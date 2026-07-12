@@ -1,0 +1,527 @@
+[workspace.package]
+version = "0.1.0"
+authors = ["f32y <nyhvec@gmail.com>"]
+edition = "2024"
+license = "MIT"
+rust-version = "1.96.0"
+
+[workspace]
+resolver = "3"
+members = [
+    "crates/agent_hook",
+    "crates/agent_hook_cli",
+    "crates/app",
+    "crates/config",
+    "crates/input",
+    "crates/platform",
+    "crates/shell_extension",
+    "crates/terminal",
+
+    "third_party/libghostty-vt-sys",
+
+    # GPUI fork
+    "third_party/collections",
+    "third_party/gpui",
+    "third_party/gpui_macros",
+    "third_party/gpui_util",
+    "third_party/gpui_windows",
+    "third_party/gpui_shared_string",
+    "third_party/refineable",
+    "third_party/refineable/derive_refineable",
+    "third_party/scheduler",
+    "third_party/sum_tree",
+    "third_party/util_macros",
+
+    # gpui-component fork
+    "third_party/gpui-component-assets",
+    "third_party/gpui-component-macros",
+    "third_party/gpui-component-ui",
+]
+default-members = [
+    "crates/agent_hook_cli",
+    "crates/app",
+    "crates/shell_extension",
+]
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(rust_analyzer)"] }
+
+[workspace.lints.clippy]
+all = { level = "allow", priority = -1 }
+disallowed_types = "deny"
+
+[workspace.dependencies]
+nmt_agent_hook = { path = "crates/agent_hook" }
+nmt_config = { path = "crates/config" }
+nmt_input = { path = "crates/input" }
+libghostty-vt-sys = { path = "third_party/libghostty-vt-sys" }
+nmt_platform = { path = "crates/platform" }
+nmt_terminal = { path = "crates/terminal" }
+
+# GPUI fork
+collections = { path = "third_party/collections" }
+gpui = { path = "third_party/gpui" }
+gpui_macros = { path = "third_party/gpui_macros" }
+gpui_util = { path = "third_party/gpui_util" }
+gpui_windows = { path = "third_party/gpui_windows" }
+gpui_shared_string = { path = "third_party/gpui_shared_string" }
+refineable = { path = "third_party/refineable" }
+derive_refineable = { path = "third_party/refineable/derive_refineable" }
+scheduler = { path = "third_party/scheduler" }
+sum_tree = { path = "third_party/sum_tree" }
+util_macros = { path = "third_party/util_macros" }
+
+# gpui-component fork
+gpui-component = { path = "third_party/gpui-component-ui", features = ["tree-sitter-powershell"] }
+gpui-component-assets = { path = "third_party/gpui-component-assets" }
+gpui-component-macros = { path = "third_party/gpui-component-macros" }
+
+##########################################
+# GPUI Component
+##########################################
+
+aho-corasick = "1.1.3"
+enum-iterator = "2.1.0"
+html5ever = "0.39.0"
+indoc = "2"
+instant = { version = "0.1", features = ["wasm-bindgen"] }
+lsp-types = { version = "0.97.0", features = ["proposed"] }
+markdown = { version = "1.0.0", features = ["serde"] }
+markup5ever_rcdom = "0.39.0"
+once_cell = "1.19.0"
+paste = "1"
+reqwest = { version = "0.12.24", default-features = false }
+ropey = { version = "=2.0.0-beta.1", features = [
+    "metric_lines_lf",
+    "metric_utf16",
+] }
+rust-embed = { version = "8.7.2", features = [
+    "interpolate-folder-path",
+    "include-exclude",
+] }
+rust-i18n = "4"
+rust_decimal = "1.37.0"
+serde_repr = "0.1"
+smol = "2"
+tree-sitter-astro-next = "0.1.1"
+tree-sitter-c = "0.24.1"
+tree-sitter-c-sharp = "0.23.1"
+tree-sitter-cmake = "0.7.1"
+tree-sitter-cpp = "0.23.4"
+tree-sitter-css = "0.25.0"
+tree-sitter-diff = "0.1.0"
+tree-sitter-elixir = "0.3.5"
+tree-sitter-embedded-template = "0.25.0"
+tree-sitter-go = "0.25.0"
+tree-sitter-graphql = "0.1.0"
+tree-sitter-html = "0.23.2"
+tree-sitter-java = "0.23.5"
+tree-sitter-javascript = "0.25.0"
+tree-sitter-jsdoc = "0.25.0"
+tree-sitter-json = "0.24.8"
+tree-sitter-kotlin-sg = "0.4.1"
+tree-sitter-lua = "0.5.0"
+tree-sitter-make = "1.1.1"
+tree-sitter-md = "0.5.3"
+tree-sitter-php = "0.24.2"
+tree-sitter-proto = "0.4.0"
+tree-sitter-python = "0.25.0"
+tree-sitter-ruby = "0.23.1"
+tree-sitter-rust = "0.24.2"
+tree-sitter-scala = "0.26.0"
+tree-sitter-sequel = "0.3.11"
+tree-sitter-svelte-next = "0.1.1"
+tree-sitter-swift = "0.7.3"
+tree-sitter-toml-ng = "0.7.0"
+tree-sitter-typescript = "0.23.2"
+tree-sitter-yaml = "0.7.2"
+tree-sitter-zig = "1.1.2"
+wasm-bindgen = "0.2.126"
+wasm-bindgen-futures = "0.4.76"
+
+##########################################
+# GPUI
+##########################################
+
+accesskit = "0.24.1"
+accesskit_windows = "0.33.1"
+anyhow = "1.0.103"
+async-channel = "2.5.0"
+async-task = "4.7.1"
+backtrace = "0.3.76"
+block = "0.1.6"
+cbindgen = { version = "0.29.4", default-features = false }
+chrono = { version = "0.4.45", features = ["serde"] }
+cocoa = "=0.26.1"
+cocoa-foundation = "=0.2.1"
+core-foundation-sys = "0.8.7"
+core-video = { version = "0.6.1", features = ["metal"] }
+ctor = "1.0.7"
+derive_more = { version = "2.1.1", features = [
+    "add",
+    "add_assign",
+    "deref",
+    "deref_mut",
+    "display",
+    "from_str",
+    "mul",
+    "mul_assign",
+    "not",
+] }
+embed-resource = "3.0.11"
+etagere = "0.3.0"
+flume = "0.12.0"
+foreign-types = "0.5.0"
+futures-concurrency = "7.7.1"
+getrandom = "0.4.3"
+hdrhistogram = "7.5.4"
+heapless = "0.9.3"
+heck = "0.5.0"
+indexmap = { version = "2.14.0", features = ["serde"] }
+inventory = "0.3.24"
+itertools = "0.15.0"
+log = { version = "0.4.33", features = ["kv_unstable_serde", "serde"] }
+lyon = "1.0.19"
+mach2 = "0.6.0"
+metal = "0.33.0"
+num_cpus = "1.17.0"
+objc2-metal = "0.3.2"
+parking = "2.2.1"
+pathfinder_geometry = "0.5.1"
+pin-project = "1.1.13"
+pollster = "0.4.0"
+postage = { version = "0.5.0", features = ["futures-traits"] }
+proc-macro2 = "1.0.106"
+profiling = "1.0.18"
+proptest = { git = "https://github.com/proptest-rs/proptest", rev = "3dca198a8fef1b32e3a66f1e1897c955b4dc5b5b", features = ["attr-macro"] }
+quote = "1.0.46"
+rand = "0.10.2"
+scap = { git = "https://github.com/zed-industries/scap", rev = "4afea48c3b002197176fb19cd0f9b180dd36eaac", default-features = false, package = "zed-scap", version = "0.0.8-zed" }
+schemars = { version = "1.2.1", features = ["indexmap2"] }
+seahash = "4.1.0"
+serde_json = { version = "1.0.150", features = ["preserve_order", "raw_value"] }
+slotmap = "1.1.1"
+spin = "0.12.1"
+stacksafe = "1.0.2"
+strum = { version = "0.28.0", features = ["derive"] }
+syn = { version = "2.0.118", features = ["full", "extra-traits", "visit-mut"] }
+thiserror = "2.0.18"
+uuid = { version = "1.23.4", features = ["v4", "v5", "v7", "serde"] }
+waker-fn = "1.2.0"
+web-time = "1.1.0"
+which = "8.0.4"
+windows-numerics = "0.3.1"
+windows-registry = "0.6.1"
+
+raw-window-handle = { version = "0.6.2", features = ["std"] }
+parking_lot = { version = "0.12.5", features = [
+    "nightly",
+    "hardware-lock-elision",
+] }
+rustc-hash = "2.1.3"
+smallvec = { version = "1.15.2", default-features = false, features = ["const_new"] }
+
+tree-sitter = "0.26.10"
+tree-sitter-bash = "0.25.1"
+tree-sitter-powershell = "0.26.4"
+
+# unicode-width = "0.2.0"
+unicode-width = { package = "unicode-width-16", version = "0.1.0" }
+simdutf = "0.7.0"
+base64 = "0.22.1"
+image_rs = { package = "image", version = "0.25.10", default-features = false, features = [
+    "gif",
+    "jpeg",
+    "ico",
+    "png",
+    "pnm",
+    "webp",
+    "bmp",
+] }
+regex = "1.12.4"
+onig = { version = "6.5.3", default-features = false }
+bytemuck = { version = "1.25.0", default-features = false, features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive", "rc"] }
+libc = "0.2.186"
+smol_str = "0.3.6"
+futures = "0.3.32"
+env_logger = "0.11.11"
+bitflags = "2.13.0"
+iovec = "0.1.4"
+tracing = { version = "0.1.44", default-features = false, features = ["log"] }
+tracing-subscriber = { version = "0.3.23", features = ["fmt", "env-filter", "chrono"] }
+tracing-appender = "0.2.5"
+objc = { package = "objc-rs", version = "0.3.1" }
+memmap2 = "0.9.11"
+url = "2.5.8"
+criterion = { version = "0.8.2", features = ["html_reports"] }
+dashmap = "6.1.1"
+flate2 = "1.1.9"
+lazy_static = "1.5.0"
+ahash = { version = "0.8.12", features = ["no-rng"] }
+approx = "0.5.1"
+bindgen = "0.72.1"
+block2 = "0.6.2"
+bytes = "1.12.0"
+calloop = "0.14.4"
+cfg-if = "1.0.4"
+cfg_aliases = "0.2.1"
+clap = "4.6.1"
+copypasta = { version = "0.10.2", default-features = false }
+core-foundation = "0.10.1"
+core-graphics = "0.25.0"
+core-text = "22.0.0"
+cpal = "0.18.1"
+cursor-icon = { version = "1.2.0", default-features = false }
+deflate = "1.0.0"
+dirs = "6.0.0"
+dpi = "0.1.2"
+dunce = "1.0.5"
+font-kit = "0.14.3"
+fontconfig-parser = { version = "0.5.8", default-features = false }
+guillotiere = "0.7.0"
+half = "2.7.1"
+halfbrown = "0.4.0"
+image = { version = "0.25.10", default-features = false, features = [
+    "gif",
+    "jpeg",
+    "ico",
+    "png",
+    "pnm",
+    "webp",
+    "bmp",
+] }
+lru = "0.18.0"
+memchr = { version = "2.8.2", default-features = false }
+mio = { version = "1.2.1", features = ["os-poll", "os-ext", "net"] }
+miow = "0.6.1"
+notify = "8.2.0"
+num-traits = "0.2.19"
+objc2 = { version = "0.6.4", features = ["relax-sign-encoding"] }
+objc2-app-kit = { version = "0.3.2", features = [
+    "NSAppearance",
+    "NSApplication",
+    "NSBitmapImageRep",
+    "NSButton",
+    "NSColor",
+    "NSColorSpace",
+    "NSControl",
+    "NSCursor",
+    "NSDragging",
+    "NSEvent",
+    "NSGraphics",
+    "NSGraphicsContext",
+    "NSImage",
+    "NSImageRep",
+    "NSMenu",
+    "NSMenuItem",
+    "NSOpenGLView",
+    "NSPasteboard",
+    "NSResponder",
+    "NSRunningApplication",
+    "NSScreen",
+    "NSTextInputClient",
+    "NSTextInputContext",
+    "NSToolbar",
+    "NSView",
+    "NSWindow",
+    "NSWindowScripting",
+    "NSWindowTabGroup",
+    "NSWorkspace",
+] }
+objc2-foundation = { version = "0.3.2", features = [
+    "NSArray",
+    "NSAttributedString",
+    "NSData",
+    "NSDictionary",
+    "NSDistributedNotificationCenter",
+    "NSEnumerator",
+    "NSGeometry",
+    "NSNotification",
+    "NSObjCRuntime",
+    "NSPathUtilities",
+    "NSProcessInfo",
+    "NSRunLoop",
+    "NSString",
+    "NSThread",
+    "NSValue",
+] }
+objc2-user-notifications = { version = "0.3.2", features = [
+    "UNUserNotificationCenter",
+    "UNNotificationContent",
+    "UNNotificationRequest",
+    "UNNotificationTrigger",
+    "block2",
+] }
+dispatch2 = "0.3.1"
+orbclient = { version = "0.4.3", default-features = false }
+percent-encoding = "2.3.2"
+phf = "0.14.0"
+png = "0.18.1"
+pretty_assertions = "1.4.1"
+rapidhash = { version = "4.4.2", default-features = false }
+redox_syscall = "0.9.0"
+resvg = { version = "0.47.0", default-features = false, features = ["text", "system-fonts", "memmap-fonts", "raster-images"] }
+rustix = { version = "1.1.4", default-features = false, features = [
+    "std",
+    "system",
+    "thread",
+    "process",
+] }
+sctk = { version = "0.20.0", package = "smithay-client-toolkit", default-features = false, features = [
+    "calloop",
+] }
+sctk-adwaita = { version = "0.11.0", default-features = false }
+signal-hook = "0.4.4"
+skrifa = "0.43.2"
+slab = "0.4.12"
+softbuffer = { version = "0.4.8", default-features = false, features = [
+    "x11",
+    "x11-dlopen",
+    "wayland",
+    "wayland-dlopen",
+] }
+swash = "0.2.9"
+taffy = "=0.11.0"
+tempdir = "0.3.7"
+tiny-skia = "0.12.0"
+tinyvec = "1.11.0"
+toml = "1.1.2"
+toml_edit = "0.25.12"
+ttf-parser = { version = "0.25.1", default-features = false, features = [
+    "std",
+    "opentype-layout",
+    "apple-layout",
+    "variable-fonts",
+    "glyph-names",
+] }
+twox-hash = { version = "2.1.2", default-features = false, features = [
+    "std",
+    "xxhash64",
+] }
+ucd-trie = "0.1.7"
+unicode-segmentation = "1.13.3"
+usvg = { version = "0.47.0", default-features = false }
+walkdir = "2.5.0"
+wayland-backend = { version = "0.3.15", default-features = false, features = [
+    "client_system",
+] }
+wayland-client = "0.31.14"
+wayland-protocols = { version = "0.32.13", features = [
+    "staging",
+] }
+wayland-protocols-plasma = { version = "0.3.12", features = [
+    "client",
+] }
+wide = "1.5.0"
+windows = { version = "0.62.2", features = [
+    "Data_Xml_Dom",
+    "System",
+    "System_Threading",
+    "UI_Notifications",
+    "UI_ViewManagement",
+    "Wdk_System_SystemServices",
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D_Fxc",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Direct3D12",
+    "Win32_Graphics_DirectManipulation",
+    "Win32_Graphics_DirectComposition",
+    "Win32_Graphics_DirectWrite",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_GdiPlus",
+    "Win32_Graphics_Hlsl",
+    "Win32_Media",
+    "Win32_Security",
+    "Win32_Security_Credentials",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_DataExchange",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Memory",
+    "Win32_System_Performance",
+    "Win32_System_SystemInformation",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_UI_Controls",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_Ime",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Input_Pointer",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+    "Win32_UI_Shell_PropertiesSystem",
+    "Win32_UI_WindowsAndMessaging",
+] }
+windows-core = "0.62.2"
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Devices_HumanInterfaceDevice",
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_Media",
+    "Win32_Security",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Console",
+    "Win32_System_IO",
+    "Win32_System_JobObjects",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Pipes",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Ole",
+    "Win32_System_Performance",
+    "Win32_System_SystemInformation",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+    "Win32_System_WindowsProgramming",
+    "Win32_UI_Accessibility",
+    "Win32_UI_Controls",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_Ime",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Input_Pointer",
+    "Win32_UI_Input_Touch",
+    "Win32_UI_Shell",
+    "Win32_UI_TextServices",
+    "Win32_UI_WindowsAndMessaging",
+] }
+winres = "0.1.12"
+wyhash = "0.6.0"
+x11-dl = "2.21.0"
+x11rb = { version = "0.13.2", default-features = false, features = [
+    "allow-unsafe-code",
+    "cursor",
+    "dl-libxcb",
+    "randr",
+    "resource_manager",
+    "xinput",
+    "xkb",
+] }
+xkbcommon-dl = "0.4.2"
+yazi = "0.2.1"
+yeslogic-fontconfig-sys = "6.0.1"
+zbus = { version = "5.16.0", features = ["blocking"] }
+zeno = "0.3.3"
+
+[profile.release]
+strip = "symbols"           # See split-debuginfo - allows us to drop the size by ~65%
+split-debuginfo = "packed"  # generates a separate *.dwp/*.dSYM so the binary can get stripped
+debug = "full"              # No one needs an undebuggable release binary
+codegen-units = 1
+incremental = false
+lto = true                  # reduces binary size by ~14%
+panic = "abort"             # reduces binary size by ~50% in combination with -Zbuild-std-features=panic_immediate_abort
+
+[profile.dev]
+split-debuginfo = "unpacked"
+lto = false
+incremental = true
+opt-level = 0

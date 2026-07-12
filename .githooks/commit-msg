@@ -1,0 +1,30 @@
+#!/bin/sh
+set -eu
+
+msg_file=${1:?commit message file required}
+subject=$(sed -n '/^#/!{/./{p;q;}}' "$msg_file")
+pattern='^(feat|fix|refactor|docs|perf|test|chore|build|ci|style|revert|lint)(\([a-z0-9_.-]+\))?: [a-z0-9].*$'
+
+if printf '%s\n' "$subject" | grep -Eq "$pattern"; then
+    exit 0
+fi
+
+cat >&2 <<EOF
+commit-msg: invalid commit subject
+
+Expected:
+  <type>(optional-scope): <lowercase subject>
+
+Allowed types:
+  feat, fix, refactor, docs, perf, test, chore, build, ci, style, revert, lint
+
+Examples:
+  feat(app): add titlebar token totals
+  fix(lint): suppress noisy clippy warnings
+  lint: apply cargo fmt
+
+Actual:
+  $subject
+EOF
+
+exit 1

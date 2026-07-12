@@ -1,0 +1,167 @@
+# NiumaTerm — example configuration
+#
+# Every key below is shown with its built-in default value, generated from the
+# serializable config types in `crates/terminal/src/config`. Copy this file to
+# your config location and change only what you need; any key you omit falls
+# back to the default shown here. Defaults reflect the Windows build.
+#
+# Not listed (not serialized into the example): `colors`, `adaptive-theme`,
+# `adaptive-colors` — see `crates/terminal/src/config/colors`.
+
+confirm-before-quit = true
+copy-on-select = false
+draw-bold-text-with-light-colors = false
+enable-scroll-bar = true
+env-vars = []
+hide-mouse-cursor-when-typing = false
+ignore-selection-foreground-color = false
+line-height = 1.0
+margin = [
+    2.0,
+    2.0,
+    2.0,
+    2.0,
+]
+option-as-alt = "none"
+scrollback-history-limit = 10000
+theme = ""
+use-fork = true
+
+[bell]
+audio = true
+
+[bindings]
+keys = []
+
+[cursor]
+blinking = false
+blinking-interval = 800
+shape = "Block"
+
+[developer]
+enable-fps-counter = false
+enable-log-file = false
+log-level = "OFF"
+
+[editor]
+args = []
+program = "notepad"
+
+[effects]
+custom-mouse-cursor = false
+trail-cursor = false
+
+[fonts]
+backend = "swash"
+disable-warnings-not-found = false
+hinting = true
+size = 14.0
+use-drawable-chars = true
+
+[fonts.bold]
+family = "cascadiacode"
+style = "default"
+
+[fonts.bold-italic]
+family = "cascadiacode"
+style = "default"
+
+[fonts.italic]
+family = "cascadiacode"
+style = "default"
+
+[fonts.regular]
+family = "cascadiacode"
+style = "default"
+
+[hints]
+alphabet = "jfkdls;ahgurieowpq"
+
+[[hints.rules]]
+hyperlinks = true
+persist = false
+post-processing = true
+regex = '(?:https?://|mailto:|ftp://|file:|ssh:|git://|ssh://|tel:|magnet:|ipfs://|ipns://|gemini://|gopher://|news:)(?:(?:\[[:0-9a-fA-F]+(?:[:0-9a-fA-F]*)+\](?::[0-9]+)?)|[\w\-.~:/?#@!$&*+,;=%]+(?:[\(\[]\w*[\)\]])?)+(?<![,.])|(?:\.\./|\./|(?<!\w)~/|(?:[\w][\w\-.]*/)*(?<!\w)\$[A-Za-z_]\w*/|\.[\w][\w\-.]*/|(?<![\w~/])/(?!/))(?:(?=[\w\-.~:/?#@!$&*+;=%]*\.)[\w\-.~:/?#@!$&*+;=%]+(?:(?<!:) (?!\w+://)(?!\.{0,2}/)(?!~/)[\w\-.~:/?#@!$&*+;=%]*[/.])*(?<!:)(?: +(?= *$))?|(?![\w\-.~:/?#@!$&*+;=%]*\.)[\w\-.~:/?#@!$&*+;=%]+(?:(?<!:) (?!\w+://)(?!\.{0,2}/)(?!~/)[\w\-.~:/?#@!$&*+;=%]+)*(?<!:)(?: +(?= *$))?)|(?=[\w\-.~:/?#@!$&*+;=%]*\.)(?<!\$\d*)(?<!\w)[\w][\w\-.]*/[\w\-.~:/?#@!$&*+;=%]+(?<!:)(?: +(?= *$))?'
+
+[hints.rules.binding]
+key = "O"
+mode = []
+mods = [
+    "Control",
+    "Shift",
+]
+
+[hints.rules.command.command]
+args = [
+    "/c",
+    "start",
+    "",
+]
+program = "cmd"
+
+[hints.rules.mouse]
+enabled = true
+mods = ["Alt"]
+
+[keyboard]
+disable-ctlseqs-alt = false
+ime-cursor-positioning = true
+
+[navigation]
+current-working-directory = true
+hide-if-single = true
+mode = "Tab"
+open-config-with-split = true
+unfocused-split-opacity = 0.699999988079071
+use-split = true
+use-terminal-title = false
+
+[panel]
+border-radius = 0.0
+border-width = 2.0
+column-gap = 0.0
+margin = [
+    2.0,
+    2.0,
+    2.0,
+    2.0,
+]
+padding = [
+    5.0,
+    5.0,
+    5.0,
+    5.0,
+]
+row-gap = 0.0
+
+[platform]
+
+[renderer]
+disable-occluded-render = false
+disable-unfocused-render = false
+strategy = "Events"
+use-cpu = false
+
+[scroll]
+divider = 1.0
+multiplier = 3.0
+
+[shell]
+args = []
+program = "powershell"
+
+[title]
+content = "{{ TITLE || PROGRAM }}"
+placeholder = "▲"
+
+[window]
+blur = false
+colorspace = "Srgb"
+decorations = "Enabled"
+height = 490
+macos-use-shadow = true
+macos-use-unified-titlebar = false
+mode = "Windowed"
+opacity = 1.0
+opacity-cells = false
+width = 800

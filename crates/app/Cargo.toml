@@ -1,0 +1,49 @@
+[package]
+name = "app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "NiumaTerm"
+path = "src/main.rs"
+
+[dependencies]
+nmt_agent_hook.workspace = true
+nmt_config.workspace = true
+nmt_terminal.workspace = true
+nmt_platform.workspace = true
+
+dirs.workspace = true
+parking_lot.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+
+[build-dependencies]
+winres.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+clap.workspace = true
+futures.workspace = true
+serde_json.workspace = true
+gpui.workspace = true
+gpui-component.workspace = true
+lsp-types.workspace = true
+gpui-component-assets.workspace = true
+rust-embed.workspace = true
+gpui_windows.workspace = true
+nmt_input.workspace = true
+# Kitty graphics: construct GPUI `RenderImage` frames from decoded pixels. Same
+# crate/version GPUI links, so `image_rs::Frame` unifies with `gpui`'s `Frame`.
+image_rs.workspace = true
+
+windows-sys.workspace = true
+percent-encoding.workspace = true
+raw-window-handle.workspace = true
