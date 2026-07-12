@@ -1,0 +1,2386 @@
+diff --git a/include/ghostty/vt.h b/include/ghostty/vt.h
+index 5606f1690..3386fcd64 100644
+--- a/include/ghostty/vt.h
++++ b/include/ghostty/vt.h
+@@ -140,6 +140,7 @@ extern "C" {
+ #include <ghostty/vt/terminal.h>
+ #include <ghostty/vt/grid_ref.h>
+ #include <ghostty/vt/grid_ref_tracked.h>
++#include <ghostty/vt/block.h>
+ #include <ghostty/vt/osc.h>
+ #include <ghostty/vt/sgr.h>
+ #include <ghostty/vt/style.h>
+diff --git a/include/ghostty/vt/block.h b/include/ghostty/vt/block.h
+new file mode 100644
+index 000000000..b3a64dc2e
+--- /dev/null
++++ b/include/ghostty/vt/block.h
+@@ -0,0 +1,442 @@
++/**
++ * @file block.h
++ *
++ * Finished command blocks: frozen primary screens produced by
++ * ghostty_terminal_finish_block.
++ */
++
++#ifndef GHOSTTY_VT_BLOCK_H
++#define GHOSTTY_VT_BLOCK_H
++
++#include <stddef.h>
++#include <stdint.h>
++#include <ghostty/vt/types.h>
++#include <ghostty/vt/allocator.h>
++#include <ghostty/vt/terminal.h>
++#include <ghostty/vt/grid_ref.h>
++#include <ghostty/vt/kitty_graphics.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/** @defgroup block Command Blocks
++ *
++ * A command block is a primary screen frozen at a shell command boundary.
++ * ghostty_terminal_finish_block() moves the current primary screen (its
++ * pages, styles, and Kitty image storage) into the terminal's block set as
++ * an O(1) ownership transfer and continues on a fresh primary screen with
++ * the writer state (SGR, charsets, kitty keyboard, ...) carried over.
++ *
++ * Finished blocks are immutable: they never receive VT writes again. They
++ * are ordered oldest-first and identified by a handle whose id is never
++ * reused; a stale handle (removed block) always reports GHOSTTY_NO_VALUE.
++ *
++ * ## Thread contract
++ *
++ * Single writer, refcounted readers:
++ *
++ * - Every `ghostty_terminal_*` function in this header mutates or reads
++ *   mutable state and must be called from the terminal's single writer
++ *   thread (the thread that calls ghostty_terminal_vt_write).
++ * - ghostty_terminal_block_acquire(), ghostty_block_ref_release(), and
++ *   every `ghostty_block_ref_*` reader may be called from ANY thread. An
++ *   acquired reference pins an immutable snapshot of the block: reads
++ *   through it take no locks and never wait on the writer (e.g. a
++ *   vt_write burst).
++ * - While a reference is held the block cannot be freed: removal and
++ *   eviction make the handle stale immediately but defer destruction to
++ *   the last release.
++ * - Reflow drains readers first: while a block is being reflowed,
++ *   acquire returns GHOSTTY_NO_VALUE (retry next frame), and the reflow
++ *   waits for outstanding references. Keep references short-lived (one
++ *   read pass); a held reference blocks the writer's resize.
++ * - All references must be released before ghostty_terminal_free().
++ *
++ * ## Reading block content
++ *
++ * On the writer thread, resolve a row with
++ * ghostty_terminal_block_grid_ref(); from any thread, acquire a
++ * reference and resolve with ghostty_block_ref_grid_ref(). Either way
++ * the grid-ref readers (ghostty_grid_ref_cell, _row, _style, _graphemes,
++ * _hyperlink_uri) work on the result. Rows at or beyond the block's row
++ * count are not part of the block.
++ *
++ * @{
++ */
++
++/**
++ * Identifies a finished block. A plain value type; copy freely.
++ *
++ * Lookup is by `id` alone; ids are never reused, so a stale id can never
++ * resolve to another block. `generation` is the block's data version: it
++ * changes when the block's content is rebuilt (reflow), making
++ * (id, generation) a stable cache key for shaped/rendered rows. Fetch the
++ * current generation with ghostty_terminal_block_at().
++ *
++ * @ingroup block
++ */
++typedef struct {
++  uint64_t id;
++  uint64_t generation;
++} GhosttyBlockHandle;
++
++/**
++ * Finish the current command block.
++ *
++ * Freezes the primary screen into the block set and continues on a fresh
++ * primary screen. The caller is responsible for only invoking this at
++ * trusted command boundaries with the primary screen active (shell
++ * integration gating).
++ *
++ * @param terminal The terminal handle
++ * @param[out] out_handle On success, the handle of the frozen block (may be NULL)
++ * @return GHOSTTY_SUCCESS when a block was created, GHOSTTY_NO_VALUE when
++ *         the active screen has no content (no block is created),
++ *         GHOSTTY_INVALID_VALUE when the alternate screen is active,
++ *         GHOSTTY_OUT_OF_MEMORY on allocation failure (terminal unchanged)
++ *
++ * @ingroup block
++ */
++GHOSTTY_API GhosttyResult ghostty_terminal_finish_block(GhosttyTerminal terminal,
++                                                        GhosttyBlockHandle *out_handle);
++
++/**
++ * Remove and destroy all finished blocks (e.g. a user-initiated clear).
++ * Does not touch the active screen.
++ *
++ * @param terminal The terminal handle
++ *
++ * @ingroup block
++ */
++GHOSTTY_API void ghostty_terminal_clear_blocks(GhosttyTerminal terminal);
++
++/**
++ * Remove and destroy one finished block.
++ *
++ * @param terminal The terminal handle
++ * @param handle The block to remove
++ * @return GHOSTTY_SUCCESS on success, GHOSTTY_NO_VALUE if the handle is stale
++ *
++ * @ingroup block
++ */
++GHOSTTY_API GhosttyResult ghostty_terminal_remove_block(GhosttyTerminal terminal,
++                                                        GhosttyBlockHandle handle);
++
++/**
++ * The number of finished blocks.
++ *
++ * @param terminal The terminal handle
++ * @return The block count, 0 for a NULL terminal
++ *
++ * @ingroup block
++ */
++GHOSTTY_API size_t ghostty_terminal_block_count(GhosttyTerminal terminal);
++
++/**
++ * The handle of the block at the given index, oldest first.
++ *
++ * @param terminal The terminal handle
++ * @param index Zero-based index, 0 is the oldest block
++ * @param[out] out_handle On success, the handle at the index (may be NULL)
++ * @return GHOSTTY_SUCCESS on success, GHOSTTY_NO_VALUE if index is out of range
++ *
++ * @ingroup block
++ */
++GHOSTTY_API GhosttyResult ghostty_terminal_block_at(GhosttyTerminal terminal,
++                                                    size_t index,
++                                                    GhosttyBlockHandle *out_handle);
++
++/**
++ * The logical row count of a block.
++ *
++ * This is the frozen screen's row count with blank rows after the
++ * finish-time cursor truncated. Rows at or beyond this count are not part
++ * of the block and cannot be resolved with
++ * ghostty_terminal_block_grid_ref().
++ *
++ * @param terminal The terminal handle
++ * @param handle The block
++ * @param[out] out_rows On success, the logical row count (may be NULL)
++ * @return GHOSTTY_SUCCESS on success, GHOSTTY_NO_VALUE if the handle is stale
++ *
++ * @ingroup block
++ */
++GHOSTTY_API GhosttyResult ghostty_terminal_block_row_count(GhosttyTerminal terminal,
++                                                           GhosttyBlockHandle handle,
++                                                           size_t *out_rows);
++
++/**
++ * The column count the block was frozen at. Blocks keep their frozen
++ * width, which can differ from the live terminal width after a resize.
++ *
++ * @param terminal The terminal handle
++ * @param handle The block
++ * @param[out] out_cols On success, the column count (may be NULL)
++ * @return GHOSTTY_SUCCESS on success, GHOSTTY_NO_VALUE if the handle is stale
++ *
++ * @ingroup block
++ */
++GHOSTTY_API GhosttyResult ghostty_terminal_block_cols(GhosttyTerminal terminal,
++                                                      GhosttyBlockHandle handle,
++                                                      uint16_t *out_cols);
++
++/**
++ * The memory retained by a block's page storage in bytes (page allocations
++ * only; Kitty image bytes are budgeted separately).
++ *
++ * @param terminal The terminal handle
++ * @param handle The block
++ * @param[out] out_bytes On success, the retained page bytes (may be NULL)
++ * @return GHOSTTY_SUCCESS on success, GHOSTTY_NO_VALUE if the handle is stale
++ *
++ * @ingroup block
++ */
++GHOSTTY_API GhosttyResult ghostty_terminal_block_bytes(GhosttyTerminal terminal,
++                                                       GhosttyBlockHandle handle,
++                                                       size_t *out_bytes);
++
++/**
++ * Reflow one finished block to the given width.
++ *
++ * This is the lazy-reflow driver: ghostty_terminal_resize() already
++ * reflows every finished block eagerly, so calling this is only needed
++ * when driving reflow selectively. Rebuilds the block's data and bumps
++ * its generation (re-fetch via ghostty_terminal_block_at()); the logical
++ * row count is recomputed, preserving intentional trailing blank rows.
++ * Each block reflows independently: a block boundary is a hard wrap
++ * boundary.
++ *
++ * @param terminal The terminal handle
++ * @param handle The block
++ * @param cols The new width; must be nonzero
++ * @return GHOSTTY_SUCCESS on success (or already at the width),
++ *         GHOSTTY_NO_VALUE if the handle is stale, GHOSTTY_INVALID_VALUE
++ *         for cols == 0, GHOSTTY_OUT_OF_MEMORY on allocation failure (the
++ *         block is destroyed rather than left in a garbage state)
++ *
++ * @ingroup block
++ */
++GHOSTTY_API GhosttyResult ghostty_terminal_reflow_block(GhosttyTerminal terminal,
++                                                        GhosttyBlockHandle handle,
++                                                        uint16_t cols);
++
++/**
++ * Total page-storage bytes retained by all finished blocks — the value
++ * the block byte budget (GHOSTTY_TERMINAL_OPT_BLOCK_BUDGET_BYTES) is
++ * enforced against.
++ *
++ * @param terminal The terminal handle
++ * @return The combined page bytes, 0 for a NULL terminal
++ *
++ * @ingroup block
++ */
++GHOSTTY_API size_t ghostty_terminal_blocks_bytes(GhosttyTerminal terminal);
++
++/**
++ * Resolve a row of a finished block to a grid reference at x=0.
++ *
++ * The returned reference works with all grid-ref readers. Because the
++ * block is immutable, the reference stays valid until the block is
++ * removed (unlike active-screen refs, which any terminal mutation can
++ * invalidate).
++ *
++ * @param terminal The terminal handle
++ * @param handle The block
++ * @param row The block-relative row, in [0, ghostty_terminal_block_row_count())
++ * @param[out] out_ref On success, the resolved reference (may be NULL)
++ * @return GHOSTTY_SUCCESS on success, GHOSTTY_NO_VALUE if the handle is
++ *         stale, GHOSTTY_INVALID_VALUE if row is out of range
++ *
++ * @ingroup block
++ */
++GHOSTTY_API GhosttyResult ghostty_terminal_block_grid_ref(GhosttyTerminal terminal,
++                                                          GhosttyBlockHandle handle,
++                                                          size_t row,
++                                                          GhosttyGridRef *out_ref);
++
++/**
++ * An acquired read reference to a finished block. Obtain with
++ * ghostty_terminal_block_acquire(), release with
++ * ghostty_block_ref_release(). Usable from any thread; see the thread
++ * contract above.
++ *
++ * @ingroup block
++ */
++typedef void *GhosttyBlockRef;
++
++/**
++ * Take a read reference on a finished block. ANY THREAD.
++ *
++ * The reference pins an immutable snapshot readable without locks via the
++ * ghostty_block_ref_* functions.
++ *
++ * @param terminal The terminal handle
++ * @param handle The block
++ * @param[out] out_ref On success, the acquired reference
++ * @return GHOSTTY_SUCCESS on success, GHOSTTY_NO_VALUE for a stale handle
++ *         or while the writer is reflowing the block (retry next frame)
++ *
++ * @ingroup block
++ */
++GHOSTTY_API GhosttyResult ghostty_terminal_block_acquire(GhosttyTerminal terminal,
++                                                         GhosttyBlockHandle handle,
++                                                         GhosttyBlockRef *out_ref);
++
++/**
++ * Release a reference from ghostty_terminal_block_acquire(). ANY THREAD.
++ * Frees the block if it was removed/evicted and this was the last
++ * reference. NULL is a no-op.
++ *
++ * @param ref The reference to release
++ *
++ * @ingroup block
++ */
++GHOSTTY_API void ghostty_block_ref_release(GhosttyBlockRef ref);
++
++/**
++ * The (id, generation) of the acquired snapshot — the stable cache key
++ * for shaped/rendered rows. ANY THREAD (holding the ref).
++ *
++ * @ingroup block
++ */
++GHOSTTY_API GhosttyResult ghostty_block_ref_handle(GhosttyBlockRef ref,
++                                                   GhosttyBlockHandle *out_handle);
++
++/**
++ * Logical row count of the snapshot. ANY THREAD (holding the ref).
++ *
++ * @ingroup block
++ */
++GHOSTTY_API GhosttyResult ghostty_block_ref_row_count(GhosttyBlockRef ref,
++                                                      size_t *out_rows);
++
++/**
++ * Column count of the snapshot. ANY THREAD (holding the ref).
++ *
++ * @ingroup block
++ */
++GHOSTTY_API GhosttyResult ghostty_block_ref_cols(GhosttyBlockRef ref,
++                                                 uint16_t *out_cols);
++
++/**
++ * Page-storage bytes of the snapshot. ANY THREAD (holding the ref).
++ *
++ * @ingroup block
++ */
++GHOSTTY_API GhosttyResult ghostty_block_ref_bytes(GhosttyBlockRef ref,
++                                                  size_t *out_bytes);
++
++/**
++ * Resolve a row of the snapshot to a grid reference at x=0. All grid-ref
++ * readers work on the result; it is valid while the reference is held.
++ * ANY THREAD (holding the ref).
++ *
++ * @param ref The block reference
++ * @param row The block-relative row, in [0, ghostty_block_ref_row_count())
++ * @param[out] out_ref On success, the resolved grid reference
++ * @return GHOSTTY_SUCCESS on success, GHOSTTY_INVALID_VALUE if row is out
++ *         of range
++ *
++ * @ingroup block
++ */
++GHOSTTY_API GhosttyResult ghostty_block_ref_grid_ref(GhosttyBlockRef ref,
++                                                     size_t row,
++                                                     GhosttyGridRef *out_ref);
++
++/**
++ * The snapshot's Kitty graphics storage (frozen images and placements).
++ * All kitty_graphics_* readers (placement iterators, image pixel reads)
++ * work on the handle; it is valid while the reference is held.
++ * ANY THREAD (holding the ref).
++ *
++ * @param ref The block reference
++ * @param[out] out_graphics On success, the graphics storage handle
++ * @return GHOSTTY_SUCCESS on success, GHOSTTY_NO_VALUE if kitty graphics
++ *         are disabled at build time
++ *
++ * @ingroup block
++ */
++GHOSTTY_API GhosttyResult ghostty_block_ref_kitty_graphics(GhosttyBlockRef ref,
++                                                           GhosttyKittyGraphics *out_graphics);
++
++/**
++ * Block-relative grid position of the current placement's pin.
++ *
++ * ghostty_kitty_graphics_placement_screen_pos() resolves against the
++ * ACTIVE screen's page list; a frozen placement's pin lives in the
++ * block's own frozen pages, so it must resolve here instead. The
++ * iterator must come from this block's kitty graphics storage
++ * (ghostty_block_ref_kitty_graphics()). Row/col are block-relative —
++ * the same space as ghostty_block_ref_grid_ref() rows.
++ * ANY THREAD (holding the ref).
++ *
++ * @param ref The block reference
++ * @param iterator The placement iterator positioned on a placement
++ * @param[out] out_col On success, the block-relative column (may be NULL)
++ * @param[out] out_row On success, the block-relative row (may be NULL)
++ * @return GHOSTTY_SUCCESS on success, GHOSTTY_NO_VALUE for a virtual
++ *         (unicode placeholder) placement or when kitty graphics are
++ *         disabled at build time, GHOSTTY_INVALID_VALUE if any handle is
++ *         NULL or the iterator is not positioned
++ *
++ * @ingroup block
++ */
++GHOSTTY_API GhosttyResult ghostty_block_ref_placement_pos(
++    GhosttyBlockRef ref,
++    GhosttyKittyGraphicsPlacementIterator iterator,
++    uint32_t *out_col,
++    uint32_t *out_row);
++
++/**
++ * An inclusive cell range of a block for text export.
++ *
++ * This is a sized struct. Use GHOSTTY_INIT_SIZED() to initialize it.
++ *
++ * @ingroup block
++ */
++typedef struct {
++  size_t size;
++  size_t tl_row;
++  uint16_t tl_col;
++  size_t br_row;
++  uint16_t br_col;
++  /** Rejoin soft-wrapped lines (no newline at a wrap point). */
++  bool unwrap;
++  /** Trim trailing blanks from each line. */
++  bool trim;
++} GhosttyBlockFormatOptions;
++
++/**
++ * Export a cell range of the snapshot as plain UTF-8 text — the
++ * copy/deep-search floor. Cross-block copy concatenates per-block
++ * exports. ANY THREAD (holding the ref).
++ *
++ * The buffer is allocated with the given allocator (the default when
++ * NULL) and ownership transfers to the caller: free it with
++ * ghostty_free(allocator, ptr, len).
++ *
++ * @param ref The block reference
++ * @param allocator The allocator (may be NULL for the default)
++ * @param opts The cell range and formatting flags
++ * @param[out] out_ptr On success, the UTF-8 buffer
++ * @param[out] out_len On success, the buffer length in bytes
++ * @return GHOSTTY_SUCCESS on success, GHOSTTY_INVALID_VALUE for an
++ *         out-of-range or inverted row range, GHOSTTY_OUT_OF_MEMORY on
++ *         allocation failure
++ *
++ * @ingroup block
++ */
++GHOSTTY_API GhosttyResult ghostty_block_ref_format_alloc(GhosttyBlockRef ref,
++                                                         const GhosttyAllocator *allocator,
++                                                         GhosttyBlockFormatOptions opts,
++                                                         uint8_t **out_ptr,
++                                                         size_t *out_len);
++
++/** @} */
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* GHOSTTY_VT_BLOCK_H */
+diff --git a/include/ghostty/vt/terminal.h b/include/ghostty/vt/terminal.h
+index 26ee0c0b8..ebd07754d 100644
+--- a/include/ghostty/vt/terminal.h
++++ b/include/ghostty/vt/terminal.h
+@@ -887,6 +887,15 @@ typedef enum GHOSTTY_ENUM_TYPED {
+    * Input type: GhosttyTerminalClipboardWriteFn
+    */
+   GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE = 26,
++
++  /**
++   * Byte budget for finished command blocks (`const size_t *`). Oldest
++   * blocks are evicted when the combined page storage of all finished
++   * blocks exceeds it; the newest block is never evicted. Zero means
++   * unlimited; NULL resets the default (~200k rows at 80 columns).
++   * Enforced immediately on set. See block.h.
++   */
++  GHOSTTY_TERMINAL_OPT_BLOCK_BUDGET_BYTES = 27,
+   GHOSTTY_TERMINAL_OPT_MAX_VALUE = GHOSTTY_ENUM_MAX_VALUE,
+ } GhosttyTerminalOption;
+ 
+diff --git a/src/lib_vt.zig b/src/lib_vt.zig
+index e5761e827..64a31723b 100644
+--- a/src/lib_vt.zig
++++ b/src/lib_vt.zig
+@@ -289,6 +289,27 @@ comptime {
+         @export(&c.terminal_grid_ref, .{ .name = "ghostty_terminal_grid_ref" });
+         @export(&c.terminal_grid_ref_track, .{ .name = "ghostty_terminal_grid_ref_track" });
+         @export(&c.terminal_point_from_grid_ref, .{ .name = "ghostty_terminal_point_from_grid_ref" });
++        @export(&c.terminal_finish_block, .{ .name = "ghostty_terminal_finish_block" });
++        @export(&c.terminal_clear_blocks, .{ .name = "ghostty_terminal_clear_blocks" });
++        @export(&c.terminal_remove_block, .{ .name = "ghostty_terminal_remove_block" });
++        @export(&c.terminal_block_count, .{ .name = "ghostty_terminal_block_count" });
++        @export(&c.terminal_block_at, .{ .name = "ghostty_terminal_block_at" });
++        @export(&c.terminal_block_row_count, .{ .name = "ghostty_terminal_block_row_count" });
++        @export(&c.terminal_block_cols, .{ .name = "ghostty_terminal_block_cols" });
++        @export(&c.terminal_block_bytes, .{ .name = "ghostty_terminal_block_bytes" });
++        @export(&c.terminal_blocks_bytes, .{ .name = "ghostty_terminal_blocks_bytes" });
++        @export(&c.terminal_reflow_block, .{ .name = "ghostty_terminal_reflow_block" });
++        @export(&c.terminal_block_acquire, .{ .name = "ghostty_terminal_block_acquire" });
++        @export(&c.block_ref_release, .{ .name = "ghostty_block_ref_release" });
++        @export(&c.block_ref_handle, .{ .name = "ghostty_block_ref_handle" });
++        @export(&c.block_ref_row_count, .{ .name = "ghostty_block_ref_row_count" });
++        @export(&c.block_ref_cols, .{ .name = "ghostty_block_ref_cols" });
++        @export(&c.block_ref_bytes, .{ .name = "ghostty_block_ref_bytes" });
++        @export(&c.block_ref_grid_ref, .{ .name = "ghostty_block_ref_grid_ref" });
++        @export(&c.block_ref_kitty_graphics, .{ .name = "ghostty_block_ref_kitty_graphics" });
++        @export(&c.block_ref_placement_pos, .{ .name = "ghostty_block_ref_placement_pos" });
++        @export(&c.block_ref_format_alloc, .{ .name = "ghostty_block_ref_format_alloc" });
++        @export(&c.terminal_block_grid_ref, .{ .name = "ghostty_terminal_block_grid_ref" });
+         @export(&c.kitty_graphics_get, .{ .name = "ghostty_kitty_graphics_get" });
+         @export(&c.kitty_graphics_image, .{ .name = "ghostty_kitty_graphics_image" });
+         @export(&c.kitty_graphics_image_get, .{ .name = "ghostty_kitty_graphics_image_get" });
+diff --git a/src/terminal/BlockSet.zig b/src/terminal/BlockSet.zig
+new file mode 100644
+index 000000000..1c70b1d34
+--- /dev/null
++++ b/src/terminal/BlockSet.zig
+@@ -0,0 +1,395 @@
++/// A BlockSet holds the finished command blocks of a terminal. Each block
++/// is a frozen Screen (PageList + per-screen Kitty image storage) whose
++/// ownership was moved out of the ScreenSet by Terminal.finishBlock. A
++/// finished block never receives VT writes again.
++///
++/// Blocks are ordered oldest-first (insertion order == monotonic id order),
++/// which is also the eviction order. Ids are never reused; a stale handle
++/// (removed or evicted block) never resolves to another block.
++///
++/// ## Thread model
++///
++/// Single writer, refcounted readers:
++///
++/// - All mutation (append, remove, clear, eviction, reflow) happens on the
++///   terminal's single writer thread (the thread that feeds vt_write).
++/// - Any thread may `acquire` a block, read through the returned `*Block`
++///   without further locking, and `release` it. While at least one
++///   reference is held the block's data is immutable and cannot be freed:
++///   remove/evict/clear detach the block from the table immediately (its
++///   handle goes stale) but destruction is deferred until the last
++///   reference is released.
++/// - Reflow mutates in place, but only after draining readers: the writer
++///   marks the block `writing` (new acquires are refused, returning null —
++///   callers retry next frame) and waits until the reference count reaches
++///   zero. Readers therefore never observe a mid-reflow state, which is
++///   observably equivalent to rebuild-and-swap for every reader.
++///   In-place reflow is what lets frozen Kitty placements re-pin through
++///   the existing tracked-pin machinery instead of requiring an
++///   ImageStorage deep clone. If lazy reflow ever needs reads to
++///   proceed *during* a reflow, upgrade this to a true rebuild+swap.
++/// - References are expected to be short-lived (held for one read pass,
++///   e.g. a frame). The writer's reflow drain blocks for as long as the
++///   longest outstanding reference.
++/// - All references must be released before the terminal is deinitialized.
++const BlockSet = @This();
++
++const std = @import("std");
++const assert = @import("../quirks.zig").inlineAssert;
++const testing = std.testing;
++const Allocator = std.mem.Allocator;
++const Screen = @import("Screen.zig");
++
++/// Stable identifier for a finished block. Lookup is by `id` alone (ids
++/// are never reused, so an id can never resolve to another block).
++/// `generation` is the data version: it starts at 0 and is bumped whenever
++/// the block's content is rebuilt (reflow), so (id, generation) is a
++/// stable cache key for shaped/rendered rows. Fetch the current generation
++/// with `at`.
++pub const Handle = extern struct {
++    id: u64,
++    generation: u64,
++};
++
++/// One finished block. Heap-allocated and shared with readers: the
++/// pointer returned by `acquire` stays valid until the matching
++/// `release`, even if the block is removed or evicted in between.
++///
++/// Field access rules:
++/// - `screen`, `rows`, `trailing_blanks`, `generation`: written by the
++///   writer thread only, and only while no reader holds a reference
++///   (append before publication, reflow after draining). Readers holding
++///   a reference may read them without locking.
++/// - `refs`, `writing`, `detached`: guarded by the owning set's mutex.
++pub const Block = struct {
++    alloc: Allocator,
++    owner: *BlockSet,
++    id: u64,
++
++    /// The frozen screen.
++    screen: *Screen,
++
++    /// Logical row count of the block: the frozen screen's rows with
++    /// trailing blank rows truncated at finish time (Terminal.finishBlock).
++    /// Readers must not read rows at or beyond this count. Recomputed on
++    /// reflow as contentRows() + trailing_blanks.
++    rows: usize,
++
++    /// How many of `rows` are intentional trailing blank rows (the
++    /// command's trailing newlines, before the finish-time cursor). Blank
++    /// rows carry no text, so contentRows() can't see them after a reflow;
++    /// this count re-extends the logical row count past the last text row.
++    trailing_blanks: usize = 0,
++
++    /// Data generation, bumped on reflow (see Handle.generation).
++    generation: u64 = 0,
++
++    /// Outstanding reader references. Guarded by owner.mutex.
++    refs: u32 = 0,
++
++    /// The writer is reflowing this block; acquire refuses. Guarded by
++    /// owner.mutex.
++    writing: bool = false,
++
++    /// Removed/evicted from the table; destroy when refs hits zero.
++    /// Guarded by owner.mutex.
++    detached: bool = false,
++
++    pub fn handle(self: *const Block) Handle {
++        return .{ .id = self.id, .generation = self.generation };
++    }
++
++    fn destroy(self: *Block) void {
++        self.screen.deinit();
++        self.alloc.destroy(self.screen);
++        self.alloc.destroy(self);
++    }
++
++    /// Release a reference obtained with `acquire`. Any thread. Frees the
++    /// block if it was detached and this was the last reference.
++    pub fn release(self: *Block) void {
++        const set = self.owner;
++        set.mutex.lock();
++        assert(self.refs > 0);
++        self.refs -= 1;
++        const free = self.detached and self.refs == 0;
++        if (self.refs == 0) set.drained.broadcast();
++        set.mutex.unlock();
++        if (free) self.destroy();
++    }
++};
++
++/// Ordered oldest-first: ArrayHashMap preserves insertion order and ids
++/// are monotonic. Map reads on the writer thread need no lock (the writer
++/// is the only mutator); map mutation and reader `acquire` take `mutex`.
++entries: std.AutoArrayHashMapUnmanaged(u64, *Block) = .empty,
++next_id: u64 = 1,
++
++/// Guards map mutation vs. reader acquire, and every Block's
++/// refs/writing/detached fields.
++mutex: std.Thread.Mutex = .{},
++
++/// Signaled whenever a block's refcount drops to zero; the reflow drain
++/// waits on it.
++drained: std.Thread.Condition = .{},
++
++/// Byte budget for the page storage of all finished blocks combined.
++/// Oldest blocks are evicted (images released with them) when the total
++/// exceeds this. Zero means unlimited. The newest block is never evicted,
++/// so a single oversized block survives.
++budget_bytes: usize = default_budget_bytes,
++
++/// Default budget: ~200k rows at 80 cols, from the measured
++/// ~695 KB per 1k rows of frozen page storage.
++pub const default_budget_bytes: usize = 139 * 1000 * 1000;
++
++/// Writer thread, terminal teardown. All reader references must have been
++/// released (asserted).
++pub fn deinit(self: *BlockSet, alloc: Allocator) void {
++    for (self.entries.values()) |block| {
++        assert(block.refs == 0);
++        block.destroy();
++    }
++    self.entries.deinit(alloc);
++}
++
++/// Writer thread. Take ownership of a finished screen, returning its
++/// handle.
++pub fn append(
++    self: *BlockSet,
++    alloc: Allocator,
++    opts: struct {
++        screen: *Screen,
++        rows: usize,
++        trailing_blanks: usize = 0,
++    },
++) Allocator.Error!Handle {
++    const block = try alloc.create(Block);
++    errdefer alloc.destroy(block);
++    block.* = .{
++        .alloc = alloc,
++        .owner = self,
++        .id = self.next_id,
++        .screen = opts.screen,
++        .rows = opts.rows,
++        .trailing_blanks = opts.trailing_blanks,
++    };
++
++    self.mutex.lock();
++    defer self.mutex.unlock();
++    try self.entries.putNoClobber(alloc, block.id, block);
++    self.next_id += 1;
++    return block.handle();
++}
++
++/// Writer thread. Resolve a handle, or null if the handle is stale
++/// (removed/evicted block). Lookup is by id; the handle's generation is
++/// a data-version tag for cache keying, not part of identity.
++pub fn get(self: *const BlockSet, handle: Handle) ?*const Block {
++    return self.entries.get(handle.id);
++}
++
++/// Mutable variant of `get` for the writer's reflow path.
++pub fn getPtr(self: *BlockSet, handle: Handle) ?*Block {
++    return self.entries.get(handle.id);
++}
++
++/// Any thread. Take a read reference on a block. Returns null for a stale
++/// handle or while the writer is reflowing the block (retry next frame).
++/// The returned pointer and everything reachable from it (screen, pages,
++/// image storage) stays valid and immutable until `Block.release`.
++pub fn acquire(self: *BlockSet, handle: Handle) ?*Block {
++    self.mutex.lock();
++    defer self.mutex.unlock();
++    const block = self.entries.get(handle.id) orelse return null;
++    if (block.writing) return null;
++    block.refs += 1;
++    return block;
++}
++
++/// Writer thread. Mark a block as being rewritten and wait for all reader
++/// references to drain. New acquires are refused until `endWrite`.
++pub fn beginWrite(self: *BlockSet, block: *Block) void {
++    self.mutex.lock();
++    defer self.mutex.unlock();
++    assert(!block.writing);
++    block.writing = true;
++    while (block.refs > 0) self.drained.wait(&self.mutex);
++}
++
++/// Writer thread. Re-open a block for readers after `beginWrite`.
++pub fn endWrite(self: *BlockSet, block: *Block) void {
++    self.mutex.lock();
++    defer self.mutex.unlock();
++    assert(block.writing);
++    block.writing = false;
++}
++
++/// Writer thread. Remove a block; its handle goes stale immediately.
++/// Destruction is deferred until the last reader reference is released.
++/// Returns false if the handle is stale.
++pub fn remove(self: *BlockSet, alloc: Allocator, handle: Handle) bool {
++    _ = alloc;
++    self.mutex.lock();
++    // O(count) to preserve oldest-first order; eviction removes index 0.
++    const block = self.entries.get(handle.id) orelse {
++        self.mutex.unlock();
++        return false;
++    };
++    const removed = self.entries.orderedRemove(handle.id);
++    assert(removed);
++    block.detached = true;
++    const free = block.refs == 0;
++    self.mutex.unlock();
++    if (free) block.destroy();
++    return true;
++}
++
++/// Writer thread. Remove all blocks (destruction deferred per block while
++/// references are held).
++pub fn clear(self: *BlockSet, alloc: Allocator) void {
++    _ = alloc;
++    self.mutex.lock();
++    defer self.mutex.unlock();
++    // destroy() takes no locks, so freeing under the mutex is safe; clear
++    // is a rare user action, the extra hold time doesn't matter.
++    for (self.entries.values()) |block| {
++        block.detached = true;
++        if (block.refs == 0) block.destroy();
++    }
++    self.entries.clearRetainingCapacity();
++}
++
++/// Writer thread.
++pub fn count(self: *const BlockSet) usize {
++    return self.entries.count();
++}
++
++/// Writer thread. Total page-storage bytes retained by all finished
++/// blocks. O(count); per-block bytes change on reflow, so this is not
++/// cached.
++pub fn totalBytes(self: *const BlockSet) usize {
++    var total: usize = 0;
++    for (self.entries.values()) |block| total += block.screen.pages.page_size;
++    return total;
++}
++
++/// Writer thread. Evict oldest blocks until the total is within
++/// budget_bytes (or one block remains). Returns the number of blocks
++/// evicted. Destruction of still-referenced blocks is deferred (their
++/// bytes are considered released for budget purposes: the data is
++/// unreachable and will be freed as soon as the reader finishes).
++pub fn enforceBudget(self: *BlockSet, alloc: Allocator) usize {
++    if (self.budget_bytes == 0) return 0;
++    var evicted: usize = 0;
++    var total = self.totalBytes();
++    while (total > self.budget_bytes and self.entries.count() > 1) {
++        const oldest = self.at(0).?;
++        total -= self.entries.values()[0].screen.pages.page_size;
++        const removed = self.remove(alloc, oldest);
++        assert(removed);
++        evicted += 1;
++    }
++    return evicted;
++}
++
++/// Writer thread. The handle of the block at the given index, oldest
++/// first.
++pub fn at(self: *const BlockSet, index: usize) ?Handle {
++    if (index >= self.entries.count()) return null;
++    return self.entries.values()[index].handle();
++}
++
++test "BlockSet lifecycle and stale handles" {
++    const alloc = testing.allocator;
++    var set: BlockSet = .{};
++    defer set.deinit(alloc);
++
++    const s1 = try alloc.create(Screen);
++    s1.* = try .init(alloc, .default);
++    const h1 = try set.append(alloc, .{ .screen = s1, .rows = 3 });
++
++    const s2 = try alloc.create(Screen);
++    s2.* = try .init(alloc, .default);
++    const h2 = try set.append(alloc, .{ .screen = s2, .rows = 5 });
++
++    try testing.expectEqual(@as(usize, 2), set.count());
++    try testing.expect(h1.id != h2.id);
++    try testing.expectEqual(h1, set.at(0).?);
++    try testing.expectEqual(h2, set.at(1).?);
++    try testing.expectEqual(@as(usize, 3), set.get(h1).?.rows);
++
++    // Remove keeps order and invalidates only the removed handle.
++    try testing.expect(set.remove(alloc, h1));
++    try testing.expect(!set.remove(alloc, h1));
++    try testing.expect(set.get(h1) == null);
++    try testing.expectEqual(h2, set.at(0).?);
++
++    // Lookup is by id: a different generation still resolves (generation
++    // is a data-version tag for cache keys, bumped on reflow).
++    try testing.expect(set.get(.{ .id = h2.id, .generation = h2.generation + 1 }) != null);
++
++    // Ids are never reused after removal.
++    const s3 = try alloc.create(Screen);
++    s3.* = try .init(alloc, .default);
++    const h3 = try set.append(alloc, .{ .screen = s3, .rows = 1 });
++    try testing.expect(h3.id != h1.id);
++    try testing.expect(set.get(h1) == null);
++
++    set.clear(alloc);
++    try testing.expectEqual(@as(usize, 0), set.count());
++    try testing.expect(set.get(h3) == null);
++}
++
++test "BlockSet acquire defers destruction past remove and clear" {
++    const alloc = testing.allocator;
++    var set: BlockSet = .{};
++    defer set.deinit(alloc);
++
++    const s1 = try alloc.create(Screen);
++    s1.* = try .init(alloc, .default);
++    const h1 = try set.append(alloc, .{ .screen = s1, .rows = 1 });
++
++    const ref = set.acquire(h1).?;
++    const ref2 = set.acquire(h1).?;
++    try testing.expect(ref == ref2);
++
++    // Remove: handle stale immediately, data still alive behind the refs.
++    try testing.expect(set.remove(alloc, h1));
++    try testing.expect(set.get(h1) == null);
++    try testing.expect(set.acquire(h1) == null);
++    try testing.expectEqual(@as(usize, 1), ref.rows);
++    try testing.expectEqual(@as(usize, 80), @as(usize, ref.screen.pages.cols));
++
++    ref2.release();
++    try testing.expectEqual(@as(usize, 1), ref.rows);
++    // Last release frees (testing.allocator flags a leak otherwise).
++    ref.release();
++
++    // Same via clear.
++    const s2 = try alloc.create(Screen);
++    s2.* = try .init(alloc, .default);
++    const h2 = try set.append(alloc, .{ .screen = s2, .rows = 2 });
++    const ref3 = set.acquire(h2).?;
++    set.clear(alloc);
++    try testing.expectEqual(@as(usize, 0), set.count());
++    try testing.expectEqual(@as(usize, 2), ref3.rows);
++    ref3.release();
++}
++
++test "BlockSet acquire is refused while writing" {
++    const alloc = testing.allocator;
++    var set: BlockSet = .{};
++    defer set.deinit(alloc);
++
++    const s1 = try alloc.create(Screen);
++    s1.* = try .init(alloc, .default);
++    const h1 = try set.append(alloc, .{ .screen = s1, .rows = 1 });
++
++    const block = set.getPtr(h1).?;
++    set.beginWrite(block);
++    try testing.expect(set.acquire(h1) == null);
++    set.endWrite(block);
++    const ref = set.acquire(h1).?;
++    ref.release();
++}
+diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
+index 63960dde2..02c47db99 100644
+--- a/src/terminal/PageList.zig
++++ b/src/terminal/PageList.zig
+@@ -1546,9 +1546,9 @@ const ReflowCursor = struct {
+                 const trailing_cell = cells[cols_len - 1];
+                 const trailing_trimmable = trailing_cell.isEmpty() or
+                     (builtin.os.tag == .windows and
+-                    trailing_cell.content_tag == .codepoint and
+-                    trailing_cell.content.codepoint == ' ' and
+-                    trailing_cell.wide == .narrow);
++                        trailing_cell.content_tag == .codepoint and
++                        trailing_cell.content.codepoint == ' ' and
++                        trailing_cell.wide == .narrow);
+                 if (!trailing_trimmable) break;
+                 cols_len -= 1;
+             }
+@@ -2703,6 +2703,34 @@ fn resizeWithoutReflowGrowCols(
+     self.destroyNode(chunk.node);
+ }
+ 
++/// Returns the number of rows up to and including the last row that has
++/// any text. Rows with only styling (e.g. background color) count as
++/// blank, matching the blank definition used by resize trimming. Used by
++/// Terminal.finishBlock to record the logical row count of a frozen block
++/// without mutating the page structure.
++///
++/// Unlike trailingBlankLines this is not capped at CellCountInt, since
++/// scrollback row counts exceed it.
++pub fn contentRows(self: *const PageList) usize {
++    var blank: usize = 0;
++
++    // Go through our pages backwards since we're counting trailing blanks.
++    var it = self.pages.last;
++    while (it) |node| : (it = node.prev) {
++        const page = node.page();
++        const len = node.rows();
++        const rows_slice = page.rows.ptr(page.memory)[0..len];
++        for (0..len) |i| {
++            const rev_i = len - i - 1;
++            const cells = rows_slice[rev_i].cells.ptr(page.memory)[0..node.cols()];
++            if (pagepkg.Cell.hasTextAny(cells)) return self.total_rows - blank;
++            blank += 1;
++        }
++    }
++
++    return 0;
++}
++
+ /// Returns the number of trailing blank lines, not to exceed max. Max
+ /// is used to limit our traversal in the case of large scrollback.
+ fn trailingBlankLines(
+diff --git a/src/terminal/ScreenSet.zig b/src/terminal/ScreenSet.zig
+index 4d3689e3b..62737774e 100644
+--- a/src/terminal/ScreenSet.zig
++++ b/src/terminal/ScreenSet.zig
+@@ -99,6 +99,21 @@ pub fn remove(
+     }
+ }
+ 
++/// Replace the screen stored at the given key with a new screen,
++/// returning the old screen. Ownership of the old screen transfers to
++/// the caller; ownership of the new screen transfers to the set. Bumps
++/// the key generation so stale external handles (e.g. tracked grid refs)
++/// detach, the same contract as remove+reinit. Requires the key to be
++/// initialized. Used by Terminal.finishBlock to move the primary screen
++/// into the block set.
++pub fn replace(self: *ScreenSet, key: Key, screen: *Screen) *Screen {
++    const old = self.all.get(key).?;
++    self.all.put(key, screen);
++    self.generations.put(key, self.generation(key) +% 1);
++    if (self.active_key == key) self.active = screen;
++    return old;
++}
++
+ /// Switch the active screen to the given key. Requires that the
+ /// screen is initialized.
+ pub fn switchTo(self: *ScreenSet, key: Key) void {
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index 089201276..dc1f302e7 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -4,6 +4,7 @@
+ const Terminal = @This();
+ 
+ const std = @import("std");
++const builtin = @import("builtin");
+ const build_options = @import("terminal_options");
+ const lib = @import("lib.zig");
+ const assert = @import("../quirks.zig").inlineAssert;
+@@ -33,6 +34,7 @@ const style = @import("style.zig");
+ const PageList = @import("PageList.zig");
+ const Screen = @import("Screen.zig");
+ const ScreenSet = @import("ScreenSet.zig");
++pub const BlockSet = @import("BlockSet.zig");
+ const Page = pagepkg.Page;
+ const Cell = pagepkg.Cell;
+ const Row = pagepkg.Row;
+@@ -45,6 +47,9 @@ const TABSTOP_INTERVAL = 8;
+ /// The set of screens behind this terminal (e.g. primary vs alternate).
+ screens: ScreenSet,
+ 
++/// Finished command blocks (frozen primary screens). See finishBlock.
++blocks: BlockSet = .{},
++
+ /// Whether we're currently writing to the status line (DECSASD and DECSSDT).
+ /// We don't support a status line currently so we just black hole this
+ /// data so that it doesn't mess up our main display.
+@@ -264,6 +269,10 @@ pub const Options = struct {
+         kitty.graphics.LoadingImage.Limits
+     else
+         void = if (build_options.kitty_graphics) .direct else {},
++
++    /// Byte budget for finished command blocks (see BlockSet.budget_bytes).
++    /// Zero means unlimited.
++    block_budget_bytes: usize = BlockSet.default_budget_bytes,
+ };
+ 
+ /// Initialize a new terminal.
+@@ -287,6 +296,7 @@ pub fn init(
+         .cols = cols,
+         .rows = rows,
+         .screens = screen_set,
++        .blocks = .{ .budget_bytes = opts.block_budget_bytes },
+         .tabstops = try .init(alloc, cols, TABSTOP_INTERVAL),
+         .scrolling_region = .{
+             .top = 0,
+@@ -306,6 +316,7 @@ pub fn init(
+ 
+ pub fn deinit(self: *Terminal, alloc: Allocator) void {
+     self.tabstops.deinit(alloc);
++    self.blocks.deinit(alloc);
+     self.screens.deinit(alloc);
+     self.pwd.deinit(alloc);
+     self.title.deinit(alloc);
+@@ -3570,6 +3581,21 @@ pub fn resize(
+         .reflow = false,
+     });
+ 
++    // Reflow every finished block eagerly so readers never observe mixed
++    // widths after a resize. This keeps the reader contract deterministic.
++    // A block that fails to reflow is dropped rather than left in a garbage
++    // state.
++    var block_i: usize = 0;
++    while (block_i < self.blocks.count()) {
++        const handle = self.blocks.at(block_i).?;
++        if (self.reflowBlock(handle, cols)) |_| {
++            block_i += 1;
++        } else |err| {
++            log.warn("dropping block that failed reflow id={} err={}", .{ handle.id, err });
++            _ = self.blocks.remove(alloc, handle);
++        }
++    }
++
+     // Whenever we resize we just mark it as a screen clear
+     self.flags.dirty.clear = true;
+ 
+@@ -3882,6 +3908,200 @@ pub fn plainStringUnwrapped(self: *Terminal, alloc: Allocator) ![]const u8 {
+ /// This will attempt to free the existing screen memory but if that fails
+ /// this will reuse the existing memory. In the latter case, memory may
+ /// be wasted (since its unused) but it isn't leaked.
++/// Cross-block writer state carried from a finished primary screen to its
++/// replacement. Everything here is the state a
++/// VT client expects to persist across a command boundary; terminal-global
++/// state (modes, tabstops, colors, scrolling region, ...) lives on Terminal
++/// and continues untouched.
++pub const ContinuationState = struct {
++    /// Concrete style value; re-interned into the new screen's page.
++    style: style.Style,
++
++    /// DECSCUSR cursor visual style.
++    cursor_style: Screen.CursorStyle,
++
++    /// Whether newly printed cells are protected (DECSCA/SPA state on
++    /// the cursor pen).
++    protected: bool,
++
++    charset: Screen.CharsetState,
++    protected_mode: ansi.ProtectedMode,
++    kitty_keyboard: kitty.KeyFlagStack,
++    semantic_prompt: Screen.SemanticPrompt,
++
++    /// Carry saved cursor state across command boundaries so DECSC/DECRC
++    /// remains continuous; esctest is the compatibility oracle.
++    saved_cursor: ?Screen.SavedCursor,
++
++    /// In-flight chunked Kitty image transmission: a cross-boundary
++    /// transmit is the client's continuation and must not be dropped
++    /// Ownership moves to the new screen's storage with the continuation.
++    kitty_loading: if (build_options.kitty_graphics)
++        ?*kitty.graphics.LoadingImage
++    else
++        void,
++
++    fn capture(screen: *Screen) ContinuationState {
++        return .{
++            .style = screen.cursor.style,
++            .cursor_style = screen.cursor.cursor_style,
++            .protected = screen.cursor.protected,
++            .charset = screen.charset,
++            .protected_mode = screen.protected_mode,
++            .kitty_keyboard = screen.kitty_keyboard,
++            .semantic_prompt = screen.semantic_prompt,
++            .saved_cursor = screen.saved_cursor,
++            .kitty_loading = if (comptime build_options.kitty_graphics) loading: {
++                const loading = screen.kitty_images.loading;
++                screen.kitty_images.loading = null;
++                break :loading loading;
++            } else {},
++        };
++    }
++
++    fn apply(self: ContinuationState, screen: *Screen) !void {
++        screen.cursor.style = self.style;
++        if (!self.style.default()) try screen.manualStyleUpdate();
++        screen.cursor.cursor_style = self.cursor_style;
++        screen.cursor.protected = self.protected;
++        screen.charset = self.charset;
++        screen.protected_mode = self.protected_mode;
++        screen.kitty_keyboard = self.kitty_keyboard;
++        screen.semantic_prompt = self.semantic_prompt;
++        screen.saved_cursor = self.saved_cursor;
++        if (comptime build_options.kitty_graphics) {
++            screen.kitty_images.loading = self.kitty_loading;
++        }
++    }
++};
++
++/// Finish the current command block: freeze the primary screen into the
++/// block set as an O(1) ownership move and continue on a fresh primary
++/// screen with the writer state carried over.
++///
++/// Returns null (no-op) when the active screen has no content — an empty
++/// carriage return produces no empty block. Returns error.NotPrimaryScreen
++/// if the alternate screen is active; callers must gate on the primary screen.
++///
++/// The caller relies on shell-integration boundary clearing to resync the
++/// ConPTY cursor model with the new screen's (0,0) cursor.
++pub fn finishBlock(self: *Terminal) !?BlockSet.Handle {
++    if (self.screens.active_key != .primary) return error.NotPrimaryScreen;
++    const old = self.screens.active;
++    const alloc = old.alloc;
++
++    // No content -> no block. Text is the content signal; Kitty images
++    // count too (an image-only command is content). Rows moved by bare
++    // newlines are cursor movement, not content.
++    const content_rows = old.pages.contentRows();
++    const has_images = if (comptime build_options.kitty_graphics)
++        old.kitty_images.images.count() > 0
++    else
++        false;
++    if (content_rows == 0 and !has_images) return null;
++
++    // The frozen block must not hold open writer state.
++    old.endHyperlink();
++    old.clearSelection();
++
++    const cont: ContinuationState = .capture(old);
++
++    // Logical row count: trailing blank rows are truncated (recorded, not
++    // trimmed — the frozen PageList keeps its active-area invariants).
++    // Blank rows before the cursor are kept (intentional trailing newlines
++    // of the command's output), but a blank cursor row itself is not part
++    // of the block — matching the harvest finalize semantics ("hello\r\n"
++    // is a one-row block). A cursor row with text is covered by
++    // content_rows.
++    const rows_total = old.pages.total_rows;
++    const active_start = rows_total - old.pages.rows;
++    const cursor_screen_row = active_start + old.cursor.y;
++    const block_rows = @max(content_rows, cursor_screen_row);
++
++    // Park the frozen cursor at the active top-left (after the row math
++    // above, which needs its position). The cursor pin is meaningless in
++    // a finished block, but reflow widens rows to cover a pin sitting in
++    // trailing space padding (the 0001 prompt-cursor carve-out), which
++    // would keep ConPTY padding alive across a block reflow. Parked at
++    // (0,0) it can't influence any row's trim.
++    old.cursorAbsolute(0, 0);
++
++    // Build the replacement primary screen before any ownership changes
++    // so failure leaves the terminal untouched.
++    const new_screen = try alloc.create(Screen);
++    errdefer alloc.destroy(new_screen);
++    new_screen.* = try Screen.init(alloc, .{
++        .cols = self.cols,
++        .rows = self.rows,
++        .max_scrollback = old.pages.explicit_max_size,
++        .kitty_image_storage_limit = if (comptime build_options.kitty_graphics)
++            old.kitty_images.total_limit
++        else
++            0,
++        .kitty_image_loading_limits = if (comptime build_options.kitty_graphics)
++            old.kitty_images.image_limits
++        else {},
++    });
++    errdefer new_screen.deinit();
++
++    try cont.apply(new_screen);
++
++    // Reserve the block entry (the last fallible step), then move
++    // ownership: the old screen's PageList — pages, pins, styles, image
++    // storage, placements — transfers wholesale, which is what makes
++    // finish O(1).
++    const handle = try self.blocks.append(alloc, .{
++        .screen = old,
++        .rows = block_rows,
++        .trailing_blanks = block_rows - content_rows,
++    });
++    const replaced = self.screens.replace(.primary, new_screen);
++    assert(replaced == old);
++
++    // Enforce the finished-block byte budget: oldest blocks (and their
++    // images) are destroyed until we fit. The block we just finished is
++    // never evicted (newest survives).
++    _ = self.blocks.enforceBudget(alloc);
++
++    // Everything visible changed.
++    self.flags.dirty.clear = true;
++
++    return handle;
++}
++
++/// Reflow one finished block to the given width. A rebuild of the block's
++/// data: bumps the data generation (readers key caches on
++/// (id, generation)) and recomputes the logical row count, preserving
++/// intentional trailing blank rows. Blocks reflow independently, so a
++/// block boundary is a hard wrap boundary. Returns false for a stale
++/// handle; no-op (true) when the block is already at the width.
++///
++/// On error the block's screen may be in a garbage state (same contract
++/// as Screen.resize); callers should remove the block.
++pub fn reflowBlock(
++    self: *Terminal,
++    handle: BlockSet.Handle,
++    cols: size.CellCountInt,
++) !bool {
++    const block = self.blocks.getPtr(handle) orelse return false;
++    if (block.screen.pages.cols == cols) return true;
++
++    // Drain readers before mutating: acquires are refused and the write
++    // waits for outstanding references, so no reader ever observes a
++    // mid-reflow state (BlockSet thread model).
++    self.blocks.beginWrite(block);
++    defer self.blocks.endWrite(block);
++
++    try block.screen.resize(.{
++        .cols = cols,
++        .rows = block.screen.pages.rows,
++        .reflow = true,
++    });
++    block.generation +%= 1;
++    block.rows = block.screen.pages.contentRows() + block.trailing_blanks;
++    return true;
++}
++
+ pub fn fullReset(self: *Terminal) void {
+     // Ensure we're back on primary screen
+     self.screens.switchTo(.primary);
+@@ -3890,6 +4110,11 @@ pub fn fullReset(self: *Terminal) void {
+         .alternate,
+     );
+ 
++    // Finished blocks deliberately survive here: the VT stream routes RIS
++    // through fullReset, and a program-initiated RIS must only clear the
++    // active screen. The API-level reset
++    // (c/terminal.zig) clears blocks itself.
++
+     // Reset our screens
+     self.screens.active.reset();
+ 
+@@ -13711,6 +13936,416 @@ test "Terminal: cursorIsAtPrompt alternate screen" {
+     try testing.expect(!t.cursorIsAtPrompt());
+ }
+ 
++test "Terminal: finishBlock moves content and continues on empty primary" {
++    const alloc = testing.allocator;
++    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
++    defer t.deinit(alloc);
++
++    try t.printString("hello\nworld");
++    const handle = (try t.finishBlock()).?;
++
++    // The block owns the content with the logical row count.
++    try testing.expectEqual(@as(usize, 1), t.blocks.count());
++    const entry = t.blocks.get(handle).?;
++    try testing.expectEqual(@as(usize, 2), entry.rows);
++    {
++        const str = try entry.screen.dumpStringAlloc(alloc, .{ .screen = .{} });
++        defer alloc.free(str);
++        try testing.expectEqualStrings("hello\nworld", std.mem.trimEnd(u8, str, "\n"));
++    }
++
++    // The new primary is empty with the cursor at (0,0).
++    try testing.expectEqual(@as(size.CellCountInt, 0), t.screens.active.cursor.x);
++    try testing.expectEqual(@as(size.CellCountInt, 0), t.screens.active.cursor.y);
++    {
++        const str = try t.plainString(alloc);
++        defer alloc.free(str);
++        try testing.expectEqualStrings("", str);
++    }
++
++    // Writes continue on the new screen; the block never changes.
++    try t.printString("next");
++    {
++        const str = try entry.screen.dumpStringAlloc(alloc, .{ .screen = .{} });
++        defer alloc.free(str);
++        try testing.expectEqualStrings("hello\nworld", std.mem.trimEnd(u8, str, "\n"));
++    }
++}
++
++test "Terminal: finishBlock empty screen is a no-op" {
++    const alloc = testing.allocator;
++    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
++    defer t.deinit(alloc);
++
++    try testing.expectEqual(@as(?BlockSet.Handle, null), try t.finishBlock());
++
++    // Bare newlines are cursor movement, not content.
++    try t.printString("\n\n");
++    try testing.expectEqual(@as(?BlockSet.Handle, null), try t.finishBlock());
++    try testing.expectEqual(@as(usize, 0), t.blocks.count());
++}
++
++test "Terminal: finishBlock keeps intentional trailing newlines" {
++    const alloc = testing.allocator;
++    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
++    defer t.deinit(alloc);
++
++    // Output ends with two newlines: the blank row before the cursor is
++    // part of the block (intentional trailing newline), the blank cursor
++    // row is not — "hello\n\n" is a two-row block, matching harvest.
++    try t.printString("hello\n\n");
++    const handle = (try t.finishBlock()).?;
++    try testing.expectEqual(@as(usize, 2), t.blocks.get(handle).?.rows);
++}
++
++test "Terminal: finishBlock truncates blank rows after cursor" {
++    const alloc = testing.allocator;
++    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
++    defer t.deinit(alloc);
++
++    // Print then move the cursor back up: rows below the cursor with no
++    // text do not count toward the block.
++    try t.printString("hello");
++    const handle = (try t.finishBlock()).?;
++    try testing.expectEqual(@as(usize, 1), t.blocks.get(handle).?.rows);
++}
++
++test "Terminal: finishBlock carries continuation state" {
++    const alloc = testing.allocator;
++    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
++    defer t.deinit(alloc);
++
++    try t.setAttribute(.{ .bold = {} });
++    t.configureCharset(.G0, .dec_special);
++    try t.printString("hello");
++    _ = (try t.finishBlock()).?;
++
++    // SGR and charset continue on the new screen.
++    try testing.expect(t.screens.active.cursor.style.flags.bold);
++    try testing.expectEqual(
++        charsets.Charset.dec_special,
++        t.screens.active.charset.charsets.get(.G0),
++    );
++
++    // The re-interned style applies to new prints.
++    try t.printString("x");
++    const cell = t.screens.active.pages.getCell(.{ .active = .{ .x = 0, .y = 0 } }).?;
++    const styleval = cell.node.page().styles.get(
++        cell.node.page().memory,
++        cell.cell.style_id,
++    );
++    try testing.expect(styleval.flags.bold);
++}
++
++test "Terminal: finishBlock carries saved cursor (DECSC/DECRC across boundary)" {
++    const alloc = testing.allocator;
++    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
++    defer t.deinit(alloc);
++
++    // Save a styled cursor at (col 4, row 3), then output and finish.
++    t.setCursorPos(3, 4);
++    try t.setAttribute(.{ .bold = {} });
++    t.saveCursor();
++    try t.setAttribute(.{ .unset = {} });
++    t.setCursorPos(1, 1);
++    try t.printString("hello");
++    _ = (try t.finishBlock()).?;
++
++    // The block boundary is invisible to the client: DECRC must restore
++    // the pre-boundary saved cursor on the new screen.
++    t.restoreCursor();
++    try testing.expectEqual(@as(size.CellCountInt, 3), t.screens.active.cursor.x);
++    try testing.expectEqual(@as(size.CellCountInt, 2), t.screens.active.cursor.y);
++    try testing.expect(t.screens.active.cursor.style.flags.bold);
++}
++
++test "Terminal: finishBlock continues DECSET modes and protected mode" {
++    const alloc = testing.allocator;
++    var t = try init(alloc, .{ .cols = 5, .rows = 5 });
++    defer t.deinit(alloc);
++
++    // DECAWM off + origin mode on (terminal-global), ISO protected mode
++    // (per-screen, carried via ContinuationState).
++    t.modes.set(.wraparound, false);
++    t.modes.set(.origin, true);
++    t.setProtectedMode(.iso);
++    try t.printString("hello");
++    _ = (try t.finishBlock()).?;
++
++    try testing.expect(!t.modes.get(.wraparound));
++    try testing.expect(t.modes.get(.origin));
++    try testing.expectEqual(ansi.ProtectedMode.iso, t.screens.active.protected_mode);
++    try testing.expect(t.screens.active.cursor.protected);
++
++    // DECAWM off is effective on the new screen: no soft wrap at the edge.
++    try t.printString("abcdefgh");
++    try testing.expectEqual(@as(size.CellCountInt, 0), t.screens.active.cursor.y);
++}
++
++test "Terminal: finishBlock continues charset shift state and kitty keyboard" {
++    const alloc = testing.allocator;
++    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
++    defer t.deinit(alloc);
++
++    // G1 = DEC special, GL shifted to G1 (SO), plus a pushed kitty
++    // keyboard flag set.
++    t.configureCharset(.G1, .dec_special);
++    t.invokeCharset(.GL, .G1, false);
++    t.screens.active.kitty_keyboard.push(.{ .disambiguate = true });
++    try t.printString("x");
++    _ = (try t.finishBlock()).?;
++
++    // 'q' through the shifted-in DEC special charset renders '─'.
++    try t.printString("q");
++    {
++        const str = try t.plainString(alloc);
++        defer alloc.free(str);
++        try testing.expectEqualStrings("─", str);
++    }
++    try testing.expect(t.screens.active.kitty_keyboard.current().disambiguate);
++}
++
++test "Terminal: finishBlock rejected on alternate screen" {
++    const alloc = testing.allocator;
++    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
++    defer t.deinit(alloc);
++
++    try t.printString("hello");
++    try t.switchScreenMode(.@"1049", true);
++    try testing.expectError(error.NotPrimaryScreen, t.finishBlock());
++
++    // Back on primary the residue finishes normally.
++    try t.switchScreenMode(.@"1049", false);
++    try testing.expect((try t.finishBlock()) != null);
++}
++
++test "Terminal: resize reflows finished blocks and bumps generation" {
++    const alloc = testing.allocator;
++    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
++    defer t.deinit(alloc);
++
++    // Soft-wraps at 10 cols into "0123456789" + "ABC".
++    try t.printString("0123456789ABC");
++    const handle = (try t.finishBlock()).?;
++    try testing.expectEqual(@as(usize, 2), t.blocks.get(handle).?.rows);
++
++    // Shrink: block rewraps independently to 5 cols.
++    try t.resize(alloc, 5, 5);
++    {
++        const entry = t.blocks.get(handle).?;
++        try testing.expectEqual(@as(usize, 3), entry.rows);
++        try testing.expectEqual(handle.generation + 1, entry.generation);
++        try testing.expectEqual(@as(size.CellCountInt, 5), entry.screen.pages.cols);
++        const str = try entry.screen.dumpStringAlloc(alloc, .{ .screen = .{} });
++        defer alloc.free(str);
++        try testing.expectEqualStrings(
++            "01234\n56789\nABC",
++            std.mem.trimEnd(u8, str, "\n"),
++        );
++    }
++
++    // Grow past the content width: unwraps back to one row.
++    try t.resize(alloc, 20, 5);
++    {
++        const entry = t.blocks.get(handle).?;
++        try testing.expectEqual(@as(usize, 1), entry.rows);
++        try testing.expectEqual(handle.generation + 2, entry.generation);
++        const str = try entry.screen.dumpStringAlloc(alloc, .{ .screen = .{} });
++        defer alloc.free(str);
++        try testing.expectEqualStrings(
++            "0123456789ABC",
++            std.mem.trimEnd(u8, str, "\n"),
++        );
++    }
++}
++
++test "Terminal: block reflow preserves intentional trailing blank rows" {
++    const alloc = testing.allocator;
++    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
++    defer t.deinit(alloc);
++
++    // One content row plus one intentional trailing newline.
++    try t.printString("hello\n\n");
++    const handle = (try t.finishBlock()).?;
++    try testing.expectEqual(@as(usize, 2), t.blocks.get(handle).?.rows);
++
++    try t.resize(alloc, 8, 5);
++    try testing.expectEqual(@as(usize, 2), t.blocks.get(handle).?.rows);
++}
++
++test "Terminal: block reflow trims trailing spaces (0001, windows)" {
++    if (comptime builtin.os.tag != .windows) return error.SkipZigTest;
++    const alloc = testing.allocator;
++    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
++    defer t.deinit(alloc);
++
++    // ConPTY-style explicit space padding to the full width is trimmed on
++    // reflow, so the shrink must not wrap the padding into a
++    // phantom second row.
++    try t.printString("abc       ");
++    const handle = (try t.finishBlock()).?;
++
++    try t.resize(alloc, 5, 5);
++    const entry = t.blocks.get(handle).?;
++    try testing.expectEqual(@as(usize, 1), entry.rows);
++    const str = try entry.screen.dumpStringAlloc(alloc, .{ .screen = .{} });
++    defer alloc.free(str);
++    try testing.expectEqualStrings("abc", std.mem.trimEnd(u8, str, " \n"));
++}
++
++test "Terminal: reflowBlock is a stale-handle no-op and width no-op" {
++    const alloc = testing.allocator;
++    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
++    defer t.deinit(alloc);
++
++    try t.printString("hello");
++    const handle = (try t.finishBlock()).?;
++
++    // Same width: no-op, no generation bump.
++    try testing.expect(try t.reflowBlock(handle, 10));
++    try testing.expectEqual(handle.generation, t.blocks.get(handle).?.generation);
++
++    _ = t.blocks.remove(alloc, handle);
++    try testing.expect(!(try t.reflowBlock(handle, 5)));
++}
++
++test "Terminal: concurrent block reads survive finish, eviction, and reflow" {
++    if (comptime builtin.single_threaded) return error.SkipZigTest;
++
++    // Reader threads release references, which can destroy blocks
++    // (deallocate) off the writer thread; the allocator must be
++    // thread-safe.
++    var tsa: std.heap.ThreadSafeAllocator = .{
++        .child_allocator = testing.allocator,
++    };
++    const alloc = tsa.allocator();
++
++    // A small budget keeps eviction churning while the writer finishes
++    // blocks, so readers constantly race detach-and-deferred-destroy.
++    var t = try init(alloc, .{
++        .cols = 20,
++        .rows = 5,
++        .block_budget_bytes = 4 * 1024 * 1024,
++    });
++    defer t.deinit(alloc);
++
++    const Shared = struct {
++        blocks: *BlockSet,
++        latest_id: std.atomic.Value(u64) = .init(0),
++        done: std.atomic.Value(bool) = .init(false),
++
++        fn reader(shared: *@This()) void {
++            while (!shared.done.load(.acquire)) {
++                const id = shared.latest_id.load(.acquire);
++                if (id == 0) continue;
++                // Generation is irrelevant for lookup (id-only).
++                const block = shared.blocks.acquire(.{
++                    .id = id,
++                    .generation = 0,
++                }) orelse continue;
++                defer block.release();
++
++                // Read the pinned snapshot: logical rows, then walk a few
++                // cells the way the render path would.
++                var checked: usize = 0;
++                var row: usize = 0;
++                while (row < block.rows and row < 4) : (row += 1) {
++                    const pin = block.screen.pages.pin(.{ .screen = .{
++                        .x = 0,
++                        .y = @intCast(row),
++                    } }) orelse break;
++                    const rac = pin.rowAndCell();
++                    checked += @intFromBool(rac.cell.codepoint() != 0);
++                }
++                std.mem.doNotOptimizeAway(checked);
++            }
++        }
++    };
++
++    var shared: Shared = .{ .blocks = &t.blocks };
++    var threads: [2]std.Thread = undefined;
++    for (&threads) |*th| th.* = try std.Thread.spawn(.{}, Shared.reader, .{&shared});
++    defer {
++        shared.done.store(true, .release);
++        for (threads) |th| th.join();
++    }
++
++    // Writer: finish blocks under budget churn, punctuated by resizes
++    // (block reflow drains readers) and explicit removals.
++    var cols: size.CellCountInt = 20;
++    var i: usize = 0;
++    while (i < 300) : (i += 1) {
++        try t.printString("the quick brown fox jumps over the lazy dog");
++        const handle = (try t.finishBlock()).?;
++        shared.latest_id.store(handle.id, .release);
++
++        if (i % 25 == 24) {
++            cols = if (cols == 20) 24 else 20;
++            try t.resize(alloc, cols, 5);
++        }
++        if (i % 40 == 39) {
++            // Remove the latest block while readers may hold it.
++            shared.latest_id.store(0, .release);
++            _ = t.blocks.remove(alloc, handle);
++        }
++    }
++    // deinit (deferred) asserts every reference was released; the testing
++    // allocator flags any leaked block.
++}
++
++test "Terminal: finishBlock evicts oldest blocks over budget" {
++    const alloc = testing.allocator;
++    // A 1-byte budget: any second block pushes the total over, so only
++    // the newest block ever survives (the newest is never evicted).
++    var t = try init(alloc, .{ .cols = 10, .rows = 5, .block_budget_bytes = 1 });
++    defer t.deinit(alloc);
++
++    try t.printString("one");
++    const h1 = (try t.finishBlock()).?;
++    try testing.expectEqual(@as(usize, 1), t.blocks.count());
++    try testing.expect(t.blocks.totalBytes() > 1);
++
++    try t.printString("two");
++    const h2 = (try t.finishBlock()).?;
++    try testing.expectEqual(@as(usize, 1), t.blocks.count());
++    try testing.expect(t.blocks.get(h1) == null);
++    try testing.expect(t.blocks.get(h2) != null);
++
++    try t.printString("three");
++    const h3 = (try t.finishBlock()).?;
++    try testing.expectEqual(@as(usize, 1), t.blocks.count());
++    try testing.expect(t.blocks.get(h2) == null);
++    try testing.expect(t.blocks.get(h3) != null);
++}
++
++test "Terminal: finishBlock unlimited budget keeps all blocks" {
++    const alloc = testing.allocator;
++    var t = try init(alloc, .{ .cols = 10, .rows = 5, .block_budget_bytes = 0 });
++    defer t.deinit(alloc);
++
++    for (0..3) |_| {
++        try t.printString("x");
++        _ = (try t.finishBlock()).?;
++    }
++    try testing.expectEqual(@as(usize, 3), t.blocks.count());
++    try testing.expect(t.blocks.totalBytes() > 0);
++}
++
++test "Terminal: finishBlock blocks survive fullReset (stream RIS)" {
++    const alloc = testing.allocator;
++    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
++    defer t.deinit(alloc);
++
++    try t.printString("hello");
++    const handle = (try t.finishBlock()).?;
++
++    // The VT stream routes RIS through fullReset; finished blocks must
++    // survive a program-initiated RIS because it only resets the active screen.
++    t.fullReset();
++    try testing.expect(t.blocks.get(handle) != null);
++    try testing.expectEqual(@as(usize, 1), t.blocks.count());
++}
++
+ test "Terminal: fullReset with a non-empty pen" {
+     var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+     defer t.deinit(testing.allocator);
+diff --git a/src/terminal/c/block.zig b/src/terminal/c/block.zig
+new file mode 100644
+index 000000000..1448d21be
+--- /dev/null
++++ b/src/terminal/c/block.zig
+@@ -0,0 +1,597 @@
++//! C API for finished command blocks.
++//!
++//! Thread contract: every `ghostty_terminal_*` function in this file is a
++//! mutator or reads mutable state and must be called from the terminal's
++//! single writer thread (the same thread that calls vt_write). The
++//! refcounted read path — `ghostty_terminal_block_acquire`,
++//! `ghostty_block_ref_release`, and every `ghostty_block_ref_*` reader —
++//! may be called from any thread; an acquired reference pins an immutable
++//! snapshot (see BlockSet's thread model).
++
++const std = @import("std");
++const build_options = @import("terminal_options");
++const testing = std.testing;
++const lib = @import("../lib.zig");
++const CAllocator = lib.alloc.Allocator;
++const size = @import("../size.zig");
++const formatterpkg = @import("../formatter.zig");
++const Selection = @import("../Selection.zig");
++const grid_ref_c = @import("grid_ref.zig");
++const kitty_gfx_c = @import("kitty_graphics.zig");
++const terminal_c = @import("terminal.zig");
++const Result = @import("result.zig").Result;
++const BlockSet = terminal_c.ZigTerminal.BlockSet;
++
++const Terminal = terminal_c.Terminal;
++
++/// C: GhosttyBlockHandle
++pub const Handle = BlockSet.Handle;
++
++/// C: GhosttyBlockRef — an acquired read reference to a finished block.
++pub const BlockRef = ?*BlockSet.Block;
++
++/// Finish the current command block. On success fills out_handle with the
++/// handle of the frozen block. Returns NO_VALUE (and no block) when the
++/// active screen has no content, INVALID_VALUE when the alternate screen
++/// is active because blocks can only finish from the primary screen.
++pub fn finish_block(
++    terminal_: Terminal,
++    out_handle: ?*Handle,
++) callconv(lib.calling_conv) Result {
++    const t = (terminal_ orelse return .invalid_value).terminal;
++    const handle = t.finishBlock() catch |err| switch (err) {
++        error.NotPrimaryScreen => return .invalid_value,
++        error.OutOfMemory => return .out_of_memory,
++        else => return .out_of_memory,
++    } orelse return .no_value;
++    if (out_handle) |out| out.* = handle;
++    return .success;
++}
++
++/// Remove and destroy all finished blocks for a user-initiated clear-screen.
++pub fn clear_blocks(terminal_: Terminal) callconv(lib.calling_conv) void {
++    const t = (terminal_ orelse return).terminal;
++    t.blocks.clear(t.gpa());
++}
++
++/// Remove and destroy one block. Returns NO_VALUE for a stale handle.
++pub fn remove_block(
++    terminal_: Terminal,
++    handle: Handle,
++) callconv(lib.calling_conv) Result {
++    const t = (terminal_ orelse return .invalid_value).terminal;
++    if (!t.blocks.remove(t.gpa(), handle)) return .no_value;
++    return .success;
++}
++
++pub fn block_count(terminal_: Terminal) callconv(lib.calling_conv) usize {
++    const t = (terminal_ orelse return 0).terminal;
++    return t.blocks.count();
++}
++
++/// The handle of the block at the given index, oldest first.
++pub fn block_at(
++    terminal_: Terminal,
++    index: usize,
++    out_handle: ?*Handle,
++) callconv(lib.calling_conv) Result {
++    const t = (terminal_ orelse return .invalid_value).terminal;
++    const handle = t.blocks.at(index) orelse return .no_value;
++    if (out_handle) |out| out.* = handle;
++    return .success;
++}
++
++/// The logical row count of a block: frozen rows with trailing blank rows
++/// (after the finish-time cursor) truncated. Readers must not read rows at
++/// or beyond this count. Returns NO_VALUE for a stale handle.
++pub fn block_row_count(
++    terminal_: Terminal,
++    handle: Handle,
++    out_rows: ?*usize,
++) callconv(lib.calling_conv) Result {
++    const t = (terminal_ orelse return .invalid_value).terminal;
++    const entry = t.blocks.get(handle) orelse return .no_value;
++    if (out_rows) |out| out.* = entry.rows;
++    return .success;
++}
++
++/// The column count the block was frozen at. Blocks keep their frozen
++/// width until reflowed; it can differ from the live terminal width.
++pub fn block_cols(
++    terminal_: Terminal,
++    handle: Handle,
++    out_cols: ?*u16,
++) callconv(lib.calling_conv) Result {
++    const t = (terminal_ orelse return .invalid_value).terminal;
++    const entry = t.blocks.get(handle) orelse return .no_value;
++    if (out_cols) |out| out.* = entry.screen.pages.cols;
++    return .success;
++}
++
++/// The memory retained by a block's page storage in bytes (page allocations
++/// only; Kitty image bytes are budgeted separately). The input for the
++/// finished-block byte budget. Returns NO_VALUE for a stale
++/// handle.
++pub fn block_bytes(
++    terminal_: Terminal,
++    handle: Handle,
++    out_bytes: ?*usize,
++) callconv(lib.calling_conv) Result {
++    const t = (terminal_ orelse return .invalid_value).terminal;
++    const entry = t.blocks.get(handle) orelse return .no_value;
++    if (out_bytes) |out| out.* = entry.screen.pages.page_size;
++    return .success;
++}
++
++/// Reflow one finished block to the given width for on-demand reflow;
++/// resize already reflows all blocks eagerly). Bumps the block's data
++/// generation; fetch the new one via block_at. Returns NO_VALUE for a
++/// stale handle. On allocation failure the block is destroyed rather than
++/// left in a garbage state, and OUT_OF_MEMORY is returned.
++pub fn reflow_block(
++    terminal_: Terminal,
++    handle: Handle,
++    cols: u16,
++) callconv(lib.calling_conv) Result {
++    const t = (terminal_ orelse return .invalid_value).terminal;
++    if (cols == 0) return .invalid_value;
++    const ok = t.reflowBlock(handle, cols) catch {
++        _ = t.blocks.remove(t.gpa(), handle);
++        return .out_of_memory;
++    };
++    return if (ok) .success else .no_value;
++}
++
++/// Total page-storage bytes retained by all finished blocks (the value
++/// the block budget is enforced against).
++pub fn blocks_bytes(terminal_: Terminal) callconv(lib.calling_conv) usize {
++    const t = (terminal_ orelse return 0).terminal;
++    return t.blocks.totalBytes();
++}
++
++/// Resolve a row of a finished block to a grid ref at x=0. All existing
++/// grid-ref readers (cell, row, style, graphemes, hyperlink URI) work on
++/// the result. The ref is a snapshot: valid until the block is removed.
++/// Returns NO_VALUE for a stale handle, INVALID_VALUE for a row at or
++/// beyond the block's logical row count.
++pub fn block_grid_ref(
++    terminal_: Terminal,
++    handle: Handle,
++    row: usize,
++    out_ref: ?*grid_ref_c.CGridRef,
++) callconv(lib.calling_conv) Result {
++    const t = (terminal_ orelse return .invalid_value).terminal;
++    const entry = t.blocks.get(handle) orelse return .no_value;
++    if (row >= entry.rows) return .invalid_value;
++    const p = entry.screen.pages.pin(.{ .screen = .{
++        .x = 0,
++        .y = @intCast(row),
++    } }) orelse return .invalid_value;
++    if (out_ref) |out| out.* = grid_ref_c.CGridRef.fromPin(p);
++    return .success;
++}
++
++/// Take a read reference on a finished block. ANY THREAD. The reference
++/// pins an immutable snapshot readable without locks via the
++/// block_ref_* functions; it must be released with block_ref_release.
++/// Returns NO_VALUE for a stale handle or while the writer is reflowing
++/// the block (retry next frame).
++pub fn block_acquire(
++    terminal_: Terminal,
++    handle: Handle,
++    out_ref: ?*BlockRef,
++) callconv(lib.calling_conv) Result {
++    const t = (terminal_ orelse return .invalid_value).terminal;
++    const out = out_ref orelse return .invalid_value;
++    out.* = null;
++    const block = t.blocks.acquire(handle) orelse return .no_value;
++    out.* = block;
++    return .success;
++}
++
++/// Release a reference from block_acquire. ANY THREAD.
++pub fn block_ref_release(ref: BlockRef) callconv(lib.calling_conv) void {
++    (ref orelse return).release();
++}
++
++/// The (id, generation) of the acquired snapshot — the stable cache key
++/// for shaped/rendered rows. ANY THREAD (holding the ref).
++pub fn block_ref_handle(
++    ref: BlockRef,
++    out_handle: ?*Handle,
++) callconv(lib.calling_conv) Result {
++    const block = ref orelse return .invalid_value;
++    if (out_handle) |out| out.* = block.handle();
++    return .success;
++}
++
++/// Logical row count of the snapshot. ANY THREAD (holding the ref).
++pub fn block_ref_row_count(
++    ref: BlockRef,
++    out_rows: ?*usize,
++) callconv(lib.calling_conv) Result {
++    const block = ref orelse return .invalid_value;
++    if (out_rows) |out| out.* = block.rows;
++    return .success;
++}
++
++/// The column count of the snapshot. ANY THREAD (holding the ref).
++pub fn block_ref_cols(
++    ref: BlockRef,
++    out_cols: ?*u16,
++) callconv(lib.calling_conv) Result {
++    const block = ref orelse return .invalid_value;
++    if (out_cols) |out| out.* = block.screen.pages.cols;
++    return .success;
++}
++
++/// Page-storage bytes of the snapshot. ANY THREAD (holding the ref).
++pub fn block_ref_bytes(
++    ref: BlockRef,
++    out_bytes: ?*usize,
++) callconv(lib.calling_conv) Result {
++    const block = ref orelse return .invalid_value;
++    if (out_bytes) |out| out.* = block.screen.pages.page_size;
++    return .success;
++}
++
++/// Resolve a row of the snapshot to a grid ref at x=0; all grid-ref
++/// readers work on the result, valid while the reference is held.
++/// ANY THREAD (holding the ref).
++pub fn block_ref_grid_ref(
++    ref: BlockRef,
++    row: usize,
++    out_ref: ?*grid_ref_c.CGridRef,
++) callconv(lib.calling_conv) Result {
++    const block = ref orelse return .invalid_value;
++    if (row >= block.rows) return .invalid_value;
++    const p = block.screen.pages.pin(.{ .screen = .{
++        .x = 0,
++        .y = @intCast(row),
++    } }) orelse return .invalid_value;
++    if (out_ref) |out| out.* = grid_ref_c.CGridRef.fromPin(p);
++    return .success;
++}
++
++/// The snapshot's Kitty graphics storage (frozen images + placements).
++/// All existing kitty_graphics_* readers (placement iterators, image
++/// pixel reads) work on the handle, valid while the reference is held.
++/// ANY THREAD (holding the ref). NO_VALUE if kitty graphics are disabled
++/// at build time.
++pub fn block_ref_kitty_graphics(
++    ref: BlockRef,
++    out_graphics: ?*kitty_gfx_c.KittyGraphics,
++) callconv(lib.calling_conv) Result {
++    const block = ref orelse return .invalid_value;
++    if (comptime !build_options.kitty_graphics) return .no_value;
++    if (out_graphics) |out| out.* = &block.screen.kitty_images;
++    return .success;
++}
++
++/// Block-relative grid position of the current placement's pin. The
++/// kitty_graphics variant of this
++/// resolves against the ACTIVE screen's page list; a frozen placement's
++/// pin lives in the block's own frozen pages, so it must resolve here.
++/// The iterator must come from this block's kitty graphics storage.
++/// Row/col are block-relative (same space as block_ref_grid_ref rows).
++/// NO_VALUE for virtual (unicode-placeholder) placements.
++/// ANY THREAD (holding the ref).
++pub fn block_ref_placement_pos(
++    ref: BlockRef,
++    iter_: kitty_gfx_c.PlacementIterator,
++    out_col: ?*u32,
++    out_row: ?*u32,
++) callconv(lib.calling_conv) Result {
++    const block = ref orelse return .invalid_value;
++    if (comptime !build_options.kitty_graphics) return .no_value;
++    const iter = iter_ orelse return .invalid_value;
++    const entry = iter.entry orelse return .invalid_value;
++
++    const pin = switch (entry.value_ptr.location) {
++        .pin => |pin| pin,
++        .virtual => return .no_value,
++    };
++
++    const pt = block.screen.pages.pointFromPin(.screen, pin.*) orelse return .no_value;
++    if (out_col) |out| out.* = @intCast(pt.screen.x);
++    if (out_row) |out| out.* = @intCast(pt.screen.y);
++    return .success;
++}
++
++/// C: GhosttyBlockFormatOptions — an inclusive cell range of the block.
++pub const BlockFormatOptions = extern struct {
++    size: usize = @sizeOf(BlockFormatOptions),
++    tl_row: usize,
++    tl_col: u16,
++    br_row: usize,
++    br_col: u16,
++    /// Rejoin soft-wrapped lines (no newline at a wrap point).
++    unwrap: bool,
++    /// Trim trailing blanks from each line.
++    trim: bool,
++};
++
++/// Export a cell range of the snapshot as plain UTF-8 text — the
++/// copy/deep-search floor. The buffer is allocated with
++/// the given allocator (default when null) and ownership transfers to
++/// the caller. ANY THREAD (holding the ref).
++pub fn block_ref_format_alloc(
++    ref: BlockRef,
++    alloc_: ?*const CAllocator,
++    opts: BlockFormatOptions,
++    out_ptr: *?[*]u8,
++    out_len: *usize,
++) callconv(lib.calling_conv) Result {
++    out_ptr.* = null;
++    out_len.* = 0;
++
++    const block = ref orelse return .invalid_value;
++    if (opts.size < @sizeOf(BlockFormatOptions)) return .invalid_value;
++    if (opts.tl_row > opts.br_row) return .invalid_value;
++    if (opts.br_row >= block.rows) return .invalid_value;
++
++    const pages = &block.screen.pages;
++    const tl = pages.pin(.{ .screen = .{
++        .x = @min(opts.tl_col, pages.cols - 1),
++        .y = @intCast(opts.tl_row),
++    } }) orelse return .invalid_value;
++    const br = pages.pin(.{ .screen = .{
++        .x = @min(opts.br_col, pages.cols - 1),
++        .y = @intCast(opts.br_row),
++    } }) orelse return .invalid_value;
++
++    var formatter: formatterpkg.ScreenFormatter = .init(block.screen, .{
++        .emit = .plain,
++        .unwrap = opts.unwrap,
++        .trim = opts.trim,
++    });
++    formatter.content = .{ .selection = Selection.init(tl, br, false) };
++
++    const alloc = lib.alloc.default(alloc_);
++    var aw: std.Io.Writer.Allocating = .init(alloc);
++    defer aw.deinit();
++    formatter.format(&aw.writer) catch return .out_of_memory;
++
++    const buf = aw.toOwnedSlice() catch return .out_of_memory;
++    out_ptr.* = buf.ptr;
++    out_len.* = buf.len;
++    return .success;
++}
++
++test "block C API lifecycle and readback" {
++    var t: Terminal = null;
++    try testing.expectEqual(Result.success, terminal_c.new(
++        &lib.alloc.test_allocator,
++        &t,
++        .{ .cols = 10, .rows = 5, .max_scrollback = 0 },
++    ));
++    defer terminal_c.free(t);
++
++    // Empty screen: no block.
++    var handle: Handle = undefined;
++    try testing.expectEqual(Result.no_value, finish_block(t, &handle));
++
++    const input = "hello\r\nworld";
++    terminal_c.vt_write(t, input.ptr, input.len);
++    try testing.expectEqual(Result.success, finish_block(t, &handle));
++    try testing.expectEqual(@as(usize, 1), block_count(t));
++
++    var at_handle: Handle = undefined;
++    try testing.expectEqual(Result.success, block_at(t, 0, &at_handle));
++    try testing.expectEqual(handle, at_handle);
++    try testing.expectEqual(Result.no_value, block_at(t, 1, &at_handle));
++
++    var rows: usize = 0;
++    try testing.expectEqual(Result.success, block_row_count(t, handle, &rows));
++    try testing.expectEqual(@as(usize, 2), rows);
++
++    var cols: u16 = 0;
++    try testing.expectEqual(Result.success, block_cols(t, handle, &cols));
++    try testing.expectEqual(@as(u16, 10), cols);
++
++    // Read back "world" from row 1 through the grid-ref readers.
++    var ref: grid_ref_c.CGridRef = .{};
++    try testing.expectEqual(Result.success, block_grid_ref(t, handle, 1, &ref));
++    var text: [5]u8 = undefined;
++    for (0..5) |x| {
++        ref.x = @intCast(x);
++        var cell: @import("cell.zig").CCell = undefined;
++        try testing.expectEqual(Result.success, grid_ref_c.grid_ref_cell(&ref, &cell));
++        const zig_cell: @import("../page.zig").Cell = @bitCast(cell);
++        text[x] = @intCast(zig_cell.codepoint());
++    }
++    try testing.expectEqualStrings("world", &text);
++
++    // Rows beyond the logical count are rejected.
++    try testing.expectEqual(Result.invalid_value, block_grid_ref(t, handle, 2, &ref));
++
++    // Stale handle after removal.
++    try testing.expectEqual(Result.success, remove_block(t, handle));
++    try testing.expectEqual(Result.no_value, remove_block(t, handle));
++    try testing.expectEqual(Result.no_value, block_row_count(t, handle, &rows));
++    try testing.expectEqual(@as(usize, 0), block_count(t));
++
++    // clear_blocks drops everything.
++    const again = "again";
++    terminal_c.vt_write(t, again.ptr, again.len);
++    try testing.expectEqual(Result.success, finish_block(t, &handle));
++    clear_blocks(t);
++    try testing.expectEqual(@as(usize, 0), block_count(t));
++}
++
++test "block ref acquire, readback, format, and deferred destroy" {
++    var t: Terminal = null;
++    try testing.expectEqual(Result.success, terminal_c.new(
++        &lib.alloc.test_allocator,
++        &t,
++        .{ .cols = 10, .rows = 5, .max_scrollback = 0 },
++    ));
++    defer terminal_c.free(t);
++
++    var handle: Handle = undefined;
++    const input = "hello\r\nworld";
++    terminal_c.vt_write(t, input.ptr, input.len);
++    try testing.expectEqual(Result.success, finish_block(t, &handle));
++
++    var ref: BlockRef = null;
++    try testing.expectEqual(Result.success, block_acquire(t, handle, &ref));
++    defer block_ref_release(ref);
++
++    var got: Handle = undefined;
++    try testing.expectEqual(Result.success, block_ref_handle(ref, &got));
++    try testing.expectEqual(handle, got);
++
++    var rows: usize = 0;
++    try testing.expectEqual(Result.success, block_ref_row_count(ref, &rows));
++    try testing.expectEqual(@as(usize, 2), rows);
++    var cols: u16 = 0;
++    try testing.expectEqual(Result.success, block_ref_cols(ref, &cols));
++    try testing.expectEqual(@as(u16, 10), cols);
++    var bytes: usize = 0;
++    try testing.expectEqual(Result.success, block_ref_bytes(ref, &bytes));
++    try testing.expect(bytes > 0);
++
++    // Cell readback through the ref-resolved grid ref.
++    var gref: grid_ref_c.CGridRef = .{};
++    try testing.expectEqual(Result.success, block_ref_grid_ref(ref, 1, &gref));
++    var cell: @import("cell.zig").CCell = undefined;
++    try testing.expectEqual(Result.success, grid_ref_c.grid_ref_cell(&gref, &cell));
++    const zig_cell: @import("../page.zig").Cell = @bitCast(cell);
++    try testing.expectEqual(@as(u21, 'w'), zig_cell.codepoint());
++    try testing.expectEqual(Result.invalid_value, block_ref_grid_ref(ref, 2, &gref));
++
++    // Full-range plain text export.
++    var out_ptr: ?[*]u8 = null;
++    var out_len: usize = 0;
++    try testing.expectEqual(Result.success, block_ref_format_alloc(
++        ref,
++        &lib.alloc.test_allocator,
++        .{ .tl_row = 0, .tl_col = 0, .br_row = 1, .br_col = 9, .unwrap = true, .trim = true },
++        &out_ptr,
++        &out_len,
++    ));
++    const text = out_ptr.?[0..out_len];
++    defer lib.alloc.default(&lib.alloc.test_allocator).free(text);
++    try testing.expectEqualStrings(
++        "hello\nworld",
++        std.mem.trimEnd(u8, text, "\n"),
++    );
++
++    // Remove while the ref is held: handle goes stale immediately, the
++    // snapshot stays readable until release (defer above).
++    try testing.expectEqual(Result.success, remove_block(t, handle));
++    try testing.expectEqual(@as(usize, 0), block_count(t));
++    var ref2: BlockRef = null;
++    try testing.expectEqual(Result.no_value, block_acquire(t, handle, &ref2));
++    try testing.expectEqual(Result.success, block_ref_row_count(ref, &rows));
++    try testing.expectEqual(@as(usize, 2), rows);
++}
++
++test "block budget option evicts immediately and blocks_bytes reports totals" {
++    var t: Terminal = null;
++    try testing.expectEqual(Result.success, terminal_c.new(
++        &lib.alloc.test_allocator,
++        &t,
++        .{ .cols = 10, .rows = 5, .max_scrollback = 0 },
++    ));
++    defer terminal_c.free(t);
++
++    var handle: Handle = undefined;
++    for (0..3) |_| {
++        const input = "hello";
++        terminal_c.vt_write(t, input.ptr, input.len);
++        try testing.expectEqual(Result.success, finish_block(t, &handle));
++    }
++    try testing.expectEqual(@as(usize, 3), block_count(t));
++    try testing.expect(blocks_bytes(t) > 0);
++
++    // Shrinking the budget evicts oldest-first immediately, keeping the
++    // newest block.
++    const tiny: usize = 1;
++    try testing.expectEqual(Result.success, terminal_c.set(
++        t,
++        .block_budget_bytes,
++        &tiny,
++    ));
++    try testing.expectEqual(@as(usize, 1), block_count(t));
++    var kept: Handle = undefined;
++    try testing.expectEqual(Result.success, block_at(t, 0, &kept));
++    try testing.expectEqual(handle.id, kept.id);
++}
++
++test "block reset scoping: stream RIS keeps blocks, API reset clears them" {
++    var t: Terminal = null;
++    try testing.expectEqual(Result.success, terminal_c.new(
++        &lib.alloc.test_allocator,
++        &t,
++        .{ .cols = 10, .rows = 5, .max_scrollback = 0 },
++    ));
++    defer terminal_c.free(t);
++
++    var handle: Handle = undefined;
++    const input = "hello";
++    terminal_c.vt_write(t, input.ptr, input.len);
++    try testing.expectEqual(Result.success, finish_block(t, &handle));
++
++    // Program-initiated RIS in the VT stream resets only the active screen.
++    const ris = "\x1bc";
++    terminal_c.vt_write(t, ris.ptr, ris.len);
++    try testing.expectEqual(@as(usize, 1), block_count(t));
++
++    // API-level full reset: blocks destroyed too.
++    terminal_c.reset(t);
++    try testing.expectEqual(@as(usize, 0), block_count(t));
++    var rows: usize = 0;
++    try testing.expectEqual(Result.no_value, block_row_count(t, handle, &rows));
++}
++
++test "block_ref_placement_pos resolves against the frozen pages" {
++    if (comptime !build_options.kitty_graphics) return error.SkipZigTest;
++
++    var t: Terminal = null;
++    try testing.expectEqual(Result.success, terminal_c.new(
++        &lib.alloc.test_allocator,
++        &t,
++        .{ .cols = 10, .rows = 5, .max_scrollback = 10_000 },
++    ));
++    defer terminal_c.free(t);
++
++    // Two rows of text, then a 1x1 kitty image placed at row 2.
++    const pre = "a\r\nb\r\n";
++    terminal_c.vt_write(t, pre.ptr, pre.len);
++    const img = "\x1b_Ga=T,f=32,s=1,v=1,i=7;/wAA/w==\x1b\\";
++    terminal_c.vt_write(t, img.ptr, img.len);
++
++    var handle: Handle = undefined;
++    try testing.expectEqual(Result.success, finish_block(t, &handle));
++
++    var ref: BlockRef = null;
++    try testing.expectEqual(Result.success, block_acquire(t, handle, &ref));
++    defer block_ref_release(ref);
++
++    var graphics: kitty_gfx_c.KittyGraphics = undefined;
++    try testing.expectEqual(Result.success, block_ref_kitty_graphics(ref, &graphics));
++
++    var iter: kitty_gfx_c.PlacementIterator = null;
++    try testing.expectEqual(Result.success, kitty_gfx_c.placement_iterator_new(
++        &lib.alloc.test_allocator,
++        &iter,
++    ));
++    defer kitty_gfx_c.placement_iterator_free(iter);
++    try testing.expectEqual(Result.success, kitty_gfx_c.get(
++        graphics,
++        .placement_iterator,
++        @ptrCast(&iter),
++    ));
++    try testing.expect(kitty_gfx_c.placement_iterator_next(iter));
++
++    var col: u32 = 99;
++    var row: u32 = 99;
++    try testing.expectEqual(Result.success, block_ref_placement_pos(ref, iter, &col, &row));
++    try testing.expectEqual(@as(u32, 0), col);
++    try testing.expectEqual(@as(u32, 2), row);
++
++    // The active-screen resolver must NOT find this frozen pin — that is
++    // exactly why the block-relative variant exists.
++    try testing.expectEqual(Result.no_value, kitty_gfx_c.placement_screen_pos(iter, t, &col, &row));
++}
+diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
+index a976b7952..73043631e 100644
+--- a/src/terminal/c/main.zig
++++ b/src/terminal/c/main.zig
+@@ -215,6 +215,29 @@ pub const terminal_grid_ref = terminal.grid_ref;
+ pub const terminal_grid_ref_track = terminal.grid_ref_track;
+ pub const terminal_point_from_grid_ref = terminal.point_from_grid_ref;
+ 
++pub const block = @import("block.zig");
++pub const terminal_finish_block = block.finish_block;
++pub const terminal_clear_blocks = block.clear_blocks;
++pub const terminal_remove_block = block.remove_block;
++pub const terminal_block_count = block.block_count;
++pub const terminal_block_at = block.block_at;
++pub const terminal_block_row_count = block.block_row_count;
++pub const terminal_block_cols = block.block_cols;
++pub const terminal_block_bytes = block.block_bytes;
++pub const terminal_blocks_bytes = block.blocks_bytes;
++pub const terminal_reflow_block = block.reflow_block;
++pub const terminal_block_acquire = block.block_acquire;
++pub const block_ref_release = block.block_ref_release;
++pub const block_ref_handle = block.block_ref_handle;
++pub const block_ref_row_count = block.block_ref_row_count;
++pub const block_ref_cols = block.block_ref_cols;
++pub const block_ref_bytes = block.block_ref_bytes;
++pub const block_ref_grid_ref = block.block_ref_grid_ref;
++pub const block_ref_kitty_graphics = block.block_ref_kitty_graphics;
++pub const block_ref_placement_pos = block.block_ref_placement_pos;
++pub const block_ref_format_alloc = block.block_ref_format_alloc;
++pub const terminal_block_grid_ref = block.block_grid_ref;
++
+ pub const type_json = types.get_json;
+ 
+ pub const unicode_codepoint_width = unicode.codepoint_width;
+diff --git a/src/terminal/c/terminal.zig b/src/terminal/c/terminal.zig
+index 1c3b9f0c5..398ca1d1d 100644
+--- a/src/terminal/c/terminal.zig
++++ b/src/terminal/c/terminal.zig
+@@ -437,6 +437,7 @@ pub const Option = enum(c_int) {
+     glyph_protocol = 24,
+     pwd_changed = 25,
+     clipboard_write = 26,
++    block_budget_bytes = 27,
+ 
+     /// Input type expected for setting the option.
+     pub fn InType(comptime self: Option) type {
+@@ -461,7 +462,7 @@ pub const Option = enum(c_int) {
+             .kitty_image_medium_shared_mem,
+             .glyph_protocol,
+             => ?*const bool,
+-            .apc_max_bytes, .apc_max_bytes_kitty => ?*const usize,
++            .apc_max_bytes, .apc_max_bytes_kitty, .block_budget_bytes => ?*const usize,
+             .selection => ?*const selection_c.CSelection,
+             .default_cursor_style => ?*const TerminalCursorStyle,
+             .default_cursor_blink => ?*const bool,
+@@ -579,6 +580,15 @@ fn setTyped(
+             wrapper.stream.handler.apc_handler.enable(.glyph, enabled);
+             if (!enabled) wrapper.terminal.glyph_glossary.clearAndFree(wrapper.terminal.gpa());
+         },
++        .block_budget_bytes => {
++            const t = wrapper.terminal;
++            // Null resets to the default; 0 means unlimited.
++            t.blocks.budget_bytes = if (value) |v|
++                v.*
++            else
++                ZigTerminal.BlockSet.default_budget_bytes;
++            _ = t.blocks.enforceBudget(t.gpa());
++        },
+         .selection => {
+             if (value) |ptr| {
+                 const sel = ptr.toZig() orelse return .invalid_value;
+@@ -685,6 +695,11 @@ pub fn resize(
+ 
+ pub fn reset(terminal_: Terminal) callconv(lib.calling_conv) void {
+     const t: *ZigTerminal = (terminal_ orelse return).terminal;
++    // An API-level full reset destroys finished blocks too, unlike a
++    // stream RIS which only clears the active screen. fullReset itself
++    // keeps blocks because RIS routes
++    // through it.
++    t.blocks.clear(t.gpa());
+     t.fullReset();
+ }
+ 

@@ -1,0 +1,17 @@
+[target.aarch64-apple-darwin]
+rustflags = [
+    # We can guarantee that this target will always run on a CPU with _at least_
+    # these capabilities, so let's optimize for them
+    "-Ctarget-cpu=apple-m1"
+]
+
+[target.'cfg(target_os = "windows")']
+rustflags = [
+    "--cfg",
+    "windows_slim_errors",        # This cfg will reduce the size of `windows::core::Error` from 16 bytes to 4 bytes
+    # libghostty-vt.a is built by Zig against the static MSVC CRT (/MT). Match
+    # it across the whole Windows build so cc-built deps (simdutf, onig) and
+    # Rust std also use /MT, avoiding LNK2038 RuntimeLibrary mismatches.
+    "-C",
+    "target-feature=+crt-static",
+]

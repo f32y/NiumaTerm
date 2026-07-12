@@ -1,0 +1,129 @@
+#!/bin/sh
+set -eu
+
+collect_staged_code_files() {
+    for file in $staged_files; do
+        if printf '%s\n' "$file" | grep -Eq "$protected_paths"; then
+            continue
+        fi
+
+        case "$file" in
+            Cargo.toml|Cargo.lock|*/Cargo.toml|*/Cargo.lock|build.rs|*/build.rs|\
+            *.rs|*.zig|*.c|*.cc|*.cpp|*.cxx|*.h|*.hh|*.hpp|*.hxx|*.m|*.mm|*.swift|\
+            *.py|*.sh|*.bash|*.zsh|*.ps1|*.js|*.jsx|*.ts|*.tsx|*.css|*.scss|*.html|\
+            *.wgsl|*.hlsl|*.metal)
+                printf '%s\n' "$file"
+                ;;
+        esac
+    done
+}
+
+check_ai_docs_are_separate() {
+    if [ -z "$protected_files" ] || [ -z "$code_files" ]; then
+        return 0
+    fi
+
+    cat >&2 <<EOF
+pre-commit: AI docs must be committed separately
+
+Protected paths:
+$protected_files
+
+Code files:
+$code_files
+EOF
+    exit 1
+}
+
+check_protected_paths_on_main() {
+    if [ "$branch" != "main" ] || [ -z "$protected_files" ]; then
+        return 0
+    fi
+
+    cat >&2 <<EOF
+pre-commit: refusing protected-path commit on main
+
+$protected_files
+EOF
+    exit 1
+}
+
+check_no_ai_slop_marker() {
+    slop_marker='pony''tail'
+    slop=$(git diff --cached --diff-filter=ACMR -U0 | grep -nE '^\+' | grep -iw "$slop_marker" || true)
+    if [ -z "$slop" ]; then
+        return 0
+    fi
+
+    cat >&2 <<EOF
+pre-commit: refusing to commit AI slop containing '$slop_marker'
+
+$slop
+EOF
+    exit 1
+}
+
+check_comment_rationale() {
+    if [ -z "$code_files" ]; then
+        return 0
+    fi
+
+    comment_lines=$(
+        for file in $code_files; do
+            git diff --cached --diff-filter=ACMR -U0 -- "$file" |
+                grep -E '^\+[[:space:]]*(//[/!]?|#|/\*|\*|<!--)' |
+                sed "s|^|$file: |" || true
+        done
+    )
+    if [ -z "$comment_lines" ]; then
+        return 0
+    fi
+
+    instruction_refs=$(
+        printf '%s\n' "$comment_lines" |
+            grep -iE '(ADR[[:space:]]*[0-9]+|Phase[[:space:]]+[A-Z0-9]+|tasks?[ .:#§-]+[0-9]+|design[[:space:]]+(§[0-9]+|D[0-9]+)|CONTEXT\.md|docs/adr|tasks\.md|patch[[:space:]]+[0-9]{4}[-_][[:alnum:]_-]+|(^|[[:space:](/,:;-])[DP][0-9]+([./][0-9]+)*([^[:alnum:]_]|$)|[0-9]+\.[TA][0-9]+[a-z]?|[0-9]+(\.[0-9]+)?-D[0-9]+|(ADR|task|document|docs?|spec|design).{0,40}(require[sd]?|say[sd]?|mandate[sd]?)|(ADR|任务|文档|规范|设计).{0,40}(要求|规定|指出|说明))' || true
+    )
+    if [ -z "$instruction_refs" ]; then
+        return 0
+    fi
+
+    cat >&2 <<EOF
+pre-commit: comments must explain technical rationale, not implementation instructions
+
+Replace ADR/task/phase/document identifiers with the actual constraint, invariant,
+tradeoff, compatibility concern, or failure mode. External protocol/API references
+are allowed when the comment remains understandable without opening the reference.
+
+$instruction_refs
+EOF
+    exit 1
+}
+
+check_rustfmt_and_clippy() {
+    rust_files=$(git diff --cached --name-only --diff-filter=ACMRD -- '*.rs')
+
+    if [ -z "$rust_files" ]; then
+        echo "pre-commit: no staged Rust files; skipping rustfmt and clippy"
+        return 0
+    fi
+
+    echo "pre-commit: staged Rust files detected"
+
+    echo "pre-commit: checking rustfmt"
+    cargo fmt --all --check
+
+    echo "pre-commit: running clippy"
+    cargo clippy --workspace --all-targets --quiet
+}
+
+branch=$(git symbolic-ref --quiet --short HEAD || true)
+protected_paths='^(\.agents|\.claude|\.codex|\.scratch|openspec|spec|docs/adr|docs/agents|docs/superpowers)(/|$)'
+staged_files=$(git diff --cached --name-only --diff-filter=ACMRD)
+protected_files=$(printf '%s\n' "$staged_files" | grep -E "$protected_paths" || true)
+code_files=$(collect_staged_code_files)
+
+check_ai_docs_are_separate
+check_protected_paths_on_main
+check_no_ai_slop_marker
+check_comment_rationale
+check_rustfmt_and_clippy

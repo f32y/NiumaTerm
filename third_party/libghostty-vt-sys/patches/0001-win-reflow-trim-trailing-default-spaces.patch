@@ -1,0 +1,19 @@
+diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
+index 8e5cd1934..aa4ab9327 100644
+--- a/src/terminal/PageList.zig
++++ b/src/terminal/PageList.zig
+@@ -1257,7 +1257,13 @@ const ReflowCursor = struct {
+         var cols_len = src_page.size.cols;
+         if (!src_row.wrap) {
+             while (cols_len > 0) {
+-                if (!cells[cols_len - 1].isEmpty()) break;
++                const trailing_cell = cells[cols_len - 1];
++                const trailing_trimmable = trailing_cell.isEmpty() or
++                    (builtin.os.tag == .windows and
++                    trailing_cell.content_tag == .codepoint and
++                    trailing_cell.content.codepoint == ' ' and
++                    trailing_cell.wide == .narrow);
++                if (!trailing_trimmable) break;
+                 cols_len -= 1;
+             }
+ 

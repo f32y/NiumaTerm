@@ -1,0 +1,61 @@
+name: Windows package
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $packageName = "NiumaTerm-windows-x86_64-$(Get-Date -Format yyyyMMdd)"
+          "PACKAGE_NAME=$packageName" >> $env:GITHUB_ENV
+          $package = "dist/$packageName"
+
+          New-Item -ItemType Directory -Force $package
+
+          Copy-Item @(
+            "target/release/NiumaTerm.exe",
+            "target/release/NiumaTermHook.exe",
+            "target/release/shell_extension.dll",
+            "target/release/conpty.dll",
+            "target/release/OpenConsole.exe"
+          ) $package
+
+          Copy-Item "target/release/assets" $package -Recurse
+
+          Compress-Archive `
+            -Path "$package/*" `
+            -DestinationPath "$package.zip"
+
+      - name: Upload package
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ env.PACKAGE_NAME }}
+          path: dist/${{ env.PACKAGE_NAME }}.zip
+          if-no-files-found: error
+          compression-level: 0

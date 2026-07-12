@@ -1,0 +1,67 @@
+--- a/src/terminal/PageList.zig
++++ b/src/terminal/PageList.zig
+@@ -2132,7 +2132,17 @@
+                 // In other words, we don't want to "pull down" scrollback.
+                 // This is purely a UX feature.
+                 if (opts.cursor) |cursor| cursor: {
+-                    if (cursor.y >= self.rows - 1) break :cursor;
++                    // On Windows, ALWAYS preserve the cursor's row on grow (the
++                    // new rows become blank rows BELOW the prompt). This matches
++                    // conhost's ConPTY producer (SCREEN_INFORMATION::ResizeWithReflow),
++                    // which keeps the cursor's offset within the viewport, so the
++                    // prompt stays "high" with blanks below. ghostty's default for a
++                    // bottom cursor is to "pull down" scrollback instead, which puts
++                    // history where ConPTY expects blanks; ConPTY's viewport-relative
++                    // resize echoes then land on a history row because the two sides
++                    // no longer agree which rows below the cursor are blank.
++                    if (cursor.y >= self.rows - 1 and
++                        builtin.os.tag != .windows) break :cursor;
+ 
+                     // Cursor is not at the bottom, so we just grow our
+                     // rows and we're done. Cursor does NOT change for this
+diff --git a/src/terminal/Screen.zig b/src/terminal/Screen.zig
+index 5ca5d957c..71fd90da5 100644
+--- a/src/terminal/Screen.zig
++++ b/src/terminal/Screen.zig
+@@ -1,6 +1,7 @@
+ const Screen = @This();
+ 
+ const std = @import("std");
++const builtin = @import("builtin");
+ const build_options = @import("terminal_options");
+ const Allocator = std.mem.Allocator;
+ const assert = @import("../quirks.zig").inlineAssert;
+@@ -6534,6 +6535,18 @@ test "Screen: resize (no reflow) less cols" {
+ }
+ 
+ test "Screen: resize (no reflow) more rows with scrollback cursor end" {
++    // Windows cannot assert the upstream "pull down scrollback" behavior.
++    // When rows grow with the cursor on the bottom row, upstream fills the
++    // new rows from scrollback and keeps the cursor pinned to the new bottom;
++    // conhost's ConPTY producer instead preserves the cursor's offset within
++    // the viewport, leaving the new rows blank below the prompt. NiumaTerm
++    // consumes ConPTY's viewport-relative resize repaints, so its Windows
++    // engine must keep the same row ownership as conhost. Running this test
++    // there would assert the opposite cursor and history layout and fail even
++    // though subsequent ConPTY cursor-addressed output lands correctly.
++    // Other platforms retain the upstream behavior and coverage.
++    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
++
+     const testing = std.testing;
+     const alloc = testing.allocator;
+ 
+@@ -6594,6 +6607,14 @@ test "Screen: resize (no reflow) less rows with empty trailing" {
+ }
+ 
+ test "Screen: resize (no reflow) more rows with soft wrapping" {
++    // Windows preserves the cursor's viewport offset when rows grow so its
++    // layout matches conhost's ConPTY producer. This test asserts upstream's
++    // incompatible "pull down scrollback" behavior and therefore cannot run
++    // on Windows; the adjacent bottom-cursor test covers the same mismatch in
++    // detail. Other platforms retain the upstream behavior and coverage.
++    //
++    if (comptime builtin.os.tag == .windows) return error.SkipZigTest;
++
+     const testing = std.testing;
+     const alloc = testing.allocator;
+ 

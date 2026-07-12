@@ -1,0 +1,217 @@
+[package]
+description = "UI components for building fantastic desktop application by using GPUI."
+keywords = ["desktop", "gpui", "shadcn", "ui", "uikit"]
+license = "Apache-2.0"
+name = "gpui-component"
+documentation = "https://docs.rs/gpui-component"
+homepage = "https://longbridge.github.io/gpui-component"
+repository = "https://github.com/longbridge/gpui-component"
+readme = "../../README.md"
+version = "0.5.2"
+publish = true
+edition.workspace = true
+
+[lib]
+doctest = false
+
+[features]
+decimal = ["dep:rust_decimal"]
+inspector = ["gpui_macros/inspector", "gpui/inspector"]
+
+# For syntax highlighting in Markdown and CodeEditor.
+tree-sitter-languages = [
+    "tree-sitter-astro",
+    "tree-sitter-bash",
+    "tree-sitter-c",
+    "tree-sitter-cmake",
+    "tree-sitter-cpp",
+    "tree-sitter-csharp",
+    "tree-sitter-css",
+    "tree-sitter-diff",
+    "tree-sitter-ejs",
+    "tree-sitter-elixir",
+    "tree-sitter-erb",
+    "tree-sitter-go",
+    "tree-sitter-graphql",
+    "tree-sitter-html",
+    "tree-sitter-java",
+    "tree-sitter-javascript",
+    "tree-sitter-jsdoc",
+    "tree-sitter-kotlin",
+    "tree-sitter-lua",
+    "tree-sitter-make",
+    "tree-sitter-markdown",
+    "tree-sitter-php",
+    "tree-sitter-powershell",
+    "tree-sitter-proto",
+    "tree-sitter-python",
+    "tree-sitter-ruby",
+    "tree-sitter-rust",
+    "tree-sitter-scala",
+    "tree-sitter-sql",
+    "tree-sitter-svelte",
+    "tree-sitter-swift",
+    "tree-sitter-toml",
+    "tree-sitter-tsx",
+    "tree-sitter-typescript",
+    "tree-sitter-yaml",
+    "tree-sitter-zig",
+]
+tree-sitter-astro = ["dep:tree-sitter-astro-next"]
+tree-sitter-bash = ["dep:tree-sitter-bash"]
+tree-sitter-c = ["dep:tree-sitter-c"]
+tree-sitter-cmake = ["dep:tree-sitter-cmake"]
+tree-sitter-cpp = ["dep:tree-sitter-cpp"]
+tree-sitter-csharp = ["dep:tree-sitter-c-sharp"]
+tree-sitter-css = ["dep:tree-sitter-css"]
+tree-sitter-diff = ["dep:tree-sitter-diff"]
+tree-sitter-ejs = ["dep:tree-sitter-embedded-template"]
+tree-sitter-elixir = ["dep:tree-sitter-elixir"]
+tree-sitter-erb = ["dep:tree-sitter-embedded-template"]
+tree-sitter-go = ["dep:tree-sitter-go"]
+tree-sitter-graphql = ["dep:tree-sitter-graphql"]
+tree-sitter-html = ["dep:tree-sitter-html"]
+tree-sitter-java = ["dep:tree-sitter-java"]
+tree-sitter-javascript = ["dep:tree-sitter-javascript"]
+tree-sitter-jsdoc = ["dep:tree-sitter-jsdoc"]
+tree-sitter-kotlin = ["dep:tree-sitter-kotlin-sg"]
+tree-sitter-lua = ["dep:tree-sitter-lua"]
+tree-sitter-make = ["dep:tree-sitter-make"]
+tree-sitter-markdown = ["dep:tree-sitter-md"]
+tree-sitter-markdown-inline = ["tree-sitter-markdown"]
+tree-sitter-php = ["dep:tree-sitter-php"]
+tree-sitter-powershell = ["dep:tree-sitter-powershell"]
+tree-sitter-proto = ["dep:tree-sitter-proto"]
+tree-sitter-python = ["dep:tree-sitter-python"]
+tree-sitter-ruby = ["dep:tree-sitter-ruby"]
+tree-sitter-rust = ["dep:tree-sitter-rust"]
+tree-sitter-scala = ["dep:tree-sitter-scala"]
+tree-sitter-sql = ["dep:tree-sitter-sequel"]
+tree-sitter-svelte = ["dep:tree-sitter-svelte-next"]
+tree-sitter-swift = ["dep:tree-sitter-swift"]
+tree-sitter-toml = ["dep:tree-sitter-toml-ng"]
+tree-sitter-tsx = ["dep:tree-sitter-typescript"]
+tree-sitter-typescript = ["dep:tree-sitter-typescript"]
+tree-sitter-yaml = ["dep:tree-sitter-yaml"]
+tree-sitter-zig = ["dep:tree-sitter-zig"]
+
+[dependencies]
+anyhow.workspace = true
+gpui.workspace = true
+gpui_macros.workspace = true
+gpui-component-macros.workspace = true
+gpui-component-assets.workspace = true
+notify.workspace = true
+ropey.workspace = true
+rust-i18n.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_repr.workspace = true
+smallvec.workspace = true
+sum_tree.workspace = true
+tracing.workspace = true
+log.workspace = true
+
+enum-iterator.workspace = true
+itertools.workspace = true
+once_cell.workspace = true
+paste.workspace = true
+regex.workspace = true
+unicode-segmentation.workspace = true
+uuid.workspace = true
+
+# Async primitives (cross-platform, including WASM)
+async-channel.workspace = true
+futures.workspace = true
+
+# Chart
+num-traits.workspace = true
+rust_decimal = { workspace = true, optional = true }
+
+# Markdown Parser
+markdown.workspace = true
+
+# HTML Parser
+html5ever.workspace = true
+markup5ever_rcdom.workspace = true
+
+# Calendar
+chrono.workspace = true
+
+# Code Editor
+aho-corasick.workspace = true
+lsp-types.workspace = true
+
+# Cross-platform time APIs (zero-cost on native, uses web APIs on WASM)
+instant.workspace = true
+
+# Native-only dependencies (not available on WASM)
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+smol.workspace = true
+tree-sitter.workspace = true
+tree-sitter-astro-next = { workspace = true, optional = true }
+tree-sitter-bash = { workspace = true, optional = true }
+tree-sitter-c = { workspace = true, optional = true }
+tree-sitter-c-sharp = { workspace = true, optional = true }
+tree-sitter-cmake = { workspace = true, optional = true }
+tree-sitter-cpp = { workspace = true, optional = true }
+tree-sitter-css = { workspace = true, optional = true }
+tree-sitter-diff = { workspace = true, optional = true }
+tree-sitter-elixir = { workspace = true, optional = true }
+tree-sitter-embedded-template = { workspace = true, optional = true }
+tree-sitter-go = { workspace = true, optional = true }
+tree-sitter-graphql = { workspace = true, optional = true }
+tree-sitter-html = { workspace = true, optional = true }
+tree-sitter-java = { workspace = true, optional = true }
+tree-sitter-javascript = { workspace = true, optional = true }
+tree-sitter-jsdoc = { workspace = true, optional = true }
+tree-sitter-json.workspace = true
+tree-sitter-kotlin-sg = { workspace = true, optional = true }
+tree-sitter-lua = { workspace = true, optional = true }
+tree-sitter-make = { workspace = true, optional = true }
+tree-sitter-md = { workspace = true, optional = true }
+tree-sitter-php = { workspace = true, optional = true }
+tree-sitter-powershell = { workspace = true, optional = true }
+tree-sitter-proto = { workspace = true, optional = true }
+tree-sitter-python = { workspace = true, optional = true }
+tree-sitter-ruby = { workspace = true, optional = true }
+tree-sitter-rust = { workspace = true, optional = true }
+tree-sitter-scala = { workspace = true, optional = true }
+tree-sitter-sequel = { workspace = true, optional = true }
+tree-sitter-svelte-next = { workspace = true, optional = true }
+tree-sitter-swift = { workspace = true, optional = true }
+tree-sitter-toml-ng = { workspace = true, optional = true }
+tree-sitter-typescript = { workspace = true, optional = true }
+tree-sitter-yaml = { workspace = true, optional = true }
+tree-sitter-zig = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-text.workspace = true
+# Native menu (NativeMenu) — drives AppKit NSMenu via objc2.
+raw-window-handle.workspace = true
+objc2.workspace = true
+objc2-app-kit.workspace = true
+objc2-foundation.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# Native menu (NativeMenu) — drives Win32 popup menus.
+raw-window-handle.workspace = true
+resvg.workspace = true
+windows.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+indoc.workspace = true
+
+[lints]
+workspace = true
+
+# `gpui-component-assets` ships the canonical icon set whose variants we
+# enumerate to generate `IconName` at build time. Cargo's
+# `DEP_<links>_<key>` propagation (the bridge that hands the icons-dir
+# path from the assets crate's build.rs into our own) only works through
+# *regular* dependencies, not build-deps, so this has to live here even
+# though our use is entirely build-time.
+[package.metadata.cargo-machete]
+ignored = ["gpui-component-assets"]

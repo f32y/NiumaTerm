@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+
+remote=$1
+
+if [ "$remote" != "origin" ]; then
+    exit 0
+fi
+
+while read -r local_ref _local_sha _remote_ref _remote_sha; do
+    if [ "$local_ref" = "refs/heads/dev" ]; then
+        cat >&2 <<'EOF'
+pre-push: dev is a local development branch; pushing to origin is forbidden. Push to private instead.
+EOF
+        exit 1
+    fi
+done
+
+exit 0

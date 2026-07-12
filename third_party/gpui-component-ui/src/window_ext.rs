@@ -1,0 +1,253 @@
+use std::rc::Rc;
+
+use gpui::{App, ElementId, Entity, Window};
+
+use crate::dialog::{AlertDialog, Dialog};
+use crate::input::InputState;
+use crate::notification::Notification;
+use crate::sheet::Sheet;
+use crate::{Placement, Root};
+
+/// Extension trait for [`Window`] to add dialog, sheet .. functionality.
+pub trait WindowExt: Sized {
+    /// Opens a Sheet at right placement.
+    fn open_sheet<F>(&mut self, cx: &mut App, build: F)
+    where
+        F: Fn(Sheet, &mut Window, &mut App) -> Sheet + 'static;
+
+    /// Opens a Sheet at the given placement.
+    fn open_sheet_at<F>(&mut self, placement: Placement, cx: &mut App, build: F)
+    where
+        F: Fn(Sheet, &mut Window, &mut App) -> Sheet + 'static;
+
+    /// Return true, if there is an active Sheet.
+    fn has_active_sheet(&mut self, cx: &mut App) -> bool;
+
+    /// Closes the active Sheet.
+    fn close_sheet(&mut self, cx: &mut App);
+
+    /// Opens a Dialog.
+    fn open_dialog<F>(&mut self, cx: &mut App, build: F)
+    where
+        F: Fn(Dialog, &mut Window, &mut App) -> Dialog + 'static;
+
+    /// Opens an AlertDialog.
+    ///
+    /// This is a convenience method for opening an alert dialog with opinionated defaults.
+    /// The footer buttons are center-aligned and include an icon based on the variant.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use gpui_component::{AlertDialog, alert::AlertVariant};
+    ///
+    /// window.open_alert_dialog(cx, |alert, _, _| {
+    ///     alert.warning()
+    ///         .title("Unsaved Changes")
+    ///         .description("You have unsaved changes. Are you sure you want to leave?")
+    ///         .show_cancel(true)
+    /// });
+    /// ```
+    fn open_alert_dialog<F>(&mut self, cx: &mut App, build: F)
+    where
+        F: Fn(AlertDialog, &mut Window, &mut App) -> AlertDialog + 'static;
+
+    /// Return true, if there is an active Dialog.
+    fn has_active_dialog(&mut self, cx: &mut App) -> bool;
+
+    /// Closes the last active Dialog.
+    fn close_dialog(&mut self, cx: &mut App);
+
+    /// Closes all active Dialogs.
+    fn close_all_dialogs(&mut self, cx: &mut App);
+
+    /// Pushes a notification to the notification list.
+    fn push_notification(&mut self, note: impl Into<Notification>, cx: &mut App);
+
+    /// Removes all notifications whose id matches `T`, including ones registered with
+    /// either `Notification::id` or `Notification::id1` (any key).
+    fn remove_notification<T: Sized + 'static>(&mut self, cx: &mut App);
+
+    /// Removes a single notification matching the given type `T` and `key` (paired with `Notification::id1`).
+    fn remove_notification1<T: Sized + 'static>(&mut self, key: impl Into<ElementId>, cx: &mut App);
+
+    /// Clears all notifications.
+    fn clear_notifications(&mut self, cx: &mut App);
+
+    /// Returns number of notifications.
+    fn notifications(&mut self, cx: &mut App) -> Rc<Vec<Entity<Notification>>>;
+
+    /// Return current focused Input entity.
+    fn focused_input(&mut self, cx: &mut App) -> Option<Entity<InputState>>;
+    /// Returns true if there is a focused Input entity.
+    fn has_focused_input(&mut self, cx: &mut App) -> bool;
+
+    /// Returns the merged selected text across all selectable TextViews in
+    /// this window, ordered top to bottom and joined with `\n`.
+    ///
+    /// Returns an empty string if the window root is not a [`Root`].
+    fn selected_text(&mut self, cx: &mut App) -> String;
+
+    /// Returns true if there is an active text selection in this window
+    /// (either a window-level drag selection or a view-local selection such
+    /// as select-all or a double-click word selection).
+    fn has_text_selection(&mut self, cx: &mut App) -> bool;
+
+    /// Clears the window-level text selection and all view-local selections.
+    fn clear_text_selection(&mut self, cx: &mut App);
+
+    /// Ends the in-progress window-level text selection drag (if any).
+    fn end_text_selection(&mut self, cx: &mut App);
+}
+
+impl WindowExt for Window {
+    #[inline]
+    fn open_sheet<F>(&mut self, cx: &mut App, build: F)
+    where
+        F: Fn(Sheet, &mut Window, &mut App) -> Sheet + 'static,
+    {
+        self.open_sheet_at(Placement::Right, cx, build)
+    }
+
+    #[inline]
+    fn open_sheet_at<F>(&mut self, placement: Placement, cx: &mut App, build: F)
+    where
+        F: Fn(Sheet, &mut Window, &mut App) -> Sheet + 'static,
+    {
+        Root::update(self, cx, move |root, window, cx| {
+            root.open_sheet_at(placement, build, window, cx);
+        })
+    }
+
+    #[inline]
+    fn has_active_sheet(&mut self, cx: &mut App) -> bool {
+        Root::read(self, cx).active_sheet.is_some()
+    }
+
+    #[inline]
+    fn close_sheet(&mut self, cx: &mut App) {
+        Root::update(self, cx, |root, window, cx| {
+            root.close_sheet(window, cx);
+        })
+    }
+
+    #[inline]
+    fn open_dialog<F>(&mut self, cx: &mut App, build: F)
+    where
+        F: Fn(Dialog, &mut Window, &mut App) -> Dialog + 'static,
+    {
+        Root::update(self, cx, move |root, window, cx| {
+            root.open_dialog(build, window, cx);
+        })
+    }
+
+    #[inline]
+    fn open_alert_dialog<F>(&mut self, cx: &mut App, build: F)
+    where
+        F: Fn(AlertDialog, &mut Window, &mut App) -> AlertDialog + 'static,
+    {
+        self.open_dialog(cx, move |_, window, cx| {
+            build(AlertDialog::new(cx), window, cx).into_dialog(window, cx)
+        })
+    }
+
+    #[inline]
+    fn has_active_dialog(&mut self, cx: &mut App) -> bool {
+        Root::read(self, cx).active_dialogs.len() > 0
+    }
+
+    #[inline]
+    fn close_dialog(&mut self, cx: &mut App) {
+        Root::update(self, cx, |root, window, cx| {
+            root.close_dialog(window, cx);
+        })
+    }
+
+    #[inline]
+    fn close_all_dialogs(&mut self, cx: &mut App) {
+        Root::update(self, cx, |root, window, cx| {
+            root.close_all_dialogs(window, cx);
+        })
+    }
+
+    #[inline]
+    fn push_notification(&mut self, note: impl Into<Notification>, cx: &mut App) {
+        let note = note.into();
+        Root::update(self, cx, |root, window, cx| {
+            root.push_notification(note, window, cx);
+        })
+    }
+
+    #[inline]
+    fn remove_notification<T: Sized + 'static>(&mut self, cx: &mut App) {
+        Root::update(self, cx, |root, window, cx| {
+            root.remove_notification::<T>(window, cx);
+        })
+    }
+
+    #[inline]
+    fn remove_notification1<T: Sized + 'static>(
+        &mut self,
+        key: impl Into<ElementId>,
+        cx: &mut App,
+    ) {
+        let key = key.into();
+        Root::update(self, cx, |root, window, cx| {
+            root.remove_notification1::<T>(key, window, cx);
+        })
+    }
+
+    #[inline]
+    fn clear_notifications(&mut self, cx: &mut App) {
+        Root::update(self, cx, |root, window, cx| {
+            root.clear_notifications(window, cx);
+        })
+    }
+
+    #[inline]
+    fn notifications(&mut self, cx: &mut App) -> Rc<Vec<Entity<Notification>>> {
+        Rc::new(Root::read(self, cx).notification.read(cx).notifications())
+    }
+
+    #[inline]
+    fn has_focused_input(&mut self, cx: &mut App) -> bool {
+        Root::read(self, cx).focused_input.is_some()
+    }
+
+    #[inline]
+    fn focused_input(&mut self, cx: &mut App) -> Option<Entity<InputState>> {
+        Root::read(self, cx).focused_input.clone()
+    }
+
+    #[inline]
+    fn selected_text(&mut self, cx: &mut App) -> String {
+        let Some(root) = self.root::<Root>().flatten() else {
+            return String::new();
+        };
+        root.read(cx).window_selected_text(cx)
+    }
+
+    #[inline]
+    fn has_text_selection(&mut self, cx: &mut App) -> bool {
+        let Some(root) = self.root::<Root>().flatten() else {
+            return false;
+        };
+        root.read(cx).has_text_selection(cx)
+    }
+
+    #[inline]
+    fn clear_text_selection(&mut self, cx: &mut App) {
+        let Some(root) = self.root::<Root>().flatten() else {
+            return;
+        };
+        root.update(cx, |root, cx| root.clear_text_selection(cx));
+    }
+
+    #[inline]
+    fn end_text_selection(&mut self, cx: &mut App) {
+        let Some(root) = self.root::<Root>().flatten() else {
+            return;
+        };
+        root.update(cx, |root, cx| root.end_text_selection(cx));
+    }
+}

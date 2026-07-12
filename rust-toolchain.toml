@@ -1,0 +1,5 @@
+[toolchain]
+# Always use Release +1d nightly
+channel = "nightly-2026-05-29"
+profile = "minimal"
+components = [ "rustfmt", "clippy", "rust-analyzer" ]

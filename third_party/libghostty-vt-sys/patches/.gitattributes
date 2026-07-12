@@ -1,0 +1,3 @@
+# Patches target the LF-normalized ghostty checkout; never convert to CRLF or
+# `git apply` will fail to match context against the LF source.
+*.patch text eol=lf

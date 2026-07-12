@@ -1,0 +1,109 @@
+diff --git a/include/ghostty/vt/kitty_graphics.h b/include/ghostty/vt/kitty_graphics.h
+index 9bace3a3c..b976cd93f 100644
+--- a/include/ghostty/vt/kitty_graphics.h
++++ b/include/ghostty/vt/kitty_graphics.h
+@@ -714,6 +714,33 @@ GHOSTTY_API GhosttyResult ghostty_kitty_graphics_placement_viewport_pos(
+     int32_t* out_col,
+     int32_t* out_row);
+ 
++/**
++ * Get the screen-absolute grid position of the current placement's pin.
++ *
++ * Unlike ghostty_kitty_graphics_placement_viewport_pos(), this reports the
++ * pin's row/column in the screen coordinate space (history + active area)
++ * and does NOT cull placements that have scrolled out of the viewport. This
++ * lets embedders intersect an off-screen placement with rows they are
++ * harvesting into scrollback history, where the viewport projection is
++ * unavailable. The image handle is not required.
++ *
++ * @param iterator The placement iterator positioned on a placement
++ * @param terminal The terminal handle
++ * @param[out] out_col On success, receives the screen-absolute column
++ * @param[out] out_row On success, receives the screen-absolute row
++ * @return GHOSTTY_SUCCESS on success, GHOSTTY_NO_VALUE for a virtual
++ *         (unicode placeholder) placement or when the pin's page has been
++ *         evicted, GHOSTTY_INVALID_VALUE if any handle is NULL or the
++ *         iterator is not positioned
++ *
++ * @ingroup kitty_graphics
++ */
++GHOSTTY_API GhosttyResult ghostty_kitty_graphics_placement_screen_pos(
++    GhosttyKittyGraphicsPlacementIterator iterator,
++    GhosttyTerminal terminal,
++    uint32_t* out_col,
++    uint32_t* out_row);
++
+ /**
+  * Get the resolved source rectangle for the current placement.
+  *
+diff --git a/src/lib_vt.zig b/src/lib_vt.zig
+index 6d4406e88..80bbb8f24 100644
+--- a/src/lib_vt.zig
++++ b/src/lib_vt.zig
+@@ -277,6 +277,7 @@ comptime {
+         @export(&c.kitty_graphics_placement_pixel_size, .{ .name = "ghostty_kitty_graphics_placement_pixel_size" });
+         @export(&c.kitty_graphics_placement_grid_size, .{ .name = "ghostty_kitty_graphics_placement_grid_size" });
+         @export(&c.kitty_graphics_placement_viewport_pos, .{ .name = "ghostty_kitty_graphics_placement_viewport_pos" });
++        @export(&c.kitty_graphics_placement_screen_pos, .{ .name = "ghostty_kitty_graphics_placement_screen_pos" });
+         @export(&c.kitty_graphics_placement_source_rect, .{ .name = "ghostty_kitty_graphics_placement_source_rect" });
+         @export(&c.kitty_graphics_placement_render_info, .{ .name = "ghostty_kitty_graphics_placement_render_info" });
+         @export(&c.grid_ref_cell, .{ .name = "ghostty_grid_ref_cell" });
+diff --git a/src/terminal/c/kitty_graphics.zig b/src/terminal/c/kitty_graphics.zig
+index d50b8c4c2..5c47b0022 100644
+--- a/src/terminal/c/kitty_graphics.zig
++++ b/src/terminal/c/kitty_graphics.zig
+@@ -495,6 +495,42 @@ pub fn placement_viewport_pos(
+     return .success;
+ }
+ 
++/// Get the screen-absolute grid position of the current placement's pin.
++///
++/// Unlike placement_viewport_pos(), this reports the pin's row/column in the
++/// screen coordinate space (history + active area), and does NOT cull
++/// placements that have scrolled out of the viewport. This lets embedders
++/// intersect an off-screen placement with rows they are harvesting into
++/// scrollback history, where the viewport projection is unavailable.
++///
++/// Returns .no_value for virtual (unicode-placeholder) placements, which have
++/// no pin, and when the pin's page has been evicted from the page list.
++pub fn placement_screen_pos(
++    iter_: PlacementIterator,
++    terminal_: terminal_c.Terminal,
++    out_col: *u32,
++    out_row: *u32,
++) callconv(lib.calling_conv) Result {
++    if (comptime !build_options.kitty_graphics) return .no_value;
++
++    const wrapper = terminal_ orelse return .invalid_value;
++    const iter = iter_ orelse return .invalid_value;
++    const entry = iter.entry orelse return .invalid_value;
++
++    const pin = switch (entry.value_ptr.location) {
++        .pin => |pin| pin,
++        .virtual => return .no_value,
++    };
++
++    const pages = &wrapper.terminal.screens.active.pages;
++    const pt = pages.pointFromPin(.screen, pin.*) orelse return .no_value;
++
++    out_col.* = @intCast(pt.screen.x);
++    out_row.* = @intCast(pt.screen.y);
++
++    return .success;
++}
++
+ pub fn placement_source_rect(
+     iter_: PlacementIterator,
+     image_: ImageHandle,
+diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
+index 648bdbe51..eceaa1cbb 100644
+--- a/src/terminal/c/main.zig
++++ b/src/terminal/c/main.zig
+@@ -24,6 +24,7 @@ pub const kitty_graphics_placement_rect = kitty_graphics.placement_rect;
+ pub const kitty_graphics_placement_pixel_size = kitty_graphics.placement_pixel_size;
+ pub const kitty_graphics_placement_grid_size = kitty_graphics.placement_grid_size;
+ pub const kitty_graphics_placement_viewport_pos = kitty_graphics.placement_viewport_pos;
++pub const kitty_graphics_placement_screen_pos = kitty_graphics.placement_screen_pos;
+ pub const kitty_graphics_placement_source_rect = kitty_graphics.placement_source_rect;
+ pub const kitty_graphics_placement_render_info = kitty_graphics.placement_render_info;
+ pub const types = @import("types.zig");
