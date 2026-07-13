@@ -20,10 +20,10 @@ const MAX_PROVIDER_ID_BYTES: usize = 256;
 const MAX_TITLE_CHARS: usize = 256;
 const MAX_BODY_CHARS: usize = 4_096;
 
-pub const AGENT_ROUTE_ENV: &str = "NIUMATERM_AGENT_ROUTE";
-pub const AGENT_HOOK_TOKEN_ENV: &str = "NIUMATERM_AGENT_HOOK_TOKEN";
-pub const AGENT_HOOK_VERSION_ENV: &str = "NIUMATERM_AGENT_HOOK_VERSION";
-pub const AGENT_TESTING_ENV: &str = "NIUMATERM_TESTING";
+pub const AGENT_ROUTE_ENV: &str = "NMT_AGENT_ROUTE";
+pub const AGENT_HOOK_TOKEN_ENV: &str = "NMT_AGENT_HOOK_TOKEN";
+pub const AGENT_HOOK_VERSION_ENV: &str = "NMT_AGENT_HOOK_VERSION";
+pub const AGENT_TESTING_ENV: &str = "NMT_TESTING";
 
 pub struct AgentProcess {
     nonce: String,

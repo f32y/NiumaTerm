@@ -10,7 +10,7 @@ Raw FFI bindings for libghostty-vt.
 - Set `GHOSTTY_ZIG_SYSTEM_DIR` to force Zig package resolution through a
   pre-fetched `zig build --system` directory. This is intended for Nix and other
   sandboxed package managers that cannot fetch during build scripts.
-- Set `NiumaTerm_USE_PREBUILT_LIBGHOSTTY=1` to link `prebuilt/<TARGET>/`
+- Set `NMT_USE_PREBUILT_LIBGHOSTTY=1` to link `prebuilt/<TARGET>/`
   instead of fetching and building `libghostty-vt` from Ghostty sources via
   Zig. The checked-in Windows package keeps already-localized static archives
   in `lib/`, so prebuilt builds do not need Zig or LLVM binutils.

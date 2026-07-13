@@ -6,7 +6,7 @@
     The `libghostty-vt-sys` crate can either build libghostty-vt from the pinned
     Ghostty sources via Zig (the default) or link the checked-in prebuilt package
     under `third_party/libghostty-vt-sys/prebuilt/<target>/`. The prebuilt package
-    is what CI and `NiumaTerm_USE_PREBUILT_LIBGHOSTTY=1` builds link against, so it
+    is what CI and `NMT_USE_PREBUILT_LIBGHOSTTY=1` builds link against, so it
     must be regenerated whenever the vendored source patches change the C ABI
     (e.g. a new `patches/000N-*.patch` adds an exported symbol).
 
@@ -31,7 +31,7 @@
     Omit if `zig` is already on PATH.
 
 .PARAMETER SkipVerify
-    Skip the final `NiumaTerm_USE_PREBUILT_LIBGHOSTTY=1` link check.
+    Skip the final `NMT_USE_PREBUILT_LIBGHOSTTY=1` link check.
 
 .EXAMPLE
     pwsh scripts/update-libghostty-prebuilt.ps1 -ZigDir <directory-containing-zig>
@@ -140,7 +140,7 @@ try {
     # 1. Force a clean vendored build in the requested optimize mode so the
     #    simdutf-localized archive is regenerated from the current sources/patches.
     Write-Host "==> Building libghostty-vt from source (optimize=$Optimize, target=$Target)"
-    Remove-Item Env:NiumaTerm_USE_PREBUILT_LIBGHOSTTY -ErrorAction SilentlyContinue
+    Remove-Item Env:NMT_USE_PREBUILT_LIBGHOSTTY -ErrorAction SilentlyContinue
     $env:LIBGHOSTTY_VT_SYS_OPTIMIZE = $Optimize
 
     Invoke-Checked cargo @("clean", "-p", "libghostty-vt-sys")
@@ -176,9 +176,9 @@ try {
 
     # 4. Verify the prebuilt link path still builds against the refreshed archive.
     if (-not $SkipVerify) {
-        Write-Host "==> Verifying prebuilt link path (NiumaTerm_USE_PREBUILT_LIBGHOSTTY=1)"
+        Write-Host "==> Verifying prebuilt link path (NMT_USE_PREBUILT_LIBGHOSTTY=1)"
         Remove-Item Env:LIBGHOSTTY_VT_SYS_OPTIMIZE -ErrorAction SilentlyContinue
-        $env:NiumaTerm_USE_PREBUILT_LIBGHOSTTY = "1"
+        $env:NMT_USE_PREBUILT_LIBGHOSTTY = "1"
         Invoke-Checked cargo @("clean", "-p", "libghostty-vt-sys")
         Invoke-Checked cargo @("build", "-p", "nmt_terminal", "--target", $Target)
         Write-Host "    prebuilt link OK"
@@ -192,5 +192,5 @@ try {
 finally {
     Pop-Location
     Remove-Item Env:LIBGHOSTTY_VT_SYS_OPTIMIZE -ErrorAction SilentlyContinue
-    Remove-Item Env:NiumaTerm_USE_PREBUILT_LIBGHOSTTY -ErrorAction SilentlyContinue
+    Remove-Item Env:NMT_USE_PREBUILT_LIBGHOSTTY -ErrorAction SilentlyContinue
 }
