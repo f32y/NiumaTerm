@@ -36,6 +36,3 @@ crates/renderer/src/**/*.spv
 .idea/
 _ReSharper.Caches/
 *.DotSettings.user
-
-bin/
-obj/
