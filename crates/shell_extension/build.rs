@@ -12,4 +12,12 @@ fn main() {
     let def = manifest_dir.join("shell_extension.def");
     println!("cargo:rerun-if-changed={}", def.display());
     println!("cargo:rustc-link-arg-cdylib=/DEF:{}", def.display());
+
+    winres::WindowsResource::new()
+        .set("FileDescription", "NiumaTerm Shell Extension")
+        .set("ProductName", "NiumaTerm")
+        .set("InternalName", "NiumaTerm Shell Extension")
+        .set("OriginalFilename", "shell_extension.dll")
+        .compile()
+        .unwrap();
 }

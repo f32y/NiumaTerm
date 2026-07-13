@@ -6,6 +6,10 @@ fn main() {
         println!("cargo:rerun-if-changed={}", icon.display());
         winres::WindowsResource::new()
             .set_icon(icon.to_str().unwrap())
+            .set("FileDescription", "NiumaTerm")
+            .set("ProductName", "NiumaTerm")
+            .set("InternalName", "NiumaTerm")
+            .set("OriginalFilename", "NiumaTerm.exe")
             .compile()
             .unwrap();
     }
