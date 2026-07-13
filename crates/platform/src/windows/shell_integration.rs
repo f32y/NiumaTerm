@@ -1,12 +1,7 @@
-use std::ffi::OsStr;
-use std::os::windows::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
-use std::ptr::{null, null_mut};
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use windows_registry::CURRENT_USER;
-use windows_sys::Win32::UI::Shell::ShellExecuteW;
-use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
 use super::notifier;
 
@@ -104,33 +99,6 @@ pub fn system_notification_enabled() -> bool {
         && notifier::identity_registered()
 }
 
-#[allow(dead_code)]
-pub fn register_with_elevated(is_register: bool) -> Result<()> {
-    let exe_path = std::env::current_exe()?;
-    let operation = wide("runas");
-    let file = wide_os(exe_path.as_os_str());
-    let parameters = wide(elevated_arg(is_register));
-
-    let result = unsafe {
-        ShellExecuteW(
-            null_mut(),
-            operation.as_ptr(),
-            file.as_ptr(),
-            parameters.as_ptr(),
-            null(),
-            SW_SHOWNORMAL,
-        )
-    } as isize;
-
-    if result <= 32 {
-        Err(anyhow!(
-            "failed to launch elevated process: ShellExecuteW returned {result}"
-        ))
-    } else {
-        Ok(())
-    }
-}
-
 pub(crate) fn register_shell_integration_paths(exe_path: &Path, dll_path: &Path) -> Result<()> {
     let exe_path = path_string(exe_path);
     let dll_path = path_string(dll_path);
@@ -194,25 +162,6 @@ fn context_menu_registered_registry_roots() -> Vec<String> {
 
 fn path_string(path: &Path) -> String {
     path.as_os_str().to_string_lossy().into_owned()
-}
-
-#[allow(dead_code)]
-fn elevated_arg(is_register: bool) -> &'static str {
-    if is_register {
-        "-registerShellExtension"
-    } else {
-        "-unregisterShellExtension"
-    }
-}
-
-#[allow(dead_code)]
-fn wide(s: &str) -> Vec<u16> {
-    OsStr::new(s).encode_wide().chain([0]).collect()
-}
-
-#[allow(dead_code)]
-fn wide_os(s: &OsStr) -> Vec<u16> {
-    s.encode_wide().chain([0]).collect()
 }
 
 #[cfg(test)]

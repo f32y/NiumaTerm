@@ -1038,9 +1038,12 @@ pub fn settings_view(cx: &App) -> Settings {
                                 SettingField::switch(
                                     |_| nmt_platform::is_shell_integration_registered(),
                                     |value, _| {
-                                        if let Err(err) =
-                                            nmt_platform::register_with_elevated(value)
-                                        {
+                                        let result = if value {
+                                            nmt_platform::register_shell_integration()
+                                        } else {
+                                            nmt_platform::unregister_shell_integration()
+                                        };
+                                        if let Err(err) = result {
                                             tracing::warn!(
                                                 "failed to toggle Windows context menu: {err:#}"
                                             );

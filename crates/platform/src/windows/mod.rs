@@ -22,9 +22,8 @@ pub(crate) use notifier::{
 };
 use pipes::{EventedAnonRead as ReadPipe, EventedAnonWrite as WritePipe};
 pub use shell_integration::{
-    is_shell_integration_registered, register_shell_integration, register_with_elevated,
-    set_system_notification_enabled, shell_integration_dll_mismatched, system_notification_enabled,
-    unregister_shell_integration,
+    is_shell_integration_registered, register_shell_integration, set_system_notification_enabled,
+    shell_integration_dll_mismatched, system_notification_enabled, unregister_shell_integration,
 };
 use windows_sys::Win32::System::Threading::{CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW};
 
