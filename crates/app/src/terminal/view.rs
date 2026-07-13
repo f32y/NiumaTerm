@@ -2396,22 +2396,42 @@ fn paint_frame(
     paint_frame_images(bounds, frame, ZLayer::BelowText, cell, offsets, window);
     paint_cursor(bounds, frame.cursor(), cell, offsets, window);
 
-    for (row, line) in lines.iter().enumerate() {
-        let origin = point(
-            bounds.left(),
-            bounds.top() + px(row as f32 * cell.height_px + row_y_offset(offsets, row)),
-        );
+    paint_glyph_rows(
+        bounds,
+        lines.iter().enumerate().map(|(row, line)| {
+            (
+                row as f32 * cell.height_px + row_y_offset(offsets, row),
+                line,
+            )
+        }),
+        cell.height_px,
+        window,
+        cx,
+    );
+    // Kitty images above cursor/text (z >= 0).
+    paint_frame_images(bounds, frame, ZLayer::AboveText, cell, offsets, window);
+}
+
+/// Paint shaped glyph rows at caller-supplied element-local y offsets — the
+/// one glyph-paint convention (left-aligned, no wrap, cell-height lines) for
+/// live-frame rows and frozen block rows.
+pub(crate) fn paint_glyph_rows<'a>(
+    bounds: Bounds<Pixels>,
+    rows: impl Iterator<Item = (f32, &'a ShapedLine)>,
+    cell_h: f32,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    for (y, line) in rows {
         let _ = line.paint(
-            origin,
-            px(cell.height_px),
+            point(bounds.left(), bounds.top() + px(y)),
+            px(cell_h),
             TextAlign::Left,
             None,
             window,
             cx,
         );
     }
-    // Kitty images above cursor/text (z >= 0).
-    paint_frame_images(bounds, frame, ZLayer::AboveText, cell, offsets, window);
 }
 
 /// Paint the frame's Kitty images whose z-index falls in `layer`, in engine order (no
