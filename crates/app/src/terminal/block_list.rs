@@ -789,16 +789,16 @@ pub(crate) fn paint_frozen(
             gpui::rgb(selection_bg.rgb_u32()),
         ));
     }
-    for (row, line) in view.rows.iter().zip(shaped) {
-        let _ = line.paint(
-            point(bounds.left(), bounds.top() + px(row.y)),
-            px(cell_h),
-            gpui::TextAlign::Left,
-            None,
-            window,
-            cx,
-        );
-    }
+    crate::terminal::view::paint_glyph_rows(
+        bounds,
+        view.rows
+            .iter()
+            .zip(shaped)
+            .map(|(row, line)| (row.y, line)),
+        cell_h,
+        window,
+        cx,
+    );
 }
 
 pub(crate) fn paint_frozen_separators(
