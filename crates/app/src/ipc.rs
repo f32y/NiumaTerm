@@ -16,8 +16,8 @@ pub(crate) enum IpcAction {
 /// Run the primary's pipe server on a dedicated thread: accept one client at
 /// a time, read its line(s), parse, and send each action into `tx`. Runs for
 /// the process lifetime.
-pub(crate) fn spawn_pipe_server(tx: UnboundedSender<IpcAction>) {
-    nmt_platform::windows::ipc::spawn_server(move |bytes| {
+pub(crate) fn spawn_pipe_server(tx: UnboundedSender<IpcAction>, testing: bool) {
+    nmt_platform::windows::ipc::spawn_server(testing, move |bytes| {
         match parse_message(&bytes, agent_process().hook_token()) {
             Ok(action) => return tx.unbounded_send(action).is_ok(),
             Err(error) => tracing::warn!("ignoring IPC message: {error}"),

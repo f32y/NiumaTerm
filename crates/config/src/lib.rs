@@ -21,6 +21,7 @@ pub mod window;
 use std::default::Default;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use colors::Colors;
 use serde::{Deserialize, Serialize};
@@ -191,9 +192,24 @@ pub struct CursorConfig {
     pub blinking_interval: u64,
 }
 
+static TESTING_MODE: AtomicBool = AtomicBool::new(false);
+
+/// Select the isolated `Test` configuration directory before configuration is loaded.
+pub fn enable_testing_mode() {
+    TESTING_MODE.store(true, Ordering::Relaxed);
+}
+
+fn config_dir_for_mode(path: PathBuf, testing: bool) -> PathBuf {
+    if testing { path.join("Test") } else { path }
+}
+
+fn selected_config_dir(path: PathBuf) -> PathBuf {
+    config_dir_for_mode(path, TESTING_MODE.load(Ordering::Relaxed))
+}
+
 #[cfg(target_os = "macos")]
 #[inline]
-pub fn config_dir_path() -> PathBuf {
+fn base_config_dir_path() -> PathBuf {
     std::env::var("NiumaTerm_CONFIG_HOME")
         .map(PathBuf::from)
         .unwrap_or(dirs::home_dir().unwrap().join(".config").join("NiumaTerm"))
@@ -201,7 +217,7 @@ pub fn config_dir_path() -> PathBuf {
 
 #[cfg(target_os = "windows")]
 #[inline]
-pub fn config_dir_path() -> PathBuf {
+fn base_config_dir_path() -> PathBuf {
     std::env::var("NiumaTerm_CONFIG_HOME")
         .map(PathBuf::from)
         .unwrap_or(
@@ -215,7 +231,7 @@ pub fn config_dir_path() -> PathBuf {
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 #[inline]
-pub fn config_dir_path() -> PathBuf {
+fn base_config_dir_path() -> PathBuf {
     std::env::var("NiumaTerm_CONFIG_HOME")
         .map(PathBuf::from)
         .unwrap_or(
@@ -224,6 +240,11 @@ pub fn config_dir_path() -> PathBuf {
                 .unwrap_or(dirs::home_dir().unwrap().join(".config"))
                 .join("NiumaTerm"),
         )
+}
+
+#[inline]
+pub fn config_dir_path() -> PathBuf {
+    selected_config_dir(base_config_dir_path())
 }
 
 #[inline]
@@ -703,6 +724,13 @@ mod tests {
     use colors::{hex_to_color_arr, hex_to_color_wgpu};
 
     use super::*;
+
+    #[test]
+    fn testing_mode_uses_test_subdirectory() {
+        let base = PathBuf::from("NiumaTerm");
+        assert_eq!(config_dir_for_mode(base.clone(), false), base);
+        assert_eq!(config_dir_for_mode(base.clone(), true), base.join("Test"));
+    }
 
     fn tmp_dir() -> PathBuf {
         std::env::temp_dir()

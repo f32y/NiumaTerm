@@ -4,7 +4,7 @@ mod codex;
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 pub use codex::RawCodexHookEnvelope;
@@ -23,10 +23,12 @@ const MAX_BODY_CHARS: usize = 4_096;
 pub const AGENT_ROUTE_ENV: &str = "NIUMATERM_AGENT_ROUTE";
 pub const AGENT_HOOK_TOKEN_ENV: &str = "NIUMATERM_AGENT_HOOK_TOKEN";
 pub const AGENT_HOOK_VERSION_ENV: &str = "NIUMATERM_AGENT_HOOK_VERSION";
+pub const AGENT_TESTING_ENV: &str = "NIUMATERM_TESTING";
 
 pub struct AgentProcess {
     nonce: String,
     hook_token: String,
+    testing: AtomicBool,
     next_route: AtomicU64,
     next_notification: AtomicU64,
 }
@@ -40,6 +42,7 @@ impl AgentProcess {
         Self {
             nonce: format!("{:x}-{}", std::process::id(), hex(&nonce)),
             hook_token: hex(&hook_token),
+            testing: AtomicBool::new(false),
             next_route: AtomicU64::new(1),
             next_notification: AtomicU64::new(1),
         }
@@ -62,15 +65,23 @@ impl AgentProcess {
         &self.nonce
     }
 
+    pub fn set_testing(&self, testing: bool) {
+        self.testing.store(testing, Ordering::Relaxed);
+    }
+
     pub fn environment_for(&self, route: &AgentRoute) -> Vec<(String, String)> {
-        vec![
+        let mut environment = vec![
             (AGENT_ROUTE_ENV.into(), route.as_str().into()),
             (AGENT_HOOK_TOKEN_ENV.into(), self.hook_token.clone()),
             (
                 AGENT_HOOK_VERSION_ENV.into(),
                 AGENT_HOOK_PROTOCOL_VERSION.to_string(),
             ),
-        ]
+        ];
+        if self.testing.load(Ordering::Relaxed) {
+            environment.push((AGENT_TESTING_ENV.into(), "1".into()));
+        }
+        environment
     }
 }
 
@@ -774,7 +785,7 @@ mod tests {
 
     #[test]
     fn process_routes_are_unique_and_environment_is_exact() {
-        let process = agent_process();
+        let process = AgentProcess::new();
         let first = process.allocate_route();
         let second = process.allocate_route();
         assert_ne!(first, second);
@@ -786,6 +797,12 @@ mod tests {
             (AGENT_HOOK_TOKEN_ENV.into(), process.hook_token.clone())
         );
         assert_eq!(environment[2], (AGENT_HOOK_VERSION_ENV.into(), "1".into()));
+
+        process.set_testing(true);
+        assert_eq!(
+            process.environment_for(&first)[3],
+            (AGENT_TESTING_ENV.into(), "1".into())
+        );
     }
 
     fn event(
