@@ -11,7 +11,7 @@ const GHOSTTY_COMMIT: &str = "53bd14fecfd68c6c0ab64d37b5943247299e2b40";
 /// Folded into the fetch stamp alongside `GHOSTTY_COMMIT`.
 const GHOSTTY_PATCH_VERSION: &str =
     "win-reflow-trim-styled-v6-grow-cursor-y-v2-kitty-screen-pos-v2-blockset-v4-base53bd14f";
-const PREBUILT_ENV: &str = "NiumaTerm_USE_PREBUILT_LIBGHOSTTY";
+const PREBUILT_ENV: &str = "NMT_USE_PREBUILT_LIBGHOSTTY";
 
 /// Locate an LLVM binutils tool (`llvm-objcopy` / `llvm-nm`) on Windows.
 ///
@@ -900,7 +900,7 @@ mod tests {
 
     #[test]
     fn prebuilt_env_name_is_contract() {
-        assert_eq!(PREBUILT_ENV, "NiumaTerm_USE_PREBUILT_LIBGHOSTTY");
+        assert_eq!(PREBUILT_ENV, "NMT_USE_PREBUILT_LIBGHOSTTY");
     }
 
     #[test]

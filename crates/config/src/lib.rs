@@ -210,7 +210,7 @@ fn selected_config_dir(path: PathBuf) -> PathBuf {
 #[cfg(target_os = "macos")]
 #[inline]
 fn base_config_dir_path() -> PathBuf {
-    std::env::var("NiumaTerm_CONFIG_HOME")
+    std::env::var("NMT_CONFIG_HOME")
         .map(PathBuf::from)
         .unwrap_or(dirs::home_dir().unwrap().join(".config").join("NiumaTerm"))
 }
@@ -218,7 +218,7 @@ fn base_config_dir_path() -> PathBuf {
 #[cfg(target_os = "windows")]
 #[inline]
 fn base_config_dir_path() -> PathBuf {
-    std::env::var("NiumaTerm_CONFIG_HOME")
+    std::env::var("NMT_CONFIG_HOME")
         .map(PathBuf::from)
         .unwrap_or(
             dirs::home_dir()
@@ -232,7 +232,7 @@ fn base_config_dir_path() -> PathBuf {
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 #[inline]
 fn base_config_dir_path() -> PathBuf {
-    std::env::var("NiumaTerm_CONFIG_HOME")
+    std::env::var("NMT_CONFIG_HOME")
         .map(PathBuf::from)
         .unwrap_or(
             std::env::var("XDG_CONFIG_HOME")

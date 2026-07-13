@@ -15,12 +15,12 @@ Currently only Windows is supported.
 
 > As libghostty-vt is written in Zig but most people do not have Zig toolchain installed on their machines,
 > this repo bundles a prebuilt libghostty.a which is **opt-in** by default. If you don't want to build it by yourself,
-> set `NiumaTerm_USE_PREBUILT_LIBGHOSTTY` environment variable to `1`.
+> set `NMT_USE_PREBUILT_LIBGHOSTTY` environment variable to `1`.
 
 ```powershell
 # PowerShell
 
-$env:NiumaTerm_USE_PREBUILT_LIBGHOSTTY="1"
+$env:NMT_USE_PREBUILT_LIBGHOSTTY="1"
 cargo run --bin NiumaTerm
 ```
 

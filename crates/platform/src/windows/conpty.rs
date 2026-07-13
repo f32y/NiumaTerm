@@ -490,7 +490,7 @@ mod environment_tests {
 
     #[test]
     fn overrides_replace_names_case_insensitively_without_mutating_parent() {
-        let key = "NIUMATERM_PTY_ENV_REPLACEMENT_TEST";
+        let key = "NMT_PTY_ENV_REPLACEMENT_TEST";
         unsafe { std::env::set_var(key, "parent") };
         let block = build_environment_block(&[(key.to_lowercase(), "child".into())]);
         let matching: Vec<_> = entries(&block)
@@ -504,9 +504,9 @@ mod environment_tests {
 
     #[test]
     fn block_preserves_unrelated_values_and_unicode() {
-        let inherited = "NIUMATERM_PTY_ENV_PRESERVE_TEST";
+        let inherited = "NMT_PTY_ENV_PRESERVE_TEST";
         unsafe { std::env::set_var(inherited, "kept") };
-        let block = build_environment_block(&[("NIUMATERM_UNICODE".into(), "牛码终端🦀".into())]);
+        let block = build_environment_block(&[("NMT_UNICODE".into(), "牛码终端🦀".into())]);
         let entries = entries(&block);
         assert!(
             entries
@@ -516,7 +516,7 @@ mod environment_tests {
         assert!(
             entries
                 .iter()
-                .any(|entry| entry == "NIUMATERM_UNICODE=牛码终端🦀")
+                .any(|entry| entry == "NMT_UNICODE=牛码终端🦀")
         );
         unsafe { std::env::remove_var(inherited) };
     }
@@ -547,13 +547,13 @@ mod environment_tests {
         let output = std::env::temp_dir().join(format!("nmt-pty-env-{}.txt", std::process::id()));
         let _ = std::fs::remove_file(&output);
         let overrides = [
-            ("NIUMATERM_AGENT_ROUTE".into(), "route-exact".into()),
-            ("NIUMATERM_AGENT_HOOK_TOKEN".into(), "token-exact".into()),
-            ("NIUMATERM_AGENT_HOOK_VERSION".into(), "1".into()),
+            ("NMT_AGENT_ROUTE".into(), "route-exact".into()),
+            ("NMT_AGENT_HOOK_TOKEN".into(), "token-exact".into()),
+            ("NMT_AGENT_HOOK_VERSION".into(), "1".into()),
         ];
         let mut environment = build_environment_block(&overrides);
         let command = format!(
-            "cmd.exe /d /c (echo %NIUMATERM_AGENT_ROUTE%&echo %NIUMATERM_AGENT_HOOK_TOKEN%&echo %NIUMATERM_AGENT_HOOK_VERSION%)>\"{}\"",
+            "cmd.exe /d /c (echo %NMT_AGENT_ROUTE%&echo %NMT_AGENT_HOOK_TOKEN%&echo %NMT_AGENT_HOOK_VERSION%)>\"{}\"",
             output.display()
         );
         let mut command: Vec<u16> = command.encode_utf16().chain([0]).collect();

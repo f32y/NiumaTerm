@@ -845,11 +845,11 @@ impl PromptSniffer {
     }
 }
 
-/// Gated on `NiumaTerm_PROMPT_TRACE` so live OSC 133 region transitions can be logged during
+/// Gated on `NMT_PROMPT_TRACE` so live OSC 133 region transitions can be logged during
 /// classify-only validation; zero-cost when unset (one `OnceLock` load).
 fn prompt_trace_enabled() -> bool {
     static EN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *EN.get_or_init(|| std::env::var_os("NiumaTerm_PROMPT_TRACE").is_some())
+    *EN.get_or_init(|| std::env::var_os("NMT_PROMPT_TRACE").is_some())
 }
 
 pub struct PtyPipe<T: nmt_platform::EventedPty, U: EventListener> {
