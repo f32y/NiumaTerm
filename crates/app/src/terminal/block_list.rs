@@ -15,7 +15,7 @@ use nmt_terminal::block_store::{BlockItem, BlockStore, SegmentMeta};
 use nmt_terminal::terminal::square::Wide;
 
 use crate::terminal::frame::{
-    StyleRun, TerminalCell, TerminalColor, TerminalLine, line_from_parts, theme_default_foreground,
+    LineBuilder, StyleRun, TerminalCell, TerminalColor, TerminalLine, theme_default_foreground,
     theme_selection_background,
 };
 
@@ -303,14 +303,12 @@ pub(crate) fn format_duration(d: std::time::Duration) -> String {
 
 /// Builds one display line from an engine row visit (frozen-block row or
 /// active-grid history row): every column contributes a char (gaps become
-/// NBSP), wide glyphs get an NBSP placeholder column, runs merge on equal
-/// style. Spacer cells are dropped. Mirrors the frame extractor's display
-/// conventions so frozen rows shape and paint like live ones.
+/// NBSP), spacer cells are dropped. Display conventions (wide placeholder,
+/// run merging) come from the shared `LineBuilder`, so frozen rows shape and
+/// paint exactly like live ones.
 #[derive(Default)]
 pub(crate) struct EngineRowBuilder {
-    text: String,
-    cells: Vec<TerminalCell>,
-    runs: Vec<StyleRun>,
+    line: LineBuilder,
     col: u16,
 }
 
@@ -328,17 +326,17 @@ impl EngineRowBuilder {
             CellWide::SpacerTail | CellWide::SpacerHead => return,
             CellWide::Narrow | CellWide::Wide => {}
         }
+        let default_style = StyleRun {
+            len: 0,
+            fg: default_fg,
+            bold: false,
+            italic: false,
+            underline: false,
+            strikethrough: false,
+        };
         while self.col < x {
-            self.text.push('\u{00a0}');
-            push_run(
-                &mut self.runs,
-                '\u{00a0}'.len_utf8(),
-                default_fg,
-                false,
-                false,
-                false,
-                false,
-            );
+            self.line
+                .push_segment(std::iter::once('\u{00a0}'), default_style, false);
             self.col += 1;
         }
 
@@ -365,23 +363,19 @@ impl EngineRowBuilder {
         } else {
             cell_text.replace([' ', '\t'], "\u{00a0}")
         };
-        let mut seg_len = display.len();
-        self.text.push_str(&display);
-        if is_wide {
-            self.text.push('\u{00a0}');
-            seg_len += '\u{00a0}'.len_utf8();
-        }
-        push_run(
-            &mut self.runs,
-            seg_len,
-            fg,
-            style.bold,
-            style.italic,
-            style.underline != nmt_terminal::ghostty::Underline::None,
-            style.strikethrough,
+        self.line.push_segment(
+            display.chars(),
+            StyleRun {
+                len: 0,
+                fg,
+                bold: style.bold,
+                italic: style.italic,
+                underline: style.underline != nmt_terminal::ghostty::Underline::None,
+                strikethrough: style.strikethrough,
+            },
+            is_wide,
         );
-
-        self.cells.push(TerminalCell {
+        self.line.push_cell(TerminalCell {
             col: x,
             ch: cell_text.chars().next().unwrap_or('\0'),
             style_id: 0,
@@ -395,38 +389,7 @@ impl EngineRowBuilder {
     }
 
     pub(crate) fn finish(self) -> TerminalLine {
-        line_from_parts(self.text, self.cells, self.runs)
-    }
-}
-
-/// Append a style run, merging into the previous run on equal style.
-fn push_run(
-    runs: &mut Vec<StyleRun>,
-    len: usize,
-    fg: TerminalColor,
-    bold: bool,
-    italic: bool,
-    underline: bool,
-    strikethrough: bool,
-) {
-    match runs.last_mut() {
-        Some(last)
-            if last.fg == fg
-                && last.bold == bold
-                && last.italic == italic
-                && last.underline == underline
-                && last.strikethrough == strikethrough =>
-        {
-            last.len += len;
-        }
-        _ => runs.push(StyleRun {
-            len,
-            fg,
-            bold,
-            italic,
-            underline,
-            strikethrough,
-        }),
+        self.line.finish()
     }
 }
 
@@ -886,6 +849,7 @@ mod tests {
     use nmt_terminal::ghostty::{BlockHandle, GhosttyTerminal};
 
     use super::*;
+    use crate::terminal::frame::line_from_parts;
 
     fn row_texts(view: &FrozenView) -> Vec<String> {
         view.rows

@@ -217,6 +217,70 @@ pub(crate) fn line_from_parts(
     }
 }
 
+/// Accumulates display cells into a `TerminalLine` — the one display-
+/// convention kernel for the live frame extractor and the frozen engine-row
+/// builder: appends display text, merges runs of equal style, and gives wide
+/// glyphs an NBSP placeholder column (GPUI's force-width layout snaps one
+/// glyph per cell, so without it a wide glyph overlaps the next cell).
+#[derive(Default)]
+pub(crate) struct LineBuilder {
+    text: String,
+    cells: Vec<TerminalCell>,
+    runs: Vec<StyleRun>,
+}
+
+impl LineBuilder {
+    pub(crate) fn with_capacity(cols: usize) -> Self {
+        Self {
+            text: String::with_capacity(cols),
+            cells: Vec::with_capacity(cols),
+            runs: Vec::new(),
+        }
+    }
+
+    /// Append one cell's display text; `wide` adds the placeholder column,
+    /// covered by the same run. `style.len` is ignored — the run length is
+    /// the appended byte count, merged into the previous run on equal style.
+    pub(crate) fn push_segment(
+        &mut self,
+        display: impl Iterator<Item = char>,
+        style: StyleRun,
+        wide: bool,
+    ) {
+        let start = self.text.len();
+        self.text.extend(display);
+        if wide {
+            self.text.push('\u{00a0}');
+        }
+        let seg_len = self.text.len() - start;
+        match self.runs.last_mut() {
+            Some(last)
+                if StyleRun {
+                    len: last.len,
+                    ..style
+                } == *last =>
+            {
+                last.len += seg_len
+            }
+            _ => self.runs.push(StyleRun {
+                len: seg_len,
+                ..style
+            }),
+        }
+    }
+
+    /// Record the cell for background/hit lookups. Separate from
+    /// `push_segment` because filler columns (gaps between sparse engine
+    /// cells) contribute text but no cell.
+    pub(crate) fn push_cell(&mut self, cell: TerminalCell) {
+        self.cells.push(cell);
+    }
+
+    pub(crate) fn finish(self) -> TerminalLine {
+        line_from_parts(self.text, self.cells, self.runs)
+    }
+}
+
 /// A paintable Kitty image in a frame. Metrics-independent: it retains the
 /// shared image generation by `Arc` (no pixel copy) plus the geometry needed to place
 /// it; final pixel geometry is computed at paint from the active cell metrics and grid
@@ -543,9 +607,7 @@ fn extract_row_with_colors(
     colors: &BackgroundColors,
     row_selection: Option<RowSelection>,
 ) -> TerminalLine {
-    let mut text = String::with_capacity(buf.cols());
-    let mut cells = Vec::with_capacity(buf.cols());
-    let mut runs: Vec<StyleRun> = Vec::new();
+    let mut builder = LineBuilder::with_capacity(buf.cols());
 
     for col in 0..buf.cols() {
         let cell = buf.cell(col, row);
@@ -556,9 +618,6 @@ fn extract_row_with_colors(
 
         let is_codepoint = cell.content_tag() == ContentTag::Codepoint;
         let source_ch = if is_codepoint { cell.c() } else { '\0' };
-        let has_cursor = cursor_col == Some(col as u16);
-        let display_ch = display_char(source_ch);
-        text.push(display_ch);
 
         let extras = if is_codepoint {
             cell.extras_id()
@@ -568,55 +627,34 @@ fn extract_row_with_colors(
         } else {
             Vec::new()
         };
-        text.extend(extras.iter());
 
-        let (foreground, bold, italic, underline, strikethrough) = if is_codepoint {
+        let style = if is_codepoint {
             let style = buf.style(cell.style_id());
             let flags = style.flags;
-            (
-                colors.cell_foreground(style),
-                flags.contains(StyleFlags::BOLD),
-                flags.contains(StyleFlags::ITALIC),
-                flags.intersects(StyleFlags::ALL_UNDERLINES),
-                flags.contains(StyleFlags::STRIKEOUT),
-            )
+            StyleRun {
+                len: 0,
+                fg: colors.cell_foreground(style),
+                bold: flags.contains(StyleFlags::BOLD),
+                italic: flags.contains(StyleFlags::ITALIC),
+                underline: flags.intersects(StyleFlags::ALL_UNDERLINES),
+                strikethrough: flags.contains(StyleFlags::STRIKEOUT),
+            }
         } else {
-            (colors.default_foreground(), false, false, false, false)
+            StyleRun {
+                len: 0,
+                fg: colors.default_foreground(),
+                bold: false,
+                italic: false,
+                underline: false,
+                strikethrough: false,
+            }
         };
-        let seg_len = display_ch.len_utf8() + extras.iter().map(|c| c.len_utf8()).sum::<usize>();
-        match runs.last_mut() {
-            Some(last)
-                if last.fg == foreground
-                    && last.bold == bold
-                    && last.italic == italic
-                    && last.underline == underline
-                    && last.strikethrough == strikethrough =>
-            {
-                last.len += seg_len
-            }
-            _ => runs.push(StyleRun {
-                len: seg_len,
-                fg: foreground,
-                bold,
-                italic,
-                underline,
-                strikethrough,
-            }),
-        }
-
-        // A wide (CJK) glyph occupies two columns but is one glyph. GPUI's
-        // force-width layout snaps one glyph per cell, so append a blank
-        // placeholder for the second column; without it the wide glyph overlaps
-        // the next cell. Backgrounds use `cells` (wide-aware), so skip it there.
-        if wide == Wide::Wide {
-            let placeholder = '\u{00a0}';
-            text.push(placeholder);
-            if let Some(last) = runs.last_mut() {
-                last.len += placeholder.len_utf8();
-            }
-        }
-
-        cells.push(TerminalCell {
+        builder.push_segment(
+            std::iter::once(display_char(source_ch)).chain(extras.iter().copied()),
+            style,
+            wide == Wide::Wide,
+        );
+        builder.push_cell(TerminalCell {
             col: col as u16,
             ch: source_ch,
             style_id: if is_codepoint { cell.style_id() } else { 0 },
@@ -627,18 +665,14 @@ fn extract_row_with_colors(
             },
             wide,
             extras,
-            has_cursor,
+            has_cursor: cursor_col == Some(col as u16),
         });
     }
 
-    TerminalLine {
-        text_hash: hash_line(&text, &runs),
-        text: text.into(),
-        cells: cells.into_boxed_slice().into(),
-        runs: runs.into_boxed_slice().into(),
-        #[cfg(test)]
-        cursor_col,
-    }
+    let line = builder.finish();
+    #[cfg(test)]
+    let line = TerminalLine { cursor_col, ..line };
+    line
 }
 
 struct BackgroundColors {
