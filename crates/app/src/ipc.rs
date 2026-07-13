@@ -47,12 +47,12 @@ fn parse_message(bytes: &[u8], expected_token: &str) -> Result<IpcAction, String
                 .into_event(expected_token)
                 .map(IpcAction::Agent)
                 .map_err(|_| "invalid agent envelope fields".into()),
-            Some("codex_hook") => {
-                serde_json::from_value::<nmt_agent_hook::RawCodexHookEnvelope>(value)
-                    .map_err(|_| "invalid Codex Hook envelope")?
+            Some("codex_hook" | "claude_hook") => {
+                serde_json::from_value::<nmt_agent_hook::RawAgentHookEnvelope>(value)
+                    .map_err(|_| "invalid agent Hook envelope")?
                     .into_event(expected_token)
                     .map(IpcAction::Agent)
-                    .ok_or_else(|| "invalid Codex Hook fields".into())
+                    .ok_or_else(|| "invalid agent Hook fields".into())
             }
             _ => Err("unsupported IPC action".into()),
         }
@@ -184,6 +184,28 @@ mod tests {
             panic!("raw Hook should normalize");
         };
         assert_eq!(event.kind, AgentEventKind::PromptSubmitted);
+        assert!(parse_message(line.as_bytes(), "wrong-token").is_err());
+    }
+
+    #[test]
+    fn raw_claude_hook_is_normalized_with_session_scoped_turn() {
+        let line = serde_json::json!({
+            "action": "claude_hook",
+            "version": 1,
+            "token": "token",
+            "route": "route",
+            "payload": {
+                "hook_event_name": "UserPromptSubmit",
+                "session_id": "session"
+            }
+        })
+        .to_string();
+        let Ok(IpcAction::Agent(event)) = parse_message(line.as_bytes(), "token") else {
+            panic!("raw Claude Hook should normalize");
+        };
+        assert_eq!(event.kind, AgentEventKind::PromptSubmitted);
+        assert_eq!(event.agent, "claude");
+        assert_eq!(event.turn_id.as_deref(), Some("session"));
         assert!(parse_message(line.as_bytes(), "wrong-token").is_err());
     }
 

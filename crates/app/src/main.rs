@@ -159,6 +159,12 @@ where
 
 fn run_app(argv_url: Option<String>, testing: bool) {
     nmt_agent_hook::agent_process().set_testing(testing);
+    nmt_agent_hook::agent_process().set_hook_executable(
+        utils::get_exe_dir()
+            .join("NiumaTermHook.exe")
+            .display()
+            .to_string(),
+    );
     if testing {
         nmt_config::enable_testing_mode();
     }

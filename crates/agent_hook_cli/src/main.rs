@@ -5,14 +5,16 @@ use std::time::Duration;
 
 use nmt_agent_hook::{
     AGENT_HOOK_PROTOCOL_VERSION, AGENT_HOOK_TOKEN_ENV, AGENT_HOOK_VERSION_ENV, AGENT_ROUTE_ENV,
-    AGENT_TESTING_ENV, RawCodexHookEnvelope,
+    AGENT_TESTING_ENV, RawAgentHookEnvelope,
 };
 use nmt_platform::windows::ipc::{MAX_MESSAGE_BYTES, send};
 
 fn main() {
-    if std::env::args().nth(1).as_deref() != Some("codex") {
-        return;
-    }
+    let action = match std::env::args().nth(1).as_deref() {
+        Some("codex") => "codex_hook",
+        Some("claude") => "claude_hook",
+        _ => return,
+    };
 
     let (Ok(route), Ok(token), Some(version)) = (
         std::env::var(AGENT_ROUTE_ENV),
@@ -37,8 +39,8 @@ fn main() {
     let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&input) else {
         return;
     };
-    let Ok(message) = serde_json::to_string(&RawCodexHookEnvelope {
-        action: "codex_hook".into(),
+    let Ok(message) = serde_json::to_string(&RawAgentHookEnvelope {
+        action: action.into(),
         version,
         token,
         route,

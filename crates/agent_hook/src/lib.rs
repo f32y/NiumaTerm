@@ -1,5 +1,6 @@
 //! Pure agent lifecycle, ownership, expiry, and unread-notification model.
 
+pub mod claude_code;
 mod codex;
 
 use std::collections::HashMap;
@@ -7,7 +8,6 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-pub use codex::RawCodexHookEnvelope;
 use serde::{Deserialize, Serialize};
 
 pub const AGENT_HOOK_PROTOCOL_VERSION: u32 = 1;
@@ -23,11 +23,13 @@ const MAX_BODY_CHARS: usize = 4_096;
 pub const AGENT_ROUTE_ENV: &str = "NMT_AGENT_ROUTE";
 pub const AGENT_HOOK_TOKEN_ENV: &str = "NMT_AGENT_HOOK_TOKEN";
 pub const AGENT_HOOK_VERSION_ENV: &str = "NMT_AGENT_HOOK_VERSION";
+pub const AGENT_HOOK_EXE_ENV: &str = "NMT_AGENT_HOOK_EXE";
 pub const AGENT_TESTING_ENV: &str = "NMT_TESTING";
 
 pub struct AgentProcess {
     nonce: String,
     hook_token: String,
+    hook_executable: OnceLock<String>,
     testing: AtomicBool,
     next_route: AtomicU64,
     next_notification: AtomicU64,
@@ -42,6 +44,7 @@ impl AgentProcess {
         Self {
             nonce: format!("{:x}-{}", std::process::id(), hex(&nonce)),
             hook_token: hex(&hook_token),
+            hook_executable: OnceLock::new(),
             testing: AtomicBool::new(false),
             next_route: AtomicU64::new(1),
             next_notification: AtomicU64::new(1),
@@ -69,6 +72,13 @@ impl AgentProcess {
         self.testing.store(testing, Ordering::Relaxed);
     }
 
+    /// Absolute path of the hook CLI binary, exported to every pane so
+    /// externally configured agent hooks can locate it via `$NMT_AGENT_HOOK_EXE`
+    /// without baking an install path into their configuration.
+    pub fn set_hook_executable(&self, path: String) {
+        let _ = self.hook_executable.set(path);
+    }
+
     pub fn environment_for(&self, route: &AgentRoute) -> Vec<(String, String)> {
         let mut environment = vec![
             (AGENT_ROUTE_ENV.into(), route.as_str().into()),
@@ -78,6 +88,9 @@ impl AgentProcess {
                 AGENT_HOOK_PROTOCOL_VERSION.to_string(),
             ),
         ];
+        if let Some(path) = self.hook_executable.get() {
+            environment.push((AGENT_HOOK_EXE_ENV.into(), path.clone()));
+        }
         if self.testing.load(Ordering::Relaxed) {
             environment.push((AGENT_TESTING_ENV.into(), "1".into()));
         }
@@ -156,6 +169,49 @@ pub struct AgentEventWire {
     pub kind: AgentEventKind,
     pub title: String,
     pub body: String,
+}
+
+/// Raw stdin hook payload forwarded by the hook CLI, normalized per agent.
+/// Both supported CLIs emit the same payload schema; the adapters in
+/// `codex`/`claude_code` differ only in turn identity and presentation
+/// strings, and always fail open.
+#[derive(Serialize, Deserialize)]
+pub struct RawAgentHookEnvelope {
+    pub action: String,
+    pub version: u32,
+    pub token: String,
+    pub route: String,
+    pub payload: serde_json::Value,
+}
+
+impl RawAgentHookEnvelope {
+    pub fn into_event(self, expected_token: &str) -> Option<AgentEvent> {
+        let normalize = match self.action.as_str() {
+            "codex_hook" => codex::normalize,
+            "claude_hook" => claude_code::normalize,
+            _ => return None,
+        };
+        normalize(
+            self.payload,
+            &self.route,
+            &self.token,
+            self.version,
+            expected_token,
+        )
+    }
+}
+
+/// State of an agent CLI's hook registration as managed by the per-agent
+/// installers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HookInstallStatus {
+    /// Every event is registered with the current hook command.
+    Installed,
+    /// NiumaTerm entries exist but differ from the current command (for
+    /// example a legacy absolute-path install) or miss events; reinstalling
+    /// migrates them.
+    Stale,
+    NotInstalled,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -798,9 +854,19 @@ mod tests {
         );
         assert_eq!(environment[2], (AGENT_HOOK_VERSION_ENV.into(), "1".into()));
 
-        process.set_testing(true);
+        process.set_hook_executable("C:\\NiumaTerm\\NiumaTermHook.exe".into());
+        process.set_hook_executable("C:\\ignored\\second\\call.exe".into());
         assert_eq!(
             process.environment_for(&first)[3],
+            (
+                AGENT_HOOK_EXE_ENV.into(),
+                "C:\\NiumaTerm\\NiumaTermHook.exe".into()
+            )
+        );
+
+        process.set_testing(true);
+        assert_eq!(
+            process.environment_for(&first)[4],
             (AGENT_TESTING_ENV.into(), "1".into())
         );
     }
