@@ -418,9 +418,11 @@ impl TerminalPane {
             let new = (thumb_top.max(0.0) * total).min(max_scroll);
             if let (Some(frame), Some(cell)) = (self.frame_cache.current(), self.cell_metrics) {
                 let cols = self.content_cols();
+                let pad_rows = block_pad_rows(cx);
                 let store = self.surface.block_store();
                 let store = store.lock();
-                let offset = self.list_offset_for_px(&store, &frame, cols, cell.height_px, new);
+                let offset =
+                    self.list_offset_for_px(&store, &frame, cols, cell.height_px, pad_rows, new);
                 self.block_list.list.scroll_to(offset);
                 self.block_list.scrollbar.0 = new;
             }
@@ -646,9 +648,9 @@ impl TerminalPane {
         self.open_prompt = self.surface.open_prompt_region();
     }
 
-    /// Engine blocks remain the storage model while the setting controls only their
-    /// chrome, so display changes never hide frozen output. Alt-screen stays a plain
-    /// terminal grid.
+    /// Engine blocks remain the storage model while the setting controls only
+    /// their presentation, so display changes never hide frozen output.
+    /// Alt-screen stays a plain terminal grid.
     fn block_list_mode(&self, _cx: &App) -> bool {
         self.surface.engine_blocks() && !self.surface.alt_screen()
     }
@@ -673,11 +675,12 @@ impl TerminalPane {
         frame: &TerminalFrame,
         cols: u32,
         cell_h: f32,
+        pad_rows: f32,
     ) -> f32 {
         let frozen: f32 = store
             .items()
             .iter()
-            .map(|item| crate::terminal::block_list::item_px(item, cols, cell_h))
+            .map(|item| crate::terminal::block_list::item_px(item, cols, cell_h, pad_rows))
             .sum();
         frozen
             + self.live_history_rows(frame) as f32 * cell_h
@@ -701,11 +704,12 @@ impl TerminalPane {
         frame: &TerminalFrame,
         cols: u32,
         cell_h: f32,
+        pad_rows: f32,
         target: f32,
     ) -> ListOffset {
         let mut y = 0.0f32;
         for (ix, item) in store.items().iter().enumerate() {
-            let h = crate::terminal::block_list::item_px(item, cols, cell_h);
+            let h = crate::terminal::block_list::item_px(item, cols, cell_h, pad_rows);
             if target < y + h {
                 return ListOffset {
                     item_ix: ix,
@@ -714,7 +718,7 @@ impl TerminalPane {
             }
             y += h;
         }
-        let live_h = self.block_list_total_px(store, frame, cols, cell_h) - y;
+        let live_h = self.block_list_total_px(store, frame, cols, cell_h, pad_rows) - y;
         if target < y + live_h {
             ListOffset {
                 item_ix: store.items().len(),
@@ -790,6 +794,7 @@ impl TerminalPane {
             cell.width_px,
             cell.height_px,
             self.content_cols(),
+            block_pad_rows(cx),
         )
     }
 
@@ -829,6 +834,7 @@ impl TerminalPane {
             return;
         };
         let cols = self.content_cols();
+        let pad_rows = block_pad_rows(cx);
         let (resolved, max_scroll) = self.block_list.scrollbar;
         let store = self.surface.block_store();
         let target = {
@@ -837,6 +843,7 @@ impl TerminalPane {
                 &store,
                 cols,
                 cell.height_px,
+                pad_rows,
                 resolved,
                 direction,
             )
@@ -852,6 +859,7 @@ impl TerminalPane {
                 &frame,
                 cols,
                 cell.height_px,
+                pad_rows,
                 target,
             ));
         }
@@ -1173,7 +1181,9 @@ impl Render for TerminalPane {
         let show_block_chrome = settings.command_blocks;
 
         let block_list_mode = self.block_list_mode(cx);
-        if block_list_mode && self.in_flight.is_some() {
+        // The tick only repaints the running header's elapsed time; compact
+        // presentation hides headers, so skip it there.
+        if block_list_mode && show_block_chrome && self.in_flight.is_some() {
             self.schedule_block_tick(cx);
         }
 
@@ -1186,6 +1196,7 @@ impl Render for TerminalPane {
 
         let block_list_element = if block_list_mode {
             let cols = self.content_cols();
+            let pad_rows = block_pad_rows(cx);
             let store = self.surface.block_store();
             let live_rows = frame_content_rows(&frame);
             let history_rows = self.live_history_rows(&frame);
@@ -1197,6 +1208,7 @@ impl Render for TerminalPane {
                     history_rows,
                     cols,
                     cell.height_px,
+                    pad_rows,
                     self.block_list.list.logical_scroll_top(),
                 )
             };
@@ -1233,7 +1245,7 @@ impl Render for TerminalPane {
             self.block_list.evicted_items = evicted_items;
 
             let measure_key = BlockListMeasureKey {
-                layout: (cols, cell.height_px),
+                layout: (cols, cell.height_px, pad_rows),
                 store_len,
                 evicted_items,
                 last_item_px: metrics.last_item_px,
@@ -1270,6 +1282,7 @@ impl Render for TerminalPane {
                 metrics.frozen_px,
                 metrics.tail_px,
                 cell.height_px,
+                pad_rows,
                 offset_px,
             );
 
@@ -1780,6 +1793,7 @@ impl Element for BlockListItem {
     ) -> (LayoutId, Style) {
         let mut style = Style::default();
         style.size.width = relative(1.0).into();
+        let pad_rows = block_pad_rows(cx);
         let height = match self {
             BlockListItem::Frozen {
                 item_idx,
@@ -1792,7 +1806,9 @@ impl Element for BlockListItem {
                 store
                     .items()
                     .get(*item_idx)
-                    .map(|item| crate::terminal::block_list::item_px(item, *cols, cell.height_px))
+                    .map(|item| {
+                        crate::terminal::block_list::item_px(item, *cols, cell.height_px, pad_rows)
+                    })
                     .unwrap_or(0.0)
             }
             BlockListItem::Live {
@@ -1804,6 +1820,7 @@ impl Element for BlockListItem {
                 *history_rows,
                 frame_content_rows(frame),
                 cell.height_px,
+                pad_rows,
             ),
         }
         .max(0.0);
@@ -1823,6 +1840,7 @@ impl Element for BlockListItem {
     ) -> Self::PrepaintState {
         let origin_y = self.pane().read(cx).content_origin().y;
         let item_top = (bounds.top() - origin_y).as_f32();
+        let pad_rows = block_pad_rows(cx);
         match self {
             BlockListItem::Frozen {
                 item_idx,
@@ -1850,6 +1868,7 @@ impl Element for BlockListItem {
                             info.rows,
                             window.viewport_size().height.as_f32(),
                             cell.height_px,
+                            pad_rows,
                         );
                         let acquired = pane.read(cx).surface.acquire_block(info.handle);
                         let mut view = crate::terminal::block_list::frozen_block_view(
@@ -1858,6 +1877,7 @@ impl Element for BlockListItem {
                             *item_idx,
                             visible.clone(),
                             cell.height_px,
+                            pad_rows,
                             *selection,
                             *selected_item,
                         );
@@ -1894,6 +1914,7 @@ impl Element for BlockListItem {
                                 &generations,
                                 &visible,
                                 cell.height_px,
+                                pad_rows,
                             );
                         }
                         view
@@ -1929,6 +1950,7 @@ impl Element for BlockListItem {
                         (*history_rows).min(usize::MAX as u64) as usize,
                         window.viewport_size().height.as_f32(),
                         cell.height_px,
+                        pad_rows,
                     );
                     let lines = pane
                         .read(cx)
@@ -1939,6 +1961,7 @@ impl Element for BlockListItem {
                         *history_rows,
                         *cols,
                         cell.height_px,
+                        pad_rows,
                     )
                 };
                 let live_rows = frame_content_rows(frame);
@@ -1957,7 +1980,7 @@ impl Element for BlockListItem {
                     if let Some(mut chrome) = live_chrome {
                         chrome.bottom = tail_view.active_top
                             + live_rows as f32 * cell.height_px
-                            + crate::terminal::block_list::ITEM_PAD_ROWS * cell.height_px;
+                            + pad_rows * cell.height_px;
                         chrome.header_y = tail_view.active_top;
                         pane.record_frozen_chrome(chrome, item_top);
                     }
@@ -2055,6 +2078,18 @@ impl BlockListItem {
     }
 }
 
+/// Blank rows around each block for the current presentation: chrome shows
+/// one pad row above and below; compact (Command Blocks off) packs block rows
+/// contiguously like a classic grid. Every block-list geometry consumer must
+/// use this one value per frame so heights, hit-testing, and scroll math agree.
+fn block_pad_rows(cx: &App) -> f32 {
+    if cx.global::<AppSettings>().command_blocks {
+        crate::terminal::block_list::ITEM_PAD_ROWS
+    } else {
+        0.0
+    }
+}
+
 fn frame_content_rows(frame: &TerminalFrame) -> usize {
     let lines = frame.lines();
     let mut content_end = 0;
@@ -2093,7 +2128,9 @@ fn block_list_alignment(fixed_bottom: bool) -> ListAlignment {
 
 #[derive(Clone, Copy, PartialEq)]
 struct BlockListMeasureKey {
-    layout: (u32, f32),
+    /// (cols, cell height, pad rows) — pad rows toggling (Command Blocks
+    /// on/off) changes every item height, so it must force a full remeasure.
+    layout: (u32, f32, f32),
     store_len: usize,
     evicted_items: u64,
     last_item_px: f32,
@@ -2120,6 +2157,7 @@ fn block_list_render_metrics(
     history_rows: u64,
     cols: u32,
     cell_h: f32,
+    pad_rows: f32,
     offset: ListOffset,
 ) -> BlockListRenderMetrics {
     let items = store.items();
@@ -2130,7 +2168,7 @@ fn block_list_render_metrics(
     let mut last_item_px = 0.0;
 
     for (ix, item) in items.iter().enumerate() {
-        let item_px = crate::terminal::block_list::item_px(item, cols, cell_h);
+        let item_px = crate::terminal::block_list::item_px(item, cols, cell_h, pad_rows);
         if ix < offset.item_ix {
             offset_px += item_px;
         }
@@ -2141,8 +2179,8 @@ fn block_list_render_metrics(
     }
 
     let tail_px = history_rows as f32 * cell_h;
-    let total_px =
-        frozen_px + crate::terminal::block_list::live_item_px(history_rows, live_rows, cell_h);
+    let total_px = frozen_px
+        + crate::terminal::block_list::live_item_px(history_rows, live_rows, cell_h, pad_rows);
     if offset.item_ix >= item_count {
         offset_px = total_px;
     } else if offset.item_ix <= store_len {
@@ -2189,9 +2227,14 @@ fn offset_frozen_chrome(
 /// Element-local top of the live grid: frozen items, then the live item's
 /// top pad and tail rows. Computed from the per-frame metrics so it stays
 /// valid even when the live item is outside List's prepaint overdraw.
-fn block_list_active_top_px(frozen_px: f32, tail_px: f32, cell_h: f32, scroll_top: f32) -> f32 {
-    (frozen_px + crate::terminal::block_list::ITEM_PAD_ROWS * cell_h + tail_px - scroll_top)
-        .max(0.0)
+fn block_list_active_top_px(
+    frozen_px: f32,
+    tail_px: f32,
+    cell_h: f32,
+    pad_rows: f32,
+    scroll_top: f32,
+) -> f32 {
+    (frozen_px + pad_rows * cell_h + tail_px - scroll_top).max(0.0)
 }
 
 fn shift_selected_item_for_eviction(
@@ -2660,14 +2703,27 @@ mod tests {
         store.apply([block_item(1, 1, 1)]);
         // One 1-row item = 1 content row + 2 pad rows = 30px; the live grid
         // then starts after its own top pad (10px), minus the 5px scroll.
+        let pad = crate::terminal::block_list::ITEM_PAD_ROWS;
         let frozen_px: f32 = store
             .items()
             .iter()
-            .map(|item| crate::terminal::block_list::item_px(item, 80, 10.0))
+            .map(|item| crate::terminal::block_list::item_px(item, 80, 10.0, pad))
             .sum();
         assert_eq!(
-            super::block_list_active_top_px(frozen_px, 0.0, 10.0, 5.0),
+            super::block_list_active_top_px(frozen_px, 0.0, 10.0, pad, 5.0),
             35.0
+        );
+        // Compact presentation: no pads anywhere, so the live grid starts
+        // right after the frozen rows.
+        let compact_px: f32 = store
+            .items()
+            .iter()
+            .map(|item| crate::terminal::block_list::item_px(item, 80, 10.0, 0.0))
+            .sum();
+        assert_eq!(compact_px, 10.0, "1 content row, no pad rows");
+        assert_eq!(
+            super::block_list_active_top_px(compact_px, 0.0, 10.0, 0.0, 5.0),
+            5.0
         );
     }
 
@@ -2684,6 +2740,7 @@ mod tests {
             1,
             80,
             10.0,
+            crate::terminal::block_list::ITEM_PAD_ROWS,
             ListOffset {
                 item_ix: 1,
                 offset_in_item: px(3.0),

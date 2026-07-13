@@ -21,7 +21,9 @@ use crate::terminal::frame::{
 
 /// Blank rows above and below each item's content: one full cell row on each
 /// side, with the separator rule on the item's top edge — so adjacent blocks
-/// read as content / blank / rule / blank / content.
+/// read as content / blank / rule / blank / content. Compact presentation
+/// (Command Blocks off) passes `pad_rows = 0.0` through the geometry
+/// functions instead, packing rows contiguously like a classic grid.
 pub(crate) const ITEM_PAD_ROWS: f32 = 1.0;
 /// 1px separator rule inside the gap.
 const SEPARATOR_COLOR: u32 = 0x3b4252;
@@ -118,14 +120,14 @@ impl FrozenHitInfo {
         cell_w: f32,
         cell_h: f32,
         cols: u32,
+        pad_rows: f32,
     ) -> Option<FrozenPoint> {
-        let (_, item, row, cell_count) =
-            *self
-                .rows
-                .iter()
-                .take_while(|(ry, ..)| *ry <= y)
-                .last()
-                .filter(|(ry, ..)| y < ry + cell_h * (1.0 + ITEM_PAD_ROWS))?;
+        let (_, item, row, cell_count) = *self
+            .rows
+            .iter()
+            .take_while(|(ry, ..)| *ry <= y)
+            .last()
+            .filter(|(ry, ..)| y < ry + cell_h * (1.0 + pad_rows))?;
         if item == usize::MAX {
             return None; // live-history sentinel: not addressable
         }
@@ -191,21 +193,21 @@ pub(crate) fn item_rows(item: &BlockItem, _cols: u32) -> u32 {
     item.engine_rows().min(u32::MAX as usize) as u32
 }
 
-/// Pixel height of one item: content rows plus a blank pad row above and
-/// below. Empty items (empty commands never freeze, but a stale cache can
+/// Pixel height of one item: content rows plus `pad_rows` blank rows above
+/// and below. Empty items (empty commands never freeze, but a stale cache can
 /// briefly report 0) are invisible — no rows, no pads.
-pub(crate) fn item_px(item: &BlockItem, cols: u32, cell_h: f32) -> f32 {
+pub(crate) fn item_px(item: &BlockItem, cols: u32, cell_h: f32, pad_rows: f32) -> f32 {
     match item_rows(item, cols) {
         0 => 0.0,
-        rows => (rows as f32 + 2.0 * ITEM_PAD_ROWS) * cell_h,
+        rows => (rows as f32 + 2.0 * pad_rows) * cell_h,
     }
 }
 
 /// Pixel height of the live item: pads + the active grid's scrolled-out
 /// history rows + the live grid's content rows. Shared by the item element's
 /// layout and the render metrics so the two cannot drift.
-pub(crate) fn live_item_px(history_rows: u64, live_rows: usize, cell_h: f32) -> f32 {
-    history_rows as f32 * cell_h + (live_rows as f32 + 2.0 * ITEM_PAD_ROWS) * cell_h
+pub(crate) fn live_item_px(history_rows: u64, live_rows: usize, cell_h: f32, pad_rows: f32) -> f32 {
+    history_rows as f32 * cell_h + (live_rows as f32 + 2.0 * pad_rows) * cell_h
 }
 
 /// Gutter/header accent for a frozen item, keyed off the exit code.
@@ -423,9 +425,10 @@ pub(crate) fn visible_rows(
     item_rows: usize,
     viewport_h: f32,
     cell_h: f32,
+    pad_rows: f32,
 ) -> std::ops::Range<usize> {
     const OVERDRAW: f32 = 260.0;
-    let pad = ITEM_PAD_ROWS * cell_h;
+    let pad = pad_rows * cell_h;
     let visible_top = (-item_top_in_window - OVERDRAW).max(0.0);
     let visible_bottom = viewport_h - item_top_in_window + OVERDRAW;
     if visible_bottom <= 0.0 || cell_h <= 0.0 {
@@ -452,19 +455,20 @@ pub(crate) fn frozen_block_view(
     item_idx: usize,
     visible: std::ops::Range<usize>,
     cell_h: f32,
+    pad_rows: f32,
     selection: Option<(FrozenPoint, FrozenPoint)>,
     selected_item: Option<usize>,
 ) -> FrozenView {
     let default_fg = theme_default_foreground();
     let selection = selection.map(|(a, b)| if a <= b { (a, b) } else { (b, a) });
     let rows = info.rows;
-    let pad = ITEM_PAD_ROWS * cell_h;
+    let pad = pad_rows * cell_h;
     let mut view = FrozenView {
         rows: Vec::new(),
         items_chrome: Vec::new(),
         separators: Vec::new(),
         images: Vec::new(),
-        active_top: (rows as f32 + 2.0 * ITEM_PAD_ROWS) * cell_h,
+        active_top: (rows as f32 + 2.0 * pad_rows) * cell_h,
     };
     if rows == 0 {
         return view;
@@ -529,8 +533,9 @@ pub(crate) fn frozen_block_images(
     >,
     visible: &std::ops::Range<usize>,
     cell_h: f32,
+    pad_rows: f32,
 ) -> Vec<FrozenImage> {
-    let pad = ITEM_PAD_ROWS * cell_h;
+    let pad = pad_rows * cell_h;
     let mut out = Vec::new();
     for p in placements {
         if p.grid_rows == 0 || p.grid_cols == 0 {
@@ -587,8 +592,9 @@ pub(crate) fn live_history_view(
     total_rows: u64,
     cols: u32,
     cell_h: f32,
+    pad_rows: f32,
 ) -> FrozenView {
-    let pad = ITEM_PAD_ROWS * cell_h;
+    let pad = pad_rows * cell_h;
     let mut view = FrozenView {
         rows: Vec::new(),
         items_chrome: Vec::new(),
@@ -616,6 +622,7 @@ pub(crate) fn nav_item_top(
     store: &BlockStore,
     cols: u32,
     cell_h: f32,
+    pad_rows: f32,
     from_px: f32,
     direction: i8,
 ) -> Option<f32> {
@@ -625,7 +632,7 @@ pub(crate) fn nav_item_top(
         if item_rows(item, cols) > 0 {
             tops.push(y);
         }
-        y += item_px(item, cols, cell_h);
+        y += item_px(item, cols, cell_h, pad_rows);
     }
     // Half-pixel slop so the item currently at the top does not match itself.
     if direction < 0 {
@@ -896,6 +903,7 @@ mod tests {
             3,
             0..info.rows,
             10.0,
+            ITEM_PAD_ROWS,
             None,
             Some(3),
         );
@@ -928,7 +936,16 @@ mod tests {
             t.block_acquire(info.handle).expect("acquire"),
             t.color_palette(),
         );
-        let view = frozen_block_view(Some((&block, &palette)), &info, 0, 1..2, 10.0, None, None);
+        let view = frozen_block_view(
+            Some((&block, &palette)),
+            &info,
+            0,
+            1..2,
+            10.0,
+            ITEM_PAD_ROWS,
+            None,
+            None,
+        );
         assert_eq!(row_texts(&view), ["r1"]);
         assert_eq!(view.rows[0].y, 20.0, "pad + one skipped row");
         assert_eq!(view.active_top, 50.0, "full item height regardless");
@@ -947,7 +964,7 @@ mod tests {
             accent: 0,
             header: None,
         };
-        let view = frozen_block_view(None, &info, 0, 0..4, 10.0, None, None);
+        let view = frozen_block_view(None, &info, 0, 0..4, 10.0, ITEM_PAD_ROWS, None, None);
         assert!(view.rows.is_empty());
         assert_eq!(view.active_top, 60.0);
         assert_eq!(view.items_chrome.len(), 1);
@@ -979,6 +996,7 @@ mod tests {
             0,
             0..info.rows,
             10.0,
+            ITEM_PAD_ROWS,
             sel,
             None,
         );
@@ -988,6 +1006,53 @@ mod tests {
             [Some((2, 10)), Some((0, 10)), Some((0, 2))],
             "endpoint rows partial, middle row full width"
         );
+    }
+
+    /// Compact presentation (`pad_rows = 0`): rows start at the item top with
+    /// no pad, the item height is exactly its content rows, and adjacent
+    /// items pack contiguously — the classic-grid look over frozen blocks.
+    #[test]
+    fn compact_pad_rows_pack_rows_contiguously() {
+        let (t, info) = finished_block(b"hello\r\nworld\r\n", 10, 4);
+        let (block, palette) = (
+            t.block_acquire(info.handle).expect("acquire"),
+            t.color_palette(),
+        );
+        let view = frozen_block_view(
+            Some((&block, &palette)),
+            &info,
+            0,
+            0..info.rows,
+            10.0,
+            0.0,
+            None,
+            None,
+        );
+        assert_eq!(view.rows[0].y, 0.0, "no top pad");
+        assert_eq!(view.rows[1].y, 10.0);
+        assert_eq!(view.active_top, 20.0, "content rows only, no pads");
+
+        let mut store = BlockStore::default();
+        store.apply([BlockEvent::EngineBlock {
+            seq: 1,
+            handle: BlockHandle {
+                id: 1,
+                generation: 1,
+            },
+            rows: 2,
+        }]);
+        assert_eq!(item_px(&store.items()[0], 80, 10.0, 0.0), 20.0);
+        assert_eq!(live_item_px(3, 2, 10.0, 0.0), 50.0, "history + live rows");
+
+        let history = live_history_view(
+            vec![(0u64, line_from_parts("a".into(), Vec::new(), Vec::new()))],
+            1,
+            10,
+            10.0,
+            0.0,
+        );
+        assert_eq!(history.rows[0].y, 0.0);
+        assert_eq!(history.active_top, 10.0);
     }
 
     /// `frozen_selection_pieces` produces one per-block range with block-edge
@@ -1049,19 +1114,30 @@ mod tests {
         }]);
         let item = &store.items()[0];
         assert_eq!(item_rows(item, 80), 7);
-        assert_eq!(item_px(item, 80, 10.0), 90.0, "7 rows + 2 pad rows");
-        assert_eq!(live_item_px(3, 2, 10.0), 70.0, "history + live + pads");
+        assert_eq!(
+            item_px(item, 80, 10.0, ITEM_PAD_ROWS),
+            90.0,
+            "7 rows + 2 pad rows"
+        );
+        assert_eq!(
+            live_item_px(3, 2, 10.0, ITEM_PAD_ROWS),
+            70.0,
+            "history + live + pads"
+        );
     }
 
     /// The visible-row window clamps to the item and pads with overdraw.
     #[test]
     fn visible_rows_clamps_to_item() {
         // Item fully above the viewport (scrolled past): empty range.
-        assert_eq!(visible_rows(-10_000.0, 50, 600.0, 10.0), 50..50);
+        assert_eq!(
+            visible_rows(-10_000.0, 50, 600.0, 10.0, ITEM_PAD_ROWS),
+            50..50
+        );
         // Item starting far below the viewport bottom: empty range.
-        assert_eq!(visible_rows(10_000.0, 50, 600.0, 10.0), 0..0);
+        assert_eq!(visible_rows(10_000.0, 50, 600.0, 10.0, ITEM_PAD_ROWS), 0..0);
         // Item spanning the viewport: rows around the visible band only.
-        let range = visible_rows(-1000.0, 1000, 600.0, 10.0);
+        let range = visible_rows(-1000.0, 1000, 600.0, 10.0, ITEM_PAD_ROWS);
         assert!(range.start > 0 && range.end < 1000);
         assert!(range.contains(&100), "row at viewport top included");
     }
@@ -1077,7 +1153,7 @@ mod tests {
         hit.set_active_top(70.0);
 
         assert_eq!(
-            hit.hit_test(35.0, 15.0, 10.0, 10.0, 10),
+            hit.hit_test(35.0, 15.0, 10.0, 10.0, 10, ITEM_PAD_ROWS),
             Some(FrozenPoint {
                 item: 0,
                 line: 0,
@@ -1085,7 +1161,7 @@ mod tests {
             })
         );
         assert_eq!(
-            hit.hit_test(15.0, 25.0, 10.0, 10.0, 10),
+            hit.hit_test(15.0, 25.0, 10.0, 10.0, 10, ITEM_PAD_ROWS),
             Some(FrozenPoint {
                 item: 0,
                 line: 1,
@@ -1094,15 +1170,23 @@ mod tests {
         );
         // Beyond the row width clamps to the last column.
         assert_eq!(
-            hit.hit_test(500.0, 15.0, 10.0, 10.0, 10),
+            hit.hit_test(500.0, 15.0, 10.0, 10.0, 10, ITEM_PAD_ROWS),
             Some(FrozenPoint {
                 item: 0,
                 line: 0,
                 col: 9
             })
         );
-        assert_eq!(hit.hit_test(0.0, 55.0, 10.0, 10.0, 10), None, "sentinel");
-        assert_eq!(hit.hit_test(0.0, 5.0, 10.0, 10.0, 10), None, "above rows");
+        assert_eq!(
+            hit.hit_test(0.0, 55.0, 10.0, 10.0, 10, ITEM_PAD_ROWS),
+            None,
+            "sentinel"
+        );
+        assert_eq!(
+            hit.hit_test(0.0, 5.0, 10.0, 10.0, 10, ITEM_PAD_ROWS),
+            None,
+            "above rows"
+        );
     }
 
     /// Chrome accents and headers key off the metadata.
@@ -1178,11 +1262,20 @@ mod tests {
             },
         ]);
         // Heights: 30, 40, 30 → tops 0, 30, 70.
-        assert_eq!(nav_item_top(&store, 80, 10.0, 0.0, 1), Some(30.0));
-        assert_eq!(nav_item_top(&store, 80, 10.0, 30.0, 1), Some(70.0));
-        assert_eq!(nav_item_top(&store, 80, 10.0, 70.0, 1), None);
-        assert_eq!(nav_item_top(&store, 80, 10.0, 70.0, -1), Some(30.0));
-        assert_eq!(nav_item_top(&store, 80, 10.0, 0.0, -1), None);
+        assert_eq!(
+            nav_item_top(&store, 80, 10.0, ITEM_PAD_ROWS, 0.0, 1),
+            Some(30.0)
+        );
+        assert_eq!(
+            nav_item_top(&store, 80, 10.0, ITEM_PAD_ROWS, 30.0, 1),
+            Some(70.0)
+        );
+        assert_eq!(nav_item_top(&store, 80, 10.0, ITEM_PAD_ROWS, 70.0, 1), None);
+        assert_eq!(
+            nav_item_top(&store, 80, 10.0, ITEM_PAD_ROWS, 70.0, -1),
+            Some(30.0)
+        );
+        assert_eq!(nav_item_top(&store, 80, 10.0, ITEM_PAD_ROWS, 0.0, -1), None);
     }
 
     #[test]
@@ -1215,7 +1308,7 @@ mod tests {
             (0u64, line_from_parts("a".into(), Vec::new(), Vec::new())),
             (2u64, line_from_parts("c".into(), Vec::new(), Vec::new())),
         ];
-        let view = live_history_view(lines, 3, 10, 10.0);
+        let view = live_history_view(lines, 3, 10, 10.0, ITEM_PAD_ROWS);
         assert_eq!(view.rows.len(), 2);
         assert_eq!(view.rows[0].y, 10.0, "pad + row 0");
         assert_eq!(view.rows[1].y, 30.0, "pad + row 2 (row 1 not visible)");
@@ -1253,15 +1346,26 @@ mod tests {
         let mut generations = std::collections::HashMap::new();
         generations.insert(1u32, generation);
 
-        let images = frozen_block_images(&placements, &generations, &(0..3), 10.0);
+        let images = frozen_block_images(&placements, &generations, &(0..3), 10.0, ITEM_PAD_ROWS);
         assert_eq!(images.len(), 1);
         assert_eq!(images[0].y, 10.0 + 2.0 * 10.0, "pad + block row 2");
         assert_eq!((images[0].col, images[0].width), (0, p.grid_cols));
 
         // Rows outside the visible window materialize nothing.
-        assert!(frozen_block_images(&placements, &generations, &(0..2), 10.0).is_empty());
+        assert!(
+            frozen_block_images(&placements, &generations, &(0..2), 10.0, ITEM_PAD_ROWS).is_empty()
+        );
         // A missing generation is skipped (retry next frame), not painted.
-        assert!(frozen_block_images(&placements, &Default::default(), &(0..3), 10.0).is_empty());
+        assert!(
+            frozen_block_images(
+                &placements,
+                &Default::default(),
+                &(0..3),
+                10.0,
+                ITEM_PAD_ROWS
+            )
+            .is_empty()
+        );
     }
 
     /// Kitty V1 per-block ownership intentionally differs from active-screen ownership:
