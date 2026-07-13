@@ -1,34 +1,11 @@
 //! Minimal Codex Hook adapter. This path runs before logging, config, primary
 //! election, session restore, or GPUI initialization and always fails open.
 
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{AgentEvent, AgentEventInput, AgentEventKind};
 
-#[derive(Serialize, Deserialize)]
-pub struct RawCodexHookEnvelope {
-    pub action: String,
-    pub version: u32,
-    pub token: String,
-    pub route: String,
-    pub payload: Value,
-}
-
-impl RawCodexHookEnvelope {
-    pub fn into_event(self, expected_token: &str) -> Option<AgentEvent> {
-        (self.action == "codex_hook").then_some(())?;
-        normalize_codex(
-            self.payload,
-            &self.route,
-            &self.token,
-            self.version,
-            expected_token,
-        )
-    }
-}
-
-fn normalize_codex(
+pub(crate) fn normalize(
     payload: Value,
     route: &str,
     token: &str,
@@ -101,7 +78,7 @@ mod tests {
             AgentEventKind::Stopped,
         ];
         for (payload, expected) in fixture_events().into_iter().zip(kinds) {
-            let event = normalize_codex(
+            let event = normalize(
                 payload,
                 "test-route",
                 "test-token",
@@ -117,8 +94,8 @@ mod tests {
     fn unknown_event_and_missing_turn_fail_open() {
         let unknown = serde_json::json!({"hook_event_name":"Other","session_id":"s"});
         let missing_turn = serde_json::json!({"hook_event_name":"Stop","session_id":"s"});
-        assert!(normalize_codex(unknown, "route", "token", 1, "token").is_none());
-        assert!(normalize_codex(missing_turn, "route", "token", 1, "token").is_none());
+        assert!(normalize(unknown, "route", "token", 1, "token").is_none());
+        assert!(normalize(missing_turn, "route", "token", 1, "token").is_none());
     }
 
     #[test]
@@ -130,7 +107,7 @@ mod tests {
             "unknown": {"nested": true},
             "tool_input": {"description": "允\u{0}许".repeat(3000)}
         });
-        let event = normalize_codex(
+        let event = normalize(
             payload,
             "route",
             "token",
