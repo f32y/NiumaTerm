@@ -435,7 +435,8 @@ pub fn settings_view(cx: &App) -> Settings {
                         )
                         .description(
                             "Group each command's output into a block with a separator, \
-                             exit status, and duration.",
+                             exit status, and duration. Off: outputs run together like a \
+                             classic terminal.",
                         ),
                     ),
             ),
