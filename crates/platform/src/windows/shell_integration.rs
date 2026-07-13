@@ -54,6 +54,30 @@ pub fn is_shell_integration_registered() -> bool {
         .all(|path| CURRENT_USER.open(path).is_ok())
 }
 
+pub fn shell_integration_dll_mismatched() -> bool {
+    if !context_menu_owned_registry_roots()
+        .into_iter()
+        .any(|path| CURRENT_USER.open(path).is_ok())
+    {
+        return false;
+    }
+
+    let Ok(exe_path) = std::env::current_exe() else {
+        return true;
+    };
+    let expected = shell_extension_path(&exe_path);
+
+    VERBS.iter().any(|verb| {
+        CURRENT_USER
+            .open(format!(
+                r"Software\Classes\CLSID\{}\InprocServer32",
+                verb.clsid
+            ))
+            .and_then(|key| key.get_string(""))
+            .map_or(true, |actual| !dll_path_matches(&actual, &expected))
+    })
+}
+
 pub fn set_system_notification_enabled(enabled: bool) -> Result<()> {
     if enabled {
         let exe_path = std::env::current_exe()?;
@@ -133,6 +157,10 @@ pub(crate) fn register_shell_integration_paths(exe_path: &Path, dll_path: &Path)
 
 fn shell_extension_path(exe_path: &Path) -> PathBuf {
     exe_path.with_file_name("shell_extension.dll")
+}
+
+fn dll_path_matches(actual: &str, expected: &Path) -> bool {
+    actual.eq_ignore_ascii_case(&path_string(expected))
 }
 
 fn protocol_command(exe_path: &str) -> String {
@@ -223,6 +251,14 @@ mod tests {
             shell_extension_path(Path::new(r"C:\Program Files\NiumaTerm\NiumaTerm.exe")),
             Path::new(r"C:\Program Files\NiumaTerm\shell_extension.dll")
         );
+        assert!(dll_path_matches(
+            r"c:\program files\niumaterm\SHELL_EXTENSION.DLL",
+            Path::new(r"C:\Program Files\NiumaTerm\shell_extension.dll")
+        ));
+        assert!(!dll_path_matches(
+            r"C:\Old\shell_extension.dll",
+            Path::new(r"C:\Program Files\NiumaTerm\shell_extension.dll")
+        ));
     }
 
     #[test]
