@@ -1,6 +1,6 @@
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 
 use anyhow::{Result, anyhow};
@@ -18,13 +18,11 @@ const VERBS: [Verb; 2] = [
         id: "NiumaTermNewTab",
         title: "Open NiumaTerm in new tab",
         clsid: CLSID_NEW_TAB,
-        flag: "--new-tab",
     },
     Verb {
         id: "NiumaTermNewWindow",
         title: "Open NiumaTerm in new window",
         clsid: CLSID_NEW_WINDOW,
-        flag: "--new-window",
     },
 ];
 
@@ -35,12 +33,12 @@ struct Verb {
     id: &'static str,
     title: &'static str,
     clsid: &'static str,
-    flag: &'static str,
 }
 
 pub fn register_shell_integration() -> Result<()> {
     let exe_path = std::env::current_exe()?;
-    register_shell_integration_paths(&exe_path)
+    let dll_path = shell_extension_path(&exe_path);
+    register_shell_integration_paths(&exe_path, &dll_path)
 }
 
 pub fn unregister_shell_integration() -> Result<()> {
@@ -109,40 +107,32 @@ pub fn register_with_elevated(is_register: bool) -> Result<()> {
     }
 }
 
-pub(crate) fn register_shell_integration_paths(exe_path: &Path) -> Result<()> {
+pub(crate) fn register_shell_integration_paths(exe_path: &Path, dll_path: &Path) -> Result<()> {
     let exe_path = path_string(exe_path);
+    let dll_path = path_string(dll_path);
     let icon = format!("{exe_path},0");
 
     for verb in VERBS {
-        let _ = CURRENT_USER.remove_tree(format!(r"Software\Classes\CLSID\{}", verb.clsid));
+        let clsid = CURRENT_USER.create(format!(r"Software\Classes\CLSID\{}", verb.clsid))?;
+        clsid.set_string("", verb.title)?;
+        let inproc = clsid.create("InprocServer32")?;
+        inproc.set_string("", &dll_path)?;
+        inproc.set_string("ThreadingModel", "Apartment")?;
 
         for item_type in ITEM_TYPES {
-            let key =
-                CURRENT_USER.create(format!(r"Software\Classes\{item_type}\shell\{}", verb.id))?;
+            let path = format!(r"Software\Classes\{item_type}\shell\{}", verb.id);
+            let key = CURRENT_USER.create(path)?;
             key.set_string("MUIVerb", verb.title)?;
             key.set_string("Icon", &icon)?;
-            let _ = key.remove_value("ExplorerCommandHandler");
-            let command = key.create("command")?;
-            command.set_string(
-                "",
-                command_line(&exe_path, verb.flag, path_placeholder(item_type)),
-            )?;
+            key.set_string("ExplorerCommandHandler", verb.clsid)?;
         }
     }
 
     Ok(())
 }
 
-fn path_placeholder(item_type: &str) -> &'static str {
-    if item_type == r"Directory\Background" {
-        "%V"
-    } else {
-        "%1"
-    }
-}
-
-fn command_line(exe_path: &str, flag: &str, path_placeholder: &str) -> String {
-    format!(r#""{exe_path}" {flag} "{path_placeholder}""#)
+fn shell_extension_path(exe_path: &Path) -> PathBuf {
+    exe_path.with_file_name("shell_extension.dll")
 }
 
 fn protocol_command(exe_path: &str) -> String {
@@ -163,11 +153,12 @@ fn context_menu_owned_registry_roots() -> Vec<String> {
 fn context_menu_registered_registry_roots() -> Vec<String> {
     let mut roots = Vec::new();
     for verb in VERBS {
+        roots.push(format!(
+            r"Software\Classes\CLSID\{}\InprocServer32",
+            verb.clsid
+        ));
         for item_type in ITEM_TYPES {
-            roots.push(format!(
-                r"Software\Classes\{item_type}\shell\{}\command",
-                verb.id
-            ));
+            roots.push(format!(r"Software\Classes\{item_type}\shell\{}", verb.id));
         }
     }
     roots
@@ -216,30 +207,26 @@ mod tests {
     }
 
     #[test]
-    fn registered_check_uses_command_roots() {
+    fn registered_check_uses_com_roots() {
         assert_eq!(
             context_menu_registered_registry_roots(),
             [
-                r"Software\Classes\Directory\shell\NiumaTermNewTab\command",
-                r"Software\Classes\Directory\Background\shell\NiumaTermNewTab\command",
-                r"Software\Classes\Directory\shell\NiumaTermNewWindow\command",
-                r"Software\Classes\Directory\Background\shell\NiumaTermNewWindow\command",
+                r"Software\Classes\CLSID\{f1d94feb-1aa5-4b27-9440-c3bc16247c61}\InprocServer32",
+                r"Software\Classes\Directory\shell\NiumaTermNewTab",
+                r"Software\Classes\Directory\Background\shell\NiumaTermNewTab",
+                r"Software\Classes\CLSID\{f240799c-a056-4f34-a6b0-926b9730ce3f}\InprocServer32",
+                r"Software\Classes\Directory\shell\NiumaTermNewWindow",
+                r"Software\Classes\Directory\Background\shell\NiumaTermNewWindow",
             ]
+        );
+        assert_eq!(
+            shell_extension_path(Path::new(r"C:\Program Files\NiumaTerm\NiumaTerm.exe")),
+            Path::new(r"C:\Program Files\NiumaTerm\shell_extension.dll")
         );
     }
 
     #[test]
-    fn shell_command_uses_directory_placeholders() {
-        assert_eq!(path_placeholder(r"Directory"), "%1");
-        assert_eq!(path_placeholder(r"Directory\Background"), "%V");
-        assert_eq!(
-            command_line(
-                r"C:\Program Files\NiumaTerm\NiumaTerm.exe",
-                "--new-tab",
-                "%V"
-            ),
-            r#""C:\Program Files\NiumaTerm\NiumaTerm.exe" --new-tab "%V""#
-        );
+    fn protocol_registration_quotes_executable_path() {
         assert_eq!(
             protocol_command(r"C:\Program Files\NiumaTerm\NiumaTerm.exe"),
             r#""C:\Program Files\NiumaTerm\NiumaTerm.exe" "%1""#
