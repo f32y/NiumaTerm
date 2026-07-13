@@ -154,12 +154,12 @@ pub fn split_active() -> ColorArray {
 
 #[inline]
 pub fn selection_foreground() -> ColorArray {
-    hex("#44C9F0")
+    hex("#0F0D0E")
 }
 
 #[inline]
 pub fn selection_background() -> ColorArray {
-    hex("#1C191A")
+    hex("#C8C8C8")
 }
 
 #[inline]
