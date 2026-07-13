@@ -1,6 +1,7 @@
 use gpui::{
-    AnyWindowHandle, App, AppContext, Bounds, Global, TitlebarOptions, WeakEntity, WindowBounds,
-    WindowDecorations, WindowHandle, WindowId, WindowOptions, point, px, size,
+    AnyWindowHandle, App, AppContext, Bounds, Global, Styled as _, TitlebarOptions, WeakEntity,
+    WindowBounds, WindowDecorations, WindowHandle, WindowId, WindowOptions, point, px, size,
+    transparent_black,
 };
 use gpui_component::Root;
 use nmt_config::local_state::{SessionState, WindowLocalState, WindowState};
@@ -115,6 +116,7 @@ impl AppWindow {
                     appears_transparent: true,
                     ..Default::default()
                 }),
+                window_background: crate::ui::window_background_appearance(cx),
                 ..Default::default()
             },
             // Wrap the shell in gpui-component's `Root` so modal/dialog layers
@@ -124,7 +126,10 @@ impl AppWindow {
                     .0
                     .push((window.window_handle().window_id(), initial));
                 let shell: gpui::AnyView = cx.new(|cx| Shell::new(window, cx)).into();
-                cx.new(|cx| Root::new(shell, window, cx))
+                // Each top-level region paints the configured alpha once. A
+                // background on Root would sit underneath all of them and make
+                // the effective opacity higher than the requested value.
+                cx.new(|cx| Root::new(shell, window, cx).bg(transparent_black()))
             },
         )
         .expect("open GPUI terminal window")

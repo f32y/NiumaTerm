@@ -842,30 +842,25 @@ impl PlatformWindow for WindowsWindow {
     }
 
     fn set_background_appearance(&self, background_appearance: WindowBackgroundAppearance) {
-        self.state.background_appearance.set(background_appearance);
-        let hwnd = self.0.hwnd;
-
-        // using Dwm APIs for Mica and MicaAlt backdrops.
-        // others follow the set_window_composition_attribute approach
-        match background_appearance {
-            WindowBackgroundAppearance::Opaque => {
-                set_window_composition_attribute(hwnd, None, 0);
-            }
-            WindowBackgroundAppearance::Transparent => {
-                set_window_composition_attribute(hwnd, None, 2);
-            }
-            WindowBackgroundAppearance::Blurred => {
-                set_window_composition_attribute(hwnd, Some((0, 0, 0, 0)), 4);
-            }
-            WindowBackgroundAppearance::MicaBackdrop => {
-                // DWMSBT_MAINWINDOW => MicaBase
-                dwm_set_window_composition_attribute(hwnd, 2);
-            }
-            WindowBackgroundAppearance::MicaAltBackdrop => {
-                // DWMSBT_TABBEDWINDOW => MicaAlt
-                dwm_set_window_composition_attribute(hwnd, 4);
-            }
+        if self.state.background_appearance.get() == background_appearance {
+            return;
         }
+
+        // Keep the current backdrop active while outstanding surface updates
+        // finish and the replacement alpha pipeline is created.
+        unsafe { DwmFlush() }.log_err();
+        if let Err(error) = self
+            .state
+            .renderer
+            .borrow_mut()
+            .set_background_appearance(background_appearance)
+        {
+            log::error!("Failed to switch window render pipeline: {error:#}");
+            return;
+        }
+
+        self.state.background_appearance.set(background_appearance);
+        apply_background_appearance(self.0.hwnd, background_appearance);
     }
 
     fn minimize(&self) {
@@ -1511,27 +1506,56 @@ fn retrieve_window_placement(
     Ok(placement)
 }
 
-fn dwm_set_window_composition_attribute(hwnd: HWND, backdrop_type: u32) {
+fn apply_background_appearance(hwnd: HWND, background_appearance: WindowBackgroundAppearance) {
+    // Mica variants use DWM directly; transparent and acrylic modes retain the
+    // legacy composition-attribute fallback for older Windows builds.
+    match background_appearance {
+        WindowBackgroundAppearance::Opaque => {
+            // DWMSBT_NONE clears any system backdrop left by Blurred.
+            dwm_set_window_composition_attribute(hwnd, 1);
+            set_window_composition_attribute(hwnd, None, 0);
+        }
+        WindowBackgroundAppearance::Transparent => {
+            dwm_set_window_composition_attribute(hwnd, 1);
+            set_window_composition_attribute(hwnd, None, 2);
+        }
+        WindowBackgroundAppearance::Blurred => {
+            // DWMSBT_TRANSIENTWINDOW is Acrylic. Windows 11 build 22621+
+            // ignores legacy accent-policy Acrylic, so it is only a fallback.
+            if !dwm_set_window_composition_attribute(hwnd, 3) {
+                set_window_composition_attribute(hwnd, Some((0, 0, 0, 0)), 4);
+            }
+        }
+        WindowBackgroundAppearance::MicaBackdrop => {
+            dwm_set_window_composition_attribute(hwnd, 2);
+        }
+        WindowBackgroundAppearance::MicaAltBackdrop => {
+            dwm_set_window_composition_attribute(hwnd, 4);
+        }
+    }
+}
+
+/// Returns whether the backdrop was applied, so callers can fall back to the
+/// legacy SetWindowCompositionAttribute path on builds without
+/// DWMWA_SYSTEMBACKDROP_TYPE.
+fn dwm_set_window_composition_attribute(hwnd: HWND, backdrop_type: u32) -> bool {
     let mut version = unsafe { std::mem::zeroed() };
     let status = unsafe { windows::Wdk::System::SystemServices::RtlGetVersion(&mut version) };
 
     // DWMWA_SYSTEMBACKDROP_TYPE is available only on version 22621 or later
     // using SetWindowCompositionAttributeType as a fallback
     if !status.is_ok() || version.dwBuildNumber < 22621 {
-        return;
+        return false;
     }
 
     unsafe {
-        let result = DwmSetWindowAttribute(
+        DwmSetWindowAttribute(
             hwnd,
             DWMWA_SYSTEMBACKDROP_TYPE,
             &backdrop_type as *const _ as *const _,
             std::mem::size_of_val(&backdrop_type) as u32,
-        );
-
-        if !result.is_ok() {
-            return;
-        }
+        )
+        .is_ok()
     }
 }
 
