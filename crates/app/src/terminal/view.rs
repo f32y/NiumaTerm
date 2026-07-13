@@ -99,8 +99,10 @@ pub(crate) struct TerminalPane {
     )>,
     /// Visible separator y positions, painted outside GPUI List's content mask.
     frozen_separators: Vec<f32>,
-    /// A frozen-region drag is in progress.
-    frozen_selecting: bool,
+    /// Anchor of an in-progress frozen-region drag. The selection itself is
+    /// only created on the first mouse-move, so a plain click selects nothing
+    /// (matching the engine's empty-selection-dropped-on-up semantics).
+    frozen_select_anchor: Option<crate::terminal::block_list::FrozenPoint>,
 }
 
 impl TerminalPane {
@@ -200,7 +202,7 @@ impl TerminalPane {
             frozen_chrome: Vec::new(),
             frozen_selection: None,
             frozen_separators: Vec::new(),
-            frozen_selecting: false,
+            frozen_select_anchor: None,
         }
     }
 
@@ -369,9 +371,12 @@ impl TerminalPane {
         if self.block_list_mode(cx) && !self.surface.mouse_reporting_active() {
             if event.button == MouseButton::Left {
                 if let Some(pt) = self.frozen_point_at(event.position, cx) {
+                    // The engine highlight is baked into the cached frame, so
+                    // clearing the selection needs a frame rebuild too.
                     self.surface.clear_selection();
-                    self.frozen_selection = Some((pt, pt));
-                    self.frozen_selecting = true;
+                    self.frozen_selection = None;
+                    self.frozen_select_anchor = Some(pt);
+                    self.invalidate(cx);
                     cx.notify();
                     return;
                 }
@@ -446,8 +451,7 @@ impl TerminalPane {
             self.mark_scroll_activity(cx);
         }
         self.scrollbar_dragging = false;
-        if self.frozen_selecting {
-            self.frozen_selecting = false;
+        if self.frozen_select_anchor.take().is_some() {
             return;
         }
         self.apply_mouse_event(
@@ -471,7 +475,7 @@ impl TerminalPane {
             self.scroll_thumb_to(fraction - self.scrollbar_grab, cx);
             return;
         }
-        if self.frozen_selecting {
+        if let Some(anchor) = self.frozen_select_anchor {
             // Clamp into the frozen region so a drag past the seam sticks to
             // the last frozen row instead of vanishing.
             let mut pos = event.position;
@@ -480,9 +484,7 @@ impl TerminalPane {
             if pos.y > max_y {
                 pos.y = max_y;
             }
-            if let (Some(head), Some((anchor, _))) =
-                (self.frozen_point_at(pos, cx), self.frozen_selection)
-            {
+            if let Some(head) = self.frozen_point_at(pos, cx) {
                 self.frozen_selection = Some((anchor, head));
                 cx.notify();
             }
