@@ -707,6 +707,7 @@ pub fn settings_view(cx: &App) -> Settings {
     let job_enabled = cx.global::<AppSettings>().manage_subprocess_job;
     let transparency_enabled = cx.global::<AppSettings>().window_transparency_enabled;
     let background_image_enabled = cx.global::<AppSettings>().background_image.is_some();
+    let shell_integration_mismatched = nmt_platform::shell_integration_dll_mismatched();
     Settings::new("app-settings")
         .sidebar_width(px(160.0))
         .page(
@@ -1029,7 +1030,11 @@ pub fn settings_view(cx: &App) -> Settings {
                         .title("Windows")
                         .item(
                             SettingItem::new(
-                                "Enable Windows Context Menu",
+                                if shell_integration_mismatched {
+                                    "Enable Windows Context Menu  ⚠"
+                                } else {
+                                    "Enable Windows Context Menu"
+                                },
                                 SettingField::switch(
                                     |_| nmt_platform::is_shell_integration_registered(),
                                     |value, _| {
@@ -1043,7 +1048,11 @@ pub fn settings_view(cx: &App) -> Settings {
                                     },
                                 ),
                             )
-                            .description("Add NiumaTerm actions to File Explorer directory menus."),
+                            .description(if shell_integration_mismatched {
+                                "The registered shell extension does not point to the DLL beside the current NiumaTerm executable."
+                            } else {
+                                "Add NiumaTerm actions to File Explorer directory menus."
+                            }),
                         )
                         .item(
                             SettingItem::new(
