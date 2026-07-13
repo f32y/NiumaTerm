@@ -2286,24 +2286,38 @@ fn shape_frame(
     cell: metrics::CellMetrics,
     window: &mut Window,
 ) -> Vec<ShapedLine> {
+    let row_count =
+        ((bounds.size.height.as_f32() / cell.height_px).ceil() as usize).min(frame.lines().len());
+    shape_lines(
+        frame
+            .lines()
+            .iter()
+            .take(row_count)
+            .map(|line| (line.text_hash(), line)),
+        cell.width_px,
+        window,
+    )
+}
+
+/// Shape terminal lines with per-cell forced width, cached by the caller's
+/// key — the one shaping path for live-frame rows and frozen block rows.
+pub(crate) fn shape_lines<'a>(
+    lines: impl Iterator<Item = (u64, &'a TerminalLine)>,
+    cell_w: f32,
+    window: &mut Window,
+) -> Vec<ShapedLine> {
     let style = window.text_style();
     let font_size = style.font_size.to_pixels(window.rem_size());
     let base = style.to_run(0);
-    let row_count =
-        ((bounds.size.height.as_f32() / cell.height_px).ceil() as usize).min(frame.lines().len());
-
-    frame
-        .lines()
-        .iter()
-        .take(row_count)
-        .map(|line| {
+    lines
+        .map(|(key, line)| {
             let runs = terminal_text_runs(line, &base);
             window.text_system().shape_line_by_hash(
-                line.text_hash(),
+                key,
                 line.text().len(),
                 font_size,
                 &runs,
-                Some(px(cell.width_px)),
+                Some(px(cell_w)),
                 || line.text().clone(),
             )
         })

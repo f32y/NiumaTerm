@@ -745,22 +745,16 @@ pub(crate) fn shape_frozen_rows(
     cell_w: f32,
     window: &mut Window,
 ) -> Vec<ShapedLine> {
-    let style = window.text_style();
-    let font_size = style.font_size.to_pixels(window.rem_size());
-    let base = style.to_run(0);
-    rows.iter()
-        .map(|row| {
-            let runs = crate::terminal::view::terminal_text_runs(&row.line, &base);
-            window.text_system().shape_line_by_hash(
+    crate::terminal::view::shape_lines(
+        rows.iter().map(|row| {
+            (
                 row.shape_key.unwrap_or_else(|| row.line.text_hash()),
-                row.line.text().len(),
-                font_size,
-                &runs,
-                Some(px(cell_w)),
-                || row.line.text().clone(),
+                &row.line,
             )
-        })
-        .collect()
+        }),
+        cell_w,
+        window,
+    )
 }
 
 /// Paint separators + frozen rows (backgrounds then glyphs).
