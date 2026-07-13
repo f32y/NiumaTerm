@@ -743,8 +743,8 @@ impl BackgroundColors {
     }
 
     fn color(&self, color: &AnsiColor, flags: StyleFlags, foreground: bool) -> TerminalColor {
-        let dim = flags.contains(StyleFlags::DIM);
-        let bold = flags.contains(StyleFlags::BOLD);
+        let dim = foreground && flags.contains(StyleFlags::DIM);
+        let bold = foreground && flags.contains(StyleFlags::BOLD);
         match color {
             AnsiColor::Named(named) => {
                 let named = if foreground && bold && !dim {
@@ -1000,6 +1000,18 @@ mod tests {
         let row = extract_row(&buf, 0, None);
 
         assert_eq!(row.cells()[0].background, Some((1, 2, 3).into()));
+    }
+
+    #[test]
+    fn dim_does_not_change_explicit_background() {
+        let mut engine = GhosttyTerminal::new(4, 1, 100).unwrap();
+        engine.write_vt(b"\x1b[48;2;120;100;80mA\x1b[2mB");
+        let mut buf = RenderBuffer::new(4, 1);
+        buf.update(&engine.snapshot().unwrap());
+
+        let row = extract_row(&buf, 0, None);
+
+        assert_eq!(row.cells()[0].background, row.cells()[1].background);
     }
 
     #[test]
