@@ -20,12 +20,12 @@ pub mod window;
 
 use std::default::Default;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{OnceLock, RwLock};
 
 use colors::Colors;
 use serde::{Deserialize, Serialize};
-use theme::{AdaptiveColors, AdaptiveTheme, AppearanceTheme, Theme};
+use theme::{AdaptiveColors, AdaptiveTheme, AppearanceTheme, Theme, UiTheme};
 use tracing::warn;
 
 use crate::bell::Bell;
@@ -109,7 +109,7 @@ pub struct Config {
     pub title: Title,
     #[serde(default = "default_working_dir", rename = "working-dir")]
     pub working_dir: Option<String>,
-    #[serde(default = "String::default")]
+    #[serde(default = "default_theme")]
     pub theme: String,
     #[serde(default = "Scroll::default")]
     pub scroll: Scroll,
@@ -129,8 +129,11 @@ pub struct Config {
     pub env_vars: Vec<String>,
     #[serde(default = "default_option_as_alt", rename = "option-as-alt")]
     pub option_as_alt: String,
-    #[serde(default = "Colors::default", skip_serializing)]
+    #[serde(skip)]
     pub colors: Colors,
+    /// UI theme loaded from the selected file in `themes/`.
+    #[serde(skip)]
+    pub ui_theme: Option<UiTheme>,
     #[serde(default = "Option::default", skip_serializing)]
     pub adaptive_colors: Option<AdaptiveColors>,
     #[serde(default = "Option::default", rename = "force-theme")]
@@ -252,6 +255,10 @@ pub fn config_file_path() -> PathBuf {
     config_dir_path().join("config.toml")
 }
 
+fn theme_file_path(dir: &Path, name: &str) -> PathBuf {
+    dir.join(format!("{name}.toml"))
+}
+
 impl Config {
     #[cfg(test)]
     fn load_from_path(path: &PathBuf) -> Self {
@@ -275,31 +282,32 @@ impl Config {
                     }
 
                     let tmp = std::env::temp_dir();
-                    let path = tmp.join(theme).with_extension("toml");
+                    let path = theme_file_path(&tmp, theme);
                     if let Ok(loaded_theme) = Config::load_theme(&path) {
-                        decoded.colors = loaded_theme.colors;
+                        decoded.ui_theme = loaded_theme.ui_theme();
+                        decoded.colors = loaded_theme.colors.terminal;
                     } else {
                         warn!("failed to load theme: {}", theme);
                     }
 
                     if let Some(adaptive_theme) = &decoded.adaptive_theme {
                         let light_theme = &adaptive_theme.light;
-                        let path = tmp.join(light_theme).with_extension("toml");
+                        let path = theme_file_path(&tmp, light_theme);
                         let mut adaptive_colors = AdaptiveColors {
                             dark: None,
                             light: None,
                         };
 
                         if let Ok(light_loaded_theme) = Config::load_theme(&path) {
-                            adaptive_colors.light = Some(light_loaded_theme.colors);
+                            adaptive_colors.light = Some(light_loaded_theme.colors.terminal);
                         } else {
                             warn!("failed to load light theme: {}", light_theme);
                         }
 
                         let dark_theme = &adaptive_theme.dark;
-                        let path = tmp.join(dark_theme).with_extension("toml");
+                        let path = theme_file_path(&tmp, dark_theme);
                         if let Ok(dark_loaded_theme) = Config::load_theme(&path) {
-                            adaptive_colors.dark = Some(dark_loaded_theme.colors);
+                            adaptive_colors.dark = Some(dark_loaded_theme.colors.terminal);
                         } else {
                             warn!("failed to load dark theme: {}", dark_theme);
                         }
@@ -319,15 +327,70 @@ impl Config {
     }
 
     fn load_theme(path: &PathBuf) -> Result<Theme, String> {
-        if path.exists() {
-            let content = std::fs::read_to_string(path).unwrap();
-            match toml::from_str::<Theme>(&content) {
-                Ok(decoded) => Ok(decoded),
-                Err(err_message) => Err(format!("error parsing: {err_message:?}")),
-            }
+        let content = if path.exists() {
+            std::fs::read_to_string(path).map_err(|err| err.to_string())?
         } else {
-            Err(String::from("filepath does not exist"))
+            let name = path
+                .file_stem()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| String::from("invalid theme filepath"))?;
+            nmt_themes::get(name)
+                .map(str::to_owned)
+                .ok_or_else(|| String::from("filepath does not exist"))?
+        };
+        toml::from_str::<Theme>(&content)
+            .map_err(|err_message| format!("error parsing: {err_message:?}"))
+    }
+
+    /// Load a named theme from the per-user `themes` directory.
+    pub fn load_named_theme(name: &str) -> Result<Theme, String> {
+        let path = Path::new(name);
+        if path.file_name().and_then(|name| name.to_str()) != Some(name) {
+            return Err(String::from("theme name must not contain a path"));
         }
+        Self::load_theme(&theme_file_path(&config_dir_path().join("themes"), name))
+    }
+
+    /// Load every valid `.toml` theme in the per-user themes directory.
+    pub fn load_themes() -> Vec<(String, Theme)> {
+        let mut themes = nmt_themes::THEMES
+            .iter()
+            .filter_map(|builtin| match toml::from_str::<Theme>(builtin.source) {
+                Ok(theme) => Some((builtin.name.to_string(), theme)),
+                Err(err) => {
+                    warn!("ignored invalid built-in theme {}: {err}", builtin.name);
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        for custom in Self::load_themes_from(&config_dir_path().join("themes")) {
+            merge_theme(&mut themes, custom);
+        }
+        themes.sort_by_key(|(name, _)| name.to_lowercase());
+        themes
+    }
+
+    fn load_themes_from(path: &Path) -> Vec<(String, Theme)> {
+        let Ok(entries) = std::fs::read_dir(path) else {
+            return Vec::new();
+        };
+        let mut themes = entries
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("toml"))
+            .filter_map(|entry| {
+                let path = entry.path();
+                let name = path.file_stem()?.to_str()?.to_string();
+                match Self::load_theme(&path) {
+                    Ok(theme) => Some((name, theme)),
+                    Err(err) => {
+                        warn!("ignored invalid theme {}: {err}", path.display());
+                        None
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+        themes.sort_by_key(|(name, _)| name.to_lowercase());
+        themes
     }
 
     pub fn to_string(&self) -> Result<String, toml::ser::Error> {
@@ -346,12 +409,10 @@ impl Config {
                         return decoded;
                     }
 
-                    let path = config_path
-                        .join("themes")
-                        .join(theme)
-                        .with_extension("toml");
+                    let path = theme_file_path(&config_path.join("themes"), theme);
                     if let Ok(loaded_theme) = Config::load_theme(&path) {
-                        decoded.colors = loaded_theme.colors;
+                        decoded.ui_theme = loaded_theme.ui_theme();
+                        decoded.colors = loaded_theme.colors.terminal;
                     } else {
                         warn!("failed to load theme: {}", theme);
                     }
@@ -381,9 +442,10 @@ impl Config {
         let mut decoded = toml::from_str::<Config>(&content)?;
         let theme = &decoded.theme;
         if !theme.is_empty() {
-            let path = config_dir.join("themes").join(theme).with_extension("toml");
+            let path = theme_file_path(&config_dir.join("themes"), theme);
             if let Ok(loaded_theme) = Config::load_theme(&path) {
-                decoded.colors = loaded_theme.colors;
+                decoded.ui_theme = loaded_theme.ui_theme();
+                decoded.colors = loaded_theme.colors.terminal;
             } else {
                 warn!("failed to load theme: {}", theme);
             }
@@ -401,10 +463,11 @@ impl Config {
                         let theme = &decoded.theme;
                         let theme_path = config_dir_path().join("themes");
                         if !theme.is_empty() {
-                            let path = theme_path.join(theme).with_extension("toml");
+                            let path = theme_file_path(&theme_path, theme);
                             match Config::load_theme(&path) {
                                 Ok(loaded_theme) => {
-                                    decoded.colors = loaded_theme.colors;
+                                    decoded.ui_theme = loaded_theme.ui_theme();
+                                    decoded.colors = loaded_theme.colors.terminal;
                                 }
                                 Err(err_message) => {
                                     return Err(ConfigError::ErrLoadingTheme(err_message));
@@ -419,10 +482,10 @@ impl Config {
                             };
 
                             let light_theme = &adaptive_theme.light;
-                            let path = theme_path.join(light_theme).with_extension("toml");
+                            let path = theme_file_path(&theme_path, light_theme);
                             match Config::load_theme(&path) {
                                 Ok(light_loaded_theme) => {
-                                    adaptive_colors.light = Some(light_loaded_theme.colors)
+                                    adaptive_colors.light = Some(light_loaded_theme.colors.terminal)
                                 }
                                 Err(err_message) => {
                                     warn!("failed to load light theme: {}", light_theme);
@@ -431,10 +494,10 @@ impl Config {
                             }
 
                             let dark_theme = &adaptive_theme.dark;
-                            let path = theme_path.join(dark_theme).with_extension("toml");
+                            let path = theme_file_path(&theme_path, dark_theme);
                             match Config::load_theme(&path) {
                                 Ok(dark_loaded_theme) => {
-                                    adaptive_colors.dark = Some(dark_loaded_theme.colors)
+                                    adaptive_colors.dark = Some(dark_loaded_theme.colors.terminal)
                                 }
                                 Err(err_message) => {
                                     warn!("failed to load dark theme: {}", dark_theme);
@@ -607,6 +670,17 @@ impl Config {
     }
 }
 
+fn merge_theme(themes: &mut Vec<(String, Theme)>, custom: (String, Theme)) {
+    if let Some(existing) = themes
+        .iter_mut()
+        .find(|(name, _)| name.eq_ignore_ascii_case(&custom.0))
+    {
+        *existing = custom;
+    } else {
+        themes.push(custom);
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
@@ -617,6 +691,7 @@ impl Default for Config {
             force_theme: None,
             bindings: Bindings::default(),
             colors: Colors::default(),
+            ui_theme: None,
             scroll: Scroll::default(),
             keyboard: Keyboard::default(),
             title: Title::default(),
@@ -629,7 +704,7 @@ impl Default for Config {
             renderer: Renderer::default(),
             shell: default_shell(),
             platform: Platform::default(),
-            theme: String::default(),
+            theme: default_theme(),
             use_fork: default_use_fork(),
             window: Window::default(),
             working_dir: default_working_dir(),
@@ -700,9 +775,11 @@ impl From<CursorShape> for char {
 }
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
+static ACTIVE_COLORS: OnceLock<RwLock<Colors>> = OnceLock::new();
 
 /// Install `config` as the process-wide config. Ignored if already initialized.
 pub fn init(config: Config) {
+    set_active_colors(config.colors);
     let _ = CONFIG.set(config);
 }
 
@@ -717,11 +794,27 @@ pub fn get() -> &'static Config {
     CONFIG.get_or_init(Config::default)
 }
 
+/// Return the active terminal palette. Unlike the rest of the startup config,
+/// this value can change when the user selects a theme.
+pub fn active_colors() -> Colors {
+    *ACTIVE_COLORS
+        .get_or_init(|| RwLock::new(get().colors))
+        .read()
+        .expect("active theme colors lock poisoned")
+}
+
+pub fn set_active_colors(colors: Colors) {
+    *ACTIVE_COLORS
+        .get_or_init(|| RwLock::new(colors))
+        .write()
+        .expect("active theme colors lock poisoned") = colors;
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Write;
 
-    use colors::{hex_to_color_arr, hex_to_color_wgpu};
+    use colors::hex_to_color_arr;
 
     use super::*;
 
@@ -763,7 +856,7 @@ mod tests {
     #[test]
     fn test_filepath_does_not_exist_with_fallback() {
         let config = Config::load_from_path(&tmp_dir().join("it-should-never-exist"));
-        assert_eq!(config.theme, String::default());
+        assert_eq!(config.theme, default_theme());
         assert_eq!(config.cursor.shape, default_cursor());
     }
 
@@ -791,7 +884,7 @@ mod tests {
         let env_vars: Vec<String> = vec![];
         assert_eq!(result.env_vars, env_vars);
         assert_eq!(result.cursor.shape, default_cursor());
-        assert_eq!(result.theme, String::default());
+        assert_eq!(result.theme, default_theme());
         assert_eq!(result.cursor.shape, default_cursor());
         assert_eq!(result.shell, default_shell());
         assert!(!result.renderer.disable_unfocused_render);
@@ -820,7 +913,7 @@ mod tests {
 
         let result = Config::load_from_path(&file_name);
 
-        assert_eq!(result.theme, String::default());
+        assert_eq!(result.theme, default_theme());
         // Colors
         assert_eq!(result.colors.background, colors::defaults::background());
         assert_eq!(result.colors.foreground, colors::defaults::foreground());
@@ -840,7 +933,7 @@ mod tests {
         );
 
         assert_eq!(result.renderer.backend, crate::renderer::Backend::Cpu);
-        assert_eq!(result.theme, String::default());
+        assert_eq!(result.theme, default_theme());
         // Colors
         assert_eq!(result.colors.background, colors::defaults::background());
         assert_eq!(result.colors.foreground, colors::defaults::foreground());
@@ -859,7 +952,7 @@ mod tests {
 
         assert_eq!(result.env_vars, [String::from("A=5"), String::from("B=8")]);
         assert_eq!(result.cursor.shape, default_cursor());
-        assert_eq!(result.theme, String::default());
+        assert_eq!(result.theme, default_theme());
         // Colors
         assert_eq!(result.colors.background, colors::defaults::background());
         assert_eq!(result.colors.foreground, colors::defaults::foreground());
@@ -886,7 +979,7 @@ mod tests {
         );
 
         assert_eq!(result.cursor.shape, CursorShape::Underline);
-        assert_eq!(result.theme, String::default());
+        assert_eq!(result.theme, default_theme());
         // Colors
         assert_eq!(result.colors.background, colors::defaults::background());
         assert_eq!(result.colors.foreground, colors::defaults::foreground());
@@ -904,7 +997,7 @@ mod tests {
         );
 
         assert_eq!(result.option_as_alt, String::from("Both"));
-        assert_eq!(result.theme, String::default());
+        assert_eq!(result.theme, default_theme());
         // Colors
         assert_eq!(result.colors.background, colors::defaults::background());
         assert_eq!(result.colors.foreground, colors::defaults::foreground());
@@ -924,7 +1017,7 @@ mod tests {
         "#,
         );
 
-        assert_eq!(result.theme, String::default());
+        assert_eq!(result.theme, default_theme());
         // Bindings
         assert_eq!(result.bindings.keys[0].key, "Q");
         assert_eq!(result.bindings.keys[0].with, "super");
@@ -988,13 +1081,19 @@ mod tests {
     }
 
     #[test]
-    fn test_change_theme_with_colors_overwrite() {
+    fn test_change_theme_with_colors() {
         create_temporary_theme(
             "lucario-with-colors",
             r#"
-            [colors]
+            name = 'Lucario'
+            mode = 'dark'
+
+            [colors.terminal]
             background       = '#2B3E50'
             foreground       = '#F8F8F2'
+
+            [colors.ui]
+            background = '#2B3E50'
         "#,
         );
 
@@ -1002,10 +1101,6 @@ mod tests {
             "change-theme-with-colors",
             r#"
             theme = "lucario-with-colors"
-
-            [colors]
-            background = '#333333'
-            foreground = '#333333'
         "#,
         );
 
@@ -1014,79 +1109,81 @@ mod tests {
         assert_eq!(result.colors.cursor, colors::defaults::cursor());
         assert_eq!(result.colors.foreground, hex_to_color_arr("#F8F8F2"));
         assert_eq!(result.colors.background.0, hex_to_color_arr("#2B3E50"));
+        assert_eq!(result.ui_theme.as_ref().unwrap().name, "Lucario");
+        assert_eq!(
+            result.ui_theme.as_ref().unwrap().mode,
+            AppearanceTheme::Dark
+        );
+        assert_eq!(
+            result.ui_theme.as_ref().unwrap().colors["background"].as_str(),
+            Some("#2B3E50")
+        );
     }
 
     #[test]
-    fn test_change_colors() {
+    fn theme_list_loads_valid_toml_files_in_name_order() {
+        let dir = std::env::temp_dir().join("NiumaTerm-theme-list-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("Zulu.toml"),
+            "[colors.terminal]\nbackground = '#111111'\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("alpha.toml"),
+            "[colors.terminal]\nbackground = '#222222'\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("invalid.toml"), "[colors\n").unwrap();
+        std::fs::write(dir.join("ignored.txt"), "[colors.terminal]\n").unwrap();
+
+        let themes = Config::load_themes_from(&dir);
+        assert_eq!(
+            themes
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
+            ["alpha", "Zulu"]
+        );
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn built_in_themes_load_without_user_files() {
+        for builtin in nmt_themes::THEMES {
+            let path = tmp_dir()
+                .join("NiumaTerm-missing-builtins")
+                .join(builtin.name)
+                .with_extension("toml");
+            let theme = Config::load_theme(&path).unwrap();
+            assert!(!theme.name.is_empty());
+        }
+    }
+
+    #[test]
+    fn custom_theme_overrides_builtin_case_insensitively() {
+        let mut themes = vec![(String::from("ubuntu"), Theme::default())];
+        merge_theme(&mut themes, (String::from("Ubuntu"), Theme::default()));
+
+        assert_eq!(themes.len(), 1);
+        assert_eq!(themes[0].0, "Ubuntu");
+    }
+
+    #[test]
+    fn top_level_colors_are_ignored() {
         let result = create_temporary_config(
-            "change-colors",
+            "ignored-colors",
             r#"
+            theme = ""
+
             [colors]
-            background       = '#2B3E50'
-            tabs-active      = '#E6DB74'
-            selection-background = '#111111'
-            selection-foreground = '#222222'
-            foreground       = '#F8F8F2'
-            cursor           = '#E6DB74'
-            black            = '#FFFFFF'
-            blue             = '#030303'
-            cyan             = '#030303'
-            green            = '#030303'
-            magenta          = '#030303'
-            red              = '#030303'
-            tabs             = '#030303'
-            white            = '#000000'
-            yellow           = '#030303'
-            dim-black        = '#030303'
-            dim-blue         = '#030303'
-            dim-cyan         = '#030303'
-            dim-foreground   = '#030303'
-            dim-green        = '#030303'
-            dim-magenta      = '#030303'
-            dim-red          = '#030303'
-            dim-white        = '#030303'
-            dim-yellow       = '#030303'
-            light-black      = '#030303'
-            light-blue       = '#030303'
-            light-cyan       = '#030303'
-            light-foreground = '#030303'
-            light-green      = '#030303'
-            light-magenta    = '#030303'
-            light-red        = '#030303'
-            light-white      = '#030303'
-            light-yellow     = '#030303'
+            background = '#2B3E50'
         "#,
         );
 
-        // assert_eq!(
-        // result.colors.background,
-        // ColorBuilder::from_hex(String::from("#2B3E50"), Format::SRGB0_1)
-        // .unwrap()
-        // .to_wgpu()
-        // );
-
-        assert_eq!(result.colors.background.0, hex_to_color_arr("#2B3E50"));
-        assert_eq!(result.colors.background.1, hex_to_color_wgpu("#2B3E50"));
-        assert_eq!(result.colors.cursor, hex_to_color_arr("#E6DB74"));
-        assert_eq!(result.colors.foreground, hex_to_color_arr("#F8F8F2"));
-        assert_eq!(result.colors.tabs_active, hex_to_color_arr("#E6DB74"));
-        assert_eq!(result.colors.black, hex_to_color_arr("#FFFFFF"));
-        assert_eq!(result.colors.blue, hex_to_color_arr("#030303"));
-        assert_eq!(result.colors.cyan, hex_to_color_arr("#030303"));
-        assert_eq!(result.colors.green, hex_to_color_arr("#030303"));
-        assert_eq!(result.colors.magenta, hex_to_color_arr("#030303"));
-        assert_eq!(result.colors.red, hex_to_color_arr("#030303"));
-        assert_eq!(result.colors.tabs, hex_to_color_arr("#030303"));
-        assert_eq!(result.colors.white, hex_to_color_arr("#000000"));
-        assert_eq!(result.colors.yellow, hex_to_color_arr("#030303"));
-        assert_eq!(
-            result.colors.selection_background,
-            hex_to_color_arr("#111111")
-        );
-        assert_eq!(
-            result.colors.selection_foreground,
-            hex_to_color_arr("#222222")
-        );
+        assert_eq!(result.colors, Colors::default());
     }
 
     #[test]

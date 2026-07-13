@@ -1,0 +1,12 @@
+[package]
+name = "nmt_themes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+name = "nmt_themes"
+
+[lints]
+workspace = true

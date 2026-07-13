@@ -4,8 +4,8 @@
 
 pub(crate) use self::assets::AppAssets;
 pub(crate) use self::settings::{
-    AppSettings, apply_window_translucency, background_image_layer_opacity,
-    surface_background_opacity, window_background_appearance,
+    AppSettings, apply_ui_theme, apply_window_translucency, background_image_layer_opacity,
+    surface_background_opacity, watch_themes, window_background_appearance,
 };
 pub(crate) use self::shell::{
     CloseTab, NewTab, NewWindow, NewWorkspace, NextTab, NextWorkspace, PrevTab, PrevWorkspace,

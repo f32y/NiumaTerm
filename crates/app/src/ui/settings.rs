@@ -7,10 +7,13 @@
 //! dialog closes (see `Shell::on_show_settings`). Field edits mutate the global
 //! live for preview; only closing the dialog persists them.
 
-use gpui::prelude::FluentBuilder as _;
+use std::rc::Rc;
+
+use futures::StreamExt as _;
+use gpui::prelude::{FluentBuilder as _, InteractiveElement as _, StatefulInteractiveElement as _};
 use gpui::{
-    App, AppContext as _, Entity, FileDialogFilter, Global, ParentElement as _, PathPromptOptions,
-    SharedString, Styled as _, div, px, relative,
+    App, AppContext as _, BorrowAppContext as _, Entity, FileDialogFilter, Global,
+    ParentElement as _, PathPromptOptions, SharedString, Styled as _, div, px, relative, rgba,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::group_box::GroupBoxVariant;
@@ -120,6 +123,12 @@ impl Default for Profile {
 
 /// The app-wide settings model, stored as a gpui global.
 pub struct AppSettings {
+    /// Selected file stem in the per-user `themes` directory.
+    pub theme: String,
+    /// Ephemeral filter for the theme list; it is not persisted.
+    pub theme_filter: String,
+    /// Parsed theme files, refreshed when the themes directory changes.
+    pub themes: Vec<(String, nmt_config::theme::Theme)>,
     pub input_style: InputStyle,
     pub profiles: Vec<Profile>,
     /// Name of the profile new terminals use. Always references an existing
@@ -170,6 +179,9 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            theme: String::new(),
+            theme_filter: String::new(),
+            themes: Vec::new(),
             input_style: InputStyle::Waterfall,
             profiles: vec![Profile::default()],
             default_profile: Profile::default().name,
@@ -301,6 +313,13 @@ impl AppSettings {
             profiles[0].name.clone()
         };
         Self {
+            theme: if config.theme.is_empty() {
+                nmt_config::defaults::default_theme()
+            } else {
+                config.theme.clone()
+            },
+            theme_filter: String::new(),
+            themes: load_theme_choices(),
             input_style: InputStyle::from_config(appearance.input_style),
             profiles,
             default_profile,
@@ -423,6 +442,7 @@ impl AppSettings {
             })
             .collect();
         if let Err(err) = nmt_config::appearance::save_settings(
+            &self.theme,
             &appearance,
             &system,
             &profiles,
@@ -473,6 +493,236 @@ pub(crate) fn background_image_layer_opacity(cx: &gpui::App) -> f32 {
         ),
         settings.background_image_opacity,
     ) as f32
+}
+
+/// Apply the UI half of a terminal theme, falling back to the built-in dark
+/// palette when the theme does not define `[colors.ui]` or contains invalid UI data.
+pub(crate) fn apply_ui_theme(value: Option<&nmt_config::theme::UiTheme>, cx: &mut App) {
+    let configured = value.and_then(|value| {
+        let mut config = toml::Table::new();
+        config.insert("name".to_string(), toml::Value::String(value.name.clone()));
+        config.insert(
+            "mode".to_string(),
+            toml::Value::String(
+                match value.mode {
+                    nmt_config::theme::AppearanceTheme::Dark => "dark",
+                    nmt_config::theme::AppearanceTheme::Light => "light",
+                }
+                .to_string(),
+            ),
+        );
+        config.insert("colors".to_string(), value.colors.clone());
+        toml::Value::Table(config)
+            .try_into::<gpui_component::ThemeConfig>()
+            .map(Rc::new)
+            .map_err(|err| tracing::warn!("failed to load UI theme: {err}"))
+            .ok()
+    });
+    let theme = configured.unwrap_or_else(|| {
+        gpui_component::ThemeRegistry::global(cx)
+            .default_dark_theme()
+            .clone()
+    });
+    let mode = theme.mode;
+    gpui_component::Theme::global_mut(cx).apply_config(&theme);
+    gpui_component::Theme::change(mode, None, cx);
+}
+
+fn select_theme(name: String, cx: &mut App) {
+    let theme = if name.is_empty() {
+        Ok(nmt_config::theme::Theme::default())
+    } else {
+        nmt_config::Config::load_named_theme(&name)
+    };
+    match theme {
+        Ok(theme) => {
+            nmt_config::set_active_colors(theme.colors.terminal);
+            apply_ui_theme(theme.ui_theme().as_ref(), cx);
+            cx.update_global(|settings: &mut AppSettings, _| settings.theme = name);
+            apply_window_translucency(cx);
+            cx.refresh_windows();
+        }
+        Err(err) => tracing::warn!("failed to select theme {name}: {err}"),
+    }
+}
+
+fn load_theme_choices() -> Vec<(String, nmt_config::theme::Theme)> {
+    nmt_config::Config::load_themes()
+}
+
+fn reload_themes(cx: &mut App) {
+    cx.global_mut::<AppSettings>().themes = load_theme_choices();
+    let selected = cx.global::<AppSettings>().theme.clone();
+    if selected.is_empty() {
+        cx.refresh_windows();
+    } else {
+        select_theme(selected, cx);
+    }
+}
+
+pub(crate) fn watch_themes(cx: &mut App) -> Option<gpui::Task<()>> {
+    use notify::Watcher as _;
+
+    reload_themes(cx);
+    let themes_dir = nmt_config::config_dir_path().join("themes");
+    if let Err(err) = std::fs::create_dir_all(&themes_dir) {
+        tracing::warn!("failed to create themes directory: {err}");
+        return None;
+    }
+    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    let mut watcher =
+        match notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+            if event.is_ok() {
+                let _ = tx.unbounded_send(());
+            }
+        }) {
+            Ok(watcher) => watcher,
+            Err(err) => {
+                tracing::warn!("failed to watch themes directory: {err}");
+                return None;
+            }
+        };
+    if let Err(err) = watcher.watch(&themes_dir, notify::RecursiveMode::NonRecursive) {
+        tracing::warn!("failed to watch themes directory: {err}");
+        return None;
+    }
+    Some(cx.spawn(async move |cx| {
+        let _watcher = watcher;
+        while rx.next().await.is_some() {
+            let _ = cx.update(reload_themes);
+        }
+    }))
+}
+
+fn preview_color(color: nmt_config::colors::ColorArray) -> gpui::Hsla {
+    let channel = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u32;
+    rgba(
+        channel(color[0]) << 24
+            | channel(color[1]) << 16
+            | channel(color[2]) << 8
+            | channel(color[3]),
+    )
+    .into()
+}
+
+fn theme_preview(colors: nmt_config::colors::Colors) -> gpui::Div {
+    let swatches = [
+        colors.red,
+        colors.yellow,
+        colors.green,
+        colors.cyan,
+        colors.blue,
+        colors.magenta,
+    ];
+    v_flex()
+        .w_full()
+        .h(px(72.0))
+        .p_3()
+        .gap_2()
+        .rounded_md()
+        .bg(preview_color(colors.background.0))
+        .child(
+            h_flex()
+                .gap_2()
+                .child(
+                    div()
+                        .text_color(preview_color(colors.foreground))
+                        .child("ls"),
+                )
+                .child(div().text_color(preview_color(colors.blue)).child("dir"))
+                .child(
+                    div()
+                        .text_color(preview_color(colors.red))
+                        .child("executable"),
+                )
+                .child(
+                    div()
+                        .text_color(preview_color(colors.foreground))
+                        .child("file"),
+                ),
+        )
+        .child(h_flex().gap_1().children(swatches.into_iter().map(|color| {
+            div()
+                .w(px(18.0))
+                .h(px(6.0))
+                .rounded_sm()
+                .bg(preview_color(color))
+        })))
+}
+
+fn theme_list(cx: &mut App) -> gpui::Div {
+    let selected = cx.global::<AppSettings>().theme.clone();
+    let filter = cx.global::<AppSettings>().theme_filter.to_lowercase();
+    let themes = cx
+        .global::<AppSettings>()
+        .themes
+        .clone()
+        .into_iter()
+        .filter(|(name, theme)| {
+            let display_name = if name.is_empty() { "Default" } else { name };
+            filter.is_empty()
+                || display_name.to_lowercase().contains(&filter)
+                || theme.name.to_lowercase().contains(&filter)
+        })
+        .collect::<Vec<_>>();
+    let border = cx.theme().border;
+    let selected_border = cx.theme().primary;
+    let selected_background = cx.theme().tokens.secondary;
+    let hover_background = cx.theme().tokens.secondary_hover;
+
+    v_flex()
+        .w_full()
+        .gap_2()
+        .child(
+            h_flex().justify_between().child("Themes").child(
+                Button::new("theme-refresh")
+                    .outline()
+                    .label("Refresh")
+                    .on_click(|_, _, cx: &mut App| reload_themes(cx)),
+            ),
+        )
+        .when(themes.is_empty(), |this| {
+            this.child(
+                div()
+                    .py_4()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("No matching .toml themes found."),
+            )
+        })
+        .children(
+            themes
+                .into_iter()
+                .enumerate()
+                .map(|(index, (name, theme))| {
+                    let is_selected = name == selected;
+                    let display_name = if theme.name.is_empty() {
+                        if name.is_empty() { "Default" } else { &name }
+                    } else {
+                        &theme.name
+                    }
+                    .to_string();
+                    div()
+                        .id(("theme-card", index))
+                        .w_full()
+                        .p_3()
+                        .rounded_lg()
+                        .border_1()
+                        .border_color(if is_selected { selected_border } else { border })
+                        .when(is_selected, |this| this.bg(selected_background))
+                        .hover(move |this| this.bg(hover_background))
+                        .cursor_pointer()
+                        .on_click(move |_, _, cx| select_theme(name.clone(), cx))
+                        .child(theme_preview(theme.colors.terminal))
+                        .child(
+                            h_flex().mt_2().justify_between().child(display_name).when(
+                                is_selected,
+                                |this| {
+                                    this.child(div().text_color(selected_border).child("Selected"))
+                                },
+                            ),
+                        )
+                }),
+        )
 }
 
 /// Retint the component theme for the foreground surface opacity. A configured
@@ -759,6 +1009,33 @@ pub fn settings_view(cx: &App) -> Settings {
         .page(
             SettingPage::new("Appearance")
                 .default_open(true)
+                .group(
+                    SettingGroup::new()
+                        .title("Theme")
+                        .description(
+                            "Themes are loaded from the themes directory and applied immediately.",
+                        )
+                        .item(
+                            SettingItem::new(
+                                "Search",
+                                SettingField::input(
+                                    |cx| {
+                                        cx.global::<AppSettings>().theme_filter.clone().into()
+                                    },
+                                    |value, cx| {
+                                        cx.global_mut::<AppSettings>().theme_filter =
+                                            value.to_string();
+                                    },
+                                ),
+                            )
+                            .description("Filter themes by file name or UI theme name."),
+                        )
+                        .item(SettingItem::render(|_, _, cx| theme_list(cx)).keywords([
+                            "theme",
+                            "colors",
+                            "palette",
+                        ])),
+                )
                 .group(
                     SettingGroup::new()
                         .title("Window")

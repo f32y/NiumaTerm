@@ -586,12 +586,16 @@ fn push_virtual_run(
 /// The theme's default foreground, for harvested cells with no explicit fg
 /// (block-split).
 pub(crate) fn theme_default_foreground() -> TerminalColor {
-    TerminalColor::from_color_array(nmt_config::get().colors.foreground)
+    TerminalColor::from_color_array(nmt_config::active_colors().foreground)
+}
+
+pub(crate) fn theme_default_background() -> TerminalColor {
+    TerminalColor::from_color_array(nmt_config::active_colors().background.0)
 }
 
 /// The theme's selection background (block-split frozen selection).
 pub(crate) fn theme_selection_background() -> TerminalColor {
-    TerminalColor::from_color_array(nmt_config::get().colors.selection_background)
+    TerminalColor::from_color_array(nmt_config::active_colors().selection_background)
 }
 
 #[cfg(test)]
@@ -685,9 +689,9 @@ impl BackgroundColors {
     fn new(term_colors: TermColors) -> Self {
         // Active theme from config (loader resolves the theme/adaptive palette);
         // `term_colors` still overrides per-index via engine OSC 4 changes.
-        let colors = &nmt_config::get().colors;
+        let colors = nmt_config::active_colors();
         Self {
-            colors: List::from(colors),
+            colors: List::from(&colors),
             term_colors,
             selection_background: TerminalColor::from_color_array(colors.selection_background),
         }

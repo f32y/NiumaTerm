@@ -13,7 +13,6 @@ use std::sync::atomic::{AtomicU32, AtomicU64};
 use std::sync::{Arc, mpsc};
 use std::thread::{Builder, JoinHandle};
 
-use nmt_config::colors::{ColorRgb, NamedColor};
 use nmt_platform::{Events, Interest, Poll, Token, Waker};
 use parking_lot::FairMutex;
 use tracing::error;
@@ -1085,21 +1084,7 @@ where
 
         // Push the host theme's default colors + 256-palette into the engine so
         // SGR-indexed and default colors resolve to theme.
-        let list = nmt_config::colors::term::List::from(&colors);
-        let to3 = |arr| {
-            let c = ColorRgb::from_color_arr(arr);
-            [c.r, c.g, c.b]
-        };
-        let mut palette = [[0u8; 3]; 256];
-        for (i, slot) in palette.iter_mut().enumerate() {
-            *slot = to3(list[i]);
-        }
-        ghostty.set_colors(
-            to3(list[NamedColor::Foreground]),
-            to3(list[NamedColor::Background]),
-            to3(list[NamedColor::Cursor]),
-            &palette,
-        );
+        ghostty.set_theme_colors(&colors);
 
         // Seed the atomic with the engine's initial VT modes (SHOW_CURSOR,
         // LINE_WRAP, …) so the facade is correct before the first PTY batch.

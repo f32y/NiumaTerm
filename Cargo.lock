@@ -170,11 +170,13 @@ dependencies = [
  "nmt_input",
  "nmt_platform",
  "nmt_terminal",
+ "notify",
  "parking_lot",
  "percent-encoding",
  "raw-window-handle",
  "rust-embed",
  "serde_json",
+ "toml 1.1.2+spec-1.1.0",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
@@ -3116,6 +3118,7 @@ name = "nmt_config"
 version = "0.1.0"
 dependencies = [
  "dirs",
+ "nmt_themes",
  "onig",
  "regex",
  "serde",
@@ -3198,6 +3201,10 @@ dependencies = [
  "url",
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "nmt_themes"
+version = "0.1.0"
 
 [[package]]
 name = "nom"

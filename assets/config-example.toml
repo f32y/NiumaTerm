@@ -24,7 +24,7 @@ margin = [
 ]
 option-as-alt = "none"
 scrollback-history-limit = 10000
-theme = ""
+theme = "default_dark"
 use-fork = true
 
 [bell]

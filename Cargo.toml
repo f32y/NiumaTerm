@@ -16,6 +16,7 @@ members = [
     "crates/platform",
     "crates/shell_extension",
     "crates/terminal",
+    "crates/themes",
 
     "third_party/libghostty-vt-sys",
 
@@ -57,6 +58,7 @@ nmt_input = { path = "crates/input" }
 libghostty-vt-sys = { path = "third_party/libghostty-vt-sys" }
 nmt_platform = { path = "crates/platform" }
 nmt_terminal = { path = "crates/terminal" }
+nmt_themes = { path = "crates/themes" }
 
 # GPUI fork
 collections = { path = "third_party/collections" }
