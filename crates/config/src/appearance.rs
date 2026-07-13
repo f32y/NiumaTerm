@@ -52,6 +52,14 @@ fn default_terminal_line_height() -> f64 {
     1.0
 }
 
+fn default_background_opacity() -> f64 {
+    1.0
+}
+
+fn default_window_transparency_enabled() -> bool {
+    true
+}
+
 /// The `[appearance]` section: visual settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppearanceConfig {
@@ -97,6 +105,16 @@ pub struct AppearanceConfig {
     /// Whether terminal font pickers only show monospace fonts.
     #[serde(default = "default_monospace_only", rename = "monospace-only")]
     pub monospace_only: bool,
+    /// Allow the window to use an alpha-capable render target and acrylic
+    /// backdrop. Defaults on so existing opacity configurations keep working.
+    #[serde(
+        default = "default_window_transparency_enabled",
+        rename = "enable-window-transparency"
+    )]
+    pub window_transparency_enabled: bool,
+    /// Whole-window background opacity (0.2–1.0; clamped on load).
+    #[serde(default = "default_background_opacity", rename = "background-opacity")]
+    pub background_opacity: f64,
 }
 
 fn default_command_blocks() -> bool {
@@ -121,6 +139,8 @@ impl Default for AppearanceConfig {
             terminal_font_size: default_terminal_font_size(),
             terminal_line_height: default_terminal_line_height(),
             monospace_only: true,
+            window_transparency_enabled: default_window_transparency_enabled(),
+            background_opacity: default_background_opacity(),
         }
     }
 }
@@ -199,6 +219,8 @@ fn patch_document(
     doc["appearance"]["terminal-font-size"] = value(appearance.terminal_font_size);
     doc["appearance"]["terminal-line-height"] = value(appearance.terminal_line_height);
     doc["appearance"]["monospace-only"] = value(appearance.monospace_only);
+    doc["appearance"]["enable-window-transparency"] = value(appearance.window_transparency_enabled);
+    doc["appearance"]["background-opacity"] = value(appearance.background_opacity);
 
     ensure_explicit_table(doc, "system");
     crate::system::patch_document(doc, system);
@@ -235,6 +257,8 @@ mod tests {
             terminal_font_size: 16.0,
             terminal_line_height: 1.2,
             monospace_only: false,
+            window_transparency_enabled: true,
+            background_opacity: 0.85,
         }
     }
 

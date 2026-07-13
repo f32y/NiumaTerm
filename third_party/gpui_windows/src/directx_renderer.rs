@@ -44,6 +44,8 @@ pub(crate) struct DirectXRenderer {
     resources: Option<DirectXResources>,
     globals: DirectXGlobalElements,
     pipelines: DirectXRenderPipelines,
+    target_alpha_enabled: bool,
+    force_full_present: bool,
     direct_composition: Option<DirectComposition>,
     font_info: &'static FontInfo,
 
@@ -155,7 +157,8 @@ impl DirectXRenderer {
             .context("Creating DirectX resources")?;
         let globals = DirectXGlobalElements::new(&devices.device)
             .context("Creating DirectX global elements")?;
-        let pipelines = DirectXRenderPipelines::new(&devices.device)
+        let target_alpha_enabled = false;
+        let pipelines = DirectXRenderPipelines::new(&devices.device, target_alpha_enabled)
             .context("Creating DirectX render pipelines")?;
 
         let direct_composition = if disable_direct_composition {
@@ -176,6 +179,8 @@ impl DirectXRenderer {
             resources: Some(resources),
             globals,
             pipelines,
+            target_alpha_enabled,
+            force_full_present: false,
             direct_composition,
             font_info: Self::get_font_info(),
             width: 1,
@@ -317,7 +322,7 @@ impl DirectXRenderer {
         .context("Creating DirectX resources")?;
         let globals = DirectXGlobalElements::new(&devices.device)
             .context("Creating DirectXGlobalElements")?;
-        let pipelines = DirectXRenderPipelines::new(&devices.device)
+        let pipelines = DirectXRenderPipelines::new(&devices.device, self.target_alpha_enabled)
             .context("Creating DirectXRenderPipelines")?;
 
         let direct_composition = if disable_direct_composition {
@@ -346,6 +351,25 @@ impl DirectXRenderer {
         Ok(())
     }
 
+    pub(crate) fn set_background_appearance(
+        &mut self,
+        background_appearance: WindowBackgroundAppearance,
+    ) -> Result<()> {
+        let target_alpha_enabled = target_alpha_enabled_for(background_appearance);
+        if target_alpha_enabled == self.target_alpha_enabled {
+            return Ok(());
+        }
+
+        let devices = self.devices.as_ref().context("DirectX devices missing")?;
+        // Background appearance changes only on user input, so a one-time
+        // pipeline rebuild is simpler than retaining duplicate states.
+        self.pipelines = DirectXRenderPipelines::new(&devices.device, target_alpha_enabled)
+            .context("Recreating DirectX render pipelines for window transparency")?;
+        self.target_alpha_enabled = target_alpha_enabled;
+        self.force_full_present = true;
+        Ok(())
+    }
+
     pub(crate) fn draw(
         &mut self,
         scene: &Scene,
@@ -357,6 +381,10 @@ impl DirectXRenderer {
             // and so likely do not have the textures anymore that are required for drawing
             return Ok(());
         }
+        debug_assert_eq!(
+            self.target_alpha_enabled,
+            target_alpha_enabled_for(background_appearance)
+        );
         // Bound the present queue to one frame in flight (spec:
         // low-latency-present). Proceed on timeout rather than stall the UI
         // thread behind a hung compositor.
@@ -410,7 +438,15 @@ impl DirectXRenderer {
                 scene.surfaces.len(),
             ))?;
         }
-        self.present(damage)
+        // Every pixel's alpha semantics change with the mode, even when GPUI's
+        // scene damage covers only the setting control that triggered it.
+        self.present(if self.force_full_present {
+            None
+        } else {
+            damage
+        })?;
+        self.force_full_present = false;
+        Ok(())
     }
 
     pub(crate) fn resize(&mut self, new_size: Size<DevicePixels>) -> Result<()> {
@@ -918,20 +954,20 @@ impl Drop for DirectXResources {
 }
 
 impl DirectXRenderPipelines {
-    pub fn new(device: &ID3D11Device) -> Result<Self> {
+    pub fn new(device: &ID3D11Device, target_alpha_enabled: bool) -> Result<Self> {
         let shadow_pipeline = PipelineState::new(
             device,
             "shadow_pipeline",
             ShaderModule::Shadow,
             4,
-            create_blend_state(device)?,
+            create_blend_state(device, target_alpha_enabled)?,
         )?;
         let quad_pipeline = PipelineState::new(
             device,
             "quad_pipeline",
             ShaderModule::Quad,
             64,
-            create_blend_state(device)?,
+            create_blend_state(device, target_alpha_enabled)?,
         )?;
         let path_rasterization_pipeline = PipelineState::new(
             device,
@@ -945,21 +981,21 @@ impl DirectXRenderPipelines {
             "path_sprite_pipeline",
             ShaderModule::PathSprite,
             4,
-            create_blend_state_for_path_sprite(device)?,
+            create_blend_state_for_path_sprite(device, target_alpha_enabled)?,
         )?;
         let underline_pipeline = PipelineState::new(
             device,
             "underline_pipeline",
             ShaderModule::Underline,
             4,
-            create_blend_state(device)?,
+            create_blend_state(device, target_alpha_enabled)?,
         )?;
         let mono_sprites = PipelineState::new(
             device,
             "monochrome_sprite_pipeline",
             ShaderModule::MonochromeSprite,
             512,
-            create_blend_state(device)?,
+            create_blend_state(device, target_alpha_enabled)?,
         )?;
         let subpixel_sprites = PipelineState::new(
             device,
@@ -973,7 +1009,7 @@ impl DirectXRenderPipelines {
             "polychrome_sprite_pipeline",
             ShaderModule::PolychromeSprite,
             16,
-            create_blend_state(device)?,
+            create_blend_state(device, target_alpha_enabled)?,
         )?;
 
         Ok(Self {
@@ -1516,9 +1552,28 @@ fn set_rasterizer_state(device: &ID3D11Device, device_context: &ID3D11DeviceCont
     Ok(())
 }
 
+/// Opaque composition still needs RGB blending for antialiased edges and
+/// translucent controls; suppressing only alpha writes keeps the back buffer
+/// at the clear value of 1 without breaking those primitives.
+fn render_target_write_mask(target_alpha_enabled: bool) -> u8 {
+    let all = D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8;
+    if target_alpha_enabled {
+        all
+    } else {
+        all & !(D3D11_COLOR_WRITE_ENABLE_ALPHA.0 as u8)
+    }
+}
+
+fn target_alpha_enabled_for(background_appearance: WindowBackgroundAppearance) -> bool {
+    !matches!(background_appearance, WindowBackgroundAppearance::Opaque)
+}
+
 // https://learn.microsoft.com/en-us/windows/win32/api/d3d11/ns-d3d11-d3d11_blend_desc
 #[inline]
-fn create_blend_state(device: &ID3D11Device) -> Result<ID3D11BlendState> {
+fn create_blend_state(
+    device: &ID3D11Device,
+    target_alpha_enabled: bool,
+) -> Result<ID3D11BlendState> {
     let mut desc = D3D11_BLEND_DESC::default();
     desc.RenderTarget[0].BlendEnable = true.into();
     desc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
@@ -1526,8 +1581,12 @@ fn create_blend_state(device: &ID3D11Device) -> Result<ID3D11BlendState> {
     desc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
     desc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
     desc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
-    desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ONE;
-    desc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8;
+    // Standard "over" for the alpha channel. Additive dest alpha (ONE)
+    // saturates to fully opaque once two translucent full-bleed layers stack,
+    // which defeats DWM backdrop composition on transparent/blurred windows;
+    // opaque windows are unaffected since dest alpha starts at 1.
+    desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+    desc.RenderTarget[0].RenderTargetWriteMask = render_target_write_mask(target_alpha_enabled);
     unsafe {
         let mut state = None;
         device.CreateBlendState(&desc, Some(&mut state))?;
@@ -1546,8 +1605,7 @@ fn create_blend_state_for_subpixel_rendering(device: &ID3D11Device) -> Result<ID
     // It does not make sense to draw transparent subpixel-rendered text, since it cannot be meaningfully alpha-blended onto anything else.
     desc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
     desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
-    desc.RenderTarget[0].RenderTargetWriteMask =
-        D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8 & !D3D11_COLOR_WRITE_ENABLE_ALPHA.0 as u8;
+    desc.RenderTarget[0].RenderTargetWriteMask = render_target_write_mask(false);
 
     unsafe {
         let mut state = None;
@@ -1568,7 +1626,7 @@ fn create_blend_state_for_path_rasterization(device: &ID3D11Device) -> Result<ID
     desc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
     desc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
     desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
-    desc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8;
+    desc.RenderTarget[0].RenderTargetWriteMask = render_target_write_mask(true);
     unsafe {
         let mut state = None;
         device.CreateBlendState(&desc, Some(&mut state))?;
@@ -1577,7 +1635,10 @@ fn create_blend_state_for_path_rasterization(device: &ID3D11Device) -> Result<ID
 }
 
 #[inline]
-fn create_blend_state_for_path_sprite(device: &ID3D11Device) -> Result<ID3D11BlendState> {
+fn create_blend_state_for_path_sprite(
+    device: &ID3D11Device,
+    target_alpha_enabled: bool,
+) -> Result<ID3D11BlendState> {
     // If the feature level is set to greater than D3D_FEATURE_LEVEL_9_3, the display
     // device performs the blend in linear space, which is ideal.
     let mut desc = D3D11_BLEND_DESC::default();
@@ -1587,8 +1648,8 @@ fn create_blend_state_for_path_sprite(device: &ID3D11Device) -> Result<ID3D11Ble
     desc.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
     desc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
     desc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
-    desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ONE;
-    desc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8;
+    desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+    desc.RenderTarget[0].RenderTargetWriteMask = render_target_write_mask(target_alpha_enabled);
     unsafe {
         let mut state = None;
         device.CreateBlendState(&desc, Some(&mut state))?;
@@ -2087,5 +2148,25 @@ mod dxgi {
             (number >> 16) & 0xFFFF,
             number & 0xFFFF
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn opaque_target_write_mask_blocks_only_alpha() {
+        let alpha = super::D3D11_COLOR_WRITE_ENABLE_ALPHA.0 as u8;
+        let opaque = super::render_target_write_mask(false);
+        let transparent = super::render_target_write_mask(true);
+
+        assert_eq!(opaque & alpha, 0);
+        assert_ne!(transparent & alpha, 0);
+        assert_eq!(opaque | alpha, transparent);
+        assert!(!super::target_alpha_enabled_for(
+            super::WindowBackgroundAppearance::Opaque
+        ));
+        assert!(super::target_alpha_enabled_for(
+            super::WindowBackgroundAppearance::Blurred
+        ));
     }
 }

@@ -141,6 +141,10 @@ pub struct AppSettings {
     pub tab_width: f64,
     /// Filter the settings font picker to monospace fonts.
     pub monospace_only: bool,
+    /// Whether windows use an alpha-capable render target and acrylic backdrop.
+    pub window_transparency_enabled: bool,
+    /// Whole-window background opacity (0.2..=1.0) while transparency is enabled.
+    pub background_opacity: f64,
     /// Restore the last saved workspace/tab session on startup.
     pub restore_last_session_when_opening: bool,
     /// Manage each tab's shell with a Windows Job Object: closing the tab
@@ -171,6 +175,8 @@ impl Default for AppSettings {
             terminal_line_height: DEFAULT_LINE_HEIGHT,
             tab_width: DEFAULT_TAB_WIDTH,
             monospace_only: true,
+            window_transparency_enabled: true,
+            background_opacity: 1.0,
             restore_last_session_when_opening: true,
             manage_subprocess_job: false,
             warn_before_terminating_shell: true,
@@ -240,6 +246,16 @@ fn clamp_terminal_line_height(line_height: f64) -> f64 {
     }
 }
 
+/// Clamp a persisted background opacity; the 0.2 floor keeps the window
+/// from becoming effectively invisible.
+fn clamp_background_opacity(opacity: f64) -> f64 {
+    if opacity.is_finite() {
+        opacity.clamp(0.2, 1.0)
+    } else {
+        1.0
+    }
+}
+
 impl AppSettings {
     /// Build from the loaded config file: the `[appearance]`, `[system]`, and
     /// `[[profiles]]` sections, falling back to the built-in defaults.
@@ -280,6 +296,8 @@ impl AppSettings {
             terminal_line_height: clamp_terminal_line_height(appearance.terminal_line_height),
             tab_width: clamp_tab_width(appearance.tab_width),
             monospace_only: appearance.monospace_only,
+            window_transparency_enabled: appearance.window_transparency_enabled,
+            background_opacity: clamp_background_opacity(appearance.background_opacity),
             restore_last_session_when_opening: config.system.restore_last_session_when_opening,
             manage_subprocess_job: config.system.manage_subprocess_job,
             warn_before_terminating_shell: config.system.warn_before_terminating_shell,
@@ -358,6 +376,8 @@ impl AppSettings {
             terminal_font_size: self.terminal_font_size,
             terminal_line_height: self.terminal_line_height,
             monospace_only: self.monospace_only,
+            window_transparency_enabled: self.window_transparency_enabled,
+            background_opacity: self.background_opacity,
         };
         let system = nmt_config::system::SystemConfig {
             restore_last_session_when_opening: self.restore_last_session_when_opening,
@@ -386,6 +406,140 @@ impl AppSettings {
     }
 }
 
+fn effective_background_opacity(transparency_enabled: bool, opacity: f64) -> f64 {
+    if transparency_enabled { opacity } else { 1.0 }
+}
+
+pub(crate) fn window_background_opacity(cx: &gpui::App) -> f32 {
+    let settings = cx.global::<AppSettings>();
+    effective_background_opacity(
+        settings.window_transparency_enabled,
+        settings.background_opacity,
+    ) as f32
+}
+
+/// Retint the component theme for the effective window opacity. Root remains
+/// transparent, so each top-level surface contributes the requested alpha only
+/// once. Always reset to the mode's palette first so repeated calls do not
+/// compound alpha and opacity 1.0 restores the opaque colors.
+pub(crate) fn apply_window_translucency(cx: &mut gpui::App) {
+    let opacity = window_background_opacity(cx);
+    let theme = gpui_component::Theme::global_mut(cx);
+    let palette = if theme.mode.is_dark() {
+        theme.dark_theme.clone()
+    } else {
+        theme.light_theme.clone()
+    };
+    theme.apply_config(&palette);
+    if opacity < 1.0 {
+        theme.colors.sidebar = theme.colors.sidebar.opacity(opacity);
+        for token in [
+            &mut theme.tokens.title_bar,
+            &mut theme.tokens.tab_bar,
+            &mut theme.tokens.tab_active,
+        ] {
+            let color = token.color.opacity(opacity);
+            *token = gpui_component::ThemeToken::new(color, color.into());
+        }
+    }
+}
+
+/// Slider entity for the Background Opacity setting, cached in a global
+/// because the settings view (and its field closures) is rebuilt every render.
+struct OpacitySliderState {
+    slider: Entity<gpui_component::slider::SliderState>,
+    _subscription: gpui::Subscription,
+}
+
+impl Global for OpacitySliderState {}
+
+/// A "Background Opacity" setting field: a 0.2..=1.0 slider bound to
+/// `AppSettings.background_opacity` with a numeric readout, applying live
+/// while dragging (same live-preview contract as the other fields).
+fn background_opacity_field() -> SettingField<SharedString> {
+    use gpui_component::ActiveTheme as _;
+    use gpui_component::slider::{Slider, SliderEvent, SliderState};
+
+    SettingField::render(|options, window, cx| {
+        if !cx.has_global::<OpacitySliderState>() {
+            let value = cx.global::<AppSettings>().background_opacity as f32;
+            let slider = cx.new(|_| {
+                SliderState::new()
+                    .min(0.2)
+                    .max(1.0)
+                    .step(0.05)
+                    .default_value(value)
+            });
+            let subscription = cx.subscribe(&slider, |_, event: &SliderEvent, cx| {
+                let (SliderEvent::Change(value) | SliderEvent::Release(value)) = event;
+                cx.global_mut::<AppSettings>().background_opacity =
+                    clamp_background_opacity(value.end() as f64);
+            });
+            cx.set_global(OpacitySliderState {
+                slider,
+                _subscription: subscription,
+            });
+        }
+        let slider = cx.global::<OpacitySliderState>().slider.clone();
+
+        // Resync when the setting changed outside the slider (config load
+        // happened before this dialog first opened, or a future reset path).
+        let current = cx.global::<AppSettings>().background_opacity as f32;
+        if (slider.read(cx).value().end() - current).abs() > 0.001 {
+            slider.update(cx, |state, cx| state.set_value(current, window, cx));
+        }
+
+        h_flex()
+            // The setting row's field slot is auto-sized, so a percentage
+            // width resolves to the content width (zero for the slider bar)
+            // and the whole control collapses; horizontal layout needs a
+            // fixed width, like NumberField's `w_32`.
+            .map(|this| {
+                if options.layout.is_horizontal() {
+                    this.w_56()
+                } else {
+                    this.w_full()
+                }
+            })
+            .gap_2()
+            // The thumb (16px, centered on the track position) overhangs the
+            // track by 8px at either end; pad so it stays inside the setting
+            // row's overflow_hidden instead of being clipped at min/max.
+            //
+            // Thumb color: the dark theme leaves `slider.thumb` unset and its
+            // `primary_foreground` fallback (neutral-900) vanishes against the
+            // neutral-950 panel, so use `primary`, which contrasts with the
+            // panel in both modes.
+            .child(
+                gpui::div().flex_1().px_2().child(
+                    Slider::new(&slider)
+                        .disabled(options.disabled)
+                        .text_color(cx.theme().primary),
+                ),
+            )
+            .child(
+                gpui::div()
+                    .flex_shrink_0()
+                    .child(SharedString::from(format!("{current:.2}"))),
+            )
+    })
+}
+
+fn window_background_appearance_for(
+    transparency_enabled: bool,
+) -> gpui::WindowBackgroundAppearance {
+    if transparency_enabled {
+        gpui::WindowBackgroundAppearance::Blurred
+    } else {
+        gpui::WindowBackgroundAppearance::Opaque
+    }
+}
+
+/// Select acrylic composition only while the alpha-capable target is enabled.
+pub(crate) fn window_background_appearance(cx: &gpui::App) -> gpui::WindowBackgroundAppearance {
+    window_background_appearance_for(cx.global::<AppSettings>().window_transparency_enabled)
+}
+
 /// The settings dialog body: a two-pane `Settings` view with a single
 /// "Terminal" page holding the Input Style dropdown and the profile fields.
 /// Rebuilt every render; the field closures read/write the `AppSettings`
@@ -393,6 +547,7 @@ impl AppSettings {
 pub fn settings_view(cx: &App) -> Settings {
     let profiles = cx.global::<AppSettings>().profiles.clone();
     let job_enabled = cx.global::<AppSettings>().manage_subprocess_job;
+    let transparency_enabled = cx.global::<AppSettings>().window_transparency_enabled;
     Settings::new("app-settings")
         .sidebar_width(px(160.0))
         .page(
@@ -444,6 +599,34 @@ pub fn settings_view(cx: &App) -> Settings {
         .page(
             SettingPage::new("Appearance")
                 .default_open(true)
+                .group(
+                    SettingGroup::new()
+                        .title("Window")
+                        .item(
+                            SettingItem::new(
+                                "Enable Window Transparency",
+                                SettingField::switch(
+                                    |cx| {
+                                        cx.global::<AppSettings>().window_transparency_enabled
+                                    },
+                                    |value, cx| {
+                                        cx.global_mut::<AppSettings>()
+                                            .window_transparency_enabled = value;
+                                    },
+                                ),
+                            )
+                            .description(
+                                "Use an acrylic backdrop and preserve window alpha for live transparency.",
+                            ),
+                        )
+                        .item(
+                            SettingItem::new("Background Opacity", background_opacity_field())
+                                .description(
+                                    "Whole-window opacity while window transparency is enabled.",
+                                )
+                                .disabled(!transparency_enabled),
+                        ),
+                )
                 .group(
                     SettingGroup::new().title("Interface").item(
                         SettingItem::new(
@@ -988,6 +1171,24 @@ mod tests {
         assert_eq!(clamp_terminal_line_height(0.1), 0.8);
         assert_eq!(clamp_terminal_line_height(5.0), 3.0);
         assert_eq!(clamp_terminal_line_height(f64::NAN), DEFAULT_LINE_HEIGHT);
+    }
+
+    #[test]
+    fn window_transparency_controls_opacity_and_blur() {
+        assert_eq!(clamp_background_opacity(0.1), 0.2);
+        assert_eq!(clamp_background_opacity(0.65), 0.65);
+        assert_eq!(clamp_background_opacity(2.0), 1.0);
+        assert_eq!(clamp_background_opacity(f64::NAN), 1.0);
+        assert_eq!(effective_background_opacity(false, 0.65), 1.0);
+        assert_eq!(effective_background_opacity(true, 0.65), 0.65);
+        assert_eq!(
+            window_background_appearance_for(true),
+            gpui::WindowBackgroundAppearance::Blurred
+        );
+        assert_eq!(
+            window_background_appearance_for(false),
+            gpui::WindowBackgroundAppearance::Opaque
+        );
     }
 
     #[test]

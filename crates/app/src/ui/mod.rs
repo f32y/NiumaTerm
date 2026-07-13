@@ -3,7 +3,9 @@
 //! `persistence` (session save/restore), `sidebar` and `tab_bar` (chrome renderers).
 
 pub(crate) use self::assets::AppAssets;
-pub(crate) use self::settings::AppSettings;
+pub(crate) use self::settings::{
+    AppSettings, apply_window_translucency, window_background_appearance, window_background_opacity,
+};
 pub(crate) use self::shell::{
     CloseTab, NewTab, NewWindow, NewWorkspace, NextTab, NextWorkspace, PrevTab, PrevWorkspace,
     ResizePaneDown, ResizePaneLeft, ResizePaneRight, ResizePaneUp, Shell, ShowSettings, SplitDown,

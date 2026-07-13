@@ -194,6 +194,7 @@ fn run_app(argv_url: Option<String>) {
             gpui_component::init(cx);
             gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
             cx.set_global(AppSettings::load());
+            crate::ui::apply_window_translucency(cx);
             nmt_platform::set_job_management(cx.global::<AppSettings>().manage_subprocess_job);
             // The platform remembers the choice and applies it to the vsync
             // thread when that spawns (after this closure returns).
@@ -205,6 +206,24 @@ fn run_app(argv_url: Option<String>) {
             // deferred to when the settings dialog closes (see Shell::on_show_settings).
             cx.observe_global::<AppSettings>(|cx| {
                 nmt_platform::set_job_management(cx.global::<AppSettings>().manage_subprocess_job);
+                // Opacity changes retint the theme and switch each window
+                // between acrylic composition and opaque presentation.
+                crate::ui::apply_window_translucency(cx);
+                let background = crate::ui::window_background_appearance(cx);
+                let handles: Vec<_> = cx
+                    .global::<ShellRegistry>()
+                    .0
+                    .iter()
+                    .map(|entry| entry.handle)
+                    .collect();
+                for handle in handles {
+                    handle
+                        .update(cx, |_, window, _| {
+                            window.set_background_appearance(background)
+                        })
+                        .ok();
+                }
+                cx.refresh_windows();
             })
             .detach();
 
