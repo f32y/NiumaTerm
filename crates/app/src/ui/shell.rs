@@ -122,6 +122,8 @@ pub(crate) struct Shell {
     /// Whether we've started observing the wrapping `Root` (so dialog open/close
     /// re-renders the shell, which draws the dialog layer). Set on first render.
     root_observed: bool,
+    /// Theme directory watcher, alive only while this shell's settings dialog is open.
+    theme_watcher: Option<gpui::Task<()>>,
     focus: FocusHandle,
     /// This shell's window in the `WindowRegistry`; all state writes target
     /// this entry.
@@ -255,6 +257,7 @@ impl Shell {
             tab_rename: None,
             needs_focus: true,
             root_observed: false,
+            theme_watcher: None,
             focus: cx.focus_handle(),
             window_id,
             token_usage: cx.new(TokenUsageView::new),
@@ -1717,6 +1720,7 @@ impl Shell {
     /// closes the dialog — mask clicks and Escape are disabled so a stray click
     /// can't dismiss it.
     fn on_show_settings(&mut self, _: &ShowSettings, window: &mut Window, cx: &mut Context<Self>) {
+        self.theme_watcher = crate::ui::watch_themes(cx);
         // Sized as a fraction of the window, so a large window gets a
         // proportionally large dialog.
         let shell = cx.entity();
@@ -1728,7 +1732,10 @@ impl Shell {
                 .keyboard(false)
                 .on_close(move |_, window, cx| {
                     cx.global::<AppSettings>().save();
-                    shell.update(cx, |this, cx| this.focus_active(window, cx));
+                    shell.update(cx, |this, cx| {
+                        this.theme_watcher = None;
+                        this.focus_active(window, cx);
+                    });
                 })
                 .w(window.viewport_size().width * 0.7)
                 .content(|content, window, cx| {

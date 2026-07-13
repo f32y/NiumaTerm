@@ -210,9 +210,9 @@ fn run_app(argv_url: Option<String>, testing: bool) {
         .with_assets(AppAssets)
         .run(move |cx: &mut App| {
             // Initialize gpui-component (theme, root, component globals) before any
-            // component renders, and use the dark theme to match the terminal.
+            // component renders. Themes without `[colors.ui]` retain the dark default.
             gpui_component::init(cx);
-            gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+            crate::ui::apply_ui_theme(nmt_config::get().ui_theme.as_ref(), cx);
             cx.set_global(AppSettings::load());
             crate::ui::apply_window_translucency(cx);
             nmt_platform::set_job_management(cx.global::<AppSettings>().manage_subprocess_job);

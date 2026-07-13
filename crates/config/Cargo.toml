@@ -9,6 +9,7 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+nmt_themes.workspace = true
 dirs.workspace = true
 regex.workspace = true
 serde.workspace = true

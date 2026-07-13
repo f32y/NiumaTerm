@@ -64,6 +64,10 @@ pub struct TerminalSurface {
 }
 
 impl TerminalSurface {
+    pub(crate) fn set_theme_colors(&self, colors: &nmt_config::colors::Colors) {
+        self.session.engine.lock().set_theme_colors(colors);
+    }
+
     pub fn new(
         config: TerminalSessionConfig,
         id: u64,

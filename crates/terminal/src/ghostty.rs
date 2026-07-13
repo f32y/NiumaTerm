@@ -961,6 +961,24 @@ impl GhosttyTerminal {
         }
     }
 
+    pub fn set_theme_colors(&mut self, colors: &nmt_config::colors::Colors) {
+        use nmt_config::colors::term::List;
+        use nmt_config::colors::{ColorRgb, NamedColor};
+
+        let list = List::from(colors);
+        let to_rgb = |color| {
+            let color = ColorRgb::from_color_arr(color);
+            [color.r, color.g, color.b]
+        };
+        let palette = std::array::from_fn(|index| to_rgb(list[index]));
+        self.set_colors(
+            to_rgb(list[NamedColor::Foreground]),
+            to_rgb(list[NamedColor::Background]),
+            to_rgb(list[NamedColor::Cursor]),
+            &palette,
+        );
+    }
+
     /// Probe: whether any visible row carries a PROMPT semantic tag (command-blocks-
     /// rendering — mark-forwarding regression checks in pty_pipe tests).
     #[cfg(test)]
@@ -3035,6 +3053,25 @@ mod tests {
                 b: 0x66
             }),
             "OSC 11 sets the background override"
+        );
+    }
+
+    #[test]
+    fn theme_colors_update_engine_defaults() {
+        use nmt_config::colors::{ColorRgb, Colors};
+
+        let mut terminal = GhosttyTerminal::new(8, 3, 100).unwrap();
+        let colors = Colors::default();
+        terminal.set_theme_colors(&colors);
+
+        let snapshot = terminal.snapshot().unwrap();
+        assert_eq!(
+            snapshot.colors.fg,
+            ColorRgb::from_color_arr(colors.foreground)
+        );
+        assert_eq!(
+            snapshot.colors.bg,
+            ColorRgb::from_color_arr(colors.background.0)
         );
     }
 

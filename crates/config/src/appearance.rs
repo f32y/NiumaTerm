@@ -172,6 +172,7 @@ impl Default for AppearanceConfig {
 /// not parse as TOML it is left untouched, so a hand-editable file is never
 /// clobbered; the error is returned to the caller.
 pub fn save_settings(
+    theme: &str,
     appearance: &AppearanceConfig,
     system: &SystemConfig,
     profiles: &[Profile],
@@ -179,6 +180,7 @@ pub fn save_settings(
 ) -> std::io::Result<()> {
     save_settings_to(
         &crate::config_file_path(),
+        theme,
         appearance,
         system,
         profiles,
@@ -188,6 +190,7 @@ pub fn save_settings(
 
 fn save_settings_to(
     path: &std::path::Path,
+    theme: &str,
     appearance: &AppearanceConfig,
     system: &SystemConfig,
     profiles: &[Profile],
@@ -204,7 +207,14 @@ fn save_settings_to(
         Err(_) => DocumentMut::new(),
     };
 
-    patch_document(&mut doc, appearance, system, profiles, default_profile);
+    patch_document(
+        &mut doc,
+        theme,
+        appearance,
+        system,
+        profiles,
+        default_profile,
+    );
 
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
@@ -219,11 +229,13 @@ fn save_settings_to(
 #[allow(clippy::too_many_arguments)]
 fn patch_document(
     doc: &mut DocumentMut,
+    theme: &str,
     appearance: &AppearanceConfig,
     system: &SystemConfig,
     profiles: &[Profile],
     default_profile: &str,
 ) {
+    doc["theme"] = value(theme);
     ensure_explicit_table(doc, "appearance");
     doc["appearance"]["input-style"] = value(appearance.input_style.as_str());
     doc["appearance"]["command-blocks"] = value(appearance.command_blocks);
@@ -313,6 +325,7 @@ mod tests {
     fn patch(doc: &mut DocumentMut) {
         patch_document(
             doc,
+            "test-theme",
             &sample_appearance(),
             &sample_system(),
             &sample_profiles(),
@@ -363,6 +376,7 @@ mod tests {
         let save = || {
             save_settings_to(
                 &path,
+                "test-theme",
                 &sample_appearance(),
                 &sample_system(),
                 &sample_profiles(),
@@ -375,6 +389,7 @@ mod tests {
         let config: crate::Config =
             toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(config.appearance, sample_appearance());
+        assert_eq!(config.theme, "test-theme");
 
         // Second save updates in place and leaves no temp file behind.
         save().unwrap();

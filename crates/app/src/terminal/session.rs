@@ -181,7 +181,7 @@ impl TerminalSession {
             },
             window_id,
             id as usize,
-            nmt_config::colors::Colors::default(),
+            nmt_config::active_colors(),
             config.scrollback_lines,
             engine_blocks,
         ) {

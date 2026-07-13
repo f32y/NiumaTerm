@@ -17,6 +17,7 @@ use nmt_terminal::ansi::CursorShape;
 
 use super::frame::{
     TerminalColor, TerminalCursor, TerminalFrame, TerminalFrameCache, TerminalLine,
+    theme_default_background, theme_default_foreground,
 };
 use super::surface::TerminalSurface;
 use super::{input, metrics, wake};
@@ -156,6 +157,7 @@ impl TerminalPane {
     ) -> Self {
         // Re-measure the cell and repaint when settings change (terminal font).
         cx.observe_global::<AppSettings>(|this, cx| {
+            this.surface.set_theme_colors(&nmt_config::active_colors());
             this.cell_metrics = None;
             this.frame_cache.invalidate();
             cx.notify();
@@ -1355,8 +1357,8 @@ impl Render for TerminalPane {
             .relative()
             // This is the terminal region's single full-bleed background;
             // cells with explicit background colors stay opaque on top.
-            .bg(rgb(0x0b0f14).opacity(surface_background_opacity(cx)))
-            .text_color(rgb(0xd8dee9))
+            .bg(rgb(theme_default_background().rgb_u32()).opacity(surface_background_opacity(cx)))
+            .text_color(rgb(theme_default_foreground().rgb_u32()))
             .font_family(metrics::font_family(cx))
             .text_size(px(metrics::font_size_px(cx)))
             .line_height(px(cell.height_px))
