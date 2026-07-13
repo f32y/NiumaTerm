@@ -27,7 +27,7 @@ use crate::terminal::surface::{
     SurfaceCell, SurfaceCellSide, SurfaceMouseButton, SurfaceMouseEventKind,
     TerminalKeyAction as SurfaceKeyAction,
 };
-use crate::ui::{AppSettings, window_background_opacity};
+use crate::ui::{AppSettings, surface_background_opacity};
 
 actions!(
     terminal,
@@ -1355,7 +1355,7 @@ impl Render for TerminalPane {
             .relative()
             // This is the terminal region's single full-bleed background;
             // cells with explicit background colors stay opaque on top.
-            .bg(rgb(0x0b0f14).opacity(window_background_opacity(cx)))
+            .bg(rgb(0x0b0f14).opacity(surface_background_opacity(cx)))
             .text_color(rgb(0xd8dee9))
             .font_family(metrics::font_family(cx))
             .text_size(px(metrics::font_size_px(cx)))

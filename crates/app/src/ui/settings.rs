@@ -10,7 +10,7 @@
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     App, AppContext as _, Entity, FileDialogFilter, Global, ParentElement as _, PathPromptOptions,
-    SharedString, Styled as _, px, relative,
+    SharedString, Styled as _, div, px, relative,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::group_box::GroupBoxVariant;
@@ -18,7 +18,10 @@ use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::setting::{
     NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage, Settings,
 };
-use gpui_component::{AxisExt as _, Disableable as _, Sizable as _, h_flex, v_flex};
+use gpui_component::slider::{Slider, SliderEvent, SliderState};
+use gpui_component::{
+    ActiveTheme as _, AxisExt as _, Disableable as _, Sizable as _, h_flex, v_flex,
+};
 
 /// Default shell for a new profile.
 pub const DEFAULT_SHELL: &str = r"C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe";
@@ -27,6 +30,7 @@ pub const DEFAULT_SHELL: &str = r"C:\WINDOWS\System32\WindowsPowerShell\v1.0\pow
 pub const DEFAULT_FONT_FAMILY: &str = "Consolas";
 pub const DEFAULT_FONT_SIZE: f64 = 14.0;
 pub const DEFAULT_LINE_HEIGHT: f64 = 1.0;
+const DEFAULT_BACKGROUND_IMAGE_OPACITY: f64 = 0.3;
 
 /// Font family for the app chrome (titlebar, sidebar, tabs, dialogs), used
 /// when the config sets none.
@@ -145,6 +149,10 @@ pub struct AppSettings {
     pub window_transparency_enabled: bool,
     /// Whole-window background opacity (0.2..=1.0) while transparency is enabled.
     pub background_opacity: f64,
+    /// Local image drawn behind all window content.
+    pub background_image: Option<String>,
+    /// How strongly the image shows through the window surfaces (0.0..=1.0).
+    pub background_image_opacity: f64,
     /// Restore the last saved workspace/tab session on startup.
     pub restore_last_session_when_opening: bool,
     /// Manage each tab's shell with a Windows Job Object: closing the tab
@@ -177,6 +185,8 @@ impl Default for AppSettings {
             monospace_only: true,
             window_transparency_enabled: true,
             background_opacity: 1.0,
+            background_image: None,
+            background_image_opacity: DEFAULT_BACKGROUND_IMAGE_OPACITY,
             restore_last_session_when_opening: true,
             manage_subprocess_job: false,
             warn_before_terminating_shell: true,
@@ -256,6 +266,14 @@ fn clamp_background_opacity(opacity: f64) -> f64 {
     }
 }
 
+fn clamp_background_image_opacity(opacity: f64) -> f64 {
+    if opacity.is_finite() {
+        opacity.clamp(0.0, 1.0)
+    } else {
+        DEFAULT_BACKGROUND_IMAGE_OPACITY
+    }
+}
+
 impl AppSettings {
     /// Build from the loaded config file: the `[appearance]`, `[system]`, and
     /// `[[profiles]]` sections, falling back to the built-in defaults.
@@ -298,6 +316,13 @@ impl AppSettings {
             monospace_only: appearance.monospace_only,
             window_transparency_enabled: appearance.window_transparency_enabled,
             background_opacity: clamp_background_opacity(appearance.background_opacity),
+            background_image: appearance
+                .background_image
+                .clone()
+                .filter(|path| !path.trim().is_empty()),
+            background_image_opacity: clamp_background_image_opacity(
+                appearance.background_image_opacity,
+            ),
             restore_last_session_when_opening: config.system.restore_last_session_when_opening,
             manage_subprocess_job: config.system.manage_subprocess_job,
             warn_before_terminating_shell: config.system.warn_before_terminating_shell,
@@ -378,6 +403,8 @@ impl AppSettings {
             monospace_only: self.monospace_only,
             window_transparency_enabled: self.window_transparency_enabled,
             background_opacity: self.background_opacity,
+            background_image: self.background_image.clone(),
+            background_image_opacity: self.background_image_opacity,
         };
         let system = nmt_config::system::SystemConfig {
             restore_last_session_when_opening: self.restore_last_session_when_opening,
@@ -410,20 +437,49 @@ fn effective_background_opacity(transparency_enabled: bool, opacity: f64) -> f64
     if transparency_enabled { opacity } else { 1.0 }
 }
 
-pub(crate) fn window_background_opacity(cx: &gpui::App) -> f32 {
+fn effective_surface_background_opacity(window_opacity: f64, image_opacity: Option<f64>) -> f64 {
+    window_opacity * (1.0 - image_opacity.unwrap_or(0.0))
+}
+
+pub(crate) fn surface_background_opacity(cx: &gpui::App) -> f32 {
     let settings = cx.global::<AppSettings>();
-    effective_background_opacity(
-        settings.window_transparency_enabled,
-        settings.background_opacity,
+    effective_surface_background_opacity(
+        effective_background_opacity(
+            settings.window_transparency_enabled,
+            settings.background_opacity,
+        ),
+        settings
+            .background_image
+            .as_ref()
+            .map(|_| settings.background_image_opacity),
     ) as f32
 }
 
-/// Retint the component theme for the effective window opacity. Root remains
-/// transparent, so each top-level surface contributes the requested alpha only
-/// once. Always reset to the mode's palette first so repeated calls do not
-/// compound alpha and opacity 1.0 restores the opaque colors.
+fn effective_background_image_layer_opacity(window_opacity: f64, image_opacity: f64) -> f64 {
+    let uncovered = 1.0 - effective_surface_background_opacity(window_opacity, Some(image_opacity));
+    if uncovered > 0.0 {
+        window_opacity * image_opacity / uncovered
+    } else {
+        0.0
+    }
+}
+
+pub(crate) fn background_image_layer_opacity(cx: &gpui::App) -> f32 {
+    let settings = cx.global::<AppSettings>();
+    effective_background_image_layer_opacity(
+        effective_background_opacity(
+            settings.window_transparency_enabled,
+            settings.background_opacity,
+        ),
+        settings.background_image_opacity,
+    ) as f32
+}
+
+/// Retint the component theme for the foreground surface opacity. A configured
+/// image shows through by reducing this tint; without an image it remains the
+/// effective window opacity. Reset first so repeated calls do not compound alpha.
 pub(crate) fn apply_window_translucency(cx: &mut gpui::App) {
-    let opacity = window_background_opacity(cx);
+    let opacity = surface_background_opacity(cx);
     let theme = gpui_component::Theme::global_mut(cx);
     let palette = if theme.mode.is_dark() {
         theme.dark_theme.clone()
@@ -444,47 +500,81 @@ pub(crate) fn apply_window_translucency(cx: &mut gpui::App) {
     }
 }
 
-/// Slider entity for the Background Opacity setting, cached in a global
-/// because the settings view (and its field closures) is rebuilt every render.
+#[derive(Clone, Copy)]
+enum OpacityTarget {
+    Window,
+    Image,
+}
+
+impl OpacityTarget {
+    fn value(self, settings: &AppSettings) -> f64 {
+        match self {
+            Self::Window => settings.background_opacity,
+            Self::Image => settings.background_image_opacity,
+        }
+    }
+
+    fn min(self) -> f32 {
+        match self {
+            Self::Window => 0.2,
+            Self::Image => 0.0,
+        }
+    }
+
+    fn set(self, value: f64, settings: &mut AppSettings) {
+        match self {
+            Self::Window => settings.background_opacity = clamp_background_opacity(value),
+            Self::Image => {
+                settings.background_image_opacity = clamp_background_image_opacity(value)
+            }
+        }
+    }
+}
+
+/// Both opacity fields share persistent slider entities because the settings
+/// view and its field closures are rebuilt every render.
 struct OpacitySliderState {
-    slider: Entity<gpui_component::slider::SliderState>,
-    _subscription: gpui::Subscription,
+    window: Entity<SliderState>,
+    image: Entity<SliderState>,
+    _subscriptions: [gpui::Subscription; 2],
 }
 
 impl Global for OpacitySliderState {}
 
-/// A "Background Opacity" setting field: a 0.2..=1.0 slider bound to
-/// `AppSettings.background_opacity` with a numeric readout, applying live
-/// while dragging (same live-preview contract as the other fields).
-fn background_opacity_field() -> SettingField<SharedString> {
-    use gpui_component::ActiveTheme as _;
-    use gpui_component::slider::{Slider, SliderEvent, SliderState};
-
-    SettingField::render(|options, window, cx| {
+fn opacity_slider_field(target: OpacityTarget) -> SettingField<SharedString> {
+    SettingField::render(move |options, window, cx| {
         if !cx.has_global::<OpacitySliderState>() {
-            let value = cx.global::<AppSettings>().background_opacity as f32;
-            let slider = cx.new(|_| {
-                SliderState::new()
-                    .min(0.2)
-                    .max(1.0)
-                    .step(0.05)
-                    .default_value(value)
-            });
-            let subscription = cx.subscribe(&slider, |_, event: &SliderEvent, cx| {
-                let (SliderEvent::Change(value) | SliderEvent::Release(value)) = event;
-                cx.global_mut::<AppSettings>().background_opacity =
-                    clamp_background_opacity(value.end() as f64);
-            });
+            let make_slider = |target: OpacityTarget, cx: &mut App| {
+                let value = target.value(cx.global::<AppSettings>()) as f32;
+                let slider = cx.new(|_| {
+                    SliderState::new()
+                        .min(target.min())
+                        .max(1.0)
+                        .step(0.05)
+                        .default_value(value)
+                });
+                let subscription = cx.subscribe(&slider, move |_, event: &SliderEvent, cx| {
+                    let (SliderEvent::Change(value) | SliderEvent::Release(value)) = event;
+                    target.set(value.end() as f64, cx.global_mut::<AppSettings>());
+                });
+                (slider, subscription)
+            };
+            let (window_slider, window_subscription) = make_slider(OpacityTarget::Window, cx);
+            let (image_slider, image_subscription) = make_slider(OpacityTarget::Image, cx);
             cx.set_global(OpacitySliderState {
-                slider,
-                _subscription: subscription,
+                window: window_slider,
+                image: image_slider,
+                _subscriptions: [window_subscription, image_subscription],
             });
         }
-        let slider = cx.global::<OpacitySliderState>().slider.clone();
+        let sliders = cx.global::<OpacitySliderState>();
+        let slider = match target {
+            OpacityTarget::Window => &sliders.window,
+            OpacityTarget::Image => &sliders.image,
+        }
+        .clone();
 
-        // Resync when the setting changed outside the slider (config load
-        // happened before this dialog first opened, or a future reset path).
-        let current = cx.global::<AppSettings>().background_opacity as f32;
+        let current = target.value(cx.global::<AppSettings>()) as f32;
         if (slider.read(cx).value().end() - current).abs() > 0.001 {
             slider.update(cx, |state, cx| state.set_value(current, window, cx));
         }
@@ -525,6 +615,74 @@ fn background_opacity_field() -> SettingField<SharedString> {
     })
 }
 
+fn background_opacity_field() -> SettingField<SharedString> {
+    opacity_slider_field(OpacityTarget::Window)
+}
+
+fn background_image_opacity_field() -> SettingField<SharedString> {
+    opacity_slider_field(OpacityTarget::Image)
+}
+
+fn background_image_field() -> SettingField<SharedString> {
+    SettingField::render(|options, _window, cx| {
+        let path = cx.global::<AppSettings>().background_image.clone();
+        let label = SharedString::from(path.clone().unwrap_or_else(|| "None".to_string()));
+
+        h_flex()
+            .map(|this| {
+                if options.layout.is_horizontal() {
+                    this.w_64()
+                } else {
+                    this.w_full()
+                }
+            })
+            .gap_2()
+            .child(div().flex_1().min_w_0().truncate().child(label))
+            .child(
+                Button::new("background-image-browse")
+                    .outline()
+                    .label("Browse")
+                    .disabled(options.disabled)
+                    .on_click(|_, window, cx| {
+                        let rx = cx.prompt_for_paths(PathPromptOptions {
+                            files: true,
+                            directories: false,
+                            multiple: false,
+                            prompt: Some("Select background image".into()),
+                            file_types: vec![FileDialogFilter {
+                                name: "Images".into(),
+                                extensions: ["png", "jpg", "jpeg", "webp", "bmp"]
+                                    .into_iter()
+                                    .map(Into::into)
+                                    .collect(),
+                            }],
+                        });
+                        window
+                            .spawn(cx, async move |cx| {
+                                if let Ok(Ok(Some(paths))) = rx.await
+                                    && let Some(path) = paths.first()
+                                {
+                                    let path = path.display().to_string();
+                                    let _ = cx.update_global(|settings: &mut AppSettings, _, _| {
+                                        settings.background_image = Some(path);
+                                    });
+                                }
+                            })
+                            .detach();
+                    }),
+            )
+            .children(path.is_some().then(|| {
+                Button::new("background-image-clear")
+                    .outline()
+                    .label("Clear")
+                    .disabled(options.disabled)
+                    .on_click(|_, _, cx: &mut App| {
+                        cx.global_mut::<AppSettings>().background_image = None;
+                    })
+            }))
+    })
+}
+
 fn window_background_appearance_for(
     transparency_enabled: bool,
 ) -> gpui::WindowBackgroundAppearance {
@@ -548,6 +706,7 @@ pub fn settings_view(cx: &App) -> Settings {
     let profiles = cx.global::<AppSettings>().profiles.clone();
     let job_enabled = cx.global::<AppSettings>().manage_subprocess_job;
     let transparency_enabled = cx.global::<AppSettings>().window_transparency_enabled;
+    let background_image_enabled = cx.global::<AppSettings>().background_image.is_some();
     Settings::new("app-settings")
         .sidebar_width(px(160.0))
         .page(
@@ -625,6 +784,18 @@ pub fn settings_view(cx: &App) -> Settings {
                                     "Whole-window opacity while window transparency is enabled.",
                                 )
                                 .disabled(!transparency_enabled),
+                        )
+                        .item(
+                            SettingItem::new("Background Image", background_image_field())
+                                .description("Local image stretched to cover the whole window."),
+                        )
+                        .item(
+                            SettingItem::new(
+                                "Background Image Opacity",
+                                background_image_opacity_field(),
+                            )
+                            .description("How strongly the image shows through window surfaces.")
+                            .disabled(!background_image_enabled),
                         ),
                 )
                 .group(
@@ -1181,6 +1352,19 @@ mod tests {
         assert_eq!(clamp_background_opacity(f64::NAN), 1.0);
         assert_eq!(effective_background_opacity(false, 0.65), 1.0);
         assert_eq!(effective_background_opacity(true, 0.65), 0.65);
+        assert_eq!(clamp_background_image_opacity(-1.0), 0.0);
+        assert_eq!(clamp_background_image_opacity(2.0), 1.0);
+        assert_eq!(
+            clamp_background_image_opacity(f64::NAN),
+            DEFAULT_BACKGROUND_IMAGE_OPACITY
+        );
+        assert_eq!(effective_surface_background_opacity(1.0, None), 1.0);
+        assert!((effective_surface_background_opacity(1.0, Some(0.3)) - 0.7).abs() < 1e-12);
+        assert_eq!(effective_background_image_layer_opacity(1.0, 0.0), 0.0);
+        assert!((effective_background_image_layer_opacity(1.0, 0.3) - 1.0).abs() < 1e-12);
+        let surface = effective_surface_background_opacity(0.65, Some(0.3));
+        let image = effective_background_image_layer_opacity(0.65, 0.3);
+        assert!((surface + (1.0 - surface) * image - 0.65).abs() < 1e-12);
         assert_eq!(
             window_background_appearance_for(true),
             gpui::WindowBackgroundAppearance::Blurred

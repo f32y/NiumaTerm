@@ -1,7 +1,7 @@
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Axis, Context, Entity, FocusHandle, Focusable, MouseDownEvent,
-    PathPromptOptions, Pixels, Render, SharedString, Window, WindowId, actions, div, px,
+    AnyElement, App, Axis, Context, Entity, FocusHandle, Focusable, MouseDownEvent, ObjectFit,
+    PathPromptOptions, Pixels, Render, SharedString, Window, WindowId, actions, div, img, px,
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::dialog::{DialogAction, DialogButtonProps, DialogClose, DialogFooter};
@@ -1798,8 +1798,22 @@ impl Render for Shell {
         );
         self.apply_pending_ratios(cx);
         let pane_tree = self.render_active_tree(cx);
+        let background_image = cx
+            .global::<AppSettings>()
+            .background_image
+            .clone()
+            .map(|path| {
+                img(std::path::PathBuf::from(path))
+                    .absolute()
+                    .inset_0()
+                    .size_full()
+                    .object_fit(ObjectFit::Cover)
+                    .opacity(crate::ui::background_image_layer_opacity(cx))
+            });
         div()
             .size_full()
+            .relative()
+            .overflow_hidden()
             .flex()
             .flex_col()
             // All chrome inherits the configured UI font; terminal panes override it.
@@ -1824,6 +1838,7 @@ impl Render for Shell {
             .on_action(cx.listener(Self::on_toggle_sidebar))
             .on_action(cx.listener(Self::on_toggle_git_sidebar))
             .on_action(cx.listener(Self::on_show_settings))
+            .children(background_image)
             // Interactive chrome lives in the titlebar but is wrapped in
             // `occlude()`: that blocks the drag hitbox beneath it, so Windows
             // treats these regions as client (clickable) while the empty titlebar
