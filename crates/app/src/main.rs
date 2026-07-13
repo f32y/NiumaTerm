@@ -35,7 +35,7 @@ use crate::ui::{
 use crate::window::{AppWindow, LastActiveWindow, ShellRegistry, WindowRegistry};
 
 enum StartupArgs {
-    Run { url: Option<String> },
+    Run { url: Option<String>, testing: bool },
     RegisterShellExtension,
     UnregisterShellExtension,
 }
@@ -67,7 +67,7 @@ fn main() {
             }
             return;
         }
-        StartupArgs::Run { url } => run_app(url),
+        StartupArgs::Run { url, testing } => run_app(url, testing),
     }
 }
 
@@ -104,6 +104,12 @@ where
                 .conflicts_with_all(["register", "new-tab", "new-window", "url"]),
         )
         .arg(
+            Arg::new("testing")
+                .long("testing")
+                .action(ArgAction::SetTrue)
+                .conflicts_with_all(["register", "unregister"]),
+        )
+        .arg(
             Arg::new("new-tab")
                 .long("new-tab")
                 .value_name("PATH")
@@ -133,6 +139,7 @@ where
         StartupArgs::UnregisterShellExtension
     } else {
         StartupArgs::Run {
+            testing: matches.get_flag("testing"),
             url: matches
                 .get_one::<String>("url")
                 .cloned()
@@ -150,7 +157,11 @@ where
     }
 }
 
-fn run_app(argv_url: Option<String>) {
+fn run_app(argv_url: Option<String>, testing: bool) {
+    nmt_agent_hook::agent_process().set_testing(testing);
+    if testing {
+        nmt_config::enable_testing_mode();
+    }
     // Hold the appender guard for the whole app lifetime; `main` blocks until exit.
     let _log_guard = crate::logging::init_logging().expect("init logging");
     let startup_files = load_startup_files_or_exit();
@@ -163,10 +174,13 @@ fn run_app(argv_url: Option<String>) {
             CliAction::Activate
         })
     });
-    if !nmt_platform::windows::ipc::try_become_primary() {
+    if !nmt_platform::windows::ipc::try_become_primary(testing) {
         let action = argv_action.clone().unwrap_or(CliAction::Activate);
-        match nmt_platform::windows::ipc::send(&action.to_url(), std::time::Duration::from_secs(2))
-        {
+        match nmt_platform::windows::ipc::send(
+            &action.to_url(),
+            std::time::Duration::from_secs(2),
+            testing,
+        ) {
             Ok(()) => return,
             Err(error) => tracing::warn!("primary instance pipe unreachable: {error}"),
         }
@@ -174,7 +188,7 @@ fn run_app(argv_url: Option<String>) {
         // the user with a fresh primary rather than doing nothing.
     }
     let (cli_tx, mut cli_rx) = futures::channel::mpsc::unbounded::<ipc::IpcAction>();
-    ipc::spawn_pipe_server(cli_tx.clone());
+    ipc::spawn_pipe_server(cli_tx.clone(), testing);
     if let Some(action) = argv_action {
         // The primary's own argv URL joins the same dispatch path as
         // forwarded ones, applied after startup (and session restore).
@@ -405,7 +419,7 @@ mod tests {
 
     #[test]
     fn keeps_url_argument_for_normal_launch() {
-        let StartupArgs::Run { url } =
+        let StartupArgs::Run { url, .. } =
             parse_startup_args_from(["NiumaTerm", "nmt://action/new_tab?path=C%3A%2FWorkspace"])
         else {
             panic!("expected normal launch");
@@ -418,7 +432,7 @@ mod tests {
 
     #[test]
     fn parses_shell_extension_path_flags() {
-        let StartupArgs::Run { url } =
+        let StartupArgs::Run { url, .. } =
             parse_startup_args_from(["NiumaTerm", "--new-tab", r"C:\A Dir"])
         else {
             panic!("expected normal launch");
@@ -428,7 +442,7 @@ mod tests {
             Some("nmt://action/new_tab?path=C%3A%5CA%20Dir")
         );
 
-        let StartupArgs::Run { url } =
+        let StartupArgs::Run { url, .. } =
             parse_startup_args_from(["NiumaTerm", "--new-window", r"C:\A&B"])
         else {
             panic!("expected normal launch");
@@ -437,6 +451,21 @@ mod tests {
             url.as_deref(),
             Some("nmt://action/new_window?path=C%3A%5CA%26B")
         );
+    }
+
+    #[test]
+    fn parses_testing_mode() {
+        let StartupArgs::Run { url, testing } = parse_startup_args_from(["NiumaTerm", "--testing"])
+        else {
+            panic!("expected testing launch");
+        };
+        assert!(testing);
+        assert!(url.is_none());
+
+        let StartupArgs::Run { testing, .. } = parse_startup_args_from(["NiumaTerm"]) else {
+            panic!("expected normal launch");
+        };
+        assert!(!testing);
     }
 }
 

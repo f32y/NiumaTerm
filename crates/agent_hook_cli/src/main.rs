@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use nmt_agent_hook::{
     AGENT_HOOK_PROTOCOL_VERSION, AGENT_HOOK_TOKEN_ENV, AGENT_HOOK_VERSION_ENV, AGENT_ROUTE_ENV,
-    RawCodexHookEnvelope,
+    AGENT_TESTING_ENV, RawCodexHookEnvelope,
 };
 use nmt_platform::windows::ipc::{MAX_MESSAGE_BYTES, send};
 
@@ -50,5 +50,6 @@ fn main() {
         return;
     }
 
-    let _ = send(&message, Duration::ZERO);
+    let testing = std::env::var(AGENT_TESTING_ENV).is_ok_and(|value| value == "1");
+    let _ = send(&message, Duration::ZERO, testing);
 }
