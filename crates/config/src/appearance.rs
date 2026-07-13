@@ -56,6 +56,10 @@ fn default_background_opacity() -> f64 {
     1.0
 }
 
+fn default_background_image_opacity() -> f64 {
+    0.3
+}
+
 fn default_window_transparency_enabled() -> bool {
     true
 }
@@ -115,6 +119,19 @@ pub struct AppearanceConfig {
     /// Whole-window background opacity (0.2–1.0; clamped on load).
     #[serde(default = "default_background_opacity", rename = "background-opacity")]
     pub background_opacity: f64,
+    /// Local image drawn behind all window content.
+    #[serde(
+        default,
+        rename = "background-image",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub background_image: Option<String>,
+    /// How strongly the image shows through the window surfaces (0.0–1.0).
+    #[serde(
+        default = "default_background_image_opacity",
+        rename = "background-image-opacity"
+    )]
+    pub background_image_opacity: f64,
 }
 
 fn default_command_blocks() -> bool {
@@ -141,6 +158,8 @@ impl Default for AppearanceConfig {
             monospace_only: true,
             window_transparency_enabled: default_window_transparency_enabled(),
             background_opacity: default_background_opacity(),
+            background_image: None,
+            background_image_opacity: default_background_image_opacity(),
         }
     }
 }
@@ -221,6 +240,15 @@ fn patch_document(
     doc["appearance"]["monospace-only"] = value(appearance.monospace_only);
     doc["appearance"]["enable-window-transparency"] = value(appearance.window_transparency_enabled);
     doc["appearance"]["background-opacity"] = value(appearance.background_opacity);
+    if let Some(path) = &appearance.background_image {
+        doc["appearance"]["background-image"] = value(path);
+    } else {
+        doc["appearance"]
+            .as_table_mut()
+            .expect("appearance was normalized to a table")
+            .remove("background-image");
+    }
+    doc["appearance"]["background-image-opacity"] = value(appearance.background_image_opacity);
 
     ensure_explicit_table(doc, "system");
     crate::system::patch_document(doc, system);
@@ -259,6 +287,8 @@ mod tests {
             monospace_only: false,
             window_transparency_enabled: true,
             background_opacity: 0.85,
+            background_image: Some(r"C:\Wallpapers\background.png".to_string()),
+            background_image_opacity: 0.4,
         }
     }
 
