@@ -2470,11 +2470,7 @@ fn paint_frame_images(
         ) else {
             continue;
         };
-        let Some(full) = crate::terminal::graphics::expanded_full_bounds(dest, source) else {
-            continue;
-        };
-        paint_image_clipped(window, dest, full, img.generation.image().clone());
-        img.generation.mark_uploaded();
+        paint_generation(window, dest, source, &img.generation);
     }
 }
 
@@ -2502,12 +2498,25 @@ fn paint_frozen_images(
             img.width as f32 * cell.width_px,
             cell.height_px,
         ];
-        let Some(full) = crate::terminal::graphics::expanded_full_bounds(dest, img.source) else {
-            continue;
-        };
-        paint_image_clipped(window, dest, full, img.generation.image().clone());
-        img.generation.mark_uploaded();
+        paint_generation(window, dest, img.source, &img.generation);
     }
+}
+
+/// Paint one image generation's `source` crop into `dest` and mark it
+/// uploaded (its atlas tile releases with the last reference) — the shared
+/// tail of live-frame and frozen image painting. Degenerate crops are
+/// skipped.
+fn paint_generation(
+    window: &mut Window,
+    dest: [f32; 4],
+    source: [f32; 4],
+    generation: &crate::terminal::graphics::ImageGeneration,
+) {
+    let Some(full) = crate::terminal::graphics::expanded_full_bounds(dest, source) else {
+        return;
+    };
+    paint_image_clipped(window, dest, full, generation.image().clone());
+    generation.mark_uploaded();
 }
 
 /// Paint `image`'s full texture into `full` bounds, clipped to `dest` — the source-crop
