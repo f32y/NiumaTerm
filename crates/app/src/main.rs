@@ -578,12 +578,17 @@ fn dispatch_focus_notification(
 }
 
 fn dispatch_agent_event(event: nmt_agent_hook::AgentEvent, cx: &mut App) {
+    if !cx.global::<AppSettings>().enable_agent_hooks {
+        return;
+    }
+
     let shells: Vec<_> = cx
         .global::<ShellRegistry>()
         .0
         .iter()
         .map(|entry| entry.shell.clone())
         .collect();
+
     for shell in shells {
         let event = event.clone();
         if shell
@@ -593,6 +598,7 @@ fn dispatch_agent_event(event: nmt_agent_hook::AgentEvent, cx: &mut App) {
             return;
         }
     }
+
     tracing::warn!("ignoring agent event for unknown or closed route");
 }
 

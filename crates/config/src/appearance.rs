@@ -8,6 +8,7 @@
 use serde::{Deserialize, Serialize};
 use toml_edit::{DocumentMut, Item, Table, value};
 
+use crate::agent::AgentConfig;
 use crate::profile::Profile;
 use crate::system::SystemConfig;
 
@@ -165,7 +166,7 @@ impl Default for AppearanceConfig {
 }
 
 /// Persist the dialog-managed settings into `config.toml`: the `[appearance]`,
-/// `[system]`, and `[[profiles]]` sections. All other file content is
+/// `[agent]`, `[system]`, and `[[profiles]]` sections. All other file content is
 /// preserved.
 ///
 /// The write is atomic (temp file + rename). If an existing config file does
@@ -174,6 +175,7 @@ impl Default for AppearanceConfig {
 pub fn save_settings(
     theme: &str,
     appearance: &AppearanceConfig,
+    agent: &AgentConfig,
     system: &SystemConfig,
     profiles: &[Profile],
     default_profile: &str,
@@ -182,6 +184,7 @@ pub fn save_settings(
         &crate::config_file_path(),
         theme,
         appearance,
+        agent,
         system,
         profiles,
         default_profile,
@@ -192,6 +195,7 @@ fn save_settings_to(
     path: &std::path::Path,
     theme: &str,
     appearance: &AppearanceConfig,
+    agent: &AgentConfig,
     system: &SystemConfig,
     profiles: &[Profile],
     default_profile: &str,
@@ -211,6 +215,7 @@ fn save_settings_to(
         &mut doc,
         theme,
         appearance,
+        agent,
         system,
         profiles,
         default_profile,
@@ -231,6 +236,7 @@ fn patch_document(
     doc: &mut DocumentMut,
     theme: &str,
     appearance: &AppearanceConfig,
+    agent: &AgentConfig,
     system: &SystemConfig,
     profiles: &[Profile],
     default_profile: &str,
@@ -264,6 +270,9 @@ fn patch_document(
 
     ensure_explicit_table(doc, "system");
     crate::system::patch_document(doc, system);
+
+    ensure_explicit_table(doc, "agent");
+    crate::agent::patch_document(doc, agent);
 
     crate::profile::patch_document(doc, profiles, default_profile);
 }
@@ -314,6 +323,12 @@ mod tests {
         }
     }
 
+    fn sample_agent() -> AgentConfig {
+        AgentConfig {
+            enable_agent_hooks: false,
+        }
+    }
+
     fn sample_profiles() -> Vec<Profile> {
         vec![Profile {
             name: "PowerShell".to_string(),
@@ -327,6 +342,7 @@ mod tests {
             doc,
             "test-theme",
             &sample_appearance(),
+            &sample_agent(),
             &sample_system(),
             &sample_profiles(),
             "PowerShell",
@@ -347,6 +363,7 @@ mod tests {
         // The output re-parses and the managed keys round-trip.
         let config: crate::Config = toml::from_str(&out).unwrap();
         assert_eq!(config.appearance, sample_appearance());
+        assert_eq!(config.agent, sample_agent());
         assert_eq!(config.system, sample_system());
         assert_eq!(config.profiles.list, sample_profiles());
         assert_eq!(config.profiles.default, "PowerShell");
@@ -378,6 +395,7 @@ mod tests {
                 &path,
                 "test-theme",
                 &sample_appearance(),
+                &sample_agent(),
                 &sample_system(),
                 &sample_profiles(),
                 "PowerShell",
@@ -389,6 +407,7 @@ mod tests {
         let config: crate::Config =
             toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(config.appearance, sample_appearance());
+        assert_eq!(config.agent, sample_agent());
         assert_eq!(config.theme, "test-theme");
 
         // Second save updates in place and leaves no temp file behind.

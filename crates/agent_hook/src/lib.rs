@@ -1,7 +1,7 @@
 //! Pure agent lifecycle, ownership, expiry, and unread-notification model.
 
 pub mod claude_code;
-mod codex;
+pub mod codex;
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -77,6 +77,13 @@ impl AgentProcess {
     /// without baking an install path into their configuration.
     pub fn set_hook_executable(&self, path: String) {
         let _ = self.hook_executable.set(path);
+    }
+
+    /// Installers use the same absolute binary path exported to pane children,
+    /// so their registrations keep working when NiumaTerm is installed in a
+    /// directory that is not on `PATH`.
+    pub fn hook_executable(&self) -> Option<&str> {
+        self.hook_executable.get().map(String::as_str)
     }
 
     pub fn environment_for(&self, route: &AgentRoute) -> Vec<(String, String)> {

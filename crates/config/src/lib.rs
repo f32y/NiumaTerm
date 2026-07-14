@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod appearance;
 pub mod bell;
 pub mod bindings;
@@ -180,6 +181,9 @@ pub struct Config {
     /// The `[profiles]` section: default-profile name + profile entries.
     #[serde(default)]
     pub profiles: profile::ProfilesConfig,
+    /// Agent integration settings (settings dialog, Agent page).
+    #[serde(default = "agent::AgentConfig::default")]
+    pub agent: agent::AgentConfig,
     /// System-behavior settings (settings dialog, System page).
     #[serde(default = "system::SystemConfig::default")]
     pub system: system::SystemConfig,
@@ -720,6 +724,7 @@ impl Default for Config {
             effects: effects::Effects::default(),
             appearance: appearance::AppearanceConfig::default(),
             profiles: profile::ProfilesConfig::default(),
+            agent: agent::AgentConfig::default(),
             system: system::SystemConfig::default(),
         }
     }
