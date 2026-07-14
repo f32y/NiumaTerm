@@ -3,13 +3,13 @@ use std::ops::Range;
 use futures::StreamExt;
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, AppContext, AvailableSpace, Bounds, ContentMask, Context, Corners, Element,
-    ElementId, ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable, FontStyle,
-    FontWeight, GlobalElementId, InspectorElementId, IntoElement, KeyDownEvent, Keystroke,
-    LayoutId, ListAlignment, ListOffset, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    Pixels, Point, RenderImage, ScrollDelta, ScrollWheelEvent, ShapedLine, StrikethroughStyle,
-    Style, TextAlign, TextRun, UTF16Selection, UnderlineStyle, Window, actions, div, fill, list,
-    point, px, relative, rgb, rgba, size,
+    AnyElement, App, AppContext, AvailableSpace, Bounds, ContentMask, Context, Corners,
+    DragMoveEvent, Element, ElementId, ElementInputHandler, Entity, EntityInputHandler,
+    FocusHandle, Focusable, FontStyle, FontWeight, GlobalElementId, InspectorElementId,
+    IntoElement, KeyDownEvent, Keystroke, LayoutId, ListAlignment, ListOffset, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, RenderImage, ScrollDelta,
+    ScrollWheelEvent, ShapedLine, StrikethroughStyle, Style, TextAlign, TextRun, UTF16Selection,
+    UnderlineStyle, Window, actions, div, fill, list, point, px, relative, rgb, rgba, size,
 };
 use nmt_agent_hook::{AgentRoute, agent_process};
 use nmt_config::local_state::TabState;
@@ -1416,6 +1416,7 @@ impl Render for TerminalPane {
             .on_mouse_down(MouseButton::Middle, cx.listener(Self::on_mouse_down))
             .on_mouse_down(MouseButton::Right, cx.listener(Self::on_mouse_down))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up(MouseButton::Middle, cx.listener(Self::on_mouse_up))
             .on_mouse_up(MouseButton::Right, cx.listener(Self::on_mouse_up))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
@@ -1440,11 +1441,13 @@ impl Render for TerminalPane {
 /// A right-edge scrollbar overlay, shown only when there is scrollback. The thumb
 /// size/position reflect the viewport within the total, and clicking or dragging
 /// the track scrolls to that offset.
+struct ScrollbarDrag;
+
 fn scrollbar_element(
     sb: nmt_terminal::ghostty::ScrollbarInfo,
     opacity: f32,
     cx: &mut Context<TerminalPane>,
-) -> Option<gpui::Div> {
+) -> Option<gpui::Stateful<gpui::Div>> {
     if sb.total <= sb.len {
         return None;
     }
@@ -1453,6 +1456,7 @@ fn scrollbar_element(
     let thumb_height = (sb.len as f32 / total).clamp(0.03, 1.0);
     Some(
         div()
+            .id("terminal-scrollbar")
             .absolute()
             .top_0()
             .right_0()
@@ -1474,6 +1478,18 @@ fn scrollbar_element(
                         this.scroll_thumb_to(fraction - this.scrollbar_grab, cx);
                     }
                     this.mark_scroll_activity(cx);
+                }),
+            )
+            .on_drag(ScrollbarDrag, |_, _, _, cx| {
+                cx.stop_propagation();
+                cx.new(|_| gpui::Empty)
+            })
+            .on_drag_move(
+                cx.listener(|this, event: &DragMoveEvent<ScrollbarDrag>, window, cx| {
+                    if this.scrollbar_dragging {
+                        cx.stop_propagation();
+                        this.on_mouse_move(&event.event, window, cx);
+                    }
                 }),
             )
             .child(
