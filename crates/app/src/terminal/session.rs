@@ -416,6 +416,11 @@ impl EventListener for TerminalEventProxy {
             TerminalEvent::Title(t) | TerminalEvent::TitleWithSubtitle(t, _) => HostEvent::Title(t),
             TerminalEvent::ResetTitle => HostEvent::Title(String::new()),
             TerminalEvent::Bell => HostEvent::Bell,
+            TerminalEvent::ClipboardStore(ty, text) => {
+                let mut clipboard = nmt_terminal::clipboard::Clipboard::default();
+                clipboard.set(ty, text);
+                return;
+            }
             TerminalEvent::CloseTerminal(_) => {
                 // The shell died: no ;D is coming for a running command, and any
                 // half-staged block batch for the interrupted read is discarded.

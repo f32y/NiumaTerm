@@ -1463,10 +1463,11 @@ where
         // Drain everything from the engine under ONE lock: query/DSR/DA
         // responses, bell, title, pwd, VT modes, and the snapshot. Then act on
         // the owned results below with the engine lock released.
-        let (responses, bell, title, vt_modes, snapshot, image_delta) = {
+        let (responses, bell, clipboard_writes, title, vt_modes, snapshot, image_delta) = {
             let mut engine = self.ghostty.lock();
             let responses = engine.take_pty_writes();
             let bell = engine.take_bell();
+            let clipboard_writes = engine.take_clipboard_writes();
             let title = engine.poll_title();
             let vt_modes = ghostty_vt_modes(&engine);
             let (snapshot, image_delta) = if do_snapshot {
@@ -1481,7 +1482,15 @@ where
             } else {
                 (None, (Vec::new(), Vec::new()))
             };
-            (responses, bell, title, vt_modes, snapshot, image_delta)
+            (
+                responses,
+                bell,
+                clipboard_writes,
+                title,
+                vt_modes,
+                snapshot,
+                image_delta,
+            )
         };
 
         // Ship new/changed kitty image pixels + removals via the existing graphics
@@ -1511,6 +1520,10 @@ where
         if bell > 0 {
             self.event_proxy
                 .send_event(TerminalEvent::Bell, self.window_id);
+        }
+        for (ty, text) in clipboard_writes {
+            self.event_proxy
+                .send_event(TerminalEvent::ClipboardStore(ty, text), self.window_id);
         }
         if let Some(title) = title {
             self.event_proxy
@@ -2969,6 +2982,21 @@ mod ghostty_mirror_tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn pty_read_emits_osc_52_clipboard_store() {
+        use crate::clipboard::ClipboardType;
+        use crate::event::TerminalEvent;
+
+        let (events, _) = pty_read_events(b"\x1b]52;c;Y2xhdWRlLWNvcHk=\x07");
+        assert!(events.iter().any(|event| {
+            matches!(
+                event,
+                TerminalEvent::ClipboardStore(ClipboardType::Clipboard, text)
+                    if text == "claude-copy"
+            )
+        }));
     }
 
     /// Full synthetic session: the ps1's `;A;B;C` prime, the first prompt
