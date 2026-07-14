@@ -275,6 +275,11 @@ impl TerminalPane {
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        if should_scroll_to_latest(&event.keystroke, self.surface.alt_screen())
+            && self.scroll_to_latest(cx)
+        {
+            return;
+        }
         // Plain printable text arrives through the char/IME path
         // (`replace_text_in_range`); encoding it here too would double it.
         if input::should_defer_to_ime(&event.keystroke) {
@@ -383,6 +388,31 @@ impl TerminalPane {
         let bounds = self.content_bounds.unwrap_or_default();
         let height = bounds.size.height.as_f32().max(1.0);
         ((y.as_f32() - bounds.origin.y.as_f32()) / height).clamp(0.0, 1.0)
+    }
+
+    /// Restore the newest output only when the viewport has actually moved,
+    /// leaving End available for normal shell line navigation at the bottom.
+    fn scroll_to_latest(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.block_list_mode(cx) {
+            let (offset, max) = self.block_list.scrollbar;
+            if offset >= max {
+                return false;
+            }
+            self.block_list.list.scroll_to_end();
+            self.block_list.scrollbar.0 = max;
+            self.mark_scroll_activity(cx);
+            cx.notify();
+            return true;
+        }
+
+        let scrolled = self.frame_cache.current().is_some_and(|frame| {
+            let scrollbar = frame.scrollbar();
+            scrollbar.offset < scrollbar.total.saturating_sub(scrollbar.len)
+        });
+        if scrolled {
+            self.scroll_thumb_to(1.0, cx);
+        }
+        scrolled
     }
 
     /// Scroll so the thumb's top sits at `thumb_top` of the track (thumb
@@ -1522,6 +1552,10 @@ fn terminal_scroll_lines(delta: ScrollDelta, cell: metrics::CellMetrics) -> i32 
     } else {
         raw.round() as i32
     }
+}
+
+fn should_scroll_to_latest(keystroke: &Keystroke, alt_screen: bool) -> bool {
+    !alt_screen && !keystroke.modifiers.modified() && keystroke.key.eq_ignore_ascii_case("end")
 }
 
 /// The terminal viewport as a custom GPUI leaf element: prepaint shapes the
