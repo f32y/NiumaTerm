@@ -12,6 +12,8 @@ use gpui::{
     TextRun, Window, point, px, size,
 };
 use nmt_terminal::block_store::{BlockItem, BlockStore, SegmentMeta};
+use nmt_terminal::grid_emit::row_selection_for;
+use nmt_terminal::selection::SelectionRange;
 use nmt_terminal::terminal::square::Wide;
 
 use crate::terminal::frame::{
@@ -87,11 +89,21 @@ pub(crate) struct FrozenPoint {
     pub col: u32,
 }
 
-/// Pane-side hit-test data for the last built frozen view (small copy; the
-/// full view moves into the element).
+/// A selectable row rendered by the block list. Finished blocks use their
+/// immutable block coordinates; the active block's history keeps the engine's
+/// absolute SCREEN row so selection and copy remain owned by Ghostty.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BlockListPoint {
+    Frozen(FrozenPoint),
+    LiveHistory { row: u32, col: u16 },
+}
+
+/// Pane-side hit-test data for rows rendered above the active grid (small
+/// copy; the full view moves into the element).
 #[derive(Default, Clone)]
 pub(crate) struct FrozenHitInfo {
-    /// (y, item, row, cell_count) per visible frozen row.
+    /// `(y, item, row, cell_count)` per visible block or live-history row;
+    /// `usize::MAX` marks a live SCREEN row because it cannot be a list index.
     rows: Vec<(f32, usize, usize, u32)>,
     pub active_top: f32,
 }
@@ -121,23 +133,26 @@ impl FrozenHitInfo {
         cell_h: f32,
         cols: u32,
         pad_rows: f32,
-    ) -> Option<FrozenPoint> {
+    ) -> Option<BlockListPoint> {
         let (_, item, row, cell_count) = *self
             .rows
             .iter()
             .take_while(|(ry, ..)| *ry <= y)
             .last()
             .filter(|(ry, ..)| y < ry + cell_h * (1.0 + pad_rows))?;
-        if item == usize::MAX {
-            return None; // live-history sentinel: not addressable
-        }
         let local = (x / cell_w.max(1.0)).floor().max(0.0) as u32;
         let col = local.min(cols.saturating_sub(1)).min(cell_count);
-        Some(FrozenPoint {
+        if item == usize::MAX {
+            return Some(BlockListPoint::LiveHistory {
+                row: row.min(u32::MAX as usize) as u32,
+                col: col.min(u16::MAX as u32) as u16,
+            });
+        }
+        Some(BlockListPoint::Frozen(FrozenPoint {
             item,
             line: row,
             col,
-        })
+        }))
     }
 }
 
@@ -586,13 +601,15 @@ fn block_row_shape_key(handle: nmt_terminal::ghostty::BlockHandle, row: usize) -
 
 /// The live item's scrolled-up history: active-grid scrollback rows read as
 /// physical lines rendered above the live grid. Rows carry
-/// the unselectable sentinel — the live region uses the engine selection.
+/// an out-of-band item index that the hit map converts back to their absolute
+/// SCREEN row; selection remains owned by the engine rather than BlockStore.
 pub(crate) fn live_history_view(
     lines: Vec<(u64, TerminalLine)>,
     total_rows: u64,
     cols: u32,
     cell_h: f32,
     pad_rows: f32,
+    selection: Option<SelectionRange>,
 ) -> FrozenView {
     let pad = pad_rows * cell_h;
     let mut view = FrozenView {
@@ -603,13 +620,18 @@ pub(crate) fn live_history_view(
         active_top: pad + total_rows as f32 * cell_h,
     };
     for (row, line) in lines {
+        let selected = usize::try_from(row)
+            .ok()
+            .filter(|row| *row <= i32::MAX as usize)
+            .and_then(|row| row_selection_for(selection, row, cols as usize))
+            .map(|span| (span.lo, span.hi.saturating_add(1)));
         view.rows.push(FrozenRow {
             y: pad + row as f32 * cell_h,
             line,
             item: usize::MAX,
             row: row.min(usize::MAX as u64) as usize,
             cell_count: cols,
-            selected: None,
+            selected,
             shape_key: None,
         });
     }
@@ -854,6 +876,8 @@ pub(crate) fn paint_frozen_chrome(
 mod tests {
     use nmt_terminal::event::BlockEvent;
     use nmt_terminal::ghostty::{BlockHandle, GhosttyTerminal};
+    use nmt_terminal::selection::SelectionRange;
+    use nmt_terminal::terminal::pos::{Column, Line, Pos};
 
     use super::*;
     use crate::terminal::frame::line_from_parts;
@@ -1050,6 +1074,7 @@ mod tests {
             10,
             10.0,
             0.0,
+            None,
         );
         assert_eq!(history.rows[0].y, 0.0);
         assert_eq!(history.active_top, 10.0);
@@ -1142,10 +1167,10 @@ mod tests {
         assert!(range.contains(&100), "row at viewport top included");
     }
 
-    /// The hit map resolves pixel positions to (item, row, col) and refuses
-    /// the live-history sentinel.
+    /// The hit map preserves whether a row belongs to a frozen block or the
+    /// live grid's absolute SCREEN history.
     #[test]
-    fn hit_test_maps_pixels_to_frozen_points() {
+    fn hit_test_maps_block_list_points() {
         let mut hit = FrozenHitInfo::default();
         hit.push_row(10.0, 0, 0, 10); // item 0 row 0 at y=10
         hit.push_row(20.0, 0, 1, 10);
@@ -1154,33 +1179,33 @@ mod tests {
 
         assert_eq!(
             hit.hit_test(35.0, 15.0, 10.0, 10.0, 10, ITEM_PAD_ROWS),
-            Some(FrozenPoint {
+            Some(BlockListPoint::Frozen(FrozenPoint {
                 item: 0,
                 line: 0,
                 col: 3
-            })
+            }))
         );
         assert_eq!(
             hit.hit_test(15.0, 25.0, 10.0, 10.0, 10, ITEM_PAD_ROWS),
-            Some(FrozenPoint {
+            Some(BlockListPoint::Frozen(FrozenPoint {
                 item: 0,
                 line: 1,
                 col: 1
-            })
+            }))
         );
         // Beyond the row width clamps to the last column.
         assert_eq!(
             hit.hit_test(500.0, 15.0, 10.0, 10.0, 10, ITEM_PAD_ROWS),
-            Some(FrozenPoint {
+            Some(BlockListPoint::Frozen(FrozenPoint {
                 item: 0,
                 line: 0,
                 col: 9
-            })
+            }))
         );
         assert_eq!(
             hit.hit_test(0.0, 55.0, 10.0, 10.0, 10, ITEM_PAD_ROWS),
-            None,
-            "sentinel"
+            Some(BlockListPoint::LiveHistory { row: 0, col: 0 }),
+            "live history keeps its SCREEN row"
         );
         assert_eq!(
             hit.hit_test(0.0, 5.0, 10.0, 10.0, 10, ITEM_PAD_ROWS),
@@ -1301,18 +1326,26 @@ mod tests {
         assert!(live_chrome(2, 0, 10.0, None, false).is_none());
     }
 
-    /// The live-history view positions sentinel rows and the active top.
+    /// The live-history view positions SCREEN rows, applies the engine
+    /// selection, and reports the active top.
     #[test]
     fn live_history_view_positions_rows() {
         let lines = vec![
             (0u64, line_from_parts("a".into(), Vec::new(), Vec::new())),
             (2u64, line_from_parts("c".into(), Vec::new(), Vec::new())),
         ];
-        let view = live_history_view(lines, 3, 10, 10.0, ITEM_PAD_ROWS);
+        let selection = SelectionRange::new(
+            Pos::new(Line(0), Column(2)),
+            Pos::new(Line(2), Column(3)),
+            false,
+        );
+        let view = live_history_view(lines, 3, 10, 10.0, ITEM_PAD_ROWS, Some(selection));
         assert_eq!(view.rows.len(), 2);
         assert_eq!(view.rows[0].y, 10.0, "pad + row 0");
         assert_eq!(view.rows[1].y, 30.0, "pad + row 2 (row 1 not visible)");
-        assert_eq!(view.rows[0].item, usize::MAX, "unselectable sentinel");
+        assert_eq!(view.rows[0].item, usize::MAX, "live-history sentinel");
+        assert_eq!(view.rows[0].selected, Some((2, 10)));
+        assert_eq!(view.rows[1].selected, Some((0, 4)));
         assert_eq!(view.active_top, 40.0, "pad + total history rows");
     }
 

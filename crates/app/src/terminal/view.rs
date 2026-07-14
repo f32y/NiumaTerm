@@ -21,11 +21,11 @@ use super::frame::{
 };
 use super::surface::TerminalSurface;
 use super::{input, metrics, wake};
-use crate::terminal::block_list::BlockListState;
+use crate::terminal::block_list::{BlockListPoint, BlockListState};
 use crate::terminal::dirty::DirtyState;
 use crate::terminal::session::{HostEvent, InFlightBlock};
 use crate::terminal::surface::{
-    SurfaceCell, SurfaceCellSide, SurfaceMouseButton, SurfaceMouseEventKind,
+    SurfaceCell, SurfaceCellSide, SurfaceMouseButton, SurfaceMouseEventKind, SurfaceScreenCell,
     TerminalKeyAction as SurfaceKeyAction,
 };
 use crate::ui::{AppSettings, surface_background_opacity};
@@ -340,9 +340,15 @@ impl TerminalPane {
         }
         // Block-split: a left press in the frozen region starts a frozen
         // selection (and drops the engine one); any other press clears it.
-        if self.block_list_mode(cx) && !self.surface.mouse_reporting_active() {
+        if self.block_list_mode(cx)
+            && !self
+                .surface
+                .mouse_reporting_active_for(input::modifiers_state(event.modifiers))
+        {
             if event.button == MouseButton::Left {
-                if let Some(pt) = self.frozen_point_at(event.position, cx) {
+                if let Some(BlockListPoint::Frozen(pt)) =
+                    self.block_list_point_at(event.position, cx)
+                {
                     // The engine highlight is baked into the cached frame, so
                     // clearing the selection needs a frame rebuild too.
                     self.surface.clear_selection();
@@ -458,7 +464,7 @@ impl TerminalPane {
             if pos.y > max_y {
                 pos.y = max_y;
             }
-            if let Some(head) = self.frozen_point_at(pos, cx) {
+            if let Some(BlockListPoint::Frozen(head)) = self.block_list_point_at(pos, cx) {
                 self.frozen_selection = Some((anchor, head));
                 cx.notify();
             }
@@ -516,6 +522,29 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) {
         let cell_metrics = self.cell_metrics(window, cx);
+        let modifiers = input::modifiers_state(modifiers);
+        if self.block_list_mode(cx)
+            && !self.surface.mouse_reporting_active_for(modifiers)
+            && button == Some(MouseButton::Left)
+            && let Some(point) = self.block_list_point_at(position, cx)
+        {
+            let (_, side) =
+                terminal_cell_at_position(position, self.content_origin(), cell_metrics, &[]);
+            let cell = match point {
+                BlockListPoint::LiveHistory { row, col } => SurfaceScreenCell { row, col },
+                // An engine selection cannot cross into an immutable finished
+                // block, so dragging above the active block clamps to its first
+                // SCREEN row.
+                BlockListPoint::Frozen(point) => SurfaceScreenCell {
+                    row: 0,
+                    col: point.col.min(u16::MAX as u32) as u16,
+                },
+            };
+            if self.surface.apply_screen_selection(cell, side, kind) {
+                self.invalidate(cx);
+            }
+            return;
+        }
         let offsets = self.current_row_offsets(cx);
         // Block-split: the live grid starts at `active_top` in the list, so
         // shift the mapping origin.
@@ -529,7 +558,7 @@ impl TerminalPane {
             side,
             button.and_then(surface_mouse_button),
             kind,
-            input::modifiers_state(modifiers),
+            modifiers,
         );
         if handled {
             self.invalidate(cx);
@@ -595,8 +624,16 @@ impl TerminalPane {
                 | HostEvent::Bell
                 | HostEvent::Notification { .. }
                 | HostEvent::Diagnostic(_) => {}
+                HostEvent::CommandFinished => {
+                    // Finishing transfers the active SCREEN rows into an
+                    // immutable block, so live selection anchors no longer
+                    // address the content they were created for.
+                    self.surface.clear_selection();
+                    self.frame_cache.invalidate();
+                    self.refresh_blocks();
+                }
                 // Mirror the session's split block state for the render path.
-                HostEvent::CommandFinished | HostEvent::CommandStarted => {
+                HostEvent::CommandStarted => {
                     self.refresh_blocks();
                 }
                 HostEvent::PromptStarted => {
@@ -743,13 +780,9 @@ impl TerminalPane {
             .push(offset_frozen_chrome(chrome, item_top));
     }
 
-    /// Map a window position to a frozen-history point when it lands in the
-    /// frozen region of the block list (block-split).
-    fn frozen_point_at(
-        &self,
-        position: Point<Pixels>,
-        cx: &App,
-    ) -> Option<crate::terminal::block_list::FrozenPoint> {
+    /// Map a window position to either an immutable block row or an absolute
+    /// SCREEN row from the active block's history.
+    fn block_list_point_at(&self, position: Point<Pixels>, cx: &App) -> Option<BlockListPoint> {
         if !self.block_list_mode(cx) {
             return None;
         }
@@ -1923,16 +1956,18 @@ impl Element for BlockListItem {
                         cell.height_px,
                         pad_rows,
                     );
+                    let pane = pane.read(cx);
                     let lines = pane
-                        .read(cx)
                         .surface
                         .live_history_lines(visible.start as u64..visible.end as u64);
+                    let selection = pane.surface.selection_screen_range();
                     crate::terminal::block_list::live_history_view(
                         lines,
                         *history_rows,
                         *cols,
                         cell.height_px,
                         pad_rows,
+                        selection,
                     )
                 };
                 let live_rows = frame_content_rows(frame);

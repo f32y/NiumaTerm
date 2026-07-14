@@ -28,6 +28,12 @@ pub(crate) struct SurfaceCell {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SurfaceScreenCell {
+    pub(crate) col: u16,
+    pub(crate) row: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SurfaceCellSide {
     Left,
     Right,
@@ -257,6 +263,10 @@ impl TerminalSurface {
         self.mouse_mode().is_some()
     }
 
+    pub(crate) fn mouse_reporting_active_for(&self, modifiers: ModifiersState) -> bool {
+        self.app_mouse_mode(modifiers).is_some()
+    }
+
     /// Copy `text` to the system clipboard (block copy actions).
     pub(crate) fn copy_text_to_clipboard(&self, text: String) {
         if text.is_empty() {
@@ -348,15 +358,22 @@ impl TerminalSurface {
             return false;
         }
         let pos = Pos::new(Line(cell.row as i32), Column(cell.col as usize));
-        let side = match side {
-            SurfaceCellSide::Left => Side::Left,
-            SurfaceCellSide::Right => Side::Right,
+        self.apply_selection_at(self.screen_pos(pos), side, kind)
+    }
+
+    /// Apply a selection gesture to an absolute SCREEN cell. The block-list
+    /// live history is rendered outside the engine viewport, but its rows keep
+    /// these coordinates so selection and copy still use Ghostty's formatter.
+    pub(crate) fn apply_screen_selection(
+        &self,
+        cell: SurfaceScreenCell,
+        side: SurfaceCellSide,
+        kind: SurfaceMouseEventKind,
+    ) -> bool {
+        let Ok(row) = i32::try_from(cell.row) else {
+            return false;
         };
-        match kind {
-            SurfaceMouseEventKind::Down => self.begin_selection_cell(pos, side),
-            SurfaceMouseEventKind::Move => self.update_selection_cell(pos, side),
-            SurfaceMouseEventKind::Up => self.finish_selection(),
-        }
+        self.apply_selection_at(Pos::new(Line(row), Column(cell.col as usize)), side, kind)
     }
 
     pub(crate) fn apply_scroll(
@@ -473,11 +490,20 @@ impl TerminalSurface {
     /// current `viewport_top` re-bases them; rows outside the viewport are
     /// clipped per-row by `row_selection_for`.
     pub(crate) fn selection_range(&self) -> Option<SelectionRange> {
+        self.selection_range_at(self.viewport_top())
+    }
+
+    /// Selection in absolute SCREEN coordinates for live-history rows rendered
+    /// above the pinned engine viewport.
+    pub(crate) fn selection_screen_range(&self) -> Option<SelectionRange> {
+        self.selection_range_at(0)
+    }
+
+    fn selection_range_at(&self, viewport_top: i32) -> Option<SelectionRange> {
         let guard = self.selection.lock();
         let sel = guard.as_ref()?;
-        let top = self.viewport_top();
         let buf = self.session.render_buffer.lock();
-        sel.to_range_engine(&buf, top, "")
+        sel.to_range_engine(&buf, viewport_top, "")
     }
 
     /// SCREEN row of the top visible row (0 when the viewport is empty).
@@ -523,16 +549,31 @@ impl TerminalSurface {
         *self.selection.lock() = None;
     }
 
-    fn begin_selection_cell(&self, pos: Pos, side: Side) -> bool {
-        let pos = self.screen_pos(pos);
+    fn apply_selection_at(
+        &self,
+        pos: Pos,
+        side: SurfaceCellSide,
+        kind: SurfaceMouseEventKind,
+    ) -> bool {
+        let side = match side {
+            SurfaceCellSide::Left => Side::Left,
+            SurfaceCellSide::Right => Side::Right,
+        };
+        match kind {
+            SurfaceMouseEventKind::Down => self.begin_selection(pos, side),
+            SurfaceMouseEventKind::Move => self.update_selection(pos, side),
+            SurfaceMouseEventKind::Up => self.finish_selection(),
+        }
+    }
+
+    fn begin_selection(&self, pos: Pos, side: Side) -> bool {
         let mut guard = self.selection.lock();
         let had_selection = guard.is_some();
         *guard = Some(Selection::new(SelectionType::Simple, pos, side));
         had_selection
     }
 
-    fn update_selection_cell(&self, pos: Pos, side: Side) -> bool {
-        let pos = self.screen_pos(pos);
+    fn update_selection(&self, pos: Pos, side: Side) -> bool {
         let mut guard = self.selection.lock();
         let Some(selection) = guard.as_mut() else {
             return false;
@@ -552,14 +593,7 @@ impl TerminalSurface {
     /// Selected text via the engine formatter. Ranges reaching into scrollback
     /// extract real content instead of stopping at the viewport.
     fn selection_text(&self) -> Option<String> {
-        // viewport_top = 0 keeps the resolved range in SCREEN coordinates,
-        // which is what `format_screen_range` consumes.
-        let range = {
-            let guard = self.selection.lock();
-            let sel = guard.as_ref()?;
-            let buf = self.session.render_buffer.lock();
-            sel.to_range_engine(&buf, 0, "")?
-        };
+        let range = self.selection_screen_range()?;
         if range.start.row.0 < 0 || range.end.row.0 < 0 {
             return None;
         }
