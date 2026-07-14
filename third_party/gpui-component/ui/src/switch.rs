@@ -1,16 +1,13 @@
-use std::rc::Rc;
-use std::time::Duration;
-
-use gpui::prelude::FluentBuilder as _;
+use crate::{
+    ActiveTheme, Disableable, Side, Sizable, Size, StyledExt, h_flex, text::Text,
+    tooltip::ComponentTooltip,
+};
 use gpui::{
     Animation, AnimationExt as _, App, Background, ElementId, Hsla, InteractiveElement,
     IntoElement, ParentElement as _, RenderOnce, SharedString, StyleRefinement, Styled, Window,
-    div, px,
+    div, prelude::FluentBuilder as _, px,
 };
-
-use crate::text::Text;
-use crate::tooltip::ComponentTooltip;
-use crate::{ActiveTheme, Disableable, Side, Sizable, Size, StyledExt, h_flex};
+use std::{rc::Rc, time::Duration};
 
 /// A Switch element that can be toggled on or off.
 #[derive(IntoElement)]

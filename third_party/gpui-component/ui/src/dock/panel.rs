@@ -1,17 +1,12 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-
+use crate::{button::Button, dock::TabPanel, menu::PopupMenu};
 use gpui::{
     AnyElement, AnyView, App, AppContext as _, Context, Entity, EntityId, EventEmitter,
     FocusHandle, Focusable, Global, Hsla, IntoElement, Render, SharedString, WeakEntity, Window,
 };
 use rust_i18n::t;
+use std::{collections::HashMap, sync::Arc};
 
-use super::invalid_panel::InvalidPanel;
-use super::{DockArea, PanelInfo, PanelState};
-use crate::button::Button;
-use crate::dock::TabPanel;
-use crate::menu::PopupMenu;
+use super::{DockArea, PanelInfo, PanelState, invalid_panel::InvalidPanel};
 
 pub enum PanelEvent {
     ZoomIn,

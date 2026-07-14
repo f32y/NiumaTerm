@@ -3,13 +3,12 @@
 //! This is a fork of the `html5minify` crate.
 //! https://github.com/martingallagher/html5minify
 
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::{io, str};
+use std::{cell::RefCell, io, rc::Rc, str};
 
-use html5ever::tendril::fmt::UTF8;
-use html5ever::tendril::{Tendril, TendrilSink};
-use html5ever::{Attribute, ParseOpts, QualName, parse_document};
+use html5ever::{
+    Attribute, ParseOpts, QualName, parse_document,
+    tendril::{Tendril, TendrilSink, fmt::UTF8},
+};
 use markup5ever_rcdom::{Node, NodeData, RcDom};
 
 /// Defines the minify trait.
@@ -762,9 +761,8 @@ fn optional_end_tag(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::str;
-
     use super::*;
+    use std::str;
 
     #[test]
     fn test_write_collapse_whitespace() {

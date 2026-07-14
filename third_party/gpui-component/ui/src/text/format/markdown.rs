@@ -3,12 +3,16 @@ use std::ops::Range;
 use gpui::SharedString;
 use markdown::mdast::{self, Node};
 
-use crate::highlighter::HighlightTheme;
-use crate::text::document::ParsedDocument;
-use crate::text::markdown_ext::MarkdownParseContext;
-use crate::text::node::{
-    self, BlockNode, CodeBlock, ImageNode, InlineNode, LinkMark, NodeContext, Paragraph, Span,
-    Table, TableRow, TextMark,
+use crate::{
+    highlighter::HighlightTheme,
+    text::{
+        document::ParsedDocument,
+        markdown_ext::MarkdownParseContext,
+        node::{
+            self, BlockNode, CodeBlock, ImageNode, InlineNode, LinkMark, NodeContext, Paragraph,
+            Span, Table, TableRow, TextMark,
+        },
+    },
 };
 
 /// Parse Markdown into a tree of nodes.
@@ -527,9 +531,9 @@ fn ast_to_node(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use gpui::ParentElement;
 
-    use super::*;
     use crate::text::{MarkdownExtensions, MarkdownNode, MarkdownPlugin};
 
     #[test]

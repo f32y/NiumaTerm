@@ -1,15 +1,14 @@
-use std::ops::Range;
-use std::rc::Rc;
-
 use anyhow::Result;
 use gpui::{
     App, Context, HighlightStyle, Hitbox, MouseDownEvent, Task, UnderlineStyle, Window, px,
 };
 use ropey::Rope;
+use std::{ops::Range, rc::Rc};
 
-use crate::ActiveTheme;
-use crate::input::element::TextElement;
-use crate::input::{GoToDefinition, InputState, RopeExt};
+use crate::{
+    ActiveTheme,
+    input::{GoToDefinition, InputState, RopeExt, element::TextElement},
+};
 
 /// Definition provider
 ///

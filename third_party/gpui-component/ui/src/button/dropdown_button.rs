@@ -1,13 +1,16 @@
-use gpui::prelude::FluentBuilder;
+use gpui::Corners;
 use gpui::{
-    Anchor, App, Context, Corners, Edges, ElementId, InteractiveElement as _, IntoElement,
-    ParentElement, RenderOnce, SharedString, StyleRefinement, Styled, Window, div,
+    Anchor, App, Context, Edges, ElementId, InteractiveElement as _, IntoElement, ParentElement,
+    RenderOnce, SharedString, StyleRefinement, Styled, Window, div, prelude::FluentBuilder,
+};
+
+use crate::{
+    Disableable, IconName, Selectable, Sizable, Size, StyledExt as _,
+    menu::{DropdownMenu, PopupMenu},
+    tooltip::ComponentTooltip,
 };
 
 use super::{Button, ButtonRounded, ButtonVariant, ButtonVariants};
-use crate::menu::{DropdownMenu, PopupMenu};
-use crate::tooltip::ComponentTooltip;
-use crate::{Disableable, IconName, Selectable, Sizable, Size, StyledExt as _};
 
 #[derive(IntoElement)]
 pub struct DropdownButton {

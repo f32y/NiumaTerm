@@ -1,11 +1,9 @@
-use gpui::prelude::FluentBuilder as _;
+use crate::{Icon, IconName, Sizable, Size};
 use gpui::{
     Animation, AnimationExt as _, App, Hsla, IntoElement, ParentElement, RenderOnce, Styled as _,
-    Transformation, Window, div, ease_in_out, percentage,
+    Transformation, Window, div, ease_in_out, percentage, prelude::FluentBuilder as _,
 };
 use instant::Duration;
-
-use crate::{Icon, IconName, Sizable, Size};
 
 /// A cycling loading spinner.
 #[derive(IntoElement)]

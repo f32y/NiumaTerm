@@ -1,11 +1,13 @@
-use gpui::prelude::FluentBuilder;
 use gpui::{
     App, Div, Hsla, ImageSource, InteractiveElement, Interactivity, IntoElement,
     ParentElement as _, RenderOnce, SharedString, StyleRefinement, Styled, Window, div, img,
+    prelude::FluentBuilder,
 };
 
-use crate::avatar::{AvatarSized as _, avatar_size};
-use crate::{ActiveTheme, Colorize, Icon, IconName, Sizable, Size, StyledExt};
+use crate::{
+    ActiveTheme, Colorize, Icon, IconName, Sizable, Size, StyledExt,
+    avatar::{AvatarSized as _, avatar_size},
+};
 
 /// User avatar element.
 ///

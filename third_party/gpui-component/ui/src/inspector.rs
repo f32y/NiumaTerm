@@ -1,16 +1,11 @@
-use std::cell::OnceCell;
-use std::collections::HashMap;
-use std::fmt::Write as _;
-use std::rc::Rc;
-use std::sync::OnceLock;
+use std::{cell::OnceCell, collections::HashMap, fmt::Write as _, rc::Rc, sync::OnceLock};
 
 use anyhow::Result;
-use gpui::inspector_reflection::FunctionReflection;
-use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, AppContext, Context, DivInspectorState, Entity, Inspector, InspectorElementId,
     InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Refineable as _, Render,
-    SharedString, StyleRefinement, Styled, Subscription, Task, Window, actions, div, px,
+    SharedString, StyleRefinement, Styled, Subscription, Task, Window, actions, div,
+    inspector_reflection::FunctionReflection, prelude::FluentBuilder, px,
 };
 use lsp_types::{
     CompletionItem, CompletionItemKind, CompletionResponse, CompletionTextEdit, Diagnostic,
@@ -18,13 +13,17 @@ use lsp_types::{
 };
 use ropey::Rope;
 
-use crate::alert::Alert;
-use crate::button::{Button, ButtonVariants};
-use crate::clipboard::Clipboard;
-use crate::description_list::DescriptionList;
-use crate::input::{CompletionProvider, Input, InputEvent, InputState, RopeExt, TabSize};
-use crate::link::Link;
-use crate::{ActiveTheme, IconName, Selectable, Sizable, TITLE_BAR_HEIGHT, h_flex, v_flex};
+use crate::{
+    ActiveTheme, IconName, Selectable, Sizable, TITLE_BAR_HEIGHT,
+    alert::Alert,
+    button::{Button, ButtonVariants},
+    clipboard::Clipboard,
+    description_list::DescriptionList,
+    h_flex,
+    input::{CompletionProvider, Input, InputEvent, InputState, RopeExt, TabSize},
+    link::Link,
+    v_flex,
+};
 
 actions!(inspector, [ToggleInspector]);
 

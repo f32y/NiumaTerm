@@ -4,17 +4,17 @@ mod element;
 mod number;
 mod string;
 
-use std::any::Any;
-use std::rc::Rc;
-
 pub(crate) use bool::*;
 pub(crate) use dropdown::*;
-pub use element::SettingFieldElement;
 pub(crate) use element::*;
-use gpui::{AnyElement, App, IntoElement, SharedString, StyleRefinement, Styled, Window};
-pub use number::NumberFieldOptions;
 pub(crate) use number::*;
 pub(crate) use string::*;
+
+pub use element::SettingFieldElement;
+pub use number::NumberFieldOptions;
+
+use gpui::{AnyElement, App, IntoElement, SharedString, StyleRefinement, Styled, Window};
+use std::{any::Any, rc::Rc};
 
 use crate::setting::RenderOptions;
 

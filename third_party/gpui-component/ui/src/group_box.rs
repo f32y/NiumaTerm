@@ -1,7 +1,6 @@
-use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, Background, ElementId, InteractiveElement as _, IntoElement, ParentElement,
-    RenderOnce, StyleRefinement, Styled, Window, div, relative,
+    RenderOnce, StyleRefinement, Styled, Window, div, prelude::FluentBuilder, relative,
 };
 use smallvec::SmallVec;
 

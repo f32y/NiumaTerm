@@ -1,12 +1,9 @@
-use std::cell::RefCell;
-use std::collections::HashSet;
-use std::rc::Rc;
-use std::sync::Arc;
+use std::{cell::RefCell, collections::HashSet, rc::Rc, sync::Arc};
 
-use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, ElementId, InteractiveElement as _, IntoElement, ParentElement, RenderOnce,
-    SharedString, StatefulInteractiveElement as _, Styled, Window, div, rems,
+    Role, SharedString, StatefulInteractiveElement as _, Styled, Window, div,
+    prelude::FluentBuilder as _, rems,
 };
 
 use crate::{ActiveTheme as _, Icon, IconName, Sizable, Size, h_flex, v_flex};
@@ -243,6 +240,8 @@ impl RenderOnce for AccordionItem {
                 .child(
                     h_flex()
                         .id(self.index)
+                        .role(Role::Button)
+                        .aria_expanded(self.open)
                         .justify_between()
                         .gap_3()
                         .map(|this| match self.size {

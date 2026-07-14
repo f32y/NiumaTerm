@@ -4,10 +4,15 @@ use gpui::{App, Bounds, Hsla, PathBuilder, Pixels, SharedString, Window, fill, p
 use gpui_component_macros::IntoPlot;
 use num_traits::{Num, ToPrimitive};
 
+use crate::{
+    ActiveTheme,
+    plot::{
+        AXIS_GAP, Grid, Plot, PlotAxis, origin_point,
+        scale::{Scale, ScaleBand, ScaleLinear, Sealed},
+    },
+};
+
 use super::build_band_labels;
-use crate::ActiveTheme;
-use crate::plot::scale::{Scale, ScaleBand, ScaleLinear, Sealed};
-use crate::plot::{AXIS_GAP, Grid, Plot, PlotAxis, origin_point};
 
 #[derive(IntoPlot)]
 pub struct CandlestickChart<T, X, Y>

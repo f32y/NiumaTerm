@@ -3,8 +3,11 @@ use gpui::{
     StatefulInteractiveElement, StyleRefinement, Styled, Window, div, relative,
 };
 
-use crate::dialog::{CancelDialog, ConfirmDialog};
-use crate::{ActiveTheme as _, StyledExt as _, h_flex};
+use crate::{
+    ActiveTheme as _, StyledExt as _,
+    dialog::{CancelDialog, ConfirmDialog},
+    h_flex,
+};
 
 /// Footer section of a dialog, typically contains action buttons.
 ///
@@ -23,10 +26,7 @@ pub struct DialogFooter {
 
 impl DialogFooter {
     pub fn new() -> Self {
-        Self {
-            style: StyleRefinement::default(),
-            children: Vec::new(),
-        }
+        Self { style: StyleRefinement::default(), children: Vec::new() }
     }
 }
 
@@ -71,9 +71,7 @@ pub struct DialogClose {
 
 impl DialogClose {
     pub fn new() -> Self {
-        Self {
-            children: Vec::new(),
-        }
+        Self { children: Vec::new() }
     }
 }
 
@@ -100,9 +98,7 @@ pub struct DialogAction {
 
 impl DialogAction {
     pub fn new() -> Self {
-        Self {
-            children: Vec::new(),
-        }
+        Self { children: Vec::new() }
     }
 }
 

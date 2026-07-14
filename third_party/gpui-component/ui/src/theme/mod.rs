@@ -1,16 +1,15 @@
-use std::ops::{Deref, DerefMut};
-use std::rc::Rc;
-use std::sync::Arc;
-
+use crate::{
+    highlighter::HighlightTheme, list::ListSettings, notification::NotificationSettings,
+    scroll::ScrollbarShow, sheet::SheetSettings,
+};
 use gpui::{App, Global, Hsla, Pixels, SharedString, Window, WindowAppearance, px};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-
-use crate::highlighter::HighlightTheme;
-use crate::list::ListSettings;
-use crate::notification::NotificationSettings;
-use crate::scroll::ScrollbarShow;
-use crate::sheet::SheetSettings;
+use std::{
+    ops::{Deref, DerefMut},
+    rc::Rc,
+    sync::Arc,
+};
 
 mod color;
 mod registry;

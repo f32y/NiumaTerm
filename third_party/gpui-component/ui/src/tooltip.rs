@@ -1,20 +1,20 @@
-use std::cell::Cell;
-use std::rc::Rc;
-use std::time::Duration;
+use std::{cell::Cell, rc::Rc, time::Duration};
 
-use gpui::prelude::FluentBuilder;
 use gpui::{
     Action, AnyElement, AnyView, App, AppContext, Bounds, Context, Display, Element, ElementId,
     GlobalElementId, Half, InspectorElementId, IntoElement, LayoutId, MouseButton, ParentElement,
     Pixels, Point, Position, Render, SharedString, Size, StatefulInteractiveElement, Style,
-    StyleRefinement, Styled, Task, Window, deferred, div, point, px,
+    StyleRefinement, Styled, Task, Window, deferred, div, point, prelude::FluentBuilder, px,
 };
 
-use crate::animation::{Transition, ease_in_out_cubic, ease_out_cubic};
-use crate::kbd::Kbd;
-use crate::root::Root;
-use crate::text::Text;
-use crate::{ActiveTheme, StyledExt, h_flex};
+use crate::{
+    ActiveTheme, StyledExt,
+    animation::{Transition, ease_in_out_cubic, ease_out_cubic},
+    h_flex,
+    kbd::Kbd,
+    root::Root,
+    text::Text,
+};
 
 pub(crate) fn init(_cx: &mut App) {
     // No app-level init needed — TooltipOverlay is per-window via Root.
@@ -635,9 +635,8 @@ impl<E: StatefulInteractiveElement + crate::ElementExt> ManagedTooltipExt for E 
 
 #[cfg(test)]
 mod tests {
-    use gpui::size;
-
     use super::*;
+    use gpui::size;
 
     fn test_content(bounds: Bounds<Pixels>) -> TooltipContent {
         TooltipContent {

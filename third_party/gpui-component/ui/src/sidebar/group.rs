@@ -1,8 +1,8 @@
-use gpui::prelude::FluentBuilder as _;
-use gpui::{App, ElementId, IntoElement, ParentElement, SharedString, Styled as _, Window, div};
-
-use crate::sidebar::SidebarItem;
-use crate::{ActiveTheme, Collapsible, h_flex, v_flex};
+use crate::{ActiveTheme, Collapsible, h_flex, sidebar::SidebarItem, v_flex};
+use gpui::{
+    App, ElementId, IntoElement, ParentElement, SharedString, Styled as _, Window, div,
+    prelude::FluentBuilder as _,
+};
 
 /// A group of items in the [`super::Sidebar`].
 #[derive(Clone)]

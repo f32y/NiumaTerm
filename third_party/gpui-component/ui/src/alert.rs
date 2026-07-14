@@ -1,14 +1,15 @@
 use std::rc::Rc;
 
-use gpui::prelude::FluentBuilder as _;
 use gpui::{
     App, ClickEvent, ElementId, Empty, Hsla, InteractiveElement, IntoElement, ParentElement as _,
-    RenderOnce, SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Window, div, px,
-    rems, transparent_white,
+    RenderOnce, Role, SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Window,
+    div, prelude::FluentBuilder as _, px, rems, transparent_white,
 };
 
-use crate::text::{Text, TextViewStyle};
-use crate::{ActiveTheme as _, Colorize, Icon, IconName, Sizable, Size, StyledExt, h_flex};
+use crate::{
+    ActiveTheme as _, Colorize, Icon, IconName, Sizable, Size, StyledExt, h_flex,
+    text::{Text, TextViewStyle},
+};
 
 /// The variant of the [`Alert`].
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -188,6 +189,7 @@ impl RenderOnce for Alert {
 
         h_flex()
             .id(self.id)
+            .role(Role::Alert)
             .w_full()
             .text_color(fg)
             .bg(bg)

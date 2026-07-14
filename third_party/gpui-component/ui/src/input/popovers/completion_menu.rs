@@ -1,11 +1,10 @@
 use std::rc::Rc;
 
-use gpui::prelude::FluentBuilder;
 use gpui::{
     Action, AnyElement, App, AppContext, Context, DismissEvent, Empty, Entity, EventEmitter,
     Half as _, HighlightStyle, InteractiveElement as _, IntoElement, ParentElement, Pixels, Point,
-    Render, RenderOnce, SharedString, Styled, StyledText, Subscription, Window, deferred, div, px,
-    relative,
+    Render, RenderOnce, SharedString, Styled, StyledText, Subscription, Window, deferred, div,
+    prelude::FluentBuilder, px, relative,
 };
 use lsp_types::{CompletionItem, CompletionTextEdit};
 
@@ -13,11 +12,15 @@ const MAX_MENU_WIDTH: Pixels = px(320.);
 const MAX_MENU_HEIGHT: Pixels = px(240.);
 const POPOVER_GAP: Pixels = px(4.);
 
-use crate::input::popovers::{editor_popover, render_markdown};
-use crate::input::{self, InputState, RopeExt};
-use crate::label::Label;
-use crate::list::{List, ListDelegate, ListEvent, ListState};
-use crate::{ActiveTheme, IndexPath, Selectable, actions, h_flex};
+use crate::{
+    ActiveTheme, IndexPath, Selectable, actions, h_flex,
+    input::{
+        self, InputState, RopeExt,
+        popovers::{editor_popover, render_markdown},
+    },
+    label::Label,
+    list::{List, ListDelegate, ListEvent, ListState},
+};
 
 struct ContextMenuDelegate {
     query: SharedString,

@@ -2,8 +2,10 @@ use gpui::{
     App, Background, Bounds, Corners, PaintQuad, Pixels, Point, Size, Window, fill, point, px,
 };
 
-use crate::plot::label::{PlotLabel, TEXT_GAP, TEXT_HEIGHT, TEXT_SIZE, Text};
-use crate::plot::origin_point;
+use crate::plot::{
+    label::{PlotLabel, TEXT_GAP, TEXT_HEIGHT, TEXT_SIZE, Text},
+    origin_point,
+};
 
 /// Alignment of bars within a [`Bar`] shape, controlling both the orientation
 /// (vertical vs horizontal) and the side where the baseline lives.

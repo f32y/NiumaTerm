@@ -1,22 +1,23 @@
-use std::any::TypeId;
-use std::borrow::Cow;
-use std::collections::{HashMap, VecDeque};
-use std::rc::Rc;
-use std::time::Duration;
+use std::{
+    any::TypeId,
+    borrow::Cow,
+    collections::{HashMap, VecDeque},
+    rc::Rc,
+    time::Duration,
+};
 
-use gpui::prelude::FluentBuilder;
 use gpui::{
     Anchor, Animation, AnimationExt, AnyElement, App, AppContext, ClickEvent, Context,
     DismissEvent, ElementId, Entity, EventEmitter, InteractiveElement as _, IntoElement,
     ParentElement as _, Pixels, Render, SharedString, StatefulInteractiveElement, StyleRefinement,
-    Styled, Subscription, Window, div, px,
+    Styled, Subscription, Window, div, prelude::FluentBuilder, px,
 };
 
-use crate::animation::cubic_bezier;
-use crate::button::{Button, ButtonVariants as _};
 use crate::{
-    ActiveTheme as _, Edges, Icon, IconName, Sizable as _, StyledExt, TITLE_BAR_HEIGHT, h_flex,
-    v_flex,
+    ActiveTheme as _, Edges, Icon, IconName, Sizable as _, StyledExt, TITLE_BAR_HEIGHT,
+    animation::cubic_bezier,
+    button::{Button, ButtonVariants as _},
+    h_flex, v_flex,
 };
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -602,10 +603,9 @@ impl Render for NotificationList {
 
 #[cfg(test)]
 mod tests {
-    use gpui::{TestAppContext, VisualTestContext};
-
     use super::*;
     use crate::theme::Theme;
+    use gpui::{TestAppContext, VisualTestContext};
 
     struct FooKind;
     struct BarKind;

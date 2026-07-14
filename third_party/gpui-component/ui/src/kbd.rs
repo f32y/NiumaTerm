@@ -1,7 +1,6 @@
-use gpui::prelude::FluentBuilder as _;
 use gpui::{
     Action, AsKeystroke, FocusHandle, Half, IntoElement, KeyContext, Keystroke, ParentElement as _,
-    RenderOnce, StyleRefinement, Styled, Window, div, relative,
+    RenderOnce, StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _, relative,
 };
 
 use crate::{ActiveTheme, StyledExt};
@@ -248,9 +247,8 @@ impl RenderOnce for Kbd {
 mod tests {
     #[test]
     fn test_format() {
-        use gpui::Keystroke;
-
         use super::Kbd;
+        use gpui::Keystroke;
 
         if cfg!(target_os = "macos") {
             assert_eq!(Kbd::format(&Keystroke::parse("cmd-a").unwrap()), "⌘A");

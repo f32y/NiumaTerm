@@ -1,7 +1,6 @@
-use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, ElementId, InteractiveElement as _, IntoElement, ParentElement, RenderOnce,
-    StyleRefinement, Styled, Window,
+    StyleRefinement, Styled, Window, prelude::FluentBuilder,
 };
 
 use crate::{

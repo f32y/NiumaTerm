@@ -1,13 +1,19 @@
 use std::rc::Rc;
 
-use gpui::prelude::FluentBuilder as _;
-use gpui::{Anchor, AnyElement, App, IntoElement, SharedString, StyleRefinement, Styled, Window};
+use gpui::{
+    Anchor, AnyElement, App, IntoElement, SharedString, StyleRefinement, Styled, Window,
+    prelude::FluentBuilder as _,
+};
 
-use crate::button::Button;
-use crate::menu::{DropdownMenu, PopupMenuItem};
-use crate::setting::fields::{SettingFieldRender, get_value, set_value};
-use crate::setting::{AnySettingField, RenderOptions};
-use crate::{AxisExt, Disableable, Sizable, StyledExt};
+use crate::{
+    AxisExt, Disableable, Sizable, StyledExt,
+    button::Button,
+    menu::{DropdownMenu, PopupMenuItem},
+    setting::{
+        AnySettingField, RenderOptions,
+        fields::{SettingFieldRender, get_value, set_value},
+    },
+};
 
 pub(crate) struct DropdownField<T> {
     options: Vec<(SharedString, SharedString)>,

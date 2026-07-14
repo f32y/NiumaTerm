@@ -1,24 +1,27 @@
-use std::ops::Range;
-use std::rc::Rc;
-
+use gpui::Corners;
+use gpui::Half;
 use gpui::{
-    AnyElement, App, Bounds, Corners, Edges, Element, ElementId, ElementInputHandler, Entity,
-    GlobalElementId, Half, HighlightStyle, Hitbox, HitboxBehavior, Hsla, InteractiveElement,
-    IntoElement, LayoutId, MouseButton, MouseMoveEvent, MouseUpEvent, Path, Pixels, Point,
-    Position, ShapedLine, SharedString, Size, Style, Styled as _, TextAlign, TextRun, TextStyle,
-    UnderlineStyle, Window, fill, point, px, relative, size,
+    AnyElement, App, Bounds, Edges, Element, ElementId, ElementInputHandler, Entity,
+    GlobalElementId,
+};
+use gpui::{
+    HighlightStyle, Hitbox, HitboxBehavior, Hsla, InteractiveElement, IntoElement, LayoutId,
+    MouseButton, MouseMoveEvent, MouseUpEvent, Path, Pixels, Point, Position, ShapedLine,
+    SharedString, Size, Style, Styled as _, TextAlign, TextRun, TextStyle, UnderlineStyle, Window,
+    fill, point, px, relative, size,
 };
 use ropey::Rope;
 use smallvec::SmallVec;
+use std::{ops::Range, rc::Rc};
 
-use super::mode::InputMode;
-use super::{InputState, LastLayout, WhitespaceIndicators};
-use crate::button::{Button, ButtonVariants as _};
-use crate::input::RopeExt as _;
-use crate::input::blink_cursor::CURSOR_WIDTH;
-use crate::input::display_map::LineLayout;
-use crate::scroll::Scrollbar;
-use crate::{ActiveTheme as _, Colorize, IconName, Root, Selectable, Sizable as _};
+use crate::{
+    ActiveTheme as _, Colorize, IconName, Root, Selectable, Sizable as _,
+    button::{Button, ButtonVariants as _},
+    input::{RopeExt as _, blink_cursor::CURSOR_WIDTH, display_map::LineLayout},
+    scroll::Scrollbar,
+};
+
+use super::{InputState, LastLayout, WhitespaceIndicators, mode::InputMode};
 
 const BOTTOM_MARGIN_ROWS: usize = 3;
 pub(super) const RIGHT_MARGIN: Pixels = px(10.);
@@ -354,15 +357,17 @@ impl TextElement {
         let is_selected_all = selected_range.len() == state.text.len();
 
         let mut cursor = state.cursor();
+        // Buffer rows from the raw (pre-mask) offsets, used to locate the cursor line.
+        let cursor_row = state.text.offset_to_point(cursor).row;
+        let sel_start_row = state.text.offset_to_point(selected_range.start).row;
+        let sel_end_row = state.text.offset_to_point(selected_range.end).row;
         if state.masked {
             selected_range.start = masked_display_offset(&state.text, selected_range.start);
             selected_range.end = masked_display_offset(&state.text, selected_range.end);
             cursor = masked_display_offset(&state.text, cursor);
         }
 
-        let mut current_row = None;
         let mut scroll_offset = state.scroll_handle.offset();
-        let mut cursor_bounds = None;
 
         // Padding kept between the cursor and the viewport's top/bottom
         // edges, used by the auto-scroll-into-view computation below.
@@ -373,90 +378,42 @@ impl TextElement {
             line_height,
         );
 
-        // The cursor corresponds to the current cursor position in the text no only the line.
-        let mut cursor_pos = None;
-        let mut cursor_start = None;
-        let mut cursor_end = None;
-        // Advance of the character under the block caret, if there is one.
-        let mut cursor_char_width = None;
-
-        let mut prev_lines_offset = 0;
-        let mut offset_y = px(0.);
-        let buffer_lines = state.display_map.lines();
+        // Resolve a cursor or selection endpoint to a content-space position.
         let visible_buffer_lines = &last_layout.visible_buffer_lines;
-        let mut vi = 0; // index into visible_buffer_lines / lines
-        for (ix, wrap_line) in buffer_lines.iter().enumerate() {
-            let row = ix;
-            let line_origin = point(px(0.), offset_y);
+        let caret_for = |row: usize, offset: usize, affinity: bool| -> Point<Pixels> {
+            // y of the top of buffer line `row` in content space.
+            let top = line_height * state.display_map.buffer_line_to_display_row(row);
+            let line_origin = point(px(0.), top);
 
-            // break loop if all cursor positions are found
-            if cursor_pos.is_some() && cursor_start.is_some() && cursor_end.is_some() {
-                break;
+            if let Some(vi) = visible_buffer_lines.iter().position(|&bl| bl == row) {
+                let line = &lines[vi];
+                let line_start = last_layout.visible_line_byte_offsets[vi];
+                let local = offset.saturating_sub(line_start);
+                if let Some(pos) = line.position_for_index(local, last_layout, affinity) {
+                    return line_origin + pos;
+                }
             }
+            line_origin
+        };
 
-            // Check if this buffer line has a LineLayout in the compact lines vec
-            let line_layout = if vi < visible_buffer_lines.len() && visible_buffer_lines[vi] == ix {
-                let l = &lines[vi];
-                vi += 1;
-                Some(l)
-            } else {
-                None
-            };
+        let current_row = Some(cursor_row);
+        let cursor_pos = caret_for(cursor_row, cursor, state.cursor_line_end_affinity);
+        let cursor_char_width = if state.cursor_block {
+            visible_buffer_lines
+                .iter()
+                .position(|&row| row == cursor_row)
+                .and_then(|visible_index| {
+                    let line = &lines[visible_index];
+                    let line_start = last_layout.visible_line_byte_offsets[visible_index];
+                    line.char_width_at(cursor.saturating_sub(line_start))
+                })
+        } else {
+            None
+        };
+        let cursor_start = caret_for(sel_start_row, selected_range.start, false);
+        let cursor_end = caret_for(sel_end_row, selected_range.end, false);
 
-            if let Some(line) = line_layout {
-                if cursor_pos.is_none() {
-                    let offset = cursor.saturating_sub(prev_lines_offset);
-                    if let Some(pos) =
-                        line.position_for_index(offset, last_layout, state.cursor_line_end_affinity)
-                    {
-                        current_row = Some(row);
-                        cursor_pos = Some(line_origin + pos);
-                        if state.cursor_block {
-                            cursor_char_width = line.char_width_at(offset);
-                        }
-                    }
-                }
-                if cursor_start.is_none() {
-                    let offset = selected_range.start.saturating_sub(prev_lines_offset);
-                    if let Some(pos) = line.position_for_index(offset, last_layout, false) {
-                        cursor_start = Some(line_origin + pos);
-                    }
-                }
-                if cursor_end.is_none() {
-                    let offset = selected_range.end.saturating_sub(prev_lines_offset);
-                    if let Some(pos) = line.position_for_index(offset, last_layout, false) {
-                        cursor_end = Some(line_origin + pos);
-                    }
-                }
-
-                offset_y += line.size(line_height).height;
-                // +1 for the last `\n`
-                prev_lines_offset += wrap_line.len() + 1;
-            } else {
-                // Not visible (before visible range or hidden/folded).
-                // Just increase the offset_y and prev_lines_offset for scroll tracking.
-                if prev_lines_offset >= cursor && cursor_pos.is_none() {
-                    current_row = Some(row);
-                    cursor_pos = Some(line_origin);
-                }
-                if prev_lines_offset >= selected_range.start && cursor_start.is_none() {
-                    cursor_start = Some(line_origin);
-                }
-                if prev_lines_offset >= selected_range.end && cursor_end.is_none() {
-                    cursor_end = Some(line_origin);
-                }
-
-                let visible_wrap_rows =
-                    state.display_map.visible_wrap_row_count_for_buffer_line(ix);
-                offset_y += line_height * visible_wrap_rows;
-                // +1 for the last `\n`
-                prev_lines_offset += wrap_line.len() + 1;
-            }
-        }
-
-        if let (Some(cursor_pos), Some(cursor_start), Some(cursor_end)) =
-            (cursor_pos, cursor_start, cursor_end)
-        {
+        let cursor_bounds = {
             let selection_changed = state.last_selected_range != Some(selected_range);
             let auto_scrolling = state.auto_scroll.is_active();
             if selection_changed && !is_selected_all {
@@ -563,22 +520,30 @@ impl TextElement {
                 CURSOR_WIDTH
             };
 
+            // Match the caret to the deferred scroll target (applied below) that
+            // the text paints at; otherwise the caret follows the cursor-scroll
+            // while the text uses the deferred offset, flashing it mid-field.
+            let cursor_scroll_x = state
+                .deferred_scroll_offset
+                .map(|offset| offset.x)
+                .unwrap_or(scroll_offset.x);
+
             // For Right alignment, clamp cursor within the right edge of bounds so it
             // stays visible without having to shift the text via scroll_offset.
-            let cursor_x = bounds.left() + cursor_pos.x + line_number_width + scroll_offset.x;
+            let cursor_x = bounds.left() + cursor_pos.x + line_number_width + cursor_scroll_x;
             let cursor_x = if last_layout.text_align == TextAlign::Right {
                 cursor_x.min(bounds.right() - CURSOR_WIDTH)
             } else {
                 cursor_x
             };
-            cursor_bounds = Some(Bounds::new(
+            Some(Bounds::new(
                 point(
                     cursor_x,
                     bounds.top() + cursor_pos.y + ((line_height - cursor_height) / 2.),
                 ),
                 size(cursor_width, cursor_height),
-            ));
-        }
+            ))
+        };
 
         if let Some(deferred_scroll_offset) = state.deferred_scroll_offset {
             scroll_offset = deferred_scroll_offset;
@@ -857,52 +822,57 @@ impl TextElement {
     ) -> (Range<usize>, Vec<usize>, Pixels) {
         // Add extra rows to avoid showing empty space when scroll to bottom.
         let extra_rows = 1;
-        let mut visible_top = px(0.);
         if state.mode.is_single_line() {
-            return (0..1, vec![0], visible_top);
+            return (0..1, vec![0], px(0.));
         }
 
         let total_lines = state.display_map.wrap_row_count();
+        let display_count = state.display_map.display_row_count();
+        let buffer_line_count = state.display_map.buffer_line_count();
+        if display_count == 0 || buffer_line_count == 0 {
+            return (0..0, Vec::new(), px(0.));
+        }
+
         let mut scroll_top = if let Some(deferred_scroll_offset) = state.deferred_scroll_offset {
             deferred_scroll_offset.y
         } else {
             state.scroll_handle.offset().y
         };
-
-        let mut visible_range = 0..total_lines;
         scroll_top = clamp_auto_grow_vertical_scroll_offset(
             &state.mode,
             scroll_top,
             line_height * total_lines,
             input_height,
         );
-        let mut line_bottom = px(0.);
-        for (ix, _line) in state.display_map.lines().iter().enumerate() {
-            let visible_wrap_rows = state.display_map.visible_wrap_row_count_for_buffer_line(ix);
 
-            if visible_wrap_rows == 0 {
-                continue;
-            }
+        // Display rows are uniformly `line_height` tall, so the visible window maps
+        // directly to a display-row range.
+        let viewport_top = (-scroll_top).max(px(0.));
+        let viewport_bottom = viewport_top + input_height;
+        let line_height_f = f32::from(line_height);
+        let first_display =
+            ((f32::from(viewport_top) / line_height_f).floor() as usize).min(display_count - 1);
+        let last_display =
+            ((f32::from(viewport_bottom) / line_height_f).ceil() as usize).min(display_count - 1);
 
-            let wrapped_height = line_height * visible_wrap_rows;
-            line_bottom += wrapped_height;
+        let start_line = state.display_map.display_row_to_buffer_line(first_display);
+        let end_line = state.display_map.display_row_to_buffer_line(last_display);
 
-            if line_bottom < -scroll_top {
-                visible_top = line_bottom - wrapped_height;
-                visible_range.start = ix;
-            }
+        // y of the top of the first visible buffer line (in content space).
+        let visible_top = match state
+            .display_map
+            .buffer_line_to_display_row_range(start_line)
+        {
+            Some(range) => line_height * range.start,
+            None => line_height * first_display,
+        };
 
-            if line_bottom + scroll_top >= input_height {
-                visible_range.end = (ix + extra_rows).min(total_lines);
-                break;
-            }
-        }
+        let visible_range = start_line..(end_line + 1 + extra_rows).min(buffer_line_count);
 
         // Collect non-hidden buffer lines within the visible range
         let mut visible_buffer_lines = Vec::with_capacity(visible_range.len());
-        for ix in visible_range.start..visible_range.end {
-            let visible_wrap_rows = state.display_map.visible_wrap_row_count_for_buffer_line(ix);
-            if visible_wrap_rows > 0 {
+        for ix in visible_range.clone() {
+            if state.display_map.visible_wrap_row_count_for_buffer_line(ix) > 0 {
                 visible_buffer_lines.push(ix);
             }
         }
@@ -1263,7 +1233,6 @@ impl TextElement {
         window: &mut Window,
     ) -> Vec<LineLayout> {
         let is_single_line = state.mode.is_single_line();
-        let buffer_lines = state.display_map.lines();
 
         if is_single_line {
             let shaped_line = window.text_system().shape_line(
@@ -1309,8 +1278,9 @@ impl TextElement {
 
         for (vi, &buffer_line) in last_layout.visible_buffer_lines.iter().enumerate() {
             let line_text: String = display_text.slice_line(buffer_line).into();
-            let line_item = buffer_lines
-                .get(buffer_line)
+            let line_item = state
+                .display_map
+                .line(buffer_line)
                 .expect("line should exists in wrapper");
 
             debug_assert_eq!(line_item.len(), line_text.len());
@@ -1558,9 +1528,8 @@ impl Element for TextElement {
         if state.mode.is_multi_line() {
             style.flex_grow = 1.0;
             style.size.height = relative(1.).into();
-            if state.mode.is_content_sized() {
-                // Grow the height to match the wrapped row count, capped at max rows.
-                // Covers AutoGrow and a code editor that opted into auto-grow.
+            if state.mode.is_auto_grow() {
+                // Auto grow to let height match to rows, but not exceed max rows.
                 let rows = state.mode.max_rows().min(state.mode.rows());
                 style.min_size.height = (rows * line_height).into();
             } else {
@@ -1591,23 +1560,6 @@ impl Element for TextElement {
             state.display_map.set_font(font, text_size, cx);
             state.display_map.ensure_text_prepared(&state.text, cx);
         });
-
-        let state = self.state.read(cx);
-        let line_height = window.line_height();
-
-        let (visible_range, visible_buffer_lines, visible_top) =
-            self.calculate_visible_range(&state, line_height, bounds.size.height);
-        let visible_start_offset = state.text.line_start_offset(visible_range.start);
-        let visible_end_offset = state
-            .text
-            .line_end_offset(visible_range.end.saturating_sub(1));
-
-        let highlight_styles = self.highlight_lines(
-            &visible_buffer_lines,
-            visible_top,
-            visible_start_offset..visible_end_offset,
-            cx,
-        );
 
         let state = self.state.read(cx);
         let multi_line = state.mode.is_multi_line();
@@ -1643,6 +1595,37 @@ impl Element for TextElement {
         } else {
             None
         };
+
+        let wrap_width_changed = state
+            .last_layout
+            .as_ref()
+            .map(|l| l.wrap_width != wrap_width)
+            .unwrap_or(true);
+
+        if wrap_width_changed {
+            self.state.update(cx, |state, cx| {
+                state.display_map.on_layout_changed(wrap_width, cx);
+            });
+        }
+
+        let state = self.state.read(cx);
+        let line_height = window.line_height();
+
+        let (visible_range, visible_buffer_lines, visible_top) =
+            self.calculate_visible_range(&state, line_height, bounds.size.height);
+        let visible_start_offset = state.text.line_start_offset(visible_range.start);
+        let visible_end_offset = state
+            .text
+            .line_end_offset(visible_range.end.saturating_sub(1));
+
+        let highlight_styles = self.highlight_lines(
+            &visible_buffer_lines,
+            visible_top,
+            visible_start_offset..visible_end_offset,
+            cx,
+        );
+
+        let state = self.state.read(cx);
 
         let visible_line_byte_offsets: Vec<usize> = visible_buffer_lines
             .iter()

@@ -1,15 +1,18 @@
 use std::rc::Rc;
 
-use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, AppContext as _, Entity, IntoElement, SharedString, StyleRefinement, Styled,
-    Window,
+    Window, prelude::FluentBuilder as _,
 };
 
-use crate::input::{Input, InputEvent, InputState};
-use crate::setting::fields::{SettingFieldRender, get_value, set_value};
-use crate::setting::{AnySettingField, RenderOptions};
-use crate::{AxisExt as _, Sizable, StyledExt};
+use crate::{
+    AxisExt as _, Sizable, StyledExt,
+    input::{Input, InputEvent, InputState},
+    setting::{
+        AnySettingField, RenderOptions,
+        fields::{SettingFieldRender, get_value, set_value},
+    },
+};
 
 pub(crate) struct StringField<T> {
     _marker: std::marker::PhantomData<T>,

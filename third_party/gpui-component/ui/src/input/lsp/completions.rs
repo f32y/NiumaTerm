@@ -1,19 +1,17 @@
-use std::cell::RefCell;
-use std::ops::Range;
-use std::rc::Rc;
-use std::time::Duration;
-
 use anyhow::Result;
 use gpui::{Context, EntityInputHandler, Task, Window};
-use lsp_types::request::Completion;
 use lsp_types::{
     CompletionContext, CompletionItem, CompletionResponse, InlineCompletionContext,
     InlineCompletionItem, InlineCompletionResponse, InlineCompletionTriggerKind,
+    request::Completion,
 };
 use ropey::Rope;
+use std::{cell::RefCell, ops::Range, rc::Rc, time::Duration};
 
-use crate::input::InputState;
-use crate::input::popovers::{CompletionMenu, ContextMenu};
+use crate::input::{
+    InputState,
+    popovers::{CompletionMenu, ContextMenu},
+};
 
 /// Default debounce duration for inline completions.
 const DEFAULT_INLINE_COMPLETION_DEBOUNCE: Duration = Duration::from_millis(300);

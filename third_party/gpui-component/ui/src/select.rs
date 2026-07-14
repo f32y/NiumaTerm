@@ -1,17 +1,27 @@
-use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, ClickEvent, Context, DismissEvent, Edges, ElementId, Entity, EventEmitter,
     FocusHandle, Focusable, InteractiveElement, IntoElement, KeyBinding, Length, ParentElement,
     Render, RenderOnce, SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Window,
-    anchored, deferred, div, px, rems,
+    anchored, deferred, div, prelude::FluentBuilder, px, rems,
 };
 use rust_i18n::t;
 
-use crate::actions::{Cancel, Confirm, SelectDown, SelectUp};
-use crate::global_state::GlobalState;
-use crate::input::{clear_button, input_style};
-use crate::list::List;
+use crate::{
+    ActiveTheme, Disableable, ElementExt as _, Icon, IconName, IndexPath, Sizable, Size,
+    StyleSized, StyledExt,
+    actions::{Cancel, Confirm, SelectDown, SelectUp},
+    global_state::GlobalState,
+    h_flex,
+    input::{clear_button, input_style},
+    list::List,
+    searchable_list::{
+        SearchableListChange, SearchableListDelegate, SearchableListItem, SearchableListState,
+    },
+    v_flex,
+};
+
 // MARK: Public re-exports for back-compat
+
 /// Re-exported for backward compatibility. New code should prefer [`SearchableGroup`].
 pub use crate::searchable_list::SearchableGroup as SelectGroup;
 /// Re-exported for backward compatibility. New code should prefer [`SearchableListDelegate`].
@@ -22,13 +32,6 @@ pub use crate::searchable_list::SearchableListItem as SelectItem;
 pub use crate::searchable_list::SearchableListItemElement as SelectListItem;
 /// Re-exported for backward compatibility.
 pub use crate::searchable_list::SearchableVec;
-use crate::searchable_list::{
-    SearchableListChange, SearchableListDelegate, SearchableListItem, SearchableListState,
-};
-use crate::{
-    ActiveTheme, Disableable, ElementExt as _, Icon, IconName, IndexPath, Sizable, Size,
-    StyleSized, StyledExt, h_flex, v_flex,
-};
 
 const CONTEXT: &str = "Select";
 
@@ -765,9 +768,11 @@ where
 mod tests {
     use gpui::{AppContext as _, TestAppContext};
 
-    use crate::IndexPath;
-    use crate::searchable_list::SearchableVec;
-    use crate::select::{SelectGroup, SelectState};
+    use crate::{
+        IndexPath,
+        searchable_list::SearchableVec,
+        select::{SelectGroup, SelectState},
+    };
 
     #[gpui::test]
     fn test_select_initial_selection_seeds_cursor(cx: &mut TestAppContext) {

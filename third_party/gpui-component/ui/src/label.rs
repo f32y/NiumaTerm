@@ -1,9 +1,8 @@
 use std::ops::Range;
 
-use gpui::prelude::FluentBuilder;
 use gpui::{
     App, HighlightStyle, IntoElement, ParentElement, RenderOnce, SharedString, StyleRefinement,
-    Styled, StyledText, Window, div, rems,
+    Styled, StyledText, Window, div, prelude::FluentBuilder, rems,
 };
 
 use crate::{ActiveTheme, StyledExt};

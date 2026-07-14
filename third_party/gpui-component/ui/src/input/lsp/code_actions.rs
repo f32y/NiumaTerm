@@ -1,11 +1,12 @@
-use std::ops::Range;
-
 use anyhow::Result;
 use gpui::{App, Context, Entity, SharedString, Task, Window};
 use lsp_types::CodeAction;
+use std::ops::Range;
 
-use crate::input::popovers::{CodeActionItem, CodeActionMenu, ContextMenu};
-use crate::input::{InputState, ToggleCodeActions};
+use crate::input::{
+    InputState, ToggleCodeActions,
+    popovers::{CodeActionItem, CodeActionMenu, ContextMenu},
+};
 
 pub trait CodeActionProvider {
     /// The id for this CodeAction.

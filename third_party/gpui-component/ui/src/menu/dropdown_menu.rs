@@ -5,10 +5,7 @@ use gpui::{
     RenderOnce, SharedString, StyleRefinement, Styled, Window,
 };
 
-use crate::Selectable;
-use crate::button::Button;
-use crate::menu::PopupMenu;
-use crate::popover::Popover;
+use crate::{Selectable, button::Button, menu::PopupMenu, popover::Popover};
 
 /// A dropdown menu trait for buttons and other interactive elements
 pub trait DropdownMenu: Styled + Selectable + InteractiveElement + IntoElement + 'static {

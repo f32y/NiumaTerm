@@ -1,12 +1,10 @@
-use std::ops::Deref;
-use std::sync::Arc;
+use std::{ops::Deref, sync::Arc};
+
+use crate::{ThemeMode, theme::DEFAULT_THEME_COLORS};
 
 use gpui::{Background, Fill, Hsla};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-
-use crate::ThemeMode;
-use crate::theme::DEFAULT_THEME_COLORS;
 
 /// A theme token that keeps a solid representative color and its renderable background.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]

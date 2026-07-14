@@ -208,9 +208,9 @@ impl<T> Line<T> {
 
 #[cfg(test)]
 mod tests {
-    use gpui::{Bounds, point, px};
-
     use super::*;
+
+    use gpui::{Bounds, point, px};
 
     #[test]
     fn test_line_path() {

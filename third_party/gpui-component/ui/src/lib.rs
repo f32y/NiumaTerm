@@ -1,10 +1,5 @@
-// Vendored code keeps upstream's std::sync::Mutex; the workspace
-// disallowed-types policy applies to first-party crates.
-#![allow(clippy::disallowed_types)]
-
-use std::ops::Deref;
-
 use gpui::{App, SharedString};
+use std::ops::Deref;
 
 mod async_util;
 mod element_ext;
@@ -16,6 +11,8 @@ mod icon;
 mod index_path;
 #[cfg(any(feature = "inspector", debug_assertions))]
 mod inspector;
+#[cfg(all(target_os = "macos", not(test)))]
+mod macos_accessibility;
 mod root;
 mod styled;
 mod time;
@@ -83,6 +80,7 @@ pub mod theme;
 pub mod tooltip;
 pub mod tree;
 
+pub use crate::Disableable;
 pub use element_ext::*;
 pub use event::InteractiveElementExt;
 pub use focus_trap::FocusTrapElement;
@@ -102,8 +100,6 @@ pub use title_bar::*;
 pub use virtual_list::{VirtualList, VirtualListScrollHandle, h_virtual_list, v_virtual_list};
 pub use window_border::{WindowBorder, window_border, window_paddings};
 pub use window_ext::WindowExt;
-
-pub use crate::Disableable;
 
 rust_i18n::i18n!("locales", fallback = "en");
 

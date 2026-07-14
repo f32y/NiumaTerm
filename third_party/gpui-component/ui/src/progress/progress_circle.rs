@@ -1,16 +1,16 @@
-use std::f32::consts::TAU;
-
+use crate::{ActiveTheme, Sizable, Size, StyledExt};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    Animation, AnimationExt as _, AnyElement, App, Bounds, ElementId, Hsla,
-    InteractiveElement as _, IntoElement, ParentElement, Pixels, RenderOnce, StyleRefinement,
-    Styled, Window, canvas, div, ease_in_out, px, relative,
+    Animation, AnimationExt as _, AnyElement, App, ElementId, Hsla, InteractiveElement as _,
+    IntoElement, ParentElement, Pixels, RenderOnce, StyleRefinement, Styled, Window, canvas,
+    ease_in_out, px, relative,
 };
+use gpui::{Bounds, div};
 use instant::Duration;
+use std::f32::consts::TAU;
 
 use super::ProgressState;
 use crate::plot::shape::{Arc, ArcData};
-use crate::{ActiveTheme, Sizable, Size, StyledExt};
 
 /// A circular progress indicator element.
 #[derive(IntoElement)]

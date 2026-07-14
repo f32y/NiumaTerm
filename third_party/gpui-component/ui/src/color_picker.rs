@@ -1,21 +1,22 @@
-use gpui::prelude::FluentBuilder as _;
 use gpui::{
     Anchor, App, AppContext, Context, Div, ElementId, Entity, EventEmitter, FocusHandle, Focusable,
     Hsla, InteractiveElement as _, IntoElement, KeyBinding, ParentElement, Render, RenderOnce,
     SharedString, Stateful, StatefulInteractiveElement as _, StyleRefinement, Styled, Subscription,
-    TextAlign, Window, div, hsla, linear_color_stop, linear_gradient,
+    TextAlign, Window, div, hsla, linear_color_stop, linear_gradient, prelude::FluentBuilder as _,
 };
 use rust_i18n::t;
 
-use crate::actions::Confirm;
-use crate::input::{Input, InputEvent, InputState};
-use crate::popover::Popover;
-use crate::separator::Separator;
-use crate::slider::{Slider, SliderEvent, SliderState};
-use crate::tab::{Tab, TabBar};
-use crate::tooltip::{ManagedTooltipExt as _, Tooltip};
 use crate::{
-    ActiveTheme as _, Colorize as _, Icon, Selectable, Sizable, Size, StyleSized, h_flex, v_flex,
+    ActiveTheme as _, Colorize as _, Icon, Selectable, Sizable, Size, StyleSized,
+    actions::Confirm,
+    h_flex,
+    input::{Input, InputEvent, InputState},
+    popover::Popover,
+    separator::Separator,
+    slider::{Slider, SliderEvent, SliderState},
+    tab::{Tab, TabBar},
+    tooltip::{ManagedTooltipExt as _, Tooltip},
+    v_flex,
 };
 
 const CONTEXT: &'static str = "ColorPicker";
@@ -34,9 +35,8 @@ pub enum ColorPickerEvent {
 }
 
 fn color_palettes() -> Vec<Vec<Hsla>> {
-    use itertools::Itertools as _;
-
     use crate::theme::DEFAULT_COLORS;
+    use itertools::Itertools as _;
 
     macro_rules! c {
         ($color:tt) => {

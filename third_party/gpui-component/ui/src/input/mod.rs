@@ -4,6 +4,7 @@ pub(super) const MASK_CHAR: char = '•';
 mod blink_cursor;
 mod change;
 mod clear_button;
+mod content_type;
 mod cursor;
 mod display_map;
 mod element;
@@ -13,6 +14,8 @@ mod lsp;
 mod mask_pattern;
 mod mode;
 mod movement;
+#[cfg(target_os = "macos")]
+mod native;
 mod number_input;
 mod otp_input;
 pub(crate) mod popovers;
@@ -22,9 +25,10 @@ mod selection;
 mod state;
 
 pub(crate) use clear_button::*;
+pub use content_type::*;
 pub use cursor::*;
-#[cfg(target_family = "wasm")]
-pub use display_map::folding::Tree;
+#[cfg(not(feature = "tree-sitter"))]
+pub use display_map::Tree;
 pub use display_map::{BufferPoint, DisplayMap, DisplayPoint, FoldRange};
 pub use indent::TabSize;
 pub use input::*;

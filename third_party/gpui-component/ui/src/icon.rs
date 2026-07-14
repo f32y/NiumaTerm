@@ -1,11 +1,10 @@
-use gpui::prelude::FluentBuilder as _;
+use crate::{ActiveTheme, Sizable, Size};
 use gpui::{
     AnyElement, App, AppContext, Context, Entity, Hsla, IntoElement, Radians, Render, RenderOnce,
-    SharedString, StyleRefinement, Styled, Svg, Transformation, Window, svg,
+    SharedString, StyleRefinement, Styled, Svg, Transformation, Window,
+    prelude::FluentBuilder as _, svg,
 };
 use gpui_component_macros::icon_named;
-
-use crate::{ActiveTheme, Sizable, Size};
 
 /// Types implementing this trait can automatically be converted to [`Icon`].
 ///

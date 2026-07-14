@@ -1,5 +1,4 @@
-use std::ops::Range;
-use std::rc::Rc;
+use std::{ops::Range, rc::Rc};
 
 use gpui::{
     AnyElement, App, AppContext as _, AvailableSpace, Bounds, Element, ElementId, Entity,
@@ -8,9 +7,10 @@ use gpui::{
     px,
 };
 
-use crate::StyledExt;
-use crate::input::InputState;
-use crate::input::popovers::render_markdown;
+use crate::{
+    StyledExt,
+    input::{InputState, popovers::render_markdown},
+};
 
 pub struct HoverPopover {
     editor: Entity<InputState>,

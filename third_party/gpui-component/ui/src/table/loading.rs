@@ -1,8 +1,5 @@
-use gpui::prelude::FluentBuilder as _;
-use gpui::{IntoElement, ParentElement as _, RenderOnce, Styled};
-
-use crate::skeleton::Skeleton;
-use crate::{ActiveTheme, Size, h_flex, v_flex};
+use crate::{ActiveTheme, Size, h_flex, skeleton::Skeleton, v_flex};
+use gpui::{IntoElement, ParentElement as _, RenderOnce, Styled, prelude::FluentBuilder as _};
 
 #[derive(IntoElement)]
 pub(super) struct Loading {

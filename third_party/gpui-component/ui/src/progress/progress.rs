@@ -1,13 +1,12 @@
-use gpui::prelude::FluentBuilder;
+use crate::{ActiveTheme, Sizable, Size, StyledExt};
 use gpui::{
     Animation, AnimationExt as _, App, Background, ElementId, Hsla, InteractiveElement as _,
-    IntoElement, ParentElement, RenderOnce, StyleRefinement, Styled, Window, div, ease_in_out, px,
-    relative,
+    IntoElement, ParentElement, RenderOnce, Role, StatefulInteractiveElement as _, StyleRefinement,
+    Styled, Window, div, ease_in_out, prelude::FluentBuilder, px, relative,
 };
 use instant::Duration;
 
 use super::ProgressState;
-use crate::{ActiveTheme, Sizable, Size, StyledExt};
 
 /// A linear horizontal progress bar element.
 #[derive(IntoElement)]
@@ -97,6 +96,10 @@ impl RenderOnce for Progress {
 
         div()
             .id(self.id)
+            .role(Role::ProgressIndicator)
+            .aria_numeric_value(value as f64)
+            .aria_min_numeric_value(0.0)
+            .aria_max_numeric_value(100.0)
             .w_full()
             .relative()
             .h(height)

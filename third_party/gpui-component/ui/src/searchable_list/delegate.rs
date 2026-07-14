@@ -1,7 +1,8 @@
 use gpui::{AnyElement, App, IntoElement, SharedString, Task, Window};
 
-use super::change::SearchableListChange;
 use crate::IndexPath;
+
+use super::change::SearchableListChange;
 
 /// An item that can appear in a searchable list (Select, ComboBox).
 pub trait SearchableListItem: Clone {

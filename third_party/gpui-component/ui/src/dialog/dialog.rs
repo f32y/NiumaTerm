@@ -1,23 +1,23 @@
-use std::rc::Rc;
-use std::sync::LazyLock;
-use std::time::Duration;
+use std::{rc::Rc, sync::LazyLock, time::Duration};
 
-use gpui::prelude::FluentBuilder;
 use gpui::{
     Animation, AnimationExt as _, AnyElement, App, Bounds, BoxShadow, ClickEvent, Edges,
     FocusHandle, Hsla, InteractiveElement, IntoElement, KeyBinding, MouseButton, ParentElement,
-    Pixels, Point, RenderOnce, SharedString, StyleRefinement, Styled, Window, WindowControlArea,
-    actions, anchored, div, hsla, point, px,
+    Pixels, Point, RenderOnce, Role, SharedString, StatefulInteractiveElement as _, StyleRefinement,
+    Styled, Window, WindowControlArea, actions, anchored, div, hsla, point, prelude::FluentBuilder,
+    px,
 };
 use rust_i18n::t;
 
-use crate::animation::cubic_bezier;
-use crate::button::{Button, ButtonVariant, ButtonVariants as _};
-use crate::dialog::{DialogContent, DialogTitle};
-use crate::scroll::ScrollableElement as _;
 use crate::{
     ActiveTheme as _, FocusTrapElement as _, IconName, Root, Sizable as _, StyledExt,
-    TITLE_BAR_HEIGHT, WindowExt as _, v_flex,
+    TITLE_BAR_HEIGHT, WindowExt as _,
+    animation::cubic_bezier,
+    button::{Button, ButtonVariant, ButtonVariants as _},
+    dialog::{DialogContent, DialogTitle},
+    scroll::ScrollableElement as _,
+    text::{SelectionScope, SelectionScopeElement as _},
+    v_flex,
 };
 
 pub static ANIMATION_DURATION: LazyLock<Duration> = LazyLock::new(|| Duration::from_secs_f64(0.25));
@@ -209,6 +209,7 @@ pub struct Dialog {
     pub(crate) footer: Option<AnyElement>,
     pub(crate) content_builder: Option<ContentBuilderFn>,
     pub(crate) props: DialogProps,
+    pub(crate) a11y_role: Role,
 
     button_props: DialogButtonProps,
 
@@ -240,6 +241,7 @@ impl Dialog {
             children: Vec::new(),
             layer_ix: 0,
             button_props: DialogButtonProps::default(),
+            a11y_role: Role::Dialog,
         }
     }
 
@@ -285,6 +287,11 @@ impl Dialog {
     /// Set the button props of the dialog.
     pub fn button_props(mut self, button_props: DialogButtonProps) -> Self {
         self.button_props = button_props;
+        self
+    }
+
+    pub(crate) fn alert_dialog_role(mut self) -> Self {
+        self.a11y_role = Role::AlertDialog;
         self
     }
 
@@ -524,6 +531,7 @@ impl RenderOnce for Dialog {
                     .child(
                         v_flex()
                             .id(layer_ix)
+                            .role(self.a11y_role)
                             .track_focus(&self.focus_handle)
                             .focus_trap(format!("dialog-{}", layer_ix), &self.focus_handle)
                             .bg(cx.theme().tokens.background)
@@ -641,11 +649,6 @@ impl RenderOnce for Dialog {
                                         }
                                     })
                             }))
-                            .on_any_mouse_down({
-                                |_, _, cx| {
-                                    cx.stop_propagation();
-                                }
-                            })
                             .with_animation("slide-down", animation.clone(), move |this, delta| {
                                 // This is equivalent to `shadow_xl` with an extra opacity.
                                 let shadow = vec![
@@ -665,7 +668,8 @@ impl RenderOnce for Dialog {
                                     },
                                 ];
                                 this.top(y * delta).shadow(shadow)
-                            }),
+                            })
+                            .selection_scope(SelectionScope::Dialog(layer_ix)),
                     )
                     .with_animation("fade-in", animation, move |this, delta| this.opacity(delta)),
             )

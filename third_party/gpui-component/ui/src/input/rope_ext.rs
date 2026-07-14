@@ -2,10 +2,11 @@ use std::ops::Range;
 
 use ropey::{LineType, Rope, RopeSlice};
 use sum_tree::Bias;
-#[cfg(not(target_family = "wasm"))]
+
+#[cfg(feature = "tree-sitter")]
 pub use tree_sitter::{InputEdit, Point};
 
-#[cfg(target_family = "wasm")]
+#[cfg(not(feature = "tree-sitter"))]
 /// Stub type for tree-sitter Point on WASM (tree-sitter not available).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Point {
@@ -13,14 +14,14 @@ pub struct Point {
     pub column: usize,
 }
 
-#[cfg(target_family = "wasm")]
+#[cfg(not(feature = "tree-sitter"))]
 impl Point {
     pub fn new(row: usize, column: usize) -> Self {
         Self { row, column }
     }
 }
 
-#[cfg(target_family = "wasm")]
+#[cfg(not(feature = "tree-sitter"))]
 /// Stub type for tree-sitter InputEdit on WASM (tree-sitter not available).
 #[derive(Debug, Clone, Copy)]
 pub struct InputEdit {
@@ -457,12 +458,11 @@ impl RopeExt for Rope {
 
 #[cfg(test)]
 mod tests {
+    use super::Point;
     use ropey::Rope;
     use sum_tree::Bias;
-    use tree_sitter::Point;
 
-    use crate::RopeExt;
-    use crate::input::Position;
+    use crate::{RopeExt, input::Position};
 
     #[test]
     fn test_slice_line() {

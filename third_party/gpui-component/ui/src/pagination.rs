@@ -1,17 +1,18 @@
-use std::ops::Range;
-use std::rc::Rc;
+use std::{ops::Range, rc::Rc};
 
-use gpui::prelude::FluentBuilder;
 use gpui::{
     App, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce, SharedString,
-    StyleRefinement, Styled, Window, px,
+    StyleRefinement, Styled, Window, prelude::FluentBuilder, px,
 };
 use rust_i18n::t;
 
-use crate::button::{Button, ButtonVariants};
-use crate::icon::IconName;
-use crate::menu::{DropdownMenu as _, PopupMenuItem};
-use crate::{Disableable, Icon, Sizable, Size, StyledExt, h_flex};
+use crate::{
+    Disableable, Icon, Sizable, Size, StyledExt,
+    button::{Button, ButtonVariants},
+    h_flex,
+    icon::IconName,
+    menu::{DropdownMenu as _, PopupMenuItem},
+};
 
 /// Pagination with page navigation, next and previous links.
 #[derive(IntoElement)]

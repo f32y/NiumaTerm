@@ -1,16 +1,12 @@
-use std::cell::Cell;
-use std::rc::Rc;
-
-use gpui::prelude::FluentBuilder as _;
 use gpui::{
     Anchor, AnyElement, App, Bounds, Context, ElementId, InteractiveElement as _, IntoElement,
     ParentElement, Pixels, Render, RenderOnce, StatefulInteractiveElement, StyleRefinement, Styled,
-    Task, Window, div,
+    Task, Window, div, prelude::FluentBuilder as _,
 };
 use instant::Duration;
+use std::{cell::Cell, rc::Rc};
 
-use crate::popover::Popover;
-use crate::{ElementExt, StyledExt as _};
+use crate::{ElementExt, StyledExt as _, popover::Popover};
 
 /// A hover card element that displays content when hovering over a trigger element.
 ///
@@ -53,6 +49,10 @@ impl HoverCard {
     }
 
     /// Set the anchor corner of the hover card, default is [`Anchor::TopCenter`].
+    ///
+    /// Imagine the card has a pointer tip (like a speech bubble's tail). The anchor
+    /// is where that tip sits relative to the trigger — e.g. `Anchor::TopCenter`
+    /// places it at the trigger's top center. The card then hangs off that point.
     pub fn anchor(mut self, anchor: impl Into<Anchor>) -> Self {
         self.anchor = anchor.into();
         self

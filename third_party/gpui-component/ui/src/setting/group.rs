@@ -1,10 +1,15 @@
-use gpui::prelude::FluentBuilder as _;
-use gpui::{App, IntoElement, ParentElement as _, SharedString, StyleRefinement, Styled, Window};
+use gpui::{
+    App, IntoElement, ParentElement as _, SharedString, StyleRefinement, Styled, Window,
+    prelude::FluentBuilder as _,
+};
 
-use crate::group_box::{GroupBox, GroupBoxVariants};
-use crate::label::Label;
-use crate::setting::{RenderOptions, SettingItem};
-use crate::{ActiveTheme, StyledExt, v_flex};
+use crate::{
+    ActiveTheme, StyledExt,
+    group_box::{GroupBox, GroupBoxVariants},
+    label::Label,
+    setting::{RenderOptions, SettingItem},
+    v_flex,
+};
 
 /// A setting group that can contain multiple setting items.
 #[derive(Clone)]

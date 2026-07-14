@@ -1,7 +1,6 @@
 use std::fmt::Debug;
 
-use crate::history::HistoryItem;
-use crate::input::Selection;
+use crate::{history::HistoryItem, input::Selection};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Change {

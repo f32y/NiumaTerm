@@ -1,7 +1,6 @@
 //! Windows native menu implementation (Win32 popup menus).
 
-use std::ffi::c_void;
-use std::sync::Arc;
+use std::{ffi::c_void, sync::Arc};
 
 use gpui::{Action, App, AssetSource, ImageFormat, Pixels, Point, SharedString, Window};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -23,7 +22,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SetMenuItemInfoW, TPM_LEFTALIGN, TPM_NONOTIFY, TPM_RETURNCMD, TPM_TOPALIGN, TrackPopupMenuEx,
     WM_NULL,
 };
-use windows::core::{BOOL, PCWSTR};
+use windows::core::PCWSTR;
 
 use super::{NativeMenuItem, resolve_icon_image};
 
@@ -243,8 +242,8 @@ impl GdiplusSession {
         let input = GdiplusStartupInput {
             GdiplusVersion: 1,
             DebugEventCallback: 0,
-            SuppressBackgroundThread: BOOL(0),
-            SuppressExternalCodecs: BOOL(0),
+            SuppressBackgroundThread: false.into(),
+            SuppressExternalCodecs: false.into(),
         };
 
         let mut token: usize = 0;

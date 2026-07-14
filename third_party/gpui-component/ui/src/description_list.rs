@@ -1,11 +1,9 @@
-use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Axis, DefiniteLength, IntoElement, ParentElement, RenderOnce, SharedString,
-    Styled, Window, div, px, relative,
+    Styled, Window, div, prelude::FluentBuilder as _, px, relative,
 };
 
-use crate::text::Text;
-use crate::{ActiveTheme as _, AxisExt, Sizable, Size, h_flex, v_flex};
+use crate::{ActiveTheme as _, AxisExt, Sizable, Size, h_flex, text::Text, v_flex};
 
 /// A description list.
 #[derive(IntoElement)]

@@ -3,8 +3,10 @@ use gpui::{
     point, px,
 };
 
-use super::label::{PlotLabel, TEXT_GAP, TEXT_HEIGHT, TEXT_SIZE, Text};
-use super::origin_point;
+use super::{
+    label::PlotLabel, label::TEXT_GAP, label::TEXT_HEIGHT, label::TEXT_SIZE, label::Text,
+    origin_point,
+};
 
 pub const AXIS_GAP: f32 = 18.;
 

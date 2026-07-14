@@ -1,19 +1,22 @@
 use std::sync::Arc;
 
+use crate::{
+    ActiveTheme, AxisExt as _, Placement,
+    dock::PanelInfo,
+    h_flex,
+    resizable::{
+        PANEL_MIN_SIZE, ResizablePanelEvent, ResizablePanelGroup, ResizablePanelState,
+        ResizableState, resizable_panel,
+    },
+};
+
+use super::{DockArea, Panel, PanelEvent, PanelState, PanelView, TabPanel};
 use gpui::{
     App, AppContext as _, Axis, Context, DismissEvent, Entity, EventEmitter, FocusHandle,
     Focusable, IntoElement, ParentElement, Pixels, Render, Styled, Subscription, WeakEntity,
     Window,
 };
 use smallvec::SmallVec;
-
-use super::{DockArea, Panel, PanelEvent, PanelState, PanelView, TabPanel};
-use crate::dock::PanelInfo;
-use crate::resizable::{
-    PANEL_MIN_SIZE, ResizablePanelEvent, ResizablePanelGroup, ResizablePanelState, ResizableState,
-    resizable_panel,
-};
-use crate::{ActiveTheme, AxisExt as _, Placement, h_flex};
 
 pub struct StackPanel {
     pub(super) parent: Option<WeakEntity<StackPanel>>,

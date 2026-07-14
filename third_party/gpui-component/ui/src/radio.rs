@@ -1,16 +1,14 @@
 use std::rc::Rc;
 
-use gpui::prelude::FluentBuilder;
+use crate::{
+    ActiveTheme, AxisExt, FocusableExt as _, Sizable, Size, StyledExt,
+    checkbox::checkbox_check_icon, h_flex, text::Text, tooltip::ComponentTooltip, v_flex,
+};
 use gpui::{
     AnyElement, App, Axis, Div, ElementId, InteractiveElement, IntoElement, ParentElement,
-    RenderOnce, SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Window, div, px,
-    relative, rems,
+    RenderOnce, Role, SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Window,
+    div, prelude::FluentBuilder, px, relative, rems,
 };
-
-use crate::checkbox::checkbox_check_icon;
-use crate::text::Text;
-use crate::tooltip::ComponentTooltip;
-use crate::{ActiveTheme, AxisExt, FocusableExt as _, Sizable, Size, StyledExt, h_flex, v_flex};
 
 /// A Radio element.
 ///
@@ -29,6 +27,8 @@ pub struct Radio {
     size: Size,
     on_click: Option<Rc<dyn Fn(&bool, &mut Window, &mut App) + 'static>>,
     tooltip: ComponentTooltip,
+    position_in_set: Option<usize>,
+    size_of_set: Option<usize>,
 }
 
 impl Radio {
@@ -47,6 +47,8 @@ impl Radio {
             size: Size::default(),
             on_click: None,
             tooltip: ComponentTooltip::default(),
+            position_in_set: None,
+            size_of_set: None,
         }
     }
 
@@ -159,6 +161,18 @@ impl RenderOnce for Radio {
         div().child(
             self.base
                 .id(self.id.clone())
+                .role(Role::RadioButton)
+                .aria_selected(self.checked)
+                .when_some(
+                    self.label.as_ref().map(|l| l.get_text(cx)),
+                    |this, label| this.aria_label(label),
+                )
+                .when_some(self.position_in_set, |this, pos| {
+                    this.aria_position_in_set(pos)
+                })
+                .when_some(self.size_of_set, |this, size| {
+                    this.aria_size_of_set(size)
+                })
                 .when(!self.disabled, |this| {
                     this.track_focus(
                         &focus_handle
@@ -353,7 +367,8 @@ impl RenderOnce for RadioGroup {
             h_flex().w_full().flex_wrap()
         };
 
-        let mut container = div().id(self.id);
+        let total = self.radios.len();
+        let mut container = div().id(self.id).role(Role::RadioGroup);
         *container.style() = self.style;
 
         container.child(
@@ -362,6 +377,8 @@ impl RenderOnce for RadioGroup {
                     let checked = selected_ix == Some(ix);
 
                     radio.id = ix.into();
+                    radio.position_in_set = Some(ix + 1);
+                    radio.size_of_set = Some(total);
                     radio.disabled(disabled).checked(checked).when_some(
                         on_click.clone(),
                         |this, on_click| {

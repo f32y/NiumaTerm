@@ -3,8 +3,9 @@ use gpui::{
     Styled as _, Window,
 };
 
-use super::{Panel, PanelEvent, PanelState};
 use crate::ActiveTheme as _;
+
+use super::{Panel, PanelEvent, PanelState};
 
 pub(crate) struct InvalidPanel {
     name: SharedString,

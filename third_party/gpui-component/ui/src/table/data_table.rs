@@ -1,15 +1,15 @@
-use gpui::prelude::FluentBuilder;
+use crate::{
+    ActiveTheme, Sizable, Size,
+    actions::{
+        Cancel, SelectDown, SelectFirst, SelectLast, SelectNextColumn, SelectPageDown,
+        SelectPageUp, SelectPrevColumn, SelectUp,
+    },
+    table::{TableDelegate, TableState},
+};
 use gpui::{
     App, Edges, Entity, Focusable, InteractiveElement, IntoElement, KeyBinding, ParentElement,
-    RenderOnce, Styled, Window, div,
+    RenderOnce, Styled, Window, div, prelude::FluentBuilder,
 };
-
-use crate::actions::{
-    Cancel, SelectDown, SelectFirst, SelectLast, SelectNextColumn, SelectPageDown, SelectPageUp,
-    SelectPrevColumn, SelectUp,
-};
-use crate::table::{TableDelegate, TableState};
-use crate::{ActiveTheme, Sizable, Size};
 
 const CONTEXT: &'static str = "DataTable";
 pub(super) fn init(cx: &mut App) {

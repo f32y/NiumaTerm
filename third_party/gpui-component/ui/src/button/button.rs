@@ -1,18 +1,17 @@
 use std::rc::Rc;
 
-use gpui::prelude::FluentBuilder as _;
+use crate::{
+    ActiveTheme, Colorize as _, Disableable, FocusableExt as _, Icon, IconName, Selectable,
+    Sizable, Size, StyleSized, StyledExt,
+    button::ButtonIcon,
+    h_flex,
+    tooltip::{ManagedTooltipExt as _, Tooltip},
+};
 use gpui::{
     AnyElement, App, Background, ClickEvent, Corners, Div, Edges, ElementId, Hsla,
     InteractiveElement, Interactivity, IntoElement, MouseButton, ParentElement, Pixels, RenderOnce,
-    SharedString, Stateful, StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div,
-    px, relative, transparent_white,
-};
-
-use crate::button::ButtonIcon;
-use crate::tooltip::{ManagedTooltipExt as _, Tooltip};
-use crate::{
-    ActiveTheme, Colorize as _, Disableable, FocusableExt as _, Icon, IconName, Selectable,
-    Sizable, Size, StyleSized, StyledExt, h_flex,
+    Role, SharedString, Stateful, StatefulInteractiveElement as _, StyleRefinement, Styled, Window,
+    div, prelude::FluentBuilder as _, px, relative, transparent_white,
 };
 
 #[derive(Default, Clone, Copy)]
@@ -462,6 +461,15 @@ impl RenderOnce for Button {
         };
 
         self.base
+            .role(if self.variant.is_link() {
+                Role::Link
+            } else {
+                Role::Button
+            })
+            .when_some(self.label.as_ref(), |this, label| {
+                this.aria_label(label.clone())
+            })
+            .aria_selected(self.selected)
             .when(!self.disabled, |this| {
                 this.track_focus(
                     &focus_handle
@@ -1138,9 +1146,8 @@ impl ButtonVariant {
 
 #[cfg(test)]
 mod tests {
-    use gpui::{linear_color_stop, linear_gradient};
-
     use super::*;
+    use gpui::{linear_color_stop, linear_gradient};
 
     #[gpui::test]
     fn test_button_builder(_cx: &mut gpui::TestAppContext) {

@@ -1,5 +1,4 @@
 use std::fmt::Debug;
-
 use instant::{Duration, Instant};
 
 /// A HistoryItem represents a single change in the history.

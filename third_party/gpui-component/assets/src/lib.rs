@@ -26,5 +26,6 @@ mod wasm_assets;
 
 #[cfg(not(target_family = "wasm"))]
 pub use native_assets::Assets;
+
 #[cfg(target_family = "wasm")]
 pub use wasm_assets::Assets;

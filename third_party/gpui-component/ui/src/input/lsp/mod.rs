@@ -1,11 +1,9 @@
-use std::rc::Rc;
-
 use anyhow::Result;
 use gpui::{App, Context, Hsla, MouseMoveEvent, SharedString, Task, Window};
 use ropey::Rope;
+use std::rc::Rc;
 
-use crate::input::popovers::ContextMenu;
-use crate::input::{InputState, RopeExt};
+use crate::input::{InputState, RopeExt, popovers::ContextMenu};
 
 mod code_actions;
 mod completions;
@@ -157,13 +155,21 @@ impl InputState {
         window: &mut Window,
         cx: &mut Context<InputState>,
     ) {
+        let had_definition = !self.hover_definition.is_empty();
+        let had_popover = self.hover_popover.is_some();
+
         if event.modifiers.secondary() {
             self.handle_hover_definition(offset, window, cx);
         } else {
             self.hover_definition.clear();
             self.handle_hover_popover(offset, window, cx);
         }
-        cx.notify();
+
+        let changed = had_definition == self.hover_definition.is_empty()
+            || had_popover != self.hover_popover.is_some();
+        if changed {
+            cx.notify();
+        }
     }
 
     pub(crate) fn clear_hover_state(&mut self, cx: &mut Context<InputState>) {

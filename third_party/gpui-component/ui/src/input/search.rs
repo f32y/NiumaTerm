@@ -1,23 +1,25 @@
-use std::ops::Range;
-use std::rc::Rc;
-
 use aho_corasick::AhoCorasick;
-use gpui::prelude::FluentBuilder as _;
+use rust_i18n::t;
+use std::{ops::Range, rc::Rc};
+
 use gpui::{
     App, AppContext as _, Context, Empty, Entity, FocusHandle, Focusable, Half,
     InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, Styled, Subscription,
-    Window, actions, div,
+    Window, actions, div, prelude::FluentBuilder as _,
 };
 use ropey::Rope;
-use rust_i18n::t;
 
-use crate::button::{Button, ButtonVariants};
-use crate::input::movement::MoveDirection;
-use crate::input::{
-    Enter, Escape, IndentInline, Input, InputEvent, InputState, RopeExt as _, Search,
+use crate::{
+    ActiveTheme, Disableable, ElementExt, IconName, Selectable, Sizable,
+    button::{Button, ButtonVariants},
+    h_flex,
+    input::{
+        Enter, Escape, IndentInline, Input, InputEvent, InputState, RopeExt as _, Search,
+        movement::MoveDirection,
+    },
+    label::Label,
+    v_flex,
 };
-use crate::label::Label;
-use crate::{ActiveTheme, Disableable, ElementExt, IconName, Selectable, Sizable, h_flex, v_flex};
 
 const CONTEXT: &'static str = "SearchPanel";
 

@@ -1,8 +1,8 @@
-use std::cell::Cell;
-use std::ops::Deref;
-use std::panic::Location;
-use std::rc::Rc;
+use std::{cell::Cell, ops::Deref, panic::Location, rc::Rc};
 
+use instant::{Duration, Instant};
+
+use crate::{ActiveTheme, AxisExt};
 use gpui::{
     Anchor, App, Axis, Background, BorderStyle, Bounds, ContentMask, CursorStyle, Edges, Element,
     ElementId, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement,
@@ -10,11 +10,8 @@ use gpui::{
     Point, Position, ScrollHandle, ScrollWheelEvent, Size, Style, UniformListScrollHandle, Window,
     fill, point, px, relative, size,
 };
-use instant::{Duration, Instant};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-
-use crate::{ActiveTheme, AxisExt};
 
 /// The width of the scrollbar (THUMB_ACTIVE_INSET * 2 + THUMB_ACTIVE_WIDTH)
 const WIDTH: Pixels = px(4. * 2. + 8.);

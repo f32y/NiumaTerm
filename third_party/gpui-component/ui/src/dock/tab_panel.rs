@@ -1,23 +1,27 @@
 use std::sync::Arc;
 
-use gpui::prelude::FluentBuilder;
 use gpui::{
     Anchor, App, AppContext, Context, DismissEvent, Div, DragMoveEvent, Empty, Entity,
     EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement, ParentElement,
     Pixels, Render, ScrollHandle, SharedString, StatefulInteractiveElement, StyleRefinement,
-    Styled, WeakEntity, Window, div, px, relative, rems,
+    Styled, WeakEntity, Window, div, prelude::FluentBuilder, px, relative, rems,
 };
 use rust_i18n::t;
+
+use crate::{
+    ActiveTheme, AxisExt, IconName, Placement, Selectable, Sizable,
+    button::{Button, ButtonVariants as _},
+    dock::PanelInfo,
+    h_flex,
+    menu::{DropdownMenu, PopupMenu},
+    tab::{Tab, TabBar},
+    v_flex,
+};
 
 use super::{
     ClosePanel, DockArea, DockPlacement, Panel, PanelControl, PanelEvent, PanelState, PanelStyle,
     PanelView, StackPanel, ToggleZoom,
 };
-use crate::button::{Button, ButtonVariants as _};
-use crate::dock::PanelInfo;
-use crate::menu::{DropdownMenu, PopupMenu};
-use crate::tab::{Tab, TabBar};
-use crate::{ActiveTheme, AxisExt, IconName, Placement, Selectable, Sizable, h_flex, v_flex};
 
 #[derive(Clone)]
 struct TabState {
@@ -395,6 +399,10 @@ impl TabPanel {
     }
 
     /// Return true if self or parent only have last panel.
+    ///
+    /// Only visible panels are counted, so a hidden panel does not keep the
+    /// last visible panel draggable/closable (which could otherwise leave the
+    /// dock visually empty and undroppable).
     fn is_last_panel(&self, cx: &App) -> bool {
         if let Some(parent) = &self.stack_panel {
             if let Some(stack_panel) = parent.upgrade() {
@@ -404,7 +412,7 @@ impl TabPanel {
             }
         }
 
-        self.panels.len() <= 1
+        self.visible_panels(cx).count() <= 1
     }
 
     /// Return all visible panels

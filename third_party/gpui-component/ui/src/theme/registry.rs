@@ -1,14 +1,13 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::rc::Rc;
-use std::sync::{Arc, LazyLock};
-
+use crate::{Theme, ThemeColor, ThemeConfig, ThemeMode, ThemeSet, highlighter::HighlightTheme};
 #[allow(unused)]
 use anyhow::Result;
 use gpui::{App, Global, SharedString};
-
-use crate::highlighter::HighlightTheme;
-use crate::{Theme, ThemeColor, ThemeConfig, ThemeMode, ThemeSet};
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    rc::Rc,
+    sync::{Arc, LazyLock},
+};
 
 const DEFAULT_THEME: &str = include_str!("./default-theme.json");
 pub(crate) static DEFAULT_THEME_COLORS: LazyLock<
