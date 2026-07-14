@@ -419,6 +419,8 @@ struct Callbacks {
     pty_writes: Vec<u8>,
     /// Number of BEL characters received since last drained.
     bell_count: u32,
+    /// Owned text copied from clipboard requests before the FFI callback returns.
+    clipboard_writes: Vec<(crate::clipboard::ClipboardType, String)>,
 }
 
 unsafe extern "C" fn write_pty_cb(
@@ -441,6 +443,66 @@ unsafe extern "C" fn bell_cb(_terminal: vt::Terminal, userdata: *mut std::os::ra
     }
     let cb = unsafe { &mut *(userdata as *mut Callbacks) };
     cb.bell_count = cb.bell_count.saturating_add(1);
+}
+
+unsafe fn vt_string_bytes(value: &vt::String) -> Option<&[u8]> {
+    if value.len == 0 {
+        return Some(&[]);
+    }
+    if value.ptr.is_null() {
+        return None;
+    }
+    Some(unsafe { std::slice::from_raw_parts(value.ptr, value.len) })
+}
+
+unsafe extern "C" fn clipboard_write_cb(
+    _terminal: vt::Terminal,
+    userdata: *mut std::os::raw::c_void,
+    write: *const vt::ClipboardWrite,
+) -> vt::ClipboardWriteResult::Type {
+    use crate::clipboard::ClipboardType;
+
+    if userdata.is_null() || write.is_null() {
+        return vt::ClipboardWriteResult::INVALID_DATA;
+    }
+    let size = unsafe { write.cast::<usize>().read() };
+    if size < std::mem::size_of::<vt::ClipboardWrite>() {
+        return vt::ClipboardWriteResult::INVALID_DATA;
+    }
+    let write = unsafe { &*write };
+    let ty = match write.location {
+        vt::ClipboardLocation::STANDARD => ClipboardType::Clipboard,
+        vt::ClipboardLocation::SELECTION | vt::ClipboardLocation::PRIMARY => {
+            ClipboardType::Selection
+        }
+        _ => return vt::ClipboardWriteResult::UNSUPPORTED,
+    };
+    let cb = unsafe { &mut *(userdata as *mut Callbacks) };
+    if write.contents_len == 0 {
+        cb.clipboard_writes.push((ty, String::new()));
+        return vt::ClipboardWriteResult::SUCCESS;
+    }
+    if write.contents.is_null() {
+        return vt::ClipboardWriteResult::INVALID_DATA;
+    }
+    let contents = unsafe { std::slice::from_raw_parts(write.contents, write.contents_len) };
+    for content in contents {
+        let Some(mime) = (unsafe { vt_string_bytes(&content.mime) }) else {
+            return vt::ClipboardWriteResult::INVALID_DATA;
+        };
+        if mime != b"text/plain" && !mime.starts_with(b"text/plain;") {
+            continue;
+        }
+        let Some(data) = (unsafe { vt_string_bytes(&content.data) }) else {
+            return vt::ClipboardWriteResult::INVALID_DATA;
+        };
+        let Ok(text) = std::str::from_utf8(data) else {
+            return vt::ClipboardWriteResult::INVALID_DATA;
+        };
+        cb.clipboard_writes.push((ty, text.to_owned()));
+        return vt::ClipboardWriteResult::SUCCESS;
+    }
+    vt::ClipboardWriteResult::UNSUPPORTED
 }
 
 /// PNG decode hook for the engine's kitty graphics protocol. The
@@ -598,6 +660,11 @@ impl GhosttyTerminal {
                 vt::TerminalOption::BELL,
                 bell_cb as *const std::os::raw::c_void,
             );
+            vt::ghostty_terminal_set(
+                terminal,
+                vt::TerminalOption::CLIPBOARD_WRITE,
+                clipboard_write_cb as *const std::os::raw::c_void,
+            );
         }
 
         // Match conhost/ConPTY, which defaults to grapheme clustering (mode 2027,
@@ -636,6 +703,11 @@ impl GhosttyTerminal {
     /// Drain and reset the bell counter (number of BELs since last call).
     pub fn take_bell(&mut self) -> u32 {
         std::mem::replace(&mut self.callbacks.bell_count, 0)
+    }
+
+    /// Drain clipboard writes decoded from OSC 52 or iTerm2 OSC 1337.
+    pub fn take_clipboard_writes(&mut self) -> Vec<(crate::clipboard::ClipboardType, String)> {
+        std::mem::take(&mut self.callbacks.clipboard_writes)
     }
 
     /// Poll the terminal title; returns `Some(title)` only when it changed
