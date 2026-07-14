@@ -56,9 +56,6 @@ pub(crate) struct TerminalPane {
     /// to route host events to the owning tab.
     id: u64,
     agent_route: AgentRoute,
-    unread_attention: bool,
-    attention_flash: bool,
-    attention_flash_generation: u64,
     surface: TerminalSurface,
     frame_cache: TerminalFrameCache,
     cell_metrics: Option<metrics::CellMetrics>,
@@ -182,9 +179,6 @@ impl TerminalPane {
             focus: cx.focus_handle(),
             id: surface_id,
             agent_route,
-            unread_attention: false,
-            attention_flash: false,
-            attention_flash_generation: 0,
             surface,
             frame_cache: TerminalFrameCache::default(),
             cell_metrics: None,
@@ -210,32 +204,6 @@ impl TerminalPane {
 
     pub(crate) fn agent_route(&self) -> &AgentRoute {
         &self.agent_route
-    }
-
-    pub(crate) fn set_unread_attention(&mut self, unread: bool, cx: &mut Context<Self>) {
-        if self.unread_attention != unread {
-            self.unread_attention = unread;
-            cx.notify();
-        }
-    }
-
-    pub(crate) fn flash_attention(&mut self, cx: &mut Context<Self>) {
-        self.attention_flash = true;
-        self.attention_flash_generation = self.attention_flash_generation.wrapping_add(1);
-        let generation = self.attention_flash_generation;
-        cx.notify();
-        cx.spawn(async move |this, cx| {
-            cx.background_executor()
-                .timer(std::time::Duration::from_millis(600))
-                .await;
-            let _ = this.update(cx, |this, cx| {
-                if this.attention_flash_generation == generation {
-                    this.attention_flash = false;
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
     }
 
     /// Record a user scroll action and schedule the repaint that starts fading
@@ -1364,9 +1332,6 @@ impl Render for TerminalPane {
             .line_height(px(cell.height_px))
             .p(px(metrics::PADDING_PX))
             .overflow_hidden()
-            .when(self.unread_attention || self.attention_flash, |this| {
-                this.border_2().border_color(rgb(0x4A90E2))
-            })
             .track_focus(&self.focus)
             .key_context("Terminal")
             .on_action(cx.listener(Self::on_send_tab))

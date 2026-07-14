@@ -323,7 +323,6 @@ impl Shell {
             cx.notify();
         }
         self.reschedule_agent_timer(cx);
-        self.sync_route_attention(route, cx);
     }
 
     fn remove_native_notifications(notifications: &[AgentNotification]) {
@@ -363,7 +362,6 @@ impl Shell {
         let mutation = self.agent_monitor.acknowledge(route, notification_id);
         Self::remove_native_notifications(&mutation.removed_notifications);
         if mutation.visible_changed {
-            self.sync_route_attention(route, cx);
             cx.notify();
         }
         mutation.visible_changed
@@ -477,42 +475,20 @@ impl Shell {
         window.activate_window();
         let handle = location.pane.read(cx).focus.clone();
         window.focus(&handle, cx);
-        location
-            .pane
-            .update(cx, |pane, cx| pane.flash_attention(cx));
         self.acknowledge_notification(route, notification_id, cx);
         true
-    }
-
-    fn sync_route_attention(&self, route: &AgentRoute, cx: &mut Context<Self>) {
-        let unread = self
-            .agent_monitor
-            .notification(route)
-            .is_some_and(|notification| !notification.read);
-        let pane = self.workspaces.all_tabs().find_map(|tabs| {
-            tabs.tabs().iter().find_map(|tab| {
-                tab.surface().leaves().into_iter().find_map(|(_, pane)| {
-                    (pane.read(cx).agent_route() == route).then(|| pane.clone())
-                })
-            })
-        });
-        if let Some(pane) = pane {
-            pane.update(cx, |pane, cx| pane.set_unread_attention(unread, cx));
-        }
     }
 
     pub(crate) fn apply_agent_event(&mut self, event: AgentEvent, cx: &mut Context<Self>) -> bool {
         if !self.owns_agent_route(&event.route, cx) {
             return false;
         }
-        let route = event.route.clone();
         let mutation = self.agent_monitor.apply(event, std::time::Instant::now());
         Self::remove_native_notifications(&mutation.removed_notifications);
         if mutation.visible_changed {
             cx.notify();
         }
         self.reschedule_agent_timer(cx);
-        self.sync_route_attention(&route, cx);
         self.process_native_notifications(cx);
         true
     }
@@ -532,17 +508,10 @@ impl Shell {
                 }
                 let mutation = this.agent_monitor.process_due(std::time::Instant::now());
                 Self::remove_native_notifications(&mutation.removed_notifications);
-                let created_route = mutation
-                    .created_notification
-                    .as_ref()
-                    .map(|notification| notification.route.clone());
                 if mutation.visible_changed {
                     cx.notify();
                 }
                 this.reschedule_agent_timer(cx);
-                if let Some(route) = created_route {
-                    this.sync_route_attention(&route, cx);
-                }
                 this.process_native_notifications(cx);
             });
         })
@@ -721,7 +690,6 @@ impl Shell {
                     let mutation = self.agent_monitor.notify(&agent_route, title, body);
                     Self::remove_native_notifications(&mutation.removed_notifications);
                     chrome_changed |= mutation.visible_changed;
-                    self.sync_route_attention(&agent_route, cx);
                     self.process_native_notifications(cx);
                 }
                 _ => {}
