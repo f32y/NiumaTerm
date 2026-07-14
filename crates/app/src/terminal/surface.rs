@@ -587,6 +587,7 @@ impl TerminalSurface {
         }
         let mut clipboard = nmt_terminal::clipboard::Clipboard::default();
         clipboard.set(nmt_terminal::clipboard::ClipboardType::Clipboard, text);
+        self.clear_selection();
         true
     }
 

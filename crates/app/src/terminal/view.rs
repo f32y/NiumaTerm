@@ -281,6 +281,8 @@ impl TerminalPane {
             let text = self.frozen_selection_to_text(a, b);
             if !text.is_empty() {
                 self.surface.copy_text_to_clipboard(text);
+                self.frozen_selection = None;
+                cx.notify();
                 return;
             }
         }
