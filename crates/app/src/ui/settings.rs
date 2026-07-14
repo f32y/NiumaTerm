@@ -162,6 +162,8 @@ pub struct AppSettings {
     pub background_image: Option<String>,
     /// How strongly the image shows through the window surfaces (0.0..=1.0).
     pub background_image_opacity: f64,
+    /// Process lifecycle events received from Agent Hook executables.
+    pub enable_agent_hooks: bool,
     /// Restore the last saved workspace/tab session on startup.
     pub restore_last_session_when_opening: bool,
     /// Manage each tab's shell with a Windows Job Object: closing the tab
@@ -199,6 +201,7 @@ impl Default for AppSettings {
             background_opacity: 1.0,
             background_image: None,
             background_image_opacity: DEFAULT_BACKGROUND_IMAGE_OPACITY,
+            enable_agent_hooks: true,
             restore_last_session_when_opening: true,
             manage_subprocess_job: false,
             warn_before_terminating_shell: true,
@@ -342,6 +345,7 @@ impl AppSettings {
             background_image_opacity: clamp_background_image_opacity(
                 appearance.background_image_opacity,
             ),
+            enable_agent_hooks: config.agent.enable_agent_hooks,
             restore_last_session_when_opening: config.system.restore_last_session_when_opening,
             manage_subprocess_job: config.system.manage_subprocess_job,
             warn_before_terminating_shell: config.system.warn_before_terminating_shell,
@@ -425,6 +429,9 @@ impl AppSettings {
             background_image: self.background_image.clone(),
             background_image_opacity: self.background_image_opacity,
         };
+        let agent = nmt_config::agent::AgentConfig {
+            enable_agent_hooks: self.enable_agent_hooks,
+        };
         let system = nmt_config::system::SystemConfig {
             restore_last_session_when_opening: self.restore_last_session_when_opening,
             manage_subprocess_job: self.manage_subprocess_job,
@@ -444,6 +451,7 @@ impl AppSettings {
         if let Err(err) = nmt_config::appearance::save_settings(
             &self.theme,
             &appearance,
+            &agent,
             &system,
             &profiles,
             &self.default_profile,
@@ -948,6 +956,88 @@ pub(crate) fn window_background_appearance(cx: &gpui::App) -> gpui::WindowBackgr
     window_background_appearance_for(cx.global::<AppSettings>().window_transparency_enabled)
 }
 
+fn agent_hook_item(
+    name: &'static str,
+    detection_path: Option<std::path::PathBuf>,
+    hooks_path: Option<std::path::PathBuf>,
+    status: fn(&std::path::Path) -> nmt_agent_hook::HookInstallStatus,
+    install: fn(&std::path::Path) -> std::io::Result<()>,
+    uninstall: fn(&std::path::Path) -> std::io::Result<()>,
+) -> SettingItem {
+    let detected = detection_path.as_ref().is_some_and(|path| path.is_file());
+    let status_path = hooks_path.clone();
+    let action_path = hooks_path;
+    SettingItem::new(
+        name,
+        SettingField::checkbox(
+            // Settings renders only the active page, so a disk-backed getter
+            // refreshes Hook state whenever the user enters the Agent page.
+            move |_| {
+                status_path.as_deref().is_some_and(|path| {
+                    status(path) == nmt_agent_hook::HookInstallStatus::Installed
+                })
+            },
+            move |enabled, cx| {
+                let Some(path) = action_path.as_deref() else {
+                    return;
+                };
+                let result = if enabled {
+                    install(path)
+                } else {
+                    uninstall(path)
+                };
+                if let Err(error) = result {
+                    tracing::warn!("failed to update {name} hooks: {error}");
+                }
+                cx.refresh_windows();
+            },
+        ),
+    )
+    .disabled(!detected)
+}
+
+fn agent_page() -> SettingPage {
+    SettingPage::new("Agent")
+        .default_open(true)
+        .description("Configure Agent event handling and per-Agent Hook installation.")
+        .group(
+            SettingGroup::new().title("General").item(
+                SettingItem::new(
+                    "Enable Agent Hooks",
+                    SettingField::switch(
+                        |cx| cx.global::<AppSettings>().enable_agent_hooks,
+                        |value, cx| {
+                            cx.global_mut::<AppSettings>().enable_agent_hooks = value;
+                        },
+                    ),
+                )
+                .description(
+                    "Process new lifecycle events from installed Agent Hooks. This does not change their installation state.",
+                ),
+            ),
+        )
+        .group(
+            SettingGroup::new()
+                .title("Installed Agents")
+                .item(agent_hook_item(
+                    "Claude Code",
+                    nmt_agent_hook::claude_code::settings_path(),
+                    nmt_agent_hook::claude_code::settings_path(),
+                    nmt_agent_hook::claude_code::hooks_status,
+                    nmt_agent_hook::claude_code::install_hooks,
+                    nmt_agent_hook::claude_code::uninstall_hooks,
+                ))
+                .item(agent_hook_item(
+                    "Codex",
+                    nmt_agent_hook::codex::config_path(),
+                    nmt_agent_hook::codex::hooks_path(),
+                    nmt_agent_hook::codex::hooks_status,
+                    nmt_agent_hook::codex::install_hooks,
+                    nmt_agent_hook::codex::uninstall_hooks,
+                )),
+        )
+}
+
 /// The settings dialog body: a two-pane `Settings` view with a single
 /// "Terminal" page holding the Input Style dropdown and the profile fields.
 /// Rebuilt every render; the field closures read/write the `AppSettings`
@@ -1230,6 +1320,7 @@ pub fn settings_view(cx: &App) -> Settings {
                 ),
         )
         .page(profiles_page(&profiles))
+        .page(agent_page())
         .page(
             SettingPage::new("System")
                 .default_open(true)
