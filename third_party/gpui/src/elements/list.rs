@@ -334,6 +334,20 @@ impl ListState {
         this
     }
 
+    /// Change which edge holds content that is shorter than the viewport.
+    /// Bottom alignment represents its implicit tail with no logical offset, so
+    /// materialize the current position before changing that sentinel's meaning.
+    pub fn set_alignment(&self, alignment: ListAlignment) {
+        let state = &mut *self.0.borrow_mut();
+        if state.alignment == alignment {
+            return;
+        }
+
+        let scroll_top = state.logical_scroll_top();
+        state.alignment = alignment;
+        state.logical_scroll_top = Some(scroll_top);
+    }
+
     /// Set the list to measure all items in the list in the first layout phase.
     ///
     /// This is useful for ensuring that the scrollbar size is correct instead of based on only rendered elements.
@@ -2544,6 +2558,49 @@ mod test {
             "scrollbar offset ({}) should equal max offset ({}) when list is pinned to bottom",
             -scroll_offset.y, max_offset.y,
         );
+    }
+
+    #[gpui::test]
+    fn test_alignment_can_change_after_layout(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let state = ListState::new(1, crate::ListAlignment::Top, px(0.)).measure_all();
+        let view = cx.update(|_, cx| cx.new(|_| TestListView(state.clone())));
+
+        cx.draw(point(px(0.), px(0.)), size(px(100.), px(100.)), |_, _| {
+            view.clone().into_any_element()
+        });
+        assert_eq!(state.logical_scroll_top().item_ix, 0);
+
+        state.set_alignment(crate::ListAlignment::Bottom);
+        cx.draw(point(px(0.), px(0.)), size(px(100.), px(100.)), |_, _| {
+            view.clone().into_any_element()
+        });
+        assert_eq!(state.logical_scroll_top().item_ix, state.item_count());
+
+        state.set_alignment(crate::ListAlignment::Top);
+        cx.draw(point(px(0.), px(0.)), size(px(100.), px(100.)), |_, _| {
+            view.into_any_element()
+        });
+        assert_eq!(state.logical_scroll_top().item_ix, 0);
+    }
+
+    #[gpui::test]
+    fn test_alignment_change_preserves_scroll_position(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let state = ListState::new(10, crate::ListAlignment::Bottom, px(0.)).measure_all();
+        let view = cx.update(|_, cx| cx.new(|_| TestListView(state.clone())));
+
+        cx.draw(point(px(0.), px(0.)), size(px(100.), px(100.)), |_, _| {
+            view.clone().into_any_element()
+        });
+        let offset = state.scroll_px_offset_for_scrollbar();
+
+        state.set_alignment(crate::ListAlignment::Top);
+        cx.draw(point(px(0.), px(0.)), size(px(100.), px(100.)), |_, _| {
+            view.into_any_element()
+        });
+
+        assert_eq!(state.scroll_px_offset_for_scrollbar(), offset);
     }
 
     /// When the user scrolls away from the bottom during follow_tail,

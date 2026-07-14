@@ -152,8 +152,13 @@ impl TerminalPane {
         surface: TerminalSurface,
         fixed_bottom_requested: bool,
     ) -> Self {
-        // Re-measure the cell and repaint when settings change (terminal font).
+        // Apply terminal presentation settings to existing panes and invalidate
+        // measurements that depend on font metrics.
         cx.observe_global::<AppSettings>(|this, cx| {
+            let fixed_bottom = cx.global::<AppSettings>().input_style.is_fixed_bottom();
+            this.block_list
+                .list
+                .set_alignment(block_list_alignment(fixed_bottom));
             this.surface.set_theme_colors(&nmt_config::active_colors());
             this.cell_metrics = None;
             this.frame_cache.invalidate();
