@@ -21,22 +21,22 @@ members = [
     "third_party/libghostty-vt-sys",
 
     # GPUI fork
-    "third_party/collections",
-    "third_party/gpui",
-    "third_party/gpui_macros",
-    "third_party/gpui_util",
-    "third_party/gpui_windows",
-    "third_party/gpui_shared_string",
-    "third_party/refineable",
-    "third_party/refineable/derive_refineable",
-    "third_party/scheduler",
-    "third_party/sum_tree",
-    "third_party/util_macros",
+    "third_party/gpui/collections",
+    "third_party/gpui/gpui",
+    "third_party/gpui/gpui_macros",
+    "third_party/gpui/gpui_util",
+    "third_party/gpui/gpui_windows",
+    "third_party/gpui/gpui_shared_string",
+    "third_party/gpui/refineable",
+    "third_party/gpui/refineable/derive_refineable",
+    "third_party/gpui/scheduler",
+    "third_party/gpui/sum_tree",
+    "third_party/gpui/util_macros",
 
     # gpui-component fork
-    "third_party/gpui-component-assets",
-    "third_party/gpui-component-macros",
-    "third_party/gpui-component-ui",
+    "third_party/gpui-component/assets",
+    "third_party/gpui-component/macros",
+    "third_party/gpui-component/ui",
 ]
 default-members = [
     "crates/agent_hook_cli",
@@ -61,22 +61,22 @@ nmt_terminal = { path = "crates/terminal" }
 nmt_themes = { path = "crates/themes" }
 
 # GPUI fork
-collections = { path = "third_party/collections" }
-gpui = { path = "third_party/gpui" }
-gpui_macros = { path = "third_party/gpui_macros" }
-gpui_util = { path = "third_party/gpui_util" }
-gpui_windows = { path = "third_party/gpui_windows" }
-gpui_shared_string = { path = "third_party/gpui_shared_string" }
-refineable = { path = "third_party/refineable" }
-derive_refineable = { path = "third_party/refineable/derive_refineable" }
-scheduler = { path = "third_party/scheduler" }
-sum_tree = { path = "third_party/sum_tree" }
-util_macros = { path = "third_party/util_macros" }
+collections = { path = "third_party/gpui/collections" }
+gpui = { path = "third_party/gpui/gpui" }
+gpui_macros = { path = "third_party/gpui/gpui_macros" }
+gpui_util = { path = "third_party/gpui/gpui_util" }
+gpui_windows = { path = "third_party/gpui/gpui_windows" }
+gpui_shared_string = { path = "third_party/gpui/gpui_shared_string" }
+refineable = { path = "third_party/gpui/refineable" }
+derive_refineable = { path = "third_party/gpui/refineable/derive_refineable" }
+scheduler = { path = "third_party/gpui/scheduler" }
+sum_tree = { path = "third_party/gpui/sum_tree" }
+util_macros = { path = "third_party/gpui/util_macros" }
 
 # gpui-component fork
-gpui-component = { path = "third_party/gpui-component-ui", features = ["tree-sitter-powershell"] }
-gpui-component-assets = { path = "third_party/gpui-component-assets" }
-gpui-component-macros = { path = "third_party/gpui-component-macros" }
+gpui-component = { path = "third_party/gpui-component/ui", features = ["tree-sitter-powershell"] }
+gpui-component-assets = { path = "third_party/gpui-component/assets" }
+gpui-component-macros = { path = "third_party/gpui-component/macros" }
 
 ##########################################
 # GPUI Component
