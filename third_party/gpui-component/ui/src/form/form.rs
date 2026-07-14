@@ -3,8 +3,11 @@ use gpui::{
     Window, div, px,
 };
 
-use crate::form::{Field, FieldProps};
-use crate::{Sizable, Size, v_flex};
+use crate::{
+    Sizable, Size,
+    form::{Field, FieldProps},
+    v_flex,
+};
 
 /// A form element that contains multiple form fields.
 #[derive(IntoElement)]

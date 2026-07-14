@@ -22,16 +22,15 @@
 //!     .show(position, window, cx);
 //! ```
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-use std::{path::Path, sync::Arc};
+use crate::Icon;
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use gpui::AssetSource;
 use gpui::{Action, App, Pixels, Point, SharedString, Window};
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use gpui::{Image, ImageFormat};
-
-use crate::Icon;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use std::{path::Path, sync::Arc};
 
 #[cfg(target_os = "macos")]
 mod macos;
@@ -333,10 +332,9 @@ impl From<gpui::Menu> for NativeMenu {
 
 #[cfg(test)]
 mod tests {
-    use serde::Deserialize;
-
     use super::*;
     use crate::IconName;
+    use serde::Deserialize;
 
     #[derive(Action, Clone, PartialEq, Deserialize)]
     #[action(namespace = native_menu_tests, no_json)]

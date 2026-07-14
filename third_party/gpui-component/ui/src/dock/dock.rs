@@ -1,19 +1,20 @@
 //! Dock is a fixed container that places at left, bottom, right of the Windows.
 
-use std::ops::Deref;
-use std::sync::Arc;
+use std::{ops::Deref, sync::Arc};
 
-use gpui::prelude::FluentBuilder as _;
 use gpui::{
     App, AppContext, Axis, Context, Element, Empty, Entity, IntoElement, MouseMoveEvent,
     MouseUpEvent, ParentElement as _, Pixels, Point, Render, Style, StyleRefinement, Styled as _,
-    WeakEntity, Window, div, px,
+    WeakEntity, Window, div, prelude::FluentBuilder as _, px,
 };
 use serde::{Deserialize, Serialize};
 
+use crate::{
+    StyledExt,
+    resizable::{PANEL_MIN_SIZE, resize_handle},
+};
+
 use super::{DockArea, DockItem, PanelView, TabPanel};
-use crate::StyledExt;
-use crate::resizable::{PANEL_MIN_SIZE, resize_handle};
 
 #[derive(Clone)]
 struct ResizePanel;

@@ -1,19 +1,13 @@
-use std::rc::Rc;
-use std::time::Duration;
+use std::{rc::Rc, time::Duration};
 
-use gpui::prelude::FluentBuilder as _;
-use gpui::{
-    Animation, AnimationExt, AnyElement, App, Div, ElementId, InteractiveElement, IntoElement,
-    ParentElement, RenderOnce, SharedString, StatefulInteractiveElement, StyleRefinement, Styled,
-    Window, div, px, relative, rems, svg,
-};
-
-use crate::icon::IconNamed;
-use crate::text::Text;
-use crate::tooltip::ComponentTooltip;
 use crate::{
     ActiveTheme, Disableable, FocusableExt, IconName, Selectable, Sizable, Size, StyledExt as _,
-    v_flex,
+    icon::IconNamed, text::Text, tooltip::ComponentTooltip, v_flex,
+};
+use gpui::{
+    Animation, AnimationExt, AnyElement, App, Div, ElementId, InteractiveElement, IntoElement,
+    ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement, StyleRefinement,
+    Styled, Toggled, Window, div, prelude::FluentBuilder as _, px, relative, rems, svg,
 };
 
 /// A Checkbox element.
@@ -228,6 +222,12 @@ impl RenderOnce for Checkbox {
         div().child(
             self.base
                 .id(self.id.clone())
+                .role(Role::CheckBox)
+                .aria_toggled(if checked { Toggled::True } else { Toggled::False })
+                .when_some(
+                    self.label.as_ref().map(|l| l.get_text(cx)),
+                    |this, label| this.aria_label(label),
+                )
                 .when(!self.disabled, |this| {
                     this.track_focus(
                         &focus_handle

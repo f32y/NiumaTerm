@@ -1,10 +1,8 @@
-use gpui::prelude::FluentBuilder as _;
+use crate::{ActiveTheme, StyledExt};
 use gpui::{
     App, Axis, Div, Hsla, IntoElement, ParentElement, PathBuilder, RenderOnce, SharedString,
-    StyleRefinement, Styled, Window, canvas, div, point, px,
+    StyleRefinement, Styled, Window, canvas, div, point, prelude::FluentBuilder as _, px,
 };
-
-use crate::{ActiveTheme, StyledExt};
 
 /// The style of the separator line.
 #[derive(Clone, Copy, PartialEq, Default)]

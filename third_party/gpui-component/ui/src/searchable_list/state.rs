@@ -3,10 +3,9 @@ use gpui::{
     Pixels, StyleRefinement, Subscription, Window,
 };
 
+use crate::{IndexPath, Size, list::ListState, searchable_list::adapter::SearchableListAdapter};
+
 use super::delegate::{SearchableListDelegate, SearchableListItem};
-use crate::list::ListState;
-use crate::searchable_list::adapter::SearchableListAdapter;
-use crate::{IndexPath, Size};
 
 /// Shared infrastructure for all searchable-list-based components (`SelectState`, `ComboBoxState`).
 ///

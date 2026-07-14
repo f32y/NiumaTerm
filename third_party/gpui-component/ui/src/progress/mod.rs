@@ -1,10 +1,10 @@
 mod progress;
 mod progress_circle;
 
-use std::cell::Cell;
-
 pub use progress::Progress;
 pub use progress_circle::ProgressCircle;
+
+use std::cell::Cell;
 
 /// Shared state for progress components.
 ///

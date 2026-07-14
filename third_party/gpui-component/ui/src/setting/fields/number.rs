@@ -1,15 +1,18 @@
 use std::rc::Rc;
 
-use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, AppContext as _, Entity, IntoElement, SharedString, StyleRefinement, Styled,
-    Subscription, Window,
+    Subscription, Window, prelude::FluentBuilder as _,
 };
 
-use crate::input::{InputEvent, InputState, NumberInput, NumberInputEvent, StepAction};
-use crate::setting::fields::{SettingFieldRender, get_value, set_value};
-use crate::setting::{AnySettingField, RenderOptions};
-use crate::{AxisExt, Disableable, Sizable, StyledExt};
+use crate::{
+    AxisExt, Disableable, Sizable, StyledExt,
+    input::{InputEvent, InputState, NumberInput, NumberInputEvent, StepAction},
+    setting::{
+        AnySettingField, RenderOptions,
+        fields::{SettingFieldRender, get_value, set_value},
+    },
+};
 
 #[derive(Clone, Debug)]
 pub struct NumberFieldOptions {

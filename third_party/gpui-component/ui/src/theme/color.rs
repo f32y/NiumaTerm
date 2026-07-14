@@ -1,12 +1,11 @@
-use std::collections::HashMap;
-use std::fmt::Display;
+use std::{collections::HashMap, fmt::Display};
 
-use anyhow::{Error, Result, anyhow};
 use gpui::{
     Background, Hsla, LinearColorStop, SharedString, hsla, linear_color_stop, linear_gradient,
 };
-use serde::de::Error as _;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, de::Error as _};
+
+use anyhow::{Error, Result, anyhow};
 
 /// Create a [`gpui::Hsla`] color.
 ///
@@ -339,9 +338,9 @@ type ColorScales = HashMap<usize, ShadcnColor>;
 mod color_scales {
     use std::collections::HashMap;
 
-    use serde::de::{Deserialize, Deserializer};
-
     use super::{ColorScales, ShadcnColor};
+
+    use serde::de::{Deserialize, Deserializer};
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<ColorScales, D::Error>
     where
@@ -752,6 +751,27 @@ pub fn try_parse_background(background: &str) -> Result<Background> {
 
     let gradient = parse_linear_gradient(background)?;
     Ok(linear_gradient(gradient.angle, gradient.from, gradient.to))
+}
+
+/// Parse a background, clamping every color stop's alpha to at most `max`.
+///
+/// Unlike [`Background::opacity`], which scales all stops by a single factor,
+/// this caps each gradient stop independently, so a bright `to` stop (or a
+/// transparent `from` stop) can never push the rendered highlight past `max`.
+pub(crate) fn try_parse_background_clamped(background: &str, max: f32) -> Result<Background> {
+    if let Ok(color) = try_parse_color(background) {
+        return Ok(color.alpha(color.a.min(max)).into());
+    }
+
+    let gradient = parse_linear_gradient(background)?;
+    let clamp = |stop: LinearColorStop| {
+        linear_color_stop(stop.color.alpha(stop.color.a.min(max)), stop.percentage)
+    };
+    Ok(linear_gradient(
+        gradient.angle,
+        clamp(gradient.from),
+        clamp(gradient.to),
+    ))
 }
 
 pub(crate) fn try_parse_theme_color(color: &str) -> Result<Hsla> {

@@ -1,8 +1,9 @@
-use gpui::{AnyElement, ParentElement, RenderOnce, StyleRefinement};
+use gpui::{
+    AnyElement, ParentElement, RenderOnce, StyleRefinement,
+};
 use smallvec::SmallVec;
 
-use crate::list::ListItem;
-use crate::{Selectable, StyledExt};
+use crate::{list::ListItem, Selectable, StyledExt};
 
 pub struct ListSeparatorItem {
     style: StyleRefinement,

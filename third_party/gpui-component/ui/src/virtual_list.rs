@@ -10,10 +10,12 @@
 //! Unlike the `uniform_list`, the each item can have different size.
 //!
 //! This is useful for more complex layout, for example, a table with different row height.
-use std::cell::RefCell;
-use std::cmp;
-use std::ops::{Deref, Range};
-use std::rc::Rc;
+use std::{
+    cell::RefCell,
+    cmp,
+    ops::{Deref, Range},
+    rc::Rc,
+};
 
 use gpui::{
     Along, AnyElement, App, AvailableSpace, Axis, Bounds, ContentMask, Context,
@@ -24,8 +26,7 @@ use gpui::{
 };
 use smallvec::SmallVec;
 
-use crate::AxisExt;
-use crate::scroll::ScrollbarHandle;
+use crate::{AxisExt, scroll::ScrollbarHandle};
 
 struct VirtualListScrollHandleState {
     axis: Axis,

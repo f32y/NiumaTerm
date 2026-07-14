@@ -74,7 +74,7 @@ sum_tree = { path = "third_party/gpui/sum_tree" }
 util_macros = { path = "third_party/gpui/util_macros" }
 
 # gpui-component fork
-gpui-component = { path = "third_party/gpui-component/ui", features = ["tree-sitter-powershell"] }
+gpui-component = { path = "third_party/gpui-component/ui" }
 gpui-component-assets = { path = "third_party/gpui-component/assets" }
 gpui-component-macros = { path = "third_party/gpui-component/macros" }
 
@@ -225,7 +225,6 @@ smallvec = { version = "1.15.2", default-features = false, features = ["const_ne
 
 tree-sitter = "0.26.10"
 tree-sitter-bash = "0.25.1"
-tree-sitter-powershell = "0.26.4"
 
 # unicode-width = "0.2.0"
 unicode-width = { package = "unicode-width-16", version = "0.1.0" }

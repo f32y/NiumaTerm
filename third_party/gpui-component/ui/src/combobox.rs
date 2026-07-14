@@ -1,23 +1,26 @@
-use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, Bounds, ClickEvent, Context, DismissEvent, Edges, ElementId, Entity,
     EventEmitter, FocusHandle, Focusable, Hsla, InteractiveElement, IntoElement, KeyBinding,
-    Length, MouseDownEvent, ParentElement, Pixels, Render, RenderOnce, SharedString,
-    StatefulInteractiveElement, StyleRefinement, Styled, Window, anchored, deferred, div, px, rems,
+    Length, MouseDownEvent, ParentElement, Pixels, Render, RenderOnce, Role, SharedString,
+    StatefulInteractiveElement, StyleRefinement, Styled, Window, anchored, deferred, div,
+    prelude::FluentBuilder, px, rems,
 };
+
 use rust_i18n::t;
 
-use crate::actions::{Cancel, Confirm, SelectDown, SelectUp};
-use crate::global_state::GlobalState;
-use crate::input::{clear_button, input_style};
-use crate::list::{List, ListState};
-use crate::searchable_list::{
-    SearchableListAdapter, SearchableListChange, SearchableListDelegate, SearchableListItem,
-    SearchableListState,
-};
 use crate::{
     ActiveTheme, Disableable, ElementExt as _, Icon, IconName, IndexPath, Sizable, Size,
-    StyleSized, StyledExt, h_flex, v_flex,
+    StyleSized, StyledExt,
+    actions::{Cancel, Confirm, SelectDown, SelectUp},
+    global_state::GlobalState,
+    h_flex,
+    input::{clear_button, input_style},
+    list::{List, ListState},
+    searchable_list::{
+        SearchableListAdapter, SearchableListChange, SearchableListDelegate, SearchableListItem,
+        SearchableListState,
+    },
+    v_flex,
 };
 
 const CONTEXT: &str = "Combobox";
@@ -878,8 +881,12 @@ where
             }
         });
 
+        let is_open = self.state.read(cx).state.open;
+
         div()
             .id(self.id.clone())
+            .role(Role::ComboBox)
+            .aria_expanded(is_open)
             .key_context(CONTEXT)
             .when(!disabled, |this| {
                 this.track_focus(&focus_handle.tab_stop(true))
@@ -1014,11 +1021,13 @@ fn render_popup_shell<D: SearchableListDelegate + 'static>(
 mod tests {
     use gpui::{AppContext as _, TestAppContext};
 
-    use crate::IndexPath;
-    use crate::combobox::{Combobox, ComboboxState};
-    use crate::searchable_list::{
-        SearchableListChange, SearchableListDelegate, SearchableListItem, SearchableListState,
-        SearchableVec,
+    use crate::{
+        IndexPath,
+        combobox::{Combobox, ComboboxState},
+        searchable_list::{
+            SearchableListChange, SearchableListDelegate, SearchableListItem, SearchableListState,
+            SearchableVec,
+        },
     };
 
     #[gpui::test]

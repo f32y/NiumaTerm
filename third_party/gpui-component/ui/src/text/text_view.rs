@@ -8,12 +8,12 @@ use gpui::{
 };
 
 use crate::StyledExt;
-use crate::global_state::GlobalState;
 use crate::scroll::ScrollableElement;
+use crate::text::TextViewFormat;
 use crate::text::markdown_ext::{MarkdownExtensions, MarkdownNode, MarkdownPlugin};
 use crate::text::node::CodeBlock;
 use crate::text::state::TextViewState;
-use crate::text::{TextViewFormat, TextViewStyle};
+use crate::{global_state::GlobalState, text::TextViewStyle};
 
 /// Type for code block actions generator function.
 pub(crate) type CodeBlockActionsFn =
@@ -355,14 +355,13 @@ impl Element for TextView {
 
 #[cfg(test)]
 mod tests {
+    use super::{TextView, TextViewPlugin};
+    use crate::text::TextViewState;
     use gpui::{
         AppContext as _, Context, Entity, IntoElement, Modifiers, MouseButton, MouseDownEvent,
         MouseUpEvent, ParentElement as _, Render, Styled as _, TestAppContext, VisualTestContext,
         Window, div, point, px,
     };
-
-    use super::{TextView, TextViewPlugin};
-    use crate::text::TextViewState;
 
     struct TextViewTestRoot {
         text_view: Entity<TextViewState>,
@@ -461,7 +460,7 @@ mod tests {
             "unloaded inline image fallback should stay generic and compact"
         );
     }
-
+  
     #[test]
     fn plugin_accepts_text_view_plugins_beyond_markdown() {
         let view = TextView::markdown("plugin-test", "").plugin(DummyTextViewPlugin);

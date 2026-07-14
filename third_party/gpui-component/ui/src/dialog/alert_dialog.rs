@@ -1,13 +1,15 @@
-use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, ClickEvent, InteractiveElement as _, IntoElement, MouseButton, ParentElement,
-    Pixels, RenderOnce, StyleRefinement, Styled, Window, div,
+    Pixels, RenderOnce, StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _,
 };
 
-use crate::dialog::{
-    Dialog, DialogButtonProps, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+use crate::{
+    StyledExt as _, WindowExt as _,
+    dialog::{
+        Dialog, DialogButtonProps, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+    },
+    h_flex, v_flex,
 };
-use crate::{StyledExt as _, WindowExt as _, h_flex, v_flex};
 
 /// AlertDialog is a modal dialog that interrupts the user with important content
 /// and expects a response.
@@ -273,6 +275,7 @@ impl AlertDialog {
 
         self.base
             .button_props(button_props.clone())
+            .alert_dialog_role()
             .when(has_header, |this| {
                 this.header(
                     DialogHeader::new().child(

@@ -6,16 +6,15 @@ mod state;
 mod tab_panel;
 mod tiles;
 
-use std::sync::Arc;
-
 use anyhow::Result;
-pub use dock::*;
-use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, AnyView, App, AppContext, Axis, Bounds, Context, Edges, Entity, EntityId,
     EventEmitter, InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render,
-    SharedString, Styled, Subscription, WeakEntity, Window, actions, div,
+    SharedString, Styled, Subscription, WeakEntity, Window, actions, div, prelude::FluentBuilder,
 };
+use std::sync::Arc;
+
+pub use dock::*;
 pub use panel::*;
 pub use stack_panel::*;
 pub use state::*;

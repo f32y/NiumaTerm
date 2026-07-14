@@ -1,14 +1,17 @@
-use std::cell::Cell;
-use std::rc::Rc;
-
-use gpui::prelude::FluentBuilder as _;
+use gpui::Corners;
+use gpui::InteractiveElement;
+use gpui::ParentElement;
+use gpui::{App, Axis, Edges, ElementId, IntoElement, Window};
 use gpui::{
-    App, Axis, Corners, Edges, ElementId, InteractiveElement, IntoElement, ParentElement,
-    RenderOnce, StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div,
+    RenderOnce, StatefulInteractiveElement as _, StyleRefinement, Styled, div,
+    prelude::FluentBuilder as _,
 };
+use std::{cell::Cell, rc::Rc};
 
-use crate::button::{Button, ButtonVariant, ButtonVariants};
-use crate::{Disableable, Sizable, Size, StyledExt};
+use crate::{
+    Disableable, Sizable, Size, StyledExt,
+    button::{Button, ButtonVariant, ButtonVariants},
+};
 
 /// A ButtonGroup element, to wrap multiple buttons in a group.
 #[derive(IntoElement)]
@@ -260,9 +263,8 @@ impl RenderOnce for ButtonGroup {
 
 #[cfg(test)]
 mod tests {
-    use gpui::Axis;
-
     use super::*;
+    use gpui::Axis;
 
     #[gpui::test]
     fn test_button_group_builder(_cx: &mut gpui::TestAppContext) {

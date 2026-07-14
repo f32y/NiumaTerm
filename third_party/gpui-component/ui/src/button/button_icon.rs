@@ -1,9 +1,5 @@
-use gpui::prelude::FluentBuilder;
-use gpui::{App, IntoElement, RenderOnce, Window};
-
-use crate::progress::ProgressCircle;
-use crate::spinner::Spinner;
-use crate::{Icon, Sizable, Size};
+use crate::{Icon, Sizable, Size, progress::ProgressCircle, spinner::Spinner};
+use gpui::{App, IntoElement, RenderOnce, Window, prelude::FluentBuilder};
 
 /// Button icon which can be an Icon, Spinner, or Progress use for `icon` method of Button.
 #[doc(hidden)]

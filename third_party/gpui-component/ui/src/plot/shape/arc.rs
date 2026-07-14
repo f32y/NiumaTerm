@@ -1,7 +1,6 @@
 // @reference: https://d3js.org/d3-shape/arc
 
-use std::f32::consts::PI;
-use std::fmt::Debug;
+use std::{f32::consts::PI, fmt::Debug};
 
 use gpui::{Bounds, Hsla, Path, PathBuilder, Pixels, Point, Window, point, px};
 

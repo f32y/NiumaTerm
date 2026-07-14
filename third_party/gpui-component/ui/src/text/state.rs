@@ -1,22 +1,26 @@
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::Poll;
-
 use futures::Stream as _;
-use gpui::prelude::FluentBuilder as _;
+use std::{pin::Pin, sync::Arc, task::Poll};
+
 use gpui::{
     App, AppContext as _, Bounds, Context, FocusHandle, IntoElement, KeyBinding, ListState,
-    ParentElement as _, Pixels, Point, Render, SharedString, Styled as _, Task, Window, px,
+    ParentElement as _, Pixels, Point, Render, SharedString, Styled as _, Task, Window,
+    prelude::FluentBuilder as _, px,
 };
 
-use crate::async_util::{Receiver, Sender, unbounded};
-use crate::highlighter::HighlightTheme;
-use crate::input::{self, SelectAll};
-use crate::scroll::AutoScroll;
-use crate::text::document::ParsedDocument;
-use crate::text::node::{self, NodeContext};
-use crate::text::{CodeBlockActionsFn, MarkdownExtensions, TextViewStyle, format};
-use crate::{ActiveTheme, ElementExt, v_flex};
+use crate::{
+    ActiveTheme, ElementExt,
+    async_util::{Receiver, Sender, unbounded},
+    highlighter::HighlightTheme,
+    input::{self, SelectAll},
+    scroll::AutoScroll,
+    text::{
+        CodeBlockActionsFn, MarkdownExtensions, TextViewStyle,
+        document::ParsedDocument,
+        format,
+        node::{self, NodeContext},
+    },
+    v_flex,
+};
 
 const CONTEXT: &'static str = "TextView";
 // Keep coalescing bounded so sustained streams still render intermediate updates.
@@ -623,10 +627,9 @@ fn parse_content(
 
 #[cfg(test)]
 mod tests {
-    use gpui::TestAppContext;
-
     use super::*;
     use crate::text::MarkdownNode;
+    use gpui::TestAppContext;
 
     #[gpui::test]
     fn set_text_then_push_str_appends_to_replaced_content(cx: &mut TestAppContext) {

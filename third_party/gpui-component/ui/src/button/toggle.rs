@@ -1,15 +1,15 @@
-use std::cell::Cell;
-use std::rc::Rc;
+use std::{cell::Cell, rc::Rc};
 
-use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Corners, Edges, ElementId, InteractiveElement, IntoElement, ParentElement,
-    RenderOnce, SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Window, div,
+    RenderOnce, Role, SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Toggled,
+    Window, div, prelude::FluentBuilder as _,
 };
 use smallvec::{SmallVec, smallvec};
 
-use crate::tooltip::ComponentTooltip;
-use crate::{ActiveTheme, Disableable, Icon, Sizable, Size, StyledExt, h_flex};
+use crate::{
+    ActiveTheme, Disableable, Icon, Sizable, Size, StyledExt, h_flex, tooltip::ComponentTooltip,
+};
 
 #[derive(Default, Copy, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ToggleVariant {
@@ -156,6 +156,12 @@ impl RenderOnce for Toggle {
 
         div()
             .id(self.id)
+            .role(Role::Button)
+            .aria_toggled(if checked { Toggled::True } else { Toggled::False })
+            .when_some(
+                self.tooltip.text.as_ref().map(|(text, _)| text.clone()),
+                |this, label| this.aria_label(label),
+            )
             .flex()
             .flex_row()
             .items_center()
@@ -309,6 +315,7 @@ impl RenderOnce for ToggleGroup {
 
         h_flex()
             .id(self.id)
+            .role(Role::Toolbar)
             .when(!self.segmented, |this| this.gap_2())
             .refine_style(&self.style)
             .children(self.items.into_iter().enumerate().map({

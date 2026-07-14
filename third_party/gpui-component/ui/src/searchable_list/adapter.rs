@@ -1,11 +1,11 @@
 use gpui::{AnyElement, App, Context, IntoElement, ParentElement as _, Styled as _, Window, div};
 
-use super::delegate::{SearchableListDelegate, SearchableListItem as _};
-use super::item::SearchableListItemElement;
-use crate::list::{ListDelegate, ListState};
 use crate::{
     ActiveTheme, Disableable as _, Icon, IconName, IndexPath, Sizable as _, Size, StyleSized as _,
+    list::{ListDelegate, ListState},
 };
+
+use super::{delegate::{SearchableListDelegate, SearchableListItem as _}, item::SearchableListItemElement};
 
 /// Bridges a [`SearchableListDelegate`] into the [`ListDelegate`] protocol.
 ///

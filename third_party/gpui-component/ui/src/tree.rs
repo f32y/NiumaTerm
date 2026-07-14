@@ -1,19 +1,19 @@
-use std::cell::RefCell;
-use std::ops::Range;
-use std::rc::Rc;
+use std::{cell::RefCell, ops::Range, rc::Rc};
 
-use gpui::prelude::FluentBuilder as _;
 use gpui::{
     App, Context, ElementId, Entity, EventEmitter, FocusHandle, InteractiveElement as _,
     IntoElement, KeyBinding, ListSizingBehavior, MouseButton, ParentElement, Render, RenderOnce,
-    SharedString, StyleRefinement, Styled, UniformListScrollHandle, Window, div, uniform_list,
+    SharedString, StyleRefinement, Styled, UniformListScrollHandle, Window, div,
+    prelude::FluentBuilder as _, uniform_list,
 };
 
-use crate::actions::{Confirm, SelectDown, SelectLeft, SelectRight, SelectUp};
-use crate::list::ListItem;
-use crate::menu::{ContextMenuExt as _, PopupMenu};
-use crate::scroll::ScrollableElement;
-use crate::{Selectable as _, StyledExt};
+use crate::{
+    Selectable as _, StyledExt,
+    actions::{Confirm, SelectDown, SelectLeft, SelectRight, SelectUp},
+    list::ListItem,
+    menu::{ContextMenuExt as _, PopupMenu},
+    scroll::ScrollableElement,
+};
 
 const CONTEXT: &str = "Tree";
 pub(crate) fn init(cx: &mut App) {
@@ -292,6 +292,25 @@ impl TreeState {
 
     pub fn scroll_to_item(&mut self, ix: usize, strategy: gpui::ScrollStrategy) {
         self.scroll_handle.scroll_to_item(ix, strategy);
+    }
+
+    /// Find the flat index of the entry whose `item.id` matches, if present.
+    pub(crate) fn index_of(&self, id: &SharedString) -> Option<usize> {
+        self.entries.iter().position(|e| &e.item.id == id)
+    }
+
+    /// Expand all ancestors of the node with `id` and scroll it into view.
+    /// No-op if `id` is not found. Does not change the selected index.
+    pub fn reveal_item(
+        &mut self,
+        id: &SharedString,
+        strategy: gpui::ScrollStrategy,
+        cx: &mut Context<Self>,
+    ) {
+        self.expand_ancestors(id.clone(), cx);
+        if let Some(ix) = self.index_of(id) {
+            self.scroll_to_item(ix, strategy);
+        }
     }
 
     /// Get the currently selected entry, if any.
@@ -611,10 +630,10 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use gpui::{AppContext as _, Render, Subscription};
     use indoc::indoc;
 
     use super::{TreeEvent, TreeState};
+    use gpui::{AppContext as _, Render, Subscription};
 
     struct TestCollector {
         _state: gpui::Entity<TreeState>,

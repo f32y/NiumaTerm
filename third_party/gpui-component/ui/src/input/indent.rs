@@ -4,10 +4,13 @@ use gpui::{
 };
 use ropey::RopeSlice;
 
-use crate::RopeExt;
-use crate::input::element::TextElement;
-use crate::input::mode::InputMode;
-use crate::input::{Indent, IndentInline, InputState, LastLayout, Outdent, OutdentInline};
+use crate::{
+    RopeExt,
+    input::{
+        Indent, IndentInline, InputState, LastLayout, Outdent, OutdentInline, element::TextElement,
+        mode::InputMode,
+    },
+};
 
 #[derive(Debug, Copy, Clone)]
 pub struct TabSize {

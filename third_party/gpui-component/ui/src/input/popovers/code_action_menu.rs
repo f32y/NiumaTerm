@@ -1,21 +1,21 @@
 use std::rc::Rc;
 
-use gpui::prelude::FluentBuilder;
 use gpui::{
     Action, AnyElement, App, AppContext, Context, DismissEvent, Empty, Entity, EventEmitter,
     Half as _, InteractiveElement as _, IntoElement, ParentElement, Pixels, Point, Render,
-    RenderOnce, SharedString, Styled, StyledText, Subscription, Window, deferred, div, px,
-    relative,
+    RenderOnce, SharedString, Styled, StyledText, Subscription, Window, deferred, div,
+    prelude::FluentBuilder, px, relative,
 };
 use lsp_types::CodeAction;
 
 const MAX_MENU_WIDTH: Pixels = px(320.);
 const MAX_MENU_HEIGHT: Pixels = px(480.);
 
-use crate::input::popovers::editor_popover;
-use crate::input::{self, InputState};
-use crate::list::{List, ListDelegate, ListEvent, ListState};
-use crate::{ActiveTheme, IndexPath, Selectable, actions, h_flex};
+use crate::{
+    ActiveTheme, IndexPath, Selectable, actions, h_flex,
+    input::{self, InputState, popovers::editor_popover},
+    list::{List, ListDelegate, ListEvent, ListState},
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct CodeActionItem {

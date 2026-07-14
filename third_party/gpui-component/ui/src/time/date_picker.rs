@@ -1,23 +1,24 @@
 use std::rc::Rc;
 
 use chrono::NaiveDate;
-use gpui::prelude::FluentBuilder as _;
 use gpui::{
     App, AppContext, ClickEvent, Context, ElementId, Empty, Entity, EventEmitter, FocusHandle,
     Focusable, InteractiveElement as _, IntoElement, KeyBinding, MouseButton, ParentElement as _,
     Render, RenderOnce, SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled,
-    Subscription, Window, anchored, deferred, div, px,
+    Subscription, Window, anchored, deferred, div, prelude::FluentBuilder as _, px,
 };
 use rust_i18n::t;
 
-use super::calendar::{Calendar, CalendarEvent, CalendarState, Date, Matcher};
-use crate::actions::{Cancel, Confirm};
-use crate::button::{Button, ButtonVariants as _};
-use crate::input::{Delete, clear_button, input_style};
 use crate::{
     ActiveTheme, Disableable, Icon, IconName, Sizable, Size, StyleSized as _, StyledExt as _,
-    h_flex, v_flex,
+    actions::{Cancel, Confirm},
+    button::{Button, ButtonVariants as _},
+    h_flex,
+    input::{Delete, clear_button, input_style},
+    v_flex,
 };
+
+use super::calendar::{Calendar, CalendarEvent, CalendarState, Date, Matcher};
 
 const CONTEXT: &'static str = "DatePicker";
 pub(crate) fn init(cx: &mut App) {

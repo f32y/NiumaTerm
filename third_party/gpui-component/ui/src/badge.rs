@@ -1,7 +1,6 @@
-use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyElement, App, Hsla, IntoElement, ParentElement, RenderOnce, StyleRefinement, Styled, Window,
-    div, px, relative,
+    div, prelude::FluentBuilder, px, relative,
 };
 
 use crate::{ActiveTheme, Icon, Sizable, Size, StyledExt, h_flex, white};

@@ -1,10 +1,9 @@
+use crate::{ActiveTheme, StyledExt};
 use gpui::{
     Animation, AnimationExt, IntoElement, RenderOnce, StyleRefinement, Styled, bounce, div,
     ease_in_out,
 };
 use instant::Duration;
-
-use crate::{ActiveTheme, StyledExt};
 
 /// A skeleton loading placeholder element.
 #[derive(IntoElement)]

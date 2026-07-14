@@ -1,16 +1,21 @@
-use gpui::prelude::FluentBuilder as _;
+use std::ops::Range;
+
+use crate::{
+    IconName, Sizable, Size, StyledExt,
+    group_box::GroupBoxVariant,
+    input::{Input, InputState},
+    resizable::{h_resizable, resizable_panel},
+    setting::{SettingGroup, SettingPage},
+    sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
+};
 use gpui::{
     App, AppContext as _, Axis, ElementId, Entity, IntoElement, ParentElement as _, Pixels,
-    RenderOnce, StyleRefinement, Styled, Window, div, px, relative,
+    RenderOnce, StyleRefinement, Styled, Window, canvas, div, prelude::FluentBuilder as _, px,
+    relative,
 };
 use rust_i18n::t;
 
-use crate::group_box::GroupBoxVariant;
-use crate::input::{Input, InputState};
-use crate::resizable::{h_resizable, resizable_panel};
-use crate::setting::{SettingGroup, SettingPage};
-use crate::sidebar::{Sidebar, SidebarMenu, SidebarMenuItem};
-use crate::{IconName, Sizable, Size, StyledExt};
+const STACKED_LAYOUT_MAX_WIDTH: Pixels = px(480.);
 
 /// The settings structure containing multiple pages for app settings.
 ///
@@ -31,6 +36,7 @@ pub struct Settings {
     group_variant: GroupBoxVariant,
     size: Size,
     sidebar_width: Pixels,
+    sidebar_size_range: Range<Pixels>,
     sidebar_style: StyleRefinement,
     default_selected_index: SelectIndex,
     header_style: StyleRefinement,
@@ -45,6 +51,7 @@ impl Settings {
             group_variant: GroupBoxVariant::default(),
             size: Size::default(),
             sidebar_width: px(250.0),
+            sidebar_size_range: px(160.0)..px(360.0),
             sidebar_style: StyleRefinement::default(),
             default_selected_index: SelectIndex::default(),
             header_style: StyleRefinement::default(),
@@ -54,6 +61,12 @@ impl Settings {
     /// Set the width of the sidebar, default is `250px`.
     pub fn sidebar_width(mut self, width: impl Into<Pixels>) -> Self {
         self.sidebar_width = width.into();
+        self
+    }
+
+    /// Set the resize range of the sidebar, default is `160px..360px`.
+    pub fn sidebar_size_range(mut self, range: impl Into<Range<Pixels>>) -> Self {
+        self.sidebar_size_range = range.into();
         self
     }
 
@@ -135,7 +148,7 @@ impl Settings {
         options: &RenderOptions,
         window: &mut Window,
         cx: &mut App,
-    ) -> impl IntoElement {
+    ) -> gpui::AnyElement {
         let selected_index = state.read(cx).selected_index;
 
         for (ix, page) in pages.into_iter().enumerate() {
@@ -283,19 +296,44 @@ impl RenderOnce for Settings {
             layout: Axis::Horizontal,
             disabled: false,
         };
+        let sidebar_size_range = self.sidebar_size_range.clone();
+        let sidebar = self
+            .render_sidebar(&state, &filtered_pages, window, cx)
+            .into_any_element();
 
         h_resizable(self.id.clone())
             .child(
                 resizable_panel()
                     .size(self.sidebar_width)
-                    .child(self.render_sidebar(&state, &filtered_pages, window, cx)),
+                    .size_range(sidebar_size_range)
+                    .child(sidebar),
             )
-            .child(resizable_panel().child(self.render_active_page(
-                &state,
-                &filtered_pages,
-                &options,
-                window,
-                cx,
-            )))
+            .child(
+                resizable_panel().child(
+                    canvas(
+                        move |bounds, window, cx| {
+                            let options = RenderOptions {
+                                layout: if bounds.size.width <= STACKED_LAYOUT_MAX_WIDTH {
+                                    Axis::Vertical
+                                } else {
+                                    Axis::Horizontal
+                                },
+                                ..options
+                            };
+                            let mut page = self.render_active_page(
+                                &state,
+                                &filtered_pages,
+                                &options,
+                                window,
+                                cx,
+                            );
+                            page.prepaint_as_root(bounds.origin, bounds.size.into(), window, cx);
+                            page
+                        },
+                        |_, mut page, window, cx| page.paint(window, cx),
+                    )
+                    .size_full(),
+                ),
+            )
     }
 }

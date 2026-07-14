@@ -9,19 +9,21 @@
 /// about `BufferPoint ↔ DisplayPoint` mapping, without worrying about internal wrap/fold complexity.
 mod display_map;
 mod fold_map;
-#[cfg(not(target_family = "wasm"))]
+#[cfg(feature = "tree-sitter")]
 mod folding;
-#[cfg(target_family = "wasm")]
+#[cfg(not(feature = "tree-sitter"))]
 pub mod folding;
 mod text_wrapper;
 mod wrap_map;
 
 // Re-export public API
-// Re-export FoldRange and extract_fold_ranges
-pub use folding::{FoldRange, extract_fold_ranges};
-
 pub use self::display_map::DisplayMap;
 pub(crate) use self::text_wrapper::LineLayout;
+
+// Re-export FoldRange and extract_fold_ranges
+pub use folding::{FoldRange, extract_fold_ranges};
+#[cfg(not(feature = "tree-sitter"))]
+pub use folding::Tree;
 
 /// Position in the buffer (logical text).
 ///

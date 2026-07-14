@@ -4,9 +4,7 @@ use gpui::{Context, Window};
 use ropey::Rope;
 use sum_tree::Bias;
 
-use crate::RopeExt as _;
-use crate::input::InputState;
-use crate::text::selection::word_range_from_chars;
+use crate::{RopeExt as _, input::InputState, text::selection::word_range_from_chars};
 
 impl InputState {
     /// Select the word at the given offset on double-click.
@@ -69,9 +67,8 @@ impl TextSelector {
 
 #[cfg(test)]
 mod tests {
-    use ropey::Rope;
-
     use super::*;
+    use ropey::Rope;
 
     #[test]
     fn test_word_range() {

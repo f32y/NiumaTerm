@@ -1,14 +1,17 @@
-use std::collections::HashMap;
-use std::ops::Deref;
-use std::sync::{Arc, LazyLock, Mutex};
-
 use gpui::{App, FontWeight, HighlightStyle, Hsla, SharedString};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
+use std::{
+    collections::HashMap,
+    ops::Deref,
+    sync::{Arc, LazyLock, Mutex},
+};
 
-use crate::highlighter::{Language, languages};
-use crate::{ActiveTheme, DEFAULT_THEME_COLORS, ThemeMode};
+use crate::{
+    ActiveTheme, DEFAULT_THEME_COLORS, ThemeMode,
+    highlighter::{Language, languages},
+};
 
 pub(super) const HIGHLIGHT_NAMES: [&str; 41] = [
     "attribute",

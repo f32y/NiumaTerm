@@ -52,8 +52,6 @@ pub enum Language {
     MarkdownInline,
     #[cfg(feature = "tree-sitter-php")]
     Php,
-    #[cfg(feature = "tree-sitter-powershell")]
-    PowerShell,
     #[cfg(feature = "tree-sitter-proto")]
     Proto,
     #[cfg(feature = "tree-sitter-python")]
@@ -143,8 +141,6 @@ impl Language {
             Self::MarkdownInline => "markdown_inline",
             #[cfg(feature = "tree-sitter-php")]
             Self::Php => "php",
-            #[cfg(feature = "tree-sitter-powershell")]
-            Self::PowerShell => "powershell",
             #[cfg(feature = "tree-sitter-proto")]
             Self::Proto => "proto",
             #[cfg(feature = "tree-sitter-python")]
@@ -229,8 +225,6 @@ impl Language {
             "markdown_inline" | "markdown-inline" => Some(Self::MarkdownInline),
             #[cfg(feature = "tree-sitter-php")]
             "php" | "php3" | "php4" | "php5" | "phtml" => Some(Self::Php),
-            #[cfg(feature = "tree-sitter-powershell")]
-            "powershell" | "pwsh" | "ps1" | "psm1" => Some(Self::PowerShell),
             #[cfg(feature = "tree-sitter-proto")]
             "proto" | "protobuf" => Some(Self::Proto),
             #[cfg(feature = "tree-sitter-python")]
@@ -485,13 +479,6 @@ impl Language {
             Self::Bash => (
                 tree_sitter_bash::LANGUAGE,
                 tree_sitter_bash::HIGHLIGHT_QUERY,
-                "",
-                "",
-            ),
-            #[cfg(feature = "tree-sitter-powershell")]
-            Self::PowerShell => (
-                tree_sitter_powershell::LANGUAGE,
-                tree_sitter_powershell::HIGHLIGHTS_QUERY,
                 "",
                 "",
             ),

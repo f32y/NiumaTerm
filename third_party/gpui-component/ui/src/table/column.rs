@@ -1,9 +1,8 @@
 use std::f32;
 
-use gpui::prelude::FluentBuilder;
 use gpui::{
     Bounds, Context, Edges, Empty, EntityId, IntoElement, ParentElement as _, Pixels, Render,
-    SharedString, Styled as _, TextAlign, Window, div, px,
+    SharedString, Styled as _, TextAlign, Window, div, prelude::FluentBuilder, px,
 };
 
 use crate::ActiveTheme as _;

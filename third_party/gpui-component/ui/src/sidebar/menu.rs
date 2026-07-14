@@ -1,18 +1,17 @@
-use std::rc::Rc;
-
-use gpui::prelude::FluentBuilder;
+use crate::{
+    ActiveTheme as _, Collapsible, Icon, IconName, Sizable as _, StyledExt,
+    button::{Button, ButtonVariants as _},
+    h_flex,
+    menu::{ContextMenuExt, PopupMenu},
+    sidebar::SidebarItem,
+    v_flex,
+};
 use gpui::{
     AnyElement, App, ClickEvent, ElementId, InteractiveElement as _, IntoElement,
     ParentElement as _, SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled,
-    Window, div, percentage,
+    Window, div, percentage, prelude::FluentBuilder,
 };
-
-use crate::button::{Button, ButtonVariants as _};
-use crate::menu::{ContextMenuExt, PopupMenu};
-use crate::sidebar::SidebarItem;
-use crate::{
-    ActiveTheme as _, Collapsible, Icon, IconName, Sizable as _, StyledExt, h_flex, v_flex,
-};
+use std::rc::Rc;
 
 /// Menu for the [`super::Sidebar`]
 #[derive(Clone)]

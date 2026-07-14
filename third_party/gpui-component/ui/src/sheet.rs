@@ -1,24 +1,25 @@
-use std::rc::Rc;
-use std::time::Duration;
+use std::{rc::Rc, time::Duration};
 
-use gpui::prelude::FluentBuilder as _;
 use gpui::{
     Animation, AnimationExt as _, AnyElement, App, ClickEvent, DefiniteLength, DismissEvent, Edges,
     EventEmitter, FocusHandle, InteractiveElement as _, IntoElement, KeyBinding, MouseButton,
     ParentElement, Pixels, RenderOnce, StyleRefinement, Styled, Window, WindowControlArea,
-    anchored, div, point, px,
+    anchored, div, point, prelude::FluentBuilder as _, px,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::actions::Cancel;
-use crate::button::{Button, ButtonVariants as _};
-use crate::dialog::overlay_color;
-use crate::scroll::ScrollableElement as _;
-use crate::title_bar::TITLE_BAR_HEIGHT;
 use crate::{
     ActiveTheme, FocusTrapElement as _, IconName, Placement, Sizable, StyledExt as _,
-    WindowExt as _, h_flex, v_flex,
+    WindowExt as _,
+    actions::Cancel,
+    button::{Button, ButtonVariants as _},
+    dialog::overlay_color,
+    h_flex,
+    scroll::ScrollableElement as _,
+    text::{SelectionScope, SelectionScopeElement as _},
+    title_bar::TITLE_BAR_HEIGHT,
+    v_flex,
 };
 
 const CONTEXT: &str = "Sheet";
@@ -267,11 +268,6 @@ impl RenderOnce for Sheet {
                                         .child(footer),
                                 )
                             })
-                            .on_any_mouse_down({
-                                |_, _, cx| {
-                                    cx.stop_propagation();
-                                }
-                            })
                             .with_animation(
                                 "slide",
                                 Animation::new(Duration::from_secs_f64(0.15)),
@@ -284,7 +280,8 @@ impl RenderOnce for Sheet {
                                         Placement::Left => this.left(y),
                                     })
                                 },
-                            ),
+                            )
+                            .selection_scope(SelectionScope::Sheet),
                     ),
             )
     }

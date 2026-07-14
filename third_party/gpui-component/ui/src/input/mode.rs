@@ -1,13 +1,13 @@
-use std::cell::RefCell;
-use std::ops::Range;
 use std::rc::Rc;
 use std::time::Duration;
+use std::{cell::RefCell, ops::Range};
 
 use gpui::{App, SharedString, Task};
 use ropey::Rope;
 
 use super::display_map::DisplayMap;
-use crate::highlighter::{DiagnosticSet, SyntaxHighlighter};
+use crate::highlighter::DiagnosticSet;
+use crate::highlighter::SyntaxHighlighter;
 use crate::input::{InputEdit, RopeExt as _, TabSize};
 
 #[allow(dead_code)]
@@ -46,10 +46,6 @@ pub(crate) enum InputMode {
         highlighter: Rc<RefCell<Option<SyntaxHighlighter>>>,
         diagnostics: DiagnosticSet,
         parse_task: Rc<RefCell<Option<Task<()>>>>,
-        /// When `Some((min, max))`, the editor sizes its height to the content's
-        /// wrapped row count (clamped to that range) like [`InputMode::AutoGrow`],
-        /// instead of filling its container. Keeps syntax highlighting.
-        auto_grow: Option<(usize, usize)>,
     },
 }
 
@@ -83,7 +79,6 @@ impl InputMode {
             folding: true,
             diagnostics: DiagnosticSet::new(&Rope::new()),
             parse_task: Rc::new(RefCell::new(None)),
-            auto_grow: None,
         }
     }
 
@@ -137,33 +132,6 @@ impl InputMode {
         matches!(self, InputMode::AutoGrow { .. })
     }
 
-    /// True when the height should track the content's wrapped row count (clamped to
-    /// max rows): the dedicated [`InputMode::AutoGrow`], or a [`InputMode::CodeEditor`]
-    /// that opted in via [`InputMode::set_code_editor_auto_grow`].
-    #[inline]
-    pub(super) fn is_content_sized(&self) -> bool {
-        self.is_auto_grow()
-            || matches!(
-                self,
-                InputMode::CodeEditor {
-                    auto_grow: Some(_),
-                    ..
-                }
-            )
-    }
-
-    /// Enable content-sized height for a code editor (no-op for other modes). `rows`
-    /// is the visible row count clamped to `[min, max]`; starts at `min`.
-    pub(super) fn set_code_editor_auto_grow(&mut self, min_rows: usize, max_rows: usize) {
-        if let InputMode::CodeEditor {
-            auto_grow, rows, ..
-        } = self
-        {
-            *auto_grow = Some((min_rows, max_rows));
-            *rows = min_rows.max(1);
-        }
-    }
-
     #[inline]
     pub(super) fn is_multi_line(&self) -> bool {
         match self {
@@ -177,13 +145,6 @@ impl InputMode {
         match self {
             InputMode::PlainText { rows, .. } => {
                 *rows = new_rows;
-            }
-            InputMode::CodeEditor {
-                rows,
-                auto_grow: Some((min_rows, max_rows)),
-                ..
-            } => {
-                *rows = new_rows.clamp(*min_rows, *max_rows);
             }
             InputMode::CodeEditor { rows, .. } => {
                 *rows = new_rows;
@@ -199,7 +160,7 @@ impl InputMode {
     }
 
     pub(super) fn update_auto_grow(&mut self, display_map: &DisplayMap) {
-        if !self.is_content_sized() {
+        if self.is_single_line() {
             return;
         }
 
@@ -226,10 +187,6 @@ impl InputMode {
     pub(super) fn min_rows(&self) -> usize {
         match self {
             InputMode::AutoGrow { min_rows, .. } => *min_rows,
-            InputMode::CodeEditor {
-                auto_grow: Some((min_rows, _)),
-                ..
-            } => *min_rows,
             _ => 1,
         }
         .max(1)
@@ -243,10 +200,6 @@ impl InputMode {
 
         match self {
             InputMode::AutoGrow { max_rows, .. } => *max_rows,
-            InputMode::CodeEditor {
-                auto_grow: Some((_, max_rows)),
-                ..
-            } => *max_rows,
             _ => usize::MAX,
         }
     }
@@ -303,7 +256,14 @@ impl InputMode {
                 let edit = replacement_input_edit(old_text, new_text, selected_range, change_text);
 
                 const SYNC_PARSE_TIMEOUT: Duration = Duration::from_millis(2);
-                let completed = h.update(Some(edit), new_text, Some(SYNC_PARSE_TIMEOUT));
+                // Skip parsing in the foreground above this threshold
+                const SYNC_PARSE_MAX_BYTES: usize = 256 * 1024;
+                let completed = if new_text.len() > SYNC_PARSE_MAX_BYTES {
+                    h.edit_tree(Some(edit), new_text);
+                    false
+                } else {
+                    h.update(Some(edit), new_text, Some(SYNC_PARSE_TIMEOUT))
+                };
                 if completed {
                     // Sync parse succeeded, cancel any pending background parse.
                     parse_task.borrow_mut().take();
@@ -378,9 +338,10 @@ mod tests {
     use ropey::Rope;
 
     use super::replacement_input_edit;
-    use crate::highlighter::DiagnosticSet;
-    use crate::input::mode::InputMode;
-    use crate::input::{Point, TabSize};
+    use crate::{
+        highlighter::DiagnosticSet,
+        input::{Point, TabSize, mode::InputMode},
+    };
 
     #[test]
     fn test_replacement_input_edit_backspace_at_end_uses_old_range() {
@@ -397,7 +358,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(feature = "tree-sitter")]
     fn test_replacement_input_edit_shifts_tree_sitter_included_ranges() {
         let old_source = "[1,2]";
         let new_source = "[1,2";
@@ -454,7 +415,6 @@ mod tests {
             highlighter: Default::default(),
             diagnostics: DiagnosticSet::new(&Rope::new()),
             parse_task: Default::default(),
-            auto_grow: None,
         };
         assert_eq!(mode.is_code_editor(), true);
         assert_eq!(mode.is_multi_line(), false);

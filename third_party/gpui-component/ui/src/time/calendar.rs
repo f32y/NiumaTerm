@@ -1,21 +1,21 @@
-use std::borrow::Cow;
-use std::rc::Rc;
+use std::{borrow::Cow, rc::Rc};
 
 use chrono::{Datelike, Local, NaiveDate};
-use gpui::prelude::FluentBuilder as _;
 use gpui::{
     App, ClickEvent, Context, Div, ElementId, Empty, Entity, EventEmitter, FocusHandle,
     InteractiveElement, IntoElement, ParentElement, Render, RenderOnce, SharedString, Stateful,
-    StatefulInteractiveElement, StyleRefinement, Styled, Window, px, relative,
+    StatefulInteractiveElement, StyleRefinement, Styled, Window, prelude::FluentBuilder as _, px,
+    relative,
 };
 use rust_i18n::t;
 
-use super::utils::days_in_month;
-use crate::button::{Button, ButtonVariants as _};
 use crate::{
-    ActiveTheme, Disableable as _, IconName, Selectable, Sizable, Size, StyledExt as _, h_flex,
-    v_flex,
+    ActiveTheme, Disableable as _, IconName, Selectable, Sizable, Size, StyledExt as _,
+    button::{Button, ButtonVariants as _},
+    h_flex, v_flex,
 };
+
+use super::utils::days_in_month;
 
 /// Events emitted by the calendar.
 pub enum CalendarEvent {

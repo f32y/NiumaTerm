@@ -1,14 +1,17 @@
 use std::rc::Rc;
 
-use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    App, AppContext as _, Bounds, Context, Empty, Entity, IntoElement, Pixels, Point, Render,
-    Styled, Window, px,
+    prelude::FluentBuilder as _, px, App, AppContext as _, Bounds, Context, Empty, Entity,
+    IntoElement, Pixels, Point, Render, Styled, Window,
 };
 
-use crate::highlighter::DiagnosticEntry;
-use crate::input::InputState;
-use crate::input::popovers::{Popover, render_markdown};
+use crate::{
+    highlighter::DiagnosticEntry,
+    input::{
+        popovers::{render_markdown, Popover},
+        InputState,
+    },
+};
 
 pub struct DiagnosticPopover {
     state: Entity<InputState>,

@@ -1,9 +1,7 @@
+use gpui::{AnyElement, App, IntoElement, StyleRefinement, Window};
 use std::rc::Rc;
 
-use gpui::{AnyElement, App, IntoElement, StyleRefinement, Window};
-
-use crate::setting::fields::SettingFieldRender;
-use crate::setting::{AnySettingField, RenderOptions};
+use crate::setting::{fields::SettingFieldRender, AnySettingField, RenderOptions};
 
 /// A trait for rendering custom setting field elements.
 ///

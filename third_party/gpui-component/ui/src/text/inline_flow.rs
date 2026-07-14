@@ -1,19 +1,22 @@
-use std::ops::Range;
-use std::sync::{Arc, Mutex};
+use std::{
+    ops::Range,
+    sync::{Arc, Mutex},
+};
 
-use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AbsoluteLength, AnyElement, App, AvailableSpace, Bounds, DefiniteLength, Element, ElementId,
     GlobalElementId, HighlightStyle, InspectorElementId, InteractiveElement as _, IntoElement,
     LayoutId, LineFragment as WrapLineFragment, ObjectFit, Pixels, ShapedLine, SharedString,
     SharedUri, Size, StatefulInteractiveElement as _, Styled, StyledImage as _, TextRun, TextStyle,
-    WhiteSpace, Window, img, point, px, relative, size,
+    WhiteSpace, Window, img, point, prelude::FluentBuilder as _, px, relative, size,
 };
 
-use super::inline::{Inline, InlineState};
-use super::node::LinkMark;
-use crate::WindowExt as _;
-use crate::tooltip::Tooltip;
+use crate::{WindowExt as _, tooltip::Tooltip};
+
+use super::{
+    inline::{Inline, InlineState},
+    node::LinkMark,
+};
 
 const IMAGE_LEN: usize = 1;
 

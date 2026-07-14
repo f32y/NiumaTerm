@@ -1,10 +1,9 @@
+use crate::ActiveTheme;
 use gpui::{
     App, BoxShadow, Corners, DefiniteLength, Div, Edges, FocusHandle, Hsla, ParentElement, Pixels,
     Refineable, StyleRefinement, Styled, Window, div, point, px,
 };
 use serde::{Deserialize, Serialize};
-
-use crate::ActiveTheme;
 
 /// Returns a `Div` as horizontal flex layout.
 #[inline(always)]

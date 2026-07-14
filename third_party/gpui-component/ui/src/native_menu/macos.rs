@@ -1,7 +1,6 @@
 //! macOS native menu implementation (AppKit `NSMenu` via objc2).
 
-use std::cell::Cell;
-use std::sync::Arc;
+use std::{cell::Cell, sync::Arc};
 
 use gpui::{Action, App, AssetSource, Pixels, Point, SharedString, Window};
 use objc2::rc::Retained;

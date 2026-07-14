@@ -4,10 +4,15 @@ use gpui::{App, Bounds, Hsla, Pixels, SharedString, TextAlign, Window, point};
 use gpui_component_macros::IntoPlot;
 use num_traits::Zero;
 
-use crate::ActiveTheme;
-use crate::plot::label::{PlotLabel, TEXT_HEIGHT, TEXT_SIZE, Text};
-use crate::plot::shape::{Arc, ArcData, Pie};
-use crate::plot::{Plot, polygon};
+use crate::{
+    ActiveTheme,
+    plot::{
+        Plot,
+        label::{PlotLabel, TEXT_HEIGHT, TEXT_SIZE, Text},
+        polygon,
+        shape::{Arc, ArcData, Pie},
+    },
+};
 
 /// The default extra gap (in pixels) between `outer_radius` and the label radius.
 const DEFAULT_LABEL_GAP: f32 = 15.;

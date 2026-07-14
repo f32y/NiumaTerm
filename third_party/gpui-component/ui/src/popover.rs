@@ -1,17 +1,14 @@
-use std::cell::Cell;
-use std::rc::Rc;
-
-use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    Anchor, AnyElement, App, Bounds, Context, Deferred, DismissEvent, Div, ElementId, EventEmitter,
-    FocusHandle, Focusable, InteractiveElement as _, IntoElement, KeyBinding, MouseButton,
-    ParentElement, Pixels, Point, Render, RenderOnce, Stateful, StyleRefinement, Styled,
-    Subscription, Window, anchored, deferred, div, px,
+    Anchor, AnyElement, App, Bounds, Context, Deferred, DismissEvent, Div, ElementId,
+    EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement, KeyBinding,
+    MouseButton, ParentElement, Pixels, Point, Render, RenderOnce, Stateful, StyleRefinement,
+    Styled, Subscription, Window, anchored, deferred, div, prelude::FluentBuilder as _, px,
 };
+use std::{cell::Cell, rc::Rc};
 
-use crate::actions::Cancel;
-use crate::global_state::GlobalState;
-use crate::{ElementExt, Selectable, StyledExt as _, v_flex};
+use crate::{
+    ElementExt, Selectable, StyledExt as _, actions::Cancel, global_state::GlobalState, v_flex,
+};
 
 const CONTEXT: &str = "Popover";
 pub(crate) fn init(cx: &mut App) {
@@ -65,10 +62,12 @@ impl Popover {
         }
     }
 
-    /// Set the anchor corner of the popover, default is `Anchor::TopLeft`.
+    /// Set the anchor corner of the popover, default is [`Anchor::TopLeft`].
     ///
-    /// This method is kept for backward compatibility with `Anchor` type.
-    /// Internally, it converts `Anchor` to `Anchor`.
+    /// Imagine the popover has a pointer tip (like a speech bubble's tail). The
+    /// anchor is where that tip sits relative to the trigger: `Anchor::TopLeft`
+    /// places it at the trigger's top-left corner, `Anchor::BottomRight` at the
+    /// bottom-right, and so on. The popover then hangs off that point.
     pub fn anchor(mut self, anchor: impl Into<Anchor>) -> Self {
         self.anchor = anchor.into();
         self
@@ -473,9 +472,8 @@ impl RenderOnce for Popover {
 
 #[cfg(test)]
 mod tests {
-    use gpui::MouseButton;
-
     use super::*;
+    use gpui::MouseButton;
 
     #[test]
     fn test_popover_builder_chaining() {

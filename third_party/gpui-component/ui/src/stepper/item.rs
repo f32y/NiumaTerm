@@ -1,11 +1,13 @@
-use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Axis, ClickEvent, Half, InteractiveElement as _, IntoElement, ParentElement,
-    Pixels, RenderOnce, StyleRefinement, Styled, Window, div, px, relative,
+    Pixels, RenderOnce, Role, StatefulInteractiveElement as _, StyleRefinement, Styled, Window,
+    div, prelude::FluentBuilder as _, px, relative,
 };
 
-use crate::stepper::trigger::StepperTrigger;
-use crate::{ActiveTheme as _, AxisExt, Icon, Sizable, Size, StyledExt as _};
+use crate::{
+    ActiveTheme as _, AxisExt, Icon, Sizable, Size, StyledExt as _,
+    stepper::trigger::StepperTrigger,
+};
 
 /// A step item within a [`Stepper`].
 #[derive(IntoElement)]
@@ -121,6 +123,8 @@ impl RenderOnce for StepperItem {
 
         div()
             .id(("stepper-item", self.step))
+            .role(Role::ListItem)
+            .aria_position_in_set(self.step + 1)
             .relative()
             .when(self.layout.is_horizontal(), |this| this.h_flex())
             .when(self.layout.is_vertical(), |this| this.v_flex())

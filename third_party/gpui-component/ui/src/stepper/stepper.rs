@@ -1,13 +1,11 @@
 use std::rc::Rc;
 
-use gpui::prelude::FluentBuilder as _;
 use gpui::{
     App, Axis, ElementId, InteractiveElement as _, IntoElement, ParentElement, RenderOnce,
-    StyleRefinement, Styled, Window, div,
+    StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _,
 };
 
-use crate::stepper::StepperItem;
-use crate::{AxisExt, Sizable, Size, StyledExt as _};
+use crate::{AxisExt, Sizable, Size, StyledExt as _, stepper::StepperItem};
 
 /// A step-by-step progress for users to navigate through a series of steps or stages.
 #[derive(IntoElement)]

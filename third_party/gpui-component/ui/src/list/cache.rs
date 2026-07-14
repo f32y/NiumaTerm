@@ -224,8 +224,10 @@ impl RowsCache {
 mod tests {
     use std::rc::Rc;
 
-    use crate::IndexPath;
-    use crate::list::cache::{RowEntry, RowsCache};
+    use crate::{
+        IndexPath,
+        list::cache::{RowEntry, RowsCache},
+    };
 
     fn build_entities(sections: &[usize]) -> Vec<RowEntry> {
         sections
