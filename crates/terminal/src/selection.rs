@@ -18,6 +18,10 @@ use crate::terminal::grid::{Dimensions, Indexed};
 use crate::terminal::pos::{Column, Line, Pos, Side};
 use crate::terminal::square::{Square, Wide};
 
+/// Characters that split words for semantic selection. Matches Windows
+/// Terminal's default so paths, flags, and punctuation select predictably.
+pub const WORD_DELIMITERS: &str = " ./\\()\"'-:,.;<>~!@#$%^&*|+=[]{}~?\u{2502}\t\0";
+
 /// A Pos and side within that point.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Anchor {

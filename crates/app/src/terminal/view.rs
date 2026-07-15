@@ -14,6 +14,7 @@ use gpui::{
 use nmt_agent_hook::{AgentRoute, agent_process};
 use nmt_config::local_state::TabState;
 use nmt_terminal::ansi::CursorShape;
+use nmt_terminal::selection::SelectionType;
 
 use super::frame::{
     TerminalColor, TerminalCursor, TerminalFrame, TerminalFrameCache, TerminalLine,
@@ -21,7 +22,7 @@ use super::frame::{
 };
 use super::surface::TerminalSurface;
 use super::{input, metrics, wake};
-use crate::terminal::block_list::{BlockListPoint, BlockListState};
+use crate::terminal::block_list::{BlockListPoint, BlockListState, FrozenPoint};
 use crate::terminal::dirty::DirtyState;
 use crate::terminal::session::{HostEvent, InFlightBlock};
 use crate::terminal::surface::{
@@ -367,6 +368,7 @@ impl TerminalPane {
         let reports_mouse = self
             .surface
             .mouse_reporting_active_for(input::modifiers_state(event.modifiers));
+        let selection_type = selection_type_for_click_count(event.click_count);
         self.selection_drag_origin =
             (event.button == MouseButton::Left && !reports_mouse).then_some(event.position);
         if self.block_list_mode(cx) && !reports_mouse {
@@ -377,8 +379,13 @@ impl TerminalPane {
                     // The engine highlight is baked into the cached frame, so
                     // clearing the selection needs a frame rebuild too.
                     self.surface.clear_selection();
-                    self.frozen_selection = None;
-                    self.frozen_select_anchor = Some(pt);
+                    if selection_type == SelectionType::Simple {
+                        self.frozen_selection = None;
+                        self.frozen_select_anchor = Some(pt);
+                    } else {
+                        self.frozen_selection = self.expanded_frozen_selection(pt, selection_type);
+                        self.frozen_select_anchor = None;
+                    }
                     self.invalidate(cx);
                     cx.notify();
                     return;
@@ -393,6 +400,7 @@ impl TerminalPane {
             Some(event.button),
             SurfaceMouseEventKind::Down,
             event.modifiers,
+            selection_type,
             window,
             cx,
         );
@@ -492,6 +500,7 @@ impl TerminalPane {
             Some(event.button),
             SurfaceMouseEventKind::Up,
             event.modifiers,
+            SelectionType::Simple,
             window,
             cx,
         );
@@ -535,6 +544,7 @@ impl TerminalPane {
             event.pressed_button,
             SurfaceMouseEventKind::Move,
             event.modifiers,
+            SelectionType::Simple,
             window,
             cx,
         );
@@ -578,6 +588,7 @@ impl TerminalPane {
         button: Option<MouseButton>,
         kind: SurfaceMouseEventKind,
         modifiers: gpui::Modifiers,
+        selection_type: SelectionType,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -600,7 +611,10 @@ impl TerminalPane {
                     col: point.col.min(u16::MAX as u32) as u16,
                 },
             };
-            if self.surface.apply_screen_selection(cell, side, kind) {
+            if self
+                .surface
+                .apply_screen_selection(cell, side, kind, selection_type)
+            {
                 self.invalidate(cx);
             }
             return;
@@ -619,6 +633,7 @@ impl TerminalPane {
             button.and_then(surface_mouse_button),
             kind,
             modifiers,
+            selection_type,
         );
         if handled {
             self.invalidate(cx);
@@ -986,6 +1001,35 @@ impl TerminalPane {
                 .and_then(|frame| live_frame_text(&frame));
         }
         None
+    }
+
+    fn expanded_frozen_selection(
+        &self,
+        point: FrozenPoint,
+        selection_type: SelectionType,
+    ) -> Option<(FrozenPoint, FrozenPoint)> {
+        // The PTY path acquires engine before store, so release the store
+        // guard before asking the surface to inspect the engine-owned block.
+        let handle = {
+            let store = self.surface.block_store();
+            let store = store.lock();
+            store.items().get(point.item)?.handle()?
+        };
+        let ((start_line, start_col), (end_line, end_col)) =
+            self.surface
+                .frozen_selection_range(handle, point.line, point.col, selection_type)?;
+        Some((
+            FrozenPoint {
+                item: point.item,
+                line: start_line,
+                col: start_col,
+            },
+            FrozenPoint {
+                item: point.item,
+                line: end_line,
+                col: end_col,
+            },
+        ))
     }
 
     /// Resolve a frozen selection to plain text: the per-block ranges are
@@ -1488,6 +1532,14 @@ fn selection_drag_started(origin: Point<Pixels>, position: Point<Pixels>, cell_w
     let dx = position.x.as_f32() - origin.x.as_f32();
     let dy = position.y.as_f32() - origin.y.as_f32();
     dx * dx + dy * dy >= cell_width * cell_width / 16.0
+}
+
+fn selection_type_for_click_count(click_count: usize) -> SelectionType {
+    match click_count {
+        2 => SelectionType::Semantic,
+        3.. => SelectionType::Lines,
+        _ => SelectionType::Simple,
+    }
 }
 
 fn scrollbar_element(
@@ -2786,10 +2838,12 @@ mod tests {
     use nmt_terminal::event::BlockEvent;
     use nmt_terminal::ghostty::BlockHandle;
     use nmt_terminal::render_buffer::RenderBuffer;
+    use nmt_terminal::selection::SelectionType;
 
     use super::{
         cursor_bounds, metrics, scrollbar_offset_for_thumb, scrollbar_thumb_geometry,
-        selection_drag_started, terminal_cell_at_position, terminal_scroll_lines,
+        selection_drag_started, selection_type_for_click_count, terminal_cell_at_position,
+        terminal_scroll_lines,
     };
     use crate::terminal::frame::TerminalCursor;
     use crate::terminal::surface::{SurfaceCell, SurfaceCellSide};
@@ -2800,6 +2854,14 @@ mod tests {
             handle: BlockHandle { id, generation: 1 },
             rows,
         }
+    }
+
+    #[test]
+    fn repeated_clicks_choose_terminal_selection_modes() {
+        assert_eq!(selection_type_for_click_count(1), SelectionType::Simple);
+        assert_eq!(selection_type_for_click_count(2), SelectionType::Semantic);
+        assert_eq!(selection_type_for_click_count(3), SelectionType::Lines);
+        assert_eq!(selection_type_for_click_count(4), SelectionType::Lines);
     }
 
     #[test]
