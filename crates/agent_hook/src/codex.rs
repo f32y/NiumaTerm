@@ -10,7 +10,10 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use crate::{AGENT_HOOK_EXE_ENV, AgentEvent, AgentEventInput, AgentEventKind, HookInstallStatus};
+use crate::{
+    AGENT_HOOK_EXE_ENV, AgentEvent, AgentEventInput, AgentEventKind, HookInstallStatus,
+    build_windows_hook_command, hook_command_contains,
+};
 
 /// Every Codex event that contributes to the pane lifecycle.
 pub const HOOK_EVENTS: [&str; 6] = [
@@ -88,7 +91,7 @@ pub fn hooks_path() -> Option<PathBuf> {
 }
 
 pub fn install_hooks(hooks_path: &Path) -> io::Result<()> {
-    let command = current_hook_command()?;
+    let command = hook_command()?;
     install_hooks_with_command(hooks_path, &command)
 }
 
@@ -108,19 +111,30 @@ pub fn uninstall_hooks(hooks_path: &Path) -> io::Result<()> {
 }
 
 pub fn hooks_status(hooks_path: &Path) -> HookInstallStatus {
-    read_hooks(hooks_path).map_or(HookInstallStatus::NotInstalled, |settings| {
-        status_of(&settings)
-    })
+    let Ok(settings) = read_hooks(hooks_path) else {
+        return HookInstallStatus::NotInstalled;
+    };
+    match hook_command() {
+        Ok(command) => status_of(&settings, &command),
+        Err(_)
+            if HOOK_EVENTS
+                .iter()
+                .flat_map(|event| event_commands(&settings, event))
+                .any(is_marked) =>
+        {
+            HookInstallStatus::Stale
+        }
+        Err(_) => HookInstallStatus::NotInstalled,
+    }
 }
 
-fn current_hook_command() -> io::Result<String> {
+/// The exact command written to Codex and used when checking whether an
+/// existing registration still matches this NiumaTerm installation.
+pub fn hook_command() -> io::Result<String> {
     let executable = crate::agent_process()
         .hook_executable()
         .ok_or_else(|| invalid("NiumaTerm Hook executable path is unavailable"))?;
-    if executable.contains('"') {
-        return Err(invalid("NiumaTerm Hook executable path contains a quote"));
-    }
-    Ok(format!(r#""{executable}" codex"#))
+    build_windows_hook_command(executable, "codex")
 }
 
 /// Re-registering is idempotent: prior NiumaTerm entries are removed before
@@ -175,7 +189,7 @@ fn uninstall_from(settings: &mut Value) {
     }
 }
 
-fn status_of(settings: &Value) -> HookInstallStatus {
+fn status_of(settings: &Value, command: &str) -> HookInstallStatus {
     let marked: Vec<_> = HOOK_EVENTS
         .iter()
         .flat_map(|event| event_commands(settings, event))
@@ -183,9 +197,10 @@ fn status_of(settings: &Value) -> HookInstallStatus {
         .collect();
     if marked.is_empty() {
         HookInstallStatus::NotInstalled
-    } else if HOOK_EVENTS
-        .iter()
-        .all(|event| event_commands(settings, event).any(is_marked))
+    } else if marked.iter().all(|value| *value == command)
+        && HOOK_EVENTS
+            .iter()
+            .all(|event| event_commands(settings, event).any(|value| value == command))
     {
         HookInstallStatus::Installed
     } else {
@@ -211,7 +226,9 @@ fn is_niuma_hook(hook: &Value) -> bool {
 }
 
 fn is_marked(command: &str) -> bool {
-    HOOK_MARKERS.iter().any(|marker| command.contains(marker))
+    HOOK_MARKERS
+        .iter()
+        .any(|marker| hook_command_contains(command, marker))
 }
 
 fn read_hooks(hooks_path: &Path) -> io::Result<Value> {
@@ -311,8 +328,8 @@ mod tests {
         assert!(!event.body.contains('\0'));
     }
 
-    const CURRENT_COMMAND: &str = r#""C:\Program Files\NiumaTerm\NiumaTermHook.exe" codex"#;
-    const LEGACY_COMMAND: &str = r#"C:\Workspace\NiumaTerm\target\debug\NiumaTermHook.exe codex"#;
+    const CURRENT_COMMAND: &str = r"C:\Soft\NiumaTerm\NiumaTermHook.exe codex";
+    const LEGACY_COMMAND: &str = r#""C:\Program Files\NiumaTerm\NiumaTermHook.exe" codex"#;
 
     fn user_hooks() -> Value {
         json!({
@@ -336,7 +353,10 @@ mod tests {
         let mut settings = user_hooks();
         install_into(&mut settings, CURRENT_COMMAND).unwrap();
 
-        assert_eq!(status_of(&settings), HookInstallStatus::Installed);
+        assert_eq!(
+            status_of(&settings, CURRENT_COMMAND),
+            HookInstallStatus::Installed
+        );
         assert_eq!(settings["metadata"]["preserved"], true);
         assert!(event_commands(&settings, "PreToolUse").any(|command| command == "rtk hook codex"));
         for event in HOOK_EVENTS {
@@ -348,12 +368,18 @@ mod tests {
     fn reinstall_migrates_legacy_entries_without_duplicates() {
         let mut settings = json!({});
         install_into(&mut settings, LEGACY_COMMAND).unwrap();
-        assert_eq!(status_of(&settings), HookInstallStatus::Installed);
+        assert_eq!(
+            status_of(&settings, LEGACY_COMMAND),
+            HookInstallStatus::Installed
+        );
 
         install_into(&mut settings, CURRENT_COMMAND).unwrap();
         install_into(&mut settings, CURRENT_COMMAND).unwrap();
 
-        assert_eq!(status_of(&settings), HookInstallStatus::Installed);
+        assert_eq!(
+            status_of(&settings, CURRENT_COMMAND),
+            HookInstallStatus::Installed
+        );
         for event in HOOK_EVENTS {
             assert_eq!(
                 event_commands(&settings, event)
@@ -372,7 +398,10 @@ mod tests {
         install_into(&mut settings, CURRENT_COMMAND).unwrap();
         uninstall_from(&mut settings);
 
-        assert_eq!(status_of(&settings), HookInstallStatus::NotInstalled);
+        assert_eq!(
+            status_of(&settings, CURRENT_COMMAND),
+            HookInstallStatus::NotInstalled
+        );
         assert_eq!(settings, original);
     }
 
@@ -384,7 +413,10 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("PermissionRequest");
-        assert_eq!(status_of(&settings), HookInstallStatus::Stale);
+        assert_eq!(
+            status_of(&settings, CURRENT_COMMAND),
+            HookInstallStatus::Stale
+        );
     }
 
     #[test]
@@ -395,9 +427,15 @@ mod tests {
         std::fs::write(&path, serde_json::to_string(&user_hooks()).unwrap()).unwrap();
 
         install_hooks_with_command(&path, CURRENT_COMMAND).unwrap();
-        assert_eq!(hooks_status(&path), HookInstallStatus::Installed);
+        assert_eq!(
+            status_of(&read_hooks(&path).unwrap(), CURRENT_COMMAND),
+            HookInstallStatus::Installed
+        );
         uninstall_hooks(&path).unwrap();
-        assert_eq!(hooks_status(&path), HookInstallStatus::NotInstalled);
+        assert_eq!(
+            status_of(&read_hooks(&path).unwrap(), CURRENT_COMMAND),
+            HookInstallStatus::NotInstalled
+        );
         assert_eq!(read_hooks(&path).unwrap(), user_hooks());
 
         let wrong_shape = r#"{"hooks":{"Stop":{}}}"#;
@@ -413,7 +451,7 @@ mod tests {
     }
 
     #[test]
-    fn hooks_json_with_complete_niuma_registration_is_installed() {
+    fn complete_registration_with_an_old_command_is_stale() {
         let dir = std::env::temp_dir().join(format!("nmt-codex-hooks-json-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("hooks.json");
@@ -432,7 +470,10 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(hooks_status(&path), HookInstallStatus::Installed);
+        assert_eq!(
+            status_of(&read_hooks(&path).unwrap(), CURRENT_COMMAND),
+            HookInstallStatus::Stale
+        );
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

@@ -12,7 +12,10 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use crate::{AGENT_HOOK_EXE_ENV, AgentEvent, AgentEventInput, AgentEventKind, HookInstallStatus};
+use crate::{
+    AGENT_HOOK_EXE_ENV, AgentEvent, AgentEventInput, AgentEventKind, HookInstallStatus,
+    hook_command_contains,
+};
 
 /// Every hook event the adapter normalizes. Keep in sync with the `normalize`
 /// match below.
@@ -211,7 +214,9 @@ fn is_niuma_hook(hook: &Value) -> bool {
 }
 
 fn is_marked(command: &str) -> bool {
-    HOOK_MARKERS.iter().any(|marker| command.contains(marker))
+    HOOK_MARKERS
+        .iter()
+        .any(|marker| hook_command_contains(command, marker))
 }
 
 /// A missing or empty file reads as an empty object; anything unparseable is
