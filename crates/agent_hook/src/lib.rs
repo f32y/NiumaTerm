@@ -4,10 +4,12 @@ pub mod claude_code;
 pub mod codex;
 
 use std::collections::HashMap;
+use std::io;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
 pub const AGENT_HOOK_PROTOCOL_VERSION: u32 = 1;
@@ -219,6 +221,91 @@ pub enum HookInstallStatus {
     /// migrates them.
     Stale,
     NotInstalled,
+}
+
+/// Build a Windows hook command that remains valid when an agent executes it
+/// through either cmd.exe or PowerShell.
+pub fn build_windows_hook_command(executable: &str, argument: &str) -> io::Result<String> {
+    let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+    build_windows_hook_command_for(executable, argument, &system_root)
+}
+
+fn build_windows_hook_command_for(
+    executable: &str,
+    argument: &str,
+    system_root: &str,
+) -> io::Result<String> {
+    if executable.is_empty() || executable.contains(['\0', '\r', '\n']) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "hook executable path is invalid",
+        ));
+    }
+    if argument.is_empty()
+        || !argument
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "hook argument is not shell-safe",
+        ));
+    }
+
+    // A bare path containing only cmd/PowerShell-safe characters starts
+    // without another interpreter and avoids per-event PowerShell startup.
+    if executable.bytes().all(|byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b':' | b'\\' | b'~' | b'-')
+    }) {
+        return Ok(format!("{executable} {argument}"));
+    }
+
+    // Spaces and cmd metacharacters such as `%` and `^` cannot be made safe by
+    // quoting alone. Encoding the PowerShell invocation keeps the executable
+    // path out of the outer agent shell's parser.
+    let quoted = executable.replace('\'', "''");
+    let script = format!("& '{quoted}' {argument}; exit $LASTEXITCODE");
+    let encoded = base64::engine::general_purpose::STANDARD.encode(
+        script
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>(),
+    );
+    let powershell = format!(
+        "{}/System32/WindowsPowerShell/v1.0/powershell.exe",
+        system_root.trim_end_matches(['\\', '/']).replace('\\', "/")
+    );
+    Ok(format!(
+        "{powershell} -NoProfile -ExecutionPolicy Bypass -EncodedCommand {encoded}"
+    ))
+}
+
+/// Match a marker in either a plain hook command or the decoded payload of a
+/// PowerShell `-EncodedCommand` launcher.
+pub fn hook_command_contains(command: &str, marker: &str) -> bool {
+    command.contains(marker)
+        || decode_powershell_command(command).is_some_and(|decoded| decoded.contains(marker))
+}
+
+fn decode_powershell_command(command: &str) -> Option<String> {
+    let mut parts = command.split_whitespace();
+    let encoded = loop {
+        if parts.next()?.eq_ignore_ascii_case("-EncodedCommand") {
+            break parts.next()?;
+        }
+    };
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .ok()?;
+    let mut chunks = bytes.chunks_exact(2);
+    let units = chunks
+        .by_ref()
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+        .collect::<Vec<_>>();
+    if !chunks.remainder().is_empty() {
+        return None;
+    }
+    String::from_utf16(&units).ok()
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -924,6 +1011,76 @@ mod tests {
             process.environment_for(&first)[4],
             (AGENT_TESTING_ENV.into(), "1".into())
         );
+    }
+
+    #[test]
+    fn windows_hook_command_uses_bare_safe_path() {
+        assert_eq!(
+            build_windows_hook_command_for(
+                r"C:\Soft\NiumaTerm\NiumaTermHook.exe",
+                "codex",
+                r"C:\Windows",
+            )
+            .unwrap(),
+            r"C:\Soft\NiumaTerm\NiumaTermHook.exe codex"
+        );
+        assert!(
+            build_windows_hook_command_for(r"C:\Hook.exe", "codex & whoami", r"C:\Windows")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn windows_hook_command_encodes_unsafe_path() {
+        let executable = r"C:\Program Files\Niuma'Term\%HOOK%^\NiumaTermHook.exe";
+        let command = build_windows_hook_command_for(executable, "codex", r"D:\Windows").unwrap();
+        assert!(command.starts_with(
+            "D:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile \
+             -ExecutionPolicy Bypass -EncodedCommand "
+        ));
+        assert!(!command.contains(executable));
+        assert!(hook_command_contains(&command, "NiumaTermHook.exe"));
+
+        let encoded = command.rsplit_once(' ').unwrap().1;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap();
+        let units = bytes
+            .chunks_exact(2)
+            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            String::from_utf16(&units).unwrap(),
+            r"& 'C:\Program Files\Niuma''Term\%HOOK%^\NiumaTermHook.exe' codex; exit $LASTEXITCODE"
+        );
+
+        #[cfg(windows)]
+        {
+            let dir =
+                std::env::temp_dir().join(format!("nmt hook path % ^ {}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let script = dir.join("hook.cmd");
+            std::fs::write(&script, "@echo hook-ran\r\n@exit /b 0\r\n").unwrap();
+            let command = build_windows_hook_command(script.to_str().unwrap(), "codex").unwrap();
+            for (shell, args) in [
+                ("powershell.exe", vec!["-NoProfile", "-Command", &command]),
+                ("cmd.exe", vec!["/d", "/c", &command]),
+            ] {
+                let output = std::process::Command::new(shell)
+                    .args(args)
+                    .output()
+                    .unwrap();
+                assert_eq!(
+                    output.status.code(),
+                    Some(0),
+                    "{shell}: stdout={}, stderr={}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert!(String::from_utf8_lossy(&output.stdout).contains("hook-ran"));
+            }
+            std::fs::remove_dir_all(dir).unwrap();
+        }
     }
 
     fn event(

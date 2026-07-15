@@ -9,6 +9,7 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+base64.workspace = true
 getrandom.workspace = true
 serde.workspace = true
 serde_json.workspace = true
