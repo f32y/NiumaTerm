@@ -223,7 +223,11 @@ impl RenderOnce for Checkbox {
             self.base
                 .id(self.id.clone())
                 .role(Role::CheckBox)
-                .aria_toggled(if checked { Toggled::True } else { Toggled::False })
+                .aria_toggled(if checked {
+                    Toggled::True
+                } else {
+                    Toggled::False
+                })
                 .when_some(
                     self.label.as_ref().map(|l| l.get_text(cx)),
                     |this, label| this.aria_label(label),
