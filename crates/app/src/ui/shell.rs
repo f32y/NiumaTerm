@@ -19,7 +19,7 @@ use crate::cli::CliAction;
 use crate::pane_tree::{PaneId, PaneNode, PaneTree, RemoveOutcome, SplitDirection, SplitOutcome};
 use crate::tabs::{TabId, TabManager};
 use crate::terminal::session::HostEvent;
-use crate::terminal::view::TerminalPane;
+use crate::terminal::view::{AgentInterrupted, TerminalPane};
 use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::git_status::{GitStatusModel, GitStatusView};
 use crate::ui::settings::{AppSettings, settings_view};
@@ -623,6 +623,18 @@ impl Shell {
     pub(crate) fn watch_pane(pane: &Entity<TerminalPane>, cx: &mut Context<Self>) {
         cx.observe(pane, |this, pane, cx| this.pump_pane(pane, cx))
             .detach();
+        cx.subscribe(pane, |this, pane, _: &AgentInterrupted, cx| {
+            let route = pane.read(cx).agent_route().clone();
+            let mutation = this
+                .agent_monitor
+                .interrupt(&route, std::time::Instant::now());
+            Self::remove_native_notifications(&mutation.removed_notifications);
+            if mutation.visible_changed {
+                cx.notify();
+            }
+            this.reschedule_agent_timer(cx);
+        })
+        .detach();
     }
 
     /// The id of the tab whose pane tree contains `pane_id`, searched across
