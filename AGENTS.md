@@ -2,6 +2,13 @@
 
 Repo-level guidance for AI coding agents working in this repository.
 
+## Testing application launches
+
+Always pass `--testing` when launching NiumaTerm for manual or automated
+validation, for example `target\debug\NiumaTerm.exe --testing`. Without this
+flag, the launch may reuse the currently running terminal process instead of
+starting an isolated test instance.
+
 ## Code comments
 
 Write comments as self-contained explanations of the technical choice: state the
