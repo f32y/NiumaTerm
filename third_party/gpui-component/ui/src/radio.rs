@@ -170,9 +170,7 @@ impl RenderOnce for Radio {
                 .when_some(self.position_in_set, |this, pos| {
                     this.aria_position_in_set(pos)
                 })
-                .when_some(self.size_of_set, |this, size| {
-                    this.aria_size_of_set(size)
-                })
+                .when_some(self.size_of_set, |this, size| this.aria_size_of_set(size))
                 .when(!self.disabled, |this| {
                     this.track_focus(
                         &focus_handle

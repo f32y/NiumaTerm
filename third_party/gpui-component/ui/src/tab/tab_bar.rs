@@ -498,7 +498,9 @@ impl RenderOnce for TabBar {
                                         this.selected(selected_ix == ix)
                                     })
                                     .when_some(self.on_click.clone(), move |this, on_click| {
-                                        this.on_click(move |_, window, cx| on_click(&ix, window, cx))
+                                        this.on_click(move |_, window, cx| {
+                                            on_click(&ix, window, cx)
+                                        })
                                     });
 
                                 if let Some(ref rc) = bounds_rc {

@@ -1,9 +1,9 @@
 // From:
 // https://github.com/zed-industries/zed/blob/56daba28d40301ee4c05546fadb691d070b7b2b6/crates/gpui/examples/window_shadow.rs
 use gpui::{
-    AnyElement, App, CursorStyle, Decorations, Edges, Hsla, InteractiveElement as _,
-    IntoElement, MouseButton, ParentElement, Pixels, Point, RenderOnce, ResizeEdge, Size,
-    Styled as _, Tiling, Window, div, point, prelude::FluentBuilder as _, px,
+    AnyElement, App, CursorStyle, Decorations, Edges, Hsla, InteractiveElement as _, IntoElement,
+    MouseButton, ParentElement, Pixels, Point, RenderOnce, ResizeEdge, Size, Styled as _, Tiling,
+    Window, div, point, prelude::FluentBuilder as _, px,
 };
 
 use crate::ActiveTheme;
@@ -197,25 +197,17 @@ impl RenderOnce for WindowBorder {
                     .bg(gpui::transparent_black())
                     .children(self.children),
             )
-            .when(
-                matches!(decorations, Decorations::Client { .. }),
-                |this| {
-                    let Decorations::Client { tiling, .. } = decorations else {
-                        return this;
-                    };
-                    this.child(
-                        div()
-                            .absolute()
-                            .size_full()
-                            .children(resize_hit_zones(
-                                window_size,
-                                platform_inset,
-                                resize_hit_size,
-                                &tiling,
-                            )),
-                    )
-                },
-            )
+            .when(matches!(decorations, Decorations::Client { .. }), |this| {
+                let Decorations::Client { tiling, .. } = decorations else {
+                    return this;
+                };
+                this.child(div().absolute().size_full().children(resize_hit_zones(
+                    window_size,
+                    platform_inset,
+                    resize_hit_size,
+                    &tiling,
+                )))
+            })
     }
 }
 
