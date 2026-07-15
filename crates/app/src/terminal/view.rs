@@ -1211,7 +1211,7 @@ impl EntityInputHandler for TerminalPane {
         ))
     }
 
-    // No editable document and no preedit: the remaining methods are inert.
+    // No editable document and no preedit: text and marked-text methods are inert.
     fn text_for_range(
         &mut self,
         _range: Range<usize>,
@@ -1228,7 +1228,12 @@ impl EntityInputHandler for TerminalPane {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
-        None
+        // GPUI's Windows IME path queries bounds only after obtaining a
+        // selection; an empty virtual caret keeps commit-only input eligible.
+        Some(UTF16Selection {
+            range: 0..0,
+            reversed: false,
+        })
     }
 
     fn marked_text_range(
