@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use nmt_config::local_state::TabState;
 use nmt_input::keyboard::ModifiersState;
 use nmt_terminal::render_buffer::RenderBuffer;
-use nmt_terminal::selection::{Selection, SelectionRange, SelectionType};
+use nmt_terminal::selection::{Selection, SelectionRange, SelectionType, WORD_DELIMITERS};
 use nmt_terminal::terminal::Mode;
 use nmt_terminal::terminal::pos::{Column, Line, Pos, Side};
 use parking_lot::Mutex;
@@ -327,6 +327,7 @@ impl TerminalSurface {
         button: Option<SurfaceMouseButton>,
         kind: SurfaceMouseEventKind,
         modifiers: ModifiersState,
+        selection_type: SelectionType,
     ) -> bool {
         if let Some(mode) = self.app_mouse_mode(modifiers) {
             return match kind {
@@ -358,7 +359,7 @@ impl TerminalSurface {
             return false;
         }
         let pos = Pos::new(Line(cell.row as i32), Column(cell.col as usize));
-        self.apply_selection_at(self.screen_pos(pos), side, kind)
+        self.apply_selection_at(self.screen_pos(pos), side, kind, selection_type)
     }
 
     /// Apply a selection gesture to an absolute SCREEN cell. The block-list
@@ -369,11 +370,30 @@ impl TerminalSurface {
         cell: SurfaceScreenCell,
         side: SurfaceCellSide,
         kind: SurfaceMouseEventKind,
+        selection_type: SelectionType,
     ) -> bool {
         let Ok(row) = i32::try_from(cell.row) else {
             return false;
         };
-        self.apply_selection_at(Pos::new(Line(row), Column(cell.col as usize)), side, kind)
+        self.apply_selection_at(
+            Pos::new(Line(row), Column(cell.col as usize)),
+            side,
+            kind,
+            selection_type,
+        )
+    }
+
+    pub(crate) fn frozen_selection_range(
+        &self,
+        handle: nmt_terminal::ghostty::BlockHandle,
+        line: usize,
+        col: u32,
+        selection_type: SelectionType,
+    ) -> Option<((usize, u32), (usize, u32))> {
+        let engine = self.session.engine.lock();
+        let palette = engine.color_palette();
+        let block = engine.block_acquire(handle)?;
+        block_selection_range(&block, &palette, line, col, selection_type)
     }
 
     pub(crate) fn apply_scroll(
@@ -503,7 +523,7 @@ impl TerminalSurface {
         let guard = self.selection.lock();
         let sel = guard.as_ref()?;
         let buf = self.session.render_buffer.lock();
-        sel.to_range_engine(&buf, viewport_top, "")
+        sel.to_range_engine(&buf, viewport_top, WORD_DELIMITERS)
     }
 
     /// SCREEN row of the top visible row (0 when the viewport is empty).
@@ -554,23 +574,24 @@ impl TerminalSurface {
         pos: Pos,
         side: SurfaceCellSide,
         kind: SurfaceMouseEventKind,
+        selection_type: SelectionType,
     ) -> bool {
         let side = match side {
             SurfaceCellSide::Left => Side::Left,
             SurfaceCellSide::Right => Side::Right,
         };
         match kind {
-            SurfaceMouseEventKind::Down => self.begin_selection(pos, side),
+            SurfaceMouseEventKind::Down => self.begin_selection(pos, side, selection_type),
             SurfaceMouseEventKind::Move => self.update_selection(pos, side),
             SurfaceMouseEventKind::Up => self.finish_selection(),
         }
     }
 
-    fn begin_selection(&self, pos: Pos, side: Side) -> bool {
+    fn begin_selection(&self, pos: Pos, side: Side, selection_type: SelectionType) -> bool {
         let mut guard = self.selection.lock();
         let had_selection = guard.is_some();
-        *guard = Some(Selection::new(SelectionType::Simple, pos, side));
-        had_selection
+        *guard = Some(Selection::new(selection_type, pos, side));
+        had_selection || selection_type != SelectionType::Simple
     }
 
     fn update_selection(&self, pos: Pos, side: Side) -> bool {
@@ -676,6 +697,90 @@ impl TerminalSurface {
     }
 }
 
+fn block_selection_range(
+    block: &nmt_terminal::ghostty::BlockRef,
+    palette: &nmt_terminal::ghostty::Palette,
+    line: usize,
+    col: u32,
+    selection_type: SelectionType,
+) -> Option<((usize, u32), (usize, u32))> {
+    let cols = usize::from(block.cols());
+    if cols == 0 || line >= block.row_count() {
+        return None;
+    }
+
+    let wrapped = |row| {
+        block
+            .read_row_visit(row, palette, |_, _, _, _| {})
+            .ok()
+            .flatten()
+            .map(|meta| meta.wrapped)
+    };
+    let mut first = line;
+    while first > 0 && wrapped(first - 1)? {
+        first -= 1;
+    }
+    let mut last = line;
+    while last + 1 < block.row_count() && wrapped(last)? {
+        last += 1;
+    }
+
+    if selection_type == SelectionType::Lines {
+        return Some(((first, 0), (last, cols.saturating_sub(1) as u32)));
+    }
+    if selection_type != SelectionType::Semantic {
+        let col = col.min(cols.saturating_sub(1) as u32);
+        return Some(((line, col), (line, col)));
+    }
+
+    // Class 0 = whitespace, 1 = punctuation delimiter, 2 = word content.
+    // Expanding one class matches terminal double-click behavior for words,
+    // delimiter runs, and blank runs while retaining cell-accurate wide text.
+    let mut classes = vec![0u8; (last - first + 1) * cols];
+    for row in first..=last {
+        let offset = (row - first) * cols;
+        block
+            .read_row_visit(row, palette, |x, text, wide, _| {
+                use nmt_terminal::ghostty::CellWide;
+                if matches!(wide, CellWide::SpacerHead | CellWide::SpacerTail) {
+                    return;
+                }
+                let ch = text.as_str().chars().next().unwrap_or(' ');
+                let class = if ch.is_whitespace() {
+                    0
+                } else if WORD_DELIMITERS.contains(ch) {
+                    1
+                } else {
+                    2
+                };
+                let x = usize::from(x);
+                if x < cols {
+                    classes[offset + x] = class;
+                    if wide == CellWide::Wide && x + 1 < cols {
+                        classes[offset + x + 1] = class;
+                    }
+                }
+            })
+            .ok()
+            .flatten()?;
+    }
+
+    let clicked = (line - first) * cols + (col as usize).min(cols - 1);
+    let class = classes[clicked];
+    let mut start = clicked;
+    while start > 0 && classes[start - 1] == class {
+        start -= 1;
+    }
+    let mut end = clicked;
+    while end + 1 < classes.len() && classes[end + 1] == class {
+        end += 1;
+    }
+    Some((
+        (first + start / cols, (start % cols) as u32),
+        (first + end / cols, (end % cols) as u32),
+    ))
+}
+
 fn tab_state_with_cwd(launch: &TabState, last_cwd: Option<String>) -> TabState {
     let mut state = launch.clone();
     if last_cwd.is_some() {
@@ -743,10 +848,12 @@ fn should_scroll_to_bottom_before_input(offset: u64, total: u64, len: u64) -> bo
 #[cfg(test)]
 mod tests {
     use nmt_input::keyboard::ModifiersState;
+    use nmt_terminal::ghostty::GhosttyTerminal;
+    use nmt_terminal::selection::SelectionType;
 
     use super::{
-        SurfaceMouseButton, TerminalSurface, mouse_button_code, mouse_report_mods, paste_payload,
-        should_scroll_to_bottom_before_input, tab_state_with_cwd,
+        SurfaceMouseButton, TerminalSurface, block_selection_range, mouse_button_code,
+        mouse_report_mods, paste_payload, should_scroll_to_bottom_before_input, tab_state_with_cwd,
     };
     use crate::terminal::session::TerminalSessionConfig;
 
@@ -762,6 +869,28 @@ mod tests {
             .expect("bad shell must fail");
 
         assert!(err.contains("PtySpawn"));
+    }
+
+    #[test]
+    fn frozen_click_selection_expands_words_and_wrapped_lines() {
+        let mut terminal = GhosttyTerminal::new(8, 4, 100).unwrap();
+        terminal.write_vt(b"foo bar\r\nabcdefghijk");
+        let handle = terminal.finish_block().unwrap().expect("block created");
+        let block = terminal.block_acquire(handle).expect("block acquired");
+        let palette = terminal.color_palette();
+
+        assert_eq!(
+            block_selection_range(&block, &palette, 0, 5, SelectionType::Semantic),
+            Some(((0, 4), (0, 6)))
+        );
+        assert_eq!(
+            block_selection_range(&block, &palette, 2, 1, SelectionType::Semantic),
+            Some(((1, 0), (2, 2)))
+        );
+        assert_eq!(
+            block_selection_range(&block, &palette, 2, 1, SelectionType::Lines),
+            Some(((1, 0), (2, 7)))
+        );
     }
 
     #[test]
