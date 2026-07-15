@@ -486,6 +486,7 @@ pub struct AgentNotification {
     pub native_tag: String,
     pub native_group: String,
     pub native_requested: bool,
+    native_after: Option<Instant>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -548,10 +549,16 @@ impl AgentMonitor {
         self.notifications.get(route)
     }
 
-    pub fn pending_native_notifications(&self) -> Vec<AgentNotification> {
+    pub fn pending_native_notifications(&self, now: Instant) -> Vec<AgentNotification> {
         self.notifications
             .values()
-            .filter(|notification| !notification.read && !notification.native_requested)
+            .filter(|notification| {
+                !notification.read
+                    && !notification.native_requested
+                    && notification
+                        .native_after
+                        .is_none_or(|deadline| deadline <= now)
+            })
             .cloned()
             .collect()
     }
@@ -610,13 +617,18 @@ impl AgentMonitor {
                 if state.current_owner.as_ref() != Some(&owner) {
                     return MonitorMutation::default();
                 }
+                let codex_permission_resolved =
+                    owner.agent == "codex" && state.status == AgentRuntimeStatus::NeedsInput;
                 state.has_work_evidence = true;
                 state.pending_completion = None;
                 let visible_changed = state.set_status(AgentRuntimeStatus::Running, now);
-                MonitorMutation {
-                    visible_changed,
-                    ..MonitorMutation::default()
-                }
+                let mut mutation = if codex_permission_resolved {
+                    self.remove_notification(&route)
+                } else {
+                    MonitorMutation::default()
+                };
+                mutation.visible_changed |= visible_changed;
+                mutation
             }
             AgentEventKind::PermissionRequested => {
                 let Some(owner) = event.owner() else {
@@ -628,7 +640,16 @@ impl AgentMonitor {
                 }
                 state.pending_completion = None;
                 let status_changed = state.set_status(AgentRuntimeStatus::NeedsInput, now);
-                let mut mutation = self.create_notification(&route, event.title, event.body);
+                // Codex emits PermissionRequest before an automatic reviewer
+                // settles, but its hook payload carries no final approval result.
+                // Delay native delivery so same-turn tool progress can cancel
+                // transient checks while unresolved requests still surface.
+                let mut mutation = self.create_notification(
+                    &route,
+                    event.title,
+                    event.body,
+                    (event.agent == "codex").then_some(now + COMPLETION_QUIET_WINDOW),
+                );
                 mutation.visible_changed |= status_changed;
                 mutation
             }
@@ -682,7 +703,7 @@ impl AgentMonitor {
                     state.has_work_evidence = false;
                     let status_changed = state.set_status(AgentRuntimeStatus::Idle, now);
                     let mut mutation =
-                        self.create_notification(&route, pending.title, pending.body);
+                        self.create_notification(&route, pending.title, pending.body, None);
                     mutation.visible_changed |= status_changed;
                     result.merge(mutation);
                 }
@@ -708,7 +729,7 @@ impl AgentMonitor {
         if !self.panes.contains_key(route) {
             return MonitorMutation::default();
         }
-        self.create_notification(route, normalize_title(title), normalize_body(body))
+        self.create_notification(route, normalize_title(title), normalize_body(body), None)
     }
 
     pub fn interrupt(&mut self, route: &AgentRoute, now: Instant) -> MonitorMutation {
@@ -729,7 +750,8 @@ impl AgentMonitor {
     }
 
     pub fn next_deadline(&self) -> Option<Instant> {
-        self.panes
+        let pane_deadline = self
+            .panes
             .values()
             .flat_map(|state| {
                 let completion = state.pending_completion.as_ref().map(|p| p.deadline);
@@ -740,7 +762,14 @@ impl AgentMonitor {
                 .then_some(state.updated_at + ACTIVE_STATE_STALE_AFTER);
                 completion.into_iter().chain(stale)
             })
-            .min()
+            .min();
+        let native_deadline = self
+            .notifications
+            .values()
+            .filter(|notification| !notification.read && !notification.native_requested)
+            .filter_map(|notification| notification.native_after)
+            .min();
+        pane_deadline.into_iter().chain(native_deadline).min()
     }
 
     pub fn acknowledge(&mut self, route: &AgentRoute, notification_id: &str) -> MonitorMutation {
@@ -798,6 +827,7 @@ impl AgentMonitor {
         route: &AgentRoute,
         title: String,
         body: String,
+        native_after: Option<Instant>,
     ) -> MonitorMutation {
         let state = self.panes.get_mut(route).expect("live route");
         state.notification_generation = state.notification_generation.wrapping_add(1).max(1);
@@ -817,6 +847,7 @@ impl AgentMonitor {
             native_tag: format!("{process_order:016x}"),
             native_group: "NiumaTerm".into(),
             native_requested: false,
+            native_after,
         };
         let removed = self
             .notifications
@@ -1012,6 +1043,47 @@ mod tests {
     }
 
     #[test]
+    fn permission_notification_waits_and_auto_approval_cancels_it() {
+        let now = Instant::now();
+        let auto = route("auto");
+        let waiting = route("waiting");
+        let mut monitor = monitor(now, &[auto.clone(), waiting.clone()]);
+        for route in [&auto, &waiting] {
+            monitor.apply(
+                event(route, "s", Some("t"), AgentEventKind::PromptSubmitted),
+                now,
+            );
+            monitor.apply(
+                event(route, "s", Some("t"), AgentEventKind::PermissionRequested),
+                now,
+            );
+            assert!(monitor.notification(route).is_some());
+        }
+        assert!(monitor.pending_native_notifications(now).is_empty());
+
+        monitor.apply(
+            event(&auto, "s", Some("t"), AgentEventKind::ToolFinished),
+            now + Duration::from_millis(100),
+        );
+        monitor.process_due(now + COMPLETION_QUIET_WINDOW);
+
+        assert!(monitor.notification(&auto).is_none());
+        assert!(monitor.notification(&waiting).is_some());
+        assert_eq!(
+            monitor.pending_native_notifications(now + COMPLETION_QUIET_WINDOW),
+            vec![monitor.notification(&waiting).unwrap().clone()]
+        );
+        assert_eq!(
+            monitor.pane(&auto).unwrap().status,
+            AgentRuntimeStatus::Running
+        );
+        assert_eq!(
+            monitor.pane(&waiting).unwrap().status,
+            AgentRuntimeStatus::NeedsInput
+        );
+    }
+
+    #[test]
     fn nested_session_and_opaque_turn_events_cannot_steal_owner() {
         let now = Instant::now();
         let r = route("pane-1");
@@ -1164,9 +1236,18 @@ mod tests {
         assert_eq!(monitor.notification(&r).unwrap().native_tag.len(), 16);
         assert_eq!(monitor.notification(&r).unwrap().native_group, "NiumaTerm");
         assert_ne!(old, current);
-        assert_eq!(monitor.pending_native_notifications().len(), 1);
+        assert_eq!(
+            monitor
+                .pending_native_notifications(now + COMPLETION_QUIET_WINDOW)
+                .len(),
+            1
+        );
         assert!(monitor.mark_native_requested(&r, &current));
-        assert!(monitor.pending_native_notifications().is_empty());
+        assert!(
+            monitor
+                .pending_native_notifications(now + COMPLETION_QUIET_WINDOW)
+                .is_empty()
+        );
         assert!(!monitor.mark_native_requested(&r, &old));
         assert!(!monitor.acknowledge(&r, &old).visible_changed);
         assert!(monitor.acknowledge(&r, &current).visible_changed);
