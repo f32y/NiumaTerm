@@ -1,37 +1,36 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
-use std::cell::{Cell, RefCell};
-use std::num::NonZeroIsize;
-use std::path::PathBuf;
-use std::rc::{Rc, Weak};
-use std::str::FromStr;
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Once};
-use std::time::{Duration, Instant};
+use std::{
+    cell::{Cell, RefCell},
+    num::NonZeroIsize,
+    path::PathBuf,
+    rc::{Rc, Weak},
+    str::FromStr,
+    sync::{Arc, Once, atomic::AtomicBool},
+    time::{Duration, Instant},
+};
 
 use anyhow::{Context as _, Result};
 use futures::channel::oneshot::{self, Receiver};
-use gpui::*;
 use gpui_util::ResultExt;
 use raw_window_handle as rwh;
 use smallvec::SmallVec;
-use windows::Win32::Foundation::*;
-use windows::Win32::Graphics::Dwm::*;
-use windows::Win32::Graphics::Gdi::*;
-use windows::Win32::System::Com::*;
-use windows::Win32::System::Diagnostics::Debug::MessageBeep;
-use windows::Win32::System::LibraryLoader::*;
-use windows::Win32::System::Ole::*;
-use windows::Win32::System::SystemServices::*;
-use windows::Win32::UI::Controls::*;
-use windows::Win32::UI::HiDpi::*;
-use windows::Win32::UI::Input::KeyboardAndMouse::*;
-use windows::Win32::UI::Shell::*;
-use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::core::*;
+use windows::{
+    Win32::{
+        Foundation::*,
+        Graphics::Dwm::*,
+        Graphics::Gdi::*,
+        System::{
+            Com::*, Diagnostics::Debug::MessageBeep, LibraryLoader::*, Ole::*, SystemServices::*,
+        },
+        UI::{Controls::*, HiDpi::*, Input::KeyboardAndMouse::*, Shell::*, WindowsAndMessaging::*},
+    },
+    core::*,
+};
 
 use crate::direct_manipulation::DirectManipulationHandler;
 use crate::*;
+use gpui::*;
 
 pub(crate) struct WindowsWindow(pub Rc<WindowsWindowInner>);
 
@@ -1615,11 +1614,9 @@ fn set_non_rude_hwnd(hwnd: HWND, non_rude: bool) {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
-    use gpui::{DevicePixels, MouseButton, point};
-
     use super::ClickState;
+    use gpui::{DevicePixels, MouseButton, point};
+    use std::time::Duration;
 
     #[test]
     fn test_double_click_interval() {

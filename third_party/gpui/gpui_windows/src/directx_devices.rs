@@ -1,19 +1,23 @@
 use anyhow::{Context, Result};
 use gpui_util::ResultExt;
 use itertools::Itertools;
-use windows::Win32::Foundation::HMODULE;
-use windows::Win32::Graphics::Direct3D::{
-    D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL, D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_11_0,
-    D3D_FEATURE_LEVEL_11_1,
-};
-use windows::Win32::Graphics::Direct3D11::{
-    D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_DEBUG,
-    D3D11_FEATURE_D3D10_X_HARDWARE_OPTIONS, D3D11_FEATURE_DATA_D3D10_X_HARDWARE_OPTIONS,
-    D3D11_SDK_VERSION, D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext,
-};
-use windows::Win32::Graphics::Dxgi::{
-    CreateDXGIFactory2, DXGI_CREATE_FACTORY_DEBUG, DXGI_CREATE_FACTORY_FLAGS, IDXGIAdapter1,
-    IDXGIFactory6,
+use windows::Win32::{
+    Foundation::HMODULE,
+    Graphics::{
+        Direct3D::{
+            D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL, D3D_FEATURE_LEVEL_10_1,
+            D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
+        },
+        Direct3D11::{
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_DEBUG,
+            D3D11_FEATURE_D3D10_X_HARDWARE_OPTIONS, D3D11_FEATURE_DATA_D3D10_X_HARDWARE_OPTIONS,
+            D3D11_SDK_VERSION, D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext,
+        },
+        Dxgi::{
+            CreateDXGIFactory2, DXGI_CREATE_FACTORY_DEBUG, DXGI_CREATE_FACTORY_FLAGS,
+            IDXGIAdapter1, IDXGIFactory6,
+        },
+    },
 };
 use windows::core::Interface;
 

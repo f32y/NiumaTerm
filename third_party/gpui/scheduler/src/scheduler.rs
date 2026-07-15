@@ -4,20 +4,22 @@ mod test_scheduler;
 #[cfg(test)]
 mod tests;
 
-use std::any::Any;
-use std::future::Future;
-use std::panic::Location;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
-use std::thread;
-use std::time::Duration;
-
-use async_task::Runnable;
 pub use clock::*;
 pub use executor::*;
-use futures::channel::oneshot;
 pub use test_scheduler::*;
+
+use async_task::Runnable;
+use futures::channel::oneshot;
+use std::{
+    any::Any,
+    future::Future,
+    panic::Location,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+    thread,
+    time::Duration,
+};
 
 /// Task priority for background tasks.
 ///

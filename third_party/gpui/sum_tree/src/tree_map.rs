@@ -1,5 +1,4 @@
-use std::cmp::Ordering;
-use std::fmt::Debug;
+use std::{cmp::Ordering, fmt::Debug};
 
 use crate::{Bias, ContextLessSummary, Dimension, Edit, Item, KeyedItem, SeekTarget, SumTree};
 

@@ -5,10 +5,10 @@ use heck::ToSnakeCase as _;
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::quote;
-use syn::visit_mut::{self, VisitMut};
 use syn::{
     Attribute, Expr, FnArg, Ident, Item, ItemTrait, Lit, Meta, Path, ReturnType, TraitItem, Type,
     parse_macro_input, parse_quote,
+    visit_mut::{self, VisitMut},
 };
 
 pub fn derive_inspector_reflection(_args: TokenStream, input: TokenStream) -> TokenStream {

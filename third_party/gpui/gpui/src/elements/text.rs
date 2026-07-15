@@ -1,21 +1,21 @@
-use std::borrow::Cow;
-use std::cell::{Cell, RefCell};
-use std::mem;
-use std::ops::{Deref, DerefMut, Range};
-use std::rc::Rc;
-use std::sync::Arc;
-
-use anyhow::Context as _;
-use gpui_util::ResultExt;
-use itertools::Itertools;
-use smallvec::SmallVec;
-
 use crate::{
     ActiveTooltip, AnyView, App, Bounds, DispatchPhase, Element, ElementId, GlobalElementId,
     HighlightStyle, Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, Size, TextOverflow,
     TextRun, TextStyle, TooltipId, TruncateFrom, WhiteSpace, Window, WrappedLine,
     WrappedLineLayout, register_tooltip_mouse_handlers, set_tooltip_on_window,
+};
+use anyhow::Context as _;
+use gpui_util::ResultExt;
+use itertools::Itertools;
+use smallvec::SmallVec;
+use std::{
+    borrow::Cow,
+    cell::{Cell, RefCell},
+    mem,
+    ops::{Deref, DerefMut, Range},
+    rc::Rc,
+    sync::Arc,
 };
 
 /// An [`Element`] that renders text.
@@ -1261,9 +1261,8 @@ mod tests {
 
     #[test]
     fn test_into_element_for() {
-        use std::borrow::Cow;
-
         use crate::{ParentElement as _, SharedString, div};
+        use std::borrow::Cow;
 
         let _ = div().child("static str");
         let _ = div().child("String".to_string());

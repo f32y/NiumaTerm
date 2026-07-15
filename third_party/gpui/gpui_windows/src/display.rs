@@ -1,17 +1,22 @@
-use std::rc::Rc;
-
-use gpui::{Bounds, DevicePixels, DisplayId, Pixels, PlatformDisplay, point, size};
 use gpui_util::ResultExt;
 use itertools::Itertools;
 use smallvec::SmallVec;
+use std::rc::Rc;
 use uuid::Uuid;
-use windows::Win32::Foundation::*;
-use windows::Win32::Graphics::Gdi::*;
-use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
-use windows::Win32::UI::WindowsAndMessaging::USER_DEFAULT_SCREEN_DPI;
-use windows::core::*;
+use windows::{
+    Win32::{
+        Foundation::*,
+        Graphics::Gdi::*,
+        UI::{
+            HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI},
+            WindowsAndMessaging::USER_DEFAULT_SCREEN_DPI,
+        },
+    },
+    core::*,
+};
 
 use crate::logical_point;
+use gpui::{Bounds, DevicePixels, DisplayId, Pixels, PlatformDisplay, point, size};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct WindowsDisplay {

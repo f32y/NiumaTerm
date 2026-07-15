@@ -49,18 +49,18 @@
 //!
 //!  KeyBinding::new("cmd-k left", pane::SplitLeft, Some("Pane"))
 
-use std::any::{Any, TypeId};
-use std::cell::RefCell;
-use std::mem;
-use std::ops::Range;
-use std::rc::Rc;
-
-use collections::FxHashMap;
-use smallvec::SmallVec;
-
 use crate::{
     Action, ActionRegistry, App, DispatchPhase, EntityId, FocusId, KeyBinding, KeyContext, Keymap,
     Keystroke, ModifiersChangedEvent, Window,
+};
+use collections::FxHashMap;
+use smallvec::SmallVec;
+use std::{
+    any::{Any, TypeId},
+    cell::RefCell,
+    mem,
+    ops::Range,
+    rc::Rc,
 };
 
 /// ID of a node within `DispatchTree`. Note that these are **not** stable between frames, and so a
@@ -620,18 +620,18 @@ impl DispatchTree {
 
 #[cfg(test)]
 mod tests {
+    use crate::{
+        self as gpui, AppContext, DispatchResult, Element, ElementId, GlobalElementId,
+        InspectorElementId, Keystroke, LayoutId, Style,
+    };
     use core::panic;
-    use std::cell::RefCell;
-    use std::ops::Range;
-    use std::rc::Rc;
-
     use smallvec::SmallVec;
+    use std::{cell::RefCell, ops::Range, rc::Rc};
 
     use crate::{
-        self as gpui, ActionRegistry, App, AppContext, Bounds, Context, DispatchResult,
-        DispatchTree, Element, ElementId, FocusHandle, GlobalElementId, InputHandler,
-        InspectorElementId, IntoElement, KeyBinding, KeyContext, Keymap, Keystroke, LayoutId,
-        Pixels, Point, Render, Style, Subscription, TestAppContext, UTF16Selection, Unbind, Window,
+        ActionRegistry, App, Bounds, Context, DispatchTree, FocusHandle, InputHandler, IntoElement,
+        KeyBinding, KeyContext, Keymap, Pixels, Point, Render, Subscription, TestAppContext,
+        UTF16Selection, Unbind, Window,
     };
 
     actions!(dispatch_test, [TestAction, SecondaryTestAction]);

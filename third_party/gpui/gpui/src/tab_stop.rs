@@ -310,11 +310,10 @@ mod sum_tree_impl {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use itertools::Itertools as _;
 
     use crate::{FocusHandle, FocusId, FocusMap, TabStopMap};
+    use std::sync::Arc;
 
     #[test]
     fn test_tab_handles() {

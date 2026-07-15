@@ -1,8 +1,10 @@
-use std::borrow::Cow;
-use std::cmp::Ordering;
-use std::fmt::{self, Debug};
-use std::hash::{Hash, Hasher};
-use std::sync::Arc;
+use std::{
+    borrow::Cow,
+    cmp::Ordering,
+    fmt::{self, Debug},
+    hash::{Hash, Hasher},
+    sync::Arc,
+};
 
 pub enum ArcCow<'a, T: ?Sized> {
     Borrowed(&'a T),

@@ -1,5 +1,6 @@
 [workspace.package]
 version = "0.1.0"
+publish = false
 authors = ["f32y <nyhvec@gmail.com>"]
 edition = "2024"
 license = "MIT"
@@ -23,10 +24,16 @@ members = [
     # GPUI fork
     "third_party/gpui/collections",
     "third_party/gpui/gpui",
+    "third_party/gpui/gpui_linux",
+    "third_party/gpui/gpui_macos",
     "third_party/gpui/gpui_macros",
+    "third_party/gpui/gpui_platform",
     "third_party/gpui/gpui_util",
+    "third_party/gpui/gpui_web",
+    "third_party/gpui/gpui_wgpu",
     "third_party/gpui/gpui_windows",
     "third_party/gpui/gpui_shared_string",
+    "third_party/gpui/media",
     "third_party/gpui/refineable",
     "third_party/gpui/refineable/derive_refineable",
     "third_party/gpui/scheduler",
@@ -63,8 +70,14 @@ nmt_themes = { path = "crates/themes" }
 # GPUI fork
 collections = { path = "third_party/gpui/collections" }
 gpui = { path = "third_party/gpui/gpui" }
+gpui_linux = { path = "third_party/gpui/gpui_linux" }
+gpui_macos = { path = "third_party/gpui/gpui_macos" }
 gpui_macros = { path = "third_party/gpui/gpui_macros" }
+gpui_media = { path = "third_party/gpui/media" }
+gpui_platform = { path = "third_party/gpui/gpui_platform" }
 gpui_util = { path = "third_party/gpui/gpui_util" }
+gpui_web = { path = "third_party/gpui/gpui_web" }
+gpui_wgpu = { path = "third_party/gpui/gpui_wgpu" }
 gpui_windows = { path = "third_party/gpui/gpui_windows" }
 gpui_shared_string = { path = "third_party/gpui/gpui_shared_string" }
 refineable = { path = "third_party/gpui/refineable" }
@@ -158,6 +171,7 @@ cocoa = "=0.26.1"
 cocoa-foundation = "=0.2.1"
 core-foundation-sys = "0.8.7"
 core-video = { version = "0.6.1", features = ["metal"] }
+cosmic-text = "0.19.0"
 ctor = "1.0.7"
 derive_more = { version = "2.1.1", features = [
     "add",
@@ -214,6 +228,33 @@ web-time = "1.1.0"
 which = "8.0.4"
 windows-numerics = "0.3.1"
 windows-registry = "0.6.1"
+
+accesskit_macos = "0.26.0"
+accesskit_unix = "0.21.0"
+as-raw-xcb-connection = "1"
+ashpd = { version = "0.13", default-features = false, features = [
+    "async-io",
+    "notification",
+    "open_uri",
+    "file_chooser",
+    "settings",
+    "trash",
+] }
+calloop-wayland-source = "0.4.1"
+console_error_panic_hook = "0.1.7"
+filedescriptor = "0.8.2"
+js-sys = "0.3"
+oo7 = { version = "0.6", default-features = false }
+open = "5.2.0"
+semver = { version = "1.0", features = ["serde"] }
+wasm_thread = "0.3"
+wayland-cursor = "0.31.11"
+wayland-protocols-wlr = "0.3.9"
+web-sys = "0.3"
+x11-clipboard = "0.9.3"
+xim = { git = "https://github.com/zed-industries/xim-rs.git", rev = "16f35a2c881b815a2b6cdfd6687988e84f8447d8", package = "zed-xim", version = "0.4.0-zed" }
+xkbcommon = "0.8.0"
+wgpu = { git = "https://github.com/zed-industries/wgpu.git", rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88" }
 
 raw-window-handle = { version = "0.6.2", features = ["std"] }
 parking_lot = { version = "0.12.5", features = [
@@ -383,7 +424,7 @@ softbuffer = { version = "0.4.8", default-features = false, features = [
     "wayland-dlopen",
 ] }
 swash = "0.2.9"
-taffy = "=0.11.0"
+taffy = "=0.12.1"
 tempdir = "0.3.7"
 tiny-skia = "0.12.0"
 tinyvec = "1.11.0"

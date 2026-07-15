@@ -25,14 +25,14 @@
 //!   assert!(true)
 //! }
 //! ```
-use std::env;
-use std::panic::{self, RefUnwindSafe, UnwindSafe};
-use std::pin::Pin;
-
+use crate::{Entity, Subscription, TestAppContext, TestDispatcher};
 use futures::StreamExt as _;
 use proptest::prelude::{Just, Strategy, any};
-
-use crate::{Entity, Subscription, TestAppContext, TestDispatcher};
+use std::{
+    env,
+    panic::{self, RefUnwindSafe, UnwindSafe},
+    pin::Pin,
+};
 
 /// Strategy injected into `#[gpui::property_test]` tests to control the seed
 /// given to the scheduler. Doesn't shrink, since all scheduler seeds are

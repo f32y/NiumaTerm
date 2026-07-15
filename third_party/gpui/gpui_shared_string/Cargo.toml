@@ -1,7 +1,7 @@
 [package]
 name = "gpui_shared_string"
 version = "0.1.0"
-publish = false
+publish.workspace = true
 edition.workspace = true
 
 [lib]

@@ -1,11 +1,12 @@
-use std::any::{Any, TypeId};
-use std::fmt::Display;
-
 use anyhow::{Context as _, Result};
 use collections::{HashMap, TypeIdHashMap};
 pub use gpui_macros::Action;
 pub use no_action::{NoAction, Unbind, is_no_action, is_unbind};
 use serde_json::json;
+use std::{
+    any::{Any, TypeId},
+    fmt::Display,
+};
 
 /// Defines and registers unit structs that can be used as actions. For more complex data types, derive `Action`.
 ///
@@ -422,10 +423,9 @@ pub fn generate_list_of_all_registered_actions() -> impl Iterator<Item = MacroAc
 }
 
 mod no_action {
+    use crate as gpui;
     use schemars::JsonSchema;
     use serde::Deserialize;
-
-    use crate as gpui;
 
     actions!(
         zed,

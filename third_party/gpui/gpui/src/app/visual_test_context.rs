@@ -1,19 +1,13 @@
-use std::future::Future;
-use std::rc::Rc;
-use std::sync::Arc;
-use std::time::Duration;
-
-use anyhow::anyhow;
-use image::RgbaImage;
-
-use crate::app::GpuiMode;
 use crate::{
     Action, AnyView, AnyWindowHandle, App, AppCell, AppContext, AssetSource, BackgroundExecutor,
     Bounds, ClipboardItem, Context, Entity, EntityId, ForegroundExecutor, Global, InputEvent,
     Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
     Platform, Point, Render, Result, Size, Task, TestDispatcher, TextSystem, VisualTestPlatform,
-    Window, WindowBounds, WindowHandle, WindowOptions,
+    Window, WindowBounds, WindowHandle, WindowOptions, app::GpuiMode,
 };
+use anyhow::anyhow;
+use image::RgbaImage;
+use std::{future::Future, rc::Rc, sync::Arc, time::Duration};
 
 /// A test context that uses real macOS rendering instead of mocked rendering.
 /// This is used for visual tests that need to capture actual screenshots.

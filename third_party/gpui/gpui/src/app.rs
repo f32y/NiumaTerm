@@ -1,32 +1,36 @@
-use std::any::{TypeId, type_name};
-use std::cell::{BorrowMutError, Cell, Ref, RefCell, RefMut};
-use std::marker::PhantomData;
-use std::mem;
-use std::ops::{Deref, DerefMut};
-use std::path::{Path, PathBuf};
-use std::rc::{Rc, Weak};
-use std::sync::Arc;
-use std::sync::atomic::Ordering::SeqCst;
-use std::time::Duration;
+use scheduler::Instant;
+use std::{
+    any::{TypeId, type_name},
+    cell::{BorrowMutError, Cell, Ref, RefCell, RefMut},
+    marker::PhantomData,
+    mem,
+    ops::{Deref, DerefMut},
+    path::{Path, PathBuf},
+    rc::{Rc, Weak},
+    sync::{Arc, atomic::Ordering::SeqCst},
+    time::Duration,
+};
 
 use anyhow::{Context as _, Result, anyhow};
+use derive_more::{Deref, DerefMut};
+use futures::{
+    Future, FutureExt,
+    channel::oneshot,
+    future::{LocalBoxFuture, Shared},
+};
+use itertools::Itertools;
+use parking_lot::RwLock;
+use slotmap::SlotMap;
+
 pub use async_context::*;
 #[cfg(feature = "bench")]
 pub use bench_context::{BenchAppContext, BenchReport, BenchWindowContext, bench_platform};
 use collections::{FxHashMap, FxHashSet, HashMap, TypeIdHashMap, TypeIdHashSet, VecDeque};
 pub use context::*;
-use derive_more::{Deref, DerefMut};
 pub use entity_map::*;
-use futures::channel::oneshot;
-use futures::future::{LocalBoxFuture, Shared};
-use futures::{Future, FutureExt};
 use gpui_util::{ResultExt, debug_panic};
 #[cfg(any(test, feature = "test-support"))]
 pub use headless_app_context::*;
-use itertools::Itertools;
-use parking_lot::RwLock;
-use scheduler::Instant;
-use slotmap::SlotMap;
 use smallvec::SmallVec;
 #[cfg(any(test, feature = "test-support"))]
 pub use test_app::*;
@@ -37,7 +41,6 @@ pub use visual_test_context::*;
 
 #[cfg(any(feature = "inspector", debug_assertions))]
 use crate::InspectorElementRegistry;
-use crate::colors::{Colors, GlobalColors};
 use crate::{
     Action, ActionBuildError, ActionRegistry, Any, AnyView, AnyWindowHandle, AppContext, Arena,
     ArenaBox, Asset, AssetSource, BackgroundExecutor, Bounds, ClipboardItem, CursorStyle,
@@ -48,7 +51,9 @@ use crate::{
     PromptLevel, Render, RenderImage, RenderablePromptHandle, Reservation, ScreenCaptureSource,
     SharedString, SubscriberSet, Subscription, SvgRenderer, Task, TextRenderingMode, TextSystem,
     ThermalState, Window, WindowAppearance, WindowButtonLayout, WindowHandle, WindowId,
-    WindowInvalidator, hash, init_app_menus,
+    WindowInvalidator,
+    colors::{Colors, GlobalColors},
+    hash, init_app_menus,
 };
 
 mod async_context;
@@ -2746,8 +2751,7 @@ impl<'a, T> Drop for GpuiBorrow<'a, T> {
 
 #[cfg(test)]
 mod test {
-    use std::cell::RefCell;
-    use std::rc::Rc;
+    use std::{cell::RefCell, rc::Rc};
 
     use crate::{AppContext, TestAppContext};
 

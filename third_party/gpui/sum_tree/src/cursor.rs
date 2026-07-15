@@ -1,10 +1,6 @@
-use std::cmp::Ordering;
-use std::mem;
-use std::sync::Arc;
-
-use heapless::Vec as ArrayVec;
-
 use super::*;
+use heapless::Vec as ArrayVec;
+use std::{cmp::Ordering, mem, sync::Arc};
 
 #[derive(Clone)]
 struct StackEntry<'a, T: Item, D> {

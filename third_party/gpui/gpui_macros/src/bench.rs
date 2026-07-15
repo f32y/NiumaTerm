@@ -1,8 +1,6 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::parse::Parser;
-use syn::spanned::Spanned;
-use syn::{Expr, ItemFn, LitStr};
+use syn::{Expr, ItemFn, LitStr, parse::Parser, spanned::Spanned};
 
 pub fn bench(args: TokenStream, function: TokenStream) -> TokenStream {
     let mut fps: Option<u64> = None;

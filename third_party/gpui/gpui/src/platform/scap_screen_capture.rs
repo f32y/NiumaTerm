@@ -1,16 +1,14 @@
 //! Screen capture for Linux and Windows
-use std::rc::Rc;
-use std::sync::Arc;
-use std::sync::atomic::{self, AtomicBool};
-
-use anyhow::{Context as _, Result, anyhow};
-use futures::channel::oneshot;
-use scap::Target;
-
 use crate::{
     DevicePixels, ForegroundExecutor, ScreenCaptureFrame, ScreenCaptureSource, ScreenCaptureStream,
     Size, SourceMetadata, size,
 };
+use anyhow::{Context as _, Result, anyhow};
+use futures::channel::oneshot;
+use scap::Target;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{self, AtomicBool};
 
 /// Populates the receiver with the screens that can be captured.
 ///

@@ -1,7 +1,4 @@
 #![cfg(target_os = "windows")]
-// Vendored code keeps upstream's std::sync::Mutex; the workspace
-// disallowed-types policy applies to first-party crates.
-#![allow(clippy::disallowed_types)]
 
 mod clipboard;
 mod destination_list;
@@ -33,11 +30,13 @@ pub(crate) use display::*;
 pub(crate) use events::*;
 pub(crate) use frame_pump::*;
 pub(crate) use keyboard::*;
-pub use platform::WindowsPlatform;
 pub(crate) use platform::*;
 pub(crate) use system_settings::*;
 pub(crate) use util::*;
 pub(crate) use vsync::*;
 pub(crate) use window::*;
-pub(crate) use windows::Win32::Foundation::HWND;
 pub(crate) use wrapper::*;
+
+pub use platform::WindowsPlatform;
+
+pub(crate) use windows::Win32::Foundation::HWND;

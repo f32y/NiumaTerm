@@ -31,47 +31,6 @@ pub(crate) type PlatformScreenCaptureFrame = ();
 #[cfg(all(target_os = "macos", feature = "screen-capture"))]
 pub(crate) type PlatformScreenCaptureFrame = core_video::image_buffer::CVImageBuffer;
 
-use std::borrow::Cow;
-use std::fmt::{self, Debug};
-use std::hash::{Hash, Hasher};
-use std::io::Cursor;
-use std::ops;
-use std::ops::Range;
-use std::path::{Path, PathBuf};
-use std::rc::Rc;
-use std::sync::Arc;
-use std::time::Duration;
-
-use anyhow::Result;
-#[cfg(any(target_os = "linux", target_os = "freebsd"))]
-use anyhow::bail;
-pub use app_menu::*;
-use async_task::Runnable;
-#[cfg(any(test, feature = "bench"))]
-pub use bench_dispatcher::BenchDispatcher;
-use futures::channel::oneshot;
-#[cfg(any(test, feature = "test-support"))]
-use image::RgbaImage;
-use image::codecs::gif::GifDecoder;
-use image::{AnimationDecoder as _, Frame};
-pub use keyboard::*;
-pub use keystroke::*;
-use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
-use scheduler::Instant;
-pub use scheduler::RunnableMeta;
-use schemars::JsonSchema;
-use seahash::SeaHasher;
-use serde::{Deserialize, Serialize};
-use smallvec::SmallVec;
-use strum::EnumIter;
-#[cfg(any(test, feature = "test-support"))]
-pub(crate) use test::*;
-#[cfg(any(test, feature = "test-support"))]
-pub use test::{TestDispatcher, TestScreenCaptureSource, TestScreenCaptureStream};
-use uuid::Uuid;
-#[cfg(all(target_os = "macos", any(test, feature = "test-support")))]
-pub use visual_test::VisualTestPlatform;
-
 use crate::{
     Action, AnyWindowHandle, App, AsyncWindowContext, BackgroundExecutor, Bounds,
     DEFAULT_WINDOW_SIZE, DevicePixels, DispatchEventResult, Font, FontId, FontMetrics, FontRun,
@@ -80,6 +39,52 @@ use crate::{
     RenderSvgParams, ScaledPixels, Scene, ShapedGlyph, ShapedRun, SharedString, Size, SvgRenderer,
     SystemWindowTab, Task, Window, WindowControlArea, hash, point, px, size,
 };
+use anyhow::Result;
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+use anyhow::bail;
+use async_task::Runnable;
+use futures::channel::oneshot;
+#[cfg(any(test, feature = "test-support"))]
+use image::RgbaImage;
+use image::codecs::gif::GifDecoder;
+use image::{AnimationDecoder as _, Frame};
+use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
+use scheduler::Instant;
+pub use scheduler::RunnableMeta;
+use schemars::JsonSchema;
+use seahash::SeaHasher;
+use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
+use std::borrow::Cow;
+use std::hash::{Hash, Hasher};
+use std::io::Cursor;
+use std::ops;
+use std::time::Duration;
+use std::{
+    fmt::{self, Debug},
+    ops::Range,
+    path::{Path, PathBuf},
+    rc::Rc,
+    sync::Arc,
+};
+use strum::EnumIter;
+use uuid::Uuid;
+
+pub use app_menu::*;
+pub use keyboard::*;
+pub use keystroke::*;
+
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) use test::*;
+
+#[cfg(any(test, feature = "test-support"))]
+pub use test::{TestDispatcher, TestScreenCaptureSource, TestScreenCaptureStream};
+
+#[cfg(any(test, feature = "bench"))]
+pub use bench_dispatcher::BenchDispatcher;
+
+#[cfg(all(target_os = "macos", any(test, feature = "test-support")))]
+pub use visual_test::VisualTestPlatform;
 
 // TODO(jk): return an enum instead of a string
 /// Return which compositor we're guessing we'll use.
@@ -2342,9 +2347,8 @@ impl From<String> for ClipboardString {
 
 #[cfg(test)]
 mod image_tests {
-    use std::sync::Arc;
-
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn test_svg_image_to_image_data_converts_to_bgra() {
@@ -2367,9 +2371,8 @@ mod image_tests {
 
 #[cfg(all(test, any(target_os = "linux", target_os = "freebsd")))]
 mod tests {
-    use std::collections::HashSet;
-
     use super::*;
+    use std::collections::HashSet;
 
     #[test]
     fn test_window_button_layout_parse_standard() {

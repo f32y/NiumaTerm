@@ -1,11 +1,14 @@
-use std::borrow::Cow;
-use std::fmt::{self, Display, Formatter};
-use std::hash::{Hash, Hasher};
-
 use anyhow::{Context as _, bail};
 use schemars::{JsonSchema, json_schema};
-use serde::de::{self, Visitor};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{
+    Deserialize, Deserializer, Serialize, Serializer,
+    de::{self, Visitor},
+};
+use std::borrow::Cow;
+use std::{
+    fmt::{self, Display, Formatter},
+    hash::{Hash, Hasher},
+};
 
 /// Convert an RGB hex color code number to a color type
 pub fn rgb(hex: u32) -> Rgba {
@@ -344,9 +347,8 @@ pub struct Hsla {
 
 #[cfg(feature = "proptest")]
 mod property {
-    use proptest::prelude::*;
-
     use super::Hsla;
+    use proptest::prelude::*;
 
     impl Hsla {
         /// Proptest [`Strategy`] that produces opaque colors (i.e. alpha = 1).

@@ -1,8 +1,6 @@
-use std::fmt;
-
-use anyhow::{Context as _, Result};
-
 use crate::SharedString;
+use anyhow::{Context as _, Result};
+use std::fmt;
 
 /// A datastructure for resolving whether an action should be dispatched
 /// at this point in the element tree. Contains a set of identifiers
@@ -518,10 +516,9 @@ fn skip_whitespace(source: &str) -> &str {
 mod tests {
     use core::slice;
 
-    use KeyBindingContextPredicate::*;
-
     use super::*;
     use crate as gpui;
+    use KeyBindingContextPredicate::*;
 
     #[test]
     fn test_actions_definition() {

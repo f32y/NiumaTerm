@@ -1,11 +1,11 @@
-use std::collections::VecDeque;
-use std::fmt;
-use std::iter::FusedIterator;
-use std::sync::Arc;
-use std::sync::atomic::AtomicUsize;
+use std::{
+    collections::VecDeque,
+    fmt,
+    iter::FusedIterator,
+    sync::{Arc, atomic::AtomicUsize},
+};
 
-use rand::rngs::SmallRng;
-use rand::{RngExt, SeedableRng};
+use rand::{RngExt as _, SeedableRng, rngs::SmallRng};
 
 use crate::Priority;
 

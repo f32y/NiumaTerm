@@ -1,17 +1,21 @@
 use std::sync::OnceLock;
 
 use anyhow::Context;
-use gpui::*;
 use gpui_util::ResultExt;
-use windows::UI::Color;
-use windows::UI::ViewManagement::{UIColorType, UISettings};
-use windows::Win32::Foundation::*;
-use windows::Win32::Graphics::Dwm::*;
-use windows::Win32::System::LibraryLoader::LoadLibraryA;
-use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::core::{BOOL, PCSTR};
+use windows::{
+    UI::{
+        Color,
+        ViewManagement::{UIColorType, UISettings},
+    },
+    Win32::{
+        Foundation::*, Graphics::Dwm::*, System::LibraryLoader::LoadLibraryA,
+        UI::WindowsAndMessaging::*,
+    },
+    core::{BOOL, PCSTR},
+};
 
 use crate::*;
+use gpui::*;
 
 pub(crate) trait HiLoWord {
     fn hiword(&self) -> u16;

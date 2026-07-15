@@ -8,21 +8,16 @@
 //! Optionally, a renderer factory can be provided to enable real GPU rendering
 //! and screenshot capture via [`HeadlessAppContext::capture_screenshot`].
 
-use std::future::Future;
-use std::rc::Rc;
-use std::sync::Arc;
-use std::time::Duration;
-
-use anyhow::Result;
-use image::RgbaImage;
-
-use crate::app::{GpuiBorrow, GpuiMode};
 use crate::{
     AnyView, AnyWindowHandle, App, AppCell, AppContext, AssetSource, BackgroundExecutor, Bounds,
     Context, Entity, EntityId, ForegroundExecutor, Global, Pixels, PlatformHeadlessRenderer,
     PlatformTextSystem, Render, Reservation, Size, Task, TestDispatcher, TestPlatform, TextSystem,
     Window, WindowBounds, WindowHandle, WindowOptions,
+    app::{GpuiBorrow, GpuiMode},
 };
+use anyhow::Result;
+use image::RgbaImage;
+use std::{future::Future, rc::Rc, sync::Arc, time::Duration};
 
 /// A cross-platform headless app context for tests that need real text shaping.
 ///

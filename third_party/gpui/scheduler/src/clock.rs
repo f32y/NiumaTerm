@@ -1,7 +1,7 @@
-use std::time::Duration;
-
 use chrono::{DateTime, Utc};
 use parking_lot::Mutex;
+use std::time::Duration;
+
 pub use web_time::Instant;
 
 pub trait Clock {

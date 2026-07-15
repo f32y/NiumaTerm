@@ -1,11 +1,8 @@
-use std::hash::{Hash, Hasher};
-use std::ops::Range;
-use std::{iter, mem};
-
-use collections::HashSet;
-use refineable::Refineable;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use std::{
+    hash::{Hash, Hasher},
+    iter, mem,
+    ops::Range,
+};
 
 use crate::{
     AbsoluteLength, App, Background, BackgroundTag, BorderStyle, Bounds, ContentMask, Corners,
@@ -14,6 +11,10 @@ use crate::{
     PointRefinement, Rgba, SharedString, Size, SizeRefinement, Styled, TextRun, Window, black, phi,
     point, px, quad, rems, size,
 };
+use collections::HashSet;
+use refineable::Refineable;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 /// Use this struct for interfacing with the 'debug_below' styling from your own elements.
 /// If a parent element has this style set on it, then this struct will be set as a global in
@@ -1325,8 +1326,9 @@ impl From<Position> for taffy::style::Position {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::{blue, green, px, red, yellow};
+
+    use super::*;
 
     #[test]
     fn test_basic_highlight_style_combination() {

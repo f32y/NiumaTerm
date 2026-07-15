@@ -1,7 +1,6 @@
 use core::fmt::Debug;
 
-use proptest::prelude::*;
-use proptest::sample::SizeRange;
+use proptest::{prelude::*, sample::SizeRange};
 
 use crate::{Item, SumTree, Summary};
 

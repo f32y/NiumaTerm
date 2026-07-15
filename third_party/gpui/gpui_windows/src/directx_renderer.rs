@@ -1,21 +1,28 @@
-use std::slice;
-use std::sync::{Arc, OnceLock};
+use std::{
+    slice,
+    sync::{Arc, OnceLock},
+};
 
 use anyhow::{Context, Result};
-use gpui::*;
 use gpui_util::ResultExt;
-use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, RECT};
-use windows::Win32::Graphics::Direct3D::*;
-use windows::Win32::Graphics::Direct3D11::*;
-use windows::Win32::Graphics::DirectComposition::*;
-use windows::Win32::Graphics::DirectWrite::*;
-use windows::Win32::Graphics::Dxgi::Common::*;
-use windows::Win32::Graphics::Dxgi::*;
-use windows::Win32::System::Threading::WaitForSingleObject;
-use windows::core::Interface;
+use windows::{
+    Win32::{
+        Foundation::{CloseHandle, HANDLE, HWND, RECT},
+        Graphics::{
+            Direct3D::*,
+            Direct3D11::*,
+            DirectComposition::*,
+            DirectWrite::*,
+            Dxgi::{Common::*, *},
+        },
+        System::Threading::WaitForSingleObject,
+    },
+    core::Interface,
+};
 
 use crate::directx_renderer::shader_resources::{RawShaderBytes, ShaderModule, ShaderTarget};
 use crate::*;
+use gpui::*;
 
 pub(crate) const DISABLE_DIRECT_COMPOSITION: &str = "GPUI_DISABLE_DIRECT_COMPOSITION";
 const RENDER_TARGET_FORMAT: DXGI_FORMAT = DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -1782,6 +1789,7 @@ const BUFFER_COUNT: usize = 3;
 
 pub(crate) mod shader_resources {
     use anyhow::Result;
+
     #[cfg(debug_assertions)]
     use windows::{
         Win32::Graphics::Direct3D::{
@@ -1887,8 +1895,9 @@ pub(crate) mod shader_resources {
     #[cfg(debug_assertions)]
     pub(super) fn build_shader_blob(entry: ShaderModule, target: ShaderTarget) -> Result<ID3DBlob> {
         unsafe {
-            use windows::Win32::Graphics::Direct3D::ID3DInclude;
-            use windows::Win32::Graphics::Hlsl::D3D_COMPILE_STANDARD_FILE_INCLUDE;
+            use windows::Win32::Graphics::{
+                Direct3D::ID3DInclude, Hlsl::D3D_COMPILE_STANDARD_FILE_INCLUDE,
+            };
 
             let shader_name = if matches!(entry, ShaderModule::EmojiRasterization) {
                 "color_text_raster.hlsl"
@@ -1971,12 +1980,13 @@ pub(crate) mod shader_resources {
 }
 
 mod nvidia {
-    use std::ffi::CStr;
-    use std::os::raw::{c_char, c_int, c_uint};
+    use std::{
+        ffi::CStr,
+        os::raw::{c_char, c_int, c_uint},
+    };
 
     use anyhow::Result;
-    use windows::Win32::System::LibraryLoader::GetProcAddress;
-    use windows::core::s;
+    use windows::{Win32::System::LibraryLoader::GetProcAddress, core::s};
 
     use crate::with_dll_library;
 
@@ -2043,8 +2053,7 @@ mod amd {
     use std::os::raw::{c_char, c_int, c_void};
 
     use anyhow::Result;
-    use windows::Win32::System::LibraryLoader::GetProcAddress;
-    use windows::core::s;
+    use windows::{Win32::System::LibraryLoader::GetProcAddress, core::s};
 
     use crate::with_dll_library;
 
@@ -2136,8 +2145,10 @@ mod amd {
 }
 
 mod dxgi {
-    use windows::Win32::Graphics::Dxgi::{IDXGIAdapter1, IDXGIDevice};
-    use windows::core::Interface;
+    use windows::{
+        Win32::Graphics::Dxgi::{IDXGIAdapter1, IDXGIDevice},
+        core::Interface,
+    };
 
     pub(super) fn get_driver_version(adapter: &IDXGIAdapter1) -> anyhow::Result<String> {
         let number = unsafe { adapter.CheckInterfaceSupport(&IDXGIDevice::IID as _) }?;

@@ -1,18 +1,18 @@
-use std::any::Any;
-use std::future::Future;
-use std::marker::PhantomData;
-use std::mem::ManuallyDrop;
-use std::panic::Location;
-use std::pin::Pin;
-use std::rc::Rc;
-use std::sync::Arc;
-use std::task::{Context, Poll};
-use std::thread::{self, ThreadId};
-use std::time::Duration;
-
-use async_task::Runnable;
-
 use crate::{Instant, Priority, RunnableMeta, Scheduler, SessionId, Timer};
+use async_task::Runnable;
+use std::{
+    any::Any,
+    future::Future,
+    marker::PhantomData,
+    mem::ManuallyDrop,
+    panic::Location,
+    pin::Pin,
+    rc::Rc,
+    sync::Arc,
+    task::{Context, Poll},
+    thread::{self, ThreadId},
+    time::Duration,
+};
 
 /// A `!Send` executor pinned to a single session. Tasks spawned on it run in
 /// order on whichever thread drains the dispatch destination supplied at

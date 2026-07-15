@@ -4,31 +4,32 @@ mod line;
 mod line_layout;
 mod line_wrapper;
 
-use core::fmt;
-use std::borrow::Cow;
-use std::cmp;
-use std::fmt::{Debug, Display, Formatter};
-use std::hash::{Hash, Hasher};
-use std::ops::{Deref, DerefMut, Range};
-use std::sync::Arc;
-
-use anyhow::{Context as _, anyhow};
-use collections::FxHashMap;
-use derive_more::{Add, Deref, FromStr, Sub};
 pub use font_fallbacks::*;
 pub use font_features::*;
-use itertools::Itertools;
 pub use line::*;
 pub use line_layout::*;
 pub use line_wrapper::*;
-use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use smallvec::{SmallVec, smallvec};
 
 use crate::{
     Bounds, DevicePixels, Hsla, Pixels, PlatformTextSystem, Point, Result, SharedString, Size,
     StrikethroughStyle, TextRenderingMode, UnderlineStyle, px,
+};
+use anyhow::{Context as _, anyhow};
+use collections::FxHashMap;
+use core::fmt;
+use derive_more::{Add, Deref, FromStr, Sub};
+use itertools::Itertools;
+use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
+use smallvec::{SmallVec, smallvec};
+use std::{
+    borrow::Cow,
+    cmp,
+    fmt::{Debug, Display, Formatter},
+    hash::{Hash, Hasher},
+    ops::{Deref, DerefMut, Range},
+    sync::Arc,
 };
 
 /// An opaque identifier for a specific font.

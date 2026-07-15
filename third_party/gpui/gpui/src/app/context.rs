@@ -1,19 +1,20 @@
-use std::any::{Any, TypeId};
-use std::borrow::{Borrow, BorrowMut};
-use std::future::Future;
-use std::ops;
-use std::sync::Arc;
-
-use anyhow::Result;
-use futures::FutureExt;
-use gpui_util::Deferred;
-
-use super::{App, AsyncWindowContext, Entity, KeystrokeEvent};
 use crate::{
     AnyView, AnyWindowHandle, AppContext, AsyncApp, DispatchPhase, Effect, EntityId, EventEmitter,
     FocusHandle, FocusOutEvent, Focusable, Global, KeystrokeObserver, Priority, Reservation,
     SubscriberSet, Subscription, Task, WeakEntity, WeakFocusHandle, Window, WindowHandle,
 };
+use anyhow::Result;
+use futures::FutureExt;
+use gpui_util::Deferred;
+use std::{
+    any::{Any, TypeId},
+    borrow::{Borrow, BorrowMut},
+    future::Future,
+    ops,
+    sync::Arc,
+};
+
+use super::{App, AsyncWindowContext, Entity, KeystrokeEvent};
 
 /// The app context, with specialized behavior for the given entity.
 pub struct Context<'a, T> {

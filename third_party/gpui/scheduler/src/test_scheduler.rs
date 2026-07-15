@@ -1,29 +1,33 @@
-use std::any::{Any, type_name_of_val};
-use std::collections::{BTreeMap, HashSet, VecDeque};
-use std::fmt::Write;
-use std::future::Future;
-use std::ops::RangeInclusive;
-use std::panic::{self, AssertUnwindSafe};
-use std::pin::Pin;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering::SeqCst;
-use std::sync::{Arc, Weak};
-use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
-use std::thread::{self, Thread};
-use std::time::Duration;
-use std::{env, mem};
-
+use crate::{
+    BackgroundExecutor, Clock, Instant, LocalExecutor, Priority, RunnableMeta, Scheduler,
+    SessionId, Task, TestClock, Timer,
+};
 use async_task::Runnable;
 use backtrace::{Backtrace, BacktraceFrame};
 use futures::channel::oneshot;
 use parking_lot::{Mutex, MutexGuard};
-use rand::distr::StandardUniform;
-use rand::distr::uniform::{SampleRange, SampleUniform};
-use rand::prelude::*;
-
-use crate::{
-    BackgroundExecutor, Clock, Instant, LocalExecutor, Priority, RunnableMeta, Scheduler,
-    SessionId, Task, TestClock, Timer,
+use rand::{
+    distr::{StandardUniform, uniform::SampleRange, uniform::SampleUniform},
+    prelude::*,
+};
+use std::any::Any;
+use std::{
+    any::type_name_of_val,
+    collections::{BTreeMap, HashSet, VecDeque},
+    env,
+    fmt::Write,
+    future::Future,
+    mem,
+    ops::RangeInclusive,
+    panic::{self, AssertUnwindSafe},
+    pin::Pin,
+    sync::{
+        Arc, Weak,
+        atomic::{AtomicBool, Ordering::SeqCst},
+    },
+    task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
+    thread::{self, Thread},
+    time::Duration,
 };
 
 const PENDING_TRACES_VAR_NAME: &str = "PENDING_TRACES";

@@ -2,18 +2,20 @@
 //! can be used to describe common units, concepts, and the relationships
 //! between them.
 
-use core::fmt::Debug;
-use std::borrow::Cow;
-use std::cmp::{self, PartialOrd};
-use std::fmt::{self, Display};
-use std::hash::Hash;
-use std::ops::{Add, AddAssign, Div, Mul, MulAssign, Neg, Range, Sub};
-
 use anyhow::{Context as _, anyhow};
+use core::fmt::Debug;
 use derive_more::{Add, AddAssign, Div, DivAssign, Mul, Neg, Sub, SubAssign};
 use refineable::Refineable;
 use schemars::{JsonSchema, json_schema};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+use std::borrow::Cow;
+use std::ops::{AddAssign, Range};
+use std::{
+    cmp::{self, PartialOrd},
+    fmt::{self, Display},
+    hash::Hash,
+    ops::{Add, Div, Mul, MulAssign, Neg, Sub},
+};
 use taffy::prelude::{TaffyGridLine, TaffyGridSpan};
 
 use crate::{App, DisplayId};

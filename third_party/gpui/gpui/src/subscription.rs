@@ -1,9 +1,10 @@
-use std::cell::{Cell, RefCell};
-use std::fmt::Debug;
-use std::rc::Rc;
-
 use collections::BTreeMap;
 use gpui_util::post_inc;
+use std::{
+    cell::{Cell, RefCell},
+    fmt::Debug,
+    rc::Rc,
+};
 
 pub(crate) struct SubscriberSet<EmitterKey, Callback>(
     Rc<RefCell<SubscriberSetState<EmitterKey, Callback>>>,

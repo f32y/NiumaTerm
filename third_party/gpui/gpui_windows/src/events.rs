@@ -1,20 +1,24 @@
-use std::rc::Rc;
-use std::sync::atomic::Ordering;
+use std::{rc::Rc, sync::atomic::Ordering};
 
 use anyhow::Context as _;
-use gpui::*;
 use gpui_util::ResultExt;
-use windows::Win32::Foundation::*;
-use windows::Win32::Graphics::Gdi::*;
-use windows::Win32::System::SystemServices::*;
-use windows::Win32::UI::Controls::*;
-use windows::Win32::UI::HiDpi::*;
-use windows::Win32::UI::Input::Ime::*;
-use windows::Win32::UI::Input::KeyboardAndMouse::*;
-use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::core::PCWSTR;
+use windows::{
+    Win32::{
+        Foundation::*,
+        Graphics::Gdi::*,
+        System::SystemServices::*,
+        UI::{
+            Controls::*,
+            HiDpi::*,
+            Input::{Ime::*, KeyboardAndMouse::*},
+            WindowsAndMessaging::*,
+        },
+    },
+    core::PCWSTR,
+};
 
 use crate::*;
+use gpui::*;
 
 pub(crate) const WM_GPUI_CURSOR_STYLE_CHANGED: u32 = WM_USER + 1;
 pub(crate) const WM_GPUI_CLOSE_ONE_WINDOW: u32 = WM_USER + 2;

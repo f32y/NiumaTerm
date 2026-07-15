@@ -1,37 +1,38 @@
-use std::cell::{Cell, RefCell};
-use std::ffi::OsStr;
-use std::os::windows::io::AsRawHandle;
-use std::path::{Path, PathBuf};
-use std::rc::{Rc, Weak};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::{
+    cell::{Cell, RefCell},
+    ffi::OsStr,
+    os::windows::io::AsRawHandle,
+    path::{Path, PathBuf},
+    rc::{Rc, Weak},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use anyhow::{Context as _, Result, anyhow};
 use futures::channel::oneshot::{self, Receiver};
-use gpui::*;
 use gpui_util::{ResultExt, get_windows_system_shell, new_std_command};
 use itertools::Itertools;
 use parking_lot::RwLock;
 use smallvec::SmallVec;
-use windows::UI::ViewManagement::UISettings;
-use windows::Win32::Foundation::*;
-use windows::Win32::Graphics::Direct3D11::ID3D11Device;
-use windows::Win32::Graphics::Gdi::*;
-use windows::Win32::Security::Credentials::*;
-use windows::Win32::System::Com::*;
-use windows::Win32::System::LibraryLoader::*;
-use windows::Win32::System::Ole::*;
-use windows::Win32::System::Power::*;
-use windows::Win32::System::SystemInformation::*;
+use windows::{
+    UI::ViewManagement::UISettings,
+    Win32::{
+        Foundation::*,
+        Graphics::{Direct3D11::ID3D11Device, Gdi::*},
+        Security::Credentials::*,
+        System::{Com::*, LibraryLoader::*, Ole::*, Power::*, SystemInformation::*},
+        UI::{Input::KeyboardAndMouse::*, Shell::*, WindowsAndMessaging::*},
+    },
+    core::*,
+};
 use windows::Win32::System::Threading::{
     GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_ABOVE_NORMAL, THREAD_PRIORITY_NORMAL,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::*;
-use windows::Win32::UI::Shell::*;
-use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::core::*;
 
 use crate::*;
+use gpui::*;
 
 pub struct WindowsPlatform {
     inner: Rc<WindowsPlatformInner>,
@@ -1528,9 +1529,8 @@ unsafe extern "system" fn window_procedure(
 
 #[cfg(test)]
 mod tests {
-    use gpui::ClipboardItem;
-
     use crate::{read_from_clipboard, write_to_clipboard};
+    use gpui::ClipboardItem;
 
     #[test]
     fn test_clipboard() {

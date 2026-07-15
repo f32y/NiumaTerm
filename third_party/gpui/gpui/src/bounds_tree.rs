@@ -1,9 +1,10 @@
-use std::cmp;
-use std::fmt::Debug;
-use std::ops::{Add, Sub};
-use std::ptr::NonNull;
-
 use crate::{Bounds, Half};
+use std::{
+    cmp,
+    fmt::Debug,
+    ops::{Add, Sub},
+    ptr::NonNull,
+};
 
 /// Maximum children per internal node (R-tree style branching factor).
 /// Higher values = shorter tree = fewer cache misses, but more work per node.
@@ -372,10 +373,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use rand::{RngExt, SeedableRng};
-
     use super::*;
     use crate::{Bounds, Point, Size};
+    use rand::{RngExt as _, SeedableRng};
 
     #[test]
     fn test_insert() {

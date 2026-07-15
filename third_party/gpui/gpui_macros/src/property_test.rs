@@ -1,10 +1,13 @@
 use proc_macro2::TokenStream;
 use quote::{ToTokens, format_ident, quote, quote_spanned};
-use syn::parse::{Parse, ParseStream};
-use syn::punctuated::Punctuated;
-use syn::spanned::Spanned;
-use syn::token::Comma;
-use syn::{Expr, FnArg, Ident, ItemFn, MetaNameValue, Token, Type, parse2};
+use syn::{
+    Expr, FnArg, Ident, ItemFn, MetaNameValue, Token, Type,
+    parse::{Parse, ParseStream},
+    parse2,
+    punctuated::Punctuated,
+    spanned::Spanned,
+    token::Comma,
+};
 
 pub fn test(args: TokenStream, item: TokenStream) -> TokenStream {
     let item_span = item.span();

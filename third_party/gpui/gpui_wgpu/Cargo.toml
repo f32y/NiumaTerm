@@ -1,0 +1,54 @@
+[package]
+name = "gpui_wgpu"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license = "Apache-2.0"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/gpui_wgpu.rs"
+
+[features]
+default = []
+font-kit = ["dep:font-kit"]
+
+[dependencies]
+gpui.workspace = true
+anyhow.workspace = true
+bytemuck.workspace = true
+collections.workspace = true
+cosmic-text.workspace = true
+etagere.workspace = true
+itertools.workspace = true
+log.workspace = true
+parking_lot.workspace = true
+profiling.workspace = true
+raw-window-handle.workspace = true
+smallvec.workspace = true
+swash.workspace = true
+unicode-segmentation.workspace = true
+gpui_util.workspace = true
+wgpu.workspace = true
+
+# Optional: only needed on platforms with multiple font sources (e.g. Linux)
+# WARNING: If you change this, you must also publish a new version of zed-font-kit to crates.io
+font-kit = { workspace = true, optional = true }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+pollster.workspace = true
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+web-sys = { workspace = true, features = ["HtmlCanvasElement"] }
+js-sys.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "layout_line"
+harness = false

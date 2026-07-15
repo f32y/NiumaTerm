@@ -24,19 +24,14 @@
 //! }
 //! ```
 
-use std::future::Future;
-use std::rc::Rc;
-use std::sync::Arc;
-use std::time::Duration;
-
-use crate::app::GpuiMode;
 use crate::{
     AnyWindowHandle, App, AppCell, AppContext, AsyncApp, BackgroundExecutor, BorrowAppContext,
     Bounds, ClipboardItem, Context, Entity, ForegroundExecutor, Global, InputEvent, Keystroke,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Platform,
     PlatformTextSystem, Point, Render, Size, Task, TestDispatcher, TestPlatform, TextSystem,
-    Window, WindowBounds, WindowHandle, WindowOptions,
+    Window, WindowBounds, WindowHandle, WindowOptions, app::GpuiMode,
 };
+use std::{future::Future, rc::Rc, sync::Arc, time::Duration};
 
 /// A test application context with a clean API.
 ///
@@ -510,8 +505,7 @@ impl<V> Clone for TestAppWindow<V> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prelude::*;
-    use crate::{FocusHandle, Focusable, div};
+    use crate::{FocusHandle, Focusable, div, prelude::*};
 
     struct Counter {
         count: usize,

@@ -31,18 +31,17 @@
 //! elements when you need to take manual control of the layout and painting process, such as when using
 //! your own custom layout algorithm or rendering a code editor.
 
-use std::any::{Any, type_name};
-use std::fmt::{self, Debug, Display};
-use std::sync::Arc;
-use std::{mem, panic};
-
-use derive_more::{Deref, DerefMut};
-
-use crate::util::FluentBuilder;
-use crate::window::with_element_arena;
 use crate::{
     A11ySubtreeBuilder, App, ArenaBox, AvailableSpace, Bounds, Context, DispatchNodeId, ElementId,
     FocusHandle, InspectorElementId, LayoutId, Pixels, Point, SharedString, Size, Style, Window,
+    util::FluentBuilder, window::with_element_arena,
+};
+use derive_more::{Deref, DerefMut};
+use std::{
+    any::{Any, type_name},
+    fmt::{self, Debug, Display},
+    mem, panic,
+    sync::Arc,
 };
 
 /// Implemented by types that participate in laying out and painting the contents of a window.

@@ -7,20 +7,16 @@
 //!
 //! If all of your elements are the same height, see [`crate::UniformList`] for a simpler API
 
-use std::cell::RefCell;
-use std::ops::Range;
-use std::rc::Rc;
-
-use collections::VecDeque;
-use refineable::Refineable as _;
-use sum_tree::{Bias, Dimensions, SumTree};
-
 use crate::{
     AnyElement, App, AvailableSpace, Bounds, ContentMask, DispatchPhase, Edges, Element, EntityId,
     FocusHandle, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, IntoElement,
     Overflow, Pixels, Point, ScrollDelta, ScrollWheelEvent, Size, Style, StyleRefinement, Styled,
     Window, point, px, size,
 };
+use collections::VecDeque;
+use refineable::Refineable as _;
+use std::{cell::RefCell, ops::Range, rc::Rc};
+use sum_tree::{Bias, Dimensions, SumTree};
 
 type RenderItemFn = dyn FnMut(usize, &mut Window, &mut App) -> AnyElement + 'static;
 
@@ -1680,10 +1676,9 @@ impl sum_tree::SeekTarget<'_, ListItemSummary, ListItemSummary> for Height {
 #[cfg(test)]
 mod test {
 
+    use gpui::{ScrollDelta, ScrollWheelEvent};
     use std::cell::Cell;
     use std::rc::Rc;
-
-    use gpui::{ScrollDelta, ScrollWheelEvent};
 
     use crate::{
         self as gpui, AppContext, Bounds, Context, Element, FollowMode, IntoElement, ListState,

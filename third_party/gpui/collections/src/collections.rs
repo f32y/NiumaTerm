@@ -6,10 +6,9 @@ pub type TypeIdHashMap<V> =
     std::collections::HashMap<std::any::TypeId, V, gpui_util::TypeIdHashBuilder>;
 pub type TypeIdHashSet = std::collections::HashSet<std::any::TypeId, gpui_util::TypeIdHashBuilder>;
 
-pub use std::collections::*;
-
 pub use indexmap::Equivalent;
 pub use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet, FxHasher};
+pub use std::collections::*;
 
 pub mod vecmap;
 #[cfg(test)]
