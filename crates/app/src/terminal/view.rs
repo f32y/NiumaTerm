@@ -424,20 +424,20 @@ impl TerminalPane {
         scrolled
     }
 
-    /// Scroll so the thumb's top sits at `thumb_top` of the track (thumb
-    /// space: `offset / total`, matching how the thumb is drawn).
+    /// Scroll so the thumb's top sits at `thumb_top` of the track.
     fn scroll_thumb_to(&mut self, thumb_top: f32, cx: &mut Context<Self>) {
         if self.block_list_mode(cx) {
             let (_, max_scroll) = self.block_list.scrollbar;
-            let total = max_scroll
-                + self
-                    .content_bounds
-                    .map(|b| b.size.height.as_f32())
-                    .unwrap_or(0.0);
-            if total <= 0.0 {
+            let viewport = self
+                .content_bounds
+                .map(|b| b.size.height.as_f32())
+                .unwrap_or(0.0);
+            let total = max_scroll + viewport;
+            let Some(new) = scrollbar_offset_for_thumb(total as f64, viewport as f64, thumb_top)
+            else {
                 return;
-            }
-            let new = (thumb_top.max(0.0) * total).min(max_scroll);
+            };
+            let new = new as f32;
             if let (Some(frame), Some(cell)) = (self.frame_cache.current(), self.cell_metrics) {
                 let cols = self.content_cols();
                 let pad_rows = block_pad_rows(cx);
@@ -461,7 +461,9 @@ impl TerminalPane {
         if scrollable == 0 {
             return;
         }
-        let target = ((thumb_top.max(0.0) * sb.total as f32).round() as u64).min(scrollable);
+        let target = scrollbar_offset_for_thumb(sb.total as f64, sb.len as f64, thumb_top)
+            .unwrap_or_default()
+            .round() as u64;
         let delta = target as isize - sb.offset as isize;
         if delta != 0 && self.surface.scroll_lines(delta) {
             self.mark_scroll_activity(cx);
@@ -1452,17 +1454,29 @@ impl Render for TerminalPane {
 /// the track scrolls to that offset.
 struct ScrollbarDrag;
 
+fn scrollbar_thumb_geometry(total: f64, offset: f64, len: f64) -> Option<(f32, f32)> {
+    if total <= len {
+        return None;
+    }
+    let thumb_height = (len / total).clamp(0.03, 1.0) as f32;
+    let scrollable = total - len;
+    let thumb_top = (offset.clamp(0.0, scrollable) / scrollable) as f32 * (1.0 - thumb_height);
+    Some((thumb_top, thumb_height))
+}
+
+fn scrollbar_offset_for_thumb(total: f64, len: f64, thumb_top: f32) -> Option<f64> {
+    let (_, thumb_height) = scrollbar_thumb_geometry(total, 0.0, len)?;
+    let thumb_travel = 1.0 - thumb_height;
+    Some((thumb_top / thumb_travel).clamp(0.0, 1.0) as f64 * (total - len))
+}
+
 fn scrollbar_element(
     sb: nmt_terminal::ghostty::ScrollbarInfo,
     opacity: f32,
     cx: &mut Context<TerminalPane>,
 ) -> Option<gpui::Stateful<gpui::Div>> {
-    if sb.total <= sb.len {
-        return None;
-    }
-    let total = sb.total.max(1) as f32;
-    let thumb_top = (sb.offset as f32 / total).clamp(0.0, 1.0);
-    let thumb_height = (sb.len as f32 / total).clamp(0.03, 1.0);
+    let (thumb_top, thumb_height) =
+        scrollbar_thumb_geometry(sb.total as f64, sb.offset as f64, sb.len as f64)?;
     Some(
         div()
             .id("terminal-scrollbar")
@@ -2753,7 +2767,10 @@ mod tests {
     use nmt_terminal::ghostty::BlockHandle;
     use nmt_terminal::render_buffer::RenderBuffer;
 
-    use super::{cursor_bounds, metrics, terminal_cell_at_position, terminal_scroll_lines};
+    use super::{
+        cursor_bounds, metrics, scrollbar_offset_for_thumb, scrollbar_thumb_geometry,
+        terminal_cell_at_position, terminal_scroll_lines,
+    };
     use crate::terminal::frame::TerminalCursor;
     use crate::terminal::surface::{SurfaceCell, SurfaceCellSide};
 
@@ -3029,6 +3046,17 @@ mod tests {
         assert_eq!(
             super::scrollbar_opacity(false, Some(super::SCROLLBAR_LINGER + super::SCROLLBAR_FADE)),
             None
+        );
+    }
+
+    #[test]
+    fn scrollbar_thumb_stays_inside_track_with_long_history() {
+        let (top, height) = scrollbar_thumb_geometry(10_000.0, 9_975.0, 25.0).unwrap();
+
+        assert!(top + height <= 1.0, "thumb bottom was {}", top + height);
+        assert_eq!(
+            scrollbar_offset_for_thumb(10_000.0, 25.0, top),
+            Some(9_975.0)
         );
     }
 }
