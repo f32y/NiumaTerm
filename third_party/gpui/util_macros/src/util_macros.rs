@@ -2,7 +2,7 @@
 #![allow(clippy::test_attr_in_doctest)]
 
 use proc_macro::TokenStream;
-use quote::{quote};
+use quote::quote;
 use syn::{LitStr, parse_macro_input};
 
 /// A macro used in tests for cross-platform path string literals in tests. On Windows it replaces
