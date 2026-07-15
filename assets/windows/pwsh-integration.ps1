@@ -14,7 +14,7 @@
 
 if (Get-Module PSReadLine) {
     $Global:__YtOriginalPrompt = $function:prompt
-    $Global:__YtRanCommand = $false
+    $Global:__YtReadLineCompleted = $false
     function Global:prompt {
         # Exit status of the command this prompt follows, read FIRST: any later
         # statement (the $osc7 -eq below resets $?) would clobber it. $? decides
@@ -32,12 +32,11 @@ if (Get-Module PSReadLine) {
             $osc7 = "$e]7;file:///$($pwd.ProviderPath -replace '\\','/')$b"
         }
         # Boundary protocol (always on since split blocks became authoritative):
-        # clear the host screen after each non-empty command so ConPTY's cursor
-        # row resets with the engine's per-block clear. Without this, PSReadLine
-        # echoes at ConPTY's ever-growing absolute row -> blank rows pile up
-        # above the input in every new block.
-        $clearAtBoundary = ($Global:__YtRanCommand -eq $true)
-        $Global:__YtRanCommand = $false
+        # A completed ReadLine can paint `^C` while returning an empty string. Clear
+        # every completed boundary so ConPTY's absolute row resets with the engine's
+        # per-block clear instead of accumulating blank rows before later prompts.
+        $clearAtBoundary = ($Global:__YtReadLineCompleted -eq $true)
+        $Global:__YtReadLineCompleted = $false
         # The prompt is proof no full-screen program is running: after a real
         # command, leave the alternate screen in case it died inside one
         # (vtebench Ctrl-C, killed vim) — otherwise conhost never emits the
@@ -70,7 +69,7 @@ if (Get-Module PSReadLine) {
     $Global:__YtOriginalReadLine = $function:PSConsoleHostReadLine
     function Global:PSConsoleHostReadLine {
         $line = & $Global:__YtOriginalReadLine
-        $Global:__YtRanCommand = -not [string]::IsNullOrWhiteSpace($line)
+        $Global:__YtReadLineCompleted = $true
         $e = [char]27
         $b = [char]7
         # ;C marks the transition from command input to command output.
