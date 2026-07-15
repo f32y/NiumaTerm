@@ -711,6 +711,23 @@ impl AgentMonitor {
         self.create_notification(route, normalize_title(title), normalize_body(body))
     }
 
+    pub fn interrupt(&mut self, route: &AgentRoute, now: Instant) -> MonitorMutation {
+        let Some(state) = self.panes.get_mut(route) else {
+            return MonitorMutation::default();
+        };
+        if state.status == AgentRuntimeStatus::Idle {
+            return MonitorMutation::default();
+        }
+        state.candidate = None;
+        state.current_owner = None;
+        state.has_work_evidence = false;
+        state.pending_completion = None;
+        let status_changed = state.set_status(AgentRuntimeStatus::Idle, now);
+        let mut mutation = self.remove_notification(route);
+        mutation.visible_changed |= status_changed;
+        mutation
+    }
+
     pub fn next_deadline(&self) -> Option<Instant> {
         self.panes
             .values()

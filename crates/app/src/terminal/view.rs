@@ -103,6 +103,10 @@ pub(crate) struct TerminalPane {
     frozen_select_anchor: Option<crate::terminal::block_list::FrozenPoint>,
 }
 
+pub(crate) struct AgentInterrupted;
+
+impl gpui::EventEmitter<AgentInterrupted> for TerminalPane {}
+
 impl TerminalPane {
     pub(crate) fn spawn(
         cx: &mut impl AppContext,
@@ -286,6 +290,8 @@ impl TerminalPane {
             return;
         }
         let action = input::key_action(&event.keystroke);
+        let interrupts_agent = matches!(event.keystroke.key.as_str(), "escape" | "esc")
+            && !event.keystroke.modifiers.modified();
         // Block-split: copy the frozen-region selection on the copy chord.
         if let (SurfaceKeyAction::CopyOrWrite(_), Some((a, b))) = (&action, self.frozen_selection) {
             let text = self.frozen_selection_to_text(a, b);
@@ -297,6 +303,9 @@ impl TerminalPane {
             }
         }
         if self.surface.apply_key_action(action) {
+            if interrupts_agent {
+                cx.emit(AgentInterrupted);
+            }
             self.invalidate(cx);
         }
     }
