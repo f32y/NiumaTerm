@@ -83,7 +83,9 @@ mod seal {
     pub trait Sealed {}
 }
 
-pub use accesskit::{self, Action as AccessibleAction, Orientation, Role, Toggled};
+pub use accesskit;
+pub use accesskit::Action as AccessibleAction;
+pub use accesskit::{Orientation, Role, Toggled};
 pub use action::*;
 pub use anyhow::Result;
 pub use app::*;
@@ -124,9 +126,6 @@ macro_rules! bench_main {
         criterion::criterion_main!($($tokens)*);
     };
 }
-use std::any::Any;
-use std::future::Future;
-
 pub use gpui_shared_string::*;
 pub use gpui_util::arc_cow::ArcCow;
 pub use input::*;
@@ -136,13 +135,13 @@ use key_dispatch::*;
 pub use keymap::*;
 pub use path_builder::*;
 pub use platform::*;
-pub use pollster::block_on;
 pub use profiler::*;
 #[cfg(any(target_os = "windows", target_os = "linux", target_family = "wasm"))]
 pub use queue::{PriorityQueueReceiver, PriorityQueueSender};
 pub use refineable::*;
 pub use scene::*;
 pub use shared_uri::*;
+use std::{any::Any, future::Future};
 pub use style::*;
 pub use styled::*;
 pub use subscription::*;
@@ -156,6 +155,8 @@ pub use text_system::*;
 pub use util::{FutureExt, Timeout};
 pub use view::*;
 pub use window::*;
+
+pub use pollster::block_on;
 
 /// The context trait, allows the different contexts in GPUI to be used
 /// interchangeably for certain operations.

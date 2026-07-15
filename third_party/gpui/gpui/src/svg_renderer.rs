@@ -1,13 +1,13 @@
-use std::hash::Hash;
-use std::sync::{Arc, LazyLock, OnceLock};
-
-use image::Frame;
-use resvg::tiny_skia::Pixmap;
-use smallvec::SmallVec;
-
 use crate::{
     AssetSource, DevicePixels, IsZero, RenderImage, Result, SharedString, Size,
     swap_rgba_pa_to_bgra,
+};
+use image::Frame;
+use resvg::tiny_skia::Pixmap;
+use smallvec::SmallVec;
+use std::{
+    hash::Hash,
+    sync::{Arc, LazyLock, OnceLock},
 };
 
 #[cfg(target_os = "macos")]
@@ -299,9 +299,8 @@ fn fix_generic_font_families(db: &mut usvg::fontdb::Database) {
 
 #[cfg(test)]
 mod tests {
-    use usvg::fontdb::{Database, Family, Query};
-
     use super::*;
+    use usvg::fontdb::{Database, Family, Query};
 
     const IBM_PLEX_REGULAR: &[u8] =
         include_bytes!("../../../assets/fonts/ibm-plex-sans/IBMPlexSans-Regular.ttf");

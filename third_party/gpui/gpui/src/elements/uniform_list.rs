@@ -4,20 +4,16 @@
 //! measurement. This is much faster than the full layout system, but only works for
 //! elements with uniform height.
 
-use std::cell::RefCell;
-use std::ops::Range;
-use std::rc::Rc;
-use std::{cmp, usize};
-
-use smallvec::SmallVec;
-
-use super::ListHorizontalSizingBehavior;
 use crate::{
     AnyElement, App, AvailableSpace, Bounds, ContentMask, Element, ElementId, Entity,
     GlobalElementId, Hitbox, InspectorElementId, InteractiveElement, Interactivity, IntoElement,
     IsZero, LayoutId, ListSizingBehavior, Overflow, Pixels, Point, ScrollHandle, Size,
     StyleRefinement, Styled, Window, point, px, size,
 };
+use smallvec::SmallVec;
+use std::{cell::RefCell, cmp, ops::Range, rc::Rc, usize};
+
+use super::ListHorizontalSizingBehavior;
 
 /// uniform_list provides lazy rendering for a set of items that are of uniform height.
 /// When rendered into a container with overflow-y: hidden and a fixed (or max) height,
@@ -727,13 +723,11 @@ mod test {
 
     #[gpui::test]
     fn test_scroll_strategy_nearest(cx: &mut TestAppContext) {
-        use std::ops::Range;
-
-        use crate::prelude::*;
         use crate::{
-            Context, FocusHandle, ScrollStrategy, UniformListScrollHandle, Window, div, px,
-            uniform_list,
+            Context, FocusHandle, ScrollStrategy, UniformListScrollHandle, Window, div, prelude::*,
+            px, uniform_list,
         };
+        use std::ops::Range;
 
         actions!(example, [SelectNext, SelectPrev]);
 

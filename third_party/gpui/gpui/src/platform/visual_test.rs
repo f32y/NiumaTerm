@@ -5,19 +5,21 @@
 //! - Deterministic task scheduling via TestDispatcher
 //! - Controllable time via `advance_clock`
 
-use std::path::{Path, PathBuf};
-use std::rc::Rc;
-use std::sync::Arc;
-
+use crate::ScreenCaptureSource;
+use crate::{
+    AnyWindowHandle, BackgroundExecutor, ClipboardItem, CursorStyle, ForegroundExecutor, Keymap,
+    Menu, MenuItem, OwnedMenu, PathPromptOptions, Platform, PlatformDisplay,
+    PlatformKeyboardLayout, PlatformKeyboardMapper, PlatformTextSystem, PlatformWindow, Task,
+    TestDispatcher, WindowAppearance, WindowParams,
+};
 use anyhow::Result;
 use futures::channel::oneshot;
 use parking_lot::Mutex;
 
-use crate::{
-    AnyWindowHandle, BackgroundExecutor, ClipboardItem, CursorStyle, ForegroundExecutor, Keymap,
-    Menu, MenuItem, OwnedMenu, PathPromptOptions, Platform, PlatformDisplay,
-    PlatformKeyboardLayout, PlatformKeyboardMapper, PlatformTextSystem, PlatformWindow,
-    ScreenCaptureSource, Task, TestDispatcher, WindowAppearance, WindowParams,
+use std::{
+    path::{Path, PathBuf},
+    rc::Rc,
+    sync::Arc,
 };
 
 /// A platform that combines real Mac rendering with controllable TestDispatcher.

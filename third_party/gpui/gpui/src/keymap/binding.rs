@@ -1,11 +1,10 @@
 use std::rc::Rc;
 
-use smallvec::SmallVec;
-
 use crate::{
     Action, AsKeystroke, DummyKeyboardMapper, InvalidKeystrokeError, KeyBindingContextPredicate,
     KeybindingKeystroke, Keystroke, PlatformKeyboardMapper, SharedString,
 };
+use smallvec::SmallVec;
 
 /// A keybinding and its associated metadata, from the keymap.
 pub struct KeyBinding {

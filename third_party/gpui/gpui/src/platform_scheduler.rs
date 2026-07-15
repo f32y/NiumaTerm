@@ -1,21 +1,24 @@
-use std::any::Any;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU16, Ordering};
-#[cfg(not(target_family = "wasm"))]
-use std::task::{Context, Poll};
-use std::time::Duration;
-
+use crate::{PlatformDispatcher, RunnableMeta};
 use async_task::Runnable;
 use chrono::{DateTime, Utc};
 use futures::channel::oneshot;
+use scheduler::Instant;
 use scheduler::{
-    Clock, Instant, LocalExecutor, Priority, Scheduler, SessionId, Task, TestScheduler, Timer,
+    Clock, LocalExecutor, Priority, Scheduler, SessionId, Task, TestScheduler, Timer,
     spawn_dedicated_thread,
 };
-
-use crate::{PlatformDispatcher, RunnableMeta};
+#[cfg(not(target_family = "wasm"))]
+use std::task::{Context, Poll};
+use std::{
+    any::Any,
+    future::Future,
+    pin::Pin,
+    sync::{
+        Arc,
+        atomic::{AtomicU16, Ordering},
+    },
+    time::Duration,
+};
 
 /// A production implementation of [`Scheduler`] that wraps a [`PlatformDispatcher`].
 ///
@@ -184,12 +187,10 @@ impl Clock for PlatformClock {
 
 #[cfg(all(test, not(target_family = "wasm")))]
 mod tests {
-    use std::time::Instant as StdInstant;
-
-    use scheduler::BackgroundExecutor;
-
     use super::*;
     use crate::RunnableVariant;
+    use scheduler::BackgroundExecutor;
+    use std::time::Instant as StdInstant;
 
     // `spawn_dedicated` shouldn't touch the platform dispatcher at all;
     // panicking on every method ensures the test catches it if it does.
@@ -266,9 +267,8 @@ mod tests {
 
     #[test]
     fn spawn_dedicated_dropping_task_cancels_future() {
-        use std::sync::mpsc;
-
         use parking_lot::Mutex;
+        use std::sync::mpsc;
 
         let background =
             BackgroundExecutor::new(Arc::new(PlatformScheduler::new(Arc::new(SmokeDispatcher))));

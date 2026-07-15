@@ -1,12 +1,11 @@
+use crate::{App, SharedString, SharedUri};
+use futures::{Future, TryFutureExt};
+
 use std::fmt::Debug;
 use std::hash::{BuildHasher, Hash};
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-
-use futures::{Future, TryFutureExt};
-
-use crate::{App, SharedString, SharedUri};
 
 /// An enum representing
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]

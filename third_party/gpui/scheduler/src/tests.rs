@@ -1,17 +1,20 @@
-use std::cell::RefCell;
-use std::collections::{BTreeSet, HashSet};
-use std::pin::Pin;
-use std::rc::Rc;
-use std::sync::Arc;
-use std::task::{Context, Poll, Waker};
-
-use futures::channel::{mpsc, oneshot};
-use futures::executor::block_on;
-use futures::sink::SinkExt;
-use futures::stream::{FuturesUnordered, StreamExt};
-use futures::{FutureExt, future};
-
 use super::*;
+use futures::{
+    FutureExt,
+    channel::{mpsc, oneshot},
+    executor::block_on,
+    future,
+    sink::SinkExt,
+    stream::{FuturesUnordered, StreamExt},
+};
+use std::{
+    cell::RefCell,
+    collections::{BTreeSet, HashSet},
+    pin::Pin,
+    rc::Rc,
+    sync::Arc,
+    task::{Context, Poll, Waker},
+};
 
 #[test]
 fn test_foreground_executor_spawn() {

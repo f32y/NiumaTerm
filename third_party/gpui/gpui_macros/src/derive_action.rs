@@ -1,10 +1,8 @@
+use crate::register_action::generate_register_action;
 use proc_macro::TokenStream;
 use proc_macro2::Ident;
 use quote::quote;
-use syn::parse::ParseStream;
-use syn::{Data, DeriveInput, LitStr, Token};
-
-use crate::register_action::generate_register_action;
+use syn::{Data, DeriveInput, LitStr, Token, parse::ParseStream};
 
 pub(crate) fn derive_action(input: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(input as DeriveInput);
@@ -85,9 +83,7 @@ pub(crate) fn derive_action(input: TokenStream) -> TokenStream {
             })
             .unwrap_or_else(|e| panic!("in #[action] attribute: {}", e));
         } else if attr.path().is_ident("doc") {
-            use syn::Expr::Lit;
-            use syn::Lit::Str;
-            use syn::{ExprLit, Meta, MetaNameValue};
+            use syn::{Expr::Lit, ExprLit, Lit::Str, Meta, MetaNameValue};
             if let Meta::NameValue(MetaNameValue {
                 value:
                     Lit(ExprLit {

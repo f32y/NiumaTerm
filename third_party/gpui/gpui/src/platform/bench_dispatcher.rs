@@ -1,12 +1,16 @@
-use std::collections::BinaryHeap;
-use std::sync::Arc;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::{
+    collections::BinaryHeap,
+    sync::Arc,
+    thread,
+    time::{Duration, Instant},
+};
 
 use parking_lot::{Condvar, Mutex};
 
-use crate::queue::{PriorityQueueReceiver, PriorityQueueSender};
-use crate::{PlatformDispatcher, Priority, RunnableVariant, profiler};
+use crate::{
+    PlatformDispatcher, Priority, RunnableVariant, profiler,
+    queue::{PriorityQueueReceiver, PriorityQueueSender},
+};
 
 const MIN_THREADS: usize = 2;
 

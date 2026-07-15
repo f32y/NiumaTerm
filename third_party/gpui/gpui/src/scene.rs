@@ -1,18 +1,18 @@
 // todo("windows"): remove
 #![cfg_attr(windows, allow(dead_code))]
 
-use std::fmt::Debug;
-use std::iter::Peekable;
-use std::ops::{Add, Range, Sub};
-use std::slice;
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::bounds_tree::BoundsTree;
 use crate::{
     AtlasTextureId, AtlasTile, Background, Bounds, ContentMask, Corners, Edges, Hsla, Pixels,
-    Point, Radians, ScaledPixels, Size, point,
+    Point, Radians, ScaledPixels, Size, bounds_tree::BoundsTree, point,
+};
+use std::{
+    fmt::Debug,
+    iter::Peekable,
+    ops::{Add, Range, Sub},
+    slice,
 };
 
 #[allow(non_camel_case_types, unused)]

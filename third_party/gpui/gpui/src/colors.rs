@@ -1,7 +1,6 @@
+use crate::{App, Global, Rgba, Window, WindowAppearance, rgb};
 use std::ops::Deref;
 use std::sync::Arc;
-
-use crate::{App, Global, Rgba, Window, WindowAppearance, rgb};
 
 /// The default set of colors for gpui.
 ///

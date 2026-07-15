@@ -1,25 +1,30 @@
-use std::borrow::Cow;
-use std::ffi::{c_uint, c_void};
-use std::mem::ManuallyDrop;
+use std::{
+    borrow::Cow,
+    ffi::{c_uint, c_void},
+    mem::ManuallyDrop,
+};
 
 use anyhow::{Context, Result};
 use collections::HashMap;
-use gpui::*;
 use gpui_util::{ResultExt, maybe};
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
-use windows::Win32::Foundation::*;
-use windows::Win32::Globalization::GetUserDefaultLocaleName;
-use windows::Win32::Graphics::Direct3D::D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
-use windows::Win32::Graphics::Direct3D11::*;
-use windows::Win32::Graphics::DirectWrite::*;
-use windows::Win32::Graphics::Dxgi::Common::*;
-use windows::Win32::Graphics::Gdi::LOGFONTW;
-use windows::Win32::System::SystemServices::LOCALE_NAME_MAX_LENGTH;
-use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::core::*;
+use windows::{
+    Win32::{
+        Foundation::*,
+        Globalization::GetUserDefaultLocaleName,
+        Graphics::{
+            Direct3D::D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, Direct3D11::*, DirectWrite::*,
+            Dxgi::Common::*, Gdi::LOGFONTW,
+        },
+        System::SystemServices::LOCALE_NAME_MAX_LENGTH,
+        UI::WindowsAndMessaging::*,
+    },
+    core::*,
+};
 use windows_numerics::Vector2;
 
 use crate::*;
+use gpui::*;
 
 #[derive(Debug)]
 struct FontInfo {

@@ -15,33 +15,35 @@
 //! and Tailwind-like styling that you can use to build your own custom elements. Div is
 //! constructed by combining these two systems into an all-in-one element.
 
-use std::any::{Any, TypeId};
-use std::cell::RefCell;
-use std::cmp::Ordering;
-use std::fmt::Debug;
-use std::marker::PhantomData;
-use std::mem;
-use std::rc::Rc;
-use std::sync::Arc;
-use std::time::Duration;
-
-use collections::HashMap;
-use gpui_util::ResultExt;
-use refineable::Refineable;
-use smallvec::SmallVec;
-use stacksafe::{StackSafe, stacksafe};
-
-use super::ImageCacheProvider;
+use crate::PinchEvent;
 use crate::{
     Action, AnyDrag, AnyElement, AnyTooltip, AnyView, App, Bounds, ClickEvent, DispatchPhase,
     Display, Element, ElementId, Entity, EntityId, FocusHandle, Global, GlobalElementId, Hitbox,
     HitboxBehavior, HitboxId, InspectorElementId, IntoElement, IsZero, KeyContext, KeyDownEvent,
     KeyUpEvent, KeyboardButton, KeyboardClickEvent, LayoutId, ModifiersChangedEvent, MouseButton,
     MouseClickEvent, MouseDownEvent, MouseMoveEvent, MousePressureEvent, MouseUpEvent, Overflow,
-    ParentElement, PinchEvent, Pixels, Point, Render, ScrollWheelEvent, SharedString, Size, Style,
+    ParentElement, Pixels, Point, Render, ScrollWheelEvent, SharedString, Size, Style,
     StyleRefinement, Styled, Task, TooltipId, Visibility, Window, WindowControlArea, point, px,
     size,
 };
+use collections::HashMap;
+use gpui_util::ResultExt;
+use refineable::Refineable;
+use smallvec::SmallVec;
+use stacksafe::{StackSafe, stacksafe};
+use std::{
+    any::{Any, TypeId},
+    cell::RefCell,
+    cmp::Ordering,
+    fmt::Debug,
+    marker::PhantomData,
+    mem,
+    rc::Rc,
+    sync::Arc,
+    time::Duration,
+};
+
+use super::ImageCacheProvider;
 
 const DRAG_THRESHOLD: f64 = 2.;
 const DEFAULT_TOOLTIP_SHOW_DELAY: Duration = Duration::from_millis(500);
@@ -4010,14 +4012,12 @@ impl ScrollHandle {
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Weak;
-
     use super::*;
-    use crate::util::FluentBuilder as _;
     use crate::{
         AnyWindowHandle, AppContext as _, Context, InputEvent, Keystroke, MouseMoveEvent,
-        TestAppContext,
+        TestAppContext, util::FluentBuilder as _,
     };
+    use std::rc::Weak;
 
     struct TestTooltipView;
 

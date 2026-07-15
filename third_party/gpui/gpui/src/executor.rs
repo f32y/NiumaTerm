@@ -1,18 +1,12 @@
-use std::future::Future;
-use std::marker::PhantomData;
-use std::mem;
-use std::pin::Pin;
-use std::rc::Rc;
-use std::sync::Arc;
-use std::time::Duration;
-
+use crate::{App, PlatformDispatcher, PlatformScheduler};
 use futures::channel::mpsc;
 use futures::prelude::*;
 use gpui_util::{TryFutureExt, TryFutureExtBacktrace};
-pub use scheduler::{FallibleTask, LocalExecutor as SchedulerLocalExecutor, Priority, Task};
-use scheduler::{Instant, Scheduler};
+use scheduler::Instant;
+use scheduler::Scheduler;
+use std::{future::Future, marker::PhantomData, mem, pin::Pin, rc::Rc, sync::Arc, time::Duration};
 
-use crate::{App, PlatformDispatcher, PlatformScheduler};
+pub use scheduler::{FallibleTask, LocalExecutor as SchedulerLocalExecutor, Priority, Task};
 
 /// A pointer to the executor that is currently running,
 /// for spawning background tasks.
@@ -456,10 +450,9 @@ impl Drop for Scope<'_> {
 
 #[cfg(test)]
 mod test {
-    use std::cell::RefCell;
-
     use super::*;
     use crate::{App, TestDispatcher, TestPlatform};
+    use std::cell::RefCell;
 
     /// Helper to create test infrastructure.
     /// Returns (dispatcher, background_executor, app).

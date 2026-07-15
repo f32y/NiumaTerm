@@ -1,14 +1,11 @@
-use std::fs;
-use std::path::Path;
-use std::sync::Arc;
-
-use gpui_util::ResultExt;
+use std::{fs, path::Path, sync::Arc};
 
 use crate::{
     App, Asset, Bounds, Element, GlobalElementId, Hitbox, InspectorElementId, InteractiveElement,
     Interactivity, IntoElement, LayoutId, Pixels, Point, Radians, SharedString, Size,
     StyleRefinement, Styled, TransformationMatrix, Window, point, px, radians, size,
 };
+use gpui_util::ResultExt;
 
 /// An SVG element.
 pub struct Svg {

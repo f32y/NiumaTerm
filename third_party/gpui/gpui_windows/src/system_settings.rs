@@ -1,5 +1,7 @@
-use std::cell::Cell;
-use std::ffi::{c_uint, c_void};
+use std::{
+    cell::Cell,
+    ffi::{c_uint, c_void},
+};
 
 use gpui_util::ResultExt;
 use windows::Win32::UI::WindowsAndMessaging::{

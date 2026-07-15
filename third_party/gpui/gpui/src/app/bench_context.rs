@@ -1,19 +1,21 @@
-use std::cell::{OnceCell, RefCell};
-use std::future::Future;
-use std::rc::Rc;
-use std::sync::Arc;
-use std::time::Duration;
+use std::{
+    cell::{OnceCell, RefCell},
+    future::Future,
+    rc::Rc,
+    sync::Arc,
+    time::Duration,
+};
 
 use anyhow::{Result, anyhow};
 use hdrhistogram::Histogram;
 
-use crate::app::GpuiBorrow;
-use crate::profiler::{self, FrameTiming, FrameTimingCollector};
 use crate::{
     AnyView, AnyWindowHandle, App, AppCell, AppContext, BackgroundExecutor, BenchDispatcher,
     Bounds, Context, Empty, Entity, EntityId, Focusable, ForegroundExecutor, Global, Platform,
     PlatformHeadlessRenderer, PlatformTextSystem, Render, Reservation, Task, TestPlatform,
     VisualContext, Window, WindowBounds, WindowHandle, WindowOptions,
+    app::GpuiBorrow,
+    profiler::{self, FrameTiming, FrameTimingCollector},
 };
 
 /// Returns a benchmark platform backed by this thread's shared dispatcher.

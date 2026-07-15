@@ -53,9 +53,8 @@ impl<'de> serde::Deserialize<'de> for FontFeatures {
     where
         D: serde::Deserializer<'de>,
     {
-        use std::fmt;
-
         use serde::de::{MapAccess, Visitor};
+        use std::fmt;
 
         struct FontFeaturesVisitor;
 

@@ -1,28 +1,31 @@
-use std::fs;
-use std::io::{self, Cursor};
-use std::ops::{Deref, DerefMut};
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
-use std::sync::Arc;
-use std::time::Duration;
-
-use anyhow::Result;
-use futures::Future;
-use gpui_util::ResultExt;
-use image::codecs::gif::GifDecoder;
-use image::codecs::webp::WebPDecoder;
-use image::{AnimationDecoder, DynamicImage, Frame, ImageError, ImageFormat, Rgba};
-use scheduler::Instant;
-use smallvec::SmallVec;
-use thiserror::Error;
-
-use super::{Stateful, StatefulInteractiveElement};
 use crate::{
     AnyElement, AnyImageCache, App, Asset, AssetLogger, Bounds, DefiniteLength, Element, ElementId,
     Entity, GlobalElementId, Hitbox, Image, ImageCache, InspectorElementId, InteractiveElement,
     Interactivity, IntoElement, LayoutId, Length, ObjectFit, Pixels, RenderImage, Resource,
     SharedString, SharedUri, StyleRefinement, Styled, Task, Window, px,
 };
+use anyhow::Result;
+
+use futures::Future;
+use gpui_util::ResultExt;
+use image::{
+    AnimationDecoder, DynamicImage, Frame, ImageError, ImageFormat, Rgba,
+    codecs::{gif::GifDecoder, webp::WebPDecoder},
+};
+use scheduler::Instant;
+use smallvec::SmallVec;
+use std::{
+    fs,
+    io::{self, Cursor},
+    ops::{Deref, DerefMut},
+    path::{Path, PathBuf},
+    str::FromStr,
+    sync::Arc,
+    time::Duration,
+};
+use thiserror::Error;
+
+use super::{Stateful, StatefulInteractiveElement};
 
 /// The delay before showing the loading state.
 pub const LOADING_DELAY: Duration = Duration::from_millis(200);
@@ -773,10 +776,9 @@ impl From<image::ImageError> for ImageCacheError {
 
 #[cfg(test)]
 mod tests {
-    use image::{Frame, ImageBuffer, Rgba};
-
     use super::*;
     use crate::{ParentElement as _, TestAppContext, canvas, div, point, px, size};
+    use image::{Frame, ImageBuffer, Rgba};
 
     const TEST_IMG_ID: &str = "test-img";
 

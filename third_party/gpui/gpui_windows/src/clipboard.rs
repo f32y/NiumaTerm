@@ -2,21 +2,25 @@ use std::sync::LazyLock;
 
 use anyhow::Result;
 use collections::FxHashMap;
+use itertools::Itertools;
+use windows::Win32::{
+    Foundation::{HANDLE, HGLOBAL},
+    System::{
+        DataExchange::{
+            CloseClipboard, CountClipboardFormats, EmptyClipboard, EnumClipboardFormats,
+            GetClipboardData, GetClipboardFormatNameW, OpenClipboard, RegisterClipboardFormatW,
+            SetClipboardData,
+        },
+        Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock},
+        Ole::{CF_DIB, CF_HDROP, CF_UNICODETEXT},
+    },
+    UI::Shell::{DragQueryFileW, HDROP},
+};
+use windows::core::{Owned, PCWSTR};
+
 use gpui::{
     ClipboardEntry, ClipboardItem, ClipboardString, ExternalPaths, Image, ImageFormat, hash,
 };
-use itertools::Itertools;
-use windows::Win32::Foundation::{HANDLE, HGLOBAL};
-use windows::Win32::System::DataExchange::{
-    CloseClipboard, CountClipboardFormats, EmptyClipboard, EnumClipboardFormats, GetClipboardData,
-    GetClipboardFormatNameW, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
-};
-use windows::Win32::System::Memory::{
-    GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock,
-};
-use windows::Win32::System::Ole::{CF_DIB, CF_HDROP, CF_UNICODETEXT};
-use windows::Win32::UI::Shell::{DragQueryFileW, HDROP};
-use windows::core::{Owned, PCWSTR};
 
 const DRAGDROP_GET_FILES_COUNT: u32 = 0xFFFFFFFF;
 

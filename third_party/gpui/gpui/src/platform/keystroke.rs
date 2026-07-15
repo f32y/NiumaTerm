@@ -1,8 +1,9 @@
-use std::error::Error;
-use std::fmt::{Display, Write};
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::{
+    error::Error,
+    fmt::{Display, Write},
+};
 
 use crate::PlatformKeyboardMapper;
 

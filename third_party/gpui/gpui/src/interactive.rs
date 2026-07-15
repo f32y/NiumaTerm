@@ -1,15 +1,9 @@
-use std::any::Any;
-use std::fmt::Debug;
-use std::ops::Deref;
-use std::path::PathBuf;
-
-use smallvec::SmallVec;
-
-use crate::seal::Sealed;
 use crate::{
     Bounds, Capslock, Context, Empty, IntoElement, Keystroke, Modifiers, Pixels, Point, Render,
-    Window, point,
+    Window, point, seal::Sealed,
 };
+use smallvec::SmallVec;
+use std::{any::Any, fmt::Debug, ops::Deref, path::PathBuf};
 
 /// An event from a platform input source.
 pub trait InputEvent: Sealed + 'static {

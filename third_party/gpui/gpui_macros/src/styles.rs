@@ -1,8 +1,11 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
-use syn::parse::{Parse, ParseStream, Result};
-use syn::{Token, Visibility, braced, parse_macro_input};
+use syn::{
+    Token, Visibility, braced,
+    parse::{Parse, ParseStream, Result},
+    parse_macro_input,
+};
 
 #[derive(Debug)]
 struct StyleableMacroInput {

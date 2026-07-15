@@ -11,10 +11,12 @@ fn main() {
 
 #[cfg(all(target_os = "windows", not(debug_assertions)))]
 mod shader_compilation {
-    use std::fs;
-    use std::io::Write;
-    use std::path::{Path, PathBuf};
-    use std::process::{self, Command};
+    use std::{
+        fs,
+        io::Write,
+        path::{Path, PathBuf},
+        process::{self, Command},
+    };
 
     pub fn compile_shaders() {
         let shader_path =

@@ -3,14 +3,11 @@ mod cursor;
 pub mod property_test;
 mod tree_map;
 
-use std::cmp::Ordering;
-use std::iter::FromIterator;
-use std::marker::PhantomData;
-use std::sync::Arc;
-use std::{fmt, mem};
-
 pub use cursor::{Cursor, FilterCursor, Iter};
 use heapless::Vec as ArrayVec;
+use std::marker::PhantomData;
+use std::mem;
+use std::{cmp::Ordering, fmt, iter::FromIterator, sync::Arc};
 pub use tree_map::{MapSeekTarget, TreeMap, TreeSet};
 
 #[cfg(test)]
@@ -1317,12 +1314,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::cmp;
-
-    use rand::distr::StandardUniform;
-    use rand::prelude::*;
-
     use super::*;
+    use rand::{distr::StandardUniform, prelude::*};
+    use std::cmp;
 
     #[test]
     fn test_extend_and_push_tree() {

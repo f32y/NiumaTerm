@@ -1,13 +1,12 @@
-use std::rc::Rc;
-use std::time::Duration;
-
-pub use easing::*;
 use scheduler::Instant;
-use smallvec::SmallVec;
+use std::{rc::Rc, time::Duration};
 
 use crate::{
     AnyElement, App, Element, ElementId, GlobalElementId, InspectorElementId, IntoElement, Window,
 };
+
+pub use easing::*;
+use smallvec::SmallVec;
 
 /// An animation that can be applied to an element.
 #[derive(Clone)]

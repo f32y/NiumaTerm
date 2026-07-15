@@ -1,24 +1,28 @@
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread::{ThreadId, current};
-use std::time::Duration;
+use std::{
+    sync::Mutex,
+    sync::atomic::{AtomicBool, Ordering},
+    thread::{ThreadId, current},
+    time::Duration,
+};
 
 use anyhow::Context;
+use gpui_util::ResultExt;
+use windows::{
+    System::Threading::{
+        ThreadPool, ThreadPoolTimer, TimerElapsedHandler, WorkItemHandler, WorkItemPriority,
+    },
+    Win32::{
+        Foundation::{LPARAM, WPARAM},
+        Media::{timeBeginPeriod, timeEndPeriod},
+        System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL},
+        UI::WindowsAndMessaging::PostMessageW,
+    },
+};
+
+use crate::{HWND, SafeHwnd, WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD};
 use gpui::{
     PlatformDispatcher, Priority, PriorityQueueSender, RunnableVariant, TimerResolutionGuard,
 };
-use gpui_util::ResultExt;
-use windows::System::Threading::{
-    ThreadPool, ThreadPoolTimer, TimerElapsedHandler, WorkItemHandler, WorkItemPriority,
-};
-use windows::Win32::Foundation::{LPARAM, WPARAM};
-use windows::Win32::Media::{timeBeginPeriod, timeEndPeriod};
-use windows::Win32::System::Threading::{
-    GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL,
-};
-use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
-
-use crate::{HWND, SafeHwnd, WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD};
 
 pub(crate) struct WindowsDispatcher {
     pub(crate) wake_posted: AtomicBool,

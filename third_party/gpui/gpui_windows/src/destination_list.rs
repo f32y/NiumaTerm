@@ -1,20 +1,26 @@
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
-use gpui::{Action, MenuItem, SharedString};
 use itertools::Itertools;
 use smallvec::SmallVec;
-use windows::Win32::Foundation::PROPERTYKEY;
-use windows::Win32::Globalization::u_strlen;
-use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
-use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
-use windows::Win32::UI::Controls::INFOTIPSIZE;
-use windows::Win32::UI::Shell::Common::{IObjectArray, IObjectCollection};
-use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
-use windows::Win32::UI::Shell::{
-    DestinationList, EnumerableObjectCollection, ICustomDestinationList, IShellLinkW, ShellLink,
+use windows::{
+    Win32::{
+        Foundation::PROPERTYKEY,
+        Globalization::u_strlen,
+        System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, StructuredStorage::PROPVARIANT},
+        UI::{
+            Controls::INFOTIPSIZE,
+            Shell::{
+                Common::{IObjectArray, IObjectCollection},
+                DestinationList, EnumerableObjectCollection, ICustomDestinationList, IShellLinkW,
+                PropertiesSystem::IPropertyStore,
+                ShellLink,
+            },
+        },
+    },
+    core::{GUID, HSTRING, Interface},
 };
-use windows::core::{GUID, HSTRING, Interface};
+
+use gpui::{Action, MenuItem, SharedString};
 
 pub(crate) struct JumpList {
     pub(crate) dock_menus: Vec<DockMenuItem>,

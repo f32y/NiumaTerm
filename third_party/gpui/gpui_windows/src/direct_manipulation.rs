@@ -4,12 +4,12 @@ use std::rc::Rc;
 use anyhow::Result;
 use gpui::*;
 use gpui_util::ResultExt;
-use windows::Win32::Foundation::*;
-use windows::Win32::Graphics::DirectManipulation::*;
-use windows::Win32::Graphics::Gdi::*;
-use windows::Win32::System::Com::*;
-use windows::Win32::UI::Input::Pointer::*;
-use windows::Win32::UI::WindowsAndMessaging::*;
+use windows::Win32::{
+    Foundation::*,
+    Graphics::{DirectManipulation::*, Gdi::*},
+    System::Com::*,
+    UI::{Input::Pointer::*, WindowsAndMessaging::*},
+};
 
 use crate::*;
 

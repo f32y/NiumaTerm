@@ -1,11 +1,15 @@
-use std::sync::LazyLock;
-use std::time::{Duration, Instant};
+use std::{
+    sync::LazyLock,
+    time::{Duration, Instant},
+};
 
 use anyhow::{Context, Result};
 use gpui_util::ResultExt;
-use windows::Win32::Foundation::HWND;
-use windows::Win32::Graphics::Dwm::{DWM_TIMING_INFO, DwmFlush, DwmGetCompositionTimingInfo};
-use windows::Win32::System::Performance::QueryPerformanceFrequency;
+use windows::Win32::{
+    Foundation::HWND,
+    Graphics::Dwm::{DWM_TIMING_INFO, DwmFlush, DwmGetCompositionTimingInfo},
+    System::Performance::QueryPerformanceFrequency,
+};
 
 static QPC_TICKS_PER_SECOND: LazyLock<u64> = LazyLock::new(|| {
     let mut frequency = 0;

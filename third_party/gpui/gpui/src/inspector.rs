@@ -20,12 +20,10 @@ pub use conditional::*;
 
 #[cfg(any(feature = "inspector", debug_assertions))]
 mod conditional {
-    use std::any::{Any, TypeId};
-
-    use collections::{FxHashMap, TypeIdHashMap};
-
     use super::*;
     use crate::{AnyElement, App, Context, Empty, IntoElement, Render, Window};
+    use collections::{FxHashMap, TypeIdHashMap};
+    use std::any::{Any, TypeId};
 
     /// `GlobalElementId` qualified by source location of element construction.
     #[derive(Debug, Eq, PartialEq, Hash)]

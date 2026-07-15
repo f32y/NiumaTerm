@@ -1,17 +1,21 @@
-use std::cell::LazyCell;
-use std::collections::{HashMap, VecDeque};
-use std::hash::{DefaultHasher, Hash, Hasher};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread::ThreadId;
-use std::time::Duration;
-
 use itertools::Itertools;
 use scheduler::{Instant, SpawnTime};
+use std::{
+    cell::LazyCell,
+    collections::{HashMap, VecDeque},
+    hash::{DefaultHasher, Hash, Hasher},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread::ThreadId,
+    time::Duration,
+};
 
 mod actions;
 pub use actions::{ActionStatistics, ActionTiming, take_action_stats};
 pub(crate) use actions::{save_action_timing, update_running_action};
+
 use serde::{Deserialize, Serialize};
 
 use crate::{SharedString, TasksIncluded, WindowId};

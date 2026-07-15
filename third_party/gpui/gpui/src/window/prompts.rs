@@ -2,12 +2,13 @@ use std::ops::Deref;
 
 use futures::channel::oneshot;
 
-use super::Window;
 use crate::{
     AnyView, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, IntoElement, ParentElement, PromptButton, PromptLevel, Render,
     StatefulInteractiveElement, Styled, div, opaque_grey, white,
 };
+
+use super::Window;
 
 /// The event emitted when a prompt's option is selected.
 /// The usize is the index of the selected option, from the actions

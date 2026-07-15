@@ -1,15 +1,18 @@
 use collections::FxHashMap;
 use etagere::BucketedAtlasAllocator;
+use parking_lot::Mutex;
+use windows::Win32::Graphics::{
+    Direct3D11::{
+        D3D11_BIND_SHADER_RESOURCE, D3D11_BOX, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
+        ID3D11Device, ID3D11DeviceContext, ID3D11ShaderResourceView, ID3D11Texture2D,
+    },
+    Dxgi::Common::*,
+};
+
 use gpui::{
     AtlasKey, AtlasTextureId, AtlasTextureKind, AtlasTextureList, AtlasTile, Bounds, DevicePixels,
     PlatformAtlas, Point, Size,
 };
-use parking_lot::Mutex;
-use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BIND_SHADER_RESOURCE, D3D11_BOX, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, ID3D11Device,
-    ID3D11DeviceContext, ID3D11ShaderResourceView, ID3D11Texture2D,
-};
-use windows::Win32::Graphics::Dxgi::Common::*;
 
 pub(crate) struct DirectXAtlas(Mutex<DirectXAtlasState>);
 
@@ -320,16 +323,16 @@ fn etagere_point_to_device(value: etagere::Point) -> Point<DevicePixels> {
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Cow;
-
-    use gpui::{ImageId, RenderImageParams};
-    use windows::Win32::Foundation::HMODULE;
-    use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_WARP;
-    use windows::Win32::Graphics::Direct3D11::{
-        D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION, D3D11CreateDevice,
-    };
-
     use super::*;
+    use gpui::{ImageId, RenderImageParams};
+    use std::borrow::Cow;
+    use windows::Win32::{
+        Foundation::HMODULE,
+        Graphics::{
+            Direct3D::D3D_DRIVER_TYPE_WARP,
+            Direct3D11::{D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION, D3D11CreateDevice},
+        },
+    };
 
     fn create_atlas() -> Option<DirectXAtlas> {
         let mut device: Option<ID3D11Device> = None;

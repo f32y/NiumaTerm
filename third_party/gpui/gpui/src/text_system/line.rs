@@ -1,13 +1,11 @@
-use std::sync::Arc;
-
-use derive_more::{Deref, DerefMut};
-use smallvec::SmallVec;
-
 use crate::{
     App, Bounds, DevicePixels, Half, Hsla, LineLayout, Pixels, Point, RenderGlyphParams, Result,
     ShapedGlyph, ShapedRun, SharedString, StrikethroughStyle, TextAlign, UnderlineStyle, Window,
     WrapBoundary, WrappedLineLayout, black, fill, point, px, size,
 };
+use derive_more::{Deref, DerefMut};
+use smallvec::SmallVec;
+use std::sync::Arc;
 
 /// Pre-computed glyph data for efficient painting without per-glyph cache lookups.
 ///

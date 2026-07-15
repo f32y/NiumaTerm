@@ -290,10 +290,9 @@ impl AnchoredPositionMode {
 
 #[cfg(test)]
 mod tests {
-    use crate::prelude::*;
     use crate::{
-        Context, Pixels, PlatformInput, Point, TestAppContext, Window, deferred, div, point, px,
-        size,
+        Context, Pixels, PlatformInput, Point, TestAppContext, Window, deferred, div, point,
+        prelude::*, px, size,
     };
 
     struct AnchoredTestView {

@@ -1,11 +1,11 @@
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering::SeqCst;
-use std::task;
-use std::time::Duration;
-
 use crate::{BackgroundExecutor, Task};
+use std::{
+    future::Future,
+    pin::Pin,
+    sync::atomic::{AtomicUsize, Ordering::SeqCst},
+    task,
+    time::Duration,
+};
 
 /// A helper trait for building complex objects with imperative conditionals in a fluent style.
 pub trait FluentBuilder {
@@ -162,8 +162,9 @@ pub(crate) fn ceil_to_device_pixel(logical: f32, scale_factor: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::TestAppContext;
+
+    use super::*;
 
     #[test]
     fn test_round_half_toward_zero() {

@@ -1,17 +1,3 @@
-use std::cell::RefCell;
-use std::future::Future;
-use std::ops::Deref;
-use std::path::PathBuf;
-use std::rc::Rc;
-use std::sync::Arc;
-use std::time::Duration;
-
-use anyhow::{anyhow, bail};
-use futures::channel::oneshot;
-use futures::{Stream, StreamExt};
-
-use crate::app::GpuiMode;
-use crate::window::ElementArenaScope;
 use crate::{
     Action, AnyView, AnyWindowHandle, App, AppCell, AppContext, AsyncApp, AvailableSpace,
     BackgroundExecutor, BorrowAppContext, Bounds, Capslock, ClipboardItem, DrawPhase, Drawable,
@@ -19,7 +5,13 @@ use crate::{
     Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     Pixels, Platform, Point, Render, Result, Size, Task, TestDispatcher, TestPlatform,
     TestScreenCaptureSource, TestWindow, TextSystem, VisualContext, Window, WindowBounds,
-    WindowHandle, WindowOptions,
+    WindowHandle, WindowOptions, app::GpuiMode, window::ElementArenaScope,
+};
+use anyhow::{anyhow, bail};
+use futures::{Stream, StreamExt, channel::oneshot};
+
+use std::{
+    cell::RefCell, future::Future, ops::Deref, path::PathBuf, rc::Rc, sync::Arc, time::Duration,
 };
 
 /// A TestAppContext is provided to tests created with `#[gpui::test]`, it provides
@@ -1122,9 +1114,8 @@ impl AnyWindowHandle {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use crate::{FileDialogFilter, PathPromptOptions, TestAppContext};
+    use std::path::PathBuf;
 
     #[gpui::test]
     async fn test_simulate_path_prompt_response(cx: &mut TestAppContext) {

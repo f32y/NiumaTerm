@@ -1,13 +1,3 @@
-use std::cell::RefCell;
-use std::path::{Path, PathBuf};
-use std::rc::{Rc, Weak};
-use std::sync::Arc;
-
-use anyhow::Result;
-use collections::VecDeque;
-use futures::channel::oneshot;
-use parking_lot::Mutex;
-
 use crate::{
     AnyWindowHandle, BackgroundExecutor, ClipboardItem, CursorStyle, DevicePixels,
     DummyKeyboardMapper, ForegroundExecutor, Keymap, NoopTextSystem, PathPromptOptions, Platform,
@@ -15,6 +5,16 @@ use crate::{
     PlatformTextSystem, PromptButton, ScreenCaptureFrame, ScreenCaptureSource, ScreenCaptureStream,
     SourceMetadata, Task, TestDisplay, TestWindow, ThermalState, WindowAppearance, WindowParams,
     size,
+};
+use anyhow::Result;
+use collections::VecDeque;
+use futures::channel::oneshot;
+use parking_lot::Mutex;
+use std::{
+    cell::RefCell,
+    path::{Path, PathBuf},
+    rc::{Rc, Weak},
+    sync::Arc,
 };
 
 /// TestPlatform implements the Platform trait for use in tests.

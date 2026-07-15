@@ -1,13 +1,13 @@
-use std::borrow::Cow;
-use std::fmt;
-use std::hash::Hash;
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering::SeqCst;
-
-use image::{Delay, Frame};
+use crate::{DevicePixels, Pixels, Result, SharedString, Size, size};
 use smallvec::SmallVec;
 
-use crate::{DevicePixels, Pixels, Result, SharedString, Size, size};
+use image::{Delay, Frame};
+use std::{
+    borrow::Cow,
+    fmt,
+    hash::Hash,
+    sync::atomic::{AtomicUsize, Ordering::SeqCst},
+};
 
 /// A source of assets for this app to use.
 pub trait AssetSource: 'static + Send + Sync {
@@ -117,9 +117,8 @@ impl fmt::Debug for RenderImage {
 
 #[cfg(test)]
 mod tests {
-    use smallvec::SmallVec;
-
     use super::*;
+    use smallvec::SmallVec;
 
     #[test]
     fn empty_render_image_does_not_panic() {

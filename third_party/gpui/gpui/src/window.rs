@@ -1,40 +1,5 @@
-use std::any::{Any, TypeId};
-use std::borrow::Cow;
-use std::cell::{Cell, RefCell};
-use std::fmt::{Debug, Display};
-use std::hash::{Hash, Hasher};
-use std::marker::PhantomData;
-use std::ops::{DerefMut, Range};
-use std::rc::Rc;
-use std::sync::atomic::Ordering::SeqCst;
-use std::sync::atomic::{AtomicBool, AtomicUsize};
-use std::sync::{Arc, Weak};
-use std::time::Duration;
-use std::{cmp, mem};
-
-use anyhow::{Context as _, Result, anyhow};
-use collections::{FxHashMap, FxHashSet};
-#[cfg(target_os = "macos")]
-use core_video::pixel_buffer::CVPixelBuffer;
-use derive_more::{Deref, DerefMut};
-use futures::FutureExt;
-use futures::channel::oneshot;
-use gpui_util::{ResultExt, measure, post_inc};
-#[cfg(feature = "input-latency-histogram")]
-use hdrhistogram::Histogram;
-use itertools::FoldWhile::{Continue, Done};
-use itertools::Itertools;
-use parking_lot::RwLock;
-use raw_window_handle::{HandleError, HasDisplayHandle, HasWindowHandle};
-use refineable::Refineable;
-use scheduler::Instant;
-use slotmap::SlotMap;
-use smallvec::SmallVec;
-use uuid::Uuid;
-
 #[cfg(any(feature = "inspector", debug_assertions))]
 use crate::Inspector;
-use crate::prelude::*;
 use crate::{
     Action, AnyDrag, AnyElement, AnyImageCache, AnyTooltip, AnyView, App, AppContext, Arena, Asset,
     AsyncWindowContext, AvailableSpace, Background, BorderStyle, Bounds, BoxShadow, Capslock,
@@ -52,15 +17,52 @@ use crate::{
     SystemWindowTabController, TabStopMap, TaffyLayoutEngine, Task, TextRenderingMode, TextStyle,
     TextStyleRefinement, ThermalState, TransformationMatrix, Underline, UnderlineStyle,
     WindowAppearance, WindowBackgroundAppearance, WindowBounds, WindowControls, WindowDecorations,
-    WindowOptions, WindowParams, WindowTextSystem, point, profiler, px, rems, size,
+    WindowOptions, WindowParams, WindowTextSystem, point, prelude::*, profiler, px, rems, size,
     transparent_black,
 };
+
+use anyhow::{Context as _, Result, anyhow};
+use collections::{FxHashMap, FxHashSet};
+#[cfg(target_os = "macos")]
+use core_video::pixel_buffer::CVPixelBuffer;
+use derive_more::{Deref, DerefMut};
+use futures::FutureExt;
+use futures::channel::oneshot;
+use gpui_util::post_inc;
+use gpui_util::{ResultExt, measure};
+#[cfg(feature = "input-latency-histogram")]
+use hdrhistogram::Histogram;
+use itertools::FoldWhile::{Continue, Done};
+use itertools::Itertools;
+use parking_lot::RwLock;
+use raw_window_handle::{HandleError, HasDisplayHandle, HasWindowHandle};
+use refineable::Refineable;
+use scheduler::Instant;
+use slotmap::SlotMap;
+use smallvec::SmallVec;
+use std::{
+    any::{Any, TypeId},
+    borrow::Cow,
+    cell::{Cell, RefCell},
+    cmp,
+    fmt::{Debug, Display},
+    hash::{Hash, Hasher},
+    marker::PhantomData,
+    mem,
+    ops::{DerefMut, Range},
+    rc::Rc,
+    sync::{
+        Arc, Weak,
+        atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst},
+    },
+    time::Duration,
+};
+use uuid::Uuid;
 
 pub(crate) mod a11y;
 mod prompts;
 
 pub use a11y::A11ySubtreeBuilder;
-pub use prompts::*;
 
 use self::a11y::A11y;
 #[cfg(not(target_family = "wasm"))]
@@ -69,6 +71,7 @@ use crate::util::{
     atomic_incr_if_not_zero, ceil_to_device_pixel, floor_to_device_pixel, round_half_toward_zero,
     round_half_toward_zero_f64, round_stroke_to_device_pixel, round_to_device_pixel,
 };
+pub use prompts::*;
 
 /// Default window size used when no explicit size is provided.
 pub const DEFAULT_WINDOW_SIZE: Size<Pixels> = size(px(1536.), px(1095.));

@@ -98,15 +98,17 @@
 //!
 //! [`NodeId`]: accesskit::NodeId
 
-use std::hash::{Hash, Hasher};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use crate::*;
 
+use crate::{App, Bounds, FocusId, Pixels, SharedString, Window};
 use accesskit::{Action, NodeId, TreeUpdate};
 use collections::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
-
-use crate::{App, Bounds, FocusId, Pixels, SharedString, Window, *};
+use std::hash::{Hash, Hasher};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 /// The fixed AccessKit node ID used for the root of every window's a11y tree.
 pub(crate) const ROOT_NODE_ID: NodeId = NodeId(0);
@@ -537,13 +539,10 @@ impl A11yNodeBuilder {
 mod tests {
     // Import specific items rather than glob-importing `super`, which would pull
     // in gpui's own `test` attribute macro and shadow the standard one.
-    use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
-
-    use accesskit::{NodeId, Role};
-
     use super::{A11y, A11yNodeBuilder, ROOT_NODE_ID};
     use crate::FocusId;
+    use accesskit::{NodeId, Role};
+    use std::sync::{Arc, atomic::AtomicBool};
 
     fn test_node() -> accesskit::Node {
         accesskit::Node::new(Role::GenericContainer)
