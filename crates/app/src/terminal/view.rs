@@ -1461,8 +1461,9 @@ impl Render for TerminalPane {
         } else {
             frame.scrollbar()
         };
-        let scrollbar =
-            scrollbar_opacity.and_then(|opacity| scrollbar_element(scrollbar_info, opacity, cx));
+        // Keep the transparent track hit-testable so hovering the scrollbar
+        // region can reveal it after the activity fade has completed.
+        let scrollbar = scrollbar_element(scrollbar_info, scrollbar_opacity.unwrap_or(0.0), cx);
 
         div()
             .size_full()
@@ -1563,6 +1564,7 @@ fn scrollbar_element(
             .h_full()
             .w(px(10.0))
             .opacity(opacity)
+            .hover(|this| this.opacity(1.0))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
