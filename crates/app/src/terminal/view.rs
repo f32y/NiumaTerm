@@ -101,6 +101,9 @@ pub(crate) struct TerminalPane {
     /// only created on the first mouse-move, so a plain click selects nothing
     /// (matching the engine's empty-selection-dropped-on-up semantics).
     frozen_select_anchor: Option<crate::terminal::block_list::FrozenPoint>,
+    /// Pixel origin of a text-selection gesture. Ignoring movement within a
+    /// quarter-cell radius prevents normal hand jitter from selecting a glyph.
+    selection_drag_origin: Option<Point<Pixels>>,
 }
 
 pub(crate) struct AgentInterrupted;
@@ -208,6 +211,7 @@ impl TerminalPane {
             frozen_selection: None,
             frozen_separators: Vec::new(),
             frozen_select_anchor: None,
+            selection_drag_origin: None,
         }
     }
 
@@ -350,6 +354,7 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) {
         window.focus(&self.focus, cx);
+        self.selection_drag_origin = None;
         // A left-click on a block-list gutter selects the item instead of
         // starting a text selection.
         if event.button == MouseButton::Left && self.block_chrome_enabled(cx) {
@@ -359,11 +364,12 @@ impl TerminalPane {
         }
         // Block-split: a left press in the frozen region starts a frozen
         // selection (and drops the engine one); any other press clears it.
-        if self.block_list_mode(cx)
-            && !self
-                .surface
-                .mouse_reporting_active_for(input::modifiers_state(event.modifiers))
-        {
+        let reports_mouse = self
+            .surface
+            .mouse_reporting_active_for(input::modifiers_state(event.modifiers));
+        self.selection_drag_origin =
+            (event.button == MouseButton::Left && !reports_mouse).then_some(event.position);
+        if self.block_list_mode(cx) && !reports_mouse {
             if event.button == MouseButton::Left {
                 if let Some(BlockListPoint::Frozen(pt)) =
                     self.block_list_point_at(event.position, cx)
@@ -472,6 +478,7 @@ impl TerminalPane {
     }
 
     fn on_mouse_up(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.selection_drag_origin = None;
         if self.scrollbar_dragging {
             // Drag ended: start the linger countdown that hides the bar.
             self.mark_scroll_activity(cx);
@@ -500,6 +507,13 @@ impl TerminalPane {
             let fraction = self.scrollbar_fraction(event.position.y);
             self.scroll_thumb_to(fraction - self.scrollbar_grab, cx);
             return;
+        }
+        if let Some(origin) = self.selection_drag_origin {
+            let cell_width = self.cell_metrics(window, cx).width_px;
+            if !selection_drag_started(origin, event.position, cell_width) {
+                return;
+            }
+            self.selection_drag_origin = None;
         }
         if let Some(anchor) = self.frozen_select_anchor {
             // Clamp into the frozen region so a drag past the seam sticks to
@@ -1468,6 +1482,12 @@ fn scrollbar_offset_for_thumb(total: f64, len: f64, thumb_top: f32) -> Option<f6
     let (_, thumb_height) = scrollbar_thumb_geometry(total, 0.0, len)?;
     let thumb_travel = 1.0 - thumb_height;
     Some((thumb_top / thumb_travel).clamp(0.0, 1.0) as f64 * (total - len))
+}
+
+fn selection_drag_started(origin: Point<Pixels>, position: Point<Pixels>, cell_width: f32) -> bool {
+    let dx = position.x.as_f32() - origin.x.as_f32();
+    let dy = position.y.as_f32() - origin.y.as_f32();
+    dx * dx + dy * dy >= cell_width * cell_width / 16.0
 }
 
 fn scrollbar_element(
@@ -2769,7 +2789,7 @@ mod tests {
 
     use super::{
         cursor_bounds, metrics, scrollbar_offset_for_thumb, scrollbar_thumb_geometry,
-        terminal_cell_at_position, terminal_scroll_lines,
+        selection_drag_started, terminal_cell_at_position, terminal_scroll_lines,
     };
     use crate::terminal::frame::TerminalCursor;
     use crate::terminal::surface::{SurfaceCell, SurfaceCellSide};
@@ -3005,6 +3025,22 @@ mod tests {
             terminal_cell_at_position(point(px(31.0), px(46.0)), origin, cell, &[]),
             (SurfaceCell { col: 2, row: 2 }, SurfaceCellSide::Right)
         );
+    }
+
+    #[test]
+    fn selection_drag_waits_for_quarter_cell_movement() {
+        let origin = point(px(10.0), px(10.0));
+
+        assert!(!selection_drag_started(
+            origin,
+            point(px(11.0), px(11.0)),
+            8.0
+        ));
+        assert!(selection_drag_started(
+            origin,
+            point(px(12.0), px(10.0)),
+            8.0
+        ));
     }
 
     #[test]
