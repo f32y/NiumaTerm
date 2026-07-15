@@ -219,10 +219,7 @@ impl Sidebar {
                     .child(ws.unread_count.to_string())
             }))
             .child(controls);
-        let secondary = ws
-            .latest_unread_text
-            .clone()
-            .unwrap_or_else(|| ws.cwd.clone());
+        let secondary = ws.cwd.clone();
         let drag_label: SharedString = ws.name.clone().into();
         let item = Button::new(("workspace", idx))
             .ghost()
