@@ -367,6 +367,12 @@ impl RenderOnce for TabBar {
                 let padding = Edges::all(px(0.));
                 (cx.theme().transparent.into(), padding, px(4.))
             }
+            TabVariant::Modern => {
+                // Pills float on the chrome: a transparent bar with an inset so
+                // the rounded tab corners never touch the bar edges.
+                let padding = Edges::all(px(4.));
+                (cx.theme().transparent.into(), padding, px(4.))
+            }
             TabVariant::Segmented => {
                 let padding_x = match self.size {
                     Size::XSmall => px(2.),
