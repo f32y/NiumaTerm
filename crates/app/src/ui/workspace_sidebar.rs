@@ -225,6 +225,14 @@ impl Sidebar {
         let item = Button::new(("workspace", idx))
             .ghost()
             .selected(ws.active)
+            // The ghost-selected token (`secondary.active.background`) sits too
+            // close to the sidebar surface in the modern themes; reuse the
+            // active-tab pair so the current workspace reads as strongly as the
+            // current tab. Button applies these after the variant style.
+            .when(ws.active, |this| {
+                this.bg(cx.theme().tab_active)
+                    .text_color(cx.theme().tab_active_foreground)
+            })
             .w_full()
             .h_auto()
             .px_2()
