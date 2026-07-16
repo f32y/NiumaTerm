@@ -4781,6 +4781,18 @@ impl Window {
     }
 
     fn dispatch_key_event(&mut self, event: &dyn Any, cx: &mut App) {
+        // Escape cancels an in-progress drag instead of reaching the app:
+        // without this, the only way out of a drag is dropping it somewhere,
+        // and a drop target can't distinguish an intentional drop from an
+        // abandoned drag.
+        if cx.has_active_drag()
+            && let Some(key_down) = event.downcast_ref::<KeyDownEvent>()
+            && key_down.keystroke.key == "escape"
+        {
+            cx.stop_active_drag(self);
+            return;
+        }
+
         if self.invalidator.is_dirty() {
             self.draw(cx).clear();
         }
