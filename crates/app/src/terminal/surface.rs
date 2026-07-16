@@ -53,6 +53,17 @@ pub(crate) enum SurfaceMouseEventKind {
     Move,
 }
 
+/// One row read for pointer URL hit-testing: plain text padded to the grid
+/// width so char index == grid column (only each cell's first codepoint is
+/// kept — grapheme extras would break the column mapping), the row's OSC 8
+/// spans, and its soft-wrap flag.
+pub(crate) struct PointerRow {
+    pub(crate) text: String,
+    pub(crate) wrapped: bool,
+    /// OSC 8 spans: `(start_col, end_col_inclusive, uri)`.
+    pub(crate) hyperlinks: Vec<(u16, u16, String)>,
+}
+
 pub struct TerminalSurface {
     session: TerminalSession,
     launch_state: TabState,
@@ -154,6 +165,46 @@ impl TerminalSurface {
         handle: nmt_terminal::ghostty::BlockHandle,
     ) -> Option<nmt_terminal::ghostty::AcquiredBlock> {
         self.session.engine.lock().acquire_block_snapshot(handle)
+    }
+
+    /// The absolute SCREEN row of the viewport's top row, mapping pointer
+    /// viewport rows into SCREEN space for URL hit-testing.
+    pub(crate) fn viewport_top_screen_row(&self) -> Option<u32> {
+        self.session.engine.lock().viewport_top_screen()
+    }
+
+    /// Read one absolute SCREEN row for pointer URL hit-testing.
+    pub(crate) fn pointer_screen_row(&self, row: u32) -> Option<PointerRow> {
+        let engine = self.session.engine.lock();
+        let palette = engine.color_palette();
+        let cols = engine.cols() as usize;
+        let mut chars: Vec<char> = Vec::with_capacity(cols);
+        let meta = engine
+            .read_screen_row_visit(row, &palette, |x, text, _wide, _style| {
+                push_pointer_cell(&mut chars, x, text.as_str());
+            })
+            .ok()
+            .flatten()?;
+        Some(pointer_row(chars, cols, meta))
+    }
+
+    /// Read one row of a finished engine block for pointer URL hit-testing.
+    pub(crate) fn pointer_block_row(
+        &self,
+        handle: nmt_terminal::ghostty::BlockHandle,
+        row: usize,
+    ) -> Option<PointerRow> {
+        let engine = self.session.engine.lock();
+        let palette = engine.color_palette();
+        let cols = engine.block_cols(handle).unwrap_or_else(|| engine.cols()) as usize;
+        let mut chars: Vec<char> = Vec::with_capacity(cols);
+        let meta = engine
+            .read_block_row_visit(handle, row, &palette, |x, text, _wide, _style| {
+                push_pointer_cell(&mut chars, x, text.as_str());
+            })
+            .ok()
+            .flatten()?;
+        Some(pointer_row(chars, cols, meta))
     }
 
     /// The cached frozen generation for `(block_id, image_id)`, if a paint
@@ -805,6 +856,37 @@ fn normalize_osc7_pwd(pwd: &str) -> String {
         path[1..].to_string()
     } else {
         path.to_string()
+    }
+}
+
+/// Place one sparse row cell into the column-aligned char buffer: gaps
+/// (skipped blank cells) become spaces, and only the cell's first codepoint
+/// is kept so char index stays == grid column.
+fn push_pointer_cell(chars: &mut Vec<char>, x: u16, text: &str) {
+    let x = x as usize;
+    if chars.len() < x {
+        chars.resize(x, ' ');
+    }
+    if chars.len() == x {
+        chars.push(text.chars().next().unwrap_or(' '));
+    }
+}
+
+fn pointer_row(
+    mut chars: Vec<char>,
+    cols: usize,
+    meta: nmt_terminal::ghostty::ScreenRowMeta,
+) -> PointerRow {
+    // Pad to the full grid width so joined soft-wrapped rows keep every
+    // segment exactly `cols` chars (column math stays trivial), and so a
+    // blank tail reads as spaces that correctly terminate a URL token.
+    if chars.len() < cols {
+        chars.resize(cols, ' ');
+    }
+    PointerRow {
+        text: chars.into_iter().collect(),
+        wrapped: meta.wrapped,
+        hyperlinks: meta.hyperlinks,
     }
 }
 
