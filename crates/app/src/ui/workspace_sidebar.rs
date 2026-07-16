@@ -215,8 +215,9 @@ impl Sidebar {
                     .id(("workspace-unread", idx))
                     .aria_label(format!("{} unread notifications", ws.unread_count))
                     .px_1()
-                    .rounded(px(8.0))
-                    .bg(rgb(0x4A90E2))
+                    .rounded(px(2.0))
+                    .bg(cx.theme().primary)
+                    .text_color(cx.theme().primary_foreground)
                     .child(ws.unread_count.to_string())
             }))
             .child(controls);

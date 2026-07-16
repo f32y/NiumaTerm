@@ -9,10 +9,10 @@ use gpui::{
     AnyElement, Context, Entity, KeyDownEvent, MouseButton, Render, ScrollHandle, SharedString,
     Window, div, px, rgb,
 };
-use gpui_component::Sizable;
 use gpui_component::input::{Input, InputState};
 use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
 use gpui_component::tab::{Tab, TabBar, TabVariant};
+use gpui_component::{ActiveTheme, Sizable};
 
 use super::shell::TerminalPaneTree;
 use super::{NewTab, Shell};
@@ -149,10 +149,7 @@ impl TabStrip {
                 items
                     .into_iter()
                     .enumerate()
-                    .map(|(index, (id, mut label, unread))| {
-                        if unread {
-                            label.push_str("  •");
-                        }
+                    .map(|(index, (id, label, unread))| {
                         // `×` suffix closes this tab; `stop_propagation` keeps the click
                         // from also activating the tab (the TabBar's on_click). Shown
                         // only while the tab is hovered (visibility keeps its width, so
@@ -223,7 +220,18 @@ impl TabStrip {
                                         ),
                                     )
                                 })
+                                .gap_1()
                                 .child(div().truncate().child(label.clone()))
+                                // Unread-notification dot: a filled accent
+                                // circle instead of a text bullet, so it stays
+                                // visible against the muted inactive-tab text.
+                                .children(unread.then(|| {
+                                    div()
+                                        .flex_none()
+                                        .size(px(6.0))
+                                        .rounded_full()
+                                        .bg(cx.theme().primary)
+                                }))
                                 .into_any_element()
                         };
                         let drag_label: SharedString = label.into();
