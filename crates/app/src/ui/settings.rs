@@ -164,6 +164,8 @@ pub struct AppSettings {
     pub background_image_opacity: f64,
     /// Process lifecycle events received from Agent Hook executables.
     pub enable_agent_hooks: bool,
+    /// Show Agent account usage in the workspace sidebar.
+    pub show_agent_usage: bool,
     /// Restore the last saved workspace/tab session on startup.
     pub restore_last_session_when_opening: bool,
     /// Manage each tab's shell with a Windows Job Object: closing the tab
@@ -202,6 +204,7 @@ impl Default for AppSettings {
             background_image: None,
             background_image_opacity: DEFAULT_BACKGROUND_IMAGE_OPACITY,
             enable_agent_hooks: true,
+            show_agent_usage: true,
             restore_last_session_when_opening: true,
             manage_subprocess_job: false,
             warn_before_terminating_shell: true,
@@ -346,6 +349,7 @@ impl AppSettings {
                 appearance.background_image_opacity,
             ),
             enable_agent_hooks: config.agent.enable_agent_hooks,
+            show_agent_usage: config.agent.show_agent_usage,
             restore_last_session_when_opening: config.system.restore_last_session_when_opening,
             manage_subprocess_job: config.system.manage_subprocess_job,
             warn_before_terminating_shell: config.system.warn_before_terminating_shell,
@@ -431,6 +435,7 @@ impl AppSettings {
         };
         let agent = nmt_config::agent::AgentConfig {
             enable_agent_hooks: self.enable_agent_hooks,
+            show_agent_usage: self.show_agent_usage,
         };
         let system = nmt_config::system::SystemConfig {
             restore_last_session_when_opening: self.restore_last_session_when_opening,
@@ -1001,20 +1006,34 @@ fn agent_page() -> SettingPage {
         .default_open(true)
         .description("Configure Agent event handling and per-Agent Hook installation.")
         .group(
-            SettingGroup::new().title("General").item(
-                SettingItem::new(
-                    "Enable Agent Hooks",
-                    SettingField::switch(
-                        |cx| cx.global::<AppSettings>().enable_agent_hooks,
-                        |value, cx| {
-                            cx.global_mut::<AppSettings>().enable_agent_hooks = value;
-                        },
+            SettingGroup::new()
+                .title("General")
+                .item(
+                    SettingItem::new(
+                        "Enable Agent Hooks",
+                        SettingField::switch(
+                            |cx| cx.global::<AppSettings>().enable_agent_hooks,
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().enable_agent_hooks = value;
+                            },
+                        ),
+                    )
+                    .description(
+                        "Process new lifecycle events from installed Agent Hooks. This does not change their installation state.",
                     ),
                 )
-                .description(
-                    "Process new lifecycle events from installed Agent Hooks. This does not change their installation state.",
+                .item(
+                    SettingItem::new(
+                        "Show Agent Usage",
+                        SettingField::switch(
+                            |cx| cx.global::<AppSettings>().show_agent_usage,
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().show_agent_usage = value;
+                            },
+                        ),
+                    )
+                    .description("Show Agent account usage in the workspace sidebar."),
                 ),
-            ),
         )
         .group(
             SettingGroup::new()
