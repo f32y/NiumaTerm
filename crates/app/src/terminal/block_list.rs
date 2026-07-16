@@ -521,13 +521,16 @@ pub(crate) fn frozen_block_view(
         if !ok {
             break;
         }
+        let line = builder.finish();
+        let selected =
+            selected_span(selection, item_idx, row, cols).map(|span| expand_wide_span(&line, span));
         view.rows.push(FrozenRow {
             y: pad + row as f32 * cell_h,
-            line: builder.finish(),
+            line,
             item: item_idx,
             row,
             cell_count: cols,
-            selected: selected_span(selection, item_idx, row, cols),
+            selected,
             shape_key: Some(block_row_shape_key(handle, row)),
         });
     }
@@ -624,7 +627,8 @@ pub(crate) fn live_history_view(
             .ok()
             .filter(|row| *row <= i32::MAX as usize)
             .and_then(|row| row_selection_for(selection, row, cols as usize))
-            .map(|span| (span.lo, span.hi.saturating_add(1)));
+            .map(|span| (span.lo, span.hi.saturating_add(1)))
+            .map(|span| expand_wide_span(&line, span));
         view.rows.push(FrozenRow {
             y: pad + row as f32 * cell_h,
             line,
@@ -690,6 +694,22 @@ fn selected_span(
             hi.min(u16::MAX as u32) as u16,
         )
     })
+}
+
+fn expand_wide_span(line: &TerminalLine, (mut start, mut end): (u16, u16)) -> (u16, u16) {
+    for cell in line.cells() {
+        if cell.wide != Wide::Wide {
+            continue;
+        }
+        let spacer = cell.col.saturating_add(1);
+        if start == spacer {
+            start = cell.col;
+        }
+        if end == spacer {
+            end = spacer.saturating_add(1);
+        }
+    }
+    (start, end)
 }
 
 /// One deferred piece of a frozen selection: an inclusive cell range of one
@@ -1030,6 +1050,34 @@ mod tests {
             [Some((2, 10)), Some((0, 10)), Some((0, 2))],
             "endpoint rows partial, middle row full width"
         );
+    }
+
+    #[test]
+    fn frozen_selection_expands_wide_character() {
+        let (t, info) = finished_block("中A".as_bytes(), 10, 2);
+        let (block, palette) = (
+            t.block_acquire(info.handle).expect("acquire"),
+            t.color_palette(),
+        );
+        for col in [0, 1] {
+            let point = FrozenPoint {
+                item: 0,
+                line: 0,
+                col,
+            };
+            let view = frozen_block_view(
+                Some((&block, &palette)),
+                &info,
+                0,
+                0..info.rows,
+                10.0,
+                ITEM_PAD_ROWS,
+                Some((point, point)),
+                None,
+            );
+
+            assert_eq!(view.rows[0].selected, Some((0, 2)));
+        }
     }
 
     /// Compact presentation (`pad_rows = 0`): rows start at the item top with
