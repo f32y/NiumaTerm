@@ -3,28 +3,35 @@ use std::ops::Range;
 use futures::StreamExt;
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, AppContext, AvailableSpace, Bounds, ContentMask, Context, Corners,
-    DragMoveEvent, Element, ElementId, ElementInputHandler, Entity, EntityInputHandler,
-    FocusHandle, Focusable, FontStyle, FontWeight, GlobalElementId, InspectorElementId,
-    IntoElement, KeyDownEvent, Keystroke, LayoutId, ListAlignment, ListOffset, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, RenderImage, ScrollDelta,
-    ScrollWheelEvent, ShapedLine, StrikethroughStyle, Style, TextAlign, TextRun, UTF16Selection,
-    UnderlineStyle, Window, actions, div, fill, list, point, px, relative, rgb, rgba, size,
+    App, AppContext, Bounds, Context, Entity, EntityInputHandler, FocusHandle, Focusable,
+    IntoElement, KeyDownEvent, Keystroke, ListOffset, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, Pixels, Point, ScrollDelta, ScrollWheelEvent, UTF16Selection, Window, actions,
+    div, list, point, px, rgb, size,
 };
 use gpui_component::ActiveTheme;
 use nmt_agent_utils::{AgentRoute, agent_process};
 use nmt_config::local_state::TabState;
-use nmt_terminal::ansi::CursorShape;
 use nmt_terminal::selection::SelectionType;
 
 use super::frame::{
-    TerminalColor, TerminalCursor, TerminalFrame, TerminalFrameCache, TerminalLine,
-    theme_default_background, theme_default_foreground,
+    TerminalFrame, TerminalFrameCache, theme_default_background, theme_default_foreground,
 };
 use super::surface::TerminalSurface;
 use super::{input, metrics, wake};
-use crate::terminal::block_list::{BlockListPoint, BlockListState, FrozenPoint};
+use crate::terminal::block_list::{
+    BlockListMeasureKey, BlockListPoint, BlockListState, FrozenPoint, block_list_active_top_px,
+    block_list_alignment, block_list_render_metrics, block_pad_rows, offset_frozen_chrome,
+    shift_selected_item_for_eviction,
+};
 use crate::terminal::dirty::DirtyState;
+use crate::terminal::element::{
+    BlockListItem, BlockListView, TerminalView, bottom_anchor_offsets, frame_content_rows,
+    live_frame_text, row_y_offset, terminal_row_at_y,
+};
+use crate::terminal::links::LinkHit;
+use crate::terminal::scrollbar::{
+    SCROLLBAR_LINGER, scrollbar_element, scrollbar_offset_for_thumb, scrollbar_opacity,
+};
 use crate::terminal::session::{HostEvent, InFlightBlock};
 use crate::terminal::surface::{
     SurfaceCell, SurfaceCellSide, SurfaceMouseButton, SurfaceMouseEventKind, SurfaceScreenCell,
@@ -58,47 +65,47 @@ pub(crate) struct TerminalPane {
     /// to route host events to the owning tab.
     id: u64,
     agent_route: AgentRoute,
-    surface: TerminalSurface,
+    pub(super) surface: TerminalSurface,
     frame_cache: TerminalFrameCache,
-    cell_metrics: Option<metrics::CellMetrics>,
+    pub(super) cell_metrics: Option<metrics::CellMetrics>,
     /// The terminal leaf's laid-out content rect (window coords, padding
     /// excluded), set from the element's paint. Resize and pointer hit-testing use
     /// it so chrome (tab bar) offsets are honored instead of assuming the window.
-    content_bounds: Option<Bounds<Pixels>>,
+    pub(super) content_bounds: Option<Bounds<Pixels>>,
     /// True while the scrollbar thumb is being dragged (mouse-move then scrolls
     /// to the pointer instead of selecting text).
-    scrollbar_dragging: bool,
+    pub(super) scrollbar_dragging: bool,
     /// Last user scroll action; the scrollbar shows only while dragging or
     /// within [`SCROLLBAR_LINGER`] of this instant, then auto-hides.
-    last_scroll_activity: Option<std::time::Instant>,
+    pub(super) last_scroll_activity: Option<std::time::Instant>,
     /// Bumped per scroll action so only the newest hide-timer repaints.
     scroll_activity_gen: u64,
     /// Pointer offset inside the thumb at drag start (track fraction), so
     /// grabbing the thumb doesn't jump it.
-    scrollbar_grab: f32,
+    pub(super) scrollbar_grab: f32,
     wake: wake::WakeSignal,
     dirty: DirtyState,
     /// The in-flight command mirrored from the session on drain.
     in_flight: Option<InFlightBlock>,
     /// Whether a trusted prompt input region is open.
     open_prompt: bool,
-    block_list: BlockListState,
+    pub(super) block_list: BlockListState,
     /// Hit-test data recorded from the last native list prepaint.
-    frozen_hit: crate::terminal::block_list::FrozenHitInfo,
+    pub(super) frozen_hit: crate::terminal::block_list::FrozenHitInfo,
     /// Inputs that affect measured heights of the mutable tail of the native list.
     last_list_measure_key: Option<BlockListMeasureKey>,
     /// The gutter-selected frozen item (block-split): highlighted and
     /// targeted by the copy/re-run/jump actions in list mode.
-    selected_frozen_item: Option<usize>,
+    pub(super) selected_frozen_item: Option<usize>,
     /// Visible frozen item chrome recorded from native list item bounds.
-    frozen_chrome: Vec<crate::terminal::block_list::FrozenItemChrome>,
+    pub(super) frozen_chrome: Vec<crate::terminal::block_list::FrozenItemChrome>,
     /// Frozen-region selection: (anchor, head), both inclusive cell points.
     frozen_selection: Option<(
         crate::terminal::block_list::FrozenPoint,
         crate::terminal::block_list::FrozenPoint,
     )>,
     /// Visible separator y positions, painted outside GPUI List's content mask.
-    frozen_separators: Vec<f32>,
+    pub(super) frozen_separators: Vec<f32>,
     /// Anchor of an in-progress frozen-region drag. The selection itself is
     /// only created on the first mouse-move, so a plain click selects nothing
     /// (matching the engine's empty-selection-dropped-on-up semantics).
@@ -108,18 +115,10 @@ pub(crate) struct TerminalPane {
     selection_drag_origin: Option<Point<Pixels>>,
     /// The link under a Ctrl-hover, underlined until the pointer or the
     /// modifier leaves it.
-    hovered_link: Option<LinkHit>,
+    pub(super) hovered_link: Option<LinkHit>,
     /// Last pointer position, so a Ctrl press/release without movement can
     /// still update the hover underline.
-    last_mouse_position: Option<Point<Pixels>>,
-}
-
-/// A link resolved under the pointer: the URL plus underline rects relative
-/// to the content origin (only the visible rows of a wrapped URL get rects).
-#[derive(Clone, Debug, PartialEq)]
-struct LinkHit {
-    url: String,
-    rects: Vec<Bounds<Pixels>>,
+    pub(super) last_mouse_position: Option<Point<Pixels>>,
 }
 
 pub(crate) struct AgentInterrupted;
@@ -239,7 +238,7 @@ impl TerminalPane {
 
     /// Record a user scroll action and schedule the repaint that starts fading
     /// the scrollbar once [`SCROLLBAR_LINGER`] passes without further activity.
-    fn mark_scroll_activity(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn mark_scroll_activity(&mut self, cx: &mut Context<Self>) {
         self.last_scroll_activity = Some(std::time::Instant::now());
         self.scroll_activity_gen += 1;
         let generation = self.scroll_activity_gen;
@@ -264,7 +263,7 @@ impl TerminalPane {
 
     /// Top-left of the terminal content in window coords (falls back to origin
     /// before the first paint).
-    fn content_origin(&self) -> Point<Pixels> {
+    pub(super) fn content_origin(&self) -> Point<Pixels> {
         self.content_bounds
             .map(|bounds| bounds.origin)
             .unwrap_or_default()
@@ -438,7 +437,7 @@ impl TerminalPane {
     }
 
     /// Map a window-y pointer position to a 0..1 fraction of the content height.
-    fn scrollbar_fraction(&self, y: Pixels) -> f32 {
+    pub(super) fn scrollbar_fraction(&self, y: Pixels) -> f32 {
         let bounds = self.content_bounds.unwrap_or_default();
         let height = bounds.size.height.as_f32().max(1.0);
         ((y.as_f32() - bounds.origin.y.as_f32()) / height).clamp(0.0, 1.0)
@@ -470,7 +469,7 @@ impl TerminalPane {
     }
 
     /// Scroll so the thumb's top sits at `thumb_top` of the track.
-    fn scroll_thumb_to(&mut self, thumb_top: f32, cx: &mut Context<Self>) {
+    pub(super) fn scroll_thumb_to(&mut self, thumb_top: f32, cx: &mut Context<Self>) {
         if self.block_list_mode(cx) {
             let (_, max_scroll) = self.block_list.scrollbar;
             let viewport = self
@@ -537,38 +536,7 @@ impl TerminalPane {
         );
     }
 
-    /// Track the Ctrl-hover link underline: set while Ctrl is held over a
-    /// link inside the content area, cleared otherwise.
-    fn update_hovered_link(
-        &mut self,
-        position: Point<Pixels>,
-        modifiers: gpui::Modifiers,
-        cx: &mut Context<Self>,
-    ) {
-        let inside = self
-            .content_bounds
-            .is_some_and(|bounds| bounds.contains(&position));
-        let hit = (inside && modifiers.control && !modifiers.alt && !modifiers.shift)
-            .then(|| self.link_at_position(position, cx))
-            .flatten();
-        if self.hovered_link != hit {
-            self.hovered_link = hit;
-            cx.notify();
-        }
-    }
-
-    fn on_modifiers_changed(
-        &mut self,
-        event: &gpui::ModifiersChangedEvent,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(position) = self.last_mouse_position {
-            self.update_hovered_link(position, event.modifiers, cx);
-        }
-    }
-
-    fn on_mouse_move(
+    pub(super) fn on_mouse_move(
         &mut self,
         event: &MouseMoveEvent,
         window: &mut Window,
@@ -712,7 +680,7 @@ impl TerminalPane {
     }
 
     /// The current frame's row offsets for pointer/IME mapping.
-    fn current_row_offsets(&self, cx: &App) -> Vec<f32> {
+    pub(super) fn current_row_offsets(&self, cx: &App) -> Vec<f32> {
         if self.block_list_mode(cx) {
             return Vec::new();
         }
@@ -721,163 +689,6 @@ impl TerminalPane {
         };
         let fixed_bottom = cx.global::<AppSettings>().input_style.is_fixed_bottom();
         bottom_anchor_offsets(&frame, cell.height_px, fixed_bottom)
-    }
-
-    /// Resolve the link under a pointer position: the row's OSC 8 span if one
-    /// covers the pointed-at cell, else a URL-shaped token in the row text.
-    /// Soft-wrapped neighbor rows are joined so long URLs match whole. Also
-    /// yields underline rects (content-origin-relative) for hover feedback.
-    fn link_at_position(&self, position: Point<Pixels>, cx: &App) -> Option<LinkHit> {
-        let cell_metrics = self.cell_metrics?;
-        enum RowSource {
-            Screen(i64),
-            Block {
-                handle: nmt_terminal::ghostty::BlockHandle,
-                item: usize,
-                line: i64,
-            },
-        }
-        let block_list = self.block_list_mode(cx);
-        // Bottom-anchor slack is uniform across rows (see
-        // `bottom_anchor_offsets`), so one value shifts every underline.
-        let slack = self.current_row_offsets(cx).first().copied().unwrap_or(0.0);
-        let viewport_top = self.surface.viewport_top_screen_row();
-        let (source, col) = match self.block_list_point_at(position, cx) {
-            Some(BlockListPoint::Frozen(pt)) => {
-                // The handle lookup releases the store lock before the engine
-                // reads below (the PTY thread nests engine → store, so the
-                // reverse nesting would deadlock).
-                let handle = {
-                    let store = self.surface.block_store();
-                    let store = store.lock();
-                    store.items().get(pt.item)?.handle()?
-                };
-                (
-                    RowSource::Block {
-                        handle,
-                        item: pt.item,
-                        line: pt.line as i64,
-                    },
-                    pt.col as usize,
-                )
-            }
-            Some(BlockListPoint::LiveHistory { row, col }) => {
-                (RowSource::Screen(row as i64), col as usize)
-            }
-            None => {
-                let offsets = self.current_row_offsets(cx);
-                let mut origin = self.content_origin();
-                if block_list {
-                    origin.y += px(self.frozen_hit.active_top);
-                }
-                let (cell, _) = terminal_cell_at_position(position, origin, cell_metrics, &offsets);
-                (
-                    RowSource::Screen(viewport_top? as i64 + cell.row as i64),
-                    cell.col as usize,
-                )
-            }
-        };
-        let row_at = |delta: i64| match source {
-            RowSource::Screen(row) => u32::try_from(row + delta)
-                .ok()
-                .and_then(|row| self.surface.pointer_screen_row(row)),
-            RowSource::Block { handle, line, .. } => usize::try_from(line + delta)
-                .ok()
-                .and_then(|line| self.surface.pointer_block_row(handle, line)),
-        };
-        // Content-local y of the row `delta` rows below the pointed-at one;
-        // `None` when it is scrolled out of view (that segment gets no rect).
-        let row_y = |delta: i64| -> Option<f32> {
-            match source {
-                RowSource::Screen(row) => {
-                    let row = row + delta;
-                    let top = viewport_top? as i64;
-                    if row < top {
-                        // A live-history row above the engine viewport.
-                        return self
-                            .frozen_hit
-                            .row_top(usize::MAX, usize::try_from(row).ok()?);
-                    }
-                    let below = (row - top) as f32 * cell_metrics.height_px;
-                    Some(if block_list {
-                        self.frozen_hit.active_top + below
-                    } else {
-                        below + slack
-                    })
-                }
-                RowSource::Block { item, line, .. } => self
-                    .frozen_hit
-                    .row_top(item, usize::try_from(line + delta).ok()?),
-            }
-        };
-        let underline = |delta: i64, start_col: usize, cols: usize| -> Option<Bounds<Pixels>> {
-            let y = row_y(delta)?;
-            Some(Bounds::new(
-                point(
-                    px(start_col as f32 * cell_metrics.width_px),
-                    px(y + cell_metrics.height_px - 1.5),
-                ),
-                size(px(cols as f32 * cell_metrics.width_px), px(1.0)),
-            ))
-        };
-        let pointed = row_at(0)?;
-        if let Some((start, end, uri)) = pointed
-            .hyperlinks
-            .iter()
-            .find(|(start, end, _)| (*start as usize..=*end as usize).contains(&col))
-        {
-            if !open_allowed(uri) {
-                return None;
-            }
-            return Some(LinkHit {
-                url: uri.clone(),
-                rects: underline(0, *start as usize, (*end - *start) as usize + 1)
-                    .into_iter()
-                    .collect(),
-            });
-        }
-        // Join cap bounds the engine row reads per hover/click: a wrapped
-        // logical line can chain through the whole scrollback (e.g. `cat` of
-        // a minified file), and each joined row is a locked engine read. A
-        // URL wrapping further than ±8 rows truncates at the cap.
-        const JOIN_CAP: i64 = 8;
-        let width = pointed.text.chars().count();
-        let mut text = pointed.text;
-        let mut col = col;
-        let mut wrapped_down = pointed.wrapped;
-        for delta in 1..=JOIN_CAP {
-            if !wrapped_down {
-                break;
-            }
-            let Some(next) = row_at(delta) else { break };
-            text.push_str(&next.text);
-            wrapped_down = next.wrapped;
-        }
-        let mut back = 0i64;
-        for delta in 1..=JOIN_CAP {
-            let Some(prev) = row_at(-delta).filter(|prev| prev.wrapped) else {
-                break;
-            };
-            back = delta;
-            col += prev.text.chars().count();
-            text.insert_str(0, &prev.text);
-        }
-        let (url, range) = url_at_col(&text, col)?;
-        // Every joined segment is exactly `width` chars (rows are padded to
-        // the grid width), so the URL's char range maps directly onto rows.
-        let mut rects = Vec::new();
-        if width > 0 {
-            for seg in range.start / width..=(range.end - 1) / width {
-                let start = range.start.max(seg * width);
-                let end = range.end.min((seg + 1) * width);
-                rects.extend(underline(
-                    seg as i64 - back,
-                    start - seg * width,
-                    end - start,
-                ));
-            }
-        }
-        Some(LinkHit { url, rects })
     }
 
     pub(crate) fn id(&self) -> u64 {
@@ -943,7 +754,6 @@ impl TerminalPane {
                     self.refresh_blocks();
                 }
             }
-            // Trust loss / exit clear the session's in-flight block; mirror it.
             if matches!(
                 event,
                 HostEvent::PromptBoundaryTrusted(false) | HostEvent::Exit
@@ -963,7 +773,7 @@ impl TerminalPane {
     /// Engine blocks remain the storage model while the setting controls only
     /// their presentation, so display changes never hide frozen output.
     /// Alt-screen stays a plain terminal grid.
-    fn block_list_mode(&self, _cx: &App) -> bool {
+    pub(super) fn block_list_mode(&self, _cx: &App) -> bool {
         self.surface.engine_blocks() && !self.surface.alt_screen()
     }
 
@@ -1044,7 +854,7 @@ impl TerminalPane {
         }
     }
 
-    fn begin_block_list_frame(
+    pub(super) fn begin_block_list_frame(
         &mut self,
         bounds: Bounds<Pixels>,
         cell: metrics::CellMetrics,
@@ -1057,7 +867,7 @@ impl TerminalPane {
         self.frozen_separators.clear();
     }
 
-    fn record_frozen_view(
+    pub(super) fn record_frozen_view(
         &mut self,
         view: &crate::terminal::block_list::FrozenView,
         item_top: f32,
@@ -1074,7 +884,7 @@ impl TerminalPane {
         }
     }
 
-    fn record_frozen_chrome(
+    pub(super) fn record_frozen_chrome(
         &mut self,
         chrome: crate::terminal::block_list::FrozenItemChrome,
         item_top: f32,
@@ -1085,7 +895,11 @@ impl TerminalPane {
 
     /// Map a window position to either an immutable block row or an absolute
     /// SCREEN row from the active block's history.
-    fn block_list_point_at(&self, position: Point<Pixels>, cx: &App) -> Option<BlockListPoint> {
+    pub(super) fn block_list_point_at(
+        &self,
+        position: Point<Pixels>,
+        cx: &App,
+    ) -> Option<BlockListPoint> {
         if !self.block_list_mode(cx) {
             return None;
         }
@@ -1775,27 +1589,6 @@ impl Render for TerminalPane {
     }
 }
 
-/// A right-edge scrollbar overlay, shown only when there is scrollback. The thumb
-/// size/position reflect the viewport within the total, and clicking or dragging
-/// the track scrolls to that offset.
-struct ScrollbarDrag;
-
-fn scrollbar_thumb_geometry(total: f64, offset: f64, len: f64) -> Option<(f32, f32)> {
-    if total <= len {
-        return None;
-    }
-    let thumb_height = (len / total).clamp(0.03, 1.0) as f32;
-    let scrollable = total - len;
-    let thumb_top = (offset.clamp(0.0, scrollable) / scrollable) as f32 * (1.0 - thumb_height);
-    Some((thumb_top, thumb_height))
-}
-
-fn scrollbar_offset_for_thumb(total: f64, len: f64, thumb_top: f32) -> Option<f64> {
-    let (_, thumb_height) = scrollbar_thumb_geometry(total, 0.0, len)?;
-    let thumb_travel = 1.0 - thumb_height;
-    Some((thumb_top / thumb_travel).clamp(0.0, 1.0) as f64 * (total - len))
-}
-
 fn selection_drag_started(origin: Point<Pixels>, position: Point<Pixels>, cell_width: f32) -> bool {
     let dx = position.x.as_f32() - origin.x.as_f32();
     let dy = position.y.as_f32() - origin.y.as_f32();
@@ -1810,122 +1603,8 @@ fn selection_type_for_click_count(click_count: usize) -> SelectionType {
     }
 }
 
-fn scrollbar_element(
-    sb: nmt_terminal::ghostty::ScrollbarInfo,
-    opacity: f32,
-    cx: &mut Context<TerminalPane>,
-) -> Option<gpui::Stateful<gpui::Div>> {
-    let (thumb_top, thumb_height) =
-        scrollbar_thumb_geometry(sb.total as f64, sb.offset as f64, sb.len as f64)?;
-    Some(
-        div()
-            .id("terminal-scrollbar")
-            .absolute()
-            .top_0()
-            .right_0()
-            .h_full()
-            .w(px(10.0))
-            .opacity(opacity)
-            .hover(|this| this.opacity(1.0))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                    cx.stop_propagation();
-                    this.scrollbar_dragging = true;
-                    let fraction = this.scrollbar_fraction(event.position.y);
-                    if (thumb_top..thumb_top + thumb_height).contains(&fraction) {
-                        // Grab the thumb where the pointer hit it — no jump.
-                        this.scrollbar_grab = fraction - thumb_top;
-                    } else {
-                        // Track click: center the thumb on the pointer.
-                        this.scrollbar_grab = thumb_height / 2.0;
-                        this.scroll_thumb_to(fraction - this.scrollbar_grab, cx);
-                    }
-                    this.mark_scroll_activity(cx);
-                }),
-            )
-            .on_drag(ScrollbarDrag, |_, _, _, cx| {
-                cx.stop_propagation();
-                cx.new(|_| gpui::Empty)
-            })
-            .on_drag_move(
-                cx.listener(|this, event: &DragMoveEvent<ScrollbarDrag>, window, cx| {
-                    if this.scrollbar_dragging {
-                        cx.stop_propagation();
-                        this.on_mouse_move(&event.event, window, cx);
-                    }
-                }),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .top(relative(thumb_top))
-                    .h(relative(thumb_height))
-                    .w_full()
-                    .rounded(px(4.0))
-                    .bg(rgba(0xffffff40)),
-            ),
-    )
-}
-
-/// Schemes Ctrl+click will open. A gate, not just a matcher: OSC 8 URIs come
-/// from whatever program printed them, and an escape sequence must not be
-/// able to launch arbitrary protocol handlers.
-const URL_SCHEMES: [&str; 4] = ["https://", "http://", "file://", "mailto:"];
-
-fn open_allowed(url: &str) -> bool {
-    URL_SCHEMES
-        .iter()
-        .any(|scheme| url.len() > scheme.len() && url[..scheme.len()].eq_ignore_ascii_case(scheme))
-}
-
-/// Characters that can appear inside a URL (RFC 3986 plus `%`). ASCII-only,
-/// so byte and char offsets coincide within a matched token.
-fn is_url_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || "-._~:/?#[]@!$&'()*+,;=%".contains(c)
-}
-
-/// The URL covering char index `col` of `text`, if any, plus its char range
-/// in `text`: expand over URL characters around the click, anchor at a known
-/// scheme, and trim trailing punctuation that in practice ends the sentence
-/// rather than the URL.
-fn url_at_col(text: &str, col: usize) -> Option<(String, Range<usize>)> {
-    let chars: Vec<char> = text.chars().collect();
-    if !chars.get(col).copied().is_some_and(is_url_char) {
-        return None;
-    }
-    let start = (0..col)
-        .rev()
-        .take_while(|&i| is_url_char(chars[i]))
-        .last()
-        .unwrap_or(col);
-    let end = (col..chars.len())
-        .take_while(|&i| is_url_char(chars[i]))
-        .last()
-        .map_or(col, |i| i + 1);
-    let token: String = chars[start..end].iter().collect();
-    // The scheme anchors the URL start; anything before it in the token
-    // (quotes, parens, "url=") is surrounding text.
-    let lower = token.to_ascii_lowercase();
-    let scheme_at = URL_SCHEMES
-        .iter()
-        .filter_map(|scheme| lower.find(scheme))
-        .min()?;
-    let mut url = token[scheme_at..].trim_end_matches(['.', ',', ';', ':', '!', '?', '\'']);
-    // Trailing closers are kept only while balanced, so a URL with literal
-    // parens survives but the closer of a surrounding "(...)" is dropped.
-    for (open, close) in [('(', ')'), ('[', ']')] {
-        while url.ends_with(close) && url.matches(open).count() < url.matches(close).count() {
-            url = &url[..url.len() - 1];
-        }
-    }
-    // The click must land inside the URL itself, past any trimmed tail.
-    let url_range = start + scheme_at..start + scheme_at + url.len();
-    (url_range.contains(&col) && open_allowed(url)).then(|| (url.to_string(), url_range))
-}
-
 /// Map a pointer position to a grid cell. `offsets` shifts rows for bottom anchoring.
-fn terminal_cell_at_position(
+pub(super) fn terminal_cell_at_position(
     position: Point<Pixels>,
     origin: Point<Pixels>,
     cell: metrics::CellMetrics,
@@ -1953,29 +1632,6 @@ fn surface_mouse_button(button: MouseButton) -> Option<SurfaceMouseButton> {
     }
 }
 
-/// How long the scrollbar stays visible after the last scroll action.
-const SCROLLBAR_LINGER: std::time::Duration = std::time::Duration::from_millis(900);
-/// How long the scrollbar takes to fade out after lingering.
-const SCROLLBAR_FADE: std::time::Duration = std::time::Duration::from_millis(180);
-
-fn scrollbar_opacity(
-    dragging: bool,
-    elapsed_since_scroll: Option<std::time::Duration>,
-) -> Option<f32> {
-    if dragging {
-        return Some(1.0);
-    }
-    let elapsed = elapsed_since_scroll?;
-    if elapsed < SCROLLBAR_LINGER {
-        return Some(1.0);
-    }
-    if elapsed >= SCROLLBAR_LINGER + SCROLLBAR_FADE {
-        return None;
-    }
-    let fade_elapsed = elapsed - SCROLLBAR_LINGER;
-    Some(1.0 - fade_elapsed.as_secs_f32() / SCROLLBAR_FADE.as_secs_f32())
-}
-
 const WHEEL_LINES_PER_STEP: f32 = 3.0;
 
 fn terminal_scroll_lines(delta: ScrollDelta, cell: metrics::CellMetrics) -> i32 {
@@ -1994,1230 +1650,16 @@ fn should_scroll_to_latest(keystroke: &Keystroke, alt_screen: bool) -> bool {
     !alt_screen && !keystroke.modifiers.modified() && keystroke.key.eq_ignore_ascii_case("end")
 }
 
-/// The terminal viewport as a custom GPUI leaf element: prepaint shapes the
-/// visible rows (multi-run, per-cell foreground), paint draws backgrounds, the
-/// styled glyphs, and the cursor. Mirrors GPUI's `Canvas` element shape.
-pub(crate) struct TerminalView {
-    frame: TerminalFrame,
-    cell: metrics::CellMetrics,
-    focus: FocusHandle,
-    pane: Entity<TerminalPane>,
-    /// FixedBottom input style: bottom-anchor the grid so the last content row
-    /// pins to the viewport floor (Warp parity, incl. interactive output).
-    fixed_bottom: bool,
-}
-
-impl TerminalView {
-    pub(crate) fn new(
-        frame: TerminalFrame,
-        cell: metrics::CellMetrics,
-        focus: FocusHandle,
-        pane: Entity<TerminalPane>,
-        fixed_bottom: bool,
-    ) -> Self {
-        Self {
-            frame,
-            cell,
-            focus,
-            pane,
-            fixed_bottom,
-        }
-    }
-}
-
-impl IntoElement for TerminalView {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
-impl Element for TerminalView {
-    type RequestLayoutState = Style;
-    type PrepaintState = Vec<ShapedLine>;
-
-    fn id(&self) -> Option<ElementId> {
-        None
-    }
-
-    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
-        None
-    }
-
-    fn request_layout(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> (LayoutId, Style) {
-        let mut style = Style::default();
-        style.size.width = relative(1.0).into();
-        style.size.height = relative(1.0).into();
-        let layout_id = window.request_layout(style.clone(), [], cx);
-        (layout_id, style)
-    }
-
-    fn prepaint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        _request_layout: &mut Style,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Vec<ShapedLine> {
-        // Feed the real content rect back to the pane so it resizes the surface to
-        // its actual area (below the tab bar), not the full window.
-        let cell = self.cell;
-        self.pane
-            .update(cx, |pane, cx| pane.set_content_bounds(bounds, cell, cx));
-        shape_frame(bounds, &self.frame, self.cell, window)
-    }
-
-    fn paint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        _request_layout: &mut Style,
-        prepaint: &mut Vec<ShapedLine>,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        let offsets = bottom_anchor_offsets(&self.frame, self.cell.height_px, self.fixed_bottom);
-        paint_frame(
-            bounds,
-            &self.frame,
-            prepaint.as_slice(),
-            self.cell,
-            &offsets,
-            window,
-            cx,
-        );
-        // Register commit-only IME for the focused pane; self-gates on focus.
-        window.handle_input(
-            &self.focus,
-            ElementInputHandler::new(bounds, self.pane.clone()),
-            cx,
-        );
-    }
-}
-
-/// Block-split list wrapper: the child is a real `gpui::list`; this wrapper
-/// only feeds pane bounds, paints chrome that extends into the left padding,
-/// and keeps the IME handler attached to the full terminal content rect.
-pub(crate) struct BlockListView {
-    cell: metrics::CellMetrics,
-    focus: FocusHandle,
-    pane: Entity<TerminalPane>,
-    list: AnyElement,
-    show_chrome: bool,
-}
-
-impl IntoElement for BlockListView {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
-impl Element for BlockListView {
-    type RequestLayoutState = Style;
-    type PrepaintState = ();
-
-    fn id(&self) -> Option<ElementId> {
-        None
-    }
-
-    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
-        None
-    }
-
-    fn request_layout(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> (LayoutId, Style) {
-        let mut style = Style::default();
-        style.size.width = relative(1.0).into();
-        style.size.height = relative(1.0).into();
-        let layout_id = window.request_layout(style.clone(), [], cx);
-        (layout_id, style)
-    }
-
-    fn prepaint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        _request_layout: &mut Style,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        let cell = self.cell;
-        self.pane
-            .update(cx, |pane, cx| pane.begin_block_list_frame(bounds, cell, cx));
-        self.list.layout_as_root(
-            size(
-                AvailableSpace::Definite(bounds.size.width),
-                AvailableSpace::Definite(bounds.size.height),
-            ),
-            window,
-            cx,
-        );
-        self.list.prepaint_at(bounds.origin, window, cx);
-    }
-
-    fn paint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        _request_layout: &mut Style,
-        _prepaint: &mut (),
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        let pane = self.pane.read(cx);
-        let separators = pane.frozen_separators.clone();
-        let chrome = pane.frozen_chrome.clone();
-        if self.show_chrome {
-            crate::terminal::block_list::paint_frozen_separators(bounds, &separators, window);
-        }
-        self.list.paint(window, cx);
-        if self.show_chrome {
-            crate::terminal::block_list::paint_frozen_chrome(bounds, &chrome, window, cx);
-        }
-        window.handle_input(
-            &self.focus,
-            ElementInputHandler::new(bounds, self.pane.clone()),
-            cx,
-        );
-    }
-}
-
-type SharedBlockStore = std::sync::Arc<parking_lot::Mutex<nmt_terminal::block_store::BlockStore>>;
-
-enum BlockListItem {
-    Frozen {
-        item_idx: usize,
-        store: SharedBlockStore,
-        cols: u32,
-        cell: metrics::CellMetrics,
-        selection: Option<(
-            crate::terminal::block_list::FrozenPoint,
-            crate::terminal::block_list::FrozenPoint,
-        )>,
-        selected_item: Option<usize>,
-        pane: Entity<TerminalPane>,
-    },
-    Live {
-        frame: TerminalFrame,
-        /// Active-grid scrollback rows rendered above the live grid
-        /// when scrolling into a running command.
-        history_rows: u64,
-        in_flight: Option<InFlightBlock>,
-        has_open_prompt: bool,
-        live_index: usize,
-        selected_item: Option<usize>,
-        cols: u32,
-        cell: metrics::CellMetrics,
-        pane: Entity<TerminalPane>,
-    },
-}
-
-impl IntoElement for BlockListItem {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
-enum BlockListItemPrepaint {
-    Frozen {
-        view: crate::terminal::block_list::FrozenView,
-        shaped: Vec<ShapedLine>,
-    },
-    Live {
-        tail_view: crate::terminal::block_list::FrozenView,
-        tail_shaped: Vec<ShapedLine>,
-        active_shaped: Vec<ShapedLine>,
-    },
-}
-
-impl Element for BlockListItem {
-    type RequestLayoutState = Style;
-    type PrepaintState = BlockListItemPrepaint;
-
-    fn id(&self) -> Option<ElementId> {
-        None
-    }
-
-    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
-        None
-    }
-
-    fn request_layout(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> (LayoutId, Style) {
-        let mut style = Style::default();
-        style.size.width = relative(1.0).into();
-        let pad_rows = block_pad_rows(cx);
-        let height = match self {
-            BlockListItem::Frozen {
-                item_idx,
-                store,
-                cols,
-                cell,
-                ..
-            } => {
-                let store = store.lock();
-                store
-                    .items()
-                    .get(*item_idx)
-                    .map(|item| {
-                        crate::terminal::block_list::item_px(item, *cols, cell.height_px, pad_rows)
-                    })
-                    .unwrap_or(0.0)
-            }
-            BlockListItem::Live {
-                frame,
-                history_rows,
-                cell,
-                ..
-            } => crate::terminal::block_list::live_item_px(
-                *history_rows,
-                frame_content_rows(frame),
-                cell.height_px,
-                pad_rows,
-            ),
-        }
-        .max(0.0);
-        style.size.height = px(height).into();
-        let layout_id = window.request_layout(style.clone(), [], cx);
-        (layout_id, style)
-    }
-
-    fn prepaint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        _request_layout: &mut Style,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Self::PrepaintState {
-        let origin_y = self.pane().read(cx).content_origin().y;
-        let item_top = (bounds.top() - origin_y).as_f32();
-        let pad_rows = block_pad_rows(cx);
-        match self {
-            BlockListItem::Frozen {
-                item_idx,
-                store,
-                cols: _,
-                cell,
-                selection,
-                selected_item,
-                pane,
-            } => {
-                // Snapshot the item under the store lock, then release it
-                // before touching the engine — the PTY thread nests engine →
-                // store, so the reverse nesting here would deadlock.
-                let handle_info = {
-                    let store = store.lock();
-                    store
-                        .items()
-                        .get(*item_idx)
-                        .and_then(crate::terminal::block_list::handle_item_info)
-                };
-                let mut view = match handle_info {
-                    Some(info) => {
-                        let visible = crate::terminal::block_list::visible_rows(
-                            bounds.top().as_f32(),
-                            info.rows,
-                            window.viewport_size().height.as_f32(),
-                            cell.height_px,
-                            pad_rows,
-                        );
-                        let acquired = pane.read(cx).surface.acquire_block(info.handle);
-                        let mut view = crate::terminal::block_list::frozen_block_view(
-                            acquired.as_ref().map(|acq| (&acq.block, &acq.palette)),
-                            &info,
-                            *item_idx,
-                            visible.clone(),
-                            cell.height_px,
-                            pad_rows,
-                            *selection,
-                            *selected_item,
-                        );
-                        // Resolve each frozen Kitty placement's
-                        // generation from the session's (block_id, image_id)
-                        // cache; misses read pixels out of the acquired block
-                        // once and land in the cache for later frames.
-                        if let Some(acq) = &acquired
-                            && !acq.placements.is_empty()
-                        {
-                            let ids: std::collections::HashSet<u32> =
-                                acq.placements.iter().map(|p| p.image_id).collect();
-                            let surface = &pane.read(cx).surface;
-                            let generations: std::collections::HashMap<_, _> = ids
-                                .into_iter()
-                                .filter_map(|id| {
-                                    surface
-                                        .frozen_image(info.handle.id, id)
-                                        .or_else(|| {
-                                            let generation =
-                                                surface.frozen_image_generation(&acq.block, id)?;
-                                            surface.insert_frozen_image(
-                                                info.handle.id,
-                                                id,
-                                                generation.clone(),
-                                            );
-                                            Some(generation)
-                                        })
-                                        .map(|generation| (id, generation))
-                                })
-                                .collect();
-                            view.images = crate::terminal::block_list::frozen_block_images(
-                                &acq.placements,
-                                &generations,
-                                &visible,
-                                cell.height_px,
-                                pad_rows,
-                            );
-                        }
-                        view
-                    }
-                    None => Default::default(),
-                };
-                pane.update(cx, |pane, _| pane.record_frozen_view(&view, item_top));
-                view.items_chrome.clear();
-                let shaped = crate::terminal::block_list::shape_frozen_rows(
-                    &view.rows,
-                    cell.width_px,
-                    window,
-                );
-                BlockListItemPrepaint::Frozen { view, shaped }
-            }
-            BlockListItem::Live {
-                frame,
-                history_rows,
-                in_flight,
-                has_open_prompt,
-                live_index,
-                selected_item,
-                cols,
-                cell,
-                pane,
-            } => {
-                // The active grid's scrollback rows render above the live
-                // grid, visible range only; a running command's
-                // scroll-up history).
-                let tail_view = {
-                    let visible = crate::terminal::block_list::visible_rows(
-                        bounds.top().as_f32(),
-                        (*history_rows).min(usize::MAX as u64) as usize,
-                        window.viewport_size().height.as_f32(),
-                        cell.height_px,
-                        pad_rows,
-                    );
-                    let pane = pane.read(cx);
-                    let lines = pane
-                        .surface
-                        .live_history_lines(visible.start as u64..visible.end as u64);
-                    let selection = pane.surface.selection_screen_range();
-                    crate::terminal::block_list::live_history_view(
-                        lines,
-                        *history_rows,
-                        *cols,
-                        cell.height_px,
-                        pad_rows,
-                        selection,
-                    )
-                };
-                let live_rows = frame_content_rows(frame);
-                let live_chrome = block_list_live_chrome(
-                    *live_index,
-                    live_rows,
-                    cell.height_px,
-                    in_flight.as_ref(),
-                    *has_open_prompt,
-                    *selected_item == Some(*live_index),
-                );
-                pane.update(cx, |pane, _| {
-                    pane.record_frozen_view(&tail_view, item_top);
-                    let active_top = item_top + tail_view.active_top;
-                    pane.frozen_hit.set_active_top(active_top);
-                    if let Some(mut chrome) = live_chrome {
-                        chrome.bottom = tail_view.active_top
-                            + live_rows as f32 * cell.height_px
-                            + pad_rows * cell.height_px;
-                        chrome.header_y = tail_view.active_top;
-                        pane.record_frozen_chrome(chrome, item_top);
-                    }
-                });
-                let tail_shaped = crate::terminal::block_list::shape_frozen_rows(
-                    &tail_view.rows,
-                    cell.width_px,
-                    window,
-                );
-                let active_bounds = Bounds::new(
-                    point(bounds.left(), bounds.top() + px(tail_view.active_top)),
-                    size(bounds.size.width, px(live_rows as f32 * cell.height_px)),
-                );
-                let active_shaped = shape_frame(active_bounds, frame, *cell, window);
-                BlockListItemPrepaint::Live {
-                    tail_view,
-                    tail_shaped,
-                    active_shaped,
-                }
-            }
-        }
-    }
-
-    fn paint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        _request_layout: &mut Style,
-        prepaint: &mut Self::PrepaintState,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        match (self, prepaint) {
-            (
-                BlockListItem::Frozen { cell, .. },
-                BlockListItemPrepaint::Frozen { view, shaped },
-            ) => {
-                paint_frozen_images(bounds, view, *cell, window, false);
-                crate::terminal::block_list::paint_frozen(
-                    bounds,
-                    view,
-                    shaped,
-                    cell.width_px,
-                    cell.height_px,
-                    window,
-                    cx,
-                );
-                paint_frozen_images(bounds, view, *cell, window, true);
-            }
-            (
-                BlockListItem::Live { frame, cell, .. },
-                BlockListItemPrepaint::Live {
-                    tail_view,
-                    tail_shaped,
-                    active_shaped,
-                },
-            ) => {
-                crate::terminal::block_list::paint_frozen(
-                    bounds,
-                    tail_view,
-                    tail_shaped,
-                    cell.width_px,
-                    cell.height_px,
-                    window,
-                    cx,
-                );
-                let active_bounds = Bounds::new(
-                    point(bounds.left(), bounds.top() + px(tail_view.active_top)),
-                    size(
-                        bounds.size.width,
-                        px(active_shaped.len() as f32 * cell.height_px),
-                    ),
-                );
-                paint_frame(
-                    active_bounds,
-                    frame,
-                    active_shaped.as_slice(),
-                    *cell,
-                    &[],
-                    window,
-                    cx,
-                );
-            }
-            _ => {}
-        }
-    }
-}
-
-impl BlockListItem {
-    fn pane(&self) -> &Entity<TerminalPane> {
-        match self {
-            BlockListItem::Frozen { pane, .. } | BlockListItem::Live { pane, .. } => pane,
-        }
-    }
-}
-
-/// Blank rows around each block for the current presentation: chrome shows
-/// one pad row above and below; compact (Command Blocks off) packs block rows
-/// contiguously like a classic grid. Every block-list geometry consumer must
-/// use this one value per frame so heights, hit-testing, and scroll math agree.
-fn block_pad_rows(cx: &App) -> f32 {
-    if cx.global::<AppSettings>().command_blocks {
-        crate::terminal::block_list::ITEM_PAD_ROWS
-    } else {
-        0.0
-    }
-}
-
-fn frame_content_rows(frame: &TerminalFrame) -> usize {
-    let lines = frame.lines();
-    let mut content_end = 0;
-    for (row, line) in lines.iter().enumerate().rev() {
-        if terminal_line_has_content(line) {
-            content_end = row + 1;
-            break;
-        }
-    }
-    if let Some(cursor) = frame.cursor() {
-        content_end = content_end.max(cursor.row as usize + 1);
-    }
-    content_end.min(lines.len())
-}
-
-fn bottom_anchor_offsets(frame: &TerminalFrame, cell_height: f32, fixed_bottom: bool) -> Vec<f32> {
-    if !fixed_bottom {
-        return Vec::new();
-    }
-    let rows = frame.lines().len();
-    let slack = rows.saturating_sub(frame_content_rows(frame)) as f32 * cell_height;
-    if slack > 0.0 {
-        vec![slack; rows]
-    } else {
-        Vec::new()
-    }
-}
-
-fn block_list_alignment(fixed_bottom: bool) -> ListAlignment {
-    if fixed_bottom {
-        ListAlignment::Bottom
-    } else {
-        ListAlignment::Top
-    }
-}
-
-#[derive(Clone, Copy, PartialEq)]
-struct BlockListMeasureKey {
-    /// (cols, cell height, pad rows) — pad rows toggling (Command Blocks
-    /// on/off) changes every item height, so it must force a full remeasure.
-    layout: (u32, f32, f32),
-    store_len: usize,
-    evicted_items: u64,
-    last_item_px: f32,
-    tail_px: f32,
-    live_rows: usize,
-}
-
-struct BlockListRenderMetrics {
-    store_len: usize,
-    evicted_items: u64,
-    item_count: usize,
-    frozen_px: f32,
-    /// The live item's history rows in pixels (active-grid scrollback above
-    /// the live grid) — the "tail" position in scroll/active-top math.
-    tail_px: f32,
-    total_px: f32,
-    offset_px: f32,
-    last_item_px: f32,
-}
-
-fn block_list_render_metrics(
-    store: &nmt_terminal::block_store::BlockStore,
-    live_rows: usize,
-    history_rows: u64,
-    cols: u32,
-    cell_h: f32,
-    pad_rows: f32,
-    offset: ListOffset,
-) -> BlockListRenderMetrics {
-    let items = store.items();
-    let store_len = items.len();
-    let item_count = store_len + 1;
-    let mut frozen_px = 0.0;
-    let mut offset_px = 0.0;
-    let mut last_item_px = 0.0;
-
-    for (ix, item) in items.iter().enumerate() {
-        let item_px = crate::terminal::block_list::item_px(item, cols, cell_h, pad_rows);
-        if ix < offset.item_ix {
-            offset_px += item_px;
-        }
-        if ix + 1 == store_len {
-            last_item_px = item_px;
-        }
-        frozen_px += item_px;
-    }
-
-    let tail_px = history_rows as f32 * cell_h;
-    let total_px = frozen_px
-        + crate::terminal::block_list::live_item_px(history_rows, live_rows, cell_h, pad_rows);
-    if offset.item_ix >= item_count {
-        offset_px = total_px;
-    } else if offset.item_ix <= store_len {
-        offset_px += offset.offset_in_item.as_f32();
-    }
-
-    BlockListRenderMetrics {
-        store_len,
-        evicted_items: store.evicted_items,
-        item_count,
-        frozen_px,
-        tail_px,
-        total_px,
-        offset_px,
-        last_item_px,
-    }
-}
-
-fn block_list_live_chrome(
-    live_index: usize,
-    live_rows: usize,
-    cell_h: f32,
-    in_flight: Option<&InFlightBlock>,
-    has_open_prompt: bool,
-    selected: bool,
-) -> Option<crate::terminal::block_list::FrozenItemChrome> {
-    let running = in_flight.map(|block| (block.command.as_str(), block.started_at));
-    if running.is_none() && !has_open_prompt {
-        return None;
-    }
-    crate::terminal::block_list::live_chrome(live_index, live_rows, cell_h, running, selected)
-}
-
-fn offset_frozen_chrome(
-    mut chrome: crate::terminal::block_list::FrozenItemChrome,
-    item_top: f32,
-) -> crate::terminal::block_list::FrozenItemChrome {
-    chrome.top += item_top;
-    chrome.bottom += item_top;
-    chrome.header_y += item_top;
-    chrome
-}
-
-/// Element-local top of the live grid: frozen items, then the live item's
-/// top pad and tail rows. Computed from the per-frame metrics so it stays
-/// valid even when the live item is outside List's prepaint overdraw.
-fn block_list_active_top_px(
-    frozen_px: f32,
-    tail_px: f32,
-    cell_h: f32,
-    pad_rows: f32,
-    scroll_top: f32,
-) -> f32 {
-    (frozen_px + pad_rows * cell_h + tail_px - scroll_top).max(0.0)
-}
-
-fn shift_selected_item_for_eviction(
-    selected: Option<usize>,
-    evicted_delta: usize,
-    store_len: usize,
-) -> Option<usize> {
-    let selected = selected?;
-    if selected < evicted_delta {
-        None
-    } else {
-        let shifted = selected - evicted_delta;
-        (shifted <= store_len).then_some(shifted)
-    }
-}
-
-fn live_frame_text(frame: &TerminalFrame) -> Option<String> {
-    let rows = frame_content_rows(frame);
-    if rows == 0 {
-        return None;
-    }
-    let mut lines = frame
-        .lines()
-        .iter()
-        .take(rows)
-        .map(terminal_line_plain_text)
-        .collect::<Vec<_>>();
-    while lines.last().is_some_and(|line| line.is_empty()) {
-        lines.pop();
-    }
-    (!lines.is_empty()).then(|| lines.join("\n"))
-}
-
-fn terminal_line_plain_text(line: &TerminalLine) -> String {
-    line.text().replace('\u{00a0}', " ").trim_end().to_string()
-}
-
-fn terminal_line_has_content(line: &TerminalLine) -> bool {
-    line.cells()
-        .iter()
-        .any(|c| !matches!(c.ch, '\0' | ' ' | '\u{00a0}'))
-}
-
-/// The pixel y-offset for a viewport row (0 with no gaps / out of range).
-fn row_y_offset(offsets: &[f32], row: usize) -> f32 {
-    offsets.get(row).copied().unwrap_or(0.0)
-}
-
-/// Inverse of the offset mapping: the viewport row under a content-relative
-/// pixel y. A pointer inside the gap above a block maps to the block's first row.
-fn terminal_row_at_y(y: f32, cell_height: f32, offsets: &[f32]) -> u16 {
-    if offsets.is_empty() {
-        return (y / cell_height).floor().max(0.0) as u16;
-    }
-    for (row, off) in offsets.iter().enumerate() {
-        if y < (row as f32 + 1.0) * cell_height + off {
-            return row as u16;
-        }
-    }
-    offsets.len().saturating_sub(1) as u16
-}
-
-pub(crate) const BLOCK_SUCCESS_COLOR: u32 = 0xa3be8c;
-pub(crate) const BLOCK_FAILURE_COLOR: u32 = 0xbf616a;
-pub(crate) const BLOCK_RUNNING_COLOR: u32 = 0x88c0d0;
-pub(crate) const BLOCK_INPUT_COLOR: u32 = 0xebcb8b;
-pub(crate) const BLOCK_SELECTED_TINT: u32 = 0xffffff0d;
-
-pub(crate) fn block_separator_bounds(
-    bounds: Bounds<Pixels>,
-    y: Pixels,
-    thickness: f32,
-) -> Bounds<Pixels> {
-    let left = bounds.left() - px(metrics::PADDING_PX);
-    let right = bounds.right() + px(metrics::PADDING_PX);
-    Bounds::new(point(left, y), size(right - left, px(thickness)))
-}
-
-/// First `max` chars of the command for the header label.
-pub(crate) fn truncate_command(command: &str, max: usize) -> String {
-    if command.chars().count() <= max {
-        command.to_string()
-    } else {
-        let head: String = command.chars().take(max.saturating_sub(1)).collect();
-        format!("{head}…")
-    }
-}
-
-fn shape_frame(
-    bounds: Bounds<Pixels>,
-    frame: &TerminalFrame,
-    cell: metrics::CellMetrics,
-    window: &mut Window,
-) -> Vec<ShapedLine> {
-    let row_count =
-        ((bounds.size.height.as_f32() / cell.height_px).ceil() as usize).min(frame.lines().len());
-    shape_lines(
-        frame
-            .lines()
-            .iter()
-            .take(row_count)
-            .map(|line| (line.text_hash(), line)),
-        cell.width_px,
-        window,
-    )
-}
-
-/// Shape terminal lines with per-cell forced width, cached by the caller's
-/// key — the one shaping path for live-frame rows and frozen block rows.
-pub(crate) fn shape_lines<'a>(
-    lines: impl Iterator<Item = (u64, &'a TerminalLine)>,
-    cell_w: f32,
-    window: &mut Window,
-) -> Vec<ShapedLine> {
-    let style = window.text_style();
-    let font_size = style.font_size.to_pixels(window.rem_size());
-    let base = style.to_run(0);
-    lines
-        .map(|(key, line)| {
-            let runs = terminal_text_runs(line, &base);
-            window.text_system().shape_line_by_hash(
-                key,
-                line.text().len(),
-                font_size,
-                &runs,
-                Some(px(cell_w)),
-                || line.text().clone(),
-            )
-        })
-        .collect()
-}
-
-/// Build one styled `TextRun` per foreground run, inheriting font/size from the
-/// base run and overriding only the color. Run byte-lengths sum to the row text.
-pub(crate) fn terminal_text_runs(line: &TerminalLine, base: &TextRun) -> Vec<TextRun> {
-    if line.runs().is_empty() {
-        // Blank row: keep the single zero/whitespace run path GPUI already handles.
-        let mut run = base.clone();
-        run.len = line.text().len();
-        return vec![run];
-    }
-    line.runs()
-        .iter()
-        .map(|run| {
-            let mut text_run = base.clone();
-            text_run.len = run.len;
-            text_run.color = rgb(run.fg.rgb_u32()).into();
-            if run.bold {
-                text_run.font.weight = FontWeight::BOLD;
-            }
-            if run.italic {
-                text_run.font.style = FontStyle::Italic;
-            }
-            if run.underline {
-                text_run.underline = Some(UnderlineStyle {
-                    thickness: px(1.0),
-                    color: None,
-                    wavy: false,
-                });
-            }
-            if run.strikethrough {
-                text_run.strikethrough = Some(StrikethroughStyle {
-                    thickness: px(1.0),
-                    color: None,
-                });
-            }
-            text_run
-        })
-        .collect()
-}
-
-fn paint_frame(
-    bounds: Bounds<Pixels>,
-    frame: &TerminalFrame,
-    lines: &[ShapedLine],
-    cell: metrics::CellMetrics,
-    offsets: &[f32],
-    window: &mut Window,
-    cx: &mut App,
-) {
-    use crate::terminal::frame::ZLayer;
-    // Kitty images below cell backgrounds (z < i32::MIN/2).
-    paint_frame_images(
-        bounds,
-        frame,
-        ZLayer::BelowBackground,
-        cell,
-        offsets,
-        window,
-    );
-    for (row, line) in frame.lines().iter().take(lines.len()).enumerate() {
-        paint_line_backgrounds_at(
-            bounds,
-            line,
-            row as f32 * cell.height_px + row_y_offset(offsets, row),
-            cell.width_px,
-            cell.height_px,
-            window,
-        );
-    }
-    // Kitty images above backgrounds, below cursor/text (i32::MIN/2 <= z < 0).
-    paint_frame_images(bounds, frame, ZLayer::BelowText, cell, offsets, window);
-    paint_cursor(bounds, frame.cursor(), cell, offsets, window);
-
-    paint_glyph_rows(
-        bounds,
-        lines.iter().enumerate().map(|(row, line)| {
-            (
-                row as f32 * cell.height_px + row_y_offset(offsets, row),
-                line,
-            )
-        }),
-        cell.height_px,
-        window,
-        cx,
-    );
-    // Kitty images above cursor/text (z >= 0).
-    paint_frame_images(bounds, frame, ZLayer::AboveText, cell, offsets, window);
-}
-
-/// Paint shaped glyph rows at caller-supplied element-local y offsets — the
-/// one glyph-paint convention (left-aligned, no wrap, cell-height lines) for
-/// live-frame rows and frozen block rows.
-pub(crate) fn paint_glyph_rows<'a>(
-    bounds: Bounds<Pixels>,
-    rows: impl Iterator<Item = (f32, &'a ShapedLine)>,
-    cell_h: f32,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    for (y, line) in rows {
-        let _ = line.paint(
-            point(bounds.left(), bounds.top() + px(y)),
-            px(cell_h),
-            TextAlign::Left,
-            None,
-            window,
-            cx,
-        );
-    }
-}
-
-/// Paint the frame's Kitty images whose z-index falls in `layer`, in engine order (no
-/// per-paint sort or descriptor allocation). Each image's full texture is painted into
-/// the source-expanded bounds and clipped to its destination by a content mask, so a
-/// source crop needs no CPU cropping. A painted generation is marked
-/// uploaded so its atlas tile is released once its last reference drops.
-fn paint_frame_images(
-    bounds: Bounds<Pixels>,
-    frame: &TerminalFrame,
-    layer: crate::terminal::frame::ZLayer,
-    cell: metrics::CellMetrics,
-    offsets: &[f32],
-    window: &mut Window,
-) {
-    let images = frame.images();
-    if images.is_empty() {
-        return; // no graphics: zero work
-    }
-    for img in images {
-        if img.z_layer() != layer {
-            continue;
-        }
-        let top = img.top_row();
-        let row_offset = if top >= 0 {
-            row_y_offset(offsets, top as usize)
-        } else {
-            0.0
-        };
-        let Some((dest, source)) = img.destination(
-            cell.width_px,
-            cell.height_px,
-            f32::from(bounds.left()),
-            f32::from(bounds.top()),
-            row_offset,
-        ) else {
-            continue;
-        };
-        paint_generation(window, dest, source, &img.generation);
-    }
-}
-
-/// Paint a block-list item's frozen Kitty image slices whose z-layer is on
-/// the requested side of the frozen text: `above_text == false` paints the below-text
-/// slices (before `paint_frozen`), `true` the above-text slices (after). Uses the same
-/// source-crop primitive as live images; clips to each slice's destination cell rect.
-fn paint_frozen_images(
-    bounds: Bounds<Pixels>,
-    view: &crate::terminal::block_list::FrozenView,
-    cell: metrics::CellMetrics,
-    window: &mut Window,
-    above_text: bool,
-) {
-    if view.images.is_empty() {
-        return;
-    }
-    for img in &view.images {
-        if (img.z >= 0) != above_text {
-            continue;
-        }
-        let dest = [
-            f32::from(bounds.left()) + img.col as f32 * cell.width_px,
-            f32::from(bounds.top()) + img.y,
-            img.width as f32 * cell.width_px,
-            cell.height_px,
-        ];
-        paint_generation(window, dest, img.source, &img.generation);
-    }
-}
-
-/// Paint one image generation's `source` crop into `dest` and mark it
-/// uploaded (its atlas tile releases with the last reference) — the shared
-/// tail of live-frame and frozen image painting. Degenerate crops are
-/// skipped.
-fn paint_generation(
-    window: &mut Window,
-    dest: [f32; 4],
-    source: [f32; 4],
-    generation: &crate::terminal::graphics::ImageGeneration,
-) {
-    let Some(full) = crate::terminal::graphics::expanded_full_bounds(dest, source) else {
-        return;
-    };
-    paint_image_clipped(window, dest, full, generation.image().clone());
-    generation.mark_uploaded();
-}
-
-/// Paint `image`'s full texture into `full` bounds, clipped to `dest` — the source-crop
-/// primitive. GPUI intersects the mask with the element's existing overflow
-/// mask, so viewport clipping is automatic.
-fn paint_image_clipped(
-    window: &mut Window,
-    dest: [f32; 4],
-    full: [f32; 4],
-    image: std::sync::Arc<RenderImage>,
-) {
-    let to_bounds = |b: [f32; 4]| Bounds {
-        origin: point(px(b[0]), px(b[1])),
-        size: size(px(b[2]), px(b[3])),
-    };
-    let mask = ContentMask {
-        bounds: to_bounds(dest),
-    };
-    window.with_content_mask(Some(mask), |w| {
-        let _ = w.paint_image(to_bounds(full), Corners::default(), image, 0, false);
-    });
-}
-
-/// Paint one line's background color runs at an element-local pixel `y`,
-/// merging contiguous cells of equal background into single quads. Shared by
-/// the live grid and the frozen block rows.
-pub(crate) fn paint_line_backgrounds_at(
-    bounds: Bounds<Pixels>,
-    line: &TerminalLine,
-    y: f32,
-    cell_w: f32,
-    cell_h: f32,
-    window: &mut Window,
-) {
-    let mut run_start = 0u16;
-    let mut run_width = 0u16;
-    let mut run_color: Option<TerminalColor> = None;
-    let flush = |start: u16, width: u16, color: Option<TerminalColor>, window: &mut Window| {
-        let Some(color) = color else { return };
-        if width == 0 {
-            return;
-        }
-        window.paint_quad(fill(
-            Bounds::new(
-                point(
-                    bounds.left() + px(start as f32 * cell_w),
-                    bounds.top() + px(y),
-                ),
-                size(px(width as f32 * cell_w), px(cell_h)),
-            ),
-            rgb(color.rgb_u32()),
-        ));
-    };
-    for cell_data in line.cells() {
-        let width: u16 = if cell_data.wide == nmt_terminal::terminal::square::Wide::Wide {
-            2
-        } else {
-            1
-        };
-        if run_color == cell_data.background && run_start + run_width == cell_data.col {
-            run_width += width;
-            continue;
-        }
-        flush(run_start, run_width, run_color, window);
-        run_start = cell_data.col;
-        run_width = width;
-        run_color = cell_data.background;
-    }
-    flush(run_start, run_width, run_color, window);
-}
-
-fn paint_cursor(
-    bounds: Bounds<Pixels>,
-    cursor: Option<TerminalCursor>,
-    cell: metrics::CellMetrics,
-    offsets: &[f32],
-    window: &mut Window,
-) {
-    let Some(cursor) = cursor else {
-        return;
-    };
-    let y_offset = row_y_offset(offsets, cursor.row as usize);
-    let Some(bounds) = cursor_bounds(bounds, cursor, cell, y_offset) else {
-        return;
-    };
-    let color = match cursor.shape {
-        CursorShape::Block => rgba(0xd8dee966),
-        CursorShape::Beam | CursorShape::Underline => rgb(0xd8dee9),
-        CursorShape::Hidden => return,
-    };
-    window.paint_quad(fill(bounds, color));
-}
-
-fn cursor_bounds(
-    bounds: Bounds<Pixels>,
-    cursor: TerminalCursor,
-    cell: metrics::CellMetrics,
-    y_offset: f32,
-) -> Option<Bounds<Pixels>> {
-    let x = bounds.left() + px(cursor.col as f32 * cell.width_px);
-    let y = bounds.top() + px(cursor.row as f32 * cell.height_px + y_offset);
-    let thickness = px((cell.width_px.min(cell.height_px) / 8.0)
-        .round()
-        .clamp(1.0, 2.0));
-    Some(match cursor.shape {
-        CursorShape::Block => Bounds::new(point(x, y), size(px(cell.width_px), px(cell.height_px))),
-        CursorShape::Beam => Bounds::new(point(x, y), size(thickness, px(cell.height_px))),
-        CursorShape::Underline => Bounds::new(
-            point(x, y + px(cell.height_px) - thickness),
-            size(px(cell.width_px), thickness),
-        ),
-        CursorShape::Hidden => return None,
-    })
-}
-
 #[cfg(test)]
 mod tests {
-    use gpui::{Bounds, ListAlignment, ListOffset, ScrollDelta, point, px, size};
-    use nmt_terminal::ansi::CursorShape;
-    use nmt_terminal::event::BlockEvent;
-    use nmt_terminal::ghostty::BlockHandle;
-    use nmt_terminal::render_buffer::RenderBuffer;
+    use gpui::{ScrollDelta, point, px};
     use nmt_terminal::selection::SelectionType;
 
     use super::{
-        cursor_bounds, metrics, scrollbar_offset_for_thumb, scrollbar_thumb_geometry,
-        selection_drag_started, selection_type_for_click_count, terminal_cell_at_position,
+        metrics, selection_drag_started, selection_type_for_click_count, terminal_cell_at_position,
         terminal_scroll_lines,
     };
-    use crate::terminal::frame::TerminalCursor;
     use crate::terminal::surface::{SurfaceCell, SurfaceCellSide};
-
-    fn block_item(seq: u64, id: u64, rows: usize) -> BlockEvent {
-        BlockEvent::EngineBlock {
-            seq,
-            handle: BlockHandle { id, generation: 1 },
-            rows,
-        }
-    }
-
-    #[test]
-    fn url_at_col_finds_and_trims_urls() {
-        fn url_at(text: &str, col: usize) -> Option<String> {
-            super::url_at_col(text, col).map(|(url, _)| url)
-        }
-
-        let text = "see https://example.com/a?q=1 for details";
-        // Click anywhere inside the URL (col 10 = inside host).
-        assert_eq!(
-            url_at(text, 10).as_deref(),
-            Some("https://example.com/a?q=1")
-        );
-        // The char range covers exactly the URL.
-        assert_eq!(super::url_at_col(text, 10).unwrap().1, 4..29);
-        // Click on surrounding text misses.
-        assert_eq!(url_at(text, 1), None);
-        assert_eq!(url_at(text, 33), None);
-
-        // Sentence-final punctuation is trimmed; a click on it misses.
-        let text = "read https://a.b/c.";
-        assert_eq!(url_at(text, 8).as_deref(), Some("https://a.b/c"));
-        assert_eq!(url_at(text, 18), None);
-
-        // The closer of a surrounding paren is dropped, literal parens kept.
-        let text = "(https://en.wikipedia.org/wiki/Rust_(language))";
-        assert_eq!(
-            url_at(text, 5).as_deref(),
-            Some("https://en.wikipedia.org/wiki/Rust_(language)")
-        );
-
-        // A URL-ish token without a known scheme is not opened.
-        assert_eq!(url_at("run foo://bar now", 6), None);
-        // Scheme alone is not a URL.
-        assert_eq!(url_at("https://", 3), None);
-        // Out-of-range column is safe.
-        assert_eq!(url_at("short", 40), None);
-    }
 
     #[test]
     fn repeated_clicks_choose_terminal_selection_modes() {
@@ -3227,141 +1669,6 @@ mod tests {
         assert_eq!(selection_type_for_click_count(4), SelectionType::Lines);
     }
 
-    #[test]
-    fn block_list_active_top_survives_when_live_item_is_not_prepainted() {
-        use nmt_terminal::block_store::BlockStore;
-
-        let mut store = BlockStore::default();
-        store.apply([block_item(1, 1, 1)]);
-        // One 1-row item = 1 content row + 2 pad rows = 30px; the live grid
-        // then starts after its own top pad (10px), minus the 5px scroll.
-        let pad = crate::terminal::block_list::ITEM_PAD_ROWS;
-        let frozen_px: f32 = store
-            .items()
-            .iter()
-            .map(|item| crate::terminal::block_list::item_px(item, 80, 10.0, pad))
-            .sum();
-        assert_eq!(
-            super::block_list_active_top_px(frozen_px, 0.0, 10.0, pad, 5.0),
-            35.0
-        );
-        // Compact presentation: no pads anywhere, so the live grid starts
-        // right after the frozen rows.
-        let compact_px: f32 = store
-            .items()
-            .iter()
-            .map(|item| crate::terminal::block_list::item_px(item, 80, 10.0, 0.0))
-            .sum();
-        assert_eq!(compact_px, 10.0, "1 content row, no pad rows");
-        assert_eq!(
-            super::block_list_active_top_px(compact_px, 0.0, 10.0, 0.0, 5.0),
-            5.0
-        );
-    }
-
-    #[test]
-    fn block_list_render_metrics_resolve_scroll_once() {
-        use nmt_terminal::block_store::BlockStore;
-
-        let mut store = BlockStore::default();
-        store.apply([block_item(1, 1, 1)]);
-
-        let metrics = super::block_list_render_metrics(
-            &store,
-            2,
-            1,
-            80,
-            10.0,
-            crate::terminal::block_list::ITEM_PAD_ROWS,
-            ListOffset {
-                item_ix: 1,
-                offset_in_item: px(3.0),
-            },
-        );
-
-        assert_eq!(metrics.store_len, 1);
-        assert_eq!(metrics.item_count, 2);
-        assert_eq!(metrics.frozen_px, 30.0, "1 row + 2 pad rows");
-        assert_eq!(metrics.tail_px, 10.0, "one live-history row");
-        assert_eq!(
-            metrics.total_px, 80.0,
-            "frozen 30 + live (history 10 + 2 rows + 2 pads)"
-        );
-        assert_eq!(metrics.offset_px, 33.0);
-        assert_eq!(metrics.last_item_px, 30.0);
-    }
-
-    #[test]
-    fn selected_item_tracks_store_head_eviction() {
-        assert_eq!(
-            super::shift_selected_item_for_eviction(Some(4), 2, 10),
-            Some(2)
-        );
-        assert_eq!(
-            super::shift_selected_item_for_eviction(Some(1), 2, 10),
-            None
-        );
-        assert_eq!(
-            super::shift_selected_item_for_eviction(Some(10), 3, 7),
-            Some(7),
-            "old live index shifts to the new live index"
-        );
-        assert_eq!(
-            super::shift_selected_item_for_eviction(Some(11), 3, 7),
-            None
-        );
-    }
-
-    #[test]
-    fn block_list_alignment_follows_input_style_anchor() {
-        assert_eq!(super::block_list_alignment(false), ListAlignment::Top);
-        assert_eq!(super::block_list_alignment(true), ListAlignment::Bottom);
-    }
-
-    #[test]
-    fn block_list_live_chrome_marks_idle_open_prompt() {
-        let chrome = super::block_list_live_chrome(4, 2, 10.0, None, true, false).unwrap();
-        assert_eq!(chrome.item, 4);
-        assert_eq!(chrome.accent, super::BLOCK_INPUT_COLOR);
-        assert_eq!(chrome.header, None);
-        assert!(!chrome.selected);
-
-        assert!(super::block_list_live_chrome(4, 2, 10.0, None, false, false).is_none());
-    }
-
-    #[test]
-    fn frozen_chrome_offset_moves_header_with_item() {
-        let chrome = crate::terminal::block_list::FrozenItemChrome {
-            item: 0,
-            top: 0.0,
-            bottom: 40.0,
-            header_y: 10.0,
-            accent: super::BLOCK_SUCCESS_COLOR,
-            header: Some("build · ✓".into()),
-            selected: false,
-        };
-
-        let chrome = super::offset_frozen_chrome(chrome, 80.0);
-        assert_eq!(
-            (chrome.top, chrome.bottom, chrome.header_y),
-            (80.0, 120.0, 90.0)
-        );
-    }
-
-    #[test]
-    fn bottom_anchor_offsets_pin_content_to_the_floor() {
-        let frame =
-            crate::terminal::frame::TerminalFrame::from_render_buffer(&RenderBuffer::new(80, 3));
-
-        assert_eq!(
-            super::bottom_anchor_offsets(&frame, 10.0, false),
-            Vec::<f32>::new()
-        );
-        assert_eq!(super::bottom_anchor_offsets(&frame, 10.0, true), [30.0; 3]);
-    }
-
-    /// The gutter hit band covers the strip painted in the left padding plus a
-    /// small tolerance into column 0 — and nothing else.
     #[test]
     fn block_gutter_hit_band() {
         use super::block_gutter_hit;
@@ -3380,57 +1687,6 @@ mod tests {
             "strip is flush with the pane edge"
         );
         assert!(!block_gutter_hit(-3.0, origin_x), "left of the pane misses");
-    }
-
-    #[test]
-    fn cursor_bounds_cover_block_beam_and_underline() {
-        let bounds = Bounds::new(point(px(10.0), px(20.0)), size(px(100.0), px(100.0)));
-        let cell = metrics::CellMetrics {
-            width_px: 8.0,
-            height_px: 18.0,
-        };
-
-        let block = cursor_bounds(
-            bounds,
-            TerminalCursor {
-                col: 2,
-                row: 1,
-                shape: CursorShape::Block,
-            },
-            cell,
-            0.0,
-        )
-        .unwrap();
-        assert_eq!(block.origin, point(px(26.0), px(38.0)));
-        assert_eq!(block.size, size(px(8.0), px(18.0)));
-
-        let beam = cursor_bounds(
-            bounds,
-            TerminalCursor {
-                col: 2,
-                row: 1,
-                shape: CursorShape::Beam,
-            },
-            cell,
-            0.0,
-        )
-        .unwrap();
-        assert_eq!(beam.size.width, px(1.0));
-        assert_eq!(beam.size.height, px(18.0));
-
-        let underline = cursor_bounds(
-            bounds,
-            TerminalCursor {
-                col: 2,
-                row: 1,
-                shape: CursorShape::Underline,
-            },
-            cell,
-            0.0,
-        )
-        .unwrap();
-        assert_eq!(underline.origin.y, px(55.0));
-        assert_eq!(underline.size, size(px(8.0), px(1.0)));
     }
 
     #[test]
@@ -3486,38 +1742,6 @@ mod tests {
         assert_eq!(
             terminal_scroll_lines(ScrollDelta::Pixels(point(px(0.0), px(4.0))), cell),
             0
-        );
-    }
-
-    #[test]
-    fn scrollbar_opacity_fades_after_linger() {
-        assert_eq!(super::scrollbar_opacity(true, None), Some(1.0));
-        assert_eq!(
-            super::scrollbar_opacity(false, Some(super::SCROLLBAR_LINGER / 2)),
-            Some(1.0)
-        );
-
-        let fading = super::scrollbar_opacity(
-            false,
-            Some(super::SCROLLBAR_LINGER + super::SCROLLBAR_FADE / 2),
-        )
-        .unwrap();
-        assert!(fading > 0.0 && fading < 1.0);
-
-        assert_eq!(
-            super::scrollbar_opacity(false, Some(super::SCROLLBAR_LINGER + super::SCROLLBAR_FADE)),
-            None
-        );
-    }
-
-    #[test]
-    fn scrollbar_thumb_stays_inside_track_with_long_history() {
-        let (top, height) = scrollbar_thumb_geometry(10_000.0, 9_975.0, 25.0).unwrap();
-
-        assert!(top + height <= 1.0, "thumb bottom was {}", top + height);
-        assert_eq!(
-            scrollbar_offset_for_thumb(10_000.0, 25.0, top),
-            Some(9_975.0)
         );
     }
 }
