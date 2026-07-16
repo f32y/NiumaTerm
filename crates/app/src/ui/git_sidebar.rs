@@ -341,15 +341,29 @@ impl Render for GitSidebar {
                 cx.stop_propagation();
                 cx.new(|_| drag.clone())
             });
-        v_flex()
+        // The sidebar surface is a floating card (own background, 1px border,
+        // large radius) in a gutter cut from the fixed width: right inset
+        // clears the window edge, the top inset lines up with the tab pills,
+        // and the terminal column's own gutter provides the left gap — so the
+        // resize handle keeps riding the card's left edge.
+        let card = v_flex()
+            .size_full()
+            .bg(cx.theme().sidebar)
+            .border_1()
+            .border_color(cx.theme().sidebar_border)
+            .rounded(cx.theme().radius_lg)
+            .overflow_hidden()
+            .child(header)
+            .child(body);
+        div()
             .w(self.width)
             .h_full()
             .flex_none()
             .relative()
             .overflow_hidden()
-            .bg(cx.theme().sidebar)
-            .border_l_1()
-            .border_color(cx.theme().sidebar_border)
+            .pr(px(6.))
+            .pt(px(4.))
+            .pb(px(6.))
             .on_drag_move(cx.listener(|this, e: &DragMoveEvent<ResizeDrag>, _, cx| {
                 // The panel's right edge is pinned to the window edge, so
                 // the new width is right edge minus pointer x.
@@ -361,8 +375,7 @@ impl Render for GitSidebar {
                     cx.notify();
                 }
             }))
-            .child(header)
-            .child(body)
+            .child(card)
             .child(resize_handle)
     }
 }
