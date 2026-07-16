@@ -12,7 +12,7 @@ use gpui::{
 use gpui_component::Sizable;
 use gpui_component::input::{Input, InputState};
 use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
-use gpui_component::tab::{Tab, TabBar};
+use gpui_component::tab::{Tab, TabBar, TabVariant};
 
 use super::shell::TerminalPaneTree;
 use super::{NewTab, Shell};
@@ -134,6 +134,10 @@ impl TabStrip {
         // the tab's own overflow_hidden.
         let tab_width = cx.global::<AppSettings>().tab_width as f32;
         TabBar::new("shell-tabs")
+            // Soft-rounded pills floating on the chrome (VS Code Modern UI
+            // look); Small keeps the strip compact above the terminal card.
+            .with_variant(TabVariant::Modern)
+            .small()
             .w_full()
             .min_w_0()
             .selected_index(active_idx)

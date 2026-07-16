@@ -524,7 +524,19 @@ pub(crate) fn apply_ui_theme(value: Option<&nmt_config::theme::UiTheme>, cx: &mu
                 .to_string(),
             ),
         );
-        config.insert("colors".to_string(), value.colors.clone());
+        let mut colors = value.colors.clone();
+        // Size/behavior tokens live at the top level of `ThemeConfig`, but the
+        // theme file format keeps everything under `[colors.ui]` — lift them
+        // out so themes can set corner radii (they'd otherwise be silently
+        // ignored inside the colors table).
+        if let Some(colors) = colors.as_table_mut() {
+            for key in ["radius", "radius.lg", "shadow"] {
+                if let Some(v) = colors.remove(key) {
+                    config.insert(key.to_string(), v);
+                }
+            }
+        }
+        config.insert("colors".to_string(), colors);
         toml::Value::Table(config)
             .try_into::<gpui_component::ThemeConfig>()
             .map(Rc::new)
@@ -752,6 +764,10 @@ pub(crate) fn apply_window_translucency(cx: &mut gpui::App) {
     theme.apply_config(&palette);
     if opacity < 1.0 {
         theme.colors.sidebar = theme.colors.sidebar.opacity(opacity);
+        // The shell paints this across the whole window as the chrome base
+        // layer; it must dim with the rest of the chrome or translucency would
+        // be defeated by an opaque backdrop.
+        theme.colors.background = theme.colors.background.opacity(opacity);
         for token in [
             &mut theme.tokens.title_bar,
             &mut theme.tokens.tab_bar,

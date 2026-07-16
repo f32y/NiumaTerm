@@ -93,7 +93,7 @@ pub fn default_cursor() -> CursorShape {
 
 #[inline]
 pub fn default_theme() -> String {
-    String::from("default_dark")
+    String::from("modern_dark")
 }
 
 #[inline]

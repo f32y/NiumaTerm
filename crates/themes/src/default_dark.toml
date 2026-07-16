@@ -1,6 +1,0 @@
-name = "Default Dark"
-mode = "dark"
-
-[colors.terminal]
-
-[colors.ui]

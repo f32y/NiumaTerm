@@ -323,13 +323,17 @@ impl Sidebar {
     ) -> AnyElement {
         let width = self.width;
         // Fixed-width content; the animated wrapper below clips it so the buttons
-        // don't reflow while the sidebar slides.
-        let content = v_flex()
-            .w(px(width))
-            .h_full()
+        // don't reflow while the sidebar slides. The sidebar surface itself is
+        // a floating card — 1px border, large radius, its own background —
+        // sitting in a gutter cut from the fixed width, so the drag/animation
+        // math keeps operating on the full `width`.
+        let card = v_flex()
+            .size_full()
             .bg(cx.theme().sidebar)
-            .border_r_1()
+            .border_1()
             .border_color(cx.theme().sidebar_border)
+            .rounded(cx.theme().radius_lg)
+            .overflow_hidden()
             .p_2()
             .gap_1()
             .child(
@@ -368,6 +372,18 @@ impl Sidebar {
                     .border_color(cx.theme().sidebar_border)
                     .child(codex_usage)
             }));
+        // Gutter floating the card inside the chrome; no right inset — the
+        // terminal column carries its own 6px gutter, which doubles as the gap
+        // between the two cards and keeps the resize handle riding the card
+        // edge. The top inset matches the tab strip's 4px inset so the card's
+        // top edge lines up with the tab pills.
+        let content = div()
+            .w(px(width))
+            .h_full()
+            .pl(px(6.))
+            .pt(px(4.))
+            .pb(px(6.))
+            .child(card);
 
         let collapsed = self.collapsed;
         // Width-resize handle riding the right border: drag starts an

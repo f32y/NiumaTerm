@@ -845,6 +845,15 @@ mod tests {
         }
     }
 
+    /// Terminal palette of the built-in default theme, which a config that
+    /// doesn't name a theme resolves to.
+    fn default_theme_colors() -> Colors {
+        toml::from_str::<Theme>(nmt_themes::get(&default_theme()).unwrap())
+            .unwrap()
+            .colors
+            .terminal
+    }
+
     fn create_temporary_theme(theme: &str, toml_str: &str) {
         let file_name = tmp_dir().join(theme).with_extension("toml");
         let mut file = std::fs::File::create(file_name).unwrap();
@@ -896,7 +905,7 @@ mod tests {
         assert_eq!(result.use_fork, default_use_fork());
 
         // Colors
-        assert_eq!(result.colors, Colors::default());
+        assert_eq!(result.colors, default_theme_colors());
         // Developer
         assert_eq!(result.developer, Developer::default());
         assert_eq!(result.bindings, Bindings::default());
@@ -940,10 +949,7 @@ mod tests {
         assert_eq!(result.renderer.backend, crate::renderer::Backend::Cpu);
         assert_eq!(result.theme, default_theme());
         // Colors
-        assert_eq!(result.colors.background, colors::defaults::background());
-        assert_eq!(result.colors.foreground, colors::defaults::foreground());
-        assert_eq!(result.colors.tabs_active, colors::defaults::tabs_active());
-        assert_eq!(result.colors.cursor, colors::defaults::cursor());
+        assert_eq!(result.colors, default_theme_colors());
     }
 
     #[test]
@@ -959,18 +965,7 @@ mod tests {
         assert_eq!(result.cursor.shape, default_cursor());
         assert_eq!(result.theme, default_theme());
         // Colors
-        assert_eq!(result.colors.background, colors::defaults::background());
-        assert_eq!(result.colors.foreground, colors::defaults::foreground());
-        assert_eq!(result.colors.tabs_active, colors::defaults::tabs_active());
-        assert_eq!(
-            result.colors.selection_background,
-            colors::defaults::selection_background()
-        );
-        assert_eq!(
-            result.colors.selection_foreground,
-            colors::defaults::selection_foreground()
-        );
-        assert_eq!(result.colors.cursor, colors::defaults::cursor());
+        assert_eq!(result.colors, default_theme_colors());
     }
 
     #[test]
@@ -986,10 +981,7 @@ mod tests {
         assert_eq!(result.cursor.shape, CursorShape::Underline);
         assert_eq!(result.theme, default_theme());
         // Colors
-        assert_eq!(result.colors.background, colors::defaults::background());
-        assert_eq!(result.colors.foreground, colors::defaults::foreground());
-        assert_eq!(result.colors.tabs_active, colors::defaults::tabs_active());
-        assert_eq!(result.colors.cursor, colors::defaults::cursor());
+        assert_eq!(result.colors, default_theme_colors());
     }
 
     #[test]
@@ -1004,10 +996,7 @@ mod tests {
         assert_eq!(result.option_as_alt, String::from("Both"));
         assert_eq!(result.theme, default_theme());
         // Colors
-        assert_eq!(result.colors.background, colors::defaults::background());
-        assert_eq!(result.colors.foreground, colors::defaults::foreground());
-        assert_eq!(result.colors.tabs_active, colors::defaults::tabs_active());
-        assert_eq!(result.colors.cursor, colors::defaults::cursor());
+        assert_eq!(result.colors, default_theme_colors());
     }
 
     #[test]
@@ -1062,10 +1051,7 @@ mod tests {
             })
         );
         // Colors
-        assert_eq!(result.colors.background, colors::defaults::background());
-        assert_eq!(result.colors.foreground, colors::defaults::foreground());
-        assert_eq!(result.colors.tabs_active, colors::defaults::tabs_active());
-        assert_eq!(result.colors.cursor, colors::defaults::cursor());
+        assert_eq!(result.colors, default_theme_colors());
     }
 
     #[test]
@@ -1209,10 +1195,7 @@ mod tests {
         assert!(result.use_fork);
 
         // Colors
-        assert_eq!(result.colors.background, colors::defaults::background());
-        assert_eq!(result.colors.foreground, colors::defaults::foreground());
-        assert_eq!(result.colors.tabs_active, colors::defaults::tabs_active());
-        assert_eq!(result.colors.cursor, colors::defaults::cursor());
+        assert_eq!(result.colors, default_theme_colors());
     }
 
     #[test]
@@ -1262,10 +1245,7 @@ mod tests {
         assert!(result.developer.enable_fps_counter);
 
         // Colors
-        assert_eq!(result.colors.background, colors::defaults::background());
-        assert_eq!(result.colors.foreground, colors::defaults::foreground());
-        assert_eq!(result.colors.tabs_active, colors::defaults::tabs_active());
-        assert_eq!(result.colors.cursor, colors::defaults::cursor());
+        assert_eq!(result.colors, default_theme_colors());
     }
 
     #[test]
