@@ -1,6 +1,6 @@
 //! The workspace sidebar: one themed button per workspace with busy/idle
-//! indicator and hover-close, plus the new-workspace button, wrapped in the
-//! collapse/expand slide animation. `Sidebar` owns the collapse/width view
+//! indicator and hover-close, plus the new-workspace button and bottom status
+//! bar, wrapped in the collapse/expand slide animation. `Sidebar` owns the collapse/width view
 //! state; `Shell` holds one and feeds it the workspace summaries to render.
 
 use std::time::Duration;
@@ -20,6 +20,7 @@ use gpui_component::{ActiveTheme, Icon, IconNamed, Selectable, Sizable, h_flex, 
 use nmt_agent_utils::AgentRuntimeStatus;
 
 use super::{NewWorkspace, Shell};
+use crate::ui::codex_usage::CodexUsageView;
 use crate::window::WindowRegistry;
 use crate::workspace::{WorkspaceId, WorkspaceSummary};
 
@@ -311,11 +312,13 @@ impl Sidebar {
     }
 
     /// The workspace sidebar: one themed button per workspace (active = selected),
-    /// plus a new-workspace button. Toggled by `ToggleSidebar` (Ctrl+Shift+B).
+    /// plus a new-workspace button and bottom status bar. Toggled by
+    /// `ToggleSidebar` (Ctrl+Shift+B).
     pub(super) fn render(
         &self,
         summaries: Vec<WorkspaceSummary>,
         rename: Option<&(WorkspaceId, Entity<InputState>)>,
+        codex_usage: Entity<CodexUsageView>,
         cx: &mut Context<Shell>,
     ) -> AnyElement {
         let width = self.width;
@@ -354,6 +357,16 @@ impl Sidebar {
                             .map(|(idx, ws)| self.render_item(idx, ws, rename, cx)),
                     )
                     .child(workspace_list_scrollbar(&self.scroll)),
+            )
+            .child(
+                h_flex()
+                    .id("workspace-sidebar-status")
+                    .w_full()
+                    .flex_none()
+                    .pt_1()
+                    .border_t_1()
+                    .border_color(cx.theme().sidebar_border)
+                    .child(codex_usage),
             );
 
         let collapsed = self.collapsed;

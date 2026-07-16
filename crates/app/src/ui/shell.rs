@@ -20,6 +20,7 @@ use crate::pane_tree::{PaneId, PaneNode, PaneTree, RemoveOutcome, SplitDirection
 use crate::tabs::{TabId, TabManager};
 use crate::terminal::session::HostEvent;
 use crate::terminal::view::{AgentInterrupted, TerminalPane};
+use crate::ui::codex_usage::CodexUsageView;
 use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::git_status::{GitStatusModel, GitStatusView};
 use crate::ui::settings::{AppSettings, settings_view};
@@ -131,6 +132,8 @@ pub(crate) struct Shell {
     /// Titlebar daily-token-usage widget; rendered only while the
     /// `show_daily_token_usage` setting is on.
     token_usage: Entity<TokenUsageView>,
+    /// Active Codex account rate limits, refreshed independently of terminals.
+    codex_usage: Entity<CodexUsageView>,
     /// Shared git status poller feeding the titlebar indicator and sidebar.
     git_model: Entity<GitStatusModel>,
     /// Titlebar `+N -M` indicator (self-gating on its setting).
@@ -261,6 +264,7 @@ impl Shell {
             focus: cx.focus_handle(),
             window_id,
             token_usage: cx.new(TokenUsageView::new),
+            codex_usage: cx.new(CodexUsageView::new),
             git_status: cx.new(|cx| GitStatusView::new(git_model.clone(), cx)),
             git_sidebar: cx.new(|cx| GitSidebar::new(git_model.clone(), cx)),
             git_model,
@@ -1761,9 +1765,12 @@ impl Render for Shell {
         self.sync_git_target(cx);
         // The sidebar is always mounted so it can animate its width open/closed.
         let summaries = self.projected_workspace_summaries(cx);
-        let sidebar = self
-            .sidebar
-            .render(summaries, self.workspace_rename.as_ref(), cx);
+        let sidebar = self.sidebar.render(
+            summaries,
+            self.workspace_rename.as_ref(),
+            self.codex_usage.clone(),
+            cx,
+        );
         // Re-render the shell whenever the wrapping Root changes (dialog
         // open/close), since the shell draws the dialog layer.
         if !self.root_observed {

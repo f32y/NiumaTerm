@@ -14,6 +14,7 @@ pub(crate) use self::shell::{
 };
 
 mod assets;
+mod codex_usage;
 mod font_picker;
 mod git_sidebar;
 mod git_status;
