@@ -9,7 +9,7 @@ rust-version = "1.96.0"
 [workspace]
 resolver = "3"
 members = [
-    "crates/agent_hook",
+    "crates/agent_utils",
     "crates/agent_hook_cli",
     "crates/app",
     "crates/config",
@@ -59,7 +59,7 @@ all = { level = "allow", priority = -1 }
 disallowed_types = "deny"
 
 [workspace.dependencies]
-nmt_agent_hook = { path = "crates/agent_hook" }
+nmt_agent_utils = { path = "crates/agent_utils" }
 nmt_config = { path = "crates/config" }
 nmt_input = { path = "crates/input" }
 libghostty-vt-sys = { path = "third_party/libghostty-vt-sys" }

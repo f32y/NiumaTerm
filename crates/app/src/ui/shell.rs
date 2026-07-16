@@ -10,7 +10,7 @@ use gpui_component::resizable::{
     PANEL_MIN_SIZE, ResizablePanelGroup, ResizableState, resizable_panel,
 };
 use gpui_component::{ActiveTheme, IconName, IconNamed, Root, TitleBar, WindowExt, h_flex, v_flex};
-use nmt_agent_hook::{
+use nmt_agent_utils::{
     AgentEvent, AgentMonitor, AgentNotification, AgentRoute, agent_process, exact_window_is_active,
     request_native_delivery,
 };

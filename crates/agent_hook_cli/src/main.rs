@@ -3,7 +3,7 @@
 use std::io::Read;
 use std::time::Duration;
 
-use nmt_agent_hook::{
+use nmt_agent_utils::{
     AGENT_HOOK_PROTOCOL_VERSION, AGENT_HOOK_TOKEN_ENV, AGENT_HOOK_VERSION_ENV, AGENT_ROUTE_ENV,
     AGENT_TESTING_ENV, RawAgentHookEnvelope,
 };

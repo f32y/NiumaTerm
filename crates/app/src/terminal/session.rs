@@ -704,7 +704,7 @@ mod tests {
     fn osc_notification_drains_into_shared_exact_notification_lifecycle() {
         use std::time::Instant;
 
-        use nmt_agent_hook::{
+        use nmt_agent_utils::{
             AgentMonitor, AgentRoute, AgentRuntimeStatus, request_native_delivery,
         };
         use nmt_terminal::event::{EventListener, TerminalEvent, WindowId};
