@@ -326,6 +326,7 @@ mod tests {
     fn sample_agent() -> AgentConfig {
         AgentConfig {
             enable_agent_hooks: false,
+            show_agent_usage: false,
         }
     }
 

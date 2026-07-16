@@ -9,19 +9,38 @@ use gpui_component::progress::Progress;
 use gpui_component::{Sizable as _, h_flex, v_flex};
 use nmt_agent_utils::codex::usage_fetcher::{self, Usage};
 
+use crate::ui::AppSettings;
+
 const REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
 
 pub(crate) struct CodexUsageView {
     usage: Usage,
     refreshing: bool,
+    enabled: bool,
 }
 
 impl CodexUsageView {
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
+        let enabled = cx.global::<AppSettings>().show_agent_usage;
+        cx.observe_global::<AppSettings>(|this, cx| {
+            let enabled = cx.global::<AppSettings>().show_agent_usage;
+            if enabled && !this.enabled {
+                this.refresh(cx);
+            }
+            this.enabled = enabled;
+        })
+        .detach();
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(REFRESH_INTERVAL).await;
-                if this.update(cx, |this, cx| this.refresh(cx)).is_err() {
+                if this
+                    .update(cx, |this, cx| {
+                        if this.enabled {
+                            this.refresh(cx);
+                        }
+                    })
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -31,8 +50,11 @@ impl CodexUsageView {
         let mut this = Self {
             usage: Usage::default(),
             refreshing: false,
+            enabled,
         };
-        this.refresh(cx);
+        if enabled {
+            this.refresh(cx);
+        }
         this
     }
 

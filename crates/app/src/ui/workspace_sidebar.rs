@@ -19,7 +19,7 @@ use gpui_component::spinner::Spinner;
 use gpui_component::{ActiveTheme, Icon, IconNamed, Selectable, Sizable, h_flex, v_flex};
 use nmt_agent_utils::AgentRuntimeStatus;
 
-use super::{NewWorkspace, Shell};
+use super::{AppSettings, NewWorkspace, Shell};
 use crate::ui::codex_usage::CodexUsageView;
 use crate::window::WindowRegistry;
 use crate::workspace::{WorkspaceId, WorkspaceSummary};
@@ -358,7 +358,7 @@ impl Sidebar {
                     )
                     .child(workspace_list_scrollbar(&self.scroll)),
             )
-            .child(
+            .children(cx.global::<AppSettings>().show_agent_usage.then(|| {
                 h_flex()
                     .id("workspace-sidebar-status")
                     .w_full()
@@ -366,8 +366,8 @@ impl Sidebar {
                     .pt_1()
                     .border_t_1()
                     .border_color(cx.theme().sidebar_border)
-                    .child(codex_usage),
-            );
+                    .child(codex_usage)
+            }));
 
         let collapsed = self.collapsed;
         // Width-resize handle riding the right border: drag starts an
