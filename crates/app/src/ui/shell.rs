@@ -1639,16 +1639,17 @@ impl Shell {
     ) -> AnyElement {
         match node {
             PaneNode::Leaf { id, pane, .. } => {
-                if !multi {
-                    return pane.clone().into_any_element();
-                }
                 let id = *id;
-                // The border doubles as the focused-pane highlight; it is
-                // present on every leaf so focus changes don't shift layout.
+                // Every leaf renders as a rounded card framed by a 1px border,
+                // separating the terminal surface from the window chrome. In
+                // multi-pane layouts the border doubles as the focused-pane
+                // highlight; it is present on every leaf so focus changes
+                // don't shift layout.
                 div()
                     .size_full()
                     .border_1()
-                    .border_color(if id == focused {
+                    .rounded(cx.theme().radius_lg)
+                    .border_color(if multi && id == focused {
                         cx.theme().primary
                     } else {
                         cx.theme().border
@@ -1811,6 +1812,13 @@ impl Render for Shell {
             .size_full()
             .relative()
             .overflow_hidden()
+            // The window surface itself is never painted (gpui leaves it
+            // white/transparent), and the chrome now has see-through regions —
+            // the tab strip and the gutters around the terminal cards — so the
+            // shell paints the chrome background across the whole window.
+            // `apply_window_translucency` dims this color with the rest of the
+            // chrome when window transparency is on.
+            .bg(cx.theme().background)
             .flex()
             .flex_col()
             // All chrome inherits the configured UI font; terminal panes override it.
@@ -1929,6 +1937,11 @@ impl Render for Shell {
                                     .min_h_0()
                                     .min_w_0()
                                     .overflow_hidden()
+                                    // Gutter floating the terminal card inside
+                                    // the chrome; the tab strip above carries
+                                    // its own 4px inset, so no top gap here.
+                                    .px(px(6.))
+                                    .pb(px(6.))
                                     .child(pane_tree),
                             ),
                     )

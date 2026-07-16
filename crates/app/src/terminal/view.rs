@@ -11,6 +11,7 @@ use gpui::{
     ScrollWheelEvent, ShapedLine, StrikethroughStyle, Style, TextAlign, TextRun, UTF16Selection,
     UnderlineStyle, Window, actions, div, fill, list, point, px, relative, rgb, rgba, size,
 };
+use gpui_component::ActiveTheme;
 use nmt_agent_utils::{AgentRoute, agent_process};
 use nmt_config::local_state::TabState;
 use nmt_terminal::ansi::CursorShape;
@@ -1471,6 +1472,11 @@ impl Render for TerminalPane {
             // This is the terminal region's single full-bleed background;
             // cells with explicit background colors stay opaque on top.
             .bg(rgb(theme_default_background().rgb_u32()).opacity(surface_background_opacity(cx)))
+            // The shell frames each pane as a 1px-bordered rounded card; the
+            // fill is rounded to the card's inner radius so its corners don't
+            // paint square over the frame. The cell padding below keeps glyphs
+            // clear of the rounded corners.
+            .rounded(cx.theme().radius_lg - px(1.))
             .text_color(rgb(theme_default_foreground().rgb_u32()))
             .font_family(metrics::font_family(cx))
             .text_size(px(metrics::font_size_px(cx)))
