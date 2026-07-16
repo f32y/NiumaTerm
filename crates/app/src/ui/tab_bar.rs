@@ -6,8 +6,8 @@
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, Context, Entity, KeyDownEvent, MouseButton, Render, ScrollHandle, SharedString,
-    Window, div, px, rgb,
+    AnyElement, Context, DragMoveEvent, Entity, KeyDownEvent, MouseButton, Render, ScrollHandle,
+    SharedString, Window, div, px,
 };
 use gpui_component::input::{Input, InputState};
 use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
@@ -24,20 +24,35 @@ struct TabDrag {
     from: usize,
 }
 
-/// The small floating preview shown under the cursor while dragging a tab.
+/// The floating preview shown under the cursor while dragging a tab: a
+/// full-size replica of the active tab pill. The pill's alpha fill is
+/// composited onto the chrome background here, because the ghost floats over
+/// arbitrary content where a bare alpha fill would wash out.
 struct TabDragPreview {
     label: SharedString,
+    width: f32,
 }
 
 impl Render for TabDragPreview {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
-            .px_2()
-            .py_1()
-            .rounded(gpui::px(4.0))
-            .bg(rgb(0x2a2f38))
-            .text_color(rgb(0xd8dee9))
-            .child(self.label.clone())
+            .rounded(cx.theme().radius)
+            .bg(cx.theme().background)
+            .child(
+                div()
+                    .w(px(self.width))
+                    .h(px(24.0))
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .overflow_hidden()
+                    .rounded(cx.theme().radius)
+                    .bg(cx.theme().tab_active)
+                    .text_sm()
+                    .text_color(cx.theme().tab_active_foreground)
+                    .child(div().truncate().child(self.label.clone())),
+            )
     }
 }
 
@@ -54,7 +69,15 @@ pub(super) struct TabStrip {
     /// the second render because the scroll handle drops requests made before
     /// its first prepaint.
     reveal_retry: bool,
+    /// Tab position a tab drag currently hovers: that tab shifts right to open
+    /// an insertion gap ("make way"). Only overwritten when the pointer enters
+    /// another tab — clearing on exit would oscillate, because opening the gap
+    /// moves the hovered tab out from under the pointer.
+    drag_over: Option<usize>,
 }
+
+/// How far a tab slides to open the insertion gap while a drag hovers it.
+const TAB_MAKE_WAY_PX: f32 = 32.0;
 
 impl TabStrip {
     pub(super) fn new() -> Self {
@@ -62,6 +85,7 @@ impl TabStrip {
             scroll: ScrollHandle::new(),
             last_active: None,
             reveal_retry: false,
+            drag_over: None,
         }
     }
 
@@ -85,6 +109,13 @@ impl TabStrip {
             if self.reveal_retry {
                 cx.notify();
             }
+        }
+        // Runs every render: close the make-way gap once the drag is gone
+        // without a drop on the strip (cancelled via Escape, or released
+        // elsewhere) — the cancel itself refreshes the window, so this always
+        // gets a chance to run.
+        if self.drag_over.is_some() && !cx.has_active_drag() {
+            self.drag_over = None;
         }
     }
 
@@ -133,7 +164,7 @@ impl TabStrip {
         // Fixed width from the Appearance setting; long titles clip inside
         // the tab's own overflow_hidden.
         let tab_width = cx.global::<AppSettings>().tab_width as f32;
-        TabBar::new("shell-tabs")
+        let bar = TabBar::new("shell-tabs")
             // Soft-rounded pills floating on the chrome (VS Code Modern UI
             // look); Small keeps the strip compact above the terminal card.
             .with_variant(TabVariant::Modern)
@@ -237,6 +268,12 @@ impl TabStrip {
                         let drag_label: SharedString = label.into();
                         Tab::new()
                             .w(px(tab_width))
+                            // Make way for the dragged tab: the hovered tab
+                            // slides right, opening an insertion gap at the
+                            // pointer.
+                            .when(self.drag_over == Some(index), |this| {
+                                this.ml(px(TAB_MAKE_WAY_PX))
+                            })
                             .child(content)
                             .suffix(close)
                             .group("shell-tab")
@@ -245,9 +282,28 @@ impl TabStrip {
                             .on_drag(TabDrag { from: index }, move |_, _, _, cx| {
                                 cx.new(|_| TabDragPreview {
                                     label: drag_label.clone(),
+                                    width: tab_width,
                                 })
                             })
+                            .on_drag_move(cx.listener(
+                                move |this, e: &DragMoveEvent<TabDrag>, _, cx| {
+                                    if !e.bounds.contains(&e.event.position) {
+                                        return;
+                                    }
+                                    // No gap over the drag's own tab: dropping
+                                    // there is a no-op.
+                                    let target = (e.drag(cx).from != index).then_some(index);
+                                    if this.tab_strip.drag_over != target {
+                                        this.tab_strip.drag_over = target;
+                                        cx.notify();
+                                    }
+                                },
+                            ))
                             .on_drop(cx.listener(move |this, drag: &TabDrag, window, cx| {
+                                // The strip-level fallback handler must not
+                                // also reorder this drop.
+                                cx.stop_propagation();
+                                this.tab_strip.drag_over = None;
                                 this.workspaces.active_tabs_mut().reorder(drag.from, index);
                                 this.focus_active(window, cx);
                                 this.sync_session_memory(cx);
@@ -260,7 +316,23 @@ impl TabStrip {
                 this.focus_active(window, cx);
                 this.sync_session_memory(cx);
                 cx.notify();
+            }));
+        // Fallback drop target for the whole strip: a drop released over the
+        // make-way gap (a margin, outside every tab's hitbox) still lands on
+        // the tracked insertion position instead of silently ending the drag.
+        div()
+            .id("tab-strip-drop")
+            .w_full()
+            .min_w_0()
+            .on_drop(cx.listener(|this, drag: &TabDrag, window, cx| {
+                if let Some(to) = this.tab_strip.drag_over.take() {
+                    this.workspaces.active_tabs_mut().reorder(drag.from, to);
+                    this.focus_active(window, cx);
+                    this.sync_session_memory(cx);
+                }
+                cx.notify();
             }))
+            .child(bar)
             .into_any_element()
     }
 }

@@ -73,19 +73,52 @@ struct WorkspaceDrag {
     from: usize,
 }
 
+/// The floating preview shown under the cursor while dragging a workspace: a
+/// full-size replica of the sidebar item (name and cwd lines on the active
+/// fill). The fill's alpha is composited onto the sidebar background here,
+/// because the ghost floats over arbitrary content where a bare alpha fill
+/// would wash out.
 struct WorkspaceDragPreview {
-    label: SharedString,
+    name: SharedString,
+    cwd: SharedString,
+    width: f32,
 }
 
 impl Render for WorkspaceDragPreview {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
-            .px_2()
-            .py_1()
-            .rounded(px(4.0))
-            .bg(rgb(0x2a2f38))
-            .text_color(rgb(0xd8dee9))
-            .child(self.label.clone())
+            .rounded(cx.theme().radius)
+            .bg(cx.theme().sidebar)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .w(px(self.width))
+                    .px_2()
+                    .py_1()
+                    .overflow_hidden()
+                    .rounded(cx.theme().radius)
+                    .bg(cx.theme().list_active)
+                    .text_color(cx.theme().sidebar_foreground)
+                    .child(
+                        div()
+                            .w_full()
+                            .text_left()
+                            .text_sm()
+                            .truncate()
+                            .child(self.name.clone()),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .text_left()
+                            .text_xs()
+                            .truncate()
+                            .text_color(cx.theme().sidebar_foreground.opacity(0.6))
+                            .child(self.cwd.clone()),
+                    ),
+            )
     }
 }
 
@@ -101,7 +134,16 @@ pub(super) struct Sidebar {
     /// per window in `local_state.toml`.
     pub(super) width: f32,
     scroll: ScrollHandle,
+    /// Item position a workspace drag currently hovers: that item shifts down
+    /// to open an insertion gap ("make way"). Only overwritten when the
+    /// pointer enters another item — clearing on exit would oscillate, because
+    /// opening the gap moves the hovered item out from under the pointer.
+    drag_over: Option<usize>,
 }
+
+/// How far a workspace item slides down to open the insertion gap while a
+/// drag hovers it.
+const WS_MAKE_WAY_PX: f32 = 36.0;
 
 impl Sidebar {
     pub(super) fn new(width: f32) -> Self {
@@ -110,6 +152,7 @@ impl Sidebar {
             animated: false,
             width,
             scroll: ScrollHandle::new(),
+            drag_over: None,
         }
     }
 
@@ -222,7 +265,11 @@ impl Sidebar {
             }))
             .child(controls);
         let secondary = ws.cwd.clone();
-        let drag_label: SharedString = ws.name.clone().into();
+        let drag_name: SharedString = ws.name.clone().into();
+        let drag_cwd: SharedString = ws.cwd.clone().into();
+        // Replicate the item's rendered width: sidebar width minus the card
+        // gutter/border and the card's inner paddings around the list.
+        let drag_width = (self.width - 36.0).max(80.0);
         let item = Button::new(("workspace", idx))
             .ghost()
             .selected(ws.active)
@@ -289,12 +336,37 @@ impl Sidebar {
         div()
             .id(("workspace-menu", idx))
             .w_full()
+            // Make way for the dragged item: the hovered item slides down,
+            // opening an insertion gap at the pointer.
+            .when(self.drag_over == Some(idx), |this| {
+                this.mt(px(WS_MAKE_WAY_PX))
+            })
             .on_drag(WorkspaceDrag { from: idx }, move |_, _, _, cx| {
                 cx.new(|_| WorkspaceDragPreview {
-                    label: drag_label.clone(),
+                    name: drag_name.clone(),
+                    cwd: drag_cwd.clone(),
+                    width: drag_width,
                 })
             })
+            .on_drag_move(
+                cx.listener(move |this, e: &DragMoveEvent<WorkspaceDrag>, _, cx| {
+                    if !e.bounds.contains(&e.event.position) {
+                        return;
+                    }
+                    // No gap over the drag's own item: dropping there is a
+                    // no-op.
+                    let target = (e.drag(cx).from != idx).then_some(idx);
+                    if this.sidebar.drag_over != target {
+                        this.sidebar.drag_over = target;
+                        cx.notify();
+                    }
+                }),
+            )
             .on_drop(cx.listener(move |this, drag: &WorkspaceDrag, window, cx| {
+                // The list-level fallback handler must not also reorder this
+                // drop.
+                cx.stop_propagation();
+                this.sidebar.drag_over = None;
                 this.reorder_workspaces(drag.from, idx, window, cx);
             }))
             .context_menu(move |menu, _, _| {
@@ -331,12 +403,19 @@ impl Sidebar {
     /// plus a new-workspace button and bottom status bar. Toggled by
     /// `ToggleSidebar` (Ctrl+Shift+B).
     pub(super) fn render(
-        &self,
+        &mut self,
         summaries: Vec<WorkspaceSummary>,
         rename: Option<&(WorkspaceId, Entity<InputState>)>,
         codex_usage: Entity<CodexUsageView>,
         cx: &mut Context<Shell>,
     ) -> AnyElement {
+        // Runs every render: close the make-way gap once the drag is gone
+        // without a drop on the list (cancelled via Escape, or released
+        // elsewhere) — the cancel itself refreshes the window, so this always
+        // gets a chance to run.
+        if self.drag_over.is_some() && !cx.has_active_drag() {
+            self.drag_over = None;
+        }
         let width = self.width;
         // Fixed-width content; the animated wrapper below clips it so the buttons
         // don't reflow while the sidebar slides. The sidebar surface itself is
@@ -370,6 +449,16 @@ impl Sidebar {
                     .pr_3()
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll)
+                    // Fallback drop target for the whole list: a drop released
+                    // over the make-way gap (a margin, outside every item's
+                    // hitbox) still lands on the tracked insertion position
+                    // instead of silently ending the drag.
+                    .on_drop(cx.listener(|this, drag: &WorkspaceDrag, window, cx| {
+                        if let Some(to) = this.sidebar.drag_over.take() {
+                            this.reorder_workspaces(drag.from, to, window, cx);
+                        }
+                        cx.notify();
+                    }))
                     .children(
                         summaries
                             .iter()
