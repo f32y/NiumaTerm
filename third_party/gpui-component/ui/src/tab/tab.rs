@@ -18,6 +18,11 @@ pub enum TabVariant {
     Pill,
     Segmented,
     Underline,
+    /// Borderless soft-rounded tabs floating on the window chrome: resting,
+    /// hover and active states are all flat background fills driven by the
+    /// `tab.*` / `list.hover` theme tokens, radius from the theme's control
+    /// radius. Mirrors the VS Code Modern UI editor tabs.
+    Modern,
 }
 
 impl TabVariant {
@@ -45,23 +50,29 @@ impl TabVariant {
     pub(super) fn inner_height(&self, size: Size) -> Pixels {
         match size {
             Size::XSmall => match self {
-                TabVariant::Tab | TabVariant::Outline | TabVariant::Pill => px(18.),
+                TabVariant::Tab | TabVariant::Outline | TabVariant::Pill | TabVariant::Modern => {
+                    px(18.)
+                }
                 TabVariant::Segmented => px(16.),
                 TabVariant::Underline => px(20.),
             },
             Size::Small => match self {
-                TabVariant::Tab | TabVariant::Outline | TabVariant::Pill => px(22.),
+                TabVariant::Tab | TabVariant::Outline | TabVariant::Pill | TabVariant::Modern => {
+                    px(22.)
+                }
                 TabVariant::Segmented => px(18.),
                 TabVariant::Underline => px(22.),
             },
             Size::Large => match self {
-                TabVariant::Tab | TabVariant::Outline | TabVariant::Pill => px(36.),
+                TabVariant::Tab | TabVariant::Outline | TabVariant::Pill | TabVariant::Modern => {
+                    px(36.)
+                }
                 TabVariant::Segmented => px(28.),
                 TabVariant::Underline => px(32.),
             },
             _ => match self {
                 TabVariant::Tab => px(30.),
-                TabVariant::Outline | TabVariant::Pill => px(26.),
+                TabVariant::Outline | TabVariant::Pill | TabVariant::Modern => px(26.),
                 TabVariant::Segmented => px(24.),
                 TabVariant::Underline => px(26.),
             },
@@ -150,6 +161,11 @@ impl TabVariant {
                 bg: cx.theme().transparent.into(),
                 ..Default::default()
             },
+            TabVariant::Modern => TabStyle {
+                fg: cx.theme().tab_foreground,
+                bg: cx.theme().tokens.tab.into(),
+                ..Default::default()
+            },
             TabVariant::Segmented => TabStyle {
                 fg: cx.theme().tab_foreground,
                 bg: cx.theme().transparent.into(),
@@ -192,6 +208,11 @@ impl TabVariant {
             TabVariant::Pill => TabStyle {
                 fg: cx.theme().secondary_foreground,
                 bg: cx.theme().tokens.secondary.into(),
+                ..Default::default()
+            },
+            TabVariant::Modern => TabStyle {
+                fg: cx.theme().tab_active_foreground,
+                bg: cx.theme().tokens.list_hover.into(),
                 ..Default::default()
             },
             TabVariant::Segmented => TabStyle {
@@ -241,6 +262,11 @@ impl TabVariant {
             TabVariant::Pill => TabStyle {
                 fg: cx.theme().primary_foreground,
                 bg: cx.theme().tokens.primary.into(),
+                ..Default::default()
+            },
+            TabVariant::Modern => TabStyle {
+                fg: cx.theme().tab_active_foreground,
+                bg: cx.theme().tokens.tab_active.into(),
                 ..Default::default()
             },
             TabVariant::Segmented => TabStyle {
@@ -304,6 +330,15 @@ impl TabVariant {
                 },
                 ..Default::default()
             },
+            TabVariant::Modern => TabStyle {
+                fg: cx.theme().muted_foreground,
+                bg: if selected {
+                    cx.theme().tokens.tab_active.opacity(0.5).into()
+                } else {
+                    cx.theme().transparent.into()
+                },
+                ..Default::default()
+            },
             TabVariant::Segmented => TabStyle {
                 fg: cx.theme().muted_foreground,
                 bg: cx.theme().tokens.tab_bar.into(),
@@ -346,6 +381,7 @@ impl TabVariant {
     fn radius(&self, size: Size, cx: &App) -> Pixels {
         match self {
             TabVariant::Outline | TabVariant::Pill => px(99.),
+            TabVariant::Modern => cx.theme().radius,
             TabVariant::Segmented => match size {
                 Size::XSmall | Size::Small => cx.theme().radius,
                 Size::Large => cx.theme().radius_lg,
