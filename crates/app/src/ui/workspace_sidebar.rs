@@ -284,6 +284,7 @@ impl Sidebar {
         let pinned = ws.pinned;
         let closeable = ws.closeable;
         let pin_label = if pinned { "Unpin" } else { "Pin" };
+        let cwd = ws.cwd.clone();
         div()
             .id(("workspace-menu", idx))
             .w_full()
@@ -299,6 +300,7 @@ impl Sidebar {
                 let rename_shell = shell.clone();
                 let close_shell = shell.clone();
                 let pin_shell = shell.clone();
+                let cwd = cwd.clone();
                 menu.item(PopupMenuItem::new("Rename").on_click(move |_, window, cx| {
                     rename_shell.update(cx, |this, cx| {
                         this.start_workspace_rename(ws_id, window, cx)
@@ -307,6 +309,11 @@ impl Sidebar {
                 .item(PopupMenuItem::new(pin_label).on_click(move |_, _, cx| {
                     pin_shell.update(cx, |this, cx| this.set_workspace_pinned(ws_id, !pinned, cx));
                 }))
+                .item(
+                    PopupMenuItem::new("Copy Workspace Path").on_click(move |_, _, cx| {
+                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(cwd.clone()));
+                    }),
+                )
                 .item(PopupMenuItem::new("Close").disabled(!closeable).on_click(
                     move |_, window, cx| {
                         close_shell.update(cx, |this, cx| {
