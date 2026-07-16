@@ -5,6 +5,8 @@ pub mod claude_code {
 }
 pub mod codex {
     pub mod hook;
+    #[cfg(target_os = "windows")]
+    pub mod usage_fetcher;
 }
 
 use std::collections::HashMap;
