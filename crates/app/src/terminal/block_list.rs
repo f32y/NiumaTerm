@@ -122,6 +122,16 @@ impl FrozenHitInfo {
         self.active_top = active_top;
     }
 
+    /// The content-local y of one visible row (`usize::MAX` item = a live
+    /// SCREEN row); `None` when the row is scrolled out of view. Link-hover
+    /// underlines use this to place rects on frozen rows.
+    pub(crate) fn row_top(&self, item: usize, row: usize) -> Option<f32> {
+        self.rows
+            .iter()
+            .find(|(_, i, r, _)| *i == item && *r == row)
+            .map(|(y, ..)| *y)
+    }
+
     /// Map an element-local pixel position to a frozen point. `None` above
     /// the first visible row; positions in inter-item gaps resolve to the
     /// nearest row above (drag comfort).
