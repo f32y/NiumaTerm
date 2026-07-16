@@ -960,7 +960,7 @@ fn agent_hook_item(
     name: &'static str,
     detection_path: Option<std::path::PathBuf>,
     hooks_path: Option<std::path::PathBuf>,
-    status: fn(&std::path::Path) -> nmt_agent_hook::HookInstallStatus,
+    status: fn(&std::path::Path) -> nmt_agent_utils::HookInstallStatus,
     install: fn(&std::path::Path) -> std::io::Result<()>,
     uninstall: fn(&std::path::Path) -> std::io::Result<()>,
 ) -> SettingItem {
@@ -974,7 +974,7 @@ fn agent_hook_item(
             // refreshes Hook state whenever the user enters the Agent page.
             move |_| {
                 status_path.as_deref().is_some_and(|path| {
-                    status(path) == nmt_agent_hook::HookInstallStatus::Installed
+                    status(path) == nmt_agent_utils::HookInstallStatus::Installed
                 })
             },
             move |enabled, cx| {
@@ -1021,19 +1021,19 @@ fn agent_page() -> SettingPage {
                 .title("Installed Agents")
                 .item(agent_hook_item(
                     "Claude Code",
-                    nmt_agent_hook::claude_code::settings_path(),
-                    nmt_agent_hook::claude_code::settings_path(),
-                    nmt_agent_hook::claude_code::hooks_status,
-                    nmt_agent_hook::claude_code::install_hooks,
-                    nmt_agent_hook::claude_code::uninstall_hooks,
+                    nmt_agent_utils::claude_code::hook::settings_path(),
+                    nmt_agent_utils::claude_code::hook::settings_path(),
+                    nmt_agent_utils::claude_code::hook::hooks_status,
+                    nmt_agent_utils::claude_code::hook::install_hooks,
+                    nmt_agent_utils::claude_code::hook::uninstall_hooks,
                 ))
                 .item(agent_hook_item(
                     "Codex",
-                    nmt_agent_hook::codex::config_path(),
-                    nmt_agent_hook::codex::hooks_path(),
-                    nmt_agent_hook::codex::hooks_status,
-                    nmt_agent_hook::codex::install_hooks,
-                    nmt_agent_hook::codex::uninstall_hooks,
+                    nmt_agent_utils::codex::hook::config_path(),
+                    nmt_agent_utils::codex::hook::hooks_path(),
+                    nmt_agent_utils::codex::hook::hooks_status,
+                    nmt_agent_utils::codex::hook::install_hooks,
+                    nmt_agent_utils::codex::hook::uninstall_hooks,
                 )),
         )
 }

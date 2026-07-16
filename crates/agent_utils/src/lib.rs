@@ -1,7 +1,11 @@
 //! Pure agent lifecycle, ownership, expiry, and unread-notification model.
 
-pub mod claude_code;
-pub mod codex;
+pub mod claude_code {
+    pub mod hook;
+}
+pub mod codex {
+    pub mod hook;
+}
 
 use std::collections::HashMap;
 use std::io;
@@ -196,8 +200,8 @@ pub struct RawAgentHookEnvelope {
 impl RawAgentHookEnvelope {
     pub fn into_event(self, expected_token: &str) -> Option<AgentEvent> {
         let normalize = match self.action.as_str() {
-            "codex_hook" => codex::normalize,
-            "claude_hook" => claude_code::normalize,
+            "codex_hook" => codex::hook::normalize,
+            "claude_hook" => claude_code::hook::normalize,
             _ => return None,
         };
         normalize(

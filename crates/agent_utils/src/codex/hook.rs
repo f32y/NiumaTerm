@@ -271,7 +271,7 @@ mod tests {
 
     fn fixture_events() -> Vec<Value> {
         let fixture: Value =
-            serde_json::from_str(include_str!("../tests/fixtures/codex-0.144.1.json")).unwrap();
+            serde_json::from_str(include_str!("../../tests/fixtures/codex-0.144.1.json")).unwrap();
         fixture["events"].as_array().unwrap().clone()
     }
 

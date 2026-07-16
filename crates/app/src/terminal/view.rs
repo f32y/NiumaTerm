@@ -11,7 +11,7 @@ use gpui::{
     ScrollWheelEvent, ShapedLine, StrikethroughStyle, Style, TextAlign, TextRun, UTF16Selection,
     UnderlineStyle, Window, actions, div, fill, list, point, px, relative, rgb, rgba, size,
 };
-use nmt_agent_hook::{AgentRoute, agent_process};
+use nmt_agent_utils::{AgentRoute, agent_process};
 use nmt_config::local_state::TabState;
 use nmt_terminal::ansi::CursorShape;
 use nmt_terminal::selection::SelectionType;

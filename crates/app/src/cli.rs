@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use nmt_agent_hook::AgentRoute;
+use nmt_agent_utils::AgentRoute;
 use percent_encoding::{NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
 
 #[derive(Clone, Debug, PartialEq, Eq)]

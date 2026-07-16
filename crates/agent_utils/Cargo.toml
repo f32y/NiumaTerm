@@ -1,5 +1,5 @@
 [package]
-name = "nmt_agent_hook"
+name = "nmt_agent_utils"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

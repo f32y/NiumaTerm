@@ -17,7 +17,7 @@ use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
 use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 use gpui_component::spinner::Spinner;
 use gpui_component::{ActiveTheme, Icon, IconNamed, Selectable, Sizable, h_flex, v_flex};
-use nmt_agent_hook::AgentRuntimeStatus;
+use nmt_agent_utils::AgentRuntimeStatus;
 
 use super::{NewWorkspace, Shell};
 use crate::window::WindowRegistry;

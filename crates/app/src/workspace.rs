@@ -7,7 +7,7 @@
 //!
 //! Pure logic — generic over the surface type `S` so it unit-tests without a PTY.
 
-use nmt_agent_hook::AgentRuntimeStatus;
+use nmt_agent_utils::AgentRuntimeStatus;
 
 use crate::tabs::{TabId, TabManager};
 

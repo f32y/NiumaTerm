@@ -252,7 +252,7 @@ dependencies = [
  "gpui_windows",
  "image",
  "lsp-types",
- "nmt_agent_hook",
+ "nmt_agent_utils",
  "nmt_config",
  "nmt_input",
  "nmt_platform",
@@ -3833,21 +3833,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
-name = "nmt_agent_hook"
+name = "nmt_agent_hook_cli"
+version = "0.1.0"
+dependencies = [
+ "nmt_agent_utils",
+ "nmt_platform",
+ "serde_json",
+]
+
+[[package]]
+name = "nmt_agent_utils"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "getrandom 0.4.3",
  "serde",
- "serde_json",
-]
-
-[[package]]
-name = "nmt_agent_hook_cli"
-version = "0.1.0"
-dependencies = [
- "nmt_agent_hook",
- "nmt_platform",
  "serde_json",
 ]
 

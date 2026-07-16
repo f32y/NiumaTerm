@@ -3,7 +3,7 @@
 //! The Windows mutex and Named Pipe implementation live in `nmt_platform`.
 
 use futures::channel::mpsc::UnboundedSender;
-use nmt_agent_hook::{AgentEvent, AgentEventEnvelope, agent_process};
+use nmt_agent_utils::{AgentEvent, AgentEventEnvelope, agent_process};
 use nmt_platform::windows::ipc::MAX_MESSAGE_BYTES;
 
 use crate::cli::CliAction;
@@ -48,7 +48,7 @@ fn parse_message(bytes: &[u8], expected_token: &str) -> Result<IpcAction, String
                 .map(IpcAction::Agent)
                 .map_err(|_| "invalid agent envelope fields".into()),
             Some("codex_hook" | "claude_hook") => {
-                serde_json::from_value::<nmt_agent_hook::RawAgentHookEnvelope>(value)
+                serde_json::from_value::<nmt_agent_utils::RawAgentHookEnvelope>(value)
                     .map_err(|_| "invalid agent Hook envelope")?
                     .into_event(expected_token)
                     .map(IpcAction::Agent)
@@ -67,7 +67,7 @@ fn parse_message(bytes: &[u8], expected_token: &str) -> Result<IpcAction, String
 mod tests {
     use std::time::Instant;
 
-    use nmt_agent_hook::{
+    use nmt_agent_utils::{
         AGENT_HOOK_PROTOCOL_VERSION, AgentEvent, AgentEventInput, AgentEventKind, AgentMonitor,
         AgentRoute, AgentRuntimeStatus, COMPLETION_QUIET_WINDOW,
     };

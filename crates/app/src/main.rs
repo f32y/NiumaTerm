@@ -158,8 +158,8 @@ where
 }
 
 fn run_app(argv_url: Option<String>, testing: bool) {
-    nmt_agent_hook::agent_process().set_testing(testing);
-    nmt_agent_hook::agent_process().set_hook_executable(
+    nmt_agent_utils::agent_process().set_testing(testing);
+    nmt_agent_utils::agent_process().set_hook_executable(
         utils::get_exe_dir()
             .join("NiumaTermHook.exe")
             .display()
@@ -550,7 +550,7 @@ fn dispatch_cli_action(action: CliAction, cx: &mut App) {
 }
 
 fn dispatch_focus_notification(
-    route: &nmt_agent_hook::AgentRoute,
+    route: &nmt_agent_utils::AgentRoute,
     notification_id: &str,
     cx: &mut App,
 ) {
@@ -577,7 +577,7 @@ fn dispatch_focus_notification(
     tracing::warn!("ignoring stale notification focus action");
 }
 
-fn dispatch_agent_event(event: nmt_agent_hook::AgentEvent, cx: &mut App) {
+fn dispatch_agent_event(event: nmt_agent_utils::AgentEvent, cx: &mut App) {
     if !cx.global::<AppSettings>().enable_agent_hooks {
         return;
     }
