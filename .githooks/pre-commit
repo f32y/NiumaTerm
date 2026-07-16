@@ -35,6 +35,27 @@ EOF
     exit 1
 }
 
+check_third_party_dirs_are_separate() {
+    for isolated_path in third_party/gpui third_party/gpui-component; do
+        isolated_files=$(printf '%s\n' "$staged_files" | grep -E "^$isolated_path/" || true)
+        other_files=$(printf '%s\n' "$staged_files" | grep -Ev "^$isolated_path/" || true)
+        if [ -z "$isolated_files" ] || [ -z "$other_files" ]; then
+            continue
+        fi
+
+        cat >&2 <<EOF
+pre-commit: $isolated_path must be committed separately
+
+Files under $isolated_path:
+$isolated_files
+
+Other staged files:
+$other_files
+EOF
+        exit 1
+    done
+}
+
 check_protected_paths_on_main() {
     if [ "$branch" != "main" ] || [ -z "$protected_files" ]; then
         return 0
@@ -123,6 +144,7 @@ protected_files=$(printf '%s\n' "$staged_files" | grep -E "$protected_paths" || 
 code_files=$(collect_staged_code_files)
 
 check_ai_docs_are_separate
+check_third_party_dirs_are_separate
 check_protected_paths_on_main
 check_no_ai_slop_marker
 check_comment_rationale
