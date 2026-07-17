@@ -16,7 +16,7 @@ use crate::pane_tree::{PaneId, PaneNode, PaneTree};
 use crate::tabs::{TabId, TabManager};
 use crate::terminal::view::TerminalPane;
 use crate::window::WindowRegistry;
-use crate::workspace::{WorkspaceId, WorkspaceManager};
+use crate::workspace::{DEFAULT_WORKSPACE_NAME, WorkspaceId, WorkspaceManager};
 
 /// A pane that runs the current default profile's exact command is saved with
 /// `shell = None` — "follow the default profile" — so later profile changes apply
@@ -117,8 +117,7 @@ fn pane_node_state(
 impl Shell {
     /// The starting workspace set for a window without a restored session:
     /// one workspace, one tab. With `initial_cwd` (a CLI `new_window` target)
-    /// the workspace is rooted there and named after the directory; without,
-    /// it is the default home-directory "Workspace 1".
+    /// the workspace is rooted there; otherwise it uses the home directory.
     pub(super) fn default_session(
         initial_cwd: Option<String>,
         default_profile: (Option<String>, Vec<String>),
@@ -127,14 +126,9 @@ impl Shell {
     ) -> WorkspaceManager<TerminalPaneTree> {
         // The default (no-CLI) branch keeps spawning with no cwd — the shell
         // then starts in its own default directory, as before.
-        let (name, cwd, spawn_cwd) = match initial_cwd {
-            Some(dir) => (
-                crate::cli::dir_leaf_name(std::path::Path::new(&dir)),
-                dir.clone(),
-                Some(dir),
-            ),
+        let (cwd, spawn_cwd) = match initial_cwd {
+            Some(dir) => (dir.clone(), Some(dir)),
             None => (
-                "Workspace 1".to_string(),
                 dirs::home_dir()
                     .map(|home| home.display().to_string())
                     .unwrap_or_else(|| ".".to_string()),
@@ -148,7 +142,13 @@ impl Shell {
             TabId(surface_id),
         );
         let workspace_id = Self::alloc_id(next_id);
-        WorkspaceManager::new(tabs, WorkspaceId(workspace_id), name, cwd, false)
+        WorkspaceManager::new(
+            tabs,
+            WorkspaceId(workspace_id),
+            DEFAULT_WORKSPACE_NAME.into(),
+            cwd,
+            false,
+        )
     }
 
     pub(super) fn restore_session(

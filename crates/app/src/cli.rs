@@ -115,14 +115,6 @@ pub(crate) fn parse_nmt_url(url: &str) -> Result<CliAction, String> {
     }
 }
 
-/// A directory's display name: its final path component (`C:/E` → `E`),
-/// falling back to the whole path for component-less paths like `C:\`.
-pub(crate) fn dir_leaf_name(path: &Path) -> String {
-    path.file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.display().to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,11 +211,5 @@ mod tests {
             ))
             .is_err()
         );
-    }
-
-    #[test]
-    fn leaf_name_falls_back_to_whole_path() {
-        assert_eq!(dir_leaf_name(Path::new("C:/A/E")), "E");
-        assert_eq!(dir_leaf_name(Path::new("C:\\")), "C:\\");
     }
 }

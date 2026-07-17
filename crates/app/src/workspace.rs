@@ -27,17 +27,9 @@ pub struct Workspace<S> {
 pub struct WorkspaceManager<S> {
     workspaces: Vec<Workspace<S>>,
     active: usize,
-    /// Monotonic counter for suggested default names ("Workspace N"). Fed by
-    /// the numbers in names passed to `new`/`new_workspace` (so restored
-    /// sessions seed it) and never decremented, so a close never makes an
-    /// earlier suggestion come back.
-    next_number: u64,
 }
 
-/// The `N` of a default `Workspace N` name, `None` for custom names.
-fn workspace_number(name: &str) -> Option<u64> {
-    name.strip_prefix("Workspace ")?.trim().parse().ok()
-}
+pub const DEFAULT_WORKSPACE_NAME: &str = "New Workspace";
 
 /// A path as comparable components: separators unified by `Path`, each
 /// component lowercased (Windows filesystems are case-insensitive). Literal
@@ -97,7 +89,6 @@ impl<S> WorkspaceManager<S> {
         cwd: String,
         busy: bool,
     ) -> Self {
-        let next_number = workspace_number(&name).unwrap_or(1) + 1;
         Self {
             workspaces: vec![Workspace {
                 id,
@@ -108,13 +99,7 @@ impl<S> WorkspaceManager<S> {
                 tabs,
             }],
             active: 0,
-            next_number,
         }
-    }
-
-    /// Suggested name for the next workspace ("Workspace N").
-    pub fn next_default_name(&self) -> String {
-        format!("Workspace {}", self.next_number)
     }
 
     /// Append a workspace (already seeded with its tab set) and make it active.
@@ -126,9 +111,6 @@ impl<S> WorkspaceManager<S> {
         cwd: String,
         busy: bool,
     ) -> WorkspaceId {
-        self.next_number = self
-            .next_number
-            .max(workspace_number(&name).map_or(0, |n| n + 1));
         self.workspaces.push(Workspace {
             id,
             name,
@@ -230,9 +212,7 @@ impl<S> WorkspaceManager<S> {
         &self.workspaces[self.active].cwd
     }
 
-    /// Rename the workspace with `id`. Blank names and unknown ids are
-    /// ignored. A default-style name feeds the suggestion counter so the next
-    /// suggested name never duplicates it.
+    /// Rename the workspace with `id`. Blank names and unknown ids are ignored.
     pub fn rename(&mut self, id: WorkspaceId, name: String) {
         if name.trim().is_empty() {
             return;
@@ -240,9 +220,6 @@ impl<S> WorkspaceManager<S> {
         let Some(idx) = self.index_of(id) else {
             return;
         };
-        self.next_number = self
-            .next_number
-            .max(workspace_number(&name).map_or(0, |n| n + 1));
         self.workspaces[idx].name = name;
     }
 
@@ -432,56 +409,7 @@ mod tests {
     }
 
     #[test]
-    fn default_names_count_up_and_never_reuse_after_close() {
-        let mut mgr = manager(1);
-        assert_eq!(mgr.next_default_name(), "Workspace 2");
-        mgr.new_workspace(
-            TabManager::new(2u32, TabId(2)),
-            WorkspaceId(2),
-            mgr.next_default_name(),
-            "/".into(),
-            false,
-        );
-        assert_eq!(mgr.next_default_name(), "Workspace 3");
-        // Closing does not hand the number back.
-        mgr.close_workspace(WorkspaceId(2));
-        assert_eq!(mgr.next_default_name(), "Workspace 3");
-    }
-
-    #[test]
-    fn custom_names_do_not_advance_the_counter() {
-        let mut mgr = manager(1);
-        mgr.new_workspace(
-            TabManager::new(2u32, TabId(2)),
-            WorkspaceId(2),
-            "project".into(),
-            "/".into(),
-            false,
-        );
-        assert_eq!(mgr.next_default_name(), "Workspace 2");
-    }
-
-    #[test]
-    fn restored_names_seed_the_counter_past_their_numbers() {
-        let mut mgr = WorkspaceManager::new(
-            TabManager::new(1u32, TabId(1)),
-            WorkspaceId(1),
-            "Workspace 1".into(),
-            "/".into(),
-            false,
-        );
-        mgr.new_workspace(
-            TabManager::new(2u32, TabId(2)),
-            WorkspaceId(2),
-            "Workspace 5".into(),
-            "/".into(),
-            false,
-        );
-        assert_eq!(mgr.next_default_name(), "Workspace 6");
-    }
-
-    #[test]
-    fn rename_updates_name_and_feeds_the_counter() {
+    fn rename_updates_name() {
         let mut mgr = manager(1);
         mgr.rename(WorkspaceId(1), "project".into());
         assert_eq!(mgr.summaries()[0].name, "project");
@@ -489,9 +417,6 @@ mod tests {
         mgr.rename(WorkspaceId(1), "   ".into());
         mgr.rename(WorkspaceId(9), "ghost".into());
         assert_eq!(mgr.summaries()[0].name, "project");
-        // A default-style rename advances the suggestion counter past it.
-        mgr.rename(WorkspaceId(1), "Workspace 7".into());
-        assert_eq!(mgr.next_default_name(), "Workspace 8");
     }
 
     /// Summaries with the given cwds, ids = 1-based position.
