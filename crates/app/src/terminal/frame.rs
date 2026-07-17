@@ -103,7 +103,7 @@ impl TerminalFrame {
                 extract_row_with_colors(
                     buf,
                     row,
-                    cursor_col_for_row(cursor, row),
+                    cursor_for_row(cursor, row),
                     &colors,
                     row_selection_for(selection, row, buf.cols()),
                 )
@@ -600,15 +600,19 @@ pub(crate) fn theme_selection_background() -> TerminalColor {
 }
 
 #[cfg(test)]
-pub(crate) fn extract_row(buf: &RenderBuffer, row: usize, cursor_col: Option<u16>) -> TerminalLine {
+pub(crate) fn extract_row(
+    buf: &RenderBuffer,
+    row: usize,
+    cursor: Option<TerminalCursor>,
+) -> TerminalLine {
     let colors = BackgroundColors::new(buf.colors());
-    extract_row_with_colors(buf, row, cursor_col, &colors, None)
+    extract_row_with_colors(buf, row, cursor, &colors, None)
 }
 
 fn extract_row_with_colors(
     buf: &RenderBuffer,
     row: usize,
-    cursor_col: Option<u16>,
+    cursor: Option<TerminalCursor>,
     colors: &BackgroundColors,
     row_selection: Option<RowSelection>,
 ) -> TerminalLine {
@@ -623,6 +627,14 @@ fn extract_row_with_colors(
 
         let is_codepoint = cell.content_tag() == ContentTag::Codepoint;
         let source_ch = if is_codepoint { cell.c() } else { '\0' };
+        let cursor_shape = cursor
+            .filter(|cursor| cursor.col == col as u16)
+            .map(|cursor| cursor.shape);
+        let background = if cell_is_selected(row_selection, col as u16) {
+            Some(colors.selection_background)
+        } else {
+            colors.cell_background(buf, cell)
+        };
 
         let extras = if is_codepoint {
             cell.extras_id()
@@ -633,7 +645,7 @@ fn extract_row_with_colors(
             Vec::new()
         };
 
-        let style = if is_codepoint {
+        let mut style = if is_codepoint {
             let style = buf.style(cell.style_id());
             let flags = style.flags;
             StyleRun {
@@ -654,6 +666,11 @@ fn extract_row_with_colors(
                 strikethrough: false,
             }
         };
+        if cursor_shape == Some(CursorShape::Block) {
+            // An opaque block replaces the cell background, so painting its glyph
+            // with that original background preserves inverse-video contrast.
+            style.fg = background.unwrap_or_else(|| colors.named(NamedColor::Background));
+        }
         builder.push_segment(
             std::iter::once(display_char(source_ch)).chain(extras.iter().copied()),
             style,
@@ -663,20 +680,19 @@ fn extract_row_with_colors(
             col: col as u16,
             ch: source_ch,
             style_id: if is_codepoint { cell.style_id() } else { 0 },
-            background: if cell_is_selected(row_selection, col as u16) {
-                Some(colors.selection_background)
-            } else {
-                colors.cell_background(buf, cell)
-            },
+            background,
             wide,
             extras,
-            has_cursor: cursor_col == Some(col as u16),
+            has_cursor: cursor_shape.is_some(),
         });
     }
 
     let line = builder.finish();
     #[cfg(test)]
-    let line = TerminalLine { cursor_col, ..line };
+    let line = TerminalLine {
+        cursor_col: cursor.map(|cursor| cursor.col),
+        ..line
+    };
     line
 }
 
@@ -808,8 +824,8 @@ fn frame_cursor(buf: &RenderBuffer, colors: &BackgroundColors) -> Option<Termina
     )
 }
 
-fn cursor_col_for_row(cursor: Option<TerminalCursor>, row: usize) -> Option<u16> {
-    cursor.and_then(|cursor| (cursor.row as usize == row).then_some(cursor.col))
+fn cursor_for_row(cursor: Option<TerminalCursor>, row: usize) -> Option<TerminalCursor> {
+    cursor.filter(|cursor| cursor.row as usize == row)
 }
 
 fn display_char(ch: char) -> char {
@@ -878,8 +894,7 @@ mod tests {
     use nmt_terminal::terminal::square::Wide;
 
     use super::{
-        TerminalColor, TerminalFrame, TerminalFrameCache, TerminalLine, cursor_col_for_row,
-        extract_row,
+        TerminalColor, TerminalFrame, TerminalFrameCache, TerminalLine, cursor_for_row, extract_row,
     };
 
     fn frame_with_line(line: &str) -> TerminalFrame {
@@ -913,6 +928,29 @@ mod tests {
             colors.named(NamedColor::Cursor),
             TerminalColor::from_color_array(expected)
         );
+    }
+
+    #[test]
+    fn block_cursor_uses_terminal_background_for_glyph() {
+        let mut engine = GhosttyTerminal::new(4, 1, 100).unwrap();
+        engine.write_vt(b"A\x1b[D");
+        let mut buf = RenderBuffer::new(4, 1);
+        buf.update(&engine.snapshot().unwrap());
+
+        let gray = |value: u8| {
+            let value = f32::from(value) / 255.;
+            ColorArray::from([value, value, value, 1.])
+        };
+        let mut term_colors = TermColors::default();
+        term_colors[NamedColor::Foreground] = Some(gray(0x29));
+        term_colors[NamedColor::Background] = Some(gray(0xe0));
+        term_colors[NamedColor::Cursor] = Some(gray(0x38));
+        let colors = super::BackgroundColors::new(term_colors);
+        let cursor = super::frame_cursor(&buf, &colors).unwrap();
+        let row = super::extract_row_with_colors(&buf, 0, Some(cursor), &colors, None);
+
+        assert_eq!(cursor.shape, CursorShape::Block);
+        assert_eq!(row.runs()[0].fg, colors.named(NamedColor::Background));
     }
 
     #[test]
@@ -965,7 +1003,7 @@ mod tests {
         let mut buf = RenderBuffer::new(8, 1);
         buf.update(&engine.snapshot().unwrap());
         let frame = TerminalFrame::from_render_buffer(&buf);
-        let row = extract_row(&buf, 0, cursor_col_for_row(frame.cursor(), 0));
+        let row = extract_row(&buf, 0, cursor_for_row(frame.cursor(), 0));
 
         // The wide '中' is followed by a blank placeholder for its second column.
         assert!(row.text().as_ref().starts_with("e\u{0301}中\u{00a0}B"));
@@ -1132,7 +1170,7 @@ mod tests {
     #[test]
     fn extracts_cursor_shape_without_mutating_row_text() {
         let mut engine = GhosttyTerminal::new(4, 1, 100).unwrap();
-        engine.write_vt(b"\x1b[5 qA");
+        engine.write_vt(b"\x1b[5 qA\x1b[D");
         let mut buf = RenderBuffer::new(4, 1);
         buf.update(&engine.snapshot().unwrap());
 
@@ -1141,6 +1179,7 @@ mod tests {
 
         assert_eq!(frame.cursor().unwrap().shape, CursorShape::Beam);
         assert!(row.text().as_ref().starts_with("A\u{00a0}"));
+        assert_eq!(row.runs()[0].fg, super::theme_default_foreground());
     }
 
     // --- Kitty image frame extraction ---
