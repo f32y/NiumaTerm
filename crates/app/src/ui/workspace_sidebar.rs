@@ -11,7 +11,7 @@ use gpui::{
     StatefulInteractiveElement, Window, div, px, rgb,
 };
 use gpui_component::animation::Transition;
-use gpui_component::button::{Button, ButtonVariants};
+use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants};
 use gpui_component::input::{Input, InputState};
 use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
 use gpui_component::progress::ProgressCircle;
@@ -266,13 +266,14 @@ impl Sidebar {
         let item = Button::new(("workspace", idx))
             .ghost()
             .selected(ws.active)
-            // The ghost-selected token (`secondary.active.background`) sits too
-            // close to the sidebar surface in the modern themes; reuse the
-            // active-tab pair so the current workspace reads as strongly as the
-            // current tab. Button applies these after the variant style.
+            // Button resolves selected colors after element styles, so the
+            // active-tab pair must be the selected custom variant itself.
             .when(ws.active, |this| {
-                this.bg(cx.theme().tab_active)
-                    .text_color(cx.theme().tab_active_foreground)
+                this.custom(
+                    ButtonCustomVariant::new(cx)
+                        .foreground(cx.theme().tab_active_foreground)
+                        .active(cx.theme().tab_active),
+                )
             })
             .w_full()
             .h_auto()
