@@ -1,5 +1,6 @@
 use gpui::prelude::*;
-use gpui::{Context, DragMoveEvent, MouseButton, MouseDownEvent, div, px, relative, rgba};
+use gpui::{Context, DragMoveEvent, MouseButton, MouseDownEvent, div, px, relative};
+use gpui_component::ActiveTheme;
 
 use super::view::TerminalPane;
 
@@ -77,7 +78,7 @@ pub(super) fn scrollbar_element(
                     .h(relative(thumb_height))
                     .w_full()
                     .rounded(px(4.0))
-                    .bg(rgba(0xffffff40)),
+                    .bg(cx.theme().tokens.scrollbar_thumb),
             ),
     )
 }
