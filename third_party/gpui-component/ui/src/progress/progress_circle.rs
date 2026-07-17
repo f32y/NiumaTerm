@@ -207,7 +207,7 @@ impl RenderOnce for ProgressCircle {
                         "progress-circle-loading",
                         Animation::new(Duration::from_secs(1)).repeat(),
                         move |this, delta| {
-                            let end = ease_in_out(delta) * 100.;
+                            let end = ease_in_out((delta / 0.5).min(1.)) * 100.;
                             let start = ease_in_out(((delta - 0.5) / 0.5).clamp(0., 1.)) * 100.;
                             this.child(Self::render_circle(start, end, color))
                         },
