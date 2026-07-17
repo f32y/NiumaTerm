@@ -8,6 +8,10 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct LocalState {
     #[serde(default)]
@@ -82,9 +86,13 @@ impl WorkspaceState {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct TabState {
-    /// Display name shown in the tab bar; absent in pre-name snapshots.
+    /// User-authored display name shown in the tab bar.
     #[serde(default)]
     pub name: Option<String>,
+    /// Distinguishes explicit names from older snapshots that persisted generated
+    /// `Tab N` labels in `name`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub user_named: bool,
     #[serde(default)]
     pub shell: Option<String>,
     #[serde(default)]
@@ -205,7 +213,8 @@ mod tests {
                             pinned: true,
                             active_tab: 9,
                             tabs: vec![TabState {
-                                name: Some("Tab 1".into()),
+                                name: Some("editor".into()),
+                                user_named: true,
                                 shell: Some("pwsh.exe".into()),
                                 args: vec!["-NoLogo".into()],
                                 cwd: Some("C:/Projects/example/repo".into()),
@@ -234,6 +243,11 @@ mod tests {
             std::fs::read_to_string(&path)
                 .unwrap()
                 .contains("pinned = true")
+        );
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("user_named = true")
         );
         assert!(!path.with_extension("toml.tmp").exists());
 
@@ -276,6 +290,7 @@ mod tests {
         // A split tab: h[ leaf, v[leaf, leaf] ] with saved ratios.
         let split_tab = TabState {
             name: Some("Tab 1".into()),
+            user_named: false,
             shell: Some("pwsh.exe".into()),
             args: vec![],
             cwd: Some("C:/a".into()),

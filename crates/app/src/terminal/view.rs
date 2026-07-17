@@ -695,6 +695,10 @@ impl TerminalPane {
         self.id
     }
 
+    pub(crate) fn terminal_title(&self) -> String {
+        self.surface.title()
+    }
+
     /// The pane's last laid-out content size (`None` before the first paint).
     /// Split creation uses it to check the focused pane can yield the minimum
     /// panel size.

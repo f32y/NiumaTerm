@@ -162,6 +162,7 @@ mod tests {
                 active_tab: 0,
                 tabs: vec![TabState {
                     name: None,
+                    user_named: false,
                     shell: Some("pwsh.exe".into()),
                     args: vec!["-NoLogo".into()],
                     cwd: Some("C:/Projects/example/repo".into()),

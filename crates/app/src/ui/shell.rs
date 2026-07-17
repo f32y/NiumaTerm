@@ -560,7 +560,15 @@ impl Shell {
             .clone()
     }
 
+    fn sync_active_terminal_title(&mut self, cx: &App) {
+        let title = self.active_pane().read(cx).terminal_title();
+        let tabs = self.workspaces.active_tabs_mut();
+        let tab_id = tabs.active_id();
+        tabs.set_title(tab_id, title);
+    }
+
     pub(crate) fn focus_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.sync_active_terminal_title(cx);
         let handle = self.active_pane().read(cx).focus.clone();
         window.focus(&handle, cx);
         self.acknowledge_visible(window, true, cx);
@@ -663,6 +671,11 @@ impl Shell {
             match event {
                 HostEvent::Title(title) => {
                     if let Some(tab_id) = self.tab_for_pane(pane_id)
+                        && self
+                            .workspaces
+                            .tab_manager_for(tab_id)
+                            .and_then(|tabs| tabs.find(tab_id))
+                            .is_some_and(|tab| tab.surface().focused() == pane_id)
                         && let Some(tabs) = self.workspaces.tab_manager_for_mut(tab_id)
                     {
                         chrome_changed |= tabs.set_title(tab_id, title.clone());

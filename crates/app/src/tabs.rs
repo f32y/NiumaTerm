@@ -1,5 +1,5 @@
 //! Multi-session tab model: a set of tabs plus the active index, with all
-//! lifecycle logic (new / close / switch / reorder / exited) in one
+//! lifecycle logic (new / close / switch / reorder / title / exited) in one
 //! place. Pure logic — generic over the surface type `S` so it unit-tests
 //! without starting a PTY.
 //!
@@ -15,8 +15,9 @@ pub struct TabId(pub u64);
 pub struct Tab<S> {
     id: TabId,
     surface: S,
-    /// Stable default display title; terminal OSC titles are ignored.
-    title: String,
+    default_title: String,
+    user_title: Option<String>,
+    terminal_title: Option<String>,
     exited: bool,
 }
 
@@ -25,7 +26,13 @@ impl<S> Tab<S> {
         self.id
     }
     pub fn title(&self) -> &str {
-        &self.title
+        self.user_title
+            .as_deref()
+            .or(self.terminal_title.as_deref())
+            .unwrap_or(&self.default_title)
+    }
+    pub fn user_title(&self) -> Option<&str> {
+        self.user_title.as_deref()
     }
     pub fn exited(&self) -> bool {
         self.exited
@@ -58,7 +65,9 @@ impl<S> TabManager<S> {
             tabs: vec![Tab {
                 id,
                 surface,
-                title: default_tab_title(1),
+                default_title: default_tab_title(1),
+                user_title: None,
+                terminal_title: None,
                 exited: false,
             }],
             active: 0,
@@ -73,7 +82,9 @@ impl<S> TabManager<S> {
         self.tabs.push(Tab {
             id,
             surface,
-            title,
+            default_title: title,
+            user_title: None,
+            terminal_title: None,
             exited: false,
         });
         self.active = self.tabs.len() - 1;
@@ -130,16 +141,21 @@ impl<S> TabManager<S> {
         self.active = self.index_of(active_id).unwrap_or(self.active);
     }
 
-    /// Ignore terminal title changes; tab labels stay as their default names.
-    pub fn set_title(&mut self, _id: TabId, _title: String) -> bool {
-        false
+    /// Set the terminal-supplied title. An empty OSC title restores the default,
+    /// while an explicit user title remains authoritative.
+    pub fn set_title(&mut self, id: TabId, title: String) -> bool {
+        let Some(tab) = self.find_mut(id) else {
+            return false;
+        };
+        let previous = tab.title().to_string();
+        tab.terminal_title = (!title.is_empty()).then_some(title);
+        tab.title() != previous
     }
 
-    /// Set a tab's display name directly (session restore); unlike `set_title`
-    /// this is not an OSC terminal title and is honored.
+    /// Set the user-authored title, which takes precedence over OSC updates.
     pub fn rename(&mut self, id: TabId, title: String) {
-        if let Some(idx) = self.index_of(id) {
-            self.tabs[idx].title = title;
+        if let Some(tab) = self.find_mut(id) {
+            tab.user_title = Some(title);
         }
     }
 
@@ -291,11 +307,25 @@ mod tests {
     }
 
     #[test]
-    fn terminal_title_does_not_replace_default_tab_name() {
+    fn terminal_title_replaces_default_and_empty_restores_it() {
         let mut mgr = manager(2);
-        mgr.set_title(TabId(1), "renamed".into());
-        assert_eq!(mgr.tabs()[0].title(), "Tab 1");
+        assert!(mgr.set_title(TabId(1), "vim".into()));
+        assert_eq!(mgr.tabs()[0].title(), "vim");
         assert_eq!(mgr.tabs()[1].title(), "Tab 2");
+        assert!(mgr.set_title(TabId(1), String::new()));
+        assert_eq!(mgr.tabs()[0].title(), "Tab 1");
+    }
+
+    #[test]
+    fn user_title_takes_precedence_over_terminal_title() {
+        let mut mgr = manager(1);
+        mgr.set_title(TabId(1), "vim".into());
+        mgr.rename(TabId(1), "editor".into());
+
+        assert_eq!(mgr.tabs()[0].title(), "editor");
+        assert_eq!(mgr.tabs()[0].user_title(), Some("editor"));
+        assert!(!mgr.set_title(TabId(1), "shell".into()));
+        assert_eq!(mgr.tabs()[0].title(), "editor");
     }
 
     #[test]
