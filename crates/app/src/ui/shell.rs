@@ -201,6 +201,7 @@ impl Shell {
             this.window_active = Self::exact_window_active(window);
             if this.window_active {
                 cx.global_mut::<LastActiveWindow>().0 = Some(this.window_id);
+                this.acknowledge_visible(window, true, cx);
             }
             this.process_native_notifications(cx);
         })
