@@ -61,7 +61,15 @@ impl ProgressCircle {
         self
     }
 
-    /// Render the arc canvas. `start_value` and `end_value` are in 0.0–100.0 percentage.
+    fn loading_arc(delta: f32) -> (f32, f32) {
+        let rotation = delta * 100.;
+        let end = rotation + ease_in_out((delta / 0.5).min(1.)) * 100.;
+        let start = rotation + ease_in_out(((delta - 0.5) / 0.5).clamp(0., 1.)) * 100.;
+        (start, end)
+    }
+
+    /// Render the arc canvas. `start_value` and `end_value` are percentages of a turn;
+    /// loading animation values can exceed 100 to carry continuous rotation.
     /// The progress arc is skipped when `end_value <= 0`.
     fn render_circle(start_value: f32, end_value: f32, color: Hsla) -> impl IntoElement {
         struct PrepaintState {
@@ -207,8 +215,7 @@ impl RenderOnce for ProgressCircle {
                         "progress-circle-loading",
                         Animation::new(Duration::from_secs(1)).repeat(),
                         move |this, delta| {
-                            let end = ease_in_out((delta / 0.5).min(1.)) * 100.;
-                            let start = ease_in_out(((delta - 0.5) / 0.5).clamp(0., 1.)) * 100.;
+                            let (start, end) = Self::loading_arc(delta);
                             this.child(Self::render_circle(start, end, color))
                         },
                     )
@@ -218,5 +225,21 @@ impl RenderOnce for ProgressCircle {
                         .into_any_element()
                 }
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loading_arc_rotates_while_sweeping() {
+        let (growing_start, growing_end) = ProgressCircle::loading_arc(0.25);
+        let (shrinking_start, shrinking_end) = ProgressCircle::loading_arc(0.75);
+
+        assert_eq!(growing_start, 25.);
+        assert!(growing_end > growing_start);
+        assert!(shrinking_start > 75.);
+        assert_eq!(shrinking_end, 175.);
     }
 }
