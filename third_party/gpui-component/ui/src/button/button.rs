@@ -808,7 +808,7 @@ impl ButtonVariant {
             }
             Self::Link => cx.theme().link,
             Self::Text => cx.theme().foreground,
-            Self::Custom(colors) => colors.color,
+            Self::Custom(colors) => colors.foreground,
         }
     }
 
@@ -1208,6 +1208,22 @@ mod tests {
         assert!(ButtonVariant::Link.no_padding());
         assert!(ButtonVariant::Text.no_padding());
         assert!(!ButtonVariant::Ghost.no_padding());
+    }
+
+    #[gpui::test]
+    fn test_custom_button_uses_configured_foreground(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        let window = cx.add_empty_window();
+        window.update(|_, cx| {
+            let foreground = cx.theme().foreground;
+            let variant = ButtonVariant::Custom(
+                ButtonCustomVariant::new(cx)
+                    .color(cx.theme().transparent)
+                    .foreground(foreground),
+            );
+
+            assert_eq!(variant.selected(false, cx).fg, foreground);
+        });
     }
 
     #[gpui::test]
