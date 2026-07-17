@@ -286,8 +286,7 @@ pub fn new(
 
     let cmdline = win32_string(&cmdline(shell));
     let cwd = working_directory.as_ref().map(win32_string);
-    let mut environment =
-        (!environment_overrides.is_empty()).then(|| build_environment_block(environment_overrides));
+    let mut environment = build_environment_block(environment_overrides);
 
     let mut proc_info: PROCESS_INFORMATION = unsafe { mem::zeroed() };
     unsafe {
@@ -303,14 +302,8 @@ pub fn new(
                 EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED
             } else {
                 EXTENDED_STARTUPINFO_PRESENT
-            } | if environment.is_some() {
-                CREATE_UNICODE_ENVIRONMENT
-            } else {
-                0
-            },
-            environment
-                .as_mut()
-                .map_or_else(ptr::null_mut, |block| block.as_mut_ptr().cast()),
+            } | CREATE_UNICODE_ENVIRONMENT,
+            environment.as_mut_ptr().cast(),
             cwd.as_ref().map_or_else(ptr::null, |s| s.as_ptr()),
             &mut startup_info_ex.StartupInfo as *mut STARTUPINFOW,
             &mut proc_info as *mut PROCESS_INFORMATION,
@@ -352,6 +345,10 @@ pub fn new(
 /// inherited spelling such as `Path` even when it is supplied as `PATH`.
 fn build_environment_block(overrides: &[(String, String)]) -> Vec<u16> {
     let mut values: Vec<(OsString, OsString)> = std::env::vars_os().collect();
+    // ConPTY supports 24-bit SGR colors, but Windows does not provide a standard
+    // capability variable, so child TUIs otherwise downgrade computed RGB styles.
+    values.retain(|(key, _)| !key.eq_ignore_ascii_case("COLORTERM"));
+    values.push(("COLORTERM".into(), "truecolor".into()));
     for (key, value) in overrides {
         let folded = key.to_lowercase();
         values.retain(|(existing, _)| existing.to_string_lossy().to_lowercase() != folded);
@@ -519,6 +516,16 @@ mod environment_tests {
                 .any(|entry| entry == "NMT_UNICODE=牛码终端🦀")
         );
         unsafe { std::env::remove_var(inherited) };
+    }
+
+    #[test]
+    fn block_advertises_truecolor_by_default() {
+        let block = build_environment_block(&[]);
+        assert!(
+            entries(&block)
+                .iter()
+                .any(|entry| entry.eq_ignore_ascii_case("COLORTERM=truecolor"))
+        );
     }
 
     #[test]
