@@ -81,6 +81,10 @@ pub struct TerminalSurface {
 }
 
 impl TerminalSurface {
+    pub(crate) fn title(&self) -> String {
+        self.session.engine.lock().title()
+    }
+
     pub(crate) fn set_theme_colors(&self, colors: &nmt_config::colors::Colors) {
         self.session.engine.lock().set_theme_colors(colors);
     }
@@ -991,6 +995,7 @@ mod tests {
     fn tab_state_uses_last_reported_cwd() {
         let launch = nmt_config::local_state::TabState {
             name: None,
+            user_named: false,
             shell: Some("pwsh.exe".into()),
             args: vec!["-NoLogo".into()],
             cwd: Some("C:/old".into()),

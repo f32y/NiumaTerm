@@ -28,6 +28,15 @@ fn normalize_saved_launch(state: &mut TabState, default_profile: &(Option<String
     }
 }
 
+/// Older snapshots stored generated labels as if they were user names. The new
+/// flag is absent there, so the exact built-in label shape is the compatibility
+/// signal that lets OSC titles work immediately after upgrading.
+fn legacy_generated_tab_title(title: &str) -> bool {
+    title
+        .strip_prefix("Tab ")
+        .is_some_and(|number| number.parse::<usize>().is_ok())
+}
+
 /// Resolve a saved launch command for restore: a `None` shell follows the current
 /// default profile, and a shell matching no configured profile is a stale pin
 /// (e.g. a former built-in default the user has since moved away from) that falls
@@ -216,7 +225,11 @@ impl Shell {
         let mut restored = Vec::new();
         for mut tab_state in tabs {
             resolve_restored_launch(&mut tab_state, cx.global::<AppSettings>());
-            let name = tab_state.name.clone().filter(|n| !n.trim().is_empty());
+            let name = tab_state
+                .name
+                .clone()
+                .filter(|n| !n.trim().is_empty())
+                .filter(|n| tab_state.user_named || !legacy_generated_tab_title(n));
             // A saved pane layout rebuilds the split tree (one fresh shell per
             // leaf); an unusable layout degrades to the flat single-pane path.
             let tree = tab_state
@@ -278,6 +291,7 @@ impl Shell {
                 let surface_id = Self::alloc_id(next_id);
                 let mut launch = TabState {
                     name: None,
+                    user_named: false,
                     shell: shell.clone(),
                     args: args.clone(),
                     cwd: cwd.clone(),
@@ -391,7 +405,8 @@ impl Shell {
                         let tree = tab.surface();
                         let mut state = tree.focused_pane().read(cx).tab_state();
                         normalize_saved_launch(&mut state, &default_profile);
-                        state.name = Some(tab.title().to_string());
+                        state.name = tab.user_title().map(str::to_owned);
+                        state.user_named = state.name.is_some();
                         state.panes = (!tree.is_single_leaf())
                             .then(|| pane_node_state(tree.root(), &default_profile, cx));
                         state
@@ -417,7 +432,7 @@ impl Shell {
 mod launch_resolution_tests {
     use nmt_config::local_state::TabState;
 
-    use super::{normalize_saved_launch, resolve_restored_launch};
+    use super::{legacy_generated_tab_title, normalize_saved_launch, resolve_restored_launch};
     use crate::ui::settings::{AppSettings, Profile};
 
     fn settings_with_pwsh_default() -> AppSettings {
@@ -441,11 +456,20 @@ mod launch_resolution_tests {
     fn tab(shell: Option<&str>, args: &[&str]) -> TabState {
         TabState {
             name: None,
+            user_named: false,
             shell: shell.map(str::to_string),
             args: args.iter().map(|a| a.to_string()).collect(),
             cwd: None,
             panes: None,
         }
+    }
+
+    #[test]
+    fn recognizes_generated_titles_from_legacy_snapshots() {
+        assert!(legacy_generated_tab_title("Tab 1"));
+        assert!(legacy_generated_tab_title("Tab 42"));
+        assert!(!legacy_generated_tab_title("Tab"));
+        assert!(!legacy_generated_tab_title("editor"));
     }
 
     #[test]

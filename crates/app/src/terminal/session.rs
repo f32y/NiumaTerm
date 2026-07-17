@@ -522,6 +522,7 @@ impl TerminalSessionConfig {
     pub(crate) fn restorable_tab_state(&self) -> nmt_config::local_state::TabState {
         nmt_config::local_state::TabState {
             name: None,
+            user_named: false,
             shell: self.shell.clone(),
             args: self.args.clone(),
             cwd: self.working_dir.clone(),

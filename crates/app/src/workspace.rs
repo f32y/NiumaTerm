@@ -267,7 +267,6 @@ impl<S> WorkspaceManager<S> {
 
     /// The tab set that contains `tab_id`, searched across all workspaces (a
     /// background workspace's surface still polls host events).
-    #[allow(unused)]
     pub fn tab_manager_for(&self, tab_id: TabId) -> Option<&TabManager<S>> {
         self.workspaces
             .iter()
