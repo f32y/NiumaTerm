@@ -28,7 +28,7 @@ use crate::ui::tab_bar::TabStrip;
 use crate::ui::token_usage::TokenUsageView;
 use crate::ui::workspace_sidebar::Sidebar;
 use crate::window::{AppWindow, LastActiveWindow, ShellEntry, ShellRegistry, WindowRegistry};
-use crate::workspace::{WorkspaceId, WorkspaceManager, best_match};
+use crate::workspace::{DEFAULT_WORKSPACE_NAME, WorkspaceId, WorkspaceManager, best_match};
 
 /// A workspace cwd as a shell working directory: `None` for empty or the
 /// legacy `"."` placeholder (shells then start in their default directory).
@@ -767,8 +767,8 @@ impl Shell {
     }
 
     /// CLI `new_tab`: open `path` in the deepest workspace whose cwd contains
-    /// it (new tab, shell starts in `path`), or in a fresh workspace named
-    /// after the directory when nothing matches, preserving the user's target.
+    /// it (new tab, shell starts in `path`), or in a fresh workspace when
+    /// nothing matches, preserving the user's target.
     pub(crate) fn open_dir_tab(
         &mut self,
         path: &std::path::Path,
@@ -777,7 +777,7 @@ impl Shell {
     ) {
         let target = path.display().to_string();
         let Some(ws_id) = best_match(&self.workspaces.summaries(), path) else {
-            self.create_workspace(crate::cli::dir_leaf_name(path), target, window, cx);
+            self.create_workspace(DEFAULT_WORKSPACE_NAME.into(), target, window, cx);
             return;
         };
         if let Some(index) = self
@@ -1321,17 +1321,17 @@ impl Shell {
         cx.notify();
     }
 
-    /// Open the new-workspace dialog: a name (pre-filled with the next default
-    /// name) and a working directory. Confirming creates the workspace; cancel
-    /// creates nothing.
+    /// Open the new-workspace dialog with the shared default name and a working
+    /// directory. Confirming creates the workspace; cancel creates nothing.
     pub(crate) fn on_new_workspace(
         &mut self,
         _: &NewWorkspace,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let default_name = self.workspaces.next_default_name();
-        let name_input = cx.new(|cx| InputState::new(window, cx).default_value(default_name));
+        let name_input = cx.new(|cx| {
+            InputState::new(window, cx).default_value(DEFAULT_WORKSPACE_NAME.to_string())
+        });
         let dir_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Working directory (required)"));
         let shell = cx.entity();
@@ -1427,8 +1427,8 @@ impl Shell {
         });
     }
 
-    /// Create a workspace named `name` (empty falls back to the next default
-    /// name) whose shells start in `dir` (empty falls back to the default
+    /// Create a workspace named `name` (empty falls back to the shared default)
+    /// whose shells start in `dir` (empty falls back to the default
     /// startup directory), seeded with one fresh tab, and activate it.
     fn create_workspace(
         &mut self,
@@ -1438,7 +1438,7 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         let name = if name.is_empty() {
-            self.workspaces.next_default_name()
+            DEFAULT_WORKSPACE_NAME.to_string()
         } else {
             name
         };

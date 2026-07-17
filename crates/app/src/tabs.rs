@@ -48,41 +48,32 @@ impl<S> Tab<S> {
 pub struct TabManager<S> {
     tabs: Vec<Tab<S>>,
     active: usize,
-    /// Per-manager monotonic counter for default tab names ("Tab 1", "Tab 2", ...).
-    /// Never decrements, so numbers are not reused after a close.
-    next_tab_number: usize,
 }
 
-/// Default per-tab display name.
-fn default_tab_title(number: usize) -> String {
-    format!("Tab {number}")
-}
+const DEFAULT_TAB_TITLE: &str = "New Tab";
 
 impl<S> TabManager<S> {
-    /// Start with a single active tab named "Tab 1". There is no empty state.
+    /// Start with a single active tab. There is no empty state.
     pub fn new(surface: S, id: TabId) -> Self {
         Self {
             tabs: vec![Tab {
                 id,
                 surface,
-                default_title: default_tab_title(1),
+                default_title: DEFAULT_TAB_TITLE.into(),
                 user_title: None,
                 terminal_title: None,
                 exited: false,
             }],
             active: 0,
-            next_tab_number: 2,
         }
     }
 
-    /// Append a tab named "Tab N" (next per-manager number) and make it active.
+    /// Append a tab with the shared default name and make it active.
     pub fn new_tab(&mut self, surface: S, id: TabId) -> TabId {
-        let title = default_tab_title(self.next_tab_number);
-        self.next_tab_number += 1;
         self.tabs.push(Tab {
             id,
             surface,
-            default_title: title,
+            default_title: DEFAULT_TAB_TITLE.into(),
             user_title: None,
             terminal_title: None,
             exited: false,
@@ -230,22 +221,13 @@ mod tests {
     }
 
     #[test]
-    fn new_tabs_get_incrementing_default_titles() {
+    fn new_tabs_share_the_default_title() {
         let mut mgr = manager(1);
-        assert_eq!(mgr.tabs()[0].title(), "Tab 1");
+        assert_eq!(mgr.tabs()[0].title(), "New Tab");
         mgr.new_tab(2, TabId(2));
         mgr.new_tab(3, TabId(3));
-        assert_eq!(mgr.tabs()[1].title(), "Tab 2");
-        assert_eq!(mgr.tabs()[2].title(), "Tab 3");
-    }
-
-    #[test]
-    fn tab_numbers_are_not_reused_after_close() {
-        let mut mgr = manager(2); // Tab 1, Tab 2
-        mgr.close(TabId(2)); // closes "Tab 2"
-        mgr.new_tab(3, TabId(3));
-        // Counter does not rewind: the new tab is "Tab 3", not "Tab 2".
-        assert_eq!(mgr.tabs()[1].title(), "Tab 3");
+        assert_eq!(mgr.tabs()[1].title(), "New Tab");
+        assert_eq!(mgr.tabs()[2].title(), "New Tab");
     }
 
     #[test]
@@ -311,9 +293,9 @@ mod tests {
         let mut mgr = manager(2);
         assert!(mgr.set_title(TabId(1), "vim".into()));
         assert_eq!(mgr.tabs()[0].title(), "vim");
-        assert_eq!(mgr.tabs()[1].title(), "Tab 2");
+        assert_eq!(mgr.tabs()[1].title(), "New Tab");
         assert!(mgr.set_title(TabId(1), String::new()));
-        assert_eq!(mgr.tabs()[0].title(), "Tab 1");
+        assert_eq!(mgr.tabs()[0].title(), "New Tab");
     }
 
     #[test]
