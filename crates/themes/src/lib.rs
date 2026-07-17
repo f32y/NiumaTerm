@@ -13,6 +13,10 @@ pub const THEMES: &[BuiltinTheme] = &[
         source: include_str!("modern_light.toml"),
     },
     BuiltinTheme {
+        name: "modern_gray",
+        source: include_str!("modern_gray.toml"),
+    },
+    BuiltinTheme {
         name: "ubuntu",
         source: include_str!("ubuntu.toml"),
     },
@@ -31,7 +35,7 @@ mod tests {
 
     #[test]
     fn builtins_have_unique_names_and_sources() {
-        assert_eq!(THEMES.len(), 3);
+        assert_eq!(THEMES.len(), 4);
         let mut names: Vec<_> = THEMES.iter().map(|theme| theme.name).collect();
         names.sort_unstable();
         names.dedup();
