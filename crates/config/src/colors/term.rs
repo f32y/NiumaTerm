@@ -126,6 +126,7 @@ impl List {
         // Foreground and background.
         self[NamedColor::Foreground] = colors.foreground;
         self[NamedColor::Background] = colors.background.0;
+        self[NamedColor::Cursor] = colors.cursor;
 
         // Dims.
         if let Some(color) = colors.dim_foreground {
@@ -261,5 +262,19 @@ impl IndexMut<NamedColor> for List {
     #[inline]
     fn index_mut(&mut self, idx: NamedColor) -> &mut Self::Output {
         &mut self.0[idx as usize]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::List;
+    use crate::colors::{Colors, NamedColor};
+
+    #[test]
+    fn terminal_palette_includes_configured_cursor_color() {
+        let colors = Colors::default();
+        let palette = List::from(&colors);
+
+        assert_eq!(palette[NamedColor::Cursor], colors.cursor);
     }
 }

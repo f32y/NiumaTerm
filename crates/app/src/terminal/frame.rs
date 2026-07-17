@@ -37,6 +37,7 @@ pub(crate) struct TerminalCursor {
     pub(crate) col: u16,
     pub(crate) row: u16,
     pub(crate) shape: CursorShape,
+    pub(crate) color: TerminalColor,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -94,8 +95,8 @@ impl TerminalFrame {
         selection: Option<SelectionRange>,
         generations: &GenerationMap,
     ) -> Self {
-        let cursor = frame_cursor(buf);
         let colors = BackgroundColors::new(buf.colors());
+        let cursor = frame_cursor(buf, &colors);
 
         let lines = (0..buf.rows())
             .map(|row| {
@@ -794,7 +795,7 @@ fn normalized_channel(channel: f32) -> u8 {
     (channel.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
-fn frame_cursor(buf: &RenderBuffer) -> Option<TerminalCursor> {
+fn frame_cursor(buf: &RenderBuffer, colors: &BackgroundColors) -> Option<TerminalCursor> {
     let cursor = buf.cursor();
     let shape = buf.cursor_shape();
     (buf.cursor_visible() && cursor.row.0 >= 0 && shape != CursorShape::Hidden).then_some(
@@ -802,6 +803,7 @@ fn frame_cursor(buf: &RenderBuffer) -> Option<TerminalCursor> {
             col: cursor.col.0.min(u16::MAX as usize) as u16,
             row: (cursor.row.0 as usize).min(u16::MAX as usize) as u16,
             shape,
+            color: colors.named(NamedColor::Cursor),
         },
     )
 }
@@ -866,7 +868,8 @@ mod tests {
     use std::sync::Arc;
 
     use gpui::SharedString;
-    use nmt_config::colors::Colors;
+    use nmt_config::colors::term::TermColors;
+    use nmt_config::colors::{ColorArray, Colors, NamedColor};
     use nmt_terminal::ansi::CursorShape;
     use nmt_terminal::ghostty::GhosttyTerminal;
     use nmt_terminal::render_buffer::RenderBuffer;
@@ -896,6 +899,20 @@ mod tests {
 
     fn first_line(frame: &TerminalFrame) -> &str {
         frame.lines()[0].text().as_ref()
+    }
+
+    #[test]
+    fn terminal_cursor_color_prefers_runtime_override() {
+        let expected = ColorArray::from([0.8, 0.1, 0.2, 1.0]);
+        let mut term_colors = TermColors::default();
+        term_colors[NamedColor::Cursor] = Some(expected);
+
+        let colors = super::BackgroundColors::new(term_colors);
+
+        assert_eq!(
+            colors.named(NamedColor::Cursor),
+            TerminalColor::from_color_array(expected)
+        );
     }
 
     #[test]

@@ -2,7 +2,7 @@ use gpui::{
     AnyElement, App, AvailableSpace, Bounds, ContentMask, Corners, Element, ElementId,
     ElementInputHandler, Entity, FocusHandle, FontStyle, FontWeight, GlobalElementId,
     InspectorElementId, IntoElement, LayoutId, Pixels, RenderImage, ShapedLine, StrikethroughStyle,
-    Style, TextAlign, TextRun, UnderlineStyle, Window, fill, point, px, relative, rgb, rgba, size,
+    Style, TextAlign, TextRun, UnderlineStyle, Window, fill, point, px, relative, rgb, size,
 };
 use nmt_terminal::ansi::CursorShape;
 
@@ -1003,12 +1003,7 @@ fn paint_cursor(
     let Some(bounds) = cursor_bounds(bounds, cursor, cell, y_offset) else {
         return;
     };
-    let color = match cursor.shape {
-        CursorShape::Block => rgba(0xd8dee966),
-        CursorShape::Beam | CursorShape::Underline => rgb(0xd8dee9),
-        CursorShape::Hidden => return,
-    };
-    window.paint_quad(fill(bounds, color));
+    window.paint_quad(fill(bounds, rgb(cursor.color.rgb_u32())));
 }
 
 pub(crate) fn cursor_bounds(
@@ -1071,6 +1066,7 @@ mod tests {
                 col: 2,
                 row: 1,
                 shape: CursorShape::Block,
+                color: (0, 0, 0).into(),
             },
             cell,
             0.0,
@@ -1085,6 +1081,7 @@ mod tests {
                 col: 2,
                 row: 1,
                 shape: CursorShape::Beam,
+                color: (0, 0, 0).into(),
             },
             cell,
             0.0,
@@ -1099,6 +1096,7 @@ mod tests {
                 col: 2,
                 row: 1,
                 shape: CursorShape::Underline,
+                color: (0, 0, 0).into(),
             },
             cell,
             0.0,
