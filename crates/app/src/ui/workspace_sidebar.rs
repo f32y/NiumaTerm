@@ -14,8 +14,8 @@ use gpui_component::animation::Transition;
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::input::{Input, InputState};
 use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
+use gpui_component::progress::ProgressCircle;
 use gpui_component::scroll::{Scrollbar, ScrollbarShow};
-use gpui_component::spinner::Spinner;
 use gpui_component::{ActiveTheme, Icon, IconNamed, Selectable, Sizable, h_flex, v_flex};
 use nmt_agent_utils::AgentRuntimeStatus;
 
@@ -39,15 +39,6 @@ struct ResizeDrag;
 impl Render for ResizeDrag {
     fn render(&mut self, _: &mut gpui::Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
-    }
-}
-
-/// Sidebar busy spinner glyph (`assets/icons/loading.svg`), rotated by `Spinner`.
-struct LoadingIcon;
-
-impl IconNamed for LoadingIcon {
-    fn path(self) -> SharedString {
-        "icons/loading.svg".into()
     }
 }
 
@@ -167,15 +158,14 @@ impl Sidebar {
         rename: Option<&(WorkspaceId, Entity<InputState>)>,
         cx: &mut Context<Shell>,
     ) -> AnyElement {
-        // Busy = spinner, idle = static green dot, vertically centered
-        // on the item's left. The SVG fills are flattened by the svg
-        // renderer, so the tint is reapplied as a text color.
+        // Busy = animated progress circle, idle = static SVG dot, vertically
+        // centered on the item's left. SVG tint is applied as text color.
         let (indicator, status_label): (AnyElement, &'static str) = match ws.agent_status {
             AgentRuntimeStatus::Running => (
-                Spinner::new()
+                ProgressCircle::new(("workspace-busy", idx))
                     .small()
-                    .icon(Icon::new(LoadingIcon))
-                    .color(rgb(0xD36803).into())
+                    .loading(true)
+                    .color(rgb(0xD36803))
                     .into_any_element(),
                 "Running",
             ),
