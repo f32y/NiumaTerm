@@ -267,12 +267,12 @@ impl Sidebar {
             .ghost()
             .selected(ws.active)
             // Button resolves selected colors after element styles, so the
-            // active-tab pair must be the selected custom variant itself.
+            // sidebar-accent pair must be the selected custom variant itself.
             .when(ws.active, |this| {
                 this.custom(
                     ButtonCustomVariant::new(cx)
-                        .foreground(cx.theme().tab_active_foreground)
-                        .active(cx.theme().tab_active),
+                        .foreground(cx.theme().sidebar_accent_foreground)
+                        .active(cx.theme().sidebar_accent),
                 )
             })
             .w_full()
