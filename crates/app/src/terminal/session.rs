@@ -2,10 +2,11 @@
 //! the ConPTY-backed PTY worker so platform details stay outside the UI layer.
 
 use std::collections::VecDeque;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::{Arc, LazyLock};
 use std::thread::JoinHandle;
 
+use base64::Engine as _;
 use nmt_platform::Pty;
 use nmt_terminal::block_store::{BlockStore, SegmentMeta};
 use nmt_terminal::event::{BlockEvent, EventListener, Msg, MsgSender, TerminalEvent, WindowId};
@@ -17,7 +18,10 @@ use parking_lot::{FairMutex, Mutex};
 use crate::error::{EngineError, EngineErrorCode};
 use crate::terminal::graphics::GenerationStore;
 use crate::terminal::wake::{Wake, WakeSender};
-use crate::utils::{ShellKind, get_shell_bootstrap_script};
+use crate::utils::POWERSHELL_INTEGRATION;
+
+static ENCODED_POWERSHELL_INTEGRATION: LazyLock<String> =
+    LazyLock::new(|| encode_powershell_command(POWERSHELL_INTEGRATION));
 
 pub(crate) type SessionGraphics = Arc<Mutex<GenerationStore>>;
 
@@ -530,35 +534,31 @@ impl TerminalSessionConfig {
         }
     }
 
-    /// Augment a session config so a PowerShell shell dot-sources the bundled OSC 133
-    /// integration at startup (`-NoExit -Command ". '<script>'"`, the
-    /// `SessionConfig` shell/args seam). Only applied to a PowerShell shell with no
-    /// caller-supplied args, so explicit args (and non-PowerShell shells) are left
-    /// untouched. Without integration the sniffer simply never captures a prompt.
+    /// Augment a session config so a PowerShell shell evaluates the bundled OSC 133
+    /// integration at startup. Only applied to a PowerShell shell with no caller-supplied
+    /// args, so explicit args (and non-PowerShell shells) are left untouched.
     pub(crate) fn with_shell_integration(mut self: TerminalSessionConfig) -> TerminalSessionConfig {
         if !self.has_trusted_prompt_integration() {
             return self;
         }
 
-        if let Some(path) = get_shell_bootstrap_script(ShellKind::PowerShell) {
-            // `-Command` consumes the rest of the line as the command, so the
-            // single-quoted dot-source survives spaces in the path; `-NoExit` keeps the
-            // session interactive afterwards.
-            self.args = vec![
-                "-NoExit".to_string(),
-                "-Command".to_string(),
-                format!(". '{}'", path.display()),
-            ];
-        }
+        self.args = vec![
+            "-NoExit".to_string(),
+            "-EncodedCommand".to_string(),
+            (*ENCODED_POWERSHELL_INTEGRATION).clone(),
+        ];
 
         self
     }
 
     pub(crate) fn has_trusted_prompt_integration(&self) -> bool {
-        self.args.is_empty()
-            && shell_is_powershell(self.shell.as_deref())
-            && get_shell_bootstrap_script(ShellKind::PowerShell).is_some()
+        self.args.is_empty() && shell_is_powershell(self.shell.as_deref())
     }
+}
+
+fn encode_powershell_command(script: &str) -> String {
+    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
 impl Default for TerminalSessionConfig {
@@ -589,6 +589,7 @@ mod tests {
         TerminalSessionConfig,
     };
     use crate::terminal::wake::Wake;
+    use crate::utils::POWERSHELL_INTEGRATION;
 
     #[test]
     fn trusted_prompt_integration_requires_injected_powershell_startup() {
@@ -617,6 +618,28 @@ mod tests {
                 ..TerminalSessionConfig::default()
             }
             .has_trusted_prompt_integration()
+        );
+    }
+
+    #[test]
+    fn powershell_bootstrap_is_passed_as_utf16_encoded_command() {
+        use base64::Engine as _;
+
+        let config = TerminalSessionConfig::default().with_shell_integration();
+        let encoded = &config.args[2];
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap();
+        let utf16: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+
+        assert_eq!(config.args[0], "-NoExit");
+        assert_eq!(config.args[1], "-EncodedCommand");
+        assert_eq!(
+            String::from_utf16(utf16.as_slice()).unwrap(),
+            POWERSHELL_INTEGRATION
         );
     }
 
