@@ -6,7 +6,7 @@
 #   - capture the prompt (;A -> ;B) for the fixed prompt dock, and
 #   - bound the prompt/echo region (;A -> ;C) it withholds while prompt-hiding.
 #
-# Dot-sourced at session start via `-NoExit -Command ". '<script>'"`. Benign when
+# Evaluated at session start via `-NoExit -EncodedCommand <base64>`. Benign when
 # prompt-hiding is off: the engine ignores the unknown OSC, so the grid is
 # unchanged. Prompt and command marks install together behind a PSReadLine check so
 # a shell without PSReadLine emits no marks (region stays None, nothing withheld)
