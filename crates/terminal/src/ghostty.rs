@@ -409,6 +409,8 @@ pub mod mode {
     pub const MOUSE_SGR_PIXELS: u16 = 1016;
     pub const ALT_SCREEN: u16 = 1049;
     pub const BRACKETED_PASTE: u16 = 2004;
+    /// DEC synchronized output keeps a TUI frame private until its matching reset.
+    pub const SYNC_OUTPUT: u16 = 2026;
 }
 
 /// State the terminal's synchronous callbacks write into during `write_vt`.

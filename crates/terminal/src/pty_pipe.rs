@@ -70,6 +70,9 @@ fn engine_blocks_live_list(engine: &GhosttyTerminal) -> Vec<(crate::ghostty::Blo
 /// monitor refresh rate here if 240 Hz+ becomes a target. A caught-up read
 /// (interactive echo) always snapshots — this only coalesces under saturation.
 const SNAPSHOT_MIN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(5);
+/// Match Windows Terminal's upper bound so a missing DEC 2026 reset cannot
+/// leave the last committed frame visible indefinitely.
+const SYNC_OUTPUT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(100);
 
 fn is_conpty_resize_echo_input(bytes: &[u8]) -> bool {
     !bytes.is_empty()
@@ -921,10 +924,12 @@ pub struct PtyPipe<T: nmt_platform::EventedPty, U: EventListener> {
     /// When the last `snapshot()` readback ran, for saturation coalescing
     /// (`SNAPSHOT_MIN_INTERVAL`). PTY-thread-private.
     last_snapshot_at: std::time::Instant,
-    /// True when a saturated batch skipped its readback. Makes the event loop
-    /// run `pty_read` again (via the self-wake) and forces the readback on a
-    /// pass that reads 0 new bytes, so the stream's final state always lands.
+    /// True when a saturated batch or synchronized update deferred its readback.
+    /// Makes the event loop run `pty_read` without requiring new PTY bytes.
     snapshot_pending: bool,
+    /// Start of the current DEC 2026 transaction. The event-loop poll uses this
+    /// deadline to recover when an application omits the matching reset.
+    sync_output_started_at: Option<std::time::Instant>,
 }
 
 /// Read the VT-controlled modes from the Ghostty engine into `Mode`.
@@ -1123,6 +1128,7 @@ where
             prev_alt_screen_sent: false,
             last_snapshot_at: std::time::Instant::now(),
             snapshot_pending: false,
+            sync_output_started_at: None,
         })
     }
 
@@ -1463,14 +1469,30 @@ where
         // Drain everything from the engine under ONE lock: query/DSR/DA
         // responses, bell, title, pwd, VT modes, and the snapshot. Then act on
         // the owned results below with the engine lock released.
-        let (responses, bell, clipboard_writes, title, vt_modes, snapshot, image_delta) = {
+        let (
+            responses,
+            bell,
+            clipboard_writes,
+            title,
+            vt_modes,
+            sync_output,
+            snapshot,
+            image_delta,
+        ) = {
             let mut engine = self.ghostty.lock();
             let responses = engine.take_pty_writes();
             let bell = engine.take_bell();
             let clipboard_writes = engine.take_clipboard_writes();
             let title = engine.poll_title();
             let vt_modes = ghostty_vt_modes(&engine);
-            let (snapshot, image_delta) = if do_snapshot {
+            let sync_output_timed_out = self
+                .sync_output_started_at
+                .is_some_and(|started| started.elapsed() >= SYNC_OUTPUT_TIMEOUT);
+            if sync_output_timed_out && engine.mode(mode::SYNC_OUTPUT) {
+                engine.write_vt(b"\x1b[?2026l");
+            }
+            let sync_output = engine.mode(mode::SYNC_OUTPUT);
+            let (snapshot, image_delta) = if do_snapshot && !sync_output {
                 let snapshot = engine.snapshot();
                 // Kitty image pixel deltas, under the same lock. Only the PTY
                 // reader path drives image shipping; the scroll path never calls this.
@@ -1488,6 +1510,7 @@ where
                 clipboard_writes,
                 title,
                 vt_modes,
+                sync_output,
                 snapshot,
                 image_delta,
             )
@@ -1533,6 +1556,13 @@ where
         self.vt_modes
             .store(vt_modes.bits(), std::sync::atomic::Ordering::Relaxed);
 
+        if sync_output {
+            self.sync_output_started_at
+                .get_or_insert_with(std::time::Instant::now);
+        } else {
+            self.sync_output_started_at = None;
+        }
+
         // Interactive-state detection: full-screen TUIs set alt-screen.
         self.prev_alt_screen = vt_modes.contains(crate::terminal::Mode::ALT_SCREEN);
         self.emit_interactive_state();
@@ -1544,7 +1574,12 @@ where
         // or reads 0 bytes, lands caught-up, and flushes this pending snapshot.
         let Some(snapshot) = snapshot else {
             self.snapshot_pending = true;
-            let _ = self.waker.wake();
+            // A synchronized frame needs more PTY bytes (normally DEC reset 2026)
+            // before it is safe to publish. Waking immediately would spin while the
+            // pipe is empty; the next readable event will commit the complete frame.
+            if !sync_output {
+                let _ = self.waker.wake();
+            }
             return Ok(());
         };
         self.last_snapshot_at = std::time::Instant::now();
@@ -1739,10 +1774,6 @@ where
             let mut events = Events::with_capacity(1024);
 
             'event_loop: loop {
-                // The engine handles synchronized
-                // output (mode 2026) internally in `write_vt`. No parser-driven
-                // sync timeout → block until an event arrives.
-                //
                 // Windows soft-ready is level-like but lives outside the OS poll set,
                 // and its worker only wakes on the clear→set edge. A `pty_read` capped
                 // by MAX_LOCKED_READ can return with data still in the ring (flag left
@@ -1754,7 +1785,8 @@ where
                 let timeout = if self.pty.has_ready() {
                     Some(std::time::Duration::ZERO)
                 } else {
-                    None
+                    self.sync_output_started_at
+                        .map(|started| SYNC_OUTPUT_TIMEOUT.saturating_sub(started.elapsed()))
                 };
                 if let Err(err) = self.poll.poll(&mut events, timeout) {
                     match err.kind() {
@@ -1831,9 +1863,9 @@ where
                 let skip_io = false;
 
                 if !skip_io {
-                    // `snapshot_pending`: a saturated batch skipped its render-buffer
-                    // readback and self-woke; run `pty_read` even without OS readiness
-                    // so the pending snapshot flushes (it reads WouldBlock at worst).
+                    // A saturated batch self-wakes, while synchronized output uses the
+                    // poll deadline. Either path runs `pty_read` without new PTY bytes
+                    // so the pending snapshot can flush (it reads WouldBlock at worst).
                     if do_read || self.snapshot_pending {
                         if let Err(err) = self.pty_read(&mut state, &mut buf) {
                             // On Linux, a `read` on the master side of a PTY can fail
@@ -2455,8 +2487,8 @@ mod ghostty_mirror_tests {
     use parking_lot::FairMutex;
 
     use super::{
-        Interest, Poll, PtyPipe, PtyState, READ_BUFFER_SIZE, Token, Waker, max_cup_row_col,
-        rewrite_conpty_resize_echo_cup_rows, su_realign_count,
+        Interest, Poll, PtyPipe, PtyState, READ_BUFFER_SIZE, SYNC_OUTPUT_TIMEOUT, Token, Waker,
+        max_cup_row_col, mode, rewrite_conpty_resize_echo_cup_rows, su_realign_count,
     };
     use crate::event::VoidListener;
     use crate::render_buffer::RenderBuffer;
@@ -2696,6 +2728,81 @@ mod ghostty_mirror_tests {
         let buffer = render_buffer.lock();
         assert_eq!(buffer.rows(), 5);
         assert_eq!(render_buffer_row_text(&buffer, 0), "resize-ok");
+    }
+
+    #[test]
+    fn synchronized_output_keeps_published_cursor_on_previous_frame_until_commit() {
+        let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(20, 3)));
+        let pty = FakePty {
+            reader: FakeReader {
+                data: b"\x1b[3;1H> input\x1b[3;3H".to_vec(),
+            },
+            writer: FakeWriter::default(),
+        };
+        let mut machine = PtyPipe::new(
+            Arc::clone(&render_buffer),
+            Arc::new(AtomicU32::new(0)),
+            pty,
+            VoidListener {},
+            crate::event::WindowId::from(0),
+            0,
+            nmt_config::colors::Colors::default(),
+            1000,
+            false,
+        )
+        .unwrap();
+        let mut state = PtyState::default();
+        let mut buf = [0u8; READ_BUFFER_SIZE];
+
+        machine.pty_read(&mut state, &mut buf).unwrap();
+        assert_eq!(render_buffer.lock().cursor().row.0, 2);
+
+        machine
+            .pty
+            .reader
+            .data
+            .extend_from_slice(b"\x1b[?2026h\x1b[1;1HWorking");
+        machine.pty_read(&mut state, &mut buf).unwrap();
+        {
+            let buffer = render_buffer.lock();
+            assert_eq!(
+                buffer.cursor().row.0,
+                2,
+                "an incomplete synchronized frame must not expose its intermediate cursor"
+            );
+            assert!(
+                render_buffer_row_text(&buffer, 0).is_empty(),
+                "an incomplete synchronized frame must not expose its intermediate cells"
+            );
+        }
+
+        machine
+            .pty
+            .reader
+            .data
+            .extend_from_slice(b"\x1b[3;3H\x1b[?2026l");
+        machine.pty_read(&mut state, &mut buf).unwrap();
+        {
+            let buffer = render_buffer.lock();
+            assert_eq!(buffer.cursor().row.0, 2);
+            assert_eq!(render_buffer_row_text(&buffer, 0), "Working");
+        }
+
+        machine
+            .pty
+            .reader
+            .data
+            .extend_from_slice(b"\x1b[?2026h\x1b[2;1HStuck");
+        machine.pty_read(&mut state, &mut buf).unwrap();
+        machine.sync_output_started_at = Some(std::time::Instant::now() - SYNC_OUTPUT_TIMEOUT);
+        machine.pty_read(&mut state, &mut buf).unwrap();
+
+        {
+            let buffer = render_buffer.lock();
+            assert_eq!(buffer.cursor().row.0, 1);
+            assert_eq!(render_buffer_row_text(&buffer, 1), "Stuck");
+        }
+        assert!(!machine.ghostty.lock().mode(mode::SYNC_OUTPUT));
     }
 
     #[test]
