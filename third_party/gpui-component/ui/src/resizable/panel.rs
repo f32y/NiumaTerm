@@ -217,6 +217,7 @@ pub struct ResizablePanel {
     size_range: Range<Pixels>,
     children: Vec<AnyElement>,
     visible: bool,
+    divider_visible: bool,
     style: StyleRefinement,
 }
 
@@ -231,6 +232,7 @@ impl ResizablePanel {
             axis: Axis::Horizontal,
             children: vec![],
             visible: true,
+            divider_visible: true,
             style: StyleRefinement::default(),
         }
     }
@@ -238,6 +240,12 @@ impl ResizablePanel {
     /// Set the visibility of the panel, default is true.
     pub fn visible(mut self, visible: bool) -> Self {
         self.visible = visible;
+        self
+    }
+
+    /// Set whether the divider is painted; its resize hit area remains active.
+    pub fn divider_visible(mut self, visible: bool) -> Self {
+        self.divider_visible = visible;
         self
     }
 
@@ -332,17 +340,18 @@ impl RenderOnce for ResizablePanel {
             .children(self.children)
             .when(self.panel_ix > 0, |this| {
                 let ix = self.panel_ix - 1;
-                this.child(resize_handle(("resizable-handle", ix), self.axis).on_drag(
-                    DragPanel,
-                    move |drag_panel, _, _, cx| {
-                        cx.stop_propagation();
-                        // Set current resizing panel ix
-                        state.update(cx, |state, _| {
-                            state.resizing_panel_ix = Some(ix);
-                        });
-                        cx.new(|_| drag_panel.deref().clone())
-                    },
-                ))
+                this.child(
+                    resize_handle(("resizable-handle", ix), self.axis)
+                        .divider_visible(self.divider_visible)
+                        .on_drag(DragPanel, move |drag_panel, _, _, cx| {
+                            cx.stop_propagation();
+                            // Set current resizing panel ix
+                            state.update(cx, |state, _| {
+                                state.resizing_panel_ix = Some(ix);
+                            });
+                            cx.new(|_| drag_panel.deref().clone())
+                        }),
+                )
             })
     }
 }
