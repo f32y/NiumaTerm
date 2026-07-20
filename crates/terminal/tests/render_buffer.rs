@@ -132,6 +132,7 @@ fn buffer_resize_follows_engine() {
     engine.snapshot_into(&mut buf).unwrap();
     assert_eq!((buf.cols(), buf.rows()), (20, 4));
     assert_eq!(buf.grid().len(), 4);
+    let before_resize = buf.row_versions().to_vec();
 
     engine.resize(10, 2, 8, 16).unwrap();
     engine.snapshot_into(&mut buf).unwrap();
@@ -140,4 +141,63 @@ fn buffer_resize_follows_engine() {
     for row in buf.grid() {
         assert_eq!(row.inner.len(), 10, "no stale trailing columns");
     }
+    assert_eq!(buf.row_versions().len(), 2);
+    assert!(
+        buf.row_versions()
+            .iter()
+            .zip(before_resize)
+            .all(|(current, previous)| *current != previous),
+        "resize versions every remaining visible row"
+    );
+}
+
+#[test]
+fn row_versions_follow_and_consume_render_damage() {
+    let mut engine = GhosttyTerminal::new(8, 3, 100).unwrap();
+    let mut buf = RenderBuffer::new(8, 3);
+
+    engine.write_vt(b"\x1b[2;1H");
+    engine.snapshot_into(&mut buf).unwrap();
+    let initial = buf.row_versions().to_vec();
+    assert!(initial.iter().all(|version| *version != 0));
+    assert!(initial.windows(2).all(|pair| pair[0] == pair[1]));
+
+    engine.snapshot_into(&mut buf).unwrap();
+    assert_eq!(buf.row_versions(), initial, "clean capture keeps versions");
+
+    engine.write_vt(b"X");
+    engine.snapshot_into(&mut buf).unwrap();
+    let partial = buf.row_versions().to_vec();
+    assert_eq!(partial[0], initial[0]);
+    assert_ne!(partial[1], initial[1]);
+    assert_eq!(partial[2], initial[2]);
+
+    engine.set_colors([1, 2, 3], [4, 5, 6], [7, 8, 9], &[[0; 3]; 256]);
+    engine.snapshot_into(&mut buf).unwrap();
+    assert!(
+        buf.row_versions()
+            .iter()
+            .zip(&partial)
+            .all(|(current, previous)| current != previous),
+        "global color damage versions every row"
+    );
+}
+
+#[test]
+fn row_versions_accumulate_across_skipped_publications() {
+    let mut engine = GhosttyTerminal::new(8, 3, 100).unwrap();
+    let mut buf = RenderBuffer::new(8, 3);
+    engine.write_vt(b"\x1b[2;1H");
+    engine.snapshot_into(&mut buf).unwrap();
+    let initial = buf.row_versions().to_vec();
+
+    engine.write_vt(b"A");
+    engine.snapshot_into(&mut buf).unwrap();
+    engine.write_vt(b"\x1b[3;1HB");
+    engine.snapshot_into(&mut buf).unwrap();
+
+    let latest = buf.row_versions();
+    assert_eq!(latest[0], initial[0]);
+    assert_ne!(latest[1], initial[1]);
+    assert_ne!(latest[2], initial[2]);
 }

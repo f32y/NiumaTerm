@@ -535,6 +535,11 @@ pub struct GhosttyTerminal {
     placement_iter: vt::KittyGraphicsPlacementIterator,
     cols: u16,
     rows: u16,
+    /// Last terminal-content revision for each visible row. Revisions persist
+    /// across publications so a frontend that skips a buffer still sees every
+    /// row changed since its previous frame.
+    row_versions: Vec<u64>,
+    content_revision: u64,
     /// Boxed so its heap address stays fixed across `GhosttyTerminal` moves;
     /// registered with the engine as the callback userdata pointer.
     callbacks: Box<Callbacks>,
@@ -655,6 +660,8 @@ impl GhosttyTerminal {
             placement_iter,
             cols,
             rows,
+            row_versions: vec![0; rows as usize],
+            content_revision: 0,
             callbacks,
             last_title: String::new(),
             last_pwd: String::new(),
@@ -1073,6 +1080,7 @@ impl GhosttyTerminal {
         Error::from_code(unsafe {
             vt::ghostty_render_state_update(self.render_state, self.terminal)
         })?;
+        self.consume_render_damage()?;
 
         let cursor = self.cursor().unwrap_or(SnapshotCursor {
             x: 0,
@@ -1100,8 +1108,79 @@ impl GhosttyTerminal {
         let colors = self.colors();
         let placements = self.placements();
         let scrollbar = self.scrollbar();
-        buffer.finish_capture(cursor, colors, placements, scrollbar);
+        buffer.finish_capture(cursor, colors, placements, scrollbar, &self.row_versions);
         Ok(())
+    }
+
+    /// Transfer Ghostty's transient render damage into persistent row versions.
+    /// Both damage layers must be cleared after consumption; otherwise every
+    /// later capture would repeat the first dirty update indefinitely.
+    fn consume_render_damage(&mut self) -> Result<()> {
+        let mut dirty: vt::RenderStateDirty::Type = vt::RenderStateDirty::FALSE;
+        Error::from_code(unsafe {
+            vt::ghostty_render_state_get(
+                self.render_state,
+                vt::RenderStateData::DIRTY,
+                (&mut dirty as *mut vt::RenderStateDirty::Type).cast(),
+            )
+        })?;
+
+        let rows = self.rows as usize;
+        let dimensions_changed = self.row_versions.len() != rows;
+        if dirty == vt::RenderStateDirty::FALSE && !dimensions_changed {
+            return Ok(());
+        }
+
+        self.content_revision = self.content_revision.wrapping_add(1);
+        let revision = self.content_revision;
+        self.row_versions.resize(rows, revision);
+        let full = dimensions_changed || dirty != vt::RenderStateDirty::PARTIAL;
+        if full {
+            self.row_versions.fill(revision);
+        }
+
+        Error::from_code(unsafe {
+            vt::ghostty_render_state_get(
+                self.render_state,
+                vt::RenderStateData::ROW_ITERATOR,
+                (&mut self.row_iter as *mut vt::RenderStateRowIterator).cast(),
+            )
+        })?;
+
+        let clean = false;
+        let mut row = 0usize;
+        while unsafe { vt::ghostty_render_state_row_iterator_next(self.row_iter) } {
+            let mut row_dirty = false;
+            Error::from_code(unsafe {
+                vt::ghostty_render_state_row_get(
+                    self.row_iter,
+                    vt::RenderStateRowData::DIRTY,
+                    (&mut row_dirty as *mut bool).cast(),
+                )
+            })?;
+            if !full && row_dirty {
+                if let Some(version) = self.row_versions.get_mut(row) {
+                    *version = revision;
+                }
+            }
+            Error::from_code(unsafe {
+                vt::ghostty_render_state_row_set(
+                    self.row_iter,
+                    vt::RenderStateRowOption::DIRTY,
+                    (&clean as *const bool).cast(),
+                )
+            })?;
+            row += 1;
+        }
+
+        let clean = vt::RenderStateDirty::FALSE;
+        Error::from_code(unsafe {
+            vt::ghostty_render_state_set(
+                self.render_state,
+                vt::RenderStateOption::DIRTY,
+                (&clean as *const vt::RenderStateDirty::Type).cast(),
+            )
+        })
     }
 
     /// Allocate and populate an owned render buffer for diagnostics and tests.

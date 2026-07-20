@@ -92,6 +92,9 @@ pub struct RenderBuffer {
     /// Per row: `true` when the row soft-wraps into the next. Used by line
     /// selection (`row_search`) to span a wrapped logical line. Length == `rows`.
     row_wrapped: Vec<bool>,
+    /// Monotonic engine content version for each visible row. Unlike transient
+    /// dirty flags, these survive skipped publications until the UI observes them.
+    row_versions: Vec<u64>,
     cursor: Pos,
     cursor_visible: bool,
     /// DECSCUSR shape + modes-based blink captured from the engine render-state.
@@ -127,6 +130,7 @@ impl RenderBuffer {
             extras: FxHashMap::default(),
             next_extras_id: 1,
             row_wrapped: vec![false; rows],
+            row_versions: vec![0; rows],
             cursor: Pos::default(),
             cursor_visible: false,
             cursor_shape: crate::ansi::CursorShape::Block,
@@ -186,6 +190,11 @@ impl RenderBuffer {
     /// Per-row soft-wrap flags (length == `rows`), for the selection searches.
     pub fn row_wrapped_all(&self) -> &[bool] {
         &self.row_wrapped
+    }
+
+    /// Last engine content version for each visible row.
+    pub fn row_versions(&self) -> &[u64] {
+        &self.row_versions
     }
 
     /// Whether visible row `y` holds any kitty unicode-placeholder cells.
@@ -312,6 +321,7 @@ impl RenderBuffer {
         colors: SnapshotColors,
         placements: Vec<SnapshotPlacement>,
         scrollbar: ScrollbarInfo,
+        row_versions: &[u64],
     ) {
         let cx = (cursor.x as usize).min(self.cols.saturating_sub(1));
         let cy = (cursor.y as usize).min(self.rows.saturating_sub(1));
@@ -331,6 +341,8 @@ impl RenderBuffer {
         self.window_bg_override = colors.bg_override;
         self.placements = placements;
         self.scrollbar = scrollbar;
+        self.row_versions.clear();
+        self.row_versions.extend_from_slice(row_versions);
         self.content_changed = true;
     }
 
