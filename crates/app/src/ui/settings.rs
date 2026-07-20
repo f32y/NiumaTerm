@@ -1108,8 +1108,17 @@ pub fn settings_view(cx: &App) -> Settings {
     let transparency_enabled = cx.global::<AppSettings>().window_transparency_enabled;
     let background_image_enabled = cx.global::<AppSettings>().background_image.is_some();
     let shell_integration_mismatched = nmt_platform::shell_integration_dll_mismatched();
+    let sidebar_style = gpui::StyleRefinement::default()
+        .bg(cx.theme().sidebar)
+        .border_t_1()
+        .border_b_1()
+        .border_l_1()
+        .border_color(cx.theme().sidebar_border)
+        .rounded(cx.theme().radius_lg)
+        .overflow_hidden();
     Settings::new("app-settings")
-        .sidebar_width(px(160.0))
+        .sidebar_width(px(240.0))
+        .sidebar_style(&sidebar_style)
         .page(
             SettingPage::new("Terminal").default_open(true).group(
                 SettingGroup::new()
