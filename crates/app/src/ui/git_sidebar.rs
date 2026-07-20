@@ -3,10 +3,13 @@
 //! from the shared [`GitStatusModel`]; the per-file diff is fetched on
 //! demand on the background executor.
 
+use std::time::Duration;
+
 use gpui::prelude::*;
 use gpui::{
     Context, DragMoveEvent, Entity, Pixels, UniformListScrollHandle, Window, div, px, uniform_list,
 };
+use gpui_component::animation::Transition;
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 use gpui_component::{ActiveTheme, IconName, Sizable as _, h_flex, v_flex};
@@ -45,6 +48,10 @@ pub(crate) struct GitSidebar {
     diff_scroll: UniformListScrollHandle,
     /// Current panel width; adjusted by dragging the left edge.
     width: Pixels,
+    /// Whether the panel occupies its expanded width.
+    open: bool,
+    /// False on startup and after resizing so only explicit toggles slide.
+    animated: bool,
 }
 
 impl GitSidebar {
@@ -67,7 +74,15 @@ impl GitSidebar {
             files_scroll: UniformListScrollHandle::default(),
             diff_scroll: UniformListScrollHandle::default(),
             width: px(SIDEBAR_WIDTH),
+            open: false,
+            animated: false,
         }
+    }
+
+    pub(crate) fn set_open(&mut self, open: bool, cx: &mut Context<Self>) {
+        self.open = open;
+        self.animated = true;
+        cx.notify();
     }
 
     /// A new snapshot arrived: re-fetch the selected file's diff, or drop the
@@ -286,6 +301,8 @@ fn scrollbar(handle: &UniformListScrollHandle) -> impl IntoElement {
 
 impl Render for GitSidebar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let width = self.width;
+        let open = self.open;
         let model = self.model.clone();
         let in_repo = model.read(cx).snapshot.is_some();
         let header = h_flex()
@@ -327,20 +344,22 @@ impl Render for GitSidebar {
         // Width-resize handle riding the left border: drag starts an
         // (invisible) gpui drag; `on_drag_move` on the root receives the
         // window-level move events and turns the mouse x into a new width.
-        let resize_handle = div()
-            .id("git-sidebar-resize")
-            .absolute()
-            .left_0()
-            .top_0()
-            .bottom_0()
-            .w(px(5.0))
-            .cursor_col_resize()
-            .occlude()
-            .hover(|this| this.bg(cx.theme().drag_border))
-            .on_drag(ResizeDrag, |drag, _, _, cx| {
-                cx.stop_propagation();
-                cx.new(|_| drag.clone())
-            });
+        let resize_handle = open.then(|| {
+            div()
+                .id("git-sidebar-resize")
+                .absolute()
+                .left_0()
+                .top_0()
+                .bottom_0()
+                .w(px(5.0))
+                .cursor_col_resize()
+                .occlude()
+                .hover(|this| this.bg(cx.theme().drag_border))
+                .on_drag(ResizeDrag, |drag, _, _, cx| {
+                    cx.stop_propagation();
+                    cx.new(|_| drag.clone())
+                })
+        });
         // The sidebar surface is a floating card (own background, 1px border,
         // large radius) in a gutter cut from the fixed width: right inset
         // clears the window edge, the top inset lines up with the tab pills,
@@ -355,15 +374,20 @@ impl Render for GitSidebar {
             .overflow_hidden()
             .child(header)
             .child(body);
-        div()
-            .w(self.width)
+        let content = div()
+            .w(width)
+            .h_full()
+            .flex_none()
+            .relative()
+            .pr(px(6.))
+            .pt(px(4.))
+            .pb(px(6.))
+            .child(card);
+        let wrapper = div()
             .h_full()
             .flex_none()
             .relative()
             .overflow_hidden()
-            .pr(px(6.))
-            .pt(px(4.))
-            .pb(px(6.))
             .on_drag_move(cx.listener(|this, e: &DragMoveEvent<ResizeDrag>, _, cx| {
                 // The panel's right edge is pinned to the window edge, so
                 // the new width is right edge minus pointer x.
@@ -372,10 +396,30 @@ impl Render for GitSidebar {
                     .min(px(MAX_WIDTH));
                 if width != this.width {
                     this.width = width;
+                    // Render at the live drag width; the next toggle re-arms
+                    // the slide animation.
+                    this.animated = false;
                     cx.notify();
                 }
             }))
-            .child(card)
-            .child(resize_handle)
+            .child(content)
+            .children(resize_handle);
+
+        // Keep the entity mounted at width zero while closed so it can render
+        // the closing frames instead of disappearing in the toggle render.
+        if !self.animated {
+            let width = if open { width } else { px(0.0) };
+            return wrapper.w(width).into_any_element();
+        }
+
+        let (from, to) = if open {
+            (px(0.0), width)
+        } else {
+            (width, px(0.0))
+        };
+        Transition::new(Duration::from_millis(180))
+            .width(from, to)
+            .apply(wrapper, ("git-sidebar", open as usize))
+            .into_any_element()
     }
 }

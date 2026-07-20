@@ -138,7 +138,7 @@ pub(crate) struct Shell {
     git_model: Entity<GitStatusModel>,
     /// Titlebar `+N -M` indicator (self-gating on its setting).
     git_status: Entity<GitStatusView>,
-    /// Right-side git sidebar panel; mounted only while open.
+    /// Right-side git sidebar panel; always mounted so close can animate.
     git_sidebar: Entity<GitSidebar>,
     git_sidebar_open: bool,
     /// Workspace excluded from session persistence: the user chose Quit in
@@ -299,6 +299,8 @@ impl Shell {
     ) {
         self.git_sidebar_open = !self.git_sidebar_open;
         let open = self.git_sidebar_open;
+        self.git_sidebar
+            .update(cx, |sidebar, cx| sidebar.set_open(open, cx));
         self.git_model.update(cx, |model, cx| {
             model.sidebar_open = open;
             if open {
@@ -1967,7 +1969,7 @@ impl Render for Shell {
                                     .child(pane_tree),
                             ),
                     )
-                    .children(self.git_sidebar_open.then(|| self.git_sidebar.clone())),
+                    .child(self.git_sidebar.clone()),
             )
             .children(dialog_layer)
     }
