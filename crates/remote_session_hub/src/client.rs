@@ -11,13 +11,13 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, OnceLock, Weak};
 use std::thread::Thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use nmt_platform::{
     ChildEvent, EventedPty, Interest, Poll, ProcessReadWrite, SoftReady, Token, Waker,
     WinsizeBuilder,
 };
-use parking_lot::Mutex;
+use parking_lot::{Condvar, Mutex};
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use crate::ipc::{
@@ -27,8 +27,16 @@ use crate::{SessionId, SessionOptions};
 
 const IPC_SEND_TIMEOUT: Duration = Duration::from_secs(5);
 const OPEN_TIMEOUT: Duration = Duration::from_secs(15);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
-static DEFAULT_CLIENT: OnceLock<Mutex<Weak<HubClient>>> = OnceLock::new();
+static DEFAULT_CLIENT: OnceLock<Mutex<DefaultClient>> = OnceLock::new();
+
+#[derive(Default)]
+struct DefaultClient {
+    client: Weak<HubClient>,
+    exit: Weak<ProcessExit>,
+}
 
 #[derive(Debug, Clone)]
 pub struct HubClientError(String);
@@ -52,18 +60,47 @@ impl std::error::Error for HubClientError {}
 pub struct HubClient {
     commands: mpsc::Sender<ClientCommand>,
     worker: Thread,
+    exit: Arc<ProcessExit>,
+    shutdown_sent: AtomicBool,
+}
+
+#[derive(Default)]
+struct ProcessExit {
+    exited: Mutex<bool>,
+    changed: Condvar,
+}
+
+impl ProcessExit {
+    fn mark_exited(&self) {
+        *self.exited.lock() = true;
+        self.changed.notify_all();
+    }
+
+    fn wait(&self, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        let mut exited = self.exited.lock();
+        while !*exited {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return false;
+            }
+            self.changed.wait_for(&mut exited, remaining);
+        }
+        true
+    }
 }
 
 impl HubClient {
     pub fn connect_default() -> Result<Arc<Self>, HubClientError> {
-        let slot = DEFAULT_CLIENT.get_or_init(|| Mutex::new(Weak::new()));
+        let slot = DEFAULT_CLIENT.get_or_init(|| Mutex::new(DefaultClient::default()));
         let mut slot = slot.lock();
-        if let Some(client) = slot.upgrade() {
+        if let Some(client) = slot.client.upgrade() {
             return Ok(client);
         }
         let executable = default_hub_executable()?;
         let client = Self::spawn(&executable)?;
-        *slot = Arc::downgrade(&client);
+        slot.client = Arc::downgrade(&client);
+        slot.exit = Arc::downgrade(&client.exit);
         Ok(client)
     }
 
@@ -71,9 +108,11 @@ impl HubClient {
         let (commands, command_rx) = mpsc::channel();
         let (startup_tx, startup_rx) = mpsc::sync_channel(1);
         let executable = executable.to_owned();
+        let exit = Arc::new(ProcessExit::default());
+        let client_exit = Arc::clone(&exit);
         let handle = std::thread::Builder::new()
             .name("session-hub-client".to_owned())
-            .spawn(move || client_loop(&executable, command_rx, startup_tx))
+            .spawn(move || client_loop(&executable, command_rx, startup_tx, client_exit))
             .map_err(|error| HubClientError::new(format!("failed to start Hub client: {error}")))?;
         let worker = handle.thread().clone();
         // Dropping the JoinHandle detaches the pump. The command channel and Hub
@@ -82,7 +121,12 @@ impl HubClient {
         startup_rx.recv_timeout(OPEN_TIMEOUT).map_err(|error| {
             HubClientError::new(format!("SessionHub startup timed out: {error}"))
         })??;
-        Ok(Arc::new(Self { commands, worker }))
+        Ok(Arc::new(Self {
+            commands,
+            worker,
+            exit,
+            shutdown_sent: AtomicBool::new(false),
+        }))
     }
 
     pub fn open(self: &Arc<Self>, options: SessionOptions) -> Result<RemotePty, HubClientError> {
@@ -104,12 +148,63 @@ impl HubClient {
         self.worker.unpark();
         Ok(())
     }
+
+    fn child_process_count(&self, session_id: SessionId) -> Result<usize, HubClientError> {
+        let (reply, result) = mpsc::sync_channel(1);
+        self.send(ClientCommand::ChildProcessCount { session_id, reply })?;
+        result.recv_timeout(REQUEST_TIMEOUT).map_err(|error| {
+            HubClientError::new(format!("SessionHub process count timed out: {error}"))
+        })?
+    }
+
+    pub fn shutdown(&self) -> Result<(), HubClientError> {
+        if !self.shutdown_sent.swap(true, Ordering::AcqRel) {
+            self.commands
+                .send(ClientCommand::Shutdown)
+                .map_err(|_| HubClientError::new("SessionHub client is not running"))?;
+            self.worker.unpark();
+        }
+        if self.exit.wait(SHUTDOWN_TIMEOUT) {
+            Ok(())
+        } else {
+            Err(HubClientError::new(
+                "SessionHub did not exit within 5 seconds",
+            ))
+        }
+    }
 }
 
 impl Drop for HubClient {
     fn drop(&mut self) {
-        let _ = self.commands.send(ClientCommand::Shutdown);
-        self.worker.unpark();
+        if !self.shutdown_sent.swap(true, Ordering::AcqRel) {
+            let _ = self.commands.send(ClientCommand::Shutdown);
+            self.worker.unpark();
+        }
+    }
+}
+
+/// Stop the lazily-created process-wide Hub and wait for its process to exit.
+/// A missing Hub means remote sessions were never enabled and is a no-op.
+pub fn shutdown_default() -> Result<(), HubClientError> {
+    let Some(slot) = DEFAULT_CLIENT.get() else {
+        return Ok(());
+    };
+    let (client, exit) = {
+        let slot = slot.lock();
+        (slot.client.upgrade(), slot.exit.upgrade())
+    };
+    if let Some(client) = client {
+        client.shutdown()
+    } else if let Some(exit) = exit {
+        if exit.wait(SHUTDOWN_TIMEOUT) {
+            Ok(())
+        } else {
+            Err(HubClientError::new(
+                "SessionHub did not exit within 5 seconds",
+            ))
+        }
+    } else {
+        Ok(())
     }
 }
 
@@ -137,6 +232,10 @@ enum ClientCommand {
     Kill {
         session_id: SessionId,
     },
+    ChildProcessCount {
+        session_id: SessionId,
+        reply: SyncSender<Result<usize, HubClientError>>,
+    },
     Shutdown,
 }
 
@@ -150,6 +249,9 @@ enum PendingRequest {
         state: Arc<SessionState>,
         reply: SyncSender<Result<(SessionId, Arc<SessionState>), HubClientError>>,
     },
+    ChildProcessCount {
+        reply: SyncSender<Result<usize, HubClientError>>,
+    },
 }
 
 enum ReaderEvent {
@@ -162,8 +264,9 @@ fn client_loop(
     executable: &Path,
     commands: Receiver<ClientCommand>,
     startup: SyncSender<Result<(), HubClientError>>,
+    exit: Arc<ProcessExit>,
 ) {
-    if let Err(error) = run_client_loop(executable, commands, &startup) {
+    if let Err(error) = run_client_loop(executable, commands, &startup, exit) {
         let _ = startup.send(Err(error));
     }
 }
@@ -172,6 +275,7 @@ fn run_client_loop(
     executable: &Path,
     commands: Receiver<ClientCommand>,
     startup: &SyncSender<Result<(), HubClientError>>,
+    exit: Arc<ProcessExit>,
 ) -> Result<(), HubClientError> {
     let mut endpoint =
         SharedMemoryEndpoint::create_parent(DEFAULT_MAILBOX_CAPACITY).map_err(client_ipc_error)?;
@@ -197,6 +301,7 @@ fn run_client_loop(
         .name("session-hub-process-wait".to_owned())
         .spawn(move || {
             let _ = child.wait();
+            exit.mark_exited();
             let _ = events_tx.send(ReaderEvent::ChildExited);
             pump.unpark();
         })
@@ -250,6 +355,17 @@ fn run_client_loop(
                             session_id,
                         },
                     )?;
+                }
+                ClientCommand::ChildProcessCount { session_id, reply } => {
+                    let request_id = take_request_id(&mut next_request_id);
+                    send_request(
+                        &mut endpoint,
+                        HubRequest::ChildProcessCount {
+                            request_id,
+                            session_id,
+                        },
+                    )?;
+                    pending.insert(request_id, PendingRequest::ChildProcessCount { reply });
                 }
                 ClientCommand::Shutdown => {
                     let _ = send_request(&mut endpoint, HubRequest::Shutdown);
@@ -394,17 +510,26 @@ fn handle_response(
                 state.mark_exited();
             }
         }
+        HubResponse::ChildProcessCount { request_id, count } => {
+            let Some(PendingRequest::ChildProcessCount { reply }) = pending.remove(&request_id)
+            else {
+                return Ok(());
+            };
+            let _ = reply.send(Ok(count.try_into().unwrap_or(usize::MAX)));
+        }
         HubResponse::Error {
             request_id,
             message,
         } => {
             if let Some(request) = pending.remove(&request_id) {
-                let reply = match request {
+                match request {
                     PendingRequest::Open { reply, .. } | PendingRequest::Attach { reply, .. } => {
-                        reply
+                        let _ = reply.send(Err(HubClientError::new(message)));
                     }
-                };
-                let _ = reply.send(Err(HubClientError::new(message)));
+                    PendingRequest::ChildProcessCount { reply } => {
+                        let _ = reply.send(Err(HubClientError::new(message)));
+                    }
+                }
             }
         }
         HubResponse::Ack { .. } => {}
@@ -418,10 +543,14 @@ fn fail_all(
     message: &str,
 ) {
     for (_, request) in pending.drain() {
-        let reply = match request {
-            PendingRequest::Open { reply, .. } | PendingRequest::Attach { reply, .. } => reply,
-        };
-        let _ = reply.send(Err(HubClientError::new(message)));
+        match request {
+            PendingRequest::Open { reply, .. } | PendingRequest::Attach { reply, .. } => {
+                let _ = reply.send(Err(HubClientError::new(message)));
+            }
+            PendingRequest::ChildProcessCount { reply } => {
+                let _ = reply.send(Err(HubClientError::new(message)));
+            }
+        }
     }
     for state in sessions.values() {
         state.mark_exited();
@@ -501,8 +630,28 @@ impl RemotePty {
         }
     }
 
-    pub fn spawn(options: SessionOptions) -> Result<Self, HubClientError> {
+    pub fn spawn(mut options: SessionOptions) -> Result<Self, HubClientError> {
+        options.manage_process_tree = nmt_platform::job_management_enabled();
         HubClient::connect_default()?.open(options)
+    }
+
+    pub fn control(&self) -> RemoteSessionControl {
+        RemoteSessionControl {
+            session_id: self.session_id,
+            client: Arc::clone(&self.client),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct RemoteSessionControl {
+    session_id: SessionId,
+    client: Arc<HubClient>,
+}
+
+impl RemoteSessionControl {
+    pub fn child_process_count(&self) -> Result<usize, HubClientError> {
+        self.client.child_process_count(self.session_id)
     }
 }
 

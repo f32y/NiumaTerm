@@ -34,9 +34,13 @@ pub fn set_job_management(enabled: bool) {
     JOB_MANAGEMENT.store(enabled, std::sync::atomic::Ordering::Relaxed);
 }
 
+pub fn job_management_enabled() -> bool {
+    JOB_MANAGEMENT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 #[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn job_management() -> bool {
-    JOB_MANAGEMENT.load(std::sync::atomic::Ordering::Relaxed)
+    job_management_enabled()
 }
 
 #[repr(C)]

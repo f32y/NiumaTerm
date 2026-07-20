@@ -351,6 +351,12 @@ fn run_app(argv_url: Option<String>, testing: bool) {
                 {
                     tracing::warn!("failed to save local_state.toml: {err}");
                 }
+                // Quit confirmation has already completed before this hook runs.
+                // Waiting here prevents the out-of-process terminal owner from
+                // surviving after the application process has fully exited.
+                if let Err(err) = nmt_remote_session_hub::shutdown_default() {
+                    tracing::warn!("failed to stop SessionHub during app quit: {err}");
+                }
                 async {}
             })
             .detach();
