@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, Context, DragMoveEvent, Entity, KeyDownEvent, ScrollHandle, SharedString,
-    StatefulInteractiveElement, Window, div, px, rgb,
+    AnyElement, Context, DragMoveEvent, Entity, KeyDownEvent, MouseButton, ScrollHandle,
+    SharedString, StatefulInteractiveElement, Window, div, px, rgb,
 };
 use gpui_component::animation::Transition;
 use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants};
@@ -191,30 +191,9 @@ impl Sidebar {
             .into_any_element();
         let ws_id = ws.id;
 
-        // Inline rename: swap the whole item for an indicator + input row.
-        // Enter or clicking anywhere else (blur) commits (handled by the
-        // shell's subscription on the input); Escape is intercepted here
-        // before the input sees it and cancels, keeping the original name.
-        if let Some(input) = rename
+        let renaming = rename
             .filter(|(id, _)| *id == ws_id)
-            .map(|(_, input)| input.clone())
-        {
-            return h_flex()
-                .w_full()
-                .px_2()
-                .py_1()
-                .gap_2()
-                .items_center()
-                .capture_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| {
-                    if e.keystroke.key == "escape" {
-                        cx.stop_propagation();
-                        this.finish_workspace_rename(false, window, cx);
-                    }
-                }))
-                .child(indicator)
-                .child(div().flex_1().child(Input::new(&input).small()))
-                .into_any_element();
-        }
+            .map(|(_, input)| input.clone());
 
         let controls: AnyElement = if ws.pinned {
             div()
@@ -258,6 +237,32 @@ impl Sidebar {
             }))
             .child(controls);
         let secondary = ws.cwd.clone();
+        let name = div()
+            .id(("workspace-secondary", idx))
+            .aria_label(secondary.clone())
+            .w_full()
+            .text_left()
+            .text_sm()
+            .truncate();
+        let name: AnyElement = if let Some(input) = renaming {
+            name.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .capture_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| {
+                    if e.keystroke.key == "escape" {
+                        cx.stop_propagation();
+                        this.finish_workspace_rename(false, window, cx);
+                    }
+                }))
+                .child(
+                    Input::new(&input)
+                        .xsmall()
+                        .p_0()
+                        .text_sm()
+                        .appearance(false),
+                )
+                .into_any_element()
+        } else {
+            name.child(ws.name.clone()).into_any_element()
+        };
         let drag_name: SharedString = ws.name.clone().into();
         let drag_cwd: SharedString = ws.cwd.clone().into();
         // Replicate the item's rendered width: sidebar width minus the card
@@ -292,16 +297,7 @@ impl Sidebar {
                             .flex_1()
                             .overflow_hidden()
                             .items_start()
-                            .child(
-                                div()
-                                    .id(("workspace-secondary", idx))
-                                    .aria_label(secondary.clone())
-                                    .w_full()
-                                    .text_left()
-                                    .text_sm()
-                                    .truncate()
-                                    .child(ws.name.clone()),
-                            )
+                            .child(name)
                             .child(
                                 div()
                                     .w_full()

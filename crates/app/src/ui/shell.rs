@@ -5,7 +5,7 @@ use gpui::{
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::dialog::{DialogAction, DialogButtonProps, DialogClose, DialogFooter};
-use gpui_component::input::{Input, InputEvent, InputState, Position};
+use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::resizable::{
     PANEL_MIN_SIZE, ResizablePanelGroup, ResizableState, resizable_panel,
 };
@@ -974,11 +974,10 @@ impl Shell {
         }
     }
 
-    /// Build an inline-rename input pre-filled with `current`, focused with
-    /// the caret parked at the end (the huge column clamps to the line end),
-    /// and wired so Enter or blur (clicking anywhere else) invokes `finish`
-    /// with commit = true. Escape is intercepted by the hosting row, which
-    /// calls `finish` with commit = false.
+    /// Build an inline-rename input pre-filled with `current`, focused with the
+    /// current name selected, and wired so Enter or blur (clicking anywhere
+    /// else) invokes `finish` with commit = true. Escape is intercepted by the
+    /// hosting row, which calls `finish` with commit = false.
     fn rename_input(
         current: String,
         finish: fn(&mut Self, bool, &mut Window, &mut Context<Self>),
@@ -997,7 +996,8 @@ impl Shell {
         )
         .detach();
         input.update(cx, |input, cx| {
-            input.set_cursor_position(Position::new(0, u32::MAX), window, cx);
+            input.focus(window, cx);
+            input.set_selected_range(0..input.text().len(), cx);
         });
         input
     }

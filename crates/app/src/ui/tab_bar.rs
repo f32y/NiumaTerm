@@ -214,7 +214,13 @@ impl TabStrip {
                                         }
                                     },
                                 ))
-                                .child(Input::new(&input).small())
+                                .child(
+                                    Input::new(&input)
+                                        .small()
+                                        .p_0()
+                                        .text_center()
+                                        .appearance(false),
+                                )
                                 .into_any_element()
                         } else {
                             // Right-click menu; Close reuses the confirm-gated path of
