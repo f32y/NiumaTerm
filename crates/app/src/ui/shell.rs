@@ -1775,6 +1775,14 @@ impl IconNamed for SideBarIcon {
     }
 }
 
+struct GitIcon;
+
+impl IconNamed for GitIcon {
+    fn path(self) -> SharedString {
+        "icons/git.svg".into()
+    }
+}
+
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.window_active = Self::exact_window_active(window);
@@ -1921,7 +1929,7 @@ impl Render for Shell {
                                 div().occlude().child(
                                     Button::new("toggle-git-sidebar")
                                         .ghost()
-                                        .icon(IconName::Github)
+                                        .icon(GitIcon)
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             this.on_toggle_git_sidebar(
                                                 &ToggleGitSidebar,
