@@ -5,6 +5,8 @@ use libghostty_vt_sys as vt;
 /// type; lookup is by id, `generation` is the data version for cache keys.
 pub use libghostty_vt_sys::BlockHandle;
 
+use crate::render_buffer::RenderBuffer;
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,16 +134,6 @@ impl From<i32> for CellWide {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SnapshotCell {
-    pub x: u16,
-    pub y: u16,
-    /// Grapheme cluster for the cell. Empty for blank cells.
-    pub text: String,
-    pub wide: CellWide,
-    pub style: SnapshotStyle,
-}
-
 /// The engine's resolved 256-color palette, fetched once per lock hold and
 /// threaded through batch row reads (see `read_screen_row_visit`).
 pub type Palette = [vt::ColorRgb; 256];
@@ -226,8 +218,8 @@ impl std::ops::Deref for CellText {
     }
 }
 
-/// One sparse cell of a [`ScreenRowRead`] — the harvest-side sibling of
-/// [`SnapshotCell`], with inline [`CellText`] instead of a per-cell `String`.
+/// One sparse cell of a [`ScreenRowRead`], with inline [`CellText`] instead of
+/// a per-cell `String`.
 /// Test-only: production reads visit cells in place (`read_screen_row_visit`).
 #[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -346,31 +338,6 @@ pub struct PlacementScreenPos {
     pub source_width: u32,
     pub source_height: u32,
     pub z: i32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TerminalSnapshot {
-    pub cols: u16,
-    pub rows: u16,
-    pub cells: Vec<SnapshotCell>,
-    pub cursor: SnapshotCursor,
-    /// Effective default colors.
-    pub colors: SnapshotColors,
-    /// Per visible row: `true` when the row soft-wraps into the next one. Used by
-    /// line selection to span a wrapped logical line. Length == `rows`.
-    pub row_wrapped: Vec<bool>,
-    /// Per visible row: `true` when the row holds a kitty unicode placeholder
-    /// (`RowData` KITTY_VIRTUAL_PLACEHOLDER). Guards the virtual-placement
-    /// decode. Length == `rows`.
-    pub row_virtual_placeholder: Vec<bool>,
-    /// Kitty-graphics placements visible/active this frame. Empty when no
-    /// graphics. Non-virtual entries carry viewport geometry; virtual entries carry
-    /// only the image id.
-    pub placements: Vec<SnapshotPlacement>,
-    /// Engine scrollbar geometry for this viewport pin. Captured here so the
-    /// frontend draws the scrollbar from the render buffer, not a per-frame engine
-    /// read.
-    pub scrollbar: ScrollbarInfo,
 }
 
 /// Engine scrollbar geometry (a terminal-side `Eq` mirror of the FFI
@@ -1101,8 +1068,8 @@ impl GhosttyTerminal {
         Ok(out)
     }
 
-    /// Read the full visible viewport back into an owned snapshot.
-    pub fn snapshot(&mut self) -> Result<TerminalSnapshot> {
+    /// Populate a reusable render buffer from the full visible viewport.
+    pub fn snapshot_into(&mut self, buffer: &mut RenderBuffer) -> Result<()> {
         Error::from_code(unsafe {
             vt::ghostty_render_state_update(self.render_state, self.terminal)
         })?;
@@ -1114,46 +1081,34 @@ impl GhosttyTerminal {
             shape: crate::ansi::CursorShape::Block,
             blinking: false,
         });
-        // Viewport rows read through the same visitor as frozen-block rows
-        // (per-row viewport grid_ref — fast — then the multi-get cell walk),
-        // so live and frozen reads share one code path. A transient per-row
-        // error yields a blank row rather than failing the whole snapshot.
         let palette = self.color_palette();
-        let mut cells = Vec::new();
-        let mut row_wrapped = Vec::with_capacity(self.rows as usize);
-        let mut row_virtual_placeholder = Vec::with_capacity(self.rows as usize);
+        buffer.begin_capture(self.cols as usize, self.rows as usize);
+        // A transient row lookup failure blanks only that row; publishing the
+        // remaining viewport is safer than withholding an otherwise valid frame.
         for y in 0..self.rows {
             let meta = self
                 .grid_ref_at(vt::PointTag::VIEWPORT, 0, y as u32)
                 .and_then(|grid_ref| {
                     Self::visit_row_cells(grid_ref, self.cols, &palette, |x, text, wide, style| {
-                        cells.push(SnapshotCell {
-                            x,
-                            y,
-                            text: text.as_str().to_string(),
-                            wide,
-                            style,
-                        })
+                        buffer.write_cell(x as usize, y as usize, text.as_str(), wide, &style);
                     })
                 })
                 .unwrap_or_default();
-            row_wrapped.push(meta.wrapped);
-            row_virtual_placeholder.push(meta.virtual_placeholder);
+            buffer.write_row_meta(y as usize, meta.wrapped, meta.virtual_placeholder);
         }
 
+        let colors = self.colors();
         let placements = self.placements();
+        let scrollbar = self.scrollbar();
+        buffer.finish_capture(cursor, colors, placements, scrollbar);
+        Ok(())
+    }
 
-        Ok(TerminalSnapshot {
-            cols: self.cols,
-            rows: self.rows,
-            cells,
-            cursor,
-            colors: self.colors(),
-            row_wrapped,
-            row_virtual_placeholder,
-            placements,
-            scrollbar: self.scrollbar(),
-        })
+    /// Allocate and populate an owned render buffer for diagnostics and tests.
+    pub fn snapshot(&mut self) -> Result<RenderBuffer> {
+        let mut buffer = RenderBuffer::new(self.cols as usize, self.rows as usize);
+        self.snapshot_into(&mut buffer)?;
+        Ok(buffer)
     }
 
     /// Walk the engine's kitty-graphics placements into owned `SnapshotPlacement`s
@@ -2610,10 +2565,25 @@ fn grid_ref_hyperlink_uri(r: &vt::GridRef) -> Option<String> {
 mod tests {
     use super::*;
 
-    fn line_text(snapshot: &TerminalSnapshot, row: u16) -> String {
-        let mut cols: Vec<_> = snapshot.cells.iter().filter(|c| c.y == row).collect();
-        cols.sort_by_key(|c| c.x);
-        cols.iter().map(|c| c.text.as_str()).collect::<String>()
+    fn line_text(snapshot: &RenderBuffer, row: usize) -> String {
+        let mut text = String::new();
+        for x in 0..snapshot.cols() {
+            let cell = snapshot.cell(x, row);
+            if cell.c() == '\0'
+                || matches!(
+                    cell.wide(),
+                    crate::terminal::square::Wide::Spacer
+                        | crate::terminal::square::Wide::LeadingSpacer
+                )
+            {
+                continue;
+            }
+            text.push(cell.c());
+            if let Some(extras) = cell.extras_id().and_then(|id| snapshot.extras().get(&id)) {
+                text.extend(&extras.zerowidth);
+            }
+        }
+        text
     }
 
     /// Finishing freezes content into an engine block readable
@@ -2648,7 +2618,7 @@ mod tests {
 
         // Active screen restarted empty; SGR continues (bold pen).
         let snap = t.snapshot().unwrap();
-        assert_eq!((snap.cursor.x, snap.cursor.y), (0, 0));
+        assert_eq!((snap.cursor().col.0, snap.cursor().row.0), (0, 0));
         t.write_vt(b"next");
         let row = t.read_screen_row(0).unwrap().expect("active row");
         assert!(row.cells[0].style.bold, "continuation SGR applies");
@@ -2825,7 +2795,7 @@ mod tests {
         t.write_vt(b"\x1b_Ga=T,f=32,s=1,v=1,i=1,p=9;/wAA/w==\x1b\\");
 
         let snap = t.snapshot().unwrap();
-        let visible: Vec<_> = snap.placements.iter().filter(|p| !p.is_virtual).collect();
+        let visible: Vec<_> = snap.placements().iter().filter(|p| !p.is_virtual).collect();
         assert_eq!(visible.len(), 1, "one non-virtual placement");
         let p = visible[0];
         assert_eq!(p.image_id, 1);
@@ -2852,7 +2822,7 @@ mod tests {
         );
 
         // The delta reader ships each pixel generation exactly once.
-        let (first, removed) = t.take_image_deltas(&snap.placements);
+        let (first, removed) = t.take_image_deltas(snap.placements());
         assert!(removed.is_empty(), "nothing removed on first ship");
         assert!(
             first.iter().any(|(id, _)| *id == 1),
@@ -2861,7 +2831,7 @@ mod tests {
         // A second call with no intervening write must yield nothing — neither a
         // re-ship nor a removal (idempotent steady state).
         let snap2 = t.snapshot().unwrap();
-        let (second, removed2) = t.take_image_deltas(&snap2.placements);
+        let (second, removed2) = t.take_image_deltas(snap2.placements());
         assert!(
             second.is_empty() && removed2.is_empty(),
             "unchanged batch: {} pending / {} removed (want 0/0)",
@@ -2884,14 +2854,14 @@ mod tests {
         // Transmit + place a 1×1 opaque-red RGBA image, id=1.
         t.write_vt(b"\x1b_Ga=T,f=32,s=1,v=1,i=1;/wAA/w==\x1b\\");
         let snap = t.snapshot().unwrap();
-        let (first, _) = t.take_image_deltas(&snap.placements);
+        let (first, _) = t.take_image_deltas(snap.placements());
         assert!(first.iter().any(|(id, _)| *id == 1), "first ship");
 
         // Retransmit the SAME id with the SAME 1×1 RGBA dimensions/length but
         // different pixels (opaque-blue). Same (id,w,h,len) key ⇒ not re-shipped.
         t.write_vt(b"\x1b_Ga=T,f=32,s=1,v=1,i=1;AAD/fw==\x1b\\");
         let snap = t.snapshot().unwrap();
-        let (second, removed) = t.take_image_deltas(&snap.placements);
+        let (second, removed) = t.take_image_deltas(snap.placements());
         assert!(
             second.iter().all(|(id, _)| *id != 1) && !removed.contains(&1),
             "same-size same-id retransmission is not re-shipped (known residual)"
@@ -2921,7 +2891,7 @@ mod tests {
         t.write_vt(format!("\x1b_Ga=T,f=100,i=2;{b64}\x1b\\").as_bytes());
 
         let snap = t.snapshot().unwrap();
-        let (pending, _) = t.take_image_deltas(&snap.placements);
+        let (pending, _) = t.take_image_deltas(snap.placements());
         let img = pending
             .iter()
             .find(|(id, _)| *id == 2)
@@ -2952,18 +2922,15 @@ mod tests {
 
         let snap = t.snapshot().unwrap();
         assert!(
-            snap.row_virtual_placeholder
-                .first()
-                .copied()
-                .unwrap_or(false),
+            snap.row_has_virtual_placeholder(0),
             "row 0 carries the virtual-placeholder flag"
         );
         assert!(
-            snap.row_virtual_placeholder.iter().skip(1).all(|&f| !f),
+            (1..snap.rows()).all(|y| !snap.row_has_virtual_placeholder(y)),
             "no other row is flagged"
         );
 
-        let virt: Vec<_> = snap.placements.iter().filter(|p| p.is_virtual).collect();
+        let virt: Vec<_> = snap.placements().iter().filter(|p| p.is_virtual).collect();
         assert_eq!(virt.len(), 1, "one virtual placement");
         let v = virt[0];
         assert_eq!(v.image_id, 7);
@@ -2976,7 +2943,7 @@ mod tests {
         assert_eq!(v.z, 5, "virtual z-index exposed");
 
         // Virtual placements ship pixels through the same delta path.
-        let (pending, _) = t.take_image_deltas(&snap.placements);
+        let (pending, _) = t.take_image_deltas(snap.placements());
         assert!(
             pending.iter().any(|(id, _)| *id == 7),
             "virtual placement's image pixels ship by id"
@@ -2999,7 +2966,7 @@ mod tests {
 
         let find_row = |t: &mut GhosttyTerminal| -> Option<i32> {
             let snap = t.snapshot().unwrap();
-            snap.placements
+            snap.placements()
                 .iter()
                 .find(|p| p.image_id == 1 && !p.is_virtual)
                 .map(|p| p.viewport_row)
@@ -3010,7 +2977,7 @@ mod tests {
         t.scroll_viewport_delta(-2);
         let r0 = find_row(&mut t).expect("image visible after scrolling up 2");
         let snap = t.snapshot().unwrap();
-        let (shipped, _) = t.take_image_deltas(&snap.placements);
+        let (shipped, _) = t.take_image_deltas(snap.placements());
         assert!(
             shipped.iter().any(|(id, _)| *id == 1),
             "shipped while visible"
@@ -3028,12 +2995,12 @@ mod tests {
         let snap = t.snapshot().unwrap();
         assert!(
             !snap
-                .placements
+                .placements()
                 .iter()
                 .any(|p| p.image_id == 1 && !p.is_virtual),
             "off-screen: no visible placement"
         );
-        let (pending, removed) = t.take_image_deltas(&snap.placements);
+        let (pending, removed) = t.take_image_deltas(snap.placements());
         assert!(
             !removed.contains(&1),
             "off-screen image must not be removed"
@@ -3053,7 +3020,7 @@ mod tests {
 
         t.write_vt(b"\x1b_Ga=T,f=32,s=1,v=1,i=1;/wAA/w==\x1b\\");
         let snap = t.snapshot().unwrap();
-        let (shipped, _) = t.take_image_deltas(&snap.placements);
+        let (shipped, _) = t.take_image_deltas(snap.placements());
         assert!(
             shipped.iter().any(|(id, _)| *id == 1),
             "shipped before delete"
@@ -3063,10 +3030,10 @@ mod tests {
         t.write_vt(b"\x1b_Ga=d,d=I,i=1\x1b\\");
         let snap = t.snapshot().unwrap();
         assert!(
-            !snap.placements.iter().any(|p| p.image_id == 1),
+            !snap.placements().iter().any(|p| p.image_id == 1),
             "no placement remains after delete"
         );
-        let (_, removed) = t.take_image_deltas(&snap.placements);
+        let (_, removed) = t.take_image_deltas(snap.placements());
         assert!(removed.contains(&1), "deleted image reported for removal");
     }
 
@@ -3077,20 +3044,20 @@ mod tests {
         let mut t = GhosttyTerminal::new(20, 5, 100).unwrap();
 
         t.write_vt(b"\x1b[2 q"); // steady block
-        assert_eq!(t.snapshot().unwrap().cursor.shape, CursorShape::Block);
+        assert_eq!(t.snapshot().unwrap().cursor_shape(), CursorShape::Block);
         t.write_vt(b"\x1b[5 q"); // steady bar
-        assert_eq!(t.snapshot().unwrap().cursor.shape, CursorShape::Beam);
+        assert_eq!(t.snapshot().unwrap().cursor_shape(), CursorShape::Beam);
         t.write_vt(b"\x1b[3 q"); // blinking underline
-        assert_eq!(t.snapshot().unwrap().cursor.shape, CursorShape::Underline);
+        assert_eq!(t.snapshot().unwrap().cursor_shape(), CursorShape::Underline);
 
-        assert!(t.snapshot().unwrap().cursor.visible, "visible by default");
+        assert!(t.snapshot().unwrap().cursor_visible(), "visible by default");
         t.write_vt(b"\x1b[?25l"); // DECTCEM hide
         assert!(
-            !t.snapshot().unwrap().cursor.visible,
+            !t.snapshot().unwrap().cursor_visible(),
             "hidden after DECTCEM"
         );
         t.write_vt(b"\x1b[?25h");
-        assert!(t.snapshot().unwrap().cursor.visible, "shown again");
+        assert!(t.snapshot().unwrap().cursor_visible(), "shown again");
     }
 
     /// OSC 10/11 dynamic foreground and background land in the snapshot colors.
@@ -3098,7 +3065,7 @@ mod tests {
     /// foreground, background, and the background override.
     #[test]
     fn snapshot_captures_colors() {
-        use nmt_config::colors::ColorRgb;
+        use nmt_config::colors::{ColorRgb, NamedColor};
         let mut t = GhosttyTerminal::new(8, 3, 100).unwrap();
         t.set_colors(
             [205, 214, 244],
@@ -3109,18 +3076,21 @@ mod tests {
 
         t.write_vt(b"\x1b]10;#112233\x07"); // OSC 10 set foreground
         assert_eq!(
-            t.snapshot().unwrap().colors.fg,
-            ColorRgb {
-                r: 0x11,
-                g: 0x22,
-                b: 0x33
-            },
+            t.snapshot().unwrap().colors()[NamedColor::Foreground],
+            Some(
+                ColorRgb {
+                    r: 0x11,
+                    g: 0x22,
+                    b: 0x33
+                }
+                .to_arr()
+            ),
             "OSC 10 sets the effective foreground"
         );
 
         t.write_vt(b"\x1b]11;#445566\x07"); // OSC 11 set background
         assert_eq!(
-            t.snapshot().unwrap().colors.bg_override,
+            t.snapshot().unwrap().window_bg_override(),
             Some(ColorRgb {
                 r: 0x44,
                 g: 0x55,
@@ -3132,7 +3102,7 @@ mod tests {
 
     #[test]
     fn theme_colors_update_engine_defaults() {
-        use nmt_config::colors::{ColorRgb, Colors};
+        use nmt_config::colors::{ColorRgb, Colors, NamedColor};
 
         let mut terminal = GhosttyTerminal::new(8, 3, 100).unwrap();
         let colors = Colors::default();
@@ -3140,12 +3110,12 @@ mod tests {
 
         let snapshot = terminal.snapshot().unwrap();
         assert_eq!(
-            snapshot.colors.fg,
-            ColorRgb::from_color_arr(colors.foreground)
+            snapshot.colors()[NamedColor::Foreground],
+            Some(ColorRgb::from_color_arr(colors.foreground).to_arr())
         );
         assert_eq!(
-            snapshot.colors.bg,
-            ColorRgb::from_color_arr(colors.background.0)
+            snapshot.colors()[NamedColor::Background],
+            Some(ColorRgb::from_color_arr(colors.background.0).to_arr())
         );
     }
 
@@ -3199,7 +3169,10 @@ mod tests {
         t.resize(20, 5, 10, 20).unwrap();
         t.write_vt(b"\x1bPq#0;2;100;0;0#0~~~~~\x1b\\");
         let snap = t.snapshot().unwrap();
-        assert!(snap.placements.is_empty(), "no kitty placements from sixel");
+        assert!(
+            snap.placements().is_empty(),
+            "no kitty placements from sixel"
+        );
     }
 
     /// an iTerm2 inline-image (OSC 1337) is ignored without panicking and
@@ -3211,7 +3184,7 @@ mod tests {
         t.write_vt(b"\x1b]1337;File=inline=1:AAAA\x07");
         let snap = t.snapshot().unwrap();
         assert!(
-            snap.placements.is_empty(),
+            snap.placements().is_empty(),
             "no kitty placements from iTerm2"
         );
     }
@@ -3241,21 +3214,21 @@ mod tests {
             t.set_colors([205, 214, 244], default_bg, [180, 190, 254], &palette);
 
             assert_eq!(
-                t.snapshot().unwrap().colors.bg_override,
+                t.snapshot().unwrap().window_bg_override(),
                 None,
                 "no override before any OSC"
             );
 
             t.write_vt(b"\x1b]11;#330000\x07");
             assert_eq!(
-                t.snapshot().unwrap().colors.bg_override,
+                t.snapshot().unwrap().window_bg_override(),
                 Some(nmt_config::colors::ColorRgb { r: 51, g: 0, b: 0 }),
                 "OSC 11 sets the override"
             );
 
             t.write_vt(reset_seq);
             assert_eq!(
-                t.snapshot().unwrap().colors.bg_override,
+                t.snapshot().unwrap().window_bg_override(),
                 None,
                 "OSC 111 ({reset_seq:?}) resets the override",
             );
@@ -3272,10 +3245,10 @@ mod tests {
 
         let snapshot = terminal.snapshot().unwrap();
 
-        assert_eq!(snapshot.cols, 8);
-        assert_eq!(snapshot.rows, 3);
-        assert!(snapshot.cells.iter().any(|cell| cell.text == "h"));
-        assert!(snapshot.cells.iter().any(|cell| cell.text == "r"));
+        assert_eq!(snapshot.cols(), 8);
+        assert_eq!(snapshot.rows(), 3);
+        assert_eq!(snapshot.cell(0, 0).c(), 'h');
+        assert_eq!(snapshot.cell(3, 0).c(), 'r');
     }
 
     /// Verifies the selection-anchoring assumption: a SCREEN
@@ -3358,7 +3331,7 @@ mod tests {
         for i in 0..40 {
             t.write_vt(format!("f{i}\r\n").as_bytes());
         }
-        let baseline = t.snapshot().unwrap().scrollbar.total;
+        let baseline = t.snapshot().unwrap().scrollbar().total;
         eprintln!("[resize-diag] baseline sb_total={baseline}");
 
         // Drag: oscillate the geometry, no new writes.
@@ -3368,7 +3341,7 @@ mod tests {
             let rows = 1 + (step % 10) as u16 * 3;
             t.resize(cols.max(2), rows.max(1), 10, 20).unwrap();
             let snap = t.snapshot().unwrap();
-            trace.push((cols, rows, snap.rows, snap.scrollbar.total));
+            trace.push((cols, rows, snap.rows(), snap.scrollbar().total));
         }
         for (cols, rows, srows, total) in &trace {
             eprintln!(
@@ -3413,7 +3386,7 @@ mod tests {
             t.resize(cols, rows, 10, 20).unwrap();
             let snap = t.snapshot().unwrap();
             let mut counts: std::collections::HashMap<String, usize> = Default::default();
-            for y in 0..snap.rows {
+            for y in 0..snap.rows() {
                 for tok in line_text(&snap, y).split_whitespace() {
                     if (tok.starts_with("ROW") || tok.starts_with("DIR")) && tok.len() >= 6 {
                         *counts.entry(tok.to_string()).or_default() += 1;
@@ -3454,9 +3427,9 @@ mod tests {
         for i in 0..40 {
             unpadded.write_vt(format!("line{i:02}\r\n").as_bytes());
         }
-        let unpadded_before = unpadded.snapshot().unwrap().scrollbar.total;
+        let unpadded_before = unpadded.snapshot().unwrap().scrollbar().total;
         unpadded.resize(cols - 2, 24, 10, 20).unwrap();
-        let unpadded_after = unpadded.snapshot().unwrap().scrollbar.total;
+        let unpadded_after = unpadded.snapshot().unwrap().scrollbar().total;
 
         // Repro: every line padded with trailing spaces to the full width, then CRLF
         // (exactly what `Get-ChildItem`/`dir` output looks like through ConPTY).
@@ -3466,9 +3439,9 @@ mod tests {
             let pad = cols as usize - body.len();
             padded.write_vt(format!("{body}{}\r\n", " ".repeat(pad)).as_bytes());
         }
-        let padded_before = padded.snapshot().unwrap().scrollbar.total;
+        let padded_before = padded.snapshot().unwrap().scrollbar().total;
         padded.resize(cols - 2, 24, 10, 20).unwrap();
-        let padded_after = padded.snapshot().unwrap().scrollbar.total;
+        let padded_after = padded.snapshot().unwrap().scrollbar().total;
 
         eprintln!(
             "[double-diag] unpadded {unpadded_before}->{unpadded_after} \
@@ -3504,11 +3477,13 @@ mod tests {
         // 26 families × 2 cols = 52 → cursor stays on row 0 at col 52. Without
         // clustering it would be 26 × 6 = 156 cols and wrap to row 1.
         assert_eq!(
-            snap.cursor.y, 0,
+            snap.cursor().row.0,
+            0,
             "clustered families (52 cols) fit one 80-col row"
         );
         assert_eq!(
-            snap.cursor.x, 52,
+            snap.cursor().col.0,
+            52,
             "each ZWJ family advances 2 cols (mode 2027 on)"
         );
     }
@@ -3538,9 +3513,9 @@ mod tests {
                 };
                 t.write_vt(line.as_bytes());
             }
-            let before = t.snapshot().unwrap().scrollbar.total;
+            let before = t.snapshot().unwrap().scrollbar().total;
             t.resize(40, 24, 10, 20).unwrap();
-            (before, t.snapshot().unwrap().scrollbar.total)
+            (before, t.snapshot().unwrap().scrollbar().total)
         };
         let (_, default_after) = build(false);
         let (styled_before, styled_after) = build(true);
@@ -3600,7 +3575,7 @@ mod tests {
         // 3-row viewport, write 6 lines → 3 rows in scrollback.
         let mut t = GhosttyTerminal::new(20, 3, 100).unwrap();
         t.write_vt(b"l0\r\nl1\r\nl2\r\nl3\r\nl4\r\nl5");
-        let sb = t.snapshot().unwrap().scrollbar;
+        let sb = t.snapshot().unwrap().scrollbar();
         assert_eq!(sb.len, 3, "len = visible rows");
         assert!(sb.total >= 6, "total includes scrollback, got {}", sb.total);
         // At the bottom the viewport sits at the end: offset = total - len.
@@ -3616,7 +3591,7 @@ mod tests {
         t.write_vt(b"l0\r\nl1\r\nl2\r\nl3\r\nl4\r\nl5");
 
         t.resize(20, 3, 10, 20).unwrap();
-        let small = t.snapshot().unwrap().scrollbar;
+        let small = t.snapshot().unwrap().scrollbar();
         assert!(
             small.total > small.len,
             "precondition: small viewport scrolls"
@@ -3624,7 +3599,7 @@ mod tests {
 
         t.resize(20, 8, 10, 20).unwrap();
         let snap = t.snapshot().unwrap();
-        let grown = snap.scrollbar;
+        let grown = snap.scrollbar();
         assert!(
             grown.total <= grown.len,
             "grown viewport should not scroll when content fits: {grown:?}"
@@ -3634,13 +3609,13 @@ mod tests {
 
         t.scroll_viewport_delta(1);
         assert_eq!(
-            t.snapshot().unwrap().scrollbar,
+            t.snapshot().unwrap().scrollbar(),
             grown,
             "scroll delta must no-op when content fits"
         );
 
         t.write_vt(b"\r\nl6\r\nl7\r\nl8");
-        let overflow = t.snapshot().unwrap().scrollbar;
+        let overflow = t.snapshot().unwrap().scrollbar();
         assert!(
             overflow.total > overflow.len,
             "scrolling must return once content exceeds the viewport"
@@ -3711,11 +3686,11 @@ mod tests {
         terminal.write_vt(b"\x1b[31mR");
 
         let snapshot = terminal.snapshot().unwrap();
-        let cell = snapshot.cells.iter().find(|c| c.text == "R").unwrap();
+        let style = snapshot.style(snapshot.cell(0, 0).style_id());
         // Ghostty's default palette red (SGR 31), flattened through the palette.
         assert_eq!(
-            cell.style.fg,
-            Some(Color {
+            style.fg,
+            crate::render_buffer::to_ansi(Color {
                 r: 204,
                 g: 102,
                 b: 102
@@ -3738,22 +3713,8 @@ mod tests {
 
         let snapshot = terminal.snapshot().unwrap();
         // Wide ideograph in column 0, spacer (no text) in column 1, narrow in 2.
-        assert_eq!(
-            snapshot
-                .cells
-                .iter()
-                .find(|c| c.x == 0)
-                .map(|c| c.text.as_str()),
-            Some("中")
-        );
-        assert_eq!(
-            snapshot
-                .cells
-                .iter()
-                .find(|c| c.x == 2)
-                .map(|c| c.text.as_str()),
-            Some("A")
-        );
+        assert_eq!(snapshot.cell(0, 0).c(), '中');
+        assert_eq!(snapshot.cell(2, 0).c(), 'A');
     }
 
     #[test]
@@ -3795,10 +3756,10 @@ mod tests {
         terminal.set_colors([255, 255, 255], [0, 0, 0], [255, 255, 255], &palette);
         terminal.write_vt(b"\x1b[31mR");
         let snapshot = terminal.snapshot().unwrap();
-        let cell = snapshot.cells.iter().find(|c| c.text == "R").unwrap();
+        let style = snapshot.style(snapshot.cell(0, 0).style_id());
         assert_eq!(
-            cell.style.fg,
-            Some(Color {
+            style.fg,
+            crate::render_buffer::to_ansi(Color {
                 r: 10,
                 g: 20,
                 b: 30
@@ -3910,15 +3871,15 @@ mod tests {
         let mut t = GhosttyTerminal::new(40, 5, 10_000).unwrap();
         t.write_vt(b"out\r\n");
         let row_before = t.active_cursor_row();
-        let cursor_before = t.snapshot().unwrap().cursor;
+        let cursor_before = t.snapshot().unwrap().cursor();
         // A full prompt-render mark burst as forwarding emits it (;D always,
         // plus ;A/;B/;C in waterfall).
         t.write_vt(b"\x1b]133;D;0\x07\x1b]133;A\x07\x1b]133;B\x07\x1b]133;C\x07");
         assert_eq!(t.active_cursor_row(), row_before, "no line added");
-        let cursor_after = t.snapshot().unwrap().cursor;
+        let cursor_after = t.snapshot().unwrap().cursor();
         assert_eq!(
-            (cursor_after.x, cursor_after.y),
-            (cursor_before.x, cursor_before.y),
+            (cursor_after.col.0, cursor_after.row.0),
+            (cursor_before.col.0, cursor_before.row.0),
             "marks are zero-width"
         );
     }

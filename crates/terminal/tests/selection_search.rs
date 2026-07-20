@@ -7,7 +7,7 @@ fn buffer(cols: usize, rows: usize, bytes: &[u8]) -> RenderBuffer {
     let mut engine = GhosttyTerminal::new(cols as u16, rows as u16, 100).unwrap();
     engine.write_vt(bytes);
     let mut buf = RenderBuffer::new(cols, rows);
-    buf.update(&engine.snapshot().unwrap());
+    engine.snapshot_into(&mut buf).unwrap();
     buf
 }
 

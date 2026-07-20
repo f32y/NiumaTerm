@@ -869,9 +869,12 @@ pub struct PtyPipe<T: nmt_platform::EventedPty, U: EventListener> {
     /// render buffer is on a separate lock so a frame never waits behind a parse.
     ghostty: Arc<FairMutex<GhosttyTerminal>>,
     /// Ghostty-fed viewport copy the renderer reads. Populated here
-    /// each batch from the same `snapshot()` as the mirror; on its own lock,
-    /// separate from the engine so paint never waits behind parsing.
+    /// each batch; on its own lock, separate from the engine so paint never
+    /// waits behind parsing.
     render_buffer: Arc<FairMutex<RenderBuffer>>,
+    /// PTY-thread-private target for direct Ghostty capture. A completed frame
+    /// swaps with `render_buffer`, so the shared lock covers only publication.
+    back_buffer: RenderBuffer,
     /// VT modes published to the frontend. This `PtyPipe` is the sole writer;
     /// the input path reads it lock-free. `Mode` is `u32`.
     vt_modes: Arc<AtomicU32>,
@@ -957,6 +960,18 @@ fn ghostty_vt_modes(g: &GhosttyTerminal) -> crate::terminal::Mode {
     // modes, so fold them in here to enable Kitty press and key-release encoding.
     m |= g.kitty_keyboard_modes();
     m
+}
+
+fn publish_render_buffer(
+    front: &FairMutex<RenderBuffer>,
+    back: &mut RenderBuffer,
+    capture: crate::ghostty::Result<()>,
+) -> bool {
+    if capture.is_err() {
+        return false;
+    }
+    std::mem::swap(&mut *front.lock(), back);
+    true
 }
 
 /// Convert an OSC 7 working-directory value to a path. Strips a `file://host`
@@ -1106,6 +1121,7 @@ where
             pty,
             ghostty: Arc::new(FairMutex::new(ghostty)),
             render_buffer,
+            back_buffer: RenderBuffer::new(cols as usize, rows as usize),
             vt_modes,
             content_version: Arc::new(AtomicU64::new(0)),
             event_proxy,
@@ -1275,7 +1291,7 @@ where
                     let orig = &buf[..unprocessed];
                     (
                         escape_bytes(&orig[..orig.len().min(240)]),
-                        engine.snapshot().ok().map(|s| s.cursor.visible),
+                        engine.snapshot().ok().map(|s| s.cursor_visible()),
                     )
                 } else {
                     (String::new(), None)
@@ -1469,16 +1485,7 @@ where
         // Drain everything from the engine under ONE lock: query/DSR/DA
         // responses, bell, title, pwd, VT modes, and the snapshot. Then act on
         // the owned results below with the engine lock released.
-        let (
-            responses,
-            bell,
-            clipboard_writes,
-            title,
-            vt_modes,
-            sync_output,
-            snapshot,
-            image_delta,
-        ) = {
+        let (responses, bell, clipboard_writes, title, vt_modes, sync_output, capture, image_delta) = {
             let mut engine = self.ghostty.lock();
             let responses = engine.take_pty_writes();
             let bell = engine.take_bell();
@@ -1492,15 +1499,15 @@ where
                 engine.write_vt(b"\x1b[?2026l");
             }
             let sync_output = engine.mode(mode::SYNC_OUTPUT);
-            let (snapshot, image_delta) = if do_snapshot && !sync_output {
-                let snapshot = engine.snapshot();
+            let (capture, image_delta) = if do_snapshot && !sync_output {
+                let capture = engine.snapshot_into(&mut self.back_buffer);
                 // Kitty image pixel deltas, under the same lock. Only the PTY
                 // reader path drives image shipping; the scroll path never calls this.
-                let image_delta = match &snapshot {
-                    Ok(snap) => engine.take_image_deltas(&snap.placements),
+                let image_delta = match &capture {
+                    Ok(()) => engine.take_image_deltas(self.back_buffer.placements()),
                     Err(_) => (Vec::new(), Vec::new()),
                 };
-                (Some(snapshot), image_delta)
+                (Some(capture), image_delta)
             } else {
                 (None, (Vec::new(), Vec::new()))
             };
@@ -1511,7 +1518,7 @@ where
                 title,
                 vt_modes,
                 sync_output,
-                snapshot,
+                capture,
                 image_delta,
             )
         };
@@ -1572,7 +1579,7 @@ where
         // boundary (no OS readiness would re-fire, and the Windows soft-ready
         // flag may already be clear). That pass either parses more pending data
         // or reads 0 bytes, lands caught-up, and flushes this pending snapshot.
-        let Some(snapshot) = snapshot else {
+        let Some(capture) = capture else {
             self.snapshot_pending = true;
             // A synchronized frame needs more PTY bytes (normally DEC reset 2026)
             // before it is safe to publish. Waking immediately would spin while the
@@ -1585,14 +1592,7 @@ where
         self.last_snapshot_at = std::time::Instant::now();
         self.snapshot_pending = false;
 
-        // Reflect Ghostty's grid into the render buffer (the renderer's data
-        // source), on its own lock so a render frame never waits behind this.
-        // Keep one source of truth: cwd and modes come from the engine/atomic, while
-        // cells and damage come from the render buffer. The `update()` sets
-        // `content_changed`; the explicit
-        // `TerminalDamaged` send below drives the render.
-        if let Ok(snapshot) = snapshot {
-            self.render_buffer.lock().update(&snapshot);
+        if publish_render_buffer(&self.render_buffer, &mut self.back_buffer, capture) {
             self.event_proxy.send_event(
                 TerminalEvent::TerminalDamaged(self.route_id),
                 self.window_id,
@@ -1672,7 +1672,8 @@ where
                         if self.engine_blocks && engine.block_count() > 0 {
                             blocks_sync = Some(engine_blocks_live_list(&engine));
                         }
-                        (engine.snapshot(), engine.active_cursor_row())
+                        let capture = engine.snapshot_into(&mut self.back_buffer);
+                        (capture, engine.active_cursor_row())
                     };
                     if let Some(live) = blocks_sync {
                         self.event_proxy.send_event(
@@ -1682,12 +1683,9 @@ where
                             self.window_id,
                         );
                     }
-                    if let Ok(snapshot) = snapshot {
-                        // Refill only the render buffer; VT modes do not change on resize, so the
-                        // lock-free atomic stays valid from the last pty_read.
-                        // `update()` sets `content_changed`; the `TerminalDamaged`
-                        // send below drives the render.
-                        self.render_buffer.lock().update(&snapshot);
+                    if publish_render_buffer(&self.render_buffer, &mut self.back_buffer, snapshot) {
+                        // VT modes do not change on resize, so the lock-free
+                        // atomic remains valid from the last PTY read.
                         self.event_proxy.send_event(
                             TerminalEvent::TerminalDamaged(self.route_id),
                             self.window_id,
@@ -2488,21 +2486,32 @@ mod ghostty_mirror_tests {
 
     use super::{
         Interest, Poll, PtyPipe, PtyState, READ_BUFFER_SIZE, SYNC_OUTPUT_TIMEOUT, Token, Waker,
-        max_cup_row_col, mode, rewrite_conpty_resize_echo_cup_rows, su_realign_count,
+        max_cup_row_col, mode, publish_render_buffer, rewrite_conpty_resize_echo_cup_rows,
+        su_realign_count,
     };
     use crate::event::VoidListener;
     use crate::render_buffer::RenderBuffer;
 
-    fn snapshot_row_text(snapshot: &crate::ghostty::TerminalSnapshot, y: u16) -> String {
-        let mut row = vec![' '; snapshot.cols as usize];
-        for cell in snapshot.cells.iter().filter(|cell| cell.y == y) {
-            if let Some(ch) = cell.text.chars().next() {
-                if let Some(slot) = row.get_mut(cell.x as usize) {
-                    *slot = ch;
-                }
-            }
-        }
-        row.into_iter().collect::<String>().trim_end().to_string()
+    #[test]
+    fn failed_capture_does_not_publish_back_buffer() {
+        let front = FairMutex::new(RenderBuffer::new(2, 1));
+        let mut back = RenderBuffer::new(3, 1);
+
+        assert!(!publish_render_buffer(
+            &front,
+            &mut back,
+            Err(crate::ghostty::Error::InvalidValue),
+        ));
+        assert_eq!(front.lock().cols(), 2);
+        assert_eq!(back.cols(), 3);
+
+        assert!(publish_render_buffer(&front, &mut back, Ok(())));
+        assert_eq!(front.lock().cols(), 3);
+        assert_eq!(back.cols(), 2);
+    }
+
+    fn snapshot_row_text(snapshot: &RenderBuffer, y: u16) -> String {
+        render_buffer_row_text(snapshot, y as usize)
     }
 
     fn render_buffer_row_text(buffer: &RenderBuffer, y: usize) -> String {
@@ -2926,7 +2935,7 @@ mod ghostty_mirror_tests {
                 .write_vt(b"\x1b[2JL0\r\nL1\r\nL2\r\nL3\r\nL4\r\nL5\r\nL6\r\nL7\r\nL8\r\nPROMPT>");
             // Pin the viewport to the top of history: cursor now off-screen.
             engine.scroll_viewport_top();
-            let sb = engine.snapshot().unwrap().scrollbar;
+            let sb = engine.snapshot().unwrap().scrollbar();
             assert!(
                 sb.offset < sb.total.saturating_sub(sb.len),
                 "precondition: viewport must be scrolled away from the bottom"
@@ -2949,7 +2958,7 @@ mod ghostty_mirror_tests {
         };
         assert_eq!(snapshot_row_text(&snapshot, active_row), "INJECT");
         assert_ne!(snapshot_row_text(&snapshot, 0), "INJECT");
-        let injects = (0..snapshot.rows)
+        let injects = (0..snapshot.rows() as u16)
             .filter(|&y| snapshot_row_text(&snapshot, y).contains("INJECT"))
             .count();
         assert_eq!(injects, 1, "INJECT must appear exactly once");
@@ -2989,7 +2998,7 @@ mod ghostty_mirror_tests {
             engine
                 .write_vt(b"\x1b[2JL0\r\nL1\r\nL2\r\nL3\r\nL4\r\nL5\r\nL6\r\nL7\r\nL8\r\nPROMPT>");
             engine.scroll_viewport_top();
-            let sb = engine.snapshot().unwrap().scrollbar;
+            let sb = engine.snapshot().unwrap().scrollbar();
             assert!(
                 sb.offset < sb.total.saturating_sub(sb.len),
                 "precondition: viewport scrolled away from the bottom"
@@ -3013,7 +3022,7 @@ mod ghostty_mirror_tests {
         // 'Z' lands exactly once, on the prompt row — not a history row.
         let mut z_rows = Vec::new();
         let mut prompt_y = None;
-        for y in 0..snapshot.rows {
+        for y in 0..snapshot.rows() as u16 {
             let text = snapshot_row_text(&snapshot, y);
             if text.contains('Z') {
                 z_rows.push(y);
@@ -3184,7 +3193,7 @@ echo hi\r\n\x1b]133;C\x07hi\r\n\
         let snapshot = machine.ghostty.lock().snapshot().unwrap();
         assert_eq!(snapshot_row_text(&snapshot, 0), "PS>");
         assert!(
-            (1..snapshot.rows).all(|y| snapshot_row_text(&snapshot, y).is_empty()),
+            (1..snapshot.rows() as u16).all(|y| snapshot_row_text(&snapshot, y).is_empty()),
             "old command output must not remain in the new block"
         );
     }
@@ -3214,7 +3223,7 @@ clear\r\n\x1b]133;C\x07\x1b]133;K\x07\x1b[2J\x1b[3J\x1b[H";
 
         let snapshot = machine.ghostty.lock().snapshot().unwrap();
         assert!(
-            (0..snapshot.rows).all(|y| snapshot_row_text(&snapshot, y).is_empty()),
+            (0..snapshot.rows() as u16).all(|y| snapshot_row_text(&snapshot, y).is_empty()),
             "the engine must be wiped at the ;K mark"
         );
     }
@@ -3229,7 +3238,7 @@ vim\r\n\x1b]133;C\x07\x1b[?1049hTUI\x1b]133;D;0\x07";
         let mut engine = machine.ghostty.lock();
         assert!(engine.mode(crate::ghostty::mode::ALT_SCREEN));
         let snapshot = engine.snapshot().unwrap();
-        let rows: Vec<_> = (0..snapshot.rows)
+        let rows: Vec<_> = (0..snapshot.rows() as u16)
             .map(|y| snapshot_row_text(&snapshot, y))
             .collect();
         assert!(

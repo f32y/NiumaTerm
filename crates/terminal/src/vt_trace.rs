@@ -13,7 +13,9 @@ use std::io::Write as _;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::ghostty::{GhosttyTerminal, SnapshotCell, SnapshotStyle, TerminalSnapshot, Underline};
+use crate::ghostty::GhosttyTerminal;
+use crate::render_buffer::RenderBuffer;
+use crate::terminal::style::Style;
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -39,17 +41,16 @@ fn now_ms() -> u128 {
         .unwrap_or(0)
 }
 
-/// Reconstruct one viewport row's text from the snapshot cells.
-fn row_text(snapshot: &TerminalSnapshot, y: u16) -> String {
-    let mut row = vec![' '; snapshot.cols as usize];
-    for cell in snapshot.cells.iter().filter(|cell| cell.y == y) {
-        if let Some(ch) = cell.text.chars().next() {
-            if let Some(slot) = row.get_mut(cell.x as usize) {
-                *slot = ch;
-            }
-        }
-    }
-    row.into_iter().collect::<String>().trim_end().to_string()
+/// Reconstruct one viewport row's text from the render cells.
+fn row_text(snapshot: &RenderBuffer, y: usize) -> String {
+    (0..snapshot.cols())
+        .map(|x| match snapshot.cell(x, y).c() {
+            '\0' => ' ',
+            c => c,
+        })
+        .collect::<String>()
+        .trim_end()
+        .to_string()
 }
 
 /// Viewport geometry for measuring ghostty↔ConPTY resize divergence:
@@ -58,16 +59,19 @@ fn row_text(snapshot: &TerminalSnapshot, y: u16) -> String {
 /// ghostty's cursor-from-bottom against ConPTY's CUP row (`rows - cup_row`) reveals
 /// how many rows the two engines disagree by after a resize — the root of the
 /// repaint-lands-on-wrong-row corruption.
-fn viewport_geometry(s: &TerminalSnapshot) -> (i32, i32, i32) {
+fn viewport_geometry(s: &RenderBuffer) -> (i32, i32, i32) {
     let mut last_nonblank: i32 = -1;
-    for cell in &s.cells {
-        if !cell.text.trim().is_empty() {
-            last_nonblank = last_nonblank.max(cell.y as i32);
+    for y in 0..s.rows() {
+        if (0..s.cols()).any(|x| {
+            let c = s.cell(x, y).c();
+            c != '\0' && !c.is_whitespace()
+        }) {
+            last_nonblank = y as i32;
         }
     }
-    let rows = s.rows as i32;
+    let rows = s.rows() as i32;
     let trailing_blank = (rows - 1 - last_nonblank).max(0);
-    let cursor_from_bottom = rows - 1 - s.cursor.y as i32;
+    let cursor_from_bottom = rows - 1 - s.cursor().row.0;
     (last_nonblank, trailing_blank, cursor_from_bottom)
 }
 
@@ -75,47 +79,45 @@ fn viewport_geometry(s: &TerminalSnapshot) -> (i32, i32, i32) {
 /// many cells exist past it (ConPTY's full-width space padding), and whether any of
 /// those trailing cells carry styling (bg/fg/attrs). This answers whether the
 /// reflow doubling can be fixed by trimming trailing blanks (safe iff unstyled).
-fn trailing_pad_report(s: &TerminalSnapshot) -> String {
+fn trailing_pad_report(s: &RenderBuffer) -> String {
     let mut out = String::new();
-    let styled = |st: &SnapshotStyle| {
-        st.bg.is_some()
-            || st.fg.is_some()
-            || st.bold
-            || st.italic
-            || st.faint
-            || st.inverse
-            || st.strikethrough
-            || st.overline
-            || st.underline != Underline::None
-    };
-    for y in 0..s.rows {
-        let mut row: Vec<&SnapshotCell> = s.cells.iter().filter(|c| c.y == y).collect();
-        row.sort_by_key(|c| c.x);
+    for y in 0..s.rows() {
+        let row: Vec<_> = (0..s.cols())
+            .filter_map(|x| {
+                let cell = s.cell(x, y);
+                (cell.c() != '\0').then_some((x, cell))
+            })
+            .collect();
         // Last column holding a real (non-space) glyph.
         let content_end = row
             .iter()
             .rev()
-            .find(|c| !c.text.trim().is_empty())
-            .map(|c| c.x as i32)
+            .find(|(_, cell)| !cell.c().is_whitespace())
+            .map(|(x, _)| *x as i32)
             .unwrap_or(-1);
-        let trailing: Vec<&&SnapshotCell> =
-            row.iter().filter(|c| c.x as i32 > content_end).collect();
+        let trailing: Vec<_> = row
+            .iter()
+            .filter(|(x, _)| *x as i32 > content_end)
+            .collect();
         if trailing.is_empty() {
             continue;
         }
-        let styled_count = trailing.iter().filter(|c| styled(&c.style)).count();
-        let max_x = row.iter().map(|c| c.x).max().unwrap_or(0);
+        let styled_count = trailing
+            .iter()
+            .filter(|(_, cell)| s.style(cell.style_id()) != Style::default())
+            .count();
+        let max_x = row.iter().map(|(x, _)| *x).max().unwrap_or(0);
         let first_bg = trailing
             .first()
-            .map(|c| format!("{:?}", c.style.bg))
+            .map(|(_, cell)| format!("{:?}", s.style(cell.style_id()).bg))
             .unwrap_or_default();
         let first_text = trailing
             .first()
-            .map(|c| {
-                if c.text.is_empty() {
+            .map(|(_, cell)| {
+                if cell.c() == '\0' {
                     "<empty>".to_string()
                 } else {
-                    format!("{:?}", c.text)
+                    format!("{:?}", cell.c())
                 }
             })
             .unwrap_or_default();
@@ -169,14 +171,14 @@ pub fn trace(label: &str, engine: &mut GhosttyTerminal, detail: &str) {
                  cursor=({},{} vis={}) sb=(total={} offset={} len={}) \
                  last_nonblank={last_nonblank} trail_blank_rows={trailing_blank} \
                  cur_from_bot={cursor_from_bottom}\n",
-                s.cols,
-                s.rows,
-                s.cursor.x,
-                s.cursor.y,
-                s.cursor.visible,
-                s.scrollbar.total,
-                s.scrollbar.offset,
-                s.scrollbar.len,
+                s.cols(),
+                s.rows(),
+                s.cursor().col.0,
+                s.cursor().row.0,
+                s.cursor_visible(),
+                s.scrollbar().total,
+                s.scrollbar().offset,
+                s.scrollbar().len,
             )
         }
         Err(e) => format!("[vt-trace] #{seq:06} ts={ts} {label} | {detail} | snapshot_err={e:?}\n"),
@@ -196,7 +198,7 @@ pub fn trace(label: &str, engine: &mut GhosttyTerminal, detail: &str) {
     body.push('\n');
     if let Ok(s) = &snapshot {
         body.push_str("---- viewport (snapshot rows, y|text) ----\n");
-        for y in 0..s.rows {
+        for y in 0..s.rows() {
             let _ =
                 std::fmt::Write::write_fmt(&mut body, format_args!("{y:3}|{}\n", row_text(s, y)));
         }
