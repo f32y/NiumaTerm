@@ -15,6 +15,7 @@ members = [
     "crates/config",
     "crates/input",
     "crates/platform",
+    "crates/remote_session_hub",
     "crates/shell_extension",
     "crates/terminal",
     "crates/themes",
@@ -48,6 +49,7 @@ members = [
 default-members = [
     "crates/agent_hook_cli",
     "crates/app",
+    "crates/remote_session_hub",
     "crates/shell_extension",
 ]
 
@@ -64,6 +66,7 @@ nmt_config = { path = "crates/config" }
 nmt_input = { path = "crates/input" }
 libghostty-vt-sys = { path = "third_party/libghostty-vt-sys" }
 nmt_platform = { path = "crates/platform" }
+nmt_remote_session_hub = { path = "crates/remote_session_hub" }
 nmt_terminal = { path = "crates/terminal" }
 nmt_themes = { path = "crates/themes" }
 
@@ -216,6 +219,7 @@ scap = { git = "https://github.com/zed-industries/scap", rev = "4afea48c3b002197
 schemars = { version = "1.2.1", features = ["indexmap2"] }
 seahash = "4.1.0"
 serde_json = { version = "1.0.150", features = ["preserve_order", "raw_value"] }
+shared_memory = "0.12.4"
 slotmap = "1.1.1"
 spin = "0.12.1"
 stacksafe = "1.0.2"
@@ -402,6 +406,7 @@ phf = "0.14.0"
 png = "0.18.1"
 pretty_assertions = "1.4.1"
 rapidhash = { version = "4.4.2", default-features = false }
+raw_sync = "0.1.5"
 redox_syscall = "0.9.0"
 resvg = { version = "0.47.0", default-features = false, features = ["text", "system-fonts", "memmap-fonts", "raster-images"] }
 rustix = { version = "1.1.4", default-features = false, features = [

@@ -1,8 +1,18 @@
+pub use conpty::{job_has_other_processes, job_other_process_count};
+pub(crate) use notifier::{
+    identity_registered, register_identity, remove, show, unregister_identity,
+};
+pub use readiness::SoftReady;
+pub use shell_integration::{
+    is_shell_integration_registered, register_shell_integration, set_system_notification_enabled,
+    shell_integration_dll_mismatched, system_notification_enabled, unregister_shell_integration,
+};
+
+pub mod ipc;
+
 mod child;
 mod conpty;
-pub mod ipc;
 mod notifier;
-pub use conpty::{job_has_other_processes, job_other_process_count};
 mod pipes;
 mod readiness;
 mod shell_integration;
@@ -17,14 +27,7 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc::TryRecvError;
 
 use conpty::Conpty as Backend;
-pub(crate) use notifier::{
-    identity_registered, register_identity, remove, show, unregister_identity,
-};
 use pipes::{EventedAnonRead as ReadPipe, EventedAnonWrite as WritePipe};
-pub use shell_integration::{
-    is_shell_integration_registered, register_shell_integration, set_system_notification_enabled,
-    shell_integration_dll_mismatched, system_notification_enabled, unregister_shell_integration,
-};
 use windows_sys::Win32::System::Threading::{CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW};
 
 use crate::windows::child::ChildExitWatcher;

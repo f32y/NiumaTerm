@@ -4,14 +4,13 @@
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock};
-use std::thread::JoinHandle;
 
 use base64::Engine as _;
-use nmt_platform::Pty;
+use nmt_remote_session_hub::{RemotePty, SessionOptions};
 use nmt_terminal::block_store::{BlockStore, SegmentMeta};
 use nmt_terminal::event::{BlockEvent, EventListener, Msg, MsgSender, TerminalEvent, WindowId};
 use nmt_terminal::ghostty::GhosttyTerminal;
-use nmt_terminal::pty_pipe::{PtyPipe, PtyState};
+use nmt_terminal::pty_pipe::PtyPipe;
 use nmt_terminal::render_buffer::RenderBuffer;
 use parking_lot::{FairMutex, Mutex};
 
@@ -27,7 +26,6 @@ pub(crate) type SessionGraphics = Arc<Mutex<GenerationStore>>;
 
 pub(crate) type SessionEngine = Arc<FairMutex<GhosttyTerminal>>;
 pub(crate) type SessionBuffer = Arc<FairMutex<RenderBuffer>>;
-type SessionIoThread = JoinHandle<(PtyPipe<Pty, TerminalEventProxy>, PtyState)>;
 pub(crate) type HostEventQueue = Arc<Mutex<VecDeque<HostEvent>>>;
 
 /// A host event surfaced from the PTY thread to the shell. The shell
@@ -101,7 +99,6 @@ pub struct TerminalSession {
     /// finished engine blocks, rendered through `BlockRef` handles. Mirrors the
     /// flag the PTY pipe runs with.
     engine_blocks: bool,
-    _io_thread: Option<SessionIoThread>,
 }
 
 impl TerminalSession {
@@ -143,66 +140,75 @@ impl TerminalSession {
         let open_prompt: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
         let frozen_images: crate::terminal::graphics::FrozenImageCache = Default::default();
 
-        let pty = match nmt_platform::create_pty_with_env(
-            &shell,
-            config.args.clone(),
-            &config.working_dir,
-            cols,
-            rows,
-            &config.environment_overrides,
-            config.starting_title.as_deref(),
-        ) {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::error!("session create_pty failed: {e:?}");
-                return Err(EngineError::new(
-                    EngineErrorCode::PtySpawn,
-                    format!("failed to start shell '{shell}' via ConPTY: {e}"),
-                ));
-            }
-        };
-
-        let job_handle = pty.job_handle().map(|handle| handle as isize);
-
-        // Dummy window id: never passed to winit, only used by `PtyPipe` to tag
-        // routed events.
-        let window_id = WindowId::dummy();
         let engine_blocks = config.engine_blocks;
-        let pipe = match PtyPipe::new(
-            Arc::clone(&render_buffer),
-            Arc::clone(&vt_modes),
-            pty,
-            TerminalEventProxy {
-                events: Arc::clone(&events),
-                block_store: Arc::clone(&block_store),
-                generation_store: Arc::clone(&generation_store),
-                live_image_count: Arc::clone(&live_image_count),
-                staged_blocks: Arc::new(Mutex::new(Vec::new())),
-                in_flight: Arc::clone(&in_flight),
-                open_prompt: Arc::clone(&open_prompt),
-                frozen_images: Arc::clone(&frozen_images),
-                id,
-                wake,
-            },
-            window_id,
-            id as usize,
-            nmt_config::active_colors(),
-            config.scrollback_lines,
-            engine_blocks,
-        ) {
-            Ok(m) => m,
-            Err(e) => {
-                tracing::error!("session PtyPipe::new failed: {e:?}");
-                return Err(EngineError::new(
-                    EngineErrorCode::EngineInit,
-                    format!("libghostty-vt engine init failed: {e}"),
-                ));
-            }
+        let proxy = TerminalEventProxy {
+            events: Arc::clone(&events),
+            block_store: Arc::clone(&block_store),
+            generation_store: Arc::clone(&generation_store),
+            live_image_count: Arc::clone(&live_image_count),
+            staged_blocks: Arc::new(Mutex::new(Vec::new())),
+            in_flight: Arc::clone(&in_flight),
+            open_prompt: Arc::clone(&open_prompt),
+            frozen_images: Arc::clone(&frozen_images),
+            id,
+            wake,
         };
-
-        let engine = pipe.engine();
-        let messenger = pipe.channel();
-        let io_thread = pipe.spawn();
+        let (job_handle, engine, messenger) = if config.remote_session_enabled {
+            let pty = RemotePty::spawn(SessionOptions {
+                shell: shell.clone(),
+                args: config.args.clone(),
+                working_directory: config.working_dir.clone(),
+                environment_overrides: config.environment_overrides.clone(),
+                starting_title: config.starting_title.clone(),
+                cols,
+                rows,
+                scrollback_lines: config.scrollback_lines,
+            })
+            .map_err(|error| {
+                EngineError::new(
+                    EngineErrorCode::PtySpawn,
+                    format!("failed to start shell '{shell}' through SessionHub: {error}"),
+                )
+            })?;
+            let (engine, messenger) = start_pipe(
+                Arc::clone(&render_buffer),
+                Arc::clone(&vt_modes),
+                pty,
+                proxy,
+                id,
+                config.scrollback_lines,
+                engine_blocks,
+            )?;
+            (None, engine, messenger)
+        } else {
+            let pty = nmt_platform::create_pty_with_env(
+                &shell,
+                config.args.clone(),
+                &config.working_dir,
+                cols,
+                rows,
+                &config.environment_overrides,
+                config.starting_title.as_deref(),
+            )
+            .map_err(|error| {
+                tracing::error!("session create_pty failed: {error:?}");
+                EngineError::new(
+                    EngineErrorCode::PtySpawn,
+                    format!("failed to start shell '{shell}' via ConPTY: {error}"),
+                )
+            })?;
+            let job_handle = pty.job_handle().map(|handle| handle as isize);
+            let (engine, messenger) = start_pipe(
+                Arc::clone(&render_buffer),
+                Arc::clone(&vt_modes),
+                pty,
+                proxy,
+                id,
+                config.scrollback_lines,
+                engine_blocks,
+            )?;
+            (job_handle, engine, messenger)
+        };
 
         Ok(TerminalSession {
             engine,
@@ -218,7 +224,6 @@ impl TerminalSession {
             frozen_images,
             job_handle,
             engine_blocks,
-            _io_thread: Some(io_thread),
         })
     }
 
@@ -322,6 +327,44 @@ impl Drop for TerminalSession {
     fn drop(&mut self) {
         let _ = self.messenger.send(Msg::Shutdown);
     }
+}
+
+fn start_pipe<T>(
+    render_buffer: SessionBuffer,
+    vt_modes: Arc<AtomicU32>,
+    pty: T,
+    proxy: TerminalEventProxy,
+    id: u64,
+    scrollback_lines: usize,
+    engine_blocks: bool,
+) -> Result<(SessionEngine, MsgSender), EngineError>
+where
+    T: nmt_platform::EventedPty + Send + 'static,
+{
+    // The same parser/render pipeline consumes local ConPTY and SessionHub byte
+    // streams, keeping terminal semantics independent of process placement.
+    let pipe = PtyPipe::new(
+        render_buffer,
+        vt_modes,
+        pty,
+        proxy,
+        WindowId::dummy(),
+        id as usize,
+        nmt_config::active_colors(),
+        scrollback_lines,
+        engine_blocks,
+    )
+    .map_err(|error| {
+        tracing::error!("session PtyPipe::new failed: {error:?}");
+        EngineError::new(
+            EngineErrorCode::EngineInit,
+            format!("libghostty-vt engine init failed: {error}"),
+        )
+    })?;
+    let engine = pipe.engine();
+    let messenger = pipe.channel();
+    drop(pipe.spawn());
+    Ok((engine, messenger))
 }
 
 /// `TerminalEventProxy` for a headless session: enqueues user-visible `TerminalEvent`s onto
@@ -519,6 +562,8 @@ pub struct TerminalSessionConfig {
     /// fallback: no freezing, no boundary clears, no block events, intact
     /// scrollback. The GPUI app keeps this enabled and toggles block chrome only.
     pub engine_blocks: bool,
+    /// Route this new terminal through SessionHub instead of creating ConPTY locally.
+    pub remote_session_enabled: bool,
     /// Child-only values merged into the shell's inherited Windows environment.
     /// Runtime metadata is deliberately excluded from persisted tab state.
     pub environment_overrides: Vec<(String, String)>,
@@ -574,6 +619,7 @@ impl Default for TerminalSessionConfig {
             rows: 24,
             scrollback_lines: 10_000,
             engine_blocks: true,
+            remote_session_enabled: false,
             environment_overrides: Vec::new(),
         }
     }
