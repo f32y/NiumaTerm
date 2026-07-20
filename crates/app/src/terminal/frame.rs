@@ -26,8 +26,8 @@ pub(crate) struct TerminalFrame {
 pub(crate) struct TerminalLine {
     text: SharedString,
     text_hash: u64,
-    cells: Arc<[TerminalCell]>,
-    runs: Arc<[StyleRun]>,
+    cells: Box<[TerminalCell]>,
+    runs: Box<[StyleRun]>,
     #[cfg(test)]
     cursor_col: Option<u16>,
 }
@@ -211,8 +211,8 @@ pub(crate) fn line_from_parts(
     TerminalLine {
         text_hash: hash_line(&text, &runs),
         text: text.into(),
-        cells: cells.into_boxed_slice().into(),
-        runs: runs.into_boxed_slice().into(),
+        cells: cells.into_boxed_slice(),
+        runs: runs.into_boxed_slice(),
         #[cfg(test)]
         cursor_col: None,
     }
@@ -902,8 +902,8 @@ mod tests {
             lines: Arc::from([TerminalLine {
                 text: SharedString::from(line),
                 text_hash: super::hash_line(line, &[]),
-                cells: Arc::from([]),
-                runs: Arc::from([]),
+                cells: Box::default(),
+                runs: Box::default(),
                 cursor_col: None,
             }]),
             cursor: None,
