@@ -886,6 +886,7 @@ pub struct PtyPipe<T: nmt_platform::EventedPty, U: EventListener> {
     /// under the engine lock so a checkpoint and its following byte sequence can
     /// be ordered atomically; observers must therefore return promptly.
     output_sink: Option<Arc<dyn Fn(Arc<[u8]>) + Send + Sync>>,
+    terminal_responses_enabled: bool,
     event_proxy: U,
     window_id: WindowId,
     route_id: usize,
@@ -1129,6 +1130,7 @@ where
             vt_modes,
             content_version: Arc::new(AtomicU64::new(0)),
             output_sink: None,
+            terminal_responses_enabled: true,
             event_proxy,
             window_id,
             route_id,
@@ -1186,6 +1188,11 @@ where
     /// Observe parsed VT output without taking ownership of the PTY loop.
     pub fn set_output_sink(&mut self, sink: impl Fn(Arc<[u8]>) + Send + Sync + 'static) {
         self.output_sink = Some(Arc::new(sink));
+    }
+
+    /// Choose whether VT-generated DA/DSR/OSC replies are written to this PTY.
+    pub fn set_terminal_responses_enabled(&mut self, enabled: bool) {
+        self.terminal_responses_enabled = enabled;
     }
 
     #[inline]
@@ -1568,7 +1575,7 @@ where
             );
         }
 
-        if !responses.is_empty() {
+        if self.terminal_responses_enabled && !responses.is_empty() {
             let _ = self.pty.writer().write_all(&responses);
         }
         if bell > 0 {
@@ -2717,6 +2724,40 @@ mod ghostty_mirror_tests {
         fn next_child_event(&mut self) -> Option<nmt_platform::ChildEvent> {
             None
         }
+    }
+
+    #[test]
+    fn disabled_terminal_responses_are_forwarded_without_replying() {
+        let queries = b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\\x1b[c";
+        let pty = FakePty {
+            reader: FakeReader {
+                data: queries.to_vec(),
+            },
+            writer: FakeWriter::default(),
+        };
+        let mut machine = PtyPipe::new(
+            Arc::new(FairMutex::new(RenderBuffer::new(20, 3))),
+            Arc::new(AtomicU32::new(0)),
+            pty,
+            VoidListener {},
+            crate::event::WindowId::from(0),
+            0,
+            nmt_config::colors::Colors::default(),
+            1000,
+            false,
+        )
+        .unwrap();
+        let forwarded = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let forwarded_sink = Arc::clone(&forwarded);
+        machine.set_output_sink(move |bytes| forwarded_sink.lock().extend_from_slice(&bytes));
+        machine.set_terminal_responses_enabled(false);
+
+        machine
+            .pty_read(&mut PtyState::default(), &mut [0; READ_BUFFER_SIZE])
+            .unwrap();
+
+        assert_eq!(&*forwarded.lock(), queries);
+        assert!(machine.pty.writer.data.is_empty());
     }
 
     #[test]

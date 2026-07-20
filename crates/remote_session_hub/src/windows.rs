@@ -319,6 +319,10 @@ impl RemoteSessionHub {
         )
         .map_err(|error| HubError::Engine(error.to_string()))?;
 
+        // The attached frontend owns terminal identity and theme, so it must be
+        // the sole responder to DA/DSR/OSC queries. Replying here as well sends
+        // duplicate device reports and exposes the Hub process's default colors.
+        pipe.set_terminal_responses_enabled(false);
         let output_stream = Arc::clone(&stream);
         pipe.set_output_sink(move |data| output_stream.lock().publish_output(data));
 
