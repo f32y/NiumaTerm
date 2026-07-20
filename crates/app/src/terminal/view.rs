@@ -147,13 +147,9 @@ impl TerminalPane {
         let (wake, wake_rx) = wake::wake_channel();
         let agent_route = agent_process().allocate_route();
         let environment = agent_process().environment_for(&agent_route);
-        let (fixed_bottom_requested, remote_session_enabled) =
-            cx.read_global(|settings: &AppSettings, _| {
-                (
-                    settings.input_style.is_fixed_bottom(),
-                    settings.remote_session_enabled,
-                )
-            });
+        let fixed_bottom_requested =
+            cx.read_global(|settings: &AppSettings, _| settings.input_style.is_fixed_bottom());
+        let remote_session_enabled = nmt_config::get().remote_session.enabled;
         let surface = terminal_surface_for_tab(
             &wake,
             surface_id,
