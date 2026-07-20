@@ -34,16 +34,16 @@ impl WakeSender {
     }
 }
 
-pub(crate) type WakeReceiver = UnboundedReceiver<()>;
+pub(crate) type WakeReceiver = UnboundedReceiver<Wake>;
 
-/// The GPUI-side wakeup handle. Coalesces bursts of [`WakeSender`] posts into a
-/// single pending signal so the pane's async render loop repaints once per frame
-/// rather than once per PTY read.
+/// The GPUI-side wakeup handle. Content wakes coalesce until the pane renders;
+/// chrome wakes bypass that pending bit because a background pane may not render
+/// but its tab and workspace indicators must still update.
 #[derive(Clone)]
 pub(crate) struct WakeSignal {
     queued: Arc<AtomicBool>,
     resignal: Arc<AtomicBool>,
-    tx: UnboundedSender<()>,
+    tx: UnboundedSender<Wake>,
 }
 
 pub(crate) fn wake_channel() -> (WakeSignal, WakeReceiver) {
@@ -59,19 +59,23 @@ pub(crate) fn wake_channel() -> (WakeSignal, WakeReceiver) {
 }
 
 impl WakeSignal {
-    pub(crate) fn signal(&self) -> bool {
+    pub(crate) fn signal(&self, wake: Wake) -> bool {
+        if matches!(wake, Wake::Chrome(_)) {
+            let _ = self.tx.unbounded_send(wake);
+            return true;
+        }
         if self.queued.swap(true, Ordering::AcqRel) {
             self.resignal.store(true, Ordering::Release);
             return false;
         }
-        let _ = self.tx.unbounded_send(());
+        let _ = self.tx.unbounded_send(wake);
         true
     }
 
-    pub(crate) fn mark_delivered(&self) {
+    pub(crate) fn mark_delivered(&self, surface_id: u64) {
         self.queued.store(false, Ordering::Release);
         if self.resignal.swap(false, Ordering::AcqRel) {
-            self.signal();
+            self.signal(Wake::Content(surface_id));
         }
     }
 }
@@ -101,16 +105,28 @@ mod tests {
     fn coalesces_until_delivered() {
         let (wake, mut rx) = wake_channel();
 
-        assert!(wake.signal());
-        assert!(!wake.signal());
+        assert!(wake.signal(Wake::Content(7)));
+        assert!(!wake.signal(Wake::Content(7)));
         assert!(rx.try_recv().is_ok());
         assert!(rx.try_recv().is_err());
 
-        wake.mark_delivered();
+        wake.mark_delivered(7);
         assert!(rx.try_recv().is_ok());
         assert!(rx.try_recv().is_err());
-        wake.mark_delivered();
-        assert!(wake.signal());
+        wake.mark_delivered(7);
+        assert!(wake.signal(Wake::Content(7)));
         assert!(rx.try_recv().is_ok());
+    }
+
+    #[test]
+    fn inactive_content_cannot_suppress_chrome() {
+        let (wake, mut rx) = wake_channel();
+
+        assert!(wake.signal(Wake::Content(7)));
+        assert_eq!(rx.try_recv(), Ok(Wake::Content(7)));
+        assert!(!wake.signal(Wake::Content(7)));
+        assert!(rx.try_recv().is_err());
+        assert!(wake.signal(Wake::Chrome(7)));
+        assert_eq!(rx.try_recv(), Ok(Wake::Chrome(7)));
     }
 }

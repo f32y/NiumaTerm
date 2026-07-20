@@ -198,10 +198,11 @@ impl TerminalPane {
         .detach();
 
         cx.spawn(async move |this, cx| {
-            while wake_rx.next().await.is_some() {
+            while let Some(wake) = wake_rx.next().await {
                 if this
-                    .update(cx, |this, cx| {
-                        this.invalidate(cx);
+                    .update(cx, |this, cx| match wake {
+                        wake::Wake::Content(_) => this.invalidate(cx),
+                        wake::Wake::Chrome(_) => this.invalidate_chrome(cx),
                     })
                     .is_err()
                 {
@@ -313,6 +314,14 @@ impl TerminalPane {
         if self.dirty.mark() {
             cx.notify();
         }
+    }
+
+    fn invalidate_chrome(&mut self, cx: &mut Context<Self>) {
+        self.frame_cache.invalidate();
+        self.dirty.mark();
+        // Background panes cannot clear their dirty bit by rendering, but the
+        // shell observer still needs every chrome wake to refresh tab state.
+        cx.notify();
     }
 
     fn on_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
@@ -1337,7 +1346,7 @@ impl EntityInputHandler for TerminalPane {
 impl Render for TerminalPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.dirty.begin_frame();
-        self.wake.mark_delivered();
+        self.wake.mark_delivered(self.id);
 
         // Host events are drained by the shell pump (observer), and the surface
         // is resized from the leaf's actual bounds in paint — neither happens
