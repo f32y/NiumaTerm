@@ -51,7 +51,7 @@ pub fn create_pty(
     columns: u16,
     rows: u16,
 ) -> Result<Pty, std::io::Error> {
-    create_pty_with_env(shell, args, working_directory, columns, rows, &[])
+    create_pty_with_env(shell, args, working_directory, columns, rows, &[], None)
 }
 
 /// Create a ConPTY shell with explicit child-only environment overrides.
@@ -62,6 +62,7 @@ pub fn create_pty_with_env(
     columns: u16,
     rows: u16,
     environment_overrides: &[(String, String)],
+    starting_title: Option<&str>,
 ) -> Result<Pty, std::io::Error> {
     let exec = command_line(shell, &args);
     conpty::new(
@@ -70,6 +71,7 @@ pub fn create_pty_with_env(
         columns,
         rows,
         environment_overrides,
+        starting_title,
     )
 }
 

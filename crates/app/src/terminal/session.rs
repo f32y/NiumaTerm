@@ -150,6 +150,7 @@ impl TerminalSession {
             cols,
             rows,
             &config.environment_overrides,
+            config.starting_title.as_deref(),
         ) {
             Ok(p) => p,
             Err(e) => {
@@ -507,6 +508,7 @@ pub struct TerminalSessionConfig {
     pub shell: Option<String>,
     pub args: Vec<String>,
     pub working_dir: Option<String>,
+    pub starting_title: Option<String>,
     pub cols: u16,
     pub rows: u16,
     /// Scrollback budget in lines; converted to the engine's byte budget.
@@ -567,6 +569,7 @@ impl Default for TerminalSessionConfig {
             shell: None,
             args: Vec::new(),
             working_dir: None,
+            starting_title: None,
             cols: 80,
             rows: 24,
             scrollback_lines: 10_000,

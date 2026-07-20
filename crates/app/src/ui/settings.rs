@@ -412,6 +412,23 @@ impl AppSettings {
         }
     }
 
+    pub fn profile_name_for_command(&self, shell: Option<&str>, args: &[String]) -> String {
+        self.profiles
+            .iter()
+            .find(|profile| {
+                let profile_shell =
+                    (!profile.shell.trim().is_empty()).then(|| profile.shell.trim());
+                profile_shell.is_some_and(|value| {
+                    shell.is_some_and(|shell| value.eq_ignore_ascii_case(shell))
+                }) && profile
+                    .args
+                    .split_whitespace()
+                    .eq(args.iter().map(String::as_str))
+            })
+            .map(|profile| profile.name.clone())
+            .unwrap_or_else(|| self.default_profile.clone())
+    }
+
     /// Persist the dialog-managed settings into `config.toml` (patch-style,
     /// preserving unrelated content). Called once on dialog close. Failures are
     /// logged, never fatal.
@@ -1855,6 +1872,21 @@ mod tests {
         let (shell, args) = settings.default_profile_command();
         assert!(shell.is_none());
         assert!(args.is_empty());
+    }
+
+    #[test]
+    fn profile_name_resolves_from_launch_command() {
+        let mut settings = AppSettings::default();
+        settings.profiles.push(Profile {
+            name: "Developer PowerShell".into(),
+            shell: "pwsh.exe".into(),
+            args: "-NoLogo".into(),
+        });
+
+        assert_eq!(
+            settings.profile_name_for_command(Some("PWSH.EXE"), &["-NoLogo".to_string()]),
+            "Developer PowerShell"
+        );
     }
 
     #[test]

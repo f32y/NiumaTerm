@@ -64,6 +64,7 @@ pub(crate) struct TerminalPane {
     /// Surface/tab id (same value as this pane's `TabId`); the shell pump uses it
     /// to route host events to the owning tab.
     id: u64,
+    profile_name: String,
     agent_route: AgentRoute,
     pub(super) surface: TerminalSurface,
     frame_cache: TerminalFrameCache,
@@ -140,6 +141,9 @@ impl TerminalPane {
             tab_state.shell = default_profile.0;
             tab_state.args = default_profile.1;
         }
+        let profile_name = cx.read_global(|settings: &AppSettings, _| {
+            settings.profile_name_for_command(tab_state.shell.as_deref(), &tab_state.args)
+        });
         let (wake, wake_rx) = wake::wake_channel();
         let agent_route = agent_process().allocate_route();
         let environment = agent_process().environment_for(&agent_route);
@@ -149,6 +153,7 @@ impl TerminalPane {
             &wake,
             surface_id,
             &tab_state,
+            &profile_name,
             fixed_bottom_requested,
             environment,
         )?;
@@ -156,6 +161,7 @@ impl TerminalPane {
             Self::from_surface(
                 cx,
                 surface_id,
+                profile_name,
                 agent_route,
                 wake,
                 wake_rx,
@@ -168,6 +174,7 @@ impl TerminalPane {
     fn from_surface(
         cx: &mut Context<Self>,
         surface_id: u64,
+        profile_name: String,
         agent_route: AgentRoute,
         wake: wake::WakeSignal,
         mut wake_rx: wake::WakeReceiver,
@@ -205,6 +212,7 @@ impl TerminalPane {
         Self {
             focus: cx.focus_handle(),
             id: surface_id,
+            profile_name,
             agent_route,
             surface,
             frame_cache: TerminalFrameCache::default(),
@@ -234,6 +242,10 @@ impl TerminalPane {
 
     pub(crate) fn agent_route(&self) -> &AgentRoute {
         &self.agent_route
+    }
+
+    pub(crate) fn profile_name(&self) -> &str {
+        &self.profile_name
     }
 
     /// Record a user scroll action and schedule the repaint that starts fading
@@ -1178,6 +1190,7 @@ fn terminal_surface_for_tab(
     wake: &wake::WakeSignal,
     surface_id: u64,
     state: &TabState,
+    profile_name: &str,
     fixed_bottom_requested: bool,
     environment_overrides: Vec<(String, String)>,
 ) -> Result<TerminalSurface, String> {
@@ -1187,6 +1200,7 @@ fn terminal_surface_for_tab(
         state.shell.clone(),
         state.args.clone(),
         state.cwd.clone(),
+        profile_name.to_string(),
         fixed_bottom_requested,
         environment_overrides.clone(),
     ) {
@@ -1199,6 +1213,7 @@ fn terminal_surface_for_tab(
                 state.shell.clone(),
                 state.args.clone(),
                 None,
+                profile_name.to_string(),
                 fixed_bottom_requested,
                 environment_overrides,
             )

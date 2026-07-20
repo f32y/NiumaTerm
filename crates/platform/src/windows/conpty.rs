@@ -177,6 +177,7 @@ pub fn new(
     columns: u16,
     rows: u16,
     environment_overrides: &[(String, String)],
+    starting_title: Option<&str>,
 ) -> Result<Pty> {
     let api = ConptyApi::new();
     let use_job = crate::job_management();
@@ -222,7 +223,12 @@ pub fn new(
 
     let mut startup_info_ex: STARTUPINFOEXW = unsafe { mem::zeroed() };
 
-    startup_info_ex.StartupInfo.lpTitle = std::ptr::null_mut() as PWSTR;
+    // ConPTY projects this console title as OSC 0/2. Seeding it avoids exposing
+    // the executable path before an application deliberately changes its title.
+    let mut title = starting_title.map(win32_string);
+    startup_info_ex.StartupInfo.lpTitle = title
+        .as_mut()
+        .map_or(std::ptr::null_mut(), |title| title.as_mut_ptr());
 
     startup_info_ex.StartupInfo.cb = mem::size_of::<STARTUPINFOEXW>() as u32;
 

@@ -50,16 +50,14 @@ pub struct TabManager<S> {
     active: usize,
 }
 
-const DEFAULT_TAB_TITLE: &str = "New Tab";
-
 impl<S> TabManager<S> {
     /// Start with a single active tab. There is no empty state.
-    pub fn new(surface: S, id: TabId) -> Self {
+    pub fn new(surface: S, id: TabId, default_title: String) -> Self {
         Self {
             tabs: vec![Tab {
                 id,
                 surface,
-                default_title: DEFAULT_TAB_TITLE.into(),
+                default_title,
                 user_title: None,
                 terminal_title: None,
                 exited: false,
@@ -68,12 +66,12 @@ impl<S> TabManager<S> {
         }
     }
 
-    /// Append a tab with the shared default name and make it active.
-    pub fn new_tab(&mut self, surface: S, id: TabId) -> TabId {
+    /// Append a tab with its profile-derived default name and make it active.
+    pub fn new_tab(&mut self, surface: S, id: TabId, default_title: String) -> TabId {
         self.tabs.push(Tab {
             id,
             surface,
-            default_title: DEFAULT_TAB_TITLE.into(),
+            default_title,
             user_title: None,
             terminal_title: None,
             exited: false,
@@ -203,9 +201,9 @@ mod tests {
     /// Build a manager of fake surfaces (u32) with sequential ids 1..=n, ids
     /// equal to the surface value for easy assertions.
     fn manager(n: u32) -> TabManager<u32> {
-        let mut mgr = TabManager::new(1, TabId(1));
+        let mut mgr = TabManager::new(1, TabId(1), "PowerShell".into());
         for i in 2..=n {
-            mgr.new_tab(i, TabId(i as u64));
+            mgr.new_tab(i, TabId(i as u64), "PowerShell".into());
         }
         mgr
     }
@@ -214,20 +212,20 @@ mod tests {
     fn new_tab_becomes_active() {
         let mut mgr = manager(1);
         assert_eq!(mgr.active_id(), TabId(1));
-        mgr.new_tab(2, TabId(2));
+        mgr.new_tab(2, TabId(2), "PowerShell".into());
         assert_eq!(mgr.active_index(), 1);
         assert_eq!(mgr.active_id(), TabId(2));
         assert_eq!(*mgr.active(), 2);
     }
 
     #[test]
-    fn new_tabs_share_the_default_title() {
+    fn new_tabs_use_their_profile_names() {
         let mut mgr = manager(1);
-        assert_eq!(mgr.tabs()[0].title(), "New Tab");
-        mgr.new_tab(2, TabId(2));
-        mgr.new_tab(3, TabId(3));
-        assert_eq!(mgr.tabs()[1].title(), "New Tab");
-        assert_eq!(mgr.tabs()[2].title(), "New Tab");
+        assert_eq!(mgr.tabs()[0].title(), "PowerShell");
+        mgr.new_tab(2, TabId(2), "Command Prompt".into());
+        mgr.new_tab(3, TabId(3), "Developer PowerShell".into());
+        assert_eq!(mgr.tabs()[1].title(), "Command Prompt");
+        assert_eq!(mgr.tabs()[2].title(), "Developer PowerShell");
     }
 
     #[test]
@@ -293,9 +291,9 @@ mod tests {
         let mut mgr = manager(2);
         assert!(mgr.set_title(TabId(1), "vim".into()));
         assert_eq!(mgr.tabs()[0].title(), "vim");
-        assert_eq!(mgr.tabs()[1].title(), "New Tab");
+        assert_eq!(mgr.tabs()[1].title(), "PowerShell");
         assert!(mgr.set_title(TabId(1), String::new()));
-        assert_eq!(mgr.tabs()[0].title(), "New Tab");
+        assert_eq!(mgr.tabs()[0].title(), "PowerShell");
     }
 
     #[test]

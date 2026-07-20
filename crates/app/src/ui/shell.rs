@@ -759,9 +759,12 @@ impl Shell {
         let cwd = explicit_cwd(self.workspaces.active_cwd());
         let pane = Self::spawn_default_pane(cx, id, default_profile, cwd);
         self.register_agent_pane(&pane, cx);
-        self.workspaces
-            .active_tabs_mut()
-            .new_tab(PaneTree::new_leaf(PaneId(id), pane), TabId(id));
+        let title = pane.read(cx).profile_name().to_string();
+        self.workspaces.active_tabs_mut().new_tab(
+            PaneTree::new_leaf(PaneId(id), pane),
+            TabId(id),
+            title,
+        );
         self.focus_active(window, cx);
         self.sync_session_memory(cx);
         cx.notify();
@@ -793,9 +796,12 @@ impl Shell {
         let default_profile = Self::default_profile(cx);
         let pane = Self::spawn_default_pane(cx, id, default_profile, Some(target));
         self.register_agent_pane(&pane, cx);
-        self.workspaces
-            .active_tabs_mut()
-            .new_tab(PaneTree::new_leaf(PaneId(id), pane), TabId(id));
+        let title = pane.read(cx).profile_name().to_string();
+        self.workspaces.active_tabs_mut().new_tab(
+            PaneTree::new_leaf(PaneId(id), pane),
+            TabId(id),
+            title,
+        );
         self.focus_active(window, cx);
         self.sync_session_memory(cx);
         cx.notify();
@@ -1448,9 +1454,11 @@ impl Shell {
         let default_profile = Self::default_profile(cx);
         let pane = Self::spawn_default_pane(cx, surface_id, default_profile, cwd.clone());
         self.register_agent_pane(&pane, cx);
+        let title = pane.read(cx).profile_name().to_string();
         let tabs = TabManager::new(
             PaneTree::new_leaf(PaneId(surface_id), pane),
             TabId(surface_id),
+            title,
         );
         let ws_id = Self::alloc_id(&mut self.next_id);
         let ws_cwd = cwd.unwrap_or_else(|| ".".to_string());

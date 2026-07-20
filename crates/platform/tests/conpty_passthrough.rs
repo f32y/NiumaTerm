@@ -10,7 +10,7 @@
 use std::io::Read;
 use std::time::{Duration, Instant};
 
-use nmt_platform::{ProcessReadWrite, create_pty};
+use nmt_platform::{ProcessReadWrite, create_pty_with_env};
 
 /// Minimal base64 (standard alphabet, padded) so the test needs no crates.
 fn b64(input: &[u8]) -> String {
@@ -50,9 +50,14 @@ fn find_subslice(hay: &[u8], needle: &[u8]) -> Option<usize> {
 /// Shared driver: run a PowerShell snippet through the ConPTY path rio uses,
 /// collect conout until MARKER_DONE (or timeout), return the raw bytes.
 fn drive_conpty(script: &str) -> Vec<u8> {
+    drive_conpty_with_title(script, None)
+}
+
+fn drive_conpty_with_title(script: &str, title: Option<&str>) -> Vec<u8> {
     let encoded = b64(&utf16le(script));
     let cmdline = format!("powershell -NoProfile -NonInteractive -EncodedCommand {encoded}");
-    let mut pty = create_pty(&cmdline, Vec::new(), &None, 80, 24).expect("failed to create ConPTY");
+    let mut pty = create_pty_with_env(&cmdline, Vec::new(), &None, 80, 24, &[], title)
+        .expect("failed to create ConPTY");
 
     let mut collected: Vec<u8> = Vec::new();
     let mut buf = [0u8; 4096];
@@ -78,6 +83,18 @@ fn drive_conpty(script: &str) -> Vec<u8> {
         }
     }
     collected
+}
+
+#[test]
+fn starting_title_reaches_the_console_process() {
+    let bytes = drive_conpty_with_title(
+        "[Console]::Write([Console]::Title + '|MARKER_DONE')",
+        Some("Test Profile"),
+    );
+    assert!(
+        find_subslice(&bytes, b"Test Profile").is_some(),
+        "the console process did not inherit STARTUPINFO.lpTitle"
+    );
 }
 
 fn dump(tag: &str, bytes: &[u8]) {
