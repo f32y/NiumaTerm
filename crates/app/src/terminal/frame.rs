@@ -935,7 +935,7 @@ mod tests {
         let mut engine = GhosttyTerminal::new(4, 1, 100).unwrap();
         engine.write_vt(b"A\x1b[D");
         let mut buf = RenderBuffer::new(4, 1);
-        buf.update(&engine.snapshot().unwrap());
+        engine.snapshot_into(&mut buf).unwrap();
 
         let gray = |value: u8| {
             let value = f32::from(value) / 255.;
@@ -958,14 +958,14 @@ mod tests {
         let mut engine = GhosttyTerminal::new(4, 1, 100).unwrap();
         engine.write_vt(b"ab");
         let mut buf = RenderBuffer::new(4, 1);
-        buf.update(&engine.snapshot().unwrap());
+        engine.snapshot_into(&mut buf).unwrap();
 
         let first = extract_row(&buf, 0, None);
         let second = extract_row(&buf, 0, None);
         assert_eq!(first.text_hash(), second.text_hash());
 
         engine.write_vt(b"c");
-        buf.update(&engine.snapshot().unwrap());
+        engine.snapshot_into(&mut buf).unwrap();
         let changed = extract_row(&buf, 0, None);
         assert_ne!(first.text_hash(), changed.text_hash());
     }
@@ -1001,7 +1001,7 @@ mod tests {
         let mut engine = GhosttyTerminal::new(8, 1, 100).unwrap();
         engine.write_vt("e\u{0301}中\x1b[1mB\x1b[0m".as_bytes());
         let mut buf = RenderBuffer::new(8, 1);
-        buf.update(&engine.snapshot().unwrap());
+        engine.snapshot_into(&mut buf).unwrap();
         let frame = TerminalFrame::from_render_buffer(&buf);
         let row = extract_row(&buf, 0, cursor_for_row(frame.cursor(), 0));
 
@@ -1027,13 +1027,13 @@ mod tests {
         let mut engine = GhosttyTerminal::new(4, 1, 100).unwrap();
         engine.write_vt(b"\x1b[31mAB\x1b[0m");
         let mut buf = RenderBuffer::new(4, 1);
-        buf.update(&engine.snapshot().unwrap());
+        engine.snapshot_into(&mut buf).unwrap();
         let colored = extract_row(&buf, 0, None);
 
         let mut plain_engine = GhosttyTerminal::new(4, 1, 100).unwrap();
         plain_engine.write_vt(b"AB");
         let mut plain_buf = RenderBuffer::new(4, 1);
-        plain_buf.update(&plain_engine.snapshot().unwrap());
+        plain_engine.snapshot_into(&mut plain_buf).unwrap();
         let plain = extract_row(&plain_buf, 0, None);
 
         // Identical visible text...
@@ -1050,7 +1050,7 @@ mod tests {
         let mut engine = GhosttyTerminal::new(4, 1, 100).unwrap();
         engine.write_vt(b"\x1b[48;2;1;2;3mA");
         let mut buf = RenderBuffer::new(4, 1);
-        buf.update(&engine.snapshot().unwrap());
+        engine.snapshot_into(&mut buf).unwrap();
 
         let row = extract_row(&buf, 0, None);
 
@@ -1062,7 +1062,7 @@ mod tests {
         let mut engine = GhosttyTerminal::new(4, 1, 100).unwrap();
         engine.write_vt(b"\x1b[48;2;120;100;80mA\x1b[2mB");
         let mut buf = RenderBuffer::new(4, 1);
-        buf.update(&engine.snapshot().unwrap());
+        engine.snapshot_into(&mut buf).unwrap();
 
         let row = extract_row(&buf, 0, None);
 
@@ -1074,7 +1074,7 @@ mod tests {
         let mut engine = GhosttyTerminal::new(4, 1, 100).unwrap();
         engine.write_vt(b"abcd");
         let mut buf = RenderBuffer::new(4, 1);
-        buf.update(&engine.snapshot().unwrap());
+        engine.snapshot_into(&mut buf).unwrap();
         let selection = SelectionRange::new(
             Pos::new(Line(0), Column(1)),
             Pos::new(Line(0), Column(2)),
@@ -1100,7 +1100,7 @@ mod tests {
         let mut engine = GhosttyTerminal::new(6, 1, 100).unwrap();
         engine.write_vt("中A".as_bytes());
         let mut buf = RenderBuffer::new(6, 1);
-        buf.update(&engine.snapshot().unwrap());
+        engine.snapshot_into(&mut buf).unwrap();
         let row = extract_row(&buf, 0, None);
 
         // The wide glyph is followed by a blank placeholder for its 2nd column.
@@ -1117,13 +1117,13 @@ mod tests {
         let mut plain_engine = GhosttyTerminal::new(4, 1, 100).unwrap();
         plain_engine.write_vt(b"A");
         let mut plain_buf = RenderBuffer::new(4, 1);
-        plain_buf.update(&plain_engine.snapshot().unwrap());
+        plain_engine.snapshot_into(&mut plain_buf).unwrap();
         let plain = extract_row(&plain_buf, 0, None);
 
         let mut engine = GhosttyTerminal::new(4, 1, 100).unwrap();
         engine.write_vt(b"\x1b[7mA");
         let mut buf = RenderBuffer::new(4, 1);
-        buf.update(&engine.snapshot().unwrap());
+        engine.snapshot_into(&mut buf).unwrap();
         let inverse = extract_row(&buf, 0, None);
 
         assert_eq!(inverse.cells()[0].background, Some(plain.runs()[0].fg));
@@ -1135,7 +1135,7 @@ mod tests {
         // Bold B, italic I, underline U, strikethrough S, each reset between.
         engine.write_vt(b"\x1b[1mB\x1b[0m\x1b[3mI\x1b[0m\x1b[4mU\x1b[0m\x1b[9mS\x1b[0m");
         let mut buf = RenderBuffer::new(8, 1);
-        buf.update(&engine.snapshot().unwrap());
+        engine.snapshot_into(&mut buf).unwrap();
         let row = extract_row(&buf, 0, None);
 
         assert!(
@@ -1153,13 +1153,13 @@ mod tests {
         let mut plain_engine = GhosttyTerminal::new(4, 1, 100).unwrap();
         plain_engine.write_vt(b"A");
         let mut plain_buf = RenderBuffer::new(4, 1);
-        plain_buf.update(&plain_engine.snapshot().unwrap());
+        plain_engine.snapshot_into(&mut plain_buf).unwrap();
         let plain = extract_row(&plain_buf, 0, None);
 
         let mut bold_engine = GhosttyTerminal::new(4, 1, 100).unwrap();
         bold_engine.write_vt(b"\x1b[1mA");
         let mut bold_buf = RenderBuffer::new(4, 1);
-        bold_buf.update(&bold_engine.snapshot().unwrap());
+        bold_engine.snapshot_into(&mut bold_buf).unwrap();
         let bold = extract_row(&bold_buf, 0, None);
 
         // Same visible text, but bold must not reuse the plain shaped glyphs.
@@ -1172,7 +1172,7 @@ mod tests {
         let mut engine = GhosttyTerminal::new(4, 1, 100).unwrap();
         engine.write_vt(b"\x1b[5 qA\x1b[D");
         let mut buf = RenderBuffer::new(4, 1);
-        buf.update(&engine.snapshot().unwrap());
+        engine.snapshot_into(&mut buf).unwrap();
 
         let frame = TerminalFrame::from_render_buffer(&buf);
         let row = &frame.lines()[0];
@@ -1194,12 +1194,10 @@ mod tests {
         let mut engine = GhosttyTerminal::new(cols, rows, 100).unwrap();
         engine.resize(cols, rows, 10, 20).unwrap();
         engine.write_vt(vt);
-        let snap = engine.snapshot().unwrap();
-        let mut buf = RenderBuffer::new(cols as usize, rows as usize);
-        buf.update(&snap);
+        let buf = engine.snapshot().unwrap();
 
         let release: crate::terminal::graphics::ReleaseQueue = Default::default();
-        let (pending, _) = engine.take_image_deltas(&snap.placements);
+        let (pending, _) = engine.take_image_deltas(buf.placements());
         let mut generations = GenerationMap::new();
         for (id, data) in pending {
             if let Some(g) = graphic_to_generation(data, &release) {
@@ -1424,14 +1422,13 @@ mod full_frame_profile {
         // A persistent RenderBuffer is reused across frames, as production does.
         let gens = super::GenerationMap::new();
         let mut render_buf = RenderBuffer::new(COLS as usize, ROWS as usize);
-        let mut snap_total = Duration::ZERO;
+        let mut capture_total = Duration::ZERO;
         let mut extract_total = Duration::ZERO;
         let mut sink = 0usize;
         for _ in 0..FRAMES {
             let s = Instant::now();
-            let snap = engine.snapshot().unwrap();
-            render_buf.update(&snap);
-            snap_total += s.elapsed();
+            engine.snapshot_into(&mut render_buf).unwrap();
+            capture_total += s.elapsed();
 
             let e = Instant::now();
             let frame =
@@ -1461,7 +1458,7 @@ mod full_frame_profile {
         use std::fmt::Write as _;
         let cells = (LINES * CELLS_PER_LINE) as f64;
         let viewport_cells = (ROWS as usize * COLS as usize) as f64;
-        let per_frame_snap = snap_total / FRAMES as u32;
+        let per_frame_capture = capture_total / FRAMES as u32;
         let per_frame_extract = extract_total / FRAMES as u32;
         let per_frame_shape =
             Duration::from_secs_f64(shape.as_secs_f64() / LINES as f64 * ROWS as f64);
@@ -1479,7 +1476,7 @@ mod full_frame_profile {
         );
         let _ = writeln!(
             report,
-            "  2. snapshot  {per_frame_snap:?}/frame  (viewport {ROWS}x{COLS})"
+            "  2. capture   {per_frame_capture:?}/frame  (viewport {ROWS}x{COLS})"
         );
         let _ = writeln!(
             report,

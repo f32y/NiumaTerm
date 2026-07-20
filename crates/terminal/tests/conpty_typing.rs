@@ -14,17 +14,16 @@ use parking_lot::FairMutex;
 fn snapshot_text(engine: &Arc<FairMutex<GhosttyTerminal>>) -> Vec<String> {
     let mut e = engine.lock();
     let snap = e.snapshot().expect("snapshot");
-    let mut out = vec![String::new(); snap.rows as usize];
-    for y in 0..snap.rows {
-        let mut row = vec![' '; snap.cols as usize];
-        for cell in snap.cells.iter().filter(|c| c.y == y) {
-            if let Some(ch) = cell.text.chars().next() {
-                if let Some(slot) = row.get_mut(cell.x as usize) {
-                    *slot = ch;
-                }
-            }
-        }
-        out[y as usize] = row.into_iter().collect::<String>().trim_end().to_string();
+    let mut out = vec![String::new(); snap.rows()];
+    for (y, out_row) in out.iter_mut().enumerate() {
+        *out_row = (0..snap.cols())
+            .map(|x| match snap.cell(x, y).c() {
+                '\0' => ' ',
+                c => c,
+            })
+            .collect::<String>()
+            .trim_end()
+            .to_string();
     }
     out
 }

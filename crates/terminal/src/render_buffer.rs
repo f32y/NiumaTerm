@@ -5,7 +5,7 @@
 //! interned `style_table`, a grapheme `extras` map, cursor state, colors,
 //! scrollbar geometry, and terminal-graphics placement metadata.
 //!
-//! The **PTY thread** populates it from Ghostty snapshots; the GPUI frontend
+//! The **PTY thread** populates it directly from Ghostty; the GPUI frontend
 //! extracts `TerminalFrame`s from it. It lives behind its own lock, separate from
 //! the engine lock, so normal frame extraction does not wait behind `write_vt`
 //! parsing.
@@ -16,7 +16,8 @@ use nmt_config::colors::{AnsiColor, ColorRgb, NamedColor};
 use rustc_hash::FxHashMap;
 
 use crate::ghostty::{
-    CellWide, Color, ScrollbarInfo, SnapshotPlacement, SnapshotStyle, TerminalSnapshot, Underline,
+    CellWide, Color, ScrollbarInfo, SnapshotColors, SnapshotCursor, SnapshotPlacement,
+    SnapshotStyle, Underline,
 };
 use crate::terminal::grid::row::Row;
 use crate::terminal::pos::{Column, Line, Pos};
@@ -111,7 +112,7 @@ pub struct RenderBuffer {
     /// frontend keeps this metadata available but does not paint inline images yet.
     placements: Vec<SnapshotPlacement>,
     /// New PTY/render content since the frontend last consumed it. Set by every
-    /// `update()`, cleared by `take_content_changed()`. Starts true so the first
+    /// capture, cleared by `take_content_changed()`. Starts true so the first
     /// frame builds from the freshly initialized buffer.
     content_changed: bool,
 }
@@ -139,7 +140,7 @@ impl RenderBuffer {
     }
 
     /// Consume the "new PTY content since last frame" flag.
-    /// Returns whether `update()` ran since the previous call, then clears it.
+    /// Returns whether capture ran since the previous call, then clears it.
     /// The frontend uses `true` to invalidate its cached terminal frame.
     pub fn take_content_changed(&mut self) -> bool {
         std::mem::replace(&mut self.content_changed, false)
@@ -239,100 +240,101 @@ impl RenderBuffer {
         self.styles.get(id)
     }
 
-    /// Repopulate the buffer from a Ghostty snapshot. Auto-resizes to the
-    /// snapshot dimensions, so it follows the engine on resize with no extra
-    /// plumbing.
-    pub fn update(&mut self, snap: &TerminalSnapshot) {
-        let cols = (snap.cols as usize).max(1);
-        let rows = snap.rows as usize;
+    pub(crate) fn begin_capture(&mut self, cols: usize, rows: usize) {
+        let cols = cols.max(1);
         if cols != self.cols || rows != self.rows {
             self.cols = cols;
             self.rows = rows;
             self.grid = (0..rows).map(|_| Row::new(cols)).collect();
         } else {
-            for row in self.grid.iter_mut() {
-                for sq in row.inner.iter_mut() {
-                    *sq = Square::default();
-                }
+            for row in &mut self.grid {
+                row.inner.fill(Square::default());
                 row.has_extras = false;
+                row.kitty_virtual_placeholder = false;
                 row.dirty = true;
             }
         }
         self.extras.clear();
         self.next_extras_id = 1;
-
-        // Per-row soft-wrap flags (clamped/padded to `rows`).
         self.row_wrapped.clear();
         self.row_wrapped.resize(rows, false);
-        for (y, &w) in snap.row_wrapped.iter().take(rows).enumerate() {
-            self.row_wrapped[y] = w;
+        self.placements.clear();
+    }
+
+    pub(crate) fn write_cell(
+        &mut self,
+        x: usize,
+        y: usize,
+        text: &str,
+        wide: CellWide,
+        style: &SnapshotStyle,
+    ) {
+        if x >= self.cols || y >= self.rows {
+            return;
         }
 
-        // Per-row kitty virtual-placeholder flag. Set every row each
-        // update (the dims-match clear path above does not reset it).
-        for (y, row) in self.grid.iter_mut().enumerate() {
-            row.kitty_virtual_placeholder = snap
-                .row_virtual_placeholder
-                .get(y)
-                .copied()
-                .unwrap_or(false);
+        let id = self.styles.intern(style_from_snapshot(style));
+        let mut chars = text.chars();
+        let base = chars.next().unwrap_or(' ');
+        let sq = &mut self.grid[y][Column(x)];
+        sq.set_c(base);
+        sq.set_style_id(id);
+        sq.set_wide(wide_from(wide));
+
+        let zerowidth: Vec<char> = chars.collect();
+        if !zerowidth.is_empty() {
+            let extras_id = self.next_extras_id;
+            self.next_extras_id = self.next_extras_id.saturating_add(1);
+            self.extras.insert(
+                extras_id,
+                Extras {
+                    zerowidth,
+                    ..Extras::default()
+                },
+            );
+            sq.set_extras_id(Some(extras_id));
+            self.grid[y].has_extras = true;
         }
+    }
 
-        self.placements = snap.placements.clone();
-
-        for cell in &snap.cells {
-            let (x, y) = (cell.x as usize, cell.y as usize);
-            if x >= self.cols || y >= self.rows {
-                continue;
-            }
-            let id = self.styles.intern(style_from_snapshot(&cell.style));
-            let mut chars = cell.text.chars();
-            let base = chars.next().unwrap_or(' ');
-
-            let sq = &mut self.grid[y][Column(x)];
-            sq.set_c(base);
-            sq.set_style_id(id);
-            sq.set_wide(wide_from(cell.wide));
-
-            // Full grapheme fidelity: trailing codepoints (combining marks, ZWJ
-            // joiners) become an `Extras { zerowidth }` entry so the shaper sees
-            // the whole cluster, not just the base codepoint.
-            let zerowidth: Vec<char> = chars.collect();
-            if !zerowidth.is_empty() {
-                let extras_id = self.next_extras_id;
-                self.next_extras_id = self.next_extras_id.saturating_add(1);
-                self.extras.insert(
-                    extras_id,
-                    Extras {
-                        zerowidth,
-                        ..Extras::default()
-                    },
-                );
-                sq.set_extras_id(Some(extras_id));
-                self.grid[y].has_extras = true;
-            }
+    pub(crate) fn write_row_meta(&mut self, y: usize, wrapped: bool, placeholder: bool) {
+        if let Some(value) = self.row_wrapped.get_mut(y) {
+            *value = wrapped;
         }
+        if let Some(row) = self.grid.get_mut(y) {
+            row.kitty_virtual_placeholder = placeholder;
+        }
+    }
 
-        let cx = (snap.cursor.x as usize).min(self.cols.saturating_sub(1));
-        let cy = (snap.cursor.y as usize).min(self.rows.saturating_sub(1));
+    pub(crate) fn finish_capture(
+        &mut self,
+        cursor: SnapshotCursor,
+        colors: SnapshotColors,
+        placements: Vec<SnapshotPlacement>,
+        scrollbar: ScrollbarInfo,
+    ) {
+        let cx = (cursor.x as usize).min(self.cols.saturating_sub(1));
+        let cy = (cursor.y as usize).min(self.rows.saturating_sub(1));
         self.cursor = Pos::new(Line(cy as i32), Column(cx));
-        self.cursor_visible = snap.cursor.visible;
-        self.cursor_shape = snap.cursor.shape;
-        self.cursor_blinking = snap.cursor.blinking;
-        {
-            use nmt_config::colors::NamedColor;
-            let mut tc = nmt_config::colors::term::TermColors::default();
-            tc[NamedColor::Foreground] = Some(snap.colors.fg.to_arr());
-            tc[NamedColor::Background] = Some(snap.colors.bg.to_arr());
-            if let Some(c) = snap.colors.cursor {
-                tc[NamedColor::Cursor] = Some(c.to_arr());
-            }
-            self.colors = tc;
+        self.cursor_visible = cursor.visible;
+        self.cursor_shape = cursor.shape;
+        self.cursor_blinking = cursor.blinking;
+
+        use nmt_config::colors::NamedColor;
+        let mut term_colors = nmt_config::colors::term::TermColors::default();
+        term_colors[NamedColor::Foreground] = Some(colors.fg.to_arr());
+        term_colors[NamedColor::Background] = Some(colors.bg.to_arr());
+        if let Some(color) = colors.cursor {
+            term_colors[NamedColor::Cursor] = Some(color.to_arr());
         }
-        self.window_bg_override = snap.colors.bg_override;
-        self.scrollbar = snap.scrollbar;
-        // The renderer consumes new-content damage via
-        // `take_content_changed()` instead of the mirror's `peek_damage_event()`.
+        self.colors = term_colors;
+        self.window_bg_override = colors.bg_override;
+        self.placements = placements;
+        self.scrollbar = scrollbar;
         self.content_changed = true;
+    }
+
+    pub fn set_cursor_visible(&mut self, visible: bool) {
+        self.cursor_visible = visible;
     }
 }

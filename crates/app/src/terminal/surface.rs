@@ -480,13 +480,13 @@ impl TerminalSurface {
             engine.scroll_viewport_delta(delta);
             engine.snapshot()
         };
-        let Ok(mut snap) = snap else {
+        let Ok(mut next) = snap else {
             return false;
         };
-        let changed = snap.scrollbar != before;
+        let changed = next.scrollbar() != before;
         let mut buf = self.session.render_buffer.lock();
-        snap.cursor.visible = buf.cursor_visible();
-        buf.update(&snap);
+        next.set_cursor_visible(buf.cursor_visible());
+        std::mem::swap(&mut *buf, &mut next);
         changed
     }
 
@@ -1002,7 +1002,7 @@ mod tests {
         let mut terminal = GhosttyTerminal::new(24, 2, 100).unwrap();
         terminal.write_vt(b"pipelines.universal\r\npi");
         let mut buf = RenderBuffer::new(24, 2);
-        buf.update(&terminal.snapshot().unwrap());
+        terminal.snapshot_into(&mut buf).unwrap();
         let selection = Selection::new(
             SelectionType::Semantic,
             Pos::new(Line(1), Column(1)),

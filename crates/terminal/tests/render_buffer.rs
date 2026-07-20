@@ -9,7 +9,7 @@ fn populates_text_styles_and_cursor() {
     let mut engine = GhosttyTerminal::new(20, 2, 100).unwrap();
     engine.write_vt(b"\x1b[1mhi\x1b[0m");
     let mut buf = RenderBuffer::new(20, 2);
-    buf.update(&engine.snapshot().unwrap());
+    engine.snapshot_into(&mut buf).unwrap();
 
     assert_eq!(buf.cell(0, 0).c(), 'h');
     assert_eq!(buf.cell(1, 0).c(), 'i');
@@ -26,7 +26,7 @@ fn wide_char_marks_spacer() {
     let mut engine = GhosttyTerminal::new(8, 1, 100).unwrap();
     engine.write_vt("中A".as_bytes());
     let mut buf = RenderBuffer::new(8, 1);
-    buf.update(&engine.snapshot().unwrap());
+    engine.snapshot_into(&mut buf).unwrap();
     assert_eq!(buf.cell(0, 0).wide(), Wide::Wide);
     assert_eq!(buf.cell(1, 0).wide(), Wide::Spacer);
     assert_eq!(buf.cell(2, 0).c(), 'A');
@@ -37,7 +37,7 @@ fn style_table_indexed_by_style_id() {
     let mut engine = GhosttyTerminal::new(8, 1, 100).unwrap();
     engine.write_vt(b"\x1b[1mB\x1b[0m");
     let mut buf = RenderBuffer::new(8, 1);
-    buf.update(&engine.snapshot().unwrap());
+    engine.snapshot_into(&mut buf).unwrap();
     let sid = buf.cell(0, 0).style_id();
     // The exposed style_table resolves the same style `style()` does.
     assert_eq!(buf.style_table()[sid as usize], buf.style(sid));
@@ -50,8 +50,8 @@ fn style_table_indexed_by_style_id() {
 
 /// `content_changed` is the signal that replaces the mirror's
 /// `peek_damage_event()` on the render path. Inits `true` (first frame is Full to
-/// fill the zeroed grid); `update()` sets it; `take` reads+clears; a `take` with
-/// no intervening `update` stays `false` (the UI-only-frame = no PTY damage
+/// fill the zeroed grid); capture sets it; `take` reads+clears; a `take` with
+/// no intervening capture stays `false` (the UI-only-frame = no PTY damage
 /// invariant); coalesced updates report `true` once.
 #[test]
 fn content_changed_lifecycle() {
@@ -68,15 +68,15 @@ fn content_changed_lifecycle() {
 
     // A batch sets it.
     engine.write_vt(b"a");
-    buf.update(&engine.snapshot().unwrap());
-    assert!(buf.take_content_changed(), "update sets it");
+    engine.snapshot_into(&mut buf).unwrap();
+    assert!(buf.take_content_changed(), "capture sets it");
     assert!(!buf.take_content_changed(), "consumed after one take");
 
     // Coalesced updates between frames report true exactly once.
     engine.write_vt(b"b");
-    buf.update(&engine.snapshot().unwrap());
+    engine.snapshot_into(&mut buf).unwrap();
     engine.write_vt(b"c");
-    buf.update(&engine.snapshot().unwrap());
+    engine.snapshot_into(&mut buf).unwrap();
     assert!(buf.take_content_changed(), "coalesced updates → true");
     assert!(!buf.take_content_changed(), "→ false after the single take");
 }
@@ -89,7 +89,7 @@ fn grapheme_cluster_fidelity() {
     // `e` + U+0301 (combining acute accent) → one grapheme cell.
     engine.write_vt("e\u{0301}".as_bytes());
     let mut buf = RenderBuffer::new(8, 1);
-    buf.update(&engine.snapshot().unwrap());
+    engine.snapshot_into(&mut buf).unwrap();
 
     let sq = buf.cell(0, 0);
     assert_eq!(sq.c(), 'e', "base codepoint preserved");
@@ -111,7 +111,7 @@ fn captures_softwrap() {
     // 13 chars on an 8-wide terminal → row 0 fills and soft-wraps into row 1.
     engine.write_vt(b"aaaaaaaaaabbb");
     let mut buf = RenderBuffer::new(8, 3);
-    buf.update(&engine.snapshot().unwrap());
+    engine.snapshot_into(&mut buf).unwrap();
     assert!(buf.row_wrapped(0), "row 0 soft-wraps into row 1");
     assert!(!buf.row_wrapped(1), "row 1 is the (hard) end of the line");
 
@@ -119,7 +119,7 @@ fn captures_softwrap() {
     let mut engine2 = GhosttyTerminal::new(8, 3, 100).unwrap();
     engine2.write_vt(b"ab\r\ncd");
     let mut buf2 = RenderBuffer::new(8, 3);
-    buf2.update(&engine2.snapshot().unwrap());
+    engine2.snapshot_into(&mut buf2).unwrap();
     assert!(!buf2.row_wrapped(0), "row 0 ends with a hard newline");
 }
 
@@ -129,12 +129,12 @@ fn buffer_resize_follows_engine() {
     let mut engine = GhosttyTerminal::new(20, 4, 100).unwrap();
     engine.write_vt(b"hello");
     let mut buf = RenderBuffer::new(20, 4);
-    buf.update(&engine.snapshot().unwrap());
+    engine.snapshot_into(&mut buf).unwrap();
     assert_eq!((buf.cols(), buf.rows()), (20, 4));
     assert_eq!(buf.grid().len(), 4);
 
     engine.resize(10, 2, 8, 16).unwrap();
-    buf.update(&engine.snapshot().unwrap());
+    engine.snapshot_into(&mut buf).unwrap();
     assert_eq!((buf.cols(), buf.rows()), (10, 2));
     assert_eq!(buf.grid().len(), 2);
     for row in buf.grid() {
