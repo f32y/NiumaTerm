@@ -309,7 +309,7 @@ impl RenderOnce for Settings {
                     .child(sidebar),
             )
             .child(
-                resizable_panel().child(
+                resizable_panel().divider_visible(false).child(
                     canvas(
                         move |bounds, window, cx| {
                             let options = RenderOptions {

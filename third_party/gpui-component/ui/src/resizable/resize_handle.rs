@@ -4,6 +4,7 @@ use gpui::{
     AnyElement, App, Axis, Element, ElementId, Entity, GlobalElementId, InteractiveElement,
     IntoElement, MouseDownEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render,
     StatefulInteractiveElement, Styled as _, Window, div, prelude::FluentBuilder as _, px,
+    transparent_black,
 };
 
 use crate::{ActiveTheme as _, AxisExt as _, dock::DockPlacement};
@@ -24,6 +25,7 @@ pub(crate) struct ResizeHandle<T: 'static, E: 'static + Render> {
     axis: Axis,
     drag_value: Option<Rc<T>>,
     placement: Option<DockPlacement>,
+    divider_visible: bool,
     on_drag: Option<Rc<dyn Fn(&Point<Pixels>, &mut Window, &mut App) -> Entity<E>>>,
 }
 
@@ -35,8 +37,14 @@ impl<T: 'static, E: 'static + Render> ResizeHandle<T, E> {
             on_drag: None,
             drag_value: None,
             placement: None,
+            divider_visible: true,
             axis,
         }
+    }
+
+    pub(crate) fn divider_visible(mut self, visible: bool) -> Self {
+        self.divider_visible = visible;
+        self
     }
 
     pub(crate) fn on_drag(
@@ -105,7 +113,9 @@ impl<T: 'static, E: 'static + Render> Element for ResizeHandle<T, E> {
         window.with_element_state(id.unwrap(), |state, window| {
             let state = state.unwrap_or(ResizeHandleState::default());
 
-            let bg_color = if state.is_active() {
+            let bg_color = if !self.divider_visible {
+                transparent_black()
+            } else if state.is_active() {
                 cx.theme().drag_border
             } else {
                 cx.theme().border
