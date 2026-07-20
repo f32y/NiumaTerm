@@ -571,7 +571,11 @@ impl TerminalSurface {
     /// Selection in absolute SCREEN coordinates for live-history rows rendered
     /// above the pinned engine viewport.
     pub(crate) fn selection_screen_range(&self) -> Option<SelectionRange> {
-        self.selection_range_at(0)
+        let viewport_top = self.viewport_top();
+        let guard = self.selection.lock();
+        let selection = guard.as_ref()?;
+        let buf = self.session.render_buffer.lock();
+        selection_screen_range(selection, &buf, viewport_top)
     }
 
     fn selection_range_at(&self, viewport_top: i32) -> Option<SelectionRange> {
@@ -750,6 +754,17 @@ impl TerminalSurface {
         self.write_bytes(&msg);
         true
     }
+}
+
+fn selection_screen_range(
+    selection: &Selection,
+    buf: &RenderBuffer,
+    viewport_top: i32,
+) -> Option<SelectionRange> {
+    let mut range = selection.to_range_engine(buf, viewport_top, WORD_DELIMITERS)?;
+    range.start.row += viewport_top;
+    range.end.row += viewport_top;
+    Some(range)
 }
 
 fn block_selection_range(
@@ -935,11 +950,14 @@ fn should_scroll_to_bottom_before_input(offset: u64, total: u64, len: u64) -> bo
 mod tests {
     use nmt_input::keyboard::ModifiersState;
     use nmt_terminal::ghostty::GhosttyTerminal;
-    use nmt_terminal::selection::SelectionType;
+    use nmt_terminal::render_buffer::RenderBuffer;
+    use nmt_terminal::selection::{Selection, SelectionType};
+    use nmt_terminal::terminal::pos::{Column, Line, Pos, Side};
 
     use super::{
         SurfaceMouseButton, TerminalSurface, block_selection_range, mouse_button_code,
-        mouse_report_mods, paste_payload, should_scroll_to_bottom_before_input, tab_state_with_cwd,
+        mouse_report_mods, paste_payload, selection_screen_range,
+        should_scroll_to_bottom_before_input, tab_state_with_cwd,
     };
     use crate::terminal::session::TerminalSessionConfig;
 
@@ -977,6 +995,24 @@ mod tests {
             block_selection_range(&block, &palette, 2, 1, SelectionType::Lines),
             Some(((1, 0), (2, 7)))
         );
+    }
+
+    #[test]
+    fn screen_word_selection_searches_the_visible_row_before_rebasing() {
+        let mut terminal = GhosttyTerminal::new(24, 2, 100).unwrap();
+        terminal.write_vt(b"pipelines.universal\r\npi");
+        let mut buf = RenderBuffer::new(24, 2);
+        buf.update(&terminal.snapshot().unwrap());
+        let selection = Selection::new(
+            SelectionType::Semantic,
+            Pos::new(Line(1), Column(1)),
+            Side::Left,
+        );
+
+        let range = selection_screen_range(&selection, &buf, 1).unwrap();
+
+        assert_eq!(range.start, Pos::new(Line(1), Column(0)));
+        assert_eq!(range.end, Pos::new(Line(1), Column(8)));
     }
 
     #[test]
