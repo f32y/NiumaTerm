@@ -125,8 +125,8 @@ impl TerminalSurface {
         remote_session_enabled: bool,
         environment_overrides: Vec<(String, String)>,
     ) -> Result<Self, String> {
-        let wake_sender = WakeSender::from_fn(move |_kind: Wake| {
-            wake.signal();
+        let wake_sender = WakeSender::from_fn(move |kind: Wake| {
+            wake.signal(kind);
         });
         let config = TerminalSessionConfig {
             shell: shell.clone(),
