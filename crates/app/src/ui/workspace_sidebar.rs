@@ -265,6 +265,7 @@ impl Sidebar {
         let drag_width = (self.width - 36.0).max(80.0);
         let item = Button::new(("workspace", idx))
             .ghost()
+            .tooltip(secondary.clone())
             .selected(ws.active)
             // Button resolves selected colors after element styles, so the
             // sidebar-accent pair must be the selected custom variant itself.
