@@ -146,6 +146,36 @@ fn remote_pty_adapter_carries_terminal_io() {
     panic!("RemotePty output did not cross SessionHub");
 }
 
+#[test]
+fn remote_control_counts_children_and_shutdown_waits_for_hub() {
+    let client = HubClient::spawn(Path::new(env!("CARGO_BIN_EXE_SessionHub")))
+        .expect("start SessionHub client");
+    let mut pty = client
+        .open(SessionOptions {
+            shell: "powershell.exe".to_owned(),
+            args: vec!["-NoLogo".to_owned(), "-NoProfile".to_owned()],
+            manage_process_tree: true,
+            ..SessionOptions::default()
+        })
+        .expect("open managed remote PTY");
+    let control = pty.control();
+    pty.writer()
+        .write_all(
+            b"Start-Process powershell.exe -ArgumentList '-NoLogo -NoProfile -Command Start-Sleep -Seconds 30'\r",
+        )
+        .expect("start child process");
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        if control.child_process_count().expect("query child count") > 0 {
+            client.shutdown().expect("stop SessionHub synchronously");
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    panic!("SessionHub did not report the shell child process");
+}
+
 fn send(ipc: &mut SharedMemoryEndpoint, request: HubRequest) {
     ipc.send(&request.encode().unwrap(), Duration::from_secs(5))
         .expect("send request");

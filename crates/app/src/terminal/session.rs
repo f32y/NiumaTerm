@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock};
 
 use base64::Engine as _;
-use nmt_remote_session_hub::{RemotePty, SessionOptions};
+use nmt_remote_session_hub::{RemotePty, RemoteSessionControl, SessionOptions};
 use nmt_terminal::block_store::{BlockStore, SegmentMeta};
 use nmt_terminal::event::{BlockEvent, EventListener, Msg, MsgSender, TerminalEvent, WindowId};
 use nmt_terminal::ghostty::GhosttyTerminal;
@@ -95,6 +95,8 @@ pub struct TerminalSession {
     /// Raw Job Object handle managing the shell tree (when job management was
     /// on at spawn). Owned by the PTY; only queried while the session lives.
     job_handle: Option<isize>,
+    /// Parent-side control used to query the Job Object owned by SessionHub.
+    remote_control: Option<RemoteSessionControl>,
     /// Engine-blocks mode is active: frozen history lives in
     /// finished engine blocks, rendered through `BlockRef` handles. Mirrors the
     /// flag the PTY pipe runs with.
@@ -153,7 +155,7 @@ impl TerminalSession {
             id,
             wake,
         };
-        let (job_handle, engine, messenger) = if config.remote_session_enabled {
+        let (job_handle, remote_control, engine, messenger) = if config.remote_session_enabled {
             let pty = RemotePty::spawn(SessionOptions {
                 shell: shell.clone(),
                 args: config.args.clone(),
@@ -163,6 +165,7 @@ impl TerminalSession {
                 cols,
                 rows,
                 scrollback_lines: config.scrollback_lines,
+                manage_process_tree: false,
             })
             .map_err(|error| {
                 EngineError::new(
@@ -170,6 +173,7 @@ impl TerminalSession {
                     format!("failed to start shell '{shell}' through SessionHub: {error}"),
                 )
             })?;
+            let remote_control = pty.control();
             let (engine, messenger) = start_pipe(
                 Arc::clone(&render_buffer),
                 Arc::clone(&vt_modes),
@@ -179,7 +183,7 @@ impl TerminalSession {
                 config.scrollback_lines,
                 engine_blocks,
             )?;
-            (None, engine, messenger)
+            (None, Some(remote_control), engine, messenger)
         } else {
             let pty = nmt_platform::create_pty_with_env(
                 &shell,
@@ -207,7 +211,7 @@ impl TerminalSession {
                 config.scrollback_lines,
                 engine_blocks,
             )?;
-            (job_handle, engine, messenger)
+            (job_handle, None, engine, messenger)
         };
 
         Ok(TerminalSession {
@@ -223,6 +227,7 @@ impl TerminalSession {
             open_prompt,
             frozen_images,
             job_handle,
+            remote_control,
             engine_blocks,
         })
     }
@@ -256,6 +261,14 @@ impl TerminalSession {
     /// Number of processes beyond the shell itself in the shell's Job
     /// Object (requires job management; 0 otherwise).
     pub fn child_process_count(&self) -> usize {
+        if let Some(control) = &self.remote_control {
+            return control.child_process_count().unwrap_or_else(|error| {
+                // An unavailable count must not silently bypass the destructive
+                // close confirmation while the remote shell may still be alive.
+                tracing::warn!("failed to query SessionHub child processes: {error}");
+                1
+            });
+        }
         self.job_handle
             .map_or(0, nmt_platform::job_other_process_count)
     }

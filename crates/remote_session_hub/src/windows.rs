@@ -36,6 +36,8 @@ pub struct SessionOptions {
     pub cols: u16,
     pub rows: u16,
     pub scrollback_lines: usize,
+    #[serde(default)]
+    pub manage_process_tree: bool,
 }
 
 impl Default for SessionOptions {
@@ -49,6 +51,7 @@ impl Default for SessionOptions {
             cols: 80,
             rows: 24,
             scrollback_lines: 10_000,
+            manage_process_tree: false,
         }
     }
 }
@@ -245,6 +248,7 @@ struct RemoteSession {
     engine: Arc<FairMutex<GhosttyTerminal>>,
     stream: Arc<Mutex<StreamState>>,
     shutdown_sent: AtomicBool,
+    job_handle: Option<isize>,
 }
 
 impl RemoteSession {
@@ -276,6 +280,7 @@ impl Drop for RemoteSession {
 pub struct RemoteSessionHub {
     next_session_id: AtomicU64,
     sessions: Mutex<HashMap<SessionId, Arc<RemoteSession>>>,
+    spawn_lock: Mutex<()>,
 }
 
 impl RemoteSessionHub {
@@ -293,16 +298,23 @@ impl RemoteSessionHub {
         )));
         let vt_modes = Arc::new(AtomicU32::new(0));
         let stream = Arc::new(Mutex::new(StreamState::default()));
-        let pty = nmt_platform::create_pty_with_env(
-            &options.shell,
-            options.args.clone(),
-            &options.working_directory,
-            options.cols,
-            options.rows,
-            &options.environment_overrides,
-            options.starting_title.as_deref(),
-        )
-        .map_err(HubError::Spawn)?;
+        let pty = {
+            // The platform toggle is process-wide, so spawning is serialized to
+            // preserve each session's requested Job Object policy.
+            let _spawn = self.spawn_lock.lock();
+            nmt_platform::set_job_management(options.manage_process_tree);
+            nmt_platform::create_pty_with_env(
+                &options.shell,
+                options.args.clone(),
+                &options.working_directory,
+                options.cols,
+                options.rows,
+                &options.environment_overrides,
+                options.starting_title.as_deref(),
+            )
+            .map_err(HubError::Spawn)?
+        };
+        let job_handle = pty.job_handle().map(|handle| handle as isize);
 
         let mut pipe = PtyPipe::new(
             render_buffer,
@@ -334,6 +346,7 @@ impl RemoteSessionHub {
             engine: pipe.engine(),
             stream,
             shutdown_sent: AtomicBool::new(false),
+            job_handle,
         });
         drop(pipe.spawn());
         self.sessions.lock().insert(id, session);
@@ -409,6 +422,13 @@ impl RemoteSessionHub {
             .ok_or(HubError::SessionNotFound(id))?;
         session.shutdown();
         Ok(())
+    }
+
+    pub fn child_process_count(&self, id: SessionId) -> Result<usize, HubError> {
+        Ok(self
+            .get(id)?
+            .job_handle
+            .map_or(0, nmt_platform::job_other_process_count))
     }
 
     pub fn list_sessions(&self) -> Vec<SessionInfo> {

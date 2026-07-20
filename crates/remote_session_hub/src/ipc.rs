@@ -397,6 +397,10 @@ pub enum HubRequest {
         request_id: u64,
         session_id: SessionId,
     },
+    ChildProcessCount {
+        request_id: u64,
+        session_id: SessionId,
+    },
     Shutdown,
 }
 
@@ -451,6 +455,14 @@ impl HubRequest {
                 put_u64(&mut out, session_id.0);
             }
             Self::Shutdown => out.push(7),
+            Self::ChildProcessCount {
+                request_id,
+                session_id,
+            } => {
+                out.push(8);
+                put_u64(&mut out, *request_id);
+                put_u64(&mut out, session_id.0);
+            }
         }
         Ok(out)
     }
@@ -491,6 +503,10 @@ impl HubRequest {
                 session_id: SessionId(take_u64(&mut payload)?),
             },
             7 => Self::Shutdown,
+            8 => Self::ChildProcessCount {
+                request_id: take_u64(&mut payload)?,
+                session_id: SessionId(take_u64(&mut payload)?),
+            },
             _ => return Err(IpcError::MalformedMessage("unknown request kind")),
         };
         if !payload.is_empty() {
@@ -525,6 +541,10 @@ pub enum HubResponse {
     },
     Ack {
         request_id: u64,
+    },
+    ChildProcessCount {
+        request_id: u64,
+        count: u64,
     },
     Error {
         request_id: u64,
@@ -579,6 +599,11 @@ impl HubResponse {
                 out.push(0x85);
                 put_u64(&mut out, *request_id);
             }
+            Self::ChildProcessCount { request_id, count } => {
+                out.push(0x86);
+                put_u64(&mut out, *request_id);
+                put_u64(&mut out, *count);
+            }
             Self::Error {
                 request_id,
                 message,
@@ -619,6 +644,10 @@ impl HubResponse {
             },
             0x85 => Self::Ack {
                 request_id: take_u64(&mut payload)?,
+            },
+            0x86 => Self::ChildProcessCount {
+                request_id: take_u64(&mut payload)?,
+                count: take_u64(&mut payload)?,
             },
             0xff => Self::Error {
                 request_id: take_u64(&mut payload)?,
@@ -764,6 +793,19 @@ pub fn run_hub_host(os_id: &str) -> Result<(), IpcError> {
                     session_id,
                 } => match hub.kill(session_id) {
                     Ok(()) => send_response(&mut endpoint, HubResponse::Ack { request_id })?,
+                    Err(error) => send_error(&mut endpoint, request_id, error)?,
+                },
+                HubRequest::ChildProcessCount {
+                    request_id,
+                    session_id,
+                } => match hub.child_process_count(session_id) {
+                    Ok(count) => send_response(
+                        &mut endpoint,
+                        HubResponse::ChildProcessCount {
+                            request_id,
+                            count: count as u64,
+                        },
+                    )?,
                     Err(error) => send_error(&mut endpoint, request_id, error)?,
                 },
                 HubRequest::Shutdown => return Ok(()),
