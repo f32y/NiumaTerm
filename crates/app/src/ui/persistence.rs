@@ -137,9 +137,11 @@ impl Shell {
         };
         let surface_id = Self::alloc_id(next_id);
         let pane = Self::spawn_default_pane(cx, surface_id, default_profile, spawn_cwd);
+        let title = pane.read(cx).profile_name().to_string();
         let tabs = TabManager::new(
             PaneTree::new_leaf(PaneId(surface_id), pane),
             TabId(surface_id),
+            title,
         );
         let workspace_id = Self::alloc_id(next_id);
         WorkspaceManager::new(
@@ -257,18 +259,19 @@ impl Shell {
                 }
             };
             if let Some((tree, tab_id)) = entry {
-                restored.push((tree, tab_id, name));
+                let default_title = tree.focused_pane().read(cx).profile_name().to_string();
+                restored.push((tree, tab_id, name, default_title));
             }
         }
 
         let mut restored = restored.into_iter();
-        let (first_pane, first_id, first_name) = restored.next()?;
-        let mut tab_manager = TabManager::new(first_pane, first_id);
+        let (first_pane, first_id, first_name, first_default_title) = restored.next()?;
+        let mut tab_manager = TabManager::new(first_pane, first_id, first_default_title);
         if let Some(name) = first_name {
             tab_manager.rename(first_id, name);
         }
-        for (pane, id, name) in restored {
-            tab_manager.new_tab(pane, id);
+        for (pane, id, name, default_title) in restored {
+            tab_manager.new_tab(pane, id, default_title);
             if let Some(name) = name {
                 tab_manager.rename(id, name);
             }

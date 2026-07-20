@@ -120,6 +120,7 @@ impl TerminalSurface {
         shell: Option<String>,
         args: Vec<String>,
         working_dir: Option<String>,
+        starting_title: String,
         fixed_bottom_requested: bool,
         environment_overrides: Vec<(String, String)>,
     ) -> Result<Self, String> {
@@ -130,6 +131,7 @@ impl TerminalSurface {
             shell: shell.clone(),
             args: args.clone(),
             working_dir: working_dir.clone(),
+            starting_title: Some(starting_title),
             cols: metrics::COLS,
             rows: metrics::ROWS,
             environment_overrides,

@@ -318,7 +318,7 @@ mod tests {
     /// workspace id and its single tab's surface value both equal the 1-based index
     /// for easy assertions.
     fn manager(n: u32) -> WorkspaceManager<u32> {
-        let tabs = || TabManager::new(1u32, TabId(1));
+        let tabs = || TabManager::new(1u32, TabId(1), "PowerShell".into());
         let mut mgr = WorkspaceManager::new(
             tabs(),
             WorkspaceId(1),
@@ -350,7 +350,7 @@ mod tests {
     fn new_workspace_becomes_active() {
         let mut mgr = manager(1);
         mgr.new_workspace(
-            TabManager::new(9u32, TabId(9)),
+            TabManager::new(9u32, TabId(9), "PowerShell".into()),
             WorkspaceId(2),
             "Workspace 2".into(),
             "/".into(),
@@ -397,7 +397,7 @@ mod tests {
     fn active_tabs_routes_to_active_workspace() {
         let mut mgr = manager(1);
         mgr.new_workspace(
-            TabManager::new(42u32, TabId(42)),
+            TabManager::new(42u32, TabId(42), "PowerShell".into()),
             WorkspaceId(2),
             "Workspace 2".into(),
             "/".into(),
