@@ -168,6 +168,8 @@ pub struct AppSettings {
     pub show_agent_usage: bool,
     /// Restore the last saved workspace/tab session on startup.
     pub restore_last_session_when_opening: bool,
+    /// Run newly opened terminals through the out-of-process SessionHub.
+    pub remote_session_enabled: bool,
     /// Manage each tab's shell with a Windows Job Object: closing the tab
     /// kills the shell's entire process tree. Applies to new tabs.
     pub manage_subprocess_job: bool,
@@ -206,6 +208,7 @@ impl Default for AppSettings {
             enable_agent_hooks: true,
             show_agent_usage: true,
             restore_last_session_when_opening: true,
+            remote_session_enabled: false,
             manage_subprocess_job: false,
             warn_before_terminating_shell: true,
             confirm_before_closing_workspace: true,
@@ -351,6 +354,7 @@ impl AppSettings {
             enable_agent_hooks: config.agent.enable_agent_hooks,
             show_agent_usage: config.agent.show_agent_usage,
             restore_last_session_when_opening: config.system.restore_last_session_when_opening,
+            remote_session_enabled: config.remote_session.enabled,
             manage_subprocess_job: config.system.manage_subprocess_job,
             warn_before_terminating_shell: config.system.warn_before_terminating_shell,
             confirm_before_closing_workspace: config.system.confirm_before_closing_workspace,
@@ -461,6 +465,9 @@ impl AppSettings {
             confirm_before_closing_workspace: self.confirm_before_closing_workspace,
             prioritize_ui_threads: self.prioritize_ui_threads,
         };
+        let remote_session = nmt_config::remote_session::RemoteSession {
+            enabled: self.remote_session_enabled,
+        };
         let profiles: Vec<nmt_config::profile::Profile> = self
             .profiles
             .iter()
@@ -475,6 +482,7 @@ impl AppSettings {
             &appearance,
             &agent,
             &system,
+            &remote_session,
             &profiles,
             &self.default_profile,
         ) {
@@ -1373,6 +1381,24 @@ pub fn settings_view(cx: &App) -> Settings {
         )
         .page(profiles_page(&profiles))
         .page(agent_page())
+        .page(
+            SettingPage::new("Remote Session")
+                .default_open(true)
+                .group(SettingGroup::new().title("General").item(
+                    SettingItem::new(
+                        "Remote Session - Enabled",
+                        SettingField::switch(
+                            |cx| cx.global::<AppSettings>().remote_session_enabled,
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().remote_session_enabled = value;
+                            },
+                        ),
+                    )
+                    .description(
+                        "Run newly opened terminals in SessionHub; existing terminals keep their current backend.",
+                    ),
+                )),
+        )
         .page(
             SettingPage::new("System")
                 .default_open(true)

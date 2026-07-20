@@ -147,14 +147,20 @@ impl TerminalPane {
         let (wake, wake_rx) = wake::wake_channel();
         let agent_route = agent_process().allocate_route();
         let environment = agent_process().environment_for(&agent_route);
-        let fixed_bottom_requested =
-            cx.read_global(|settings: &AppSettings, _| settings.input_style.is_fixed_bottom());
+        let (fixed_bottom_requested, remote_session_enabled) =
+            cx.read_global(|settings: &AppSettings, _| {
+                (
+                    settings.input_style.is_fixed_bottom(),
+                    settings.remote_session_enabled,
+                )
+            });
         let surface = terminal_surface_for_tab(
             &wake,
             surface_id,
             &tab_state,
             &profile_name,
             fixed_bottom_requested,
+            remote_session_enabled,
             environment,
         )?;
         Ok(cx.new(|cx| {
@@ -1192,6 +1198,7 @@ fn terminal_surface_for_tab(
     state: &TabState,
     profile_name: &str,
     fixed_bottom_requested: bool,
+    remote_session_enabled: bool,
     environment_overrides: Vec<(String, String)>,
 ) -> Result<TerminalSurface, String> {
     match TerminalSurface::for_gpui(
@@ -1202,6 +1209,7 @@ fn terminal_surface_for_tab(
         state.cwd.clone(),
         profile_name.to_string(),
         fixed_bottom_requested,
+        remote_session_enabled,
         environment_overrides.clone(),
     ) {
         Ok(surface) => Ok(surface),
@@ -1215,6 +1223,7 @@ fn terminal_surface_for_tab(
                 None,
                 profile_name.to_string(),
                 fixed_bottom_requested,
+                remote_session_enabled,
                 environment_overrides,
             )
         }

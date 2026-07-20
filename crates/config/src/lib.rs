@@ -12,6 +12,7 @@ pub mod local_state;
 pub mod navigation;
 pub mod platform;
 pub mod profile;
+pub mod remote_session;
 pub mod render_types;
 pub mod renderer;
 pub mod system;
@@ -187,6 +188,9 @@ pub struct Config {
     /// System-behavior settings (settings dialog, System page).
     #[serde(default = "system::SystemConfig::default")]
     pub system: system::SystemConfig,
+    /// Out-of-process terminal-session settings (settings dialog, Remote Session page).
+    #[serde(default, rename = "remote-session")]
+    pub remote_session: remote_session::RemoteSession,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -726,6 +730,7 @@ impl Default for Config {
             profiles: profile::ProfilesConfig::default(),
             agent: agent::AgentConfig::default(),
             system: system::SystemConfig::default(),
+            remote_session: remote_session::RemoteSession::default(),
         }
     }
 }

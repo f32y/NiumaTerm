@@ -882,6 +882,10 @@ pub struct PtyPipe<T: nmt_platform::EventedPty, U: EventListener> {
     /// exposes no generation signal). The frontend's deep-search corpus cache
     /// compares it to detect content changes and invalidate cached views.
     content_version: Arc<AtomicU64>,
+    /// Optional observer for the exact VT stream accepted by the engine. It runs
+    /// under the engine lock so a checkpoint and its following byte sequence can
+    /// be ordered atomically; observers must therefore return promptly.
+    output_sink: Option<Arc<dyn Fn(Arc<[u8]>) + Send + Sync>>,
     event_proxy: U,
     window_id: WindowId,
     route_id: usize,
@@ -1124,6 +1128,7 @@ where
             back_buffer: RenderBuffer::new(cols as usize, rows as usize),
             vt_modes,
             content_version: Arc::new(AtomicU64::new(0)),
+            output_sink: None,
             event_proxy,
             window_id,
             route_id,
@@ -1178,6 +1183,11 @@ where
         Arc::clone(&self.content_version)
     }
 
+    /// Observe parsed VT output without taking ownership of the PTY loop.
+    pub fn set_output_sink(&mut self, sink: impl Fn(Arc<[u8]>) + Send + Sync + 'static) {
+        self.output_sink = Some(Arc::new(sink));
+    }
+
     #[inline]
     fn pty_read(&mut self, _state: &mut PtyState, buf: &mut [u8]) -> io::Result<()> {
         let mut unprocessed = 0;
@@ -1210,10 +1220,12 @@ where
             // Feed the bytes into Ghostty's VT engine (under the engine lock).
             // The render buffer is on a separate lock, so this never blocks a
             // render frame while the same engine snapshot is locked.
+            let output_sink = self.output_sink.clone();
             {
                 let mut engine = self.ghostty.lock();
                 let echo_pending_at_entry = cfg!(windows) && self.conpty_resize_echo_pending;
                 let mut rewritten = None;
+                let mut synthetic_prefix = None;
                 // Some(R_conpty) means SU realignment ran during this read.
                 let mut su_realigned_to: Option<u16> = None;
                 let repaint_window =
@@ -1239,7 +1251,9 @@ where
                             engine.cols(),
                             engine.rows(),
                         ) {
-                            engine.write_vt(format!("\x1b[{n}S").as_bytes());
+                            let realign = format!("\x1b[{n}S").into_bytes();
+                            engine.write_vt(&realign);
+                            synthetic_prefix = Some(realign);
                             su_realigned_to = Some(r_conpty);
                             self.conpty_resize_echo_pending = false;
                         }
@@ -1282,6 +1296,13 @@ where
                     }
                 }
                 let bytes = rewritten.as_deref().unwrap_or(&buf[..unprocessed]);
+                let observed_output = output_sink.as_ref().map(|_| match synthetic_prefix {
+                    Some(mut prefix) => {
+                        prefix.extend_from_slice(bytes);
+                        Arc::from(prefix)
+                    }
+                    None => Arc::from(bytes),
+                });
                 let was_rewritten = rewritten.is_some();
                 // Capture the pre-rewrite ConPTY bytes + cursor visibility for the
                 // trace so we can compare original vs rewritten CUP rows.
@@ -1456,6 +1477,9 @@ where
                             escape_bytes(&bytes[..bytes.len().min(240)])
                         ),
                     );
+                }
+                if let (Some(sink), Some(output)) = (&output_sink, observed_output) {
+                    sink(output);
                 }
             }
             // Content changed, so invalidate the cached deep-search corpus.

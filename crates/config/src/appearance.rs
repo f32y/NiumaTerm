@@ -10,6 +10,7 @@ use toml_edit::{DocumentMut, Item, Table, value};
 
 use crate::agent::AgentConfig;
 use crate::profile::Profile;
+use crate::remote_session::RemoteSession;
 use crate::system::SystemConfig;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -166,7 +167,7 @@ impl Default for AppearanceConfig {
 }
 
 /// Persist the dialog-managed settings into `config.toml`: the `[appearance]`,
-/// `[agent]`, `[system]`, and `[[profiles]]` sections. All other file content is
+/// `[agent]`, `[system]`, `[remote-session]`, and `[[profiles]]` sections. All other file content is
 /// preserved.
 ///
 /// The write is atomic (temp file + rename). If an existing config file does
@@ -177,6 +178,7 @@ pub fn save_settings(
     appearance: &AppearanceConfig,
     agent: &AgentConfig,
     system: &SystemConfig,
+    remote_session: &RemoteSession,
     profiles: &[Profile],
     default_profile: &str,
 ) -> std::io::Result<()> {
@@ -186,6 +188,7 @@ pub fn save_settings(
         appearance,
         agent,
         system,
+        remote_session,
         profiles,
         default_profile,
     )
@@ -197,6 +200,7 @@ fn save_settings_to(
     appearance: &AppearanceConfig,
     agent: &AgentConfig,
     system: &SystemConfig,
+    remote_session: &RemoteSession,
     profiles: &[Profile],
     default_profile: &str,
 ) -> std::io::Result<()> {
@@ -217,6 +221,7 @@ fn save_settings_to(
         appearance,
         agent,
         system,
+        remote_session,
         profiles,
         default_profile,
     );
@@ -238,6 +243,7 @@ fn patch_document(
     appearance: &AppearanceConfig,
     agent: &AgentConfig,
     system: &SystemConfig,
+    remote_session: &RemoteSession,
     profiles: &[Profile],
     default_profile: &str,
 ) {
@@ -270,6 +276,9 @@ fn patch_document(
 
     ensure_explicit_table(doc, "system");
     crate::system::patch_document(doc, system);
+
+    ensure_explicit_table(doc, "remote-session");
+    crate::remote_session::patch_document(doc, remote_session);
 
     ensure_explicit_table(doc, "agent");
     crate::agent::patch_document(doc, agent);
@@ -323,6 +332,10 @@ mod tests {
         }
     }
 
+    fn sample_remote_session() -> RemoteSession {
+        RemoteSession { enabled: true }
+    }
+
     fn sample_agent() -> AgentConfig {
         AgentConfig {
             enable_agent_hooks: false,
@@ -345,6 +358,7 @@ mod tests {
             &sample_appearance(),
             &sample_agent(),
             &sample_system(),
+            &sample_remote_session(),
             &sample_profiles(),
             "PowerShell",
         );
@@ -366,6 +380,7 @@ mod tests {
         assert_eq!(config.appearance, sample_appearance());
         assert_eq!(config.agent, sample_agent());
         assert_eq!(config.system, sample_system());
+        assert_eq!(config.remote_session, sample_remote_session());
         assert_eq!(config.profiles.list, sample_profiles());
         assert_eq!(config.profiles.default, "PowerShell");
     }
@@ -398,6 +413,7 @@ mod tests {
                 &sample_appearance(),
                 &sample_agent(),
                 &sample_system(),
+                &sample_remote_session(),
                 &sample_profiles(),
                 "PowerShell",
             )

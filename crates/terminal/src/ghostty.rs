@@ -2019,8 +2019,26 @@ impl GhosttyTerminal {
         unwrap: bool,
         trim: bool,
     ) -> Result<String> {
+        self.format_terminal(vt::FormatterFormat::PLAIN, selection, unwrap, trim)
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    /// Export the complete terminal state as a VT stream. Replaying the returned
+    /// bytes reconstructs the current screen, styles, modes, palette, and cursor,
+    /// which lets a newly attached client start from a consistent checkpoint.
+    pub fn format_vt_state(&mut self) -> Result<Vec<u8>> {
+        self.format_terminal(vt::FormatterFormat::VT, None, false, false)
+    }
+
+    fn format_terminal(
+        &mut self,
+        emit: vt::FormatterFormat::Type,
+        selection: Option<&vt::Selection>,
+        unwrap: bool,
+        trim: bool,
+    ) -> Result<Vec<u8>> {
         let mut opts = vt::sized!(vt::FormatterTerminalOptions);
-        opts.emit = vt::FormatterFormat::PLAIN;
+        opts.emit = emit;
         opts.unwrap = unwrap;
         opts.trim = trim;
         opts.extra = vt::sized!(vt::FormatterTerminalExtra);
@@ -2039,12 +2057,12 @@ impl GhosttyTerminal {
             vt::ghostty_formatter_format_alloc(formatter, ptr::null(), &mut out_ptr, &mut out_len)
         });
 
-        let text = res.map(|_| {
+        let bytes = res.map(|_| {
             if out_ptr.is_null() || out_len == 0 {
-                String::new()
+                Vec::new()
             } else {
                 let bytes = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
-                String::from_utf8_lossy(bytes).into_owned()
+                bytes.to_vec()
             }
         });
 
@@ -2052,7 +2070,7 @@ impl GhosttyTerminal {
             unsafe { vt::ghostty_free(ptr::null(), out_ptr, out_len) };
         }
         unsafe { vt::ghostty_formatter_free(formatter) };
-        text
+        bytes
     }
 
     /// Selection-to-string for a SCREEN-coordinate range (inclusive endpoints).
