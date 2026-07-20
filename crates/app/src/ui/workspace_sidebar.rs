@@ -51,6 +51,36 @@ impl IconNamed for IdleIcon {
     }
 }
 
+fn agent_status_indicator(
+    status: AgentRuntimeStatus,
+    busy_id: impl Into<gpui::ElementId>,
+) -> (AnyElement, &'static str) {
+    match status {
+        AgentRuntimeStatus::Running => (
+            ProgressCircle::new(busy_id)
+                .small()
+                .loading(true)
+                .color(rgb(0xD36803))
+                .into_any_element(),
+            "Running",
+        ),
+        AgentRuntimeStatus::NeedsInput => (
+            Icon::new(IdleIcon)
+                .small()
+                .text_color(rgb(0x4A90E2))
+                .into_any_element(),
+            "Needs input",
+        ),
+        AgentRuntimeStatus::Idle => (
+            Icon::new(IdleIcon)
+                .small()
+                .text_color(rgb(0x46C878))
+                .into_any_element(),
+            "Idle",
+        ),
+    }
+}
+
 /// Sidebar pinned-workspace glyph (`assets/icons/pin.svg`).
 struct PinIcon;
 
@@ -66,32 +96,45 @@ struct WorkspaceDrag {
 
 /// The floating preview shown under the cursor while dragging a workspace: a
 /// full-size replica of the sidebar item (name and cwd lines on the active
-/// fill). The fill's alpha is composited onto the sidebar background here,
-/// because the ghost floats over arbitrary content where a bare alpha fill
-/// would wash out.
+/// fill). Its background layers are composited into one opaque color because
+/// the ghost leaves the sidebar surface and floats over arbitrary content.
 struct WorkspaceDragPreview {
     name: SharedString,
     cwd: SharedString,
+    agent_status: AgentRuntimeStatus,
     width: f32,
 }
 
 impl Render for WorkspaceDragPreview {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
+        let (indicator, status_label) =
+            agent_status_indicator(self.agent_status, "workspace-drag-busy");
+        let indicator = div()
+            .id("workspace-drag-status")
+            .aria_label(status_label)
+            .child(indicator);
+        let background = cx
+            .theme()
+            .background
+            .blend(cx.theme().sidebar)
+            .blend(cx.theme().sidebar_accent);
+
+        h_flex()
+            .w(px(self.width))
+            .px_2()
+            .py_1()
+            .gap_2()
+            .items_center()
             .rounded(cx.theme().radius)
-            .bg(cx.theme().sidebar)
+            .overflow_hidden()
+            .bg(background)
+            .text_color(cx.theme().sidebar_accent_foreground)
+            .child(indicator)
             .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .items_start()
-                    .w(px(self.width))
-                    .px_2()
-                    .py_1()
+                v_flex()
+                    .flex_1()
                     .overflow_hidden()
-                    .rounded(cx.theme().radius)
-                    .bg(cx.theme().list_active)
-                    .text_color(cx.theme().sidebar_foreground)
+                    .items_start()
                     .child(
                         div()
                             .w_full()
@@ -106,7 +149,7 @@ impl Render for WorkspaceDragPreview {
                             .text_left()
                             .text_xs()
                             .truncate()
-                            .text_color(cx.theme().sidebar_foreground.opacity(0.6))
+                            .text_color(cx.theme().sidebar_accent_foreground.opacity(0.6))
                             .child(self.cwd.clone()),
                     ),
             )
@@ -130,6 +173,9 @@ pub(super) struct Sidebar {
     /// pointer enters another item — clearing on exit would oscillate, because
     /// opening the gap moves the hovered item out from under the pointer.
     drag_over: Option<usize>,
+    /// Source item hidden with zero opacity during a drag so its layout slot
+    /// remains stable while the floating preview follows the pointer.
+    dragging: Option<usize>,
 }
 
 /// How far a workspace item slides down to open the insertion gap while a
@@ -144,6 +190,7 @@ impl Sidebar {
             width,
             scroll: ScrollHandle::new(),
             drag_over: None,
+            dragging: None,
         }
     }
 
@@ -160,30 +207,8 @@ impl Sidebar {
     ) -> AnyElement {
         // Busy = animated progress circle, idle = static SVG dot, vertically
         // centered on the item's left. SVG tint is applied as text color.
-        let (indicator, status_label): (AnyElement, &'static str) = match ws.agent_status {
-            AgentRuntimeStatus::Running => (
-                ProgressCircle::new(("workspace-busy", idx))
-                    .small()
-                    .loading(true)
-                    .color(rgb(0xD36803))
-                    .into_any_element(),
-                "Running",
-            ),
-            AgentRuntimeStatus::NeedsInput => (
-                Icon::new(IdleIcon)
-                    .small()
-                    .text_color(rgb(0x4A90E2))
-                    .into_any_element(),
-                "Needs input",
-            ),
-            AgentRuntimeStatus::Idle => (
-                Icon::new(IdleIcon)
-                    .small()
-                    .text_color(rgb(0x46C878))
-                    .into_any_element(),
-                "Idle",
-            ),
-        };
+        let (indicator, status_label) =
+            agent_status_indicator(ws.agent_status, ("workspace-busy", idx));
         let indicator = div()
             .id(("workspace-status", idx))
             .aria_label(status_label)
@@ -265,6 +290,7 @@ impl Sidebar {
         };
         let drag_name: SharedString = ws.name.clone().into();
         let drag_cwd: SharedString = ws.cwd.clone().into();
+        let drag_agent_status = ws.agent_status;
         // Replicate the item's rendered width: sidebar width minus the card
         // gutter/border and the card's inner paddings around the list.
         let drag_width = (self.width - 36.0).max(80.0);
@@ -320,6 +346,7 @@ impl Sidebar {
         // Right-click menu. Close reuses the same confirm-gated path as the
         // hover `×` (last workspace included: quit/replace/cancel dialog).
         let shell = cx.entity();
+        let drag_shell = shell.clone();
         let pinned = ws.pinned;
         let closeable = ws.closeable;
         let pin_label = if pinned { "Unpin" } else { "Pin" };
@@ -327,15 +354,21 @@ impl Sidebar {
         div()
             .id(("workspace-menu", idx))
             .w_full()
+            .when(self.dragging == Some(idx), |this| this.opacity(0.0))
             // Make way for the dragged item: the hovered item slides down,
             // opening an insertion gap at the pointer.
             .when(self.drag_over == Some(idx), |this| {
                 this.mt(px(WS_MAKE_WAY_PX))
             })
             .on_drag(WorkspaceDrag { from: idx }, move |_, _, _, cx| {
+                drag_shell.update(cx, |this, cx| {
+                    this.sidebar.dragging = Some(idx);
+                    cx.notify();
+                });
                 cx.new(|_| WorkspaceDragPreview {
                     name: drag_name.clone(),
                     cwd: drag_cwd.clone(),
+                    agent_status: drag_agent_status,
                     width: drag_width,
                 })
             })
@@ -358,6 +391,7 @@ impl Sidebar {
                 // drop.
                 cx.stop_propagation();
                 this.sidebar.drag_over = None;
+                this.sidebar.dragging = None;
                 this.reorder_workspaces(drag.from, idx, window, cx);
             }))
             .context_menu(move |menu, _, _| {
@@ -404,8 +438,9 @@ impl Sidebar {
         // without a drop on the list (cancelled via Escape, or released
         // elsewhere) — the cancel itself refreshes the window, so this always
         // gets a chance to run.
-        if self.drag_over.is_some() && !cx.has_active_drag() {
+        if !cx.has_active_drag() {
             self.drag_over = None;
+            self.dragging = None;
         }
         let width = self.width;
         // Fixed-width content; the animated wrapper below clips it so the buttons
@@ -445,6 +480,7 @@ impl Sidebar {
                     // hitbox) still lands on the tracked insertion position
                     // instead of silently ending the drag.
                     .on_drop(cx.listener(|this, drag: &WorkspaceDrag, window, cx| {
+                        this.sidebar.dragging = None;
                         if let Some(to) = this.sidebar.drag_over.take() {
                             this.reorder_workspaces(drag.from, to, window, cx);
                         }
