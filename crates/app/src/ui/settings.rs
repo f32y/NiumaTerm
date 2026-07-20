@@ -1395,7 +1395,7 @@ pub fn settings_view(cx: &App) -> Settings {
                         ),
                     )
                     .description(
-                        "Run newly opened terminals in SessionHub; existing terminals keep their current backend.",
+                        "Run terminals in SessionHub. Changes take effect after restarting NiumaTerm. (*)",
                     ),
                 )),
         )
