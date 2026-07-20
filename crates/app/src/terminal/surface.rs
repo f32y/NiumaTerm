@@ -517,7 +517,7 @@ impl TerminalSurface {
         true
     }
 
-    pub(crate) fn frame(&self) -> TerminalFrame {
+    pub(crate) fn frame(&self, previous: Option<&TerminalFrame>) -> TerminalFrame {
         let total_start = std::time::Instant::now();
         let selection = self.selection_range();
         // Resolve live image generations before taking the render-buffer lock so the
@@ -535,7 +535,7 @@ impl TerminalSurface {
             // (total - sel - extract) is the lock-wait + selection lock cost.
             let extract_start = std::time::Instant::now();
             let frame =
-                TerminalFrame::from_render_buffer_with_selection(buf, selection, &generations);
+                TerminalFrame::from_render_buffer_reusing(buf, selection, &generations, previous);
             let extract_us = extract_start.elapsed().as_micros();
             tracing::trace!(
                 target: "perf",

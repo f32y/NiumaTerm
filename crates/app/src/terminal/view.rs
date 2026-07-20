@@ -183,7 +183,7 @@ impl TerminalPane {
                 .set_alignment(block_list_alignment(fixed_bottom));
             this.surface.set_theme_colors(&nmt_config::active_colors());
             this.cell_metrics = None;
-            this.frame_cache.invalidate();
+            this.frame_cache.invalidate_full();
             cx.notify();
         })
         .detach();
@@ -289,7 +289,9 @@ impl TerminalPane {
     }
 
     fn refresh_frame(&mut self) {
-        self.frame_cache.rebuild(self.surface.frame());
+        let previous = self.frame_cache.reusable_frame();
+        self.frame_cache
+            .rebuild(self.surface.frame(previous.as_ref()));
     }
 
     fn invalidate(&mut self, cx: &mut Context<Self>) {

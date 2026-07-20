@@ -15,6 +15,8 @@ use nmt_terminal::terminal::style::{Style, StyleFlags};
 #[derive(Clone, Default)]
 pub(crate) struct TerminalFrame {
     lines: Arc<[TerminalLine]>,
+    line_states: Arc<[TerminalLineState]>,
+    cols: usize,
     cursor: Option<TerminalCursor>,
     scrollbar: nmt_terminal::ghostty::ScrollbarInfo,
     /// Paintable Kitty image placements resolved against the session image cache
@@ -23,13 +25,21 @@ pub(crate) struct TerminalFrame {
 }
 
 #[derive(Clone)]
-pub(crate) struct TerminalLine {
+pub(crate) struct TerminalLine(Arc<TerminalLineData>);
+
+struct TerminalLineData {
     text: SharedString,
     text_hash: u64,
     cells: Box<[TerminalCell]>,
     runs: Box<[StyleRun]>,
     #[cfg(test)]
     cursor_col: Option<u16>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct TerminalLineState {
+    version: u64,
+    selection: Option<RowSelection>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,6 +89,7 @@ pub(crate) struct TerminalFrameCache {
     /// and the rebuild must keep using what is on screen — mapping against an
     /// empty cache flips the row offsets mid-drag (broken-selection bug).
     stale: bool,
+    full_invalidation: bool,
 }
 
 type GenerationMap =
@@ -90,25 +101,50 @@ impl TerminalFrame {
         Self::from_render_buffer_with_selection(buf, None, &GenerationMap::new())
     }
 
+    #[cfg(test)]
     pub(crate) fn from_render_buffer_with_selection(
         buf: &RenderBuffer,
         selection: Option<SelectionRange>,
         generations: &GenerationMap,
     ) -> Self {
+        Self::from_render_buffer_reusing(buf, selection, generations, None)
+    }
+
+    pub(crate) fn from_render_buffer_reusing(
+        buf: &RenderBuffer,
+        selection: Option<SelectionRange>,
+        generations: &GenerationMap,
+        previous: Option<&Self>,
+    ) -> Self {
         let colors = BackgroundColors::new(buf.colors());
         let cursor = frame_cursor(buf, &colors);
+        let reusable = previous.filter(|frame| {
+            frame.cols == buf.cols()
+                && frame.lines.len() == buf.rows()
+                && frame.line_states.len() == buf.rows()
+                && buf.row_versions().len() == buf.rows()
+        });
 
-        let lines = (0..buf.rows())
-            .map(|row| {
-                extract_row_with_colors(
-                    buf,
-                    row,
-                    cursor_for_row(cursor, row),
-                    &colors,
-                    row_selection_for(selection, row, buf.cols()),
-                )
-            })
-            .collect::<Vec<_>>();
+        let mut lines = Vec::with_capacity(buf.rows());
+        let mut line_states = Vec::with_capacity(buf.rows());
+        for row in 0..buf.rows() {
+            let state = TerminalLineState {
+                version: buf.row_versions().get(row).copied().unwrap_or_default(),
+                selection: row_selection_for(selection, row, buf.cols()),
+            };
+            let row_cursor = cursor_for_row(cursor, row);
+            let line = reusable
+                .filter(|frame| {
+                    frame.line_states[row] == state
+                        && cursor_for_row(frame.cursor, row) == row_cursor
+                })
+                .map_or_else(
+                    || extract_row_with_colors(buf, row, row_cursor, &colors, state.selection),
+                    |frame| frame.lines[row].clone(),
+                );
+            lines.push(line);
+            line_states.push(state);
+        }
 
         // Reuse one shared empty `Arc` for the common no-image frame so a graphics-free
         // rebuild allocates nothing for `images` (an empty `Vec::into::<Arc<[_]>>()`
@@ -122,6 +158,8 @@ impl TerminalFrame {
 
         Self {
             lines: lines.into_boxed_slice().into(),
+            line_states: line_states.into_boxed_slice().into(),
+            cols: buf.cols(),
             cursor,
             scrollbar: buf.scrollbar(),
             images,
@@ -178,24 +216,47 @@ impl From<ColorRgb> for TerminalColor {
 
 impl TerminalLine {
     pub(crate) fn text(&self) -> &SharedString {
-        &self.text
+        &self.0.text
     }
 
     pub(crate) fn cells(&self) -> &[TerminalCell] {
-        &self.cells
+        &self.0.cells
     }
 
     pub(crate) fn runs(&self) -> &[StyleRun] {
-        &self.runs
+        &self.0.runs
     }
 
     pub(crate) fn text_hash(&self) -> u64 {
-        self.text_hash
+        self.0.text_hash
     }
 
     #[cfg(test)]
     pub(crate) fn cursor_col(&self) -> Option<u16> {
-        self.cursor_col
+        self.0.cursor_col
+    }
+
+    fn new(
+        text: String,
+        cells: Vec<TerminalCell>,
+        runs: Vec<StyleRun>,
+        cursor_col: Option<u16>,
+    ) -> Self {
+        let text_hash = hash_line(&text, &runs);
+        let _ = cursor_col;
+        Self(Arc::new(TerminalLineData {
+            text: text.into(),
+            text_hash,
+            cells: cells.into_boxed_slice(),
+            runs: runs.into_boxed_slice(),
+            #[cfg(test)]
+            cursor_col,
+        }))
+    }
+
+    #[cfg(test)]
+    fn ptr_eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
     }
 }
 
@@ -208,14 +269,7 @@ pub(crate) fn line_from_parts(
     cells: Vec<TerminalCell>,
     runs: Vec<StyleRun>,
 ) -> TerminalLine {
-    TerminalLine {
-        text_hash: hash_line(&text, &runs),
-        text: text.into(),
-        cells: cells.into_boxed_slice(),
-        runs: runs.into_boxed_slice(),
-        #[cfg(test)]
-        cursor_col: None,
-    }
+    TerminalLine::new(text, cells, runs, None)
 }
 
 /// Accumulates display cells into a `TerminalLine` — the one display-
@@ -279,6 +333,10 @@ impl LineBuilder {
 
     pub(crate) fn finish(self) -> TerminalLine {
         line_from_parts(self.text, self.cells, self.runs)
+    }
+
+    fn finish_with_cursor(self, cursor_col: Option<u16>) -> TerminalLine {
+        TerminalLine::new(self.text, self.cells, self.runs, cursor_col)
     }
 }
 
@@ -687,13 +745,7 @@ fn extract_row_with_colors(
         });
     }
 
-    let line = builder.finish();
-    #[cfg(test)]
-    let line = TerminalLine {
-        cursor_col: cursor.map(|cursor| cursor.col),
-        ..line
-    };
-    line
+    builder.finish_with_cursor(cursor.map(|cursor| cursor.col))
 }
 
 struct BackgroundColors {
@@ -872,10 +924,22 @@ impl TerminalFrameCache {
     pub(crate) fn rebuild(&mut self, frame: TerminalFrame) {
         self.frame = Some(frame);
         self.stale = false;
+        self.full_invalidation = false;
     }
 
     pub(crate) fn invalidate(&mut self) {
         self.stale = true;
+    }
+
+    pub(crate) fn invalidate_full(&mut self) {
+        self.stale = true;
+        self.full_invalidation = true;
+    }
+
+    pub(crate) fn reusable_frame(&self) -> Option<TerminalFrame> {
+        (!self.full_invalidation)
+            .then(|| self.frame.clone())
+            .flatten()
     }
 }
 
@@ -883,7 +947,6 @@ impl TerminalFrameCache {
 mod tests {
     use std::sync::Arc;
 
-    use gpui::SharedString;
     use nmt_config::colors::term::TermColors;
     use nmt_config::colors::{ColorArray, Colors, NamedColor};
     use nmt_terminal::ansi::CursorShape;
@@ -893,19 +956,17 @@ mod tests {
     use nmt_terminal::terminal::pos::{Column, Line, Pos};
     use nmt_terminal::terminal::square::Wide;
 
-    use super::{
-        TerminalColor, TerminalFrame, TerminalFrameCache, TerminalLine, cursor_for_row, extract_row,
-    };
+    use super::{TerminalColor, TerminalFrame, TerminalFrameCache, cursor_for_row, extract_row};
 
     fn frame_with_line(line: &str) -> TerminalFrame {
         TerminalFrame {
-            lines: Arc::from([TerminalLine {
-                text: SharedString::from(line),
-                text_hash: super::hash_line(line, &[]),
-                cells: Box::default(),
-                runs: Box::default(),
-                cursor_col: None,
-            }]),
+            lines: Arc::from([super::line_from_parts(
+                line.to_owned(),
+                Vec::new(),
+                Vec::new(),
+            )]),
+            line_states: Arc::from([Default::default()]),
+            cols: line.len(),
             cursor: None,
             scrollbar: Default::default(),
             images: Arc::from([]),
@@ -985,6 +1046,10 @@ mod tests {
 
         cache.invalidate();
         assert!(cache.needs_rebuild(), "invalidation forces a rebuild");
+        assert!(
+            cache.reusable_frame().is_some(),
+            "ordinary invalidation keeps the frame eligible for line reuse"
+        );
         assert_eq!(
             first_line(&cache.current().unwrap()),
             "first",
@@ -994,6 +1059,110 @@ mod tests {
         cache.rebuild(frame_with_line("second"));
         assert!(!cache.needs_rebuild());
         assert_eq!(first_line(&cache.current().unwrap()), "second");
+    }
+
+    #[test]
+    fn cache_full_invalidation_retains_frame_but_disables_reuse_once() {
+        let mut cache = TerminalFrameCache::default();
+        cache.rebuild(frame_with_line("first"));
+
+        cache.invalidate_full();
+        assert!(cache.needs_rebuild());
+        assert_eq!(first_line(&cache.current().unwrap()), "first");
+        assert!(cache.reusable_frame().is_none());
+
+        cache.rebuild(frame_with_line("second"));
+        assert!(!cache.needs_rebuild());
+        assert_eq!(
+            first_line(&cache.reusable_frame().expect("reuse restored")),
+            "second"
+        );
+    }
+
+    #[test]
+    fn incremental_extraction_reuses_only_clean_rows() {
+        let mut engine = GhosttyTerminal::new(8, 3, 100).unwrap();
+        let mut buf = RenderBuffer::new(8, 3);
+        engine.write_vt(b"\x1b[2;1H");
+        engine.snapshot_into(&mut buf).unwrap();
+        let generations = super::GenerationMap::new();
+        let first = TerminalFrame::from_render_buffer_reusing(&buf, None, &generations, None);
+
+        engine.snapshot_into(&mut buf).unwrap();
+        let clean =
+            TerminalFrame::from_render_buffer_reusing(&buf, None, &generations, Some(&first));
+        assert!(
+            first
+                .lines()
+                .iter()
+                .zip(clean.lines())
+                .all(|(old, new)| old.ptr_eq(new)),
+            "clean capture reuses every line"
+        );
+
+        engine.write_vt(b"X");
+        engine.snapshot_into(&mut buf).unwrap();
+        let changed =
+            TerminalFrame::from_render_buffer_reusing(&buf, None, &generations, Some(&clean));
+        assert!(clean.lines()[0].ptr_eq(&changed.lines()[0]));
+        assert!(!clean.lines()[1].ptr_eq(&changed.lines()[1]));
+        assert!(clean.lines()[2].ptr_eq(&changed.lines()[2]));
+
+        let forced = TerminalFrame::from_render_buffer_reusing(&buf, None, &generations, None);
+        assert!(
+            changed
+                .lines()
+                .iter()
+                .zip(forced.lines())
+                .all(|(old, new)| !old.ptr_eq(new)),
+            "no reusable frame forces full line extraction"
+        );
+    }
+
+    #[test]
+    fn cursor_only_change_rebuilds_affected_row() {
+        let mut engine = GhosttyTerminal::new(8, 2, 100).unwrap();
+        let mut buf = RenderBuffer::new(8, 2);
+        engine.write_vt(b"AB");
+        engine.snapshot_into(&mut buf).unwrap();
+        let generations = super::GenerationMap::new();
+        let first = TerminalFrame::from_render_buffer_reusing(&buf, None, &generations, None);
+        let versions = buf.row_versions().to_vec();
+
+        engine.write_vt(b"\r");
+        engine.snapshot_into(&mut buf).unwrap();
+        assert_eq!(buf.row_versions(), versions, "CR changes only the cursor");
+        let moved =
+            TerminalFrame::from_render_buffer_reusing(&buf, None, &generations, Some(&first));
+
+        assert!(!first.lines()[0].ptr_eq(&moved.lines()[0]));
+        assert!(first.lines()[1].ptr_eq(&moved.lines()[1]));
+    }
+
+    #[test]
+    fn selection_changes_rebuild_only_affected_rows() {
+        let mut engine = GhosttyTerminal::new(8, 3, 100).unwrap();
+        let mut buf = RenderBuffer::new(8, 3);
+        engine.write_vt(b"row0\r\nrow1\r\nrow2");
+        engine.snapshot_into(&mut buf).unwrap();
+        let generations = super::GenerationMap::new();
+        let plain = TerminalFrame::from_render_buffer_reusing(&buf, None, &generations, None);
+        let row0 = SelectionRange::new(
+            Pos::new(Line(0), Column(0)),
+            Pos::new(Line(0), Column(3)),
+            false,
+        );
+        let selected =
+            TerminalFrame::from_render_buffer_reusing(&buf, Some(row0), &generations, Some(&plain));
+        assert!(!plain.lines()[0].ptr_eq(&selected.lines()[0]));
+        assert!(plain.lines()[1].ptr_eq(&selected.lines()[1]));
+        assert!(plain.lines()[2].ptr_eq(&selected.lines()[2]));
+
+        let cleared =
+            TerminalFrame::from_render_buffer_reusing(&buf, None, &generations, Some(&selected));
+        assert!(!selected.lines()[0].ptr_eq(&cleared.lines()[0]));
+        assert!(selected.lines()[1].ptr_eq(&cleared.lines()[1]));
+        assert!(selected.lines()[2].ptr_eq(&cleared.lines()[2]));
     }
 
     #[test]
@@ -1364,8 +1533,8 @@ mod tests {
 ///   1. parse    — `engine.write_vt` of 20k distinct 72-col lines (runs on the PTY
 ///                 thread today, off the frame critical path).
 ///   2. snapshot — `engine.snapshot` of the live viewport (once per rendered frame).
-///   3. extract  — `TerminalFrame::from_render_buffer_with_selection` of the viewport
-///                 (the per-frame live-region materialization, render thread).
+///   3. extract  — forced full extraction plus a one-row incremental update of the
+///                 viewport (the live-region materialization, render thread).
 ///   4. shape    — real DirectWrite `layout_line` of NOVEL lines (render thread,
 ///                 cache-miss cost). Production caches shaped lines by hash, so
 ///                 repeated output is ~free; novel output pays this per line.
@@ -1437,6 +1606,28 @@ mod full_frame_profile {
             sink += frame.lines().len();
         }
 
+        // Keep the cursor on row 0 and alternate one cell so every iteration has
+        // exactly one content-dirty row while cursor rendering stays unchanged.
+        engine.write_vt(b"\x1b[1;1H");
+        engine.snapshot_into(&mut render_buf).unwrap();
+        let mut previous =
+            super::TerminalFrame::from_render_buffer_with_selection(&render_buf, None, &gens);
+        let mut incremental_total = Duration::ZERO;
+        for i in 0..FRAMES {
+            engine.write_vt(if i % 2 == 0 { b"\rA" } else { b"\rB" });
+            engine.snapshot_into(&mut render_buf).unwrap();
+            let e = Instant::now();
+            let frame = super::TerminalFrame::from_render_buffer_reusing(
+                &render_buf,
+                None,
+                &gens,
+                Some(&previous),
+            );
+            incremental_total += e.elapsed();
+            sink += frame.lines().len();
+            previous = frame;
+        }
+
         // 4. shape novel lines with the real DirectWrite text system (no window).
         let platform = WindowsPlatform::new(false).expect("directwrite platform");
         let pts = platform.text_system();
@@ -1460,6 +1651,7 @@ mod full_frame_profile {
         let viewport_cells = (ROWS as usize * COLS as usize) as f64;
         let per_frame_capture = capture_total / FRAMES as u32;
         let per_frame_extract = extract_total / FRAMES as u32;
+        let per_frame_incremental = incremental_total / FRAMES as u32;
         let per_frame_shape =
             Duration::from_secs_f64(shape.as_secs_f64() / LINES as f64 * ROWS as f64);
         let ns_cell = |d: Duration, n: f64| d.as_nanos() as f64 / n;
@@ -1482,6 +1674,10 @@ mod full_frame_profile {
             report,
             "  3. extract   {per_frame_extract:?}/frame  {:.0} ns/cell",
             ns_cell(per_frame_extract, viewport_cells)
+        );
+        let _ = writeln!(
+            report,
+            "     one-row  {per_frame_incremental:?}/frame  (incremental)"
         );
         let _ = writeln!(
             report,
