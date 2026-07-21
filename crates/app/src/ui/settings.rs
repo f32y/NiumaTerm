@@ -25,6 +25,7 @@ use gpui_component::slider::{Slider, SliderEvent, SliderState};
 use gpui_component::{
     ActiveTheme as _, AxisExt as _, Disableable as _, Sizable as _, h_flex, v_flex,
 };
+use nmt_config::system::WarnBeforeTerminatingShell;
 
 /// Default shell for a new profile.
 pub const DEFAULT_SHELL: &str = r"C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe";
@@ -173,9 +174,8 @@ pub struct AppSettings {
     /// Manage each tab's shell with a Windows Job Object: closing the tab
     /// kills the shell's entire process tree. Applies to new tabs.
     pub manage_subprocess_job: bool,
-    /// Warn before closing a tab/workspace whose shell has child processes.
-    /// Effective only with `manage_subprocess_job` (the Job is the detector).
-    pub warn_before_terminating_shell: bool,
+    /// When to warn before closing a shell.
+    pub warn_before_terminating_shell: WarnBeforeTerminatingShell,
     /// Ask for confirmation before closing a workspace.
     pub confirm_before_closing_workspace: bool,
     /// Raise the main (UI) and render thread priority to AboveNormal.
@@ -210,7 +210,7 @@ impl Default for AppSettings {
             restore_last_session_when_opening: true,
             remote_session_enabled: false,
             manage_subprocess_job: false,
-            warn_before_terminating_shell: true,
+            warn_before_terminating_shell: WarnBeforeTerminatingShell::default(),
             confirm_before_closing_workspace: true,
             prioritize_ui_threads: false,
         }
@@ -1104,7 +1104,6 @@ fn agent_page() -> SettingPage {
 /// global directly.
 pub fn settings_view(cx: &App) -> Settings {
     let profiles = cx.global::<AppSettings>().profiles.clone();
-    let job_enabled = cx.global::<AppSettings>().manage_subprocess_job;
     let transparency_enabled = cx.global::<AppSettings>().window_transparency_enabled;
     let background_image_enabled = cx.global::<AppSettings>().background_image.is_some();
     let shell_integration_mismatched = nmt_platform::shell_integration_dll_mismatched();
@@ -1463,20 +1462,34 @@ pub fn settings_view(cx: &App) -> Settings {
                         .item(
                             SettingItem::new(
                                 "Warn before terminating shell",
-                                SettingField::switch(
-                                    |cx| cx.global::<AppSettings>().warn_before_terminating_shell,
+                                SettingField::dropdown(
+                                    vec![
+                                        ("disabled".into(), "Disabled".into()),
+                                        (
+                                            "when-child-processes-running".into(),
+                                            "When child processes running".into(),
+                                        ),
+                                        ("always".into(), "Always".into()),
+                                    ],
+                                    |cx| {
+                                        cx.global::<AppSettings>()
+                                            .warn_before_terminating_shell
+                                            .as_str()
+                                            .into()
+                                    },
                                     |value, cx| {
                                         cx.global_mut::<AppSettings>()
-                                            .warn_before_terminating_shell = value;
+                                            .warn_before_terminating_shell =
+                                            WarnBeforeTerminatingShell::from_value(&value);
                                     },
-                                ),
+                                )
+                                .default_value(SharedString::from(
+                                    WarnBeforeTerminatingShell::WhenChildProcessesRunning.as_str(),
+                                )),
                             )
-                            // The Job Object is the child-process detector, so this
-                            // is meaningless (and disabled) without it.
-                            .disabled(!job_enabled)
                             .description(
-                                "Ask before closing a tab or workspace whose shell has \
-                         running child processes. Requires Job management.",
+                                "Choose when closing a shell asks for confirmation. Detecting \
+                         child processes requires Job management.",
                             ),
                         ),
                 )
