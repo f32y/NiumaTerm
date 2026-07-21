@@ -298,6 +298,7 @@ enum ShellLifecycleProgress {
 
 /// `ESC ] 1 3 3 ;` - the OSC 133 introducer.
 const OSC133_PREFIX: &[u8] = b"\x1b]133;";
+const OSC_PROGRESS_PREFIX: &[u8] = b"\x1b]9;4;";
 /// Max bytes of one mark we buffer/scan (`ESC]133;D;<exit>ST` is far shorter). A malformed
 /// mark longer than this resyncs as ordinary bytes; also bounds the inline carry buffer.
 const OSC133_MAX: usize = 32;
@@ -312,12 +313,18 @@ enum Osc133 {
         exit: Option<i32>,
         next: Option<PromptRegion>,
     },
+    Progress {
+        len: usize,
+        active: bool,
+    },
     /// Looks like the start of a 133 mark but the slice ends before the terminator — carry.
     Incomplete,
     /// Not a 133 mark; the ESC is an ordinary terminal byte.
     NotMark,
     /// Starts like OSC 133 but is malformed or too long.
     Malformed,
+    /// Starts like OSC 9;4 but is malformed or too long.
+    ProgressMalformed,
 }
 
 fn region_for(sub: u8) -> Option<PromptRegion> {
@@ -339,6 +346,39 @@ fn parse_exit_code(arg: &[u8]) -> Option<i32> {
 
 /// Parse a potential OSC 133 mark at `s` (caller guarantees `s[0] == 0x1b`).
 fn parse_osc133(s: &[u8]) -> Osc133 {
+    let progress_prefix_len = s.len().min(OSC_PROGRESS_PREFIX.len());
+    if s[..progress_prefix_len] == OSC_PROGRESS_PREFIX[..progress_prefix_len] {
+        if s.len() <= OSC_PROGRESS_PREFIX.len() + 1 {
+            return Osc133::Incomplete;
+        }
+        let active = match s[OSC_PROGRESS_PREFIX.len()] {
+            b'0' => false,
+            b'1'..=b'4' => true,
+            _ => return Osc133::ProgressMalformed,
+        };
+        if s[OSC_PROGRESS_PREFIX.len() + 1] != b';' {
+            return Osc133::ProgressMalformed;
+        }
+        let end = s.len().min(OSC133_MAX);
+        let mut i = OSC_PROGRESS_PREFIX.len() + 2;
+        while i < end {
+            match s[i] {
+                0x07 => return Osc133::Progress { len: i + 1, active },
+                0x1b if i + 1 < s.len() && s[i + 1] == b'\\' => {
+                    return Osc133::Progress { len: i + 2, active };
+                }
+                0x1b if i + 1 == s.len() => return Osc133::Incomplete,
+                0x1b => return Osc133::ProgressMalformed,
+                _ => i += 1,
+            }
+        }
+        return if s.len() < OSC133_MAX {
+            Osc133::Incomplete
+        } else {
+            Osc133::ProgressMalformed
+        };
+    }
+
     let pn = s.len().min(OSC133_PREFIX.len());
     if s[..pn] != OSC133_PREFIX[..pn] {
         return Osc133::NotMark;
@@ -497,6 +537,9 @@ fn render_command_echo(bytes: &[u8]) -> String {
 #[derive(Default)]
 pub(crate) struct PromptSniffer {
     region: PromptRegion,
+    /// Active OSC 9;4 progress suppresses only the published cursor, leaving the
+    /// engine's DECTCEM state intact for exact restoration on removal.
+    progress_active: bool,
     boundary_trust: ShellBoundaryTrust,
     boundary_trust_changed: Option<bool>,
     lifecycle: ShellLifecycleProgress,
@@ -587,12 +630,19 @@ impl PromptSniffer {
                     self.carry_len = 0;
                     pos = len - cl; // skip the input portion of the mark
                 }
+                Osc133::Progress { len, active } => {
+                    self.progress_active = active;
+                    let mark = self.drain_mark(&tmp[..len]);
+                    on_mark(mark);
+                    self.carry_len = 0;
+                    pos = len - cl;
+                }
                 Osc133::Incomplete if cl + take < OSC133_MAX => {
                     self.carry[cl..cl + take].copy_from_slice(&input[..take]);
                     self.carry_len = cl + take;
                     return; // still incomplete — wait for the next read
                 }
-                Osc133::NotMark => {
+                Osc133::NotMark | Osc133::ProgressMalformed => {
                     // The carried ESC resolved to an ordinary escape split across
                     // reads (any chunk ending in "\x1b" or "\x1b]…" lands here —
                     // constant under ESC-dense output like vtebench). Forward the
@@ -643,6 +693,21 @@ impl PromptSniffer {
                             pos = esc + len;
                             seg_start = pos;
                         }
+                        Osc133::Progress { len, active } => {
+                            if esc > seg_start {
+                                self.pre_forward(&input[seg_start..esc]);
+                                forward(
+                                    self.region,
+                                    self.boundary_trusted(),
+                                    &input[seg_start..esc],
+                                );
+                            }
+                            self.progress_active = active;
+                            let mark = self.drain_mark(&input[esc..esc + len]);
+                            on_mark(mark);
+                            pos = esc + len;
+                            seg_start = pos;
+                        }
                         Osc133::Incomplete => {
                             if esc > seg_start {
                                 self.pre_forward(&input[seg_start..esc]);
@@ -658,7 +723,7 @@ impl PromptSniffer {
                             self.carry_len = n;
                             return;
                         }
-                        Osc133::NotMark => pos = esc + 1, // ordinary ESC; keep in the run
+                        Osc133::NotMark | Osc133::ProgressMalformed => pos = esc + 1,
                         Osc133::Malformed => {
                             if esc > seg_start {
                                 self.pre_forward(&input[seg_start..esc]);
@@ -962,9 +1027,13 @@ fn publish_render_buffer(
     front: &FairMutex<RenderBuffer>,
     back: &mut RenderBuffer,
     capture: crate::ghostty::Result<()>,
+    hide_cursor: bool,
 ) -> bool {
     if capture.is_err() {
         return false;
+    }
+    if hide_cursor {
+        back.set_cursor_visible(false);
     }
     std::mem::swap(&mut *front.lock(), back);
     true
@@ -1614,7 +1683,12 @@ where
         self.last_snapshot_at = std::time::Instant::now();
         self.snapshot_pending = false;
 
-        if publish_render_buffer(&self.render_buffer, &mut self.back_buffer, capture) {
+        if publish_render_buffer(
+            &self.render_buffer,
+            &mut self.back_buffer,
+            capture,
+            self.sniffer.progress_active,
+        ) {
             self.event_proxy.send_event(
                 TerminalEvent::TerminalDamaged(self.route_id),
                 self.window_id,
@@ -1705,7 +1779,12 @@ where
                             self.window_id,
                         );
                     }
-                    if publish_render_buffer(&self.render_buffer, &mut self.back_buffer, snapshot) {
+                    if publish_render_buffer(
+                        &self.render_buffer,
+                        &mut self.back_buffer,
+                        snapshot,
+                        self.sniffer.progress_active,
+                    ) {
                         // VT modes do not change on resize, so the lock-free
                         // atomic remains valid from the last PTY read.
                         self.event_proxy.send_event(
@@ -2523,11 +2602,12 @@ mod ghostty_mirror_tests {
             &front,
             &mut back,
             Err(crate::ghostty::Error::InvalidValue),
+            false,
         ));
         assert_eq!(front.lock().cols(), 2);
         assert_eq!(back.cols(), 3);
 
-        assert!(publish_render_buffer(&front, &mut back, Ok(())));
+        assert!(publish_render_buffer(&front, &mut back, Ok(()), false));
         assert_eq!(front.lock().cols(), 3);
         assert_eq!(back.cols(), 2);
     }
@@ -2868,6 +2948,60 @@ mod ghostty_mirror_tests {
             assert_eq!(render_buffer_row_text(&buffer, 1), "Stuck");
         }
         assert!(!machine.ghostty.lock().mode(mode::SYNC_OUTPUT));
+    }
+
+    #[test]
+    fn osc_progress_hides_published_cursor_until_removed() {
+        let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(80, 3)));
+        let pty = FakePty {
+            reader: FakeReader {
+                data: b"\x1b]9;4;1".to_vec(),
+            },
+            writer: FakeWriter::default(),
+        };
+        let mut machine = PtyPipe::new(
+            Arc::clone(&render_buffer),
+            Arc::new(AtomicU32::new(0)),
+            pty,
+            VoidListener {},
+            crate::event::WindowId::from(0),
+            0,
+            nmt_config::colors::Colors::default(),
+            1000,
+            false,
+        )
+        .unwrap();
+        machine
+            .ghostty
+            .lock()
+            .set_default_cursor_shape(crate::ansi::CursorShape::Beam)
+            .unwrap();
+        let mut state = PtyState::default();
+        let mut buf = [0u8; READ_BUFFER_SIZE];
+
+        machine.pty_read(&mut state, &mut buf).unwrap();
+        machine
+            .pty
+            .reader
+            .data
+            .extend_from_slice(b";42\x1b\\    Building [====>     ] 4/10\r");
+        machine.pty_read(&mut state, &mut buf).unwrap();
+        {
+            let buffer = render_buffer.lock();
+            assert_eq!(buffer.cursor_shape(), crate::ansi::CursorShape::Beam);
+            assert!(!buffer.cursor_visible(), "active progress hides the cursor");
+        }
+
+        machine
+            .pty
+            .reader
+            .data
+            .extend_from_slice(b"\x1b]9;4;0;\x1b\\");
+        machine.pty_read(&mut state, &mut buf).unwrap();
+        assert!(
+            render_buffer.lock().cursor_visible(),
+            "removing progress restores the terminal cursor state"
+        );
     }
 
     #[test]
