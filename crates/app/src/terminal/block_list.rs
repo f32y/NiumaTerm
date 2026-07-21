@@ -369,21 +369,13 @@ impl EngineRowBuilder {
             self.col += 1;
         }
 
-        let to_tc = |c: nmt_terminal::ghostty::Color| TerminalColor {
-            r: c.r,
-            g: c.g,
-            b: c.b,
-        };
         let (fg, bg) = if style.inverse {
             (
-                style.bg.map(to_tc).unwrap_or(default_fg),
-                Some(style.fg.map(to_tc).unwrap_or(default_fg)),
+                style.bg.unwrap_or(default_fg),
+                Some(style.fg.unwrap_or(default_fg)),
             )
         } else {
-            (
-                style.fg.map(to_tc).unwrap_or(default_fg),
-                style.bg.map(to_tc),
-            )
+            (style.fg.unwrap_or(default_fg), style.bg)
         };
 
         let is_wide = wide == CellWide::Wide;

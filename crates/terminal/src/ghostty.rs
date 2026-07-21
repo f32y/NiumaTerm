@@ -47,24 +47,22 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Color {
-    pub r: u8,
-    pub g: u8,
-    pub b: u8,
-}
+/// Alias of the workspace-wide RGB type; `vt::ColorRgb` is the FFI handle,
+/// this is the decoded byte triple.
+pub type Color = nmt_config::colors::ColorRgb;
 
-impl From<vt::ColorRgb> for Color {
-    fn from(value: vt::ColorRgb) -> Self {
-        let mut r = 0;
-        let mut g = 0;
-        let mut b = 0;
-        unsafe {
-            // ghostty 53bd14f: the accessor takes the color by const pointer.
-            vt::ghostty_color_rgb_get(&value, &mut r, &mut g, &mut b);
-        }
-        Self { r, g, b }
+/// Decode an FFI color handle into its byte triple. A free function because
+/// `Color` lives in `nmt_config` and `vt::ColorRgb` in the sys crate, so a
+/// `From` impl would violate the orphan rule.
+fn color_from_vt(value: vt::ColorRgb) -> Color {
+    let mut r = 0;
+    let mut g = 0;
+    let mut b = 0;
+    unsafe {
+        // ghostty 53bd14f: the accessor takes the color by const pointer.
+        vt::ghostty_color_rgb_get(&value, &mut r, &mut g, &mut b);
     }
+    Color { r, g, b }
 }
 
 /// Style flags for a cell. `fg`/`bg` are `None` when the cell uses the
@@ -1734,7 +1732,7 @@ impl GhosttyTerminal {
                         )
                     } == vt::Result::SUCCESS
                     {
-                        style.bg = Some(palette[idx as usize].into());
+                        style.bg = Some(color_from_vt(palette[idx as usize]));
                     }
                 } else if tag == vt::CellContentTag::BG_COLOR_RGB {
                     let mut rgb = vt::ColorRgb::default();
@@ -1746,7 +1744,7 @@ impl GhosttyTerminal {
                         )
                     } == vt::Result::SUCCESS
                     {
-                        style.bg = Some(rgb.into());
+                        style.bg = Some(color_from_vt(rgb));
                     }
                 }
             }
@@ -2602,9 +2600,9 @@ fn style_color_resolve(c: &vt::StyleColor, palette: &[vt::ColorRgb; 256]) -> Opt
     match c.tag {
         vt::StyleColorTag::PALETTE => {
             let idx = unsafe { c.value.palette } as usize;
-            palette.get(idx).map(|&rgb| rgb.into())
+            palette.get(idx).map(|&rgb| color_from_vt(rgb))
         }
-        vt::StyleColorTag::RGB => Some(unsafe { c.value.rgb }.into()),
+        vt::StyleColorTag::RGB => Some(color_from_vt(unsafe { c.value.rgb })),
         _ => None,
     }
 }
@@ -3787,7 +3785,7 @@ mod tests {
         // Ghostty's default palette red (SGR 31), flattened through the palette.
         assert_eq!(
             style.fg,
-            crate::render_buffer::to_ansi(Color {
+            nmt_config::colors::AnsiColor::Spec(Color {
                 r: 204,
                 g: 102,
                 b: 102
@@ -3856,7 +3854,7 @@ mod tests {
         let style = snapshot.style(snapshot.cell(0, 0).style_id());
         assert_eq!(
             style.fg,
-            crate::render_buffer::to_ansi(Color {
+            nmt_config::colors::AnsiColor::Spec(Color {
                 r: 10,
                 g: 20,
                 b: 30

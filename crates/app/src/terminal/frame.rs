@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use gpui::SharedString;
 use nmt_config::colors::term::{DIM_FACTOR, List, TermColors};
-use nmt_config::colors::{AnsiColor, ColorArray, ColorRgb, NamedColor};
+use nmt_config::colors::{AnsiColor, ColorRgb, NamedColor};
 use nmt_terminal::ansi::CursorShape;
 use nmt_terminal::grid_emit::{RowSelection, row_selection_for};
 use nmt_terminal::render_buffer::RenderBuffer;
@@ -61,12 +61,7 @@ pub(crate) struct TerminalCell {
     pub(crate) has_cursor: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct TerminalColor {
-    pub(crate) r: u8,
-    pub(crate) g: u8,
-    pub(crate) b: u8,
-}
+pub(crate) type TerminalColor = ColorRgb;
 
 /// A run of consecutive cells sharing one foreground style, in row order.
 /// `len` is the UTF-8 byte length this run contributes to the row text, so the
@@ -181,36 +176,6 @@ impl TerminalFrame {
 
     pub(crate) fn scrollbar(&self) -> nmt_terminal::ghostty::ScrollbarInfo {
         self.scrollbar
-    }
-}
-
-impl TerminalColor {
-    fn from_color_array(color: ColorArray) -> Self {
-        Self {
-            r: normalized_channel(color[0]),
-            g: normalized_channel(color[1]),
-            b: normalized_channel(color[2]),
-        }
-    }
-
-    pub(crate) fn rgb_u32(self) -> u32 {
-        ((self.r as u32) << 16) | ((self.g as u32) << 8) | self.b as u32
-    }
-}
-
-impl From<(u8, u8, u8)> for TerminalColor {
-    fn from((r, g, b): (u8, u8, u8)) -> Self {
-        Self { r, g, b }
-    }
-}
-
-impl From<ColorRgb> for TerminalColor {
-    fn from(rgb: ColorRgb) -> Self {
-        Self {
-            r: rgb.r,
-            g: rgb.g,
-            b: rgb.b,
-        }
     }
 }
 
@@ -645,16 +610,16 @@ fn push_virtual_run(
 /// The theme's default foreground, for harvested cells with no explicit fg
 /// (block-split).
 pub(crate) fn theme_default_foreground() -> TerminalColor {
-    TerminalColor::from_color_array(nmt_config::active_colors().foreground)
+    TerminalColor::from_color_arr(nmt_config::active_colors().foreground)
 }
 
 pub(crate) fn theme_default_background() -> TerminalColor {
-    TerminalColor::from_color_array(nmt_config::active_colors().background.0)
+    TerminalColor::from_color_arr(nmt_config::active_colors().background.0)
 }
 
 /// The theme's selection background (block-split frozen selection).
 pub(crate) fn theme_selection_background() -> TerminalColor {
-    TerminalColor::from_color_array(nmt_config::active_colors().selection_background)
+    TerminalColor::from_color_arr(nmt_config::active_colors().selection_background)
 }
 
 #[cfg(test)]
@@ -762,7 +727,7 @@ impl BackgroundColors {
         Self {
             colors: List::from(&colors),
             term_colors,
-            selection_background: TerminalColor::from_color_array(colors.selection_background),
+            selection_background: TerminalColor::from_color_arr(colors.selection_background),
         }
     }
 
@@ -827,7 +792,7 @@ impl BackgroundColors {
             }
             AnsiColor::Spec(rgb) => {
                 if dim {
-                    TerminalColor::from_color_array((*rgb * DIM_FACTOR).to_arr())
+                    TerminalColor::from_color_arr((*rgb * DIM_FACTOR).to_arr())
                 } else {
                     (*rgb).into()
                 }
@@ -851,16 +816,12 @@ impl BackgroundColors {
     }
 
     fn indexed(&self, index: usize) -> TerminalColor {
-        TerminalColor::from_color_array(self.term_colors[index].unwrap_or(self.colors[index]))
+        TerminalColor::from_color_arr(self.term_colors[index].unwrap_or(self.colors[index]))
     }
 }
 
 fn cell_is_selected(row_selection: Option<RowSelection>, col: u16) -> bool {
     row_selection.is_some_and(|selection| col >= selection.lo && col <= selection.hi)
-}
-
-fn normalized_channel(channel: f32) -> u8 {
-    (channel.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 fn frame_cursor(buf: &RenderBuffer, colors: &BackgroundColors) -> Option<TerminalCursor> {
@@ -987,7 +948,7 @@ mod tests {
 
         assert_eq!(
             colors.named(NamedColor::Cursor),
-            TerminalColor::from_color_array(expected)
+            TerminalColor::from_color_arr(expected)
         );
     }
 
@@ -1255,7 +1216,7 @@ mod tests {
             Some(selection),
             &super::GenerationMap::new(),
         );
-        let selected = TerminalColor::from_color_array(Colors::default().selection_background);
+        let selected = TerminalColor::from_color_arr(Colors::default().selection_background);
         let cells = frame.lines()[0].cells();
 
         assert_eq!(cells[0].background, None);

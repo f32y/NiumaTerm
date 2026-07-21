@@ -12,12 +12,12 @@
 //!
 //! The frontend reads this copy without holding the engine lock during paint.
 
-use nmt_config::colors::{AnsiColor, ColorRgb, NamedColor};
+use nmt_config::colors::{AnsiColor, NamedColor};
 use rustc_hash::FxHashMap;
 
 use crate::ghostty::{
-    CellWide, Color, ScrollbarInfo, SnapshotColors, SnapshotCursor, SnapshotPlacement,
-    SnapshotStyle, Underline,
+    CellWide, ScrollbarInfo, SnapshotColors, SnapshotCursor, SnapshotPlacement, SnapshotStyle,
+    Underline,
 };
 use crate::terminal::grid::row::Row;
 use crate::terminal::pos::{Column, Line, Pos};
@@ -47,23 +47,15 @@ pub(crate) fn style_from_snapshot(s: &SnapshotStyle) -> Style {
     Style {
         fg: s
             .fg
-            .map(to_ansi)
+            .map(AnsiColor::Spec)
             .unwrap_or(AnsiColor::Named(NamedColor::Foreground)),
         bg: s
             .bg
-            .map(to_ansi)
+            .map(AnsiColor::Spec)
             .unwrap_or(AnsiColor::Named(NamedColor::Background)),
-        underline_color: s.underline_color.map(to_ansi),
+        underline_color: s.underline_color.map(AnsiColor::Spec),
         flags,
     }
-}
-
-pub(crate) fn to_ansi(c: Color) -> AnsiColor {
-    AnsiColor::Spec(ColorRgb {
-        r: c.r,
-        g: c.g,
-        b: c.b,
-    })
 }
 
 pub(crate) fn wide_from(w: CellWide) -> Wide {
