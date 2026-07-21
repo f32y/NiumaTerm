@@ -509,7 +509,7 @@ mod environment_tests {
     fn block_preserves_unrelated_values_and_unicode() {
         let inherited = "NMT_PTY_ENV_PRESERVE_TEST";
         unsafe { std::env::set_var(inherited, "kept") };
-        let block = build_environment_block(&[("NMT_UNICODE".into(), "牛码终端🦀".into())]);
+        let block = build_environment_block(&[("NMT_UNICODE".into(), "牛马终端🦀".into())]);
         let entries = entries(&block);
         assert!(
             entries
@@ -519,7 +519,7 @@ mod environment_tests {
         assert!(
             entries
                 .iter()
-                .any(|entry| entry == "NMT_UNICODE=牛码终端🦀")
+                .any(|entry| entry == "NMT_UNICODE=牛马终端🦀")
         );
         unsafe { std::env::remove_var(inherited) };
     }
