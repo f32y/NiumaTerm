@@ -241,16 +241,6 @@ impl Default for Window {
     }
 }
 
-impl Colorspace {
-    pub fn to_sugarloaf_colorspace(&self) -> crate::render_types::Colorspace {
-        match self {
-            Colorspace::Srgb => crate::render_types::Colorspace::Srgb,
-            Colorspace::DisplayP3 => crate::render_types::Colorspace::DisplayP3,
-            Colorspace::Rec2020 => crate::render_types::Colorspace::Rec2020,
-        }
-    }
-}
-
 impl Window {
     pub fn is_fullscreen(&self) -> bool {
         self.mode == WindowMode::Fullscreen
