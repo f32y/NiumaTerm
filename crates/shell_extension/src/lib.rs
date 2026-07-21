@@ -18,7 +18,6 @@ use windows::core::{GUID, PWSTR, implement};
 use windows_core::{BOOL, Interface, Ref};
 
 const CLSID_NIUMATERM_NEW_TAB: GUID = GUID::from_u128(0xF1D94FEB_1AA5_4B27_9440_C3BC16247C61);
-const CLSID_NIUMATERM_NEW_WINDOW: GUID = GUID::from_u128(0xF240799C_A056_4F34_A6B0_926B9730CE3F);
 
 static mut DLL_INSTANCE: HINSTANCE = HINSTANCE(std::ptr::null_mut());
 static DLL_REF_COUNT: AtomicU32 = AtomicU32::new(0);
@@ -71,21 +70,14 @@ fn get_folder_path(items: Option<&IShellItemArray>) -> Option<String> {
     }
 }
 
-fn nmt_url(action: &str, path: &str) -> String {
-    format!(
-        "nmt://action/{action}?path={}",
-        utf8_percent_encode(path, NON_ALPHANUMERIC)
-    )
-}
-
-// --- IExplorerCommand: Open NiumaTerm in new tab ---
+// --- IExplorerCommand: Open in NiumaTerm ---
 
 #[implement(IExplorerCommand)]
 struct NiumaTermNewTabCommand;
 
 impl IExplorerCommand_Impl for NiumaTermNewTabCommand_Impl {
     fn GetTitle(&self, _items: Ref<'_, IShellItemArray>) -> windows::core::Result<PWSTR> {
-        Ok(alloc_co_task_str("Open NiumaTerm in new tab"))
+        Ok(alloc_co_task_str("Open in NiumaTerm"))
     }
 
     fn GetIcon(&self, _items: Ref<'_, IShellItemArray>) -> windows::core::Result<PWSTR> {
@@ -116,59 +108,10 @@ impl IExplorerCommand_Impl for NiumaTermNewTabCommand_Impl {
     ) -> windows::core::Result<()> {
         let exe = get_exe_path();
         let path = get_folder_path(items.as_ref()).unwrap_or_default();
-        let uri = nmt_url("new_tab", &path);
-        let _ = std::process::Command::new(&exe).arg(&uri).spawn();
-        Ok(())
-    }
-
-    fn GetFlags(&self) -> windows::core::Result<u32> {
-        Ok(0) // ECF_DEFAULT
-    }
-
-    fn EnumSubCommands(&self) -> windows::core::Result<IEnumExplorerCommand> {
-        Err(windows::core::Error::from(E_NOINTERFACE))
-    }
-}
-
-// --- IExplorerCommand: Open NiumaTerm in new window ---
-
-#[implement(IExplorerCommand)]
-struct NiumaTermNewWindowCommand;
-
-impl IExplorerCommand_Impl for NiumaTermNewWindowCommand_Impl {
-    fn GetTitle(&self, _items: Ref<'_, IShellItemArray>) -> windows::core::Result<PWSTR> {
-        Ok(alloc_co_task_str("Open NiumaTerm in new window"))
-    }
-
-    fn GetIcon(&self, _items: Ref<'_, IShellItemArray>) -> windows::core::Result<PWSTR> {
-        let icon = format!("{},0", get_exe_path());
-        Ok(alloc_co_task_str(&icon))
-    }
-
-    fn GetToolTip(&self, _items: Ref<'_, IShellItemArray>) -> windows::core::Result<PWSTR> {
-        Ok(PWSTR::null())
-    }
-
-    fn GetCanonicalName(&self) -> windows::core::Result<GUID> {
-        Ok(CLSID_NIUMATERM_NEW_WINDOW)
-    }
-
-    fn GetState(
-        &self,
-        _items: Ref<'_, IShellItemArray>,
-        _ok_to_be_slow: BOOL,
-    ) -> windows::core::Result<u32> {
-        Ok(0x0) // ECS_ENABLED
-    }
-
-    fn Invoke(
-        &self,
-        items: Ref<'_, IShellItemArray>,
-        _bind_ctx: Ref<'_, IBindCtx>,
-    ) -> windows::core::Result<()> {
-        let exe = get_exe_path();
-        let path = get_folder_path(items.as_ref()).unwrap_or_default();
-        let uri = nmt_url("new_window", &path);
+        let uri = format!(
+            "nmt://action/new_tab?path={}",
+            utf8_percent_encode(&path, NON_ALPHANUMERIC)
+        );
         let _ = std::process::Command::new(&exe).arg(&uri).spawn();
         Ok(())
     }
@@ -185,9 +128,7 @@ impl IExplorerCommand_Impl for NiumaTermNewWindowCommand_Impl {
 // --- IClassFactory ---
 
 #[implement(IClassFactory)]
-struct NiumaTermClassFactory {
-    clsid: GUID,
-}
+struct NiumaTermClassFactory;
 
 impl IClassFactory_Impl for NiumaTermClassFactory_Impl {
     fn CreateInstance(
@@ -209,15 +150,8 @@ impl IClassFactory_Impl for NiumaTermClassFactory_Impl {
         unsafe {
             *ppvobject = std::ptr::null_mut();
 
-            let obj: windows::core::IUnknown = if self.clsid == CLSID_NIUMATERM_NEW_TAB {
-                let cmd = NiumaTermNewTabCommand;
-                let cmd: IExplorerCommand = cmd.into();
-                cmd.cast()?
-            } else {
-                let cmd = NiumaTermNewWindowCommand;
-                let cmd: IExplorerCommand = cmd.into();
-                cmd.cast()?
-            };
+            let cmd: IExplorerCommand = NiumaTermNewTabCommand.into();
+            let obj: windows::core::IUnknown = cmd.cast()?;
 
             obj.query(&*riid, ppvobject).ok()
         }
@@ -249,11 +183,11 @@ unsafe extern "system" fn DllGetClassObject(
         *ppv = std::ptr::null_mut();
 
         let clsid = *rclsid;
-        if clsid != CLSID_NIUMATERM_NEW_TAB && clsid != CLSID_NIUMATERM_NEW_WINDOW {
+        if clsid != CLSID_NIUMATERM_NEW_TAB {
             return CLASS_E_CLASSNOTAVAILABLE;
         }
 
-        let factory = NiumaTermClassFactory { clsid };
+        let factory = NiumaTermClassFactory;
         let factory: IClassFactory = factory.into();
 
         factory.query(&*riid, ppv)
