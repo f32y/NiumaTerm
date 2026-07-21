@@ -22,6 +22,7 @@ mod git_status;
 mod persistence;
 mod settings;
 mod shell;
+mod sidebar_resize;
 mod tab_bar;
 mod token_usage;
 mod workspace_sidebar;

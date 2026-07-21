@@ -4,9 +4,7 @@
 use serde::{Deserialize, Serialize};
 use toml_edit::{DocumentMut, value};
 
-fn default_true() -> bool {
-    true
-}
+use crate::defaults::default_bool_true;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
@@ -47,7 +45,10 @@ impl WarnBeforeTerminatingShell {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SystemConfig {
     /// Reopen the last saved workspace/tab session on startup.
-    #[serde(default = "default_true", rename = "restore-last-session-when-opening")]
+    #[serde(
+        default = "default_bool_true",
+        rename = "restore-last-session-when-opening"
+    )]
     pub restore_last_session_when_opening: bool,
     /// Manage each tab's shell with a Windows Job Object (kill tree on close).
     #[serde(default, rename = "manage-subprocess-job")]
@@ -56,7 +57,10 @@ pub struct SystemConfig {
     #[serde(default, rename = "warn-before-terminating-shell")]
     pub warn_before_terminating_shell: WarnBeforeTerminatingShell,
     /// Ask for confirmation before closing a workspace.
-    #[serde(default = "default_true", rename = "confirm-before-closing-workspace")]
+    #[serde(
+        default = "default_bool_true",
+        rename = "confirm-before-closing-workspace"
+    )]
     pub confirm_before_closing_workspace: bool,
     /// Raise the main (UI) and render thread priority to AboveNormal.
     #[serde(default, rename = "prioritize-ui-threads")]

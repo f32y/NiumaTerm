@@ -1225,8 +1225,9 @@ impl GhosttyTerminal {
 
         while unsafe { vt::ghostty_kitty_graphics_placement_next(self.placement_iter) } {
             let iter = self.placement_iter;
-            let image_id = placement_u32(iter, vt::KittyGraphicsPlacementData::IMAGE_ID);
-            let placement_id = placement_u32(iter, vt::KittyGraphicsPlacementData::PLACEMENT_ID);
+            let image_id = placement_scalar::<u32>(iter, vt::KittyGraphicsPlacementData::IMAGE_ID);
+            let placement_id =
+                placement_scalar::<u32>(iter, vt::KittyGraphicsPlacementData::PLACEMENT_ID);
             let mut is_virtual = false;
             unsafe {
                 vt::ghostty_kitty_graphics_placement_get(
@@ -1248,15 +1249,18 @@ impl GhosttyTerminal {
                     viewport_row: 0,
                     pixel_width: 0,
                     pixel_height: 0,
-                    grid_cols: placement_u32(iter, vt::KittyGraphicsPlacementData::COLUMNS),
-                    grid_rows: placement_u32(iter, vt::KittyGraphicsPlacementData::ROWS),
+                    grid_cols: placement_scalar::<u32>(
+                        iter,
+                        vt::KittyGraphicsPlacementData::COLUMNS,
+                    ),
+                    grid_rows: placement_scalar::<u32>(iter, vt::KittyGraphicsPlacementData::ROWS),
                     cell_x_offset: 0,
                     cell_y_offset: 0,
                     source_x: 0,
                     source_y: 0,
                     source_width: 0,
                     source_height: 0,
-                    z: placement_i32(iter, vt::KittyGraphicsPlacementData::Z),
+                    z: placement_scalar::<i32>(iter, vt::KittyGraphicsPlacementData::Z),
                 });
                 continue;
             }
@@ -1304,13 +1308,19 @@ impl GhosttyTerminal {
                 pixel_height: px_h,
                 grid_cols: g_cols,
                 grid_rows: g_rows,
-                cell_x_offset: placement_u32(iter, vt::KittyGraphicsPlacementData::X_OFFSET),
-                cell_y_offset: placement_u32(iter, vt::KittyGraphicsPlacementData::Y_OFFSET),
+                cell_x_offset: placement_scalar::<u32>(
+                    iter,
+                    vt::KittyGraphicsPlacementData::X_OFFSET,
+                ),
+                cell_y_offset: placement_scalar::<u32>(
+                    iter,
+                    vt::KittyGraphicsPlacementData::Y_OFFSET,
+                ),
                 source_x: sx,
                 source_y: sy,
                 source_width: sw,
                 source_height: sh,
-                z: placement_i32(iter, vt::KittyGraphicsPlacementData::Z),
+                z: placement_scalar::<i32>(iter, vt::KittyGraphicsPlacementData::Z),
             });
         }
 
@@ -1352,7 +1362,7 @@ impl GhosttyTerminal {
                 continue;
             }
 
-            let image_id = placement_u32(iter, vt::KittyGraphicsPlacementData::IMAGE_ID);
+            let image_id = placement_scalar::<u32>(iter, vt::KittyGraphicsPlacementData::IMAGE_ID);
             let image = unsafe { vt::ghostty_kitty_graphics_image(graphics, image_id) };
             if image.is_null() {
                 continue;
@@ -1361,7 +1371,10 @@ impl GhosttyTerminal {
 
             out.push(PlacementScreenPos {
                 image_id,
-                placement_id: placement_u32(iter, vt::KittyGraphicsPlacementData::PLACEMENT_ID),
+                placement_id: placement_scalar::<u32>(
+                    iter,
+                    vt::KittyGraphicsPlacementData::PLACEMENT_ID,
+                ),
                 screen_col: col,
                 screen_row: row,
                 grid_cols: g_cols,
@@ -1370,7 +1383,7 @@ impl GhosttyTerminal {
                 source_y: sy,
                 source_width: sw,
                 source_height: sh,
-                z: placement_i32(iter, vt::KittyGraphicsPlacementData::Z),
+                z: placement_scalar::<i32>(iter, vt::KittyGraphicsPlacementData::Z),
             });
         }
 
@@ -2285,26 +2298,15 @@ impl GhosttyTerminal {
     }
 }
 
-/// Read one u32-typed datum of the placement the iterator is positioned on.
-fn placement_u32(
+/// Read one datum of the placement the iterator is positioned on. `T` must be
+/// the 32-bit integer type the FFI writes for `data` (u32 or i32).
+fn placement_scalar<T: Default>(
     iter: vt::KittyGraphicsPlacementIterator,
     data: vt::KittyGraphicsPlacementData::Type,
-) -> u32 {
-    let mut v: u32 = 0;
+) -> T {
+    let mut v = T::default();
     unsafe {
-        vt::ghostty_kitty_graphics_placement_get(iter, data, (&mut v as *mut u32).cast());
-    }
-    v
-}
-
-/// Read one i32-typed datum of the placement the iterator is positioned on.
-fn placement_i32(
-    iter: vt::KittyGraphicsPlacementIterator,
-    data: vt::KittyGraphicsPlacementData::Type,
-) -> i32 {
-    let mut v: i32 = 0;
-    unsafe {
-        vt::ghostty_kitty_graphics_placement_get(iter, data, (&mut v as *mut i32).cast());
+        vt::ghostty_kitty_graphics_placement_get(iter, data, (&mut v as *mut T).cast());
     }
     v
 }

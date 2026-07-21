@@ -797,15 +797,8 @@ fn parse_control_data(cmd: &mut KittyGraphicsCommand, control_data: &str) {
                 "o" => cmd.compression = parse_compression(value),
                 "m" => cmd.more = value == "1",
 
-                // Context-dependent keys
-                "x" => match cmd.action {
-                    Action::Delete => cmd.source_x = value.parse().unwrap_or(0),
-                    _ => cmd.source_x = value.parse().unwrap_or(0),
-                },
-                "y" => match cmd.action {
-                    Action::Delete => cmd.source_y = value.parse().unwrap_or(0),
-                    _ => cmd.source_y = value.parse().unwrap_or(0),
-                },
+                "x" => cmd.source_x = value.parse().unwrap_or(0),
+                "y" => cmd.source_y = value.parse().unwrap_or(0),
                 "w" => cmd.source_width = value.parse().unwrap_or(0),
                 "h" => cmd.source_height = value.parse().unwrap_or(0),
                 "X" => match cmd.action {
