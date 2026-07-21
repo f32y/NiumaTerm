@@ -326,7 +326,7 @@ mod tests {
         SystemConfig {
             restore_last_session_when_opening: false,
             manage_subprocess_job: true,
-            warn_before_terminating_shell: false,
+            warn_before_terminating_shell: crate::system::WarnBeforeTerminatingShell::Disabled,
             confirm_before_closing_workspace: false,
             prioritize_ui_threads: true,
         }

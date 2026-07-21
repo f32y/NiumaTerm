@@ -14,6 +14,7 @@ use nmt_agent_utils::{
     AgentEvent, AgentMonitor, AgentNotification, AgentRoute, agent_process, exact_window_is_active,
     request_native_delivery,
 };
+use nmt_config::system::WarnBeforeTerminatingShell;
 
 use crate::cli::CliAction;
 use crate::pane_tree::{PaneId, PaneNode, PaneTree, RemoveOutcome, SplitDirection, SplitOutcome};
@@ -826,12 +827,14 @@ impl Shell {
         let id = self.workspaces.active_tabs().active().focused();
         let pane = self.active_pane();
         let settings = cx.global::<AppSettings>();
-        let count = if settings.manage_subprocess_job && settings.warn_before_terminating_shell {
+        let count = if settings.manage_subprocess_job
+            && settings.warn_before_terminating_shell != WarnBeforeTerminatingShell::Disabled
+        {
             pane.read(cx).child_process_count()
         } else {
             0
         };
-        if count == 0 {
+        if !settings.warn_before_terminating_shell.should_warn(count) {
             self.close_pane_now(id, window, cx);
             return;
         }
@@ -841,10 +844,14 @@ impl Shell {
             alert
                 .confirm()
                 .title("Close this pane?")
-                .description(format!(
-                    "{} in this pane. Closing the pane will terminate them.",
-                    Self::processes_running(count)
-                ))
+                .description(if count > 0 {
+                    format!(
+                        "{} in this pane. Closing the pane will terminate them.",
+                        Self::processes_running(count)
+                    )
+                } else {
+                    "Closing the pane will terminate its shell.".to_string()
+                })
                 .on_ok(move |_, window, cx| {
                     shell.update(cx, |this, cx| this.close_pane_now(id, window, cx));
                     true
@@ -881,11 +888,13 @@ impl Shell {
     }
 
     /// Child processes running across every pane of this tab, summed over
-    /// each shell's Job Object. 0 when the warn setting is off (job
-    /// management is its detector) — closing then never asks.
+    /// each shell's Job Object. The count enriches warnings but is not needed
+    /// by the `Always` mode.
     fn close_process_count(&self, tree: &TerminalPaneTree, cx: &App) -> usize {
         let settings = cx.global::<AppSettings>();
-        if !settings.manage_subprocess_job || !settings.warn_before_terminating_shell {
+        if !settings.manage_subprocess_job
+            || settings.warn_before_terminating_shell == WarnBeforeTerminatingShell::Disabled
+        {
             return 0;
         }
         tree.leaves()
@@ -939,7 +948,8 @@ impl Shell {
             });
             return;
         }
-        if count == 0 {
+        let warn = cx.global::<AppSettings>().warn_before_terminating_shell;
+        if !warn.should_warn(count) {
             self.close_tab_now(id, window, cx);
             return;
         }
@@ -949,10 +959,14 @@ impl Shell {
             alert
                 .confirm()
                 .title("Close this tab?")
-                .description(format!(
-                    "{} in this tab. Closing the tab will terminate them.",
-                    Self::processes_running(count)
-                ))
+                .description(if count > 0 {
+                    format!(
+                        "{} in this tab. Closing the tab will terminate them.",
+                        Self::processes_running(count)
+                    )
+                } else {
+                    "Closing the tab will terminate its shell.".to_string()
+                })
                 .on_ok(move |_, window, cx| {
                     shell.update(cx, |this, cx| this.close_tab_now(id, window, cx));
                     true
@@ -1113,7 +1127,8 @@ impl Shell {
                 .map(|tab| self.close_process_count(tab.surface(), cx))
                 .sum()
         });
-        if !confirm && count == 0 {
+        let warn = cx.global::<AppSettings>().warn_before_terminating_shell;
+        if !confirm && !warn.should_warn(count) {
             self.close_workspace_now(id, window, cx);
             return;
         }
@@ -1245,17 +1260,22 @@ impl Shell {
             .flat_map(|tabs| tabs.tabs())
             .map(|tab| self.close_process_count(tab.surface(), cx))
             .sum();
-        if count == 0 {
+        let warn = cx.global::<AppSettings>().warn_before_terminating_shell;
+        if !warn.should_warn(count) {
             return true;
         }
         window.open_alert_dialog(cx, move |alert, _, _| {
             alert
                 .confirm()
                 .title("Close this window?")
-                .description(format!(
-                    "{} in this window. Closing the window will terminate them.",
-                    Self::processes_running(count)
-                ))
+                .description(if count > 0 {
+                    format!(
+                        "{} in this window. Closing the window will terminate them.",
+                        Self::processes_running(count)
+                    )
+                } else {
+                    "Closing the window will terminate its shells.".to_string()
+                })
                 .on_ok(move |_, window, _| {
                     // `remove_window` tears the window down directly (no
                     // WM_CLOSE round-trip), so this dialog won't re-trigger.
