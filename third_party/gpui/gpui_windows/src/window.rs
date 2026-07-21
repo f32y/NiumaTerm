@@ -21,7 +21,8 @@ use windows::{
         Graphics::Dwm::*,
         Graphics::Gdi::*,
         System::{
-            Com::*, Diagnostics::Debug::MessageBeep, LibraryLoader::*, Ole::*, SystemServices::*,
+            Com::*, DataExchange::RegisterClipboardFormatW, Diagnostics::Debug::MessageBeep,
+            LibraryLoader::*, Memory::*, Ole::*, SystemServices::*,
         },
         UI::{Controls::*, HiDpi::*, Input::KeyboardAndMouse::*, Shell::*, WindowsAndMessaging::*},
     },
@@ -93,6 +94,7 @@ pub struct WindowsWindowState {
 pub(crate) struct WindowsWindowInner {
     hwnd: HWND,
     drop_target_helper: IDropTargetHelper,
+    file_drop_description: Option<String>,
     pub(crate) state: WindowsWindowState,
     system_settings: WindowsSystemSettings,
     pub(crate) handle: AnyWindowHandle,
@@ -267,6 +269,7 @@ impl WindowsWindowInner {
         Ok(Rc::new(Self {
             hwnd,
             drop_target_helper: context.drop_target_helper.clone(),
+            file_drop_description: context.file_drop_description.clone(),
             state,
             handle: context.handle,
             hide_title_bar: context.hide_title_bar,
@@ -398,6 +401,7 @@ struct WindowCreateContext {
     current_cursor: Option<HCURSOR>,
     cursor_visible: Arc<AtomicBool>,
     drop_target_helper: IDropTargetHelper,
+    file_drop_description: Option<String>,
     validation_number: usize,
     main_receiver: PriorityQueueReceiver<RunnableVariant>,
     platform_window_handle: HWND,
@@ -421,6 +425,7 @@ impl WindowsWindow {
             current_cursor,
             cursor_visible,
             drop_target_helper,
+            file_drop_description,
             validation_number,
             main_receiver,
             platform_window_handle,
@@ -503,6 +508,7 @@ impl WindowsWindow {
             current_cursor,
             cursor_visible,
             drop_target_helper,
+            file_drop_description,
             validation_number,
             main_receiver,
             platform_window_handle,
@@ -1087,6 +1093,9 @@ impl IDropTarget_Impl for WindowsDragDropHandler_Impl {
             let cursor_position = POINT { x: pt.x, y: pt.y };
             if idata_obj.QueryGetData(&config as _) == S_OK {
                 *pdweffect = DROPEFFECT_COPY;
+                if let Some(description) = &self.0.file_drop_description {
+                    set_drop_description(&idata_obj, description).log_err();
+                }
                 let Some(mut idata) = idata_obj.GetData(&config as _).log_err() else {
                     return Ok(());
                 };
@@ -1196,6 +1205,52 @@ impl IDropTarget_Impl for WindowsDragDropHandler_Impl {
         self.handle_drag_drop(input);
 
         Ok(())
+    }
+}
+
+fn set_drop_description(data_object: &IDataObject, message: &str) -> Result<()> {
+    let description = drop_description(message);
+
+    unsafe {
+        let format_id = RegisterClipboardFormatW(CFSTR_DROPDESCRIPTION);
+        anyhow::ensure!(format_id != 0, "unable to register drop-description format");
+
+        let global = Owned::new(GlobalAlloc(
+            GMEM_MOVEABLE,
+            std::mem::size_of::<DROPDESCRIPTION>(),
+        )?);
+        let data = GlobalLock(*global);
+        anyhow::ensure!(!data.is_null(), "GlobalLock returned null");
+        data.cast::<DROPDESCRIPTION>().write(description);
+        GlobalUnlock(*global).ok();
+
+        let format = FORMATETC {
+            cfFormat: format_id as u16,
+            ptd: std::ptr::null_mut(),
+            dwAspect: DVASPECT_CONTENT.0,
+            lindex: -1,
+            tymed: TYMED_HGLOBAL.0 as _,
+        };
+        let mut medium = STGMEDIUM::default();
+        medium.tymed = TYMED_HGLOBAL.0 as _;
+        medium.u.hGlobal = *global;
+        data_object.SetData(&format, &medium, true)?;
+        // SetData with fRelease=true transfers the HGLOBAL to the source data
+        // object; retaining the Owned guard would free memory it now owns.
+        std::mem::forget(global);
+    }
+    Ok(())
+}
+
+fn drop_description(message: &str) -> DROPDESCRIPTION {
+    let mut wide_message = [0; 260];
+    for (target, unit) in wide_message[..259].iter_mut().zip(message.encode_utf16()) {
+        *target = unit;
+    }
+    DROPDESCRIPTION {
+        r#type: DROPIMAGE_COPY,
+        szMessage: wide_message,
+        szInsert: [0; 260],
     }
 }
 
@@ -1614,9 +1669,24 @@ fn set_non_rude_hwnd(hwnd: HWND, non_rude: bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::ClickState;
+    use super::{ClickState, drop_description};
     use gpui::{DevicePixels, MouseButton, point};
     use std::time::Duration;
+    use windows::Win32::UI::Shell::DROPIMAGE_COPY;
+
+    #[test]
+    fn drop_description_contains_the_requested_caption() {
+        let description = drop_description("Paste path to file");
+        let image_type = description.r#type;
+        let message = description.szMessage;
+        let len = message.iter().position(|unit| *unit == 0).unwrap();
+
+        assert_eq!(image_type, DROPIMAGE_COPY);
+        assert_eq!(
+            String::from_utf16_lossy(&message[..len]),
+            "Paste path to file"
+        );
+    }
 
     #[test]
     fn test_double_click_interval() {
