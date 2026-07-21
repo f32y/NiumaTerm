@@ -4,7 +4,11 @@
 //! without starting a PTY.
 //!
 //! Invariant: a `TabManager` is never empty. `close` refuses the last tab, so
-//! `active` always points at a real tab.
+//! `active` always points at a real tab. The ordering/activation mechanics
+//! live in [`ActiveList`]; this module adds the tab-specific parts (titles,
+//! exit flags, surface access).
+
+use crate::active_list::{ActiveList, HasId};
 
 /// Stable per-tab identity. Survives close/reorder (index changes, id does not);
 /// wake routing, titles, and drag all key off it. Derived from the shell's
@@ -21,9 +25,27 @@ pub struct Tab<S> {
     exited: bool,
 }
 
+impl<S> HasId for Tab<S> {
+    type Id = TabId;
+    fn id(&self) -> TabId {
+        self.id
+    }
+}
+
 impl<S> Tab<S> {
     pub fn id(&self) -> TabId {
         self.id
+    }
+
+    fn new(surface: S, id: TabId, default_title: String) -> Self {
+        Self {
+            id,
+            surface,
+            default_title,
+            user_title: None,
+            terminal_title: None,
+            exited: false,
+        }
     }
     pub fn title(&self) -> &str {
         self.user_title
@@ -46,37 +68,20 @@ impl<S> Tab<S> {
 }
 
 pub struct TabManager<S> {
-    tabs: Vec<Tab<S>>,
-    active: usize,
+    tabs: ActiveList<Tab<S>>,
 }
 
 impl<S> TabManager<S> {
     /// Start with a single active tab. There is no empty state.
     pub fn new(surface: S, id: TabId, default_title: String) -> Self {
         Self {
-            tabs: vec![Tab {
-                id,
-                surface,
-                default_title,
-                user_title: None,
-                terminal_title: None,
-                exited: false,
-            }],
-            active: 0,
+            tabs: ActiveList::new(Tab::new(surface, id, default_title)),
         }
     }
 
     /// Append a tab with its profile-derived default name and make it active.
     pub fn new_tab(&mut self, surface: S, id: TabId, default_title: String) -> TabId {
-        self.tabs.push(Tab {
-            id,
-            surface,
-            default_title,
-            user_title: None,
-            terminal_title: None,
-            exited: false,
-        });
-        self.active = self.tabs.len() - 1;
+        self.tabs.push_active(Tab::new(surface, id, default_title));
         id
     }
 
@@ -85,55 +90,32 @@ impl<S> TabManager<S> {
     /// the active tab the active falls to the right neighbor, or the left when
     /// there is no right neighbor.
     pub fn close(&mut self, id: TabId) -> Option<S> {
-        if self.tabs.len() <= 1 {
-            return None;
-        }
-        let idx = self.index_of(id)?;
-        let removed = self.tabs.remove(idx);
-        if idx < self.active {
-            self.active -= 1;
-        } else if idx == self.active {
-            // idx now points at the former right neighbor; clamp to the left
-            // neighbor when the closed tab was last.
-            self.active = idx.min(self.tabs.len() - 1);
-        }
-        Some(removed.surface)
+        self.tabs.close(id).map(|tab| tab.surface)
     }
 
     /// Activate by position. Out-of-range indices are ignored.
     pub fn activate(&mut self, index: usize) {
-        if index < self.tabs.len() {
-            self.active = index;
-        }
+        self.tabs.activate(index);
     }
 
     pub fn focus_next(&mut self) {
-        self.active = (self.active + 1) % self.tabs.len();
+        self.tabs.focus_next();
     }
 
     pub fn focus_prev(&mut self) {
-        let n = self.tabs.len();
-        self.active = (self.active + n - 1) % n;
+        self.tabs.focus_prev();
     }
 
     /// Move the tab at `from` to position `to`, keeping the same tab active.
     /// No-op for out-of-range or equal indices.
     pub fn reorder(&mut self, from: usize, to: usize) {
-        let n = self.tabs.len();
-        if from >= n || to >= n || from == to {
-            return;
-        }
-        let active_id = self.tabs[self.active].id;
-        let tab = self.tabs.remove(from);
-        self.tabs.insert(to, tab);
-        // Active follows its tab by id.
-        self.active = self.index_of(active_id).unwrap_or(self.active);
+        self.tabs.reorder(from, to);
     }
 
     /// Set the terminal-supplied title. An empty OSC title restores the default,
     /// while an explicit user title remains authoritative.
     pub fn set_title(&mut self, id: TabId, title: String) -> bool {
-        let Some(tab) = self.find_mut(id) else {
+        let Some(tab) = self.tabs.find_mut(id) else {
             return false;
         };
         let previous = tab.title().to_string();
@@ -143,33 +125,33 @@ impl<S> TabManager<S> {
 
     /// Set the user-authored title, which takes precedence over OSC updates.
     pub fn rename(&mut self, id: TabId, title: String) {
-        if let Some(tab) = self.find_mut(id) {
+        if let Some(tab) = self.tabs.find_mut(id) {
             tab.user_title = Some(title);
         }
     }
 
     /// Mark a tab's process as exited (read-only). Ignored if the id is gone.
     pub fn mark_exited(&mut self, id: TabId) {
-        if let Some(idx) = self.index_of(id) {
-            self.tabs[idx].exited = true;
+        if let Some(tab) = self.tabs.find_mut(id) {
+            tab.exited = true;
         }
     }
 
     pub fn active(&self) -> &S {
-        &self.tabs[self.active].surface
+        &self.tabs.active().surface
     }
 
     #[allow(unused)]
     pub fn active_mut(&mut self) -> &mut S {
-        &mut self.tabs[self.active].surface
+        &mut self.tabs.active_mut().surface
     }
 
     pub fn active_id(&self) -> TabId {
-        self.tabs[self.active].id
+        self.tabs.active_id()
     }
 
     pub fn active_index(&self) -> usize {
-        self.active
+        self.tabs.active_index()
     }
 
     pub fn len(&self) -> usize {
@@ -177,20 +159,16 @@ impl<S> TabManager<S> {
     }
 
     pub fn tabs(&self) -> &[Tab<S>] {
-        &self.tabs
+        self.tabs.items()
     }
 
     /// Find a tab by id (host-event routing). Index may have shifted; id is stable.
     pub fn find(&self, id: TabId) -> Option<&Tab<S>> {
-        self.index_of(id).map(|idx| &self.tabs[idx])
+        self.tabs.find(id)
     }
 
     pub fn find_mut(&mut self, id: TabId) -> Option<&mut Tab<S>> {
-        self.index_of(id).map(|idx| &mut self.tabs[idx])
-    }
-
-    fn index_of(&self, id: TabId) -> Option<usize> {
-        self.tabs.iter().position(|tab| tab.id == id)
+        self.tabs.find_mut(id)
     }
 }
 

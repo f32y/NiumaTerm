@@ -9,6 +9,7 @@ use futures::StreamExt as _;
 use gpui::{App, Application, KeyBinding};
 use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 
+mod active_list;
 mod cli;
 mod error;
 mod ipc;
