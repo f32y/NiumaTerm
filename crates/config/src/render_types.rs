@@ -1,19 +1,8 @@
 //! Backend-neutral rendering data types, relocated from the old `nmt_renderer`
-//! crate. These are pure config-facing data: how input colors are interpreted
-//! (`Colorspace`), a wide-gamut RGBA color (`Color`), and the background-image
-//! settings (`ImageProperties`).
+//! crate. These are pure config-facing data: a wide-gamut RGBA color
+//! (`Color`) and the background-image settings (`ImageProperties`).
 
 use serde::Deserialize;
-
-/// How input colors are interpreted before the shader/surface targets a
-/// wide-gamut output. Default sRGB keeps theme bytes visually consistent.
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
-pub enum Colorspace {
-    #[default]
-    Srgb,
-    DisplayP3,
-    Rec2020,
-}
 
 /// RGBA color in linear-light 0..1 space (backend-neutral).
 #[repr(C)]
