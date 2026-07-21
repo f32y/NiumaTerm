@@ -16,84 +16,52 @@ use gpui_component::button::{Button, ButtonVariants as _};
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use crate::ui::AppSettings;
+use crate::ui::auto_refresh::{self, AutoRefresh, RefreshState};
 
 /// Shown before the first successful fetch (and kept on fetch errors).
 const PLACEHOLDER: &str = "i:- o:- cw:- cr:-";
 
 pub(crate) struct TokenUsageView {
     text: SharedString,
-    refreshing: bool,
-    /// Mirror of `AppSettings::show_daily_token_usage`, tracked so the global
-    /// observer refreshes only on the off→on edge (settings fire for every
-    /// change, e.g. font size).
-    enabled: bool,
+    state: RefreshState,
+}
+
+impl AutoRefresh for TokenUsageView {
+    type Output = Result<String, String>;
+    const INTERVAL: Duration = Duration::from_secs(60);
+
+    fn enabled(settings: &AppSettings) -> bool {
+        settings.show_daily_token_usage
+    }
+
+    fn state(&mut self) -> &mut RefreshState {
+        &mut self.state
+    }
+
+    fn fetch() -> Self::Output {
+        let today = chrono::Local::now().format("%Y%m%d").to_string();
+        fetch_usage(&today)
+    }
+
+    fn apply(&mut self, output: Self::Output) {
+        match output {
+            Ok(text) => self.text = text.into(),
+            Err(err) => tracing::warn!("token usage refresh failed: {err}"),
+        }
+    }
 }
 
 impl TokenUsageView {
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
-        let enabled = cx.global::<AppSettings>().show_daily_token_usage;
-        cx.observe_global::<AppSettings>(|this, cx| {
-            let enabled = cx.global::<AppSettings>().show_daily_token_usage;
-            if enabled && !this.enabled {
-                this.refresh(cx);
-            }
-            this.enabled = enabled;
-        })
-        .detach();
-        // 60-second auto-refresh, idle while the toggle is off. Lives as long
-        // as the view entity (the loop exits when the entity is dropped).
-        cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_secs(60))
-                    .await;
-                let alive = this.update(cx, |this, cx| {
-                    if this.enabled {
-                        this.refresh(cx);
-                    }
-                });
-                if alive.is_err() {
-                    break;
-                }
-            }
-        })
-        .detach();
         let mut this = Self {
             text: PLACEHOLDER.into(),
-            refreshing: false,
-            enabled,
+            state: RefreshState {
+                refreshing: false,
+                enabled: Self::enabled(cx.global::<AppSettings>()),
+            },
         };
-        if enabled {
-            this.refresh(cx);
-        }
+        auto_refresh::start(&mut this, cx);
         this
-    }
-
-    /// Kick off one fetch on the background executor; no-op while one is
-    /// already in flight. Errors keep the previous text and log a warning.
-    fn refresh(&mut self, cx: &mut Context<Self>) {
-        if self.refreshing {
-            return;
-        }
-        self.refreshing = true;
-        cx.notify();
-        let today = chrono::Local::now().format("%Y%m%d").to_string();
-        let fetch = cx
-            .background_executor()
-            .spawn(async move { fetch_usage(&today) });
-        cx.spawn(async move |this, _cx| {
-            let result = fetch.await;
-            this.update(_cx, |this, cx| {
-                this.refreshing = false;
-                match result {
-                    Ok(text) => this.text = text.into(),
-                    Err(err) => tracing::warn!("token usage refresh failed: {err}"),
-                }
-                cx.notify();
-            })
-            .ok();
-        })
-        .detach();
     }
 }
 
@@ -103,8 +71,8 @@ impl Render for TokenUsageView {
             .ghost()
             .small()
             .label(self.text.clone())
-            .loading(self.refreshing)
-            .on_click(cx.listener(|this, _, _, cx| this.refresh(cx)))
+            .loading(self.state.refreshing)
+            .on_click(cx.listener(|this, _, _, cx| auto_refresh::refresh(this, cx)))
     }
 }
 
