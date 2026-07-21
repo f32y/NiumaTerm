@@ -50,75 +50,31 @@ fn initial_font_family() -> SharedString {
     DEFAULT_FONT_FAMILY.into()
 }
 
-/// How the prompt input is presented.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum InputStyle {
-    /// Prompt flows inline with the terminal output.
-    Waterfall,
-    /// Prompt is presented at a fixed bottom row.
-    FixedBottom,
-}
+pub use nmt_config::appearance::InputStyle;
+pub use nmt_config::profile::Profile;
 
-impl InputStyle {
-    /// Stable identifier used as the dropdown value.
-    fn value(self) -> &'static str {
-        match self {
-            Self::Waterfall => "waterfall",
-            Self::FixedBottom => "fixed-bottom",
-        }
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Waterfall => "Waterfall",
-            Self::FixedBottom => "Fixed Bottom",
-        }
-    }
-
-    pub(crate) fn is_fixed_bottom(self) -> bool {
-        matches!(self, Self::FixedBottom)
-    }
-
-    fn from_value(value: &str) -> Self {
-        match value {
-            "waterfall" => Self::Waterfall,
-            "fixed-bottom" => Self::FixedBottom,
-            _ => Self::Waterfall,
-        }
-    }
-
-    fn from_config(value: nmt_config::appearance::InputStyle) -> Self {
-        match value {
-            nmt_config::appearance::InputStyle::Waterfall => Self::Waterfall,
-            nmt_config::appearance::InputStyle::FixedBottom => Self::FixedBottom,
-        }
-    }
-
-    fn to_config(self) -> nmt_config::appearance::InputStyle {
-        match self {
-            Self::Waterfall => nmt_config::appearance::InputStyle::Waterfall,
-            Self::FixedBottom => nmt_config::appearance::InputStyle::FixedBottom,
-        }
+/// Display label for the input-style dropdown; `as_str` is its stable value.
+fn input_style_label(style: InputStyle) -> &'static str {
+    match style {
+        InputStyle::Waterfall => "Waterfall",
+        InputStyle::FixedBottom => "Fixed Bottom",
     }
 }
 
-/// One shell profile: the executable to launch and its arguments.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct Profile {
-    /// Display name; also how `default_profile` references a profile.
-    pub name: String,
-    pub shell: String,
-    /// Command-line arguments, space-separated as typed.
-    pub args: String,
+/// Parse the dropdown value; unknown values fall back to Waterfall.
+fn input_style_from_value(value: &str) -> InputStyle {
+    match value {
+        "fixed-bottom" => InputStyle::FixedBottom,
+        _ => InputStyle::Waterfall,
+    }
 }
 
-impl Default for Profile {
-    fn default() -> Self {
-        Self {
-            name: "PowerShell".to_string(),
-            shell: DEFAULT_SHELL.to_string(),
-            args: String::new(),
-        }
+/// The built-in profile seeded when the config file defines none.
+fn builtin_profile() -> Profile {
+    Profile {
+        name: "PowerShell".to_string(),
+        shell: DEFAULT_SHELL.to_string(),
+        args: String::new(),
     }
 }
 
@@ -189,8 +145,8 @@ impl Default for AppSettings {
             theme_filter: String::new(),
             themes: Vec::new(),
             input_style: InputStyle::Waterfall,
-            profiles: vec![Profile::default()],
-            default_profile: Profile::default().name,
+            profiles: vec![builtin_profile()],
+            default_profile: builtin_profile().name,
             command_blocks: true,
             show_daily_token_usage: false,
             show_git_status_on_title_bar: false,
@@ -302,18 +258,9 @@ impl AppSettings {
         let config = nmt_config::get();
         let appearance = &config.appearance;
         let profiles: Vec<Profile> = if config.profiles.list.is_empty() {
-            vec![Profile::default()]
+            vec![builtin_profile()]
         } else {
-            config
-                .profiles
-                .list
-                .iter()
-                .map(|p| Profile {
-                    name: p.name.clone(),
-                    shell: p.shell.clone(),
-                    args: p.args.clone(),
-                })
-                .collect()
+            config.profiles.list.clone()
         };
         // An unset or dangling default falls back to the first profile.
         let default_profile = if profiles.iter().any(|p| p.name == config.profiles.default) {
@@ -329,7 +276,7 @@ impl AppSettings {
             },
             theme_filter: String::new(),
             themes: load_theme_choices(),
-            input_style: InputStyle::from_config(appearance.input_style),
+            input_style: appearance.input_style,
             profiles,
             default_profile,
             command_blocks: appearance.command_blocks,
@@ -374,7 +321,7 @@ impl AppSettings {
         };
         self.profiles.push(Profile {
             name,
-            ..Profile::default()
+            ..builtin_profile()
         });
     }
 
@@ -438,7 +385,7 @@ impl AppSettings {
     /// logged, never fatal.
     pub fn save(&self) {
         let appearance = nmt_config::appearance::AppearanceConfig {
-            input_style: self.input_style.to_config(),
+            input_style: self.input_style,
             command_blocks: self.command_blocks,
             show_daily_token_usage: self.show_daily_token_usage,
             show_git_status_on_title_bar: self.show_git_status_on_title_bar,
@@ -468,15 +415,7 @@ impl AppSettings {
         let remote_session = nmt_config::remote_session::RemoteSession {
             enabled: self.remote_session_enabled,
         };
-        let profiles: Vec<nmt_config::profile::Profile> = self
-            .profiles
-            .iter()
-            .map(|p| nmt_config::profile::Profile {
-                name: p.name.clone(),
-                shell: p.shell.clone(),
-                args: p.args.clone(),
-            })
-            .collect();
+        let profiles = self.profiles.clone();
         if let Err(err) = nmt_config::appearance::save_settings(
             &self.theme,
             &appearance,
@@ -1128,21 +1067,21 @@ pub fn settings_view(cx: &App) -> Settings {
                             SettingField::dropdown(
                                 vec![
                                     (
-                                        InputStyle::Waterfall.value().into(),
-                                        InputStyle::Waterfall.label().into(),
+                                        InputStyle::Waterfall.as_str().into(),
+                                        input_style_label(InputStyle::Waterfall).into(),
                                     ),
                                     (
-                                        InputStyle::FixedBottom.value().into(),
-                                        InputStyle::FixedBottom.label().into(),
+                                        InputStyle::FixedBottom.as_str().into(),
+                                        input_style_label(InputStyle::FixedBottom).into(),
                                     ),
                                 ],
-                                |cx| cx.global::<AppSettings>().input_style.value().into(),
+                                |cx| cx.global::<AppSettings>().input_style.as_str().into(),
                                 |value, cx| {
                                     cx.global_mut::<AppSettings>().input_style =
-                                        InputStyle::from_value(&value);
+                                        input_style_from_value(&value);
                                 },
                             )
-                            .default_value(SharedString::from(InputStyle::Waterfall.value())),
+                            .default_value(SharedString::from(InputStyle::Waterfall.as_str())),
                         )
                         .description("How the prompt input is presented."),
                     )
@@ -1868,10 +1807,10 @@ mod tests {
     #[test]
     fn input_style_value_roundtrip() {
         for style in [InputStyle::Waterfall, InputStyle::FixedBottom] {
-            assert_eq!(InputStyle::from_value(style.value()), style);
+            assert_eq!(input_style_from_value(style.as_str()), style);
         }
         // Unknown values fall back to the default style.
-        assert_eq!(InputStyle::from_value("bogus"), InputStyle::Waterfall);
+        assert_eq!(input_style_from_value("bogus"), InputStyle::Waterfall);
     }
 
     #[test]
