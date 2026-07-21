@@ -85,6 +85,7 @@ pub(crate) struct TerminalPane {
     profile_name: String,
     agent_route: AgentRoute,
     pub(super) surface: TerminalSurface,
+    cursor_shape: nmt_config::CursorShape,
     frame_cache: TerminalFrameCache,
     pub(super) cell_metrics: Option<metrics::CellMetrics>,
     /// The terminal leaf's laid-out content rect (window coords, padding
@@ -165,8 +166,12 @@ impl TerminalPane {
         let (wake, wake_rx) = wake::wake_channel();
         let agent_route = agent_process().allocate_route();
         let environment = agent_process().environment_for(&agent_route);
-        let fixed_bottom_requested =
-            cx.read_global(|settings: &AppSettings, _| settings.input_style.is_fixed_bottom());
+        let (fixed_bottom_requested, cursor_shape) = cx.read_global(|settings: &AppSettings, _| {
+            (
+                settings.input_style.is_fixed_bottom(),
+                settings.cursor_shape,
+            )
+        });
         let remote_session_enabled = nmt_config::get().remote_session.enabled;
         let surface = terminal_surface_for_tab(
             &wake,
@@ -174,6 +179,7 @@ impl TerminalPane {
             &tab_state,
             &profile_name,
             fixed_bottom_requested,
+            cursor_shape,
             remote_session_enabled,
             environment,
         )?;
@@ -187,6 +193,7 @@ impl TerminalPane {
                 wake_rx,
                 surface,
                 fixed_bottom_requested,
+                cursor_shape,
             )
         }))
     }
@@ -200,15 +207,21 @@ impl TerminalPane {
         mut wake_rx: wake::WakeReceiver,
         surface: TerminalSurface,
         fixed_bottom_requested: bool,
+        cursor_shape: nmt_config::CursorShape,
     ) -> Self {
         // Apply terminal presentation settings to existing panes and invalidate
         // measurements that depend on font metrics.
         cx.observe_global::<AppSettings>(|this, cx| {
-            let fixed_bottom = cx.global::<AppSettings>().input_style.is_fixed_bottom();
+            let settings = cx.global::<AppSettings>();
+            let fixed_bottom = settings.input_style.is_fixed_bottom();
+            let cursor_shape = settings.cursor_shape;
             this.block_list
                 .list
                 .set_alignment(block_list_alignment(fixed_bottom));
             this.surface.set_theme_colors(&nmt_config::active_colors());
+            if cursor_shape != this.cursor_shape && this.surface.set_cursor_shape(cursor_shape) {
+                this.cursor_shape = cursor_shape;
+            }
             this.cell_metrics = None;
             this.frame_cache.invalidate_full();
             cx.notify();
@@ -236,6 +249,7 @@ impl TerminalPane {
             profile_name,
             agent_route,
             surface,
+            cursor_shape,
             frame_cache: TerminalFrameCache::default(),
             cell_metrics: None,
             content_bounds: None,
@@ -1227,6 +1241,7 @@ fn terminal_surface_for_tab(
     state: &TabState,
     profile_name: &str,
     fixed_bottom_requested: bool,
+    cursor_shape: nmt_config::CursorShape,
     remote_session_enabled: bool,
     environment_overrides: Vec<(String, String)>,
 ) -> Result<TerminalSurface, String> {
@@ -1238,6 +1253,7 @@ fn terminal_surface_for_tab(
         state.cwd.clone(),
         profile_name.to_string(),
         fixed_bottom_requested,
+        cursor_shape,
         remote_session_enabled,
         environment_overrides.clone(),
     ) {
@@ -1252,6 +1268,7 @@ fn terminal_surface_for_tab(
                 None,
                 profile_name.to_string(),
                 fixed_bottom_requested,
+                cursor_shape,
                 remote_session_enabled,
                 environment_overrides,
             )

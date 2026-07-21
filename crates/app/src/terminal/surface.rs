@@ -98,6 +98,26 @@ impl TerminalSurface {
         self.session.engine.lock().set_theme_colors(colors);
     }
 
+    pub(crate) fn set_cursor_shape(&self, shape: nmt_config::CursorShape) -> bool {
+        let next = {
+            let mut engine = self.session.engine.lock();
+            if let Err(error) = engine.set_default_cursor_shape(shape) {
+                tracing::warn!("failed to update cursor shape: {error}");
+                return false;
+            }
+            engine.snapshot()
+        };
+        let next = match next {
+            Ok(next) => next,
+            Err(error) => {
+                tracing::warn!("failed to refresh terminal after cursor shape change: {error}");
+                return false;
+            }
+        };
+        *self.session.render_buffer.lock() = next;
+        true
+    }
+
     pub fn new(
         config: TerminalSessionConfig,
         id: u64,
@@ -131,6 +151,7 @@ impl TerminalSurface {
         working_dir: Option<String>,
         starting_title: String,
         fixed_bottom_requested: bool,
+        cursor_shape: nmt_config::CursorShape,
         remote_session_enabled: bool,
         environment_overrides: Vec<(String, String)>,
     ) -> Result<Self, String> {
@@ -144,6 +165,7 @@ impl TerminalSurface {
             starting_title: Some(starting_title),
             cols: metrics::COLS,
             rows: metrics::ROWS,
+            cursor_shape,
             remote_session_enabled,
             environment_overrides,
             ..TerminalSessionConfig::default()

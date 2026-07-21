@@ -757,7 +757,7 @@ pub enum CursorShape {
     #[serde(alias = "underline")]
     Underline,
     /// Cursor is a vertical bar `⎸`.
-    #[serde(alias = "beam")]
+    #[serde(alias = "beam", alias = "line", alias = "Line")]
     Beam,
     /// Cursor is hidden.
     #[serde(alias = "hidden")]
@@ -765,6 +765,15 @@ pub enum CursorShape {
 }
 
 impl CursorShape {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CursorShape::Block => "block",
+            CursorShape::Underline => "underline",
+            CursorShape::Beam => "line",
+            CursorShape::Hidden => "hidden",
+        }
+    }
+
     pub fn from_char(c: char) -> CursorShape {
         match c {
             '_' => CursorShape::Underline,
@@ -987,6 +996,15 @@ mod tests {
         assert_eq!(result.theme, default_theme());
         // Colors
         assert_eq!(result.colors, default_theme_colors());
+
+        let result = create_temporary_config(
+            "change-cursor-line",
+            r#"
+            [cursor]
+            shape = 'line'
+        "#,
+        );
+        assert_eq!(result.cursor.shape, CursorShape::Beam);
     }
 
     #[test]

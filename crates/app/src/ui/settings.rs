@@ -25,6 +25,7 @@ use gpui_component::slider::{Slider, SliderEvent, SliderState};
 use gpui_component::{
     ActiveTheme as _, AxisExt as _, Disableable as _, Sizable as _, h_flex, v_flex,
 };
+use nmt_config::CursorShape;
 use nmt_config::system::WarnBeforeTerminatingShell;
 
 /// Default shell for a new profile.
@@ -69,6 +70,14 @@ fn input_style_from_value(value: &str) -> InputStyle {
     }
 }
 
+fn cursor_shape_from_value(value: &str) -> CursorShape {
+    match value {
+        "line" => CursorShape::Beam,
+        "underline" => CursorShape::Underline,
+        _ => CursorShape::Block,
+    }
+}
+
 /// The built-in profile seeded when the config file defines none.
 fn builtin_profile() -> Profile {
     Profile {
@@ -87,6 +96,7 @@ pub struct AppSettings {
     /// Parsed theme files, refreshed when the themes directory changes.
     pub themes: Vec<(String, nmt_config::theme::Theme)>,
     pub input_style: InputStyle,
+    pub cursor_shape: CursorShape,
     pub profiles: Vec<Profile>,
     /// Name of the profile new terminals use. Always references an existing
     /// profile by name (seeded to the first profile when unset).
@@ -145,6 +155,7 @@ impl Default for AppSettings {
             theme_filter: String::new(),
             themes: Vec::new(),
             input_style: InputStyle::Waterfall,
+            cursor_shape: CursorShape::Block,
             profiles: vec![builtin_profile()],
             default_profile: builtin_profile().name,
             command_blocks: true,
@@ -278,6 +289,7 @@ impl AppSettings {
             theme_filter: String::new(),
             themes: load_theme_choices(),
             input_style: appearance.input_style,
+            cursor_shape: config.cursor.shape,
             profiles,
             default_profile,
             command_blocks: appearance.command_blocks,
@@ -420,6 +432,7 @@ impl AppSettings {
         if let Err(err) = nmt_config::appearance::save_settings(
             &self.theme,
             &appearance,
+            self.cursor_shape,
             &agent,
             &system,
             &remote_session,
@@ -1088,6 +1101,25 @@ pub fn settings_view(cx: &App) -> Settings {
                     )
                     .item(
                         SettingItem::new(
+                            "Cursor Shape",
+                            SettingField::dropdown(
+                                vec![
+                                    ("block".into(), "Block".into()),
+                                    ("line".into(), "Line".into()),
+                                    ("underline".into(), "Underline".into()),
+                                ],
+                                |cx| cx.global::<AppSettings>().cursor_shape.as_str().into(),
+                                |value, cx| {
+                                    cx.global_mut::<AppSettings>().cursor_shape =
+                                        cursor_shape_from_value(&value);
+                                },
+                            )
+                            .default_value(SharedString::from("block")),
+                        )
+                        .description("Default cursor shape used by newly opened terminals."),
+                    )
+                    .item(
+                        SettingItem::new(
                             "Command Blocks",
                             SettingField::switch(
                                 |cx| cx.global::<AppSettings>().command_blocks,
@@ -1726,6 +1758,13 @@ fn shell_path_field(ix: usize) -> SettingField<SharedString> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cursor_shape_dropdown_values_match_config_shapes() {
+        assert_eq!(cursor_shape_from_value("block"), CursorShape::Block);
+        assert_eq!(cursor_shape_from_value("line"), CursorShape::Beam);
+        assert_eq!(cursor_shape_from_value("underline"), CursorShape::Underline);
+    }
 
     #[test]
     fn tab_width_clamps_to_allowed_range() {
