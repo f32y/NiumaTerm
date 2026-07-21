@@ -159,26 +159,26 @@ impl GraphicData {
         }
     }
 
-    /// Compute the display dimensions for this graphic without modifying pixels.
-    /// Returns (display_width, display_height) in pixels. If no resize is needed,
-    /// returns the original dimensions.
-    pub fn compute_display_dimensions(
+    /// The pixel dimensions the `resize` request resolves to, before any
+    /// aspect-ratio fitting. Shared by `compute_display_dimensions` (layout
+    /// prediction) and `resized` (actual resampling) so both agree on the
+    /// outcome.
+    fn resize_target(
         &self,
         cell_width: usize,
         cell_height: usize,
         view_width: usize,
         view_height: usize,
-    ) -> (usize, usize) {
-        let resize = match self.resize {
-            Some(resize) => resize,
-            None => return (self.width, self.height),
+    ) -> ResizeTarget {
+        let Some(resize) = self.resize else {
+            return ResizeTarget::Keep;
         };
 
         if (resize.width == ResizeParameter::Auto && resize.height == ResizeParameter::Auto)
             || self.height == 0
             || self.width == 0
         {
-            return (self.width, self.height);
+            return ResizeTarget::Keep;
         }
 
         let mut width = match resize.width {
@@ -196,9 +196,11 @@ impl GraphicData {
         };
 
         if width == 0 || height == 0 {
-            return (self.width, self.height);
+            return ResizeTarget::Invalid;
         }
 
+        // Derive an Auto dimension from the other one, keeping the original
+        // aspect ratio (rounded, so prediction and resampling stay aligned).
         if resize.width == ResizeParameter::Auto {
             width = (self.width as f64 * height as f64 / self.height as f64).round() as usize;
         }
@@ -207,11 +209,34 @@ impl GraphicData {
             height = (self.height as f64 * width as f64 / self.width as f64).round() as usize;
         }
 
-        width = cmp::min(width, MAX_GRAPHIC_DIMENSIONS[0]);
-        height = cmp::min(height, MAX_GRAPHIC_DIMENSIONS[1]);
+        ResizeTarget::Target(
+            cmp::min(width, MAX_GRAPHIC_DIMENSIONS[0]),
+            cmp::min(height, MAX_GRAPHIC_DIMENSIONS[1]),
+        )
+    }
 
-        if resize.preserve_aspect_ratio {
-            // Preserve aspect ratio: fit within width x height
+    /// Compute the display dimensions for this graphic without modifying pixels.
+    /// Returns (display_width, display_height) in pixels. If no resize is needed,
+    /// returns the original dimensions.
+    pub fn compute_display_dimensions(
+        &self,
+        cell_width: usize,
+        cell_height: usize,
+        view_width: usize,
+        view_height: usize,
+    ) -> (usize, usize) {
+        let (mut width, mut height) =
+            match self.resize_target(cell_width, cell_height, view_width, view_height) {
+                ResizeTarget::Keep | ResizeTarget::Invalid => return (self.width, self.height),
+                ResizeTarget::Target(width, height) => (width, height),
+            };
+
+        if self
+            .resize
+            .is_some_and(|resize| resize.preserve_aspect_ratio)
+        {
+            // Preserve aspect ratio: fit within width x height (mirrors what
+            // image_rs `resize` does in `resized`).
             let scale_w = width as f64 / self.width as f64;
             let scale_h = height as f64 / self.height as f64;
             let scale = scale_w.min(scale_h);
@@ -230,48 +255,15 @@ impl GraphicData {
         view_width: usize,
         view_height: usize,
     ) -> Option<Self> {
-        let resize = match self.resize {
-            Some(resize) => resize,
-            None => return Some(self),
-        };
-
-        if (resize.width == ResizeParameter::Auto && resize.height == ResizeParameter::Auto)
-            || self.height == 0
-            || self.width == 0
-        {
-            return Some(self);
-        }
-
-        let mut width = match resize.width {
-            ResizeParameter::Auto => 1,
-            ResizeParameter::Pixels(n) => n as usize,
-            ResizeParameter::Cells(n) => n as usize * cell_width,
-            ResizeParameter::WindowPercent(n) => n as usize * view_width / 100,
-        };
-
-        let mut height = match resize.height {
-            ResizeParameter::Auto => 1,
-            ResizeParameter::Pixels(n) => n as usize,
-            ResizeParameter::Cells(n) => n as usize * cell_height,
-            ResizeParameter::WindowPercent(n) => n as usize * view_height / 100,
-        };
-
-        if width == 0 || height == 0 {
-            return None;
-        }
-
-        // Compute "auto" dimensions.
-        if resize.width == ResizeParameter::Auto {
-            width = self.width * height / self.height;
-        }
-
-        if resize.height == ResizeParameter::Auto {
-            height = self.height * width / self.width;
-        }
-
-        // Limit size to MAX_GRAPHIC_DIMENSIONS.
-        width = cmp::min(width, MAX_GRAPHIC_DIMENSIONS[0]);
-        height = cmp::min(height, MAX_GRAPHIC_DIMENSIONS[1]);
+        let (width, height) =
+            match self.resize_target(cell_width, cell_height, view_width, view_height) {
+                ResizeTarget::Keep => return Some(self),
+                ResizeTarget::Invalid => return None,
+                ResizeTarget::Target(width, height) => (width, height),
+            };
+        let resize = self
+            .resize
+            .expect("resize_target yields Target only when resize is set");
 
         tracing::trace!("Resize new graphic to width={}, height={}", width, height,);
 
@@ -310,6 +302,16 @@ impl GraphicData {
 
         Some(Self::from_dynamic_image(self.id, new_image))
     }
+}
+
+/// Outcome of resolving a graphic's `resize` request.
+enum ResizeTarget {
+    /// No resize applies; keep the original dimensions.
+    Keep,
+    /// A requested dimension resolved to zero pixels.
+    Invalid,
+    /// Resize to this clamped (width, height).
+    Target(usize, usize),
 }
 
 /// Unit to specify a dimension to resize the graphic.
