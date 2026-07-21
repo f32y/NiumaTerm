@@ -9,6 +9,7 @@
 
 use nmt_agent_utils::AgentRuntimeStatus;
 
+use crate::active_list::{ActiveList, HasId};
 use crate::tabs::{TabId, TabManager};
 
 /// Stable per-workspace identity. Survives close (index changes, id does not).
@@ -24,9 +25,15 @@ pub struct Workspace<S> {
     tabs: TabManager<S>,
 }
 
+impl<S> HasId for Workspace<S> {
+    type Id = WorkspaceId;
+    fn id(&self) -> WorkspaceId {
+        self.id
+    }
+}
+
 pub struct WorkspaceManager<S> {
-    workspaces: Vec<Workspace<S>>,
-    active: usize,
+    workspaces: ActiveList<Workspace<S>>,
 }
 
 pub const DEFAULT_WORKSPACE_NAME: &str = "New Workspace";
@@ -90,15 +97,14 @@ impl<S> WorkspaceManager<S> {
         busy: bool,
     ) -> Self {
         Self {
-            workspaces: vec![Workspace {
+            workspaces: ActiveList::new(Workspace {
                 id,
                 name,
                 cwd,
                 busy,
                 pinned: false,
                 tabs,
-            }],
-            active: 0,
+            }),
         }
     }
 
@@ -111,7 +117,7 @@ impl<S> WorkspaceManager<S> {
         cwd: String,
         busy: bool,
     ) -> WorkspaceId {
-        self.workspaces.push(Workspace {
+        self.workspaces.push_active(Workspace {
             id,
             name,
             cwd,
@@ -119,7 +125,6 @@ impl<S> WorkspaceManager<S> {
             pinned: false,
             tabs,
         });
-        self.active = self.workspaces.len() - 1;
         id
     }
 
@@ -141,75 +146,57 @@ impl<S> WorkspaceManager<S> {
     /// Toggle a workspace's pin state. Pinning moves it to the end of the
     /// pinned group; unpinning moves it to the start of the unpinned group.
     pub fn set_pinned(&mut self, id: WorkspaceId, pinned: bool) {
-        let Some(idx) = self.index_of(id) else {
+        let Some(idx) = self.workspaces.index_of(id) else {
             return;
         };
-        if self.workspaces[idx].pinned == pinned {
+        if self.workspaces.items()[idx].pinned == pinned {
             return;
         }
-        let active_id = self.workspaces[self.active].id;
-        let mut workspace = self.workspaces.remove(idx);
-        workspace.pinned = pinned;
-        let insert_at = self
-            .workspaces
-            .iter()
-            .position(|ws| !ws.pinned)
-            .unwrap_or(self.workspaces.len());
-        self.workspaces.insert(insert_at, workspace);
-        self.active = self.index_of(active_id).unwrap_or(self.active);
+        self.workspaces.edit_preserving_active(|workspaces| {
+            let mut workspace = workspaces.remove(idx);
+            workspace.pinned = pinned;
+            let insert_at = workspaces
+                .iter()
+                .position(|ws| !ws.pinned)
+                .unwrap_or(workspaces.len());
+            workspaces.insert(insert_at, workspace);
+        });
     }
 
     /// Move the workspace at `from` to `to`, keeping the same workspace active.
     /// Cross-boundary pinned/unpinned moves are ignored.
     pub fn reorder(&mut self, from: usize, to: usize) {
-        let n = self.workspaces.len();
-        if from >= n || to >= n || from == to {
+        let workspaces = self.workspaces.items();
+        let n = workspaces.len();
+        if from >= n || to >= n || workspaces[from].pinned != workspaces[to].pinned {
             return;
         }
-        if self.workspaces[from].pinned != self.workspaces[to].pinned {
-            return;
-        }
-        let active_id = self.workspaces[self.active].id;
-        let workspace = self.workspaces.remove(from);
-        self.workspaces.insert(to, workspace);
-        self.active = self.index_of(active_id).unwrap_or(self.active);
+        self.workspaces.reorder(from, to);
     }
 
     /// Close the workspace with `id`, returning it so the caller can drop its
-    /// surfaces. Refuses the last workspace (`None`). After closing the active
-    /// workspace the active falls to the right neighbour, or the left when there is
-    /// no right neighbour (mirrors `TabManager::close`).
+    /// surfaces. Refuses the last workspace and pinned workspaces (`None`).
+    /// After closing the active workspace the active falls to the right
+    /// neighbour, or the left when there is no right neighbour.
     pub fn close_workspace(&mut self, id: WorkspaceId) -> Option<Workspace<S>> {
-        if self.workspaces.len() <= 1 {
+        if self.workspaces.find(id)?.pinned {
             return None;
         }
-        let idx = self.index_of(id)?;
-        if self.workspaces[idx].pinned {
-            return None;
-        }
-        let removed = self.workspaces.remove(idx);
-        if idx < self.active {
-            self.active -= 1;
-        } else if idx == self.active {
-            self.active = idx.min(self.workspaces.len() - 1);
-        }
-        Some(removed)
+        self.workspaces.close(id)
     }
 
     /// Activate by position. Out-of-range indices are ignored.
     pub fn activate(&mut self, index: usize) {
-        if index < self.workspaces.len() {
-            self.active = index;
-        }
+        self.workspaces.activate(index);
     }
 
     pub fn active_tabs(&self) -> &TabManager<S> {
-        &self.workspaces[self.active].tabs
+        &self.workspaces.active().tabs
     }
 
     /// The active workspace's current directory.
     pub fn active_cwd(&self) -> &str {
-        &self.workspaces[self.active].cwd
+        &self.workspaces.active().cwd
     }
 
     /// Rename the workspace with `id`. Blank names and unknown ids are ignored.
@@ -217,35 +204,34 @@ impl<S> WorkspaceManager<S> {
         if name.trim().is_empty() {
             return;
         }
-        let Some(idx) = self.index_of(id) else {
-            return;
-        };
-        self.workspaces[idx].name = name;
+        if let Some(workspace) = self.workspaces.find_mut(id) {
+            workspace.name = name;
+        }
     }
 
     pub fn active_tabs_mut(&mut self) -> &mut TabManager<S> {
-        &mut self.workspaces[self.active].tabs
+        &mut self.workspaces.active_mut().tabs
     }
 
     /// The tab set of the workspace with `id`.
     pub fn tabs_of(&self, id: WorkspaceId) -> Option<&TabManager<S>> {
-        self.index_of(id).map(|idx| &self.workspaces[idx].tabs)
+        self.workspaces.find(id).map(|ws| &ws.tabs)
     }
 
     /// Tab sets of every workspace (the window-close process sweep).
     pub fn all_tabs(&self) -> impl Iterator<Item = &TabManager<S>> {
-        self.workspaces.iter().map(|ws| &ws.tabs)
+        self.workspaces.items().iter().map(|ws| &ws.tabs)
     }
 
     pub fn is_pinned(&self, id: WorkspaceId) -> bool {
-        self.index_of(id)
-            .is_some_and(|idx| self.workspaces[idx].pinned)
+        self.workspaces.find(id).is_some_and(|ws| ws.pinned)
     }
 
     /// The tab set that contains `tab_id`, searched across all workspaces (a
     /// background workspace's surface still polls host events).
     pub fn tab_manager_for(&self, tab_id: TabId) -> Option<&TabManager<S>> {
         self.workspaces
+            .items()
             .iter()
             .map(|ws| &ws.tabs)
             .find(|tabs| tabs.find(tab_id).is_some())
@@ -255,6 +241,7 @@ impl<S> WorkspaceManager<S> {
     /// workspaces (host events arrive from background workspaces too).
     pub fn find_tab_id(&self, pred: impl Fn(&S) -> bool) -> Option<TabId> {
         self.workspaces
+            .items()
             .iter()
             .flat_map(|ws| ws.tabs.tabs())
             .find(|tab| pred(tab.surface()))
@@ -263,6 +250,7 @@ impl<S> WorkspaceManager<S> {
 
     pub fn tab_manager_for_mut(&mut self, tab_id: TabId) -> Option<&mut TabManager<S>> {
         self.workspaces
+            .items_mut()
             .iter_mut()
             .map(|ws| &mut ws.tabs)
             .find(|tabs| tabs.find(tab_id).is_some())
@@ -278,13 +266,14 @@ impl<S> WorkspaceManager<S> {
     pub fn summaries(&self) -> Vec<WorkspaceSummary> {
         let closeable = self.workspaces.len() > 1;
         self.workspaces
+            .items()
             .iter()
             .enumerate()
             .map(|(index, ws)| WorkspaceSummary {
                 id: ws.id,
                 name: ws.name.clone(),
                 cwd: ws.cwd.clone(),
-                active: index == self.active,
+                active: index == self.workspaces.active_index(),
                 busy: ws.busy,
                 agent_status: AgentRuntimeStatus::Idle,
                 unread_count: 0,
@@ -297,16 +286,12 @@ impl<S> WorkspaceManager<S> {
 
     /// Index of the active workspace.
     pub fn active_index(&self) -> usize {
-        self.active
+        self.workspaces.active_index()
     }
 
     /// Id of the active workspace (the set is never empty).
     pub fn active_id(&self) -> WorkspaceId {
-        self.workspaces[self.active].id
-    }
-
-    fn index_of(&self, id: WorkspaceId) -> Option<usize> {
-        self.workspaces.iter().position(|ws| ws.id == id)
+        self.workspaces.active_id()
     }
 }
 
