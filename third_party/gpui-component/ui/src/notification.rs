@@ -71,6 +71,8 @@ pub struct Notification {
     message: Option<SharedString>,
     icon: Option<Icon>,
     autohide: bool,
+    autohide_after: Duration,
+    show_close: bool,
     action_builder: Option<Rc<dyn Fn(&mut Self, &mut Window, &mut Context<Self>) -> Button>>,
     content_builder: Option<Rc<dyn Fn(&mut Self, &mut Window, &mut Context<Self>) -> AnyElement>>,
     on_click: Option<Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>>,
@@ -129,6 +131,8 @@ impl Notification {
             type_: None,
             icon: None,
             autohide: true,
+            autohide_after: Duration::from_secs(5),
+            show_close: true,
             action_builder: None,
             content_builder: None,
             on_click: None,
@@ -213,6 +217,18 @@ impl Notification {
     /// Set the auto hide of the notification, default is true.
     pub fn autohide(mut self, autohide: bool) -> Self {
         self.autohide = autohide;
+        self
+    }
+
+    /// Set how long an auto-hiding notification remains visible.
+    pub fn autohide_after(mut self, duration: Duration) -> Self {
+        self.autohide_after = duration;
+        self
+    }
+
+    /// Show or hide the close button.
+    pub fn show_close(mut self, show_close: bool) -> Self {
+        self.show_close = show_close;
         self
     }
 
@@ -302,6 +318,7 @@ impl Render for Notification {
             .map(|builder| builder(self, window, cx).small().mr_3p5());
 
         let closing = self.closing;
+        let show_close = self.show_close;
         let icon = match self.type_ {
             None => self.icon.clone(),
             Some(type_) => Some(type_.icon(cx)),
@@ -311,6 +328,7 @@ impl Render for Notification {
 
         h_flex()
             .id("notification")
+            .debug_selector(|| "notification".into())
             .group("")
             .occlude()
             .relative()
@@ -341,24 +359,26 @@ impl Render for Notification {
                     .when_some(content, |this, content| this.child(content)),
             )
             .when_some(action, |this, action| this.child(action))
-            .child(
-                div()
-                    .absolute()
-                    .top_1()
-                    .right_1()
-                    .invisible()
-                    .group_hover("", |this| this.visible())
-                    .child(
-                        Button::new("close")
-                            .icon(IconName::Close)
-                            .ghost()
-                            .xsmall()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                cx.stop_propagation();
-                                this.dismiss(window, cx);
-                            })),
-                    ),
-            )
+            .when(show_close, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .top_1()
+                        .right_1()
+                        .invisible()
+                        .group_hover("", |this| this.visible())
+                        .child(
+                            Button::new("close")
+                                .icon(IconName::Close)
+                                .ghost()
+                                .xsmall()
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    cx.stop_propagation();
+                                    this.dismiss(window, cx);
+                                })),
+                        ),
+                )
+            })
             .when_some(self.on_click.clone(), |this, on_click| {
                 this.on_click(cx.listener(move |view, event, window, cx| {
                     view.dismiss(window, cx);
@@ -473,6 +493,7 @@ impl NotificationList {
         let notification = notification.into();
         let id = notification.id.clone();
         let autohide = notification.autohide;
+        let autohide_after = notification.autohide_after;
 
         // Remove the notification by id, for keep unique.
         self.notifications.retain(|note| note.read(cx).id != id);
@@ -489,9 +510,8 @@ impl NotificationList {
 
         self.notifications.push_back(notification.clone());
         if autohide {
-            // Sleep for 5 seconds to autohide the notification
             cx.spawn_in(window, async move |_, cx| {
-                cx.background_executor().timer(Duration::from_secs(5)).await;
+                cx.background_executor().timer(autohide_after).await;
 
                 if let Err(err) =
                     notification.update_in(cx, |note, window, cx| note.dismiss(window, cx))
@@ -635,6 +655,34 @@ mod tests {
         cx.background_executor
             .advance_clock(Duration::from_millis(200));
         cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn custom_autohide_duration_is_honored(cx: &mut TestAppContext) {
+        cx.update(|cx| cx.set_global(Theme::default()));
+        let (root, cx) = cx.add_window_view(|window, cx| TestRoot {
+            list: cx.new(|cx| NotificationList::new(window, cx)),
+        });
+        let list = root.read_with(cx, |root, _| root.list.clone());
+        list.update_in(cx, |list, window, cx| {
+            list.push(
+                Notification::new()
+                    .message("Text copied")
+                    .autohide_after(Duration::from_millis(1500)),
+                window,
+                cx,
+            );
+        });
+
+        cx.background_executor
+            .advance_clock(Duration::from_millis(1499));
+        cx.run_until_parked();
+        assert_eq!(list.read_with(cx, |list, _| list.notifications.len()), 1);
+
+        cx.background_executor
+            .advance_clock(Duration::from_millis(201));
+        cx.run_until_parked();
+        assert!(list.read_with(cx, |list, _| list.notifications.is_empty()));
     }
 
     #[gpui::test]

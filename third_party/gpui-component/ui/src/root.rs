@@ -183,7 +183,7 @@ impl Root {
                     this.top_0().left_0()
                 })
                 .when(matches!(placement, Anchor::TopCenter), |this| {
-                    this.top_0().mx_auto()
+                    this.top_0().left_0().right_0().flex().justify_center()
                 })
                 .when(matches!(placement, Anchor::BottomRight), |this| {
                     this.bottom_0().right_0()
@@ -192,7 +192,7 @@ impl Root {
                     this.bottom_0().left_0()
                 })
                 .when(matches!(placement, Anchor::BottomCenter), |this| {
-                    this.bottom_0().mx_auto()
+                    this.bottom_0().left_0().right_0().flex().justify_center()
                 })
                 .when_some(mt, |this, offset| this.mt(offset))
                 .when_some(mr, |this, offset| this.mr(offset))
@@ -585,7 +585,7 @@ impl Render for Root {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::TestAppContext;
+    use gpui::{TestAppContext, VisualTestContext, px};
 
     struct TestView;
 
@@ -593,6 +593,58 @@ mod tests {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             div()
         }
+    }
+
+    struct NotificationHost;
+
+    impl Render for NotificationHost {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .relative()
+                .w(px(400.))
+                .h(px(200.))
+                .children(Root::render_notification_layer(window, cx))
+        }
+    }
+
+    fn draw(cx: &mut VisualTestContext) {
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+    }
+
+    #[gpui::test]
+    fn top_center_notifications_are_horizontally_centered(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        cx.update(|cx| {
+            let settings = &mut crate::Theme::global_mut(cx).notification;
+            settings.placement = Anchor::TopCenter;
+            settings.margins.top = px(16.);
+        });
+        let (root, cx) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|_| NotificationHost);
+            Root::new(view, window, cx)
+        });
+        root.update_in(cx, |root, window, cx| {
+            root.push_notification(
+                Notification::new()
+                    .message("Text copied")
+                    .autohide(false)
+                    .show_close(false)
+                    .w_auto()
+                    .px_3()
+                    .py_2(),
+                window,
+                cx,
+            );
+        });
+        let cx: &mut VisualTestContext = cx;
+        draw(cx);
+
+        let bounds = cx.debug_bounds("notification").unwrap();
+        assert_eq!(bounds.origin.x + bounds.size.width / 2., px(200.));
+        assert!(bounds.size.width < px(160.));
     }
 
     #[gpui::test]
