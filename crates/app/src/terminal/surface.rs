@@ -419,12 +419,10 @@ impl TerminalSurface {
                     )
                 }
                 SurfaceMouseEventKind::Move => {
-                    if button != Some(SurfaceMouseButton::Left)
-                        || !mode.intersects(Mode::MOUSE_MOTION | Mode::MOUSE_DRAG)
-                    {
+                    let Some(code) = mouse_motion_code(mode, button) else {
                         return false;
-                    }
-                    self.report_mouse(mode, 32, true, cell.col, cell.row, modifiers)
+                    };
+                    self.report_mouse(mode, code, true, cell.col, cell.row, modifiers)
                 }
             };
         }
@@ -947,6 +945,20 @@ fn mouse_button_code(button: SurfaceMouseButton) -> Option<u8> {
     }
 }
 
+fn mouse_motion_code(mode: Mode, button: Option<SurfaceMouseButton>) -> Option<u8> {
+    let button = button.and_then(mouse_button_code);
+    if mode.contains(Mode::MOUSE_MOTION) {
+        // DECSET 1003 reports every move; no pressed button uses the X10
+        // no-button id 3, while a pressed button keeps its own id.
+        Some(32 + button.unwrap_or(3))
+    } else if mode.contains(Mode::MOUSE_DRAG) {
+        // DECSET 1002 reports moves only while a button is held.
+        button.map(|button| 32 + button)
+    } else {
+        None
+    }
+}
+
 fn mouse_report_mods(modifiers: ModifiersState) -> u8 {
     let mut mods = 0;
     if modifiers.shift_key() {
@@ -971,11 +983,12 @@ mod tests {
     use nmt_terminal::ghostty::GhosttyTerminal;
     use nmt_terminal::render_buffer::RenderBuffer;
     use nmt_terminal::selection::{Selection, SelectionType};
+    use nmt_terminal::terminal::Mode;
     use nmt_terminal::terminal::pos::{Column, Line, Pos, Side};
 
     use super::{
         SurfaceMouseButton, TerminalSurface, block_selection_range, mouse_button_code,
-        mouse_report_mods, paste_payload, selection_screen_range,
+        mouse_motion_code, mouse_report_mods, paste_payload, selection_screen_range,
         should_scroll_to_bottom_before_input, tab_state_with_cwd,
     };
     use crate::terminal::session::TerminalSessionConfig;
@@ -1087,6 +1100,11 @@ mod tests {
             20
         );
         assert_eq!(mouse_report_mods(ModifiersState::ALT), 8);
+        assert_eq!(mouse_motion_code(Mode::MOUSE_MOTION, None), Some(35));
+        assert_eq!(
+            mouse_motion_code(Mode::MOUSE_DRAG, Some(SurfaceMouseButton::Right)),
+            Some(34)
+        );
     }
 
     #[test]
