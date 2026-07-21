@@ -12,10 +12,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use crate::{
-    AGENT_HOOK_EXE_ENV, AgentEvent, AgentEventInput, AgentEventKind, HookInstallStatus,
-    hook_command_contains,
-};
+use crate::hook_store::{self, uninstall_from};
+use crate::{AgentEvent, AgentEventInput, AgentEventKind, HookInstallStatus};
 
 /// Every hook event the adapter normalizes. Keep in sync with the `normalize`
 /// match below.
@@ -35,10 +33,6 @@ pub const HOOK_EVENTS: [&str; 6] = [
 /// outside NiumaTerm instead of logging a command-not-found error.
 pub const HOOK_COMMAND: &str =
     r#"if [ -n "$NMT_AGENT_HOOK_EXE" ]; then "$NMT_AGENT_HOOK_EXE" claude; fi"#;
-
-/// Markers that identify hook entries owned by NiumaTerm: the current
-/// env-var command and legacy installs that baked in an absolute path.
-const HOOK_MARKERS: [&str; 2] = [AGENT_HOOK_EXE_ENV, "NiumaTermHook.exe"];
 
 pub(crate) fn normalize(
     payload: Value,
@@ -122,142 +116,31 @@ pub fn hooks_status(settings_path: &Path) -> HookInstallStatus {
     }
 }
 
-/// Re-registering is idempotent: prior NiumaTerm entries (including legacy
-/// absolute-path installs) are removed before the current command is appended
-/// to every event.
+/// Binds the shared hook store to Claude Code's event list and entry shape.
 fn install_into(settings: &mut Value, command: &str) -> io::Result<()> {
-    uninstall_from(settings);
-    let root = settings
-        .as_object_mut()
-        .expect("read_settings only yields objects");
-    let hooks = root.entry("hooks").or_insert_with(|| json!({}));
-    let hooks = hooks
-        .as_object_mut()
-        .ok_or_else(|| invalid("existing \"hooks\" value is not an object"))?;
-    for event in HOOK_EVENTS {
-        let entries = hooks.entry(event).or_insert_with(|| json!([]));
-        let entries = entries
-            .as_array_mut()
-            .ok_or_else(|| invalid("existing hook event value is not an array"))?;
-        entries.push(json!({
+    hook_store::install_into(settings, &HOOK_EVENTS, command, |command| {
+        json!({
             "hooks": [{ "type": "command", "command": command }]
-        }));
-    }
-    Ok(())
-}
-
-fn uninstall_from(settings: &mut Value) {
-    let Some(hooks) = settings.get_mut("hooks").and_then(Value::as_object_mut) else {
-        return;
-    };
-    for entries in hooks.values_mut() {
-        let Some(groups) = entries.as_array_mut() else {
-            continue;
-        };
-        for group in groups.iter_mut() {
-            if let Some(commands) = group.get_mut("hooks").and_then(Value::as_array_mut) {
-                commands.retain(|hook| !is_niuma_hook(hook));
-            }
-        }
-        // A matcher group with no commands does nothing; pruning it keeps the
-        // file as clean as before the install.
-        groups.retain(|group| {
-            group
-                .get("hooks")
-                .and_then(Value::as_array)
-                .is_none_or(|commands| !commands.is_empty())
-        });
-    }
-    hooks.retain(|_, entries| entries.as_array().is_none_or(|groups| !groups.is_empty()));
-    if hooks.is_empty() {
-        settings
-            .as_object_mut()
-            .expect("checked above")
-            .remove("hooks");
-    }
+        })
+    })
 }
 
 fn status_of(settings: &Value, command: &str) -> HookInstallStatus {
-    let marked: Vec<&str> = HOOK_EVENTS
-        .iter()
-        .flat_map(|event| event_commands(settings, event))
-        .filter(|value| is_marked(value))
-        .collect();
-    if marked.is_empty() {
-        HookInstallStatus::NotInstalled
-    } else if marked.iter().all(|value| *value == command)
-        && HOOK_EVENTS
-            .iter()
-            .all(|event| event_commands(settings, event).any(|value| value == command))
-    {
-        HookInstallStatus::Installed
-    } else {
-        HookInstallStatus::Stale
-    }
+    hook_store::status_of(settings, &HOOK_EVENTS, command)
 }
 
-fn event_commands<'a>(settings: &'a Value, event: &str) -> impl Iterator<Item = &'a str> {
-    settings
-        .pointer(&format!("/hooks/{event}"))
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|group| group.get("hooks").and_then(Value::as_array))
-        .flatten()
-        .filter_map(|hook| hook.get("command").and_then(Value::as_str))
-}
-
-fn is_niuma_hook(hook: &Value) -> bool {
-    hook.get("command")
-        .and_then(Value::as_str)
-        .is_some_and(is_marked)
-}
-
-fn is_marked(command: &str) -> bool {
-    HOOK_MARKERS
-        .iter()
-        .any(|marker| hook_command_contains(command, marker))
-}
-
-/// A missing or empty file reads as an empty object; anything unparseable is
-/// surfaced as an error so a broken settings file is never overwritten.
 fn read_settings(settings_path: &Path) -> io::Result<Value> {
-    let text = match std::fs::read_to_string(settings_path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(json!({})),
-        Err(error) => return Err(error),
-    };
-    if text.trim().is_empty() {
-        return Ok(json!({}));
-    }
-    let value: Value =
-        serde_json::from_str(&text).map_err(|_| invalid("settings file is not valid JSON"))?;
-    if value.is_object() {
-        Ok(value)
-    } else {
-        Err(invalid("settings file root is not a JSON object"))
-    }
+    hook_store::read(settings_path, "settings file")
 }
 
-/// Write-then-rename so a crash mid-write cannot truncate the user's settings.
 fn write_settings(settings_path: &Path, settings: &Value) -> io::Result<()> {
-    if let Some(parent) = settings_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let mut text = serde_json::to_string_pretty(settings).map_err(io::Error::other)?;
-    text.push('\n');
-    let temp = settings_path.with_extension("json.niumaterm-tmp");
-    std::fs::write(&temp, text)?;
-    std::fs::rename(&temp, settings_path)
-}
-
-fn invalid(message: &str) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, message)
+    hook_store::write(settings_path, settings)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hook_store::event_commands;
     use crate::{AGENT_HOOK_PROTOCOL_VERSION, RawAgentHookEnvelope};
 
     #[test]

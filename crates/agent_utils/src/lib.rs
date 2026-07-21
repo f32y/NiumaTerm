@@ -3,6 +3,7 @@
 pub mod claude_code {
     pub mod hook;
 }
+mod hook_store;
 pub mod codex {
     pub mod hook;
     #[cfg(target_os = "windows")]
