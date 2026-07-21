@@ -21,6 +21,15 @@ pub(crate) enum TerminalKeyAction {
     Ignore,
 }
 
+/// Distinguishes clipboard copies from other handled keys so UI feedback does
+/// not fire when Ctrl-C writes ETX to the terminal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TerminalKeyResult {
+    Ignored,
+    Handled,
+    Copied,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct SurfaceCell {
     pub(crate) col: u16,
@@ -355,27 +364,33 @@ impl TerminalSurface {
         self.session.write_input(bytes);
     }
 
-    pub(crate) fn apply_key_action(&self, action: TerminalKeyAction) -> bool {
+    pub(crate) fn apply_key_action(&self, action: TerminalKeyAction) -> TerminalKeyResult {
         match action {
             TerminalKeyAction::Write(bytes) => {
                 if bytes.is_empty() || self.read_only.load(Ordering::Relaxed) {
-                    return false;
+                    return TerminalKeyResult::Ignored;
                 }
                 self.write_bytes(&bytes);
-                true
+                TerminalKeyResult::Handled
             }
             TerminalKeyAction::CopyOrWrite(bytes) => {
                 if self.copy_selection() {
-                    return true;
+                    return TerminalKeyResult::Copied;
                 }
                 if bytes.is_empty() || self.read_only.load(Ordering::Relaxed) {
-                    return false;
+                    return TerminalKeyResult::Ignored;
                 }
                 self.write_bytes(&bytes);
-                true
+                TerminalKeyResult::Handled
             }
-            TerminalKeyAction::Paste => self.paste(),
-            TerminalKeyAction::Ignore => false,
+            TerminalKeyAction::Paste => {
+                if self.paste() {
+                    TerminalKeyResult::Handled
+                } else {
+                    TerminalKeyResult::Ignored
+                }
+            }
+            TerminalKeyAction::Ignore => TerminalKeyResult::Ignored,
         }
     }
 

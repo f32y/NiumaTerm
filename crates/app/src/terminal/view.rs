@@ -1,4 +1,5 @@
 use std::ops::Range;
+use std::time::Duration;
 
 use futures::StreamExt;
 use gpui::prelude::*;
@@ -8,7 +9,8 @@ use gpui::{
     MouseUpEvent, Pixels, Point, ScrollDelta, ScrollWheelEvent, UTF16Selection, Window, actions,
     div, list, point, px, rgb, size,
 };
-use gpui_component::ActiveTheme;
+use gpui_component::notification::Notification;
+use gpui_component::{ActiveTheme, WindowExt as _};
 use nmt_agent_utils::{AgentRoute, agent_process};
 use nmt_config::local_state::TabState;
 use nmt_terminal::selection::SelectionType;
@@ -35,7 +37,7 @@ use crate::terminal::scrollbar::{
 use crate::terminal::session::{HostEvent, InFlightBlock};
 use crate::terminal::surface::{
     SurfaceCell, SurfaceCellSide, SurfaceMouseButton, SurfaceMouseEventKind, SurfaceScreenCell,
-    TerminalKeyAction as SurfaceKeyAction,
+    TerminalKeyAction as SurfaceKeyAction, TerminalKeyResult as SurfaceKeyResult,
 };
 use crate::ui::{AppSettings, surface_background_opacity};
 
@@ -58,6 +60,22 @@ actions!(
         NextBlock,
     ]
 );
+
+struct TextCopiedNotification;
+
+fn show_text_copied(window: &mut Window, cx: &mut App) {
+    window.push_notification(
+        Notification::new()
+            .message("Text copied")
+            .id::<TextCopiedNotification>()
+            .autohide_after(Duration::from_millis(1500))
+            .show_close(false)
+            .w_auto()
+            .px_3()
+            .py_2(),
+        cx,
+    );
+}
 
 pub(crate) struct TerminalPane {
     pub(crate) focus: FocusHandle,
@@ -324,7 +342,7 @@ impl TerminalPane {
         cx.notify();
     }
 
-    fn on_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         if should_scroll_to_latest(&event.keystroke, self.surface.alt_screen())
             && self.scroll_to_latest(cx)
         {
@@ -343,12 +361,17 @@ impl TerminalPane {
             let text = self.frozen_selection_to_text(a, b);
             if !text.is_empty() {
                 self.surface.copy_text_to_clipboard(text);
+                show_text_copied(window, cx);
                 self.frozen_selection = None;
                 cx.notify();
                 return;
             }
         }
-        if self.surface.apply_key_action(action) {
+        let result = self.surface.apply_key_action(action);
+        if result == SurfaceKeyResult::Copied {
+            show_text_copied(window, cx);
+        }
+        if result != SurfaceKeyResult::Ignored {
             if interrupts_agent {
                 cx.emit(AgentInterrupted);
             }
@@ -358,7 +381,8 @@ impl TerminalPane {
 
     /// Route a keystroke straight to the terminal PTY.
     pub(crate) fn feed_terminal_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) {
-        if self.surface.apply_key_action(input::key_action(keystroke)) {
+        if self.surface.apply_key_action(input::key_action(keystroke)) != SurfaceKeyResult::Ignored
+        {
             self.invalidate(cx);
         }
     }

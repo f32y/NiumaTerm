@@ -1815,6 +1815,7 @@ impl Render for Shell {
         // Root stores opened dialogs but does not draw them; the app renders the
         // dialog overlay itself.
         let dialog_layer = Root::render_dialog_layer(window, cx);
+        let notification_layer = Root::render_notification_layer(window, cx);
         // Scroll the newly active tab into view on any switch path.
         let active_id = self.workspaces.active_tabs().active_id();
         let active_index = self.workspaces.active_tabs().active_index();
@@ -1968,13 +1969,17 @@ impl Render for Shell {
                                     .flex_1()
                                     .min_h_0()
                                     .min_w_0()
+                                    .relative()
                                     .overflow_hidden()
                                     // Gutter floating the terminal card inside
                                     // the chrome; the tab strip above carries
                                     // its own 4px inset, so no top gap here.
                                     .px(px(6.))
                                     .pb(px(6.))
-                                    .child(pane_tree),
+                                    .child(pane_tree)
+                                    // Anchor notifications to the terminal viewport instead of
+                                    // window chrome so its top margin remains layout-independent.
+                                    .children(notification_layer),
                             ),
                     )
                     .child(self.git_sidebar.clone()),

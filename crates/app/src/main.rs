@@ -213,6 +213,9 @@ fn run_app(argv_url: Option<String>, testing: bool) {
             // component renders. Themes without `[colors.ui]` retain the dark default.
             gpui_component::init(cx);
             crate::ui::apply_ui_theme(nmt_config::get().ui_theme.as_ref(), cx);
+            let notification = &mut gpui_component::Theme::global_mut(cx).notification;
+            notification.placement = gpui::Anchor::TopCenter;
+            notification.margins.top = gpui::px(16.);
             cx.set_global(AppSettings::load());
             crate::ui::apply_window_translucency(cx);
             nmt_platform::set_job_management(cx.global::<AppSettings>().manage_subprocess_job);
