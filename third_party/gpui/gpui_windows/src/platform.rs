@@ -46,6 +46,7 @@ pub struct WindowsPlatform {
     text_system: Arc<dyn PlatformTextSystem>,
     direct_write_text_system: Option<Arc<DirectWriteTextSystem>>,
     drop_target_helper: Option<IDropTargetHelper>,
+    file_drop_description: RefCell<Option<String>>,
     /// Flag to instruct the `VSyncProvider` thread to invalidate the directx devices
     /// as resizing them has failed, causing us to have lost at least the render target.
     invalidate_devices: Arc<AtomicBool>,
@@ -213,6 +214,7 @@ impl WindowsPlatform {
             suspend_resume_notification: RefCell::new(None),
             disable_direct_composition,
             drop_target_helper,
+            file_drop_description: RefCell::new(None),
             invalidate_devices: Arc::new(AtomicBool::new(false)),
             prioritize_ui_threads: Cell::new(false),
             vsync_thread: RefCell::new(None),
@@ -229,6 +231,10 @@ impl WindowsPlatform {
         if let Some(thread) = self.vsync_thread.borrow().as_ref() {
             set_thread_priority(HANDLE(thread.as_raw_handle()), above_normal);
         }
+    }
+
+    pub fn set_file_drop_description(&self, description: impl Into<String>) {
+        *self.file_drop_description.borrow_mut() = Some(description.into());
     }
 
     pub(crate) fn window_from_hwnd(&self, hwnd: HWND) -> Option<Rc<WindowsWindowInner>> {
@@ -256,6 +262,7 @@ impl WindowsPlatform {
             current_cursor: self.inner.state.current_cursor.get(),
             cursor_visible: self.inner.state.cursor_visible.clone(),
             drop_target_helper: self.drop_target_helper.clone().unwrap(),
+            file_drop_description: self.file_drop_description.borrow().clone(),
             validation_number: self.inner.validation_number,
             main_receiver: self.inner.main_receiver.clone(),
             platform_window_handle: self.handle,
@@ -1133,6 +1140,7 @@ pub(crate) struct WindowCreationInfo {
     pub(crate) current_cursor: Option<HCURSOR>,
     pub(crate) cursor_visible: Arc<AtomicBool>,
     pub(crate) drop_target_helper: IDropTargetHelper,
+    pub(crate) file_drop_description: Option<String>,
     pub(crate) validation_number: usize,
     pub(crate) main_receiver: PriorityQueueReceiver<RunnableVariant>,
     pub(crate) platform_window_handle: HWND,
