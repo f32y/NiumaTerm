@@ -6,19 +6,17 @@ use windows_registry::CURRENT_USER;
 use super::notifier;
 
 const CLSID_NEW_TAB: &str = "{f1d94feb-1aa5-4b27-9440-c3bc16247c61}";
-const CLSID_NEW_WINDOW: &str = "{f240799c-a056-4f34-a6b0-926b9730ce3f}";
 
-const VERBS: [Verb; 2] = [
-    Verb {
-        id: "NiumaTermNewTab",
-        title: "Open NiumaTerm in new tab",
-        clsid: CLSID_NEW_TAB,
-    },
-    Verb {
-        id: "NiumaTermNewWindow",
-        title: "Open NiumaTerm in new window",
-        clsid: CLSID_NEW_WINDOW,
-    },
+const VERBS: [Verb; 1] = [Verb {
+    id: "NiumaTermNewTab",
+    title: "Open in NiumaTerm",
+    clsid: CLSID_NEW_TAB,
+}];
+
+const LEGACY_NEW_WINDOW_ROOTS: [&str; 3] = [
+    r"Software\Classes\CLSID\{f240799c-a056-4f34-a6b0-926b9730ce3f}",
+    r"Software\Classes\Directory\shell\NiumaTermNewWindow",
+    r"Software\Classes\Directory\Background\shell\NiumaTermNewWindow",
 ];
 
 const ITEM_TYPES: [&str; 2] = [r"Directory", r"Directory\Background"];
@@ -104,6 +102,10 @@ pub(crate) fn register_shell_integration_paths(exe_path: &Path, dll_path: &Path)
     let dll_path = path_string(dll_path);
     let icon = format!("{exe_path},0");
 
+    for path in LEGACY_NEW_WINDOW_ROOTS {
+        let _ = CURRENT_USER.remove_tree(path);
+    }
+
     for verb in VERBS {
         let clsid = CURRENT_USER.create(format!(r"Software\Classes\CLSID\{}", verb.clsid))?;
         clsid.set_string("", verb.title)?;
@@ -143,6 +145,7 @@ fn context_menu_owned_registry_roots() -> Vec<String> {
             roots.push(format!(r"Software\Classes\{item_type}\shell\{}", verb.id));
         }
     }
+    roots.extend(LEGACY_NEW_WINDOW_ROOTS.map(String::from));
     roots
 }
 
@@ -191,9 +194,6 @@ mod tests {
                 r"Software\Classes\CLSID\{f1d94feb-1aa5-4b27-9440-c3bc16247c61}\InprocServer32",
                 r"Software\Classes\Directory\shell\NiumaTermNewTab",
                 r"Software\Classes\Directory\Background\shell\NiumaTermNewTab",
-                r"Software\Classes\CLSID\{f240799c-a056-4f34-a6b0-926b9730ce3f}\InprocServer32",
-                r"Software\Classes\Directory\shell\NiumaTermNewWindow",
-                r"Software\Classes\Directory\Background\shell\NiumaTermNewWindow",
             ]
         );
         assert_eq!(
