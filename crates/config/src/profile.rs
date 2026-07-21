@@ -31,7 +31,7 @@ pub struct Profile {
 /// Write the `[profiles]` section (`default` plus the `[[profiles.list]]`
 /// entries) into a parsed `config.toml` document, replacing any existing one.
 pub(crate) fn patch_document(doc: &mut DocumentMut, profiles: &[Profile], default_profile: &str) {
-    crate::appearance::ensure_explicit_table(doc, "profiles");
+    crate::ensure_explicit_table(doc, "profiles");
     doc["profiles"]["default"] = value(default_profile);
 
     let mut tables = ArrayOfTables::new();

@@ -429,7 +429,7 @@ impl AppSettings {
             enabled: self.remote_session_enabled,
         };
         let profiles = self.profiles.clone();
-        if let Err(err) = nmt_config::appearance::save_settings(
+        if let Err(err) = nmt_config::save_settings(
             &self.theme,
             &appearance,
             self.cursor_shape,

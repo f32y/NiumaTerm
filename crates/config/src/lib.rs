@@ -28,8 +28,11 @@ use std::sync::{OnceLock, RwLock};
 use colors::Colors;
 use serde::{Deserialize, Serialize};
 use theme::{AdaptiveColors, AdaptiveTheme, AppearanceTheme, Theme, UiTheme};
+use toml_edit::{DocumentMut, Item, Table, value};
 use tracing::warn;
 
+use crate::agent::AgentConfig;
+use crate::appearance::AppearanceConfig;
 use crate::bell::Bell;
 use crate::bindings::Bindings;
 use crate::defaults::*;
@@ -38,7 +41,10 @@ use crate::keyboard::Keyboard;
 use crate::layout::{Margin, Panel};
 use crate::navigation::Navigation;
 use crate::platform::{Platform, PlatformConfig};
+use crate::profile::Profile;
+use crate::remote_session::RemoteSession;
 use crate::renderer::Renderer;
+use crate::system::SystemConfig;
 use crate::title::Title;
 use crate::window::Window;
 
@@ -796,19 +802,15 @@ impl From<CursorShape> for char {
 static CONFIG: OnceLock<Config> = OnceLock::new();
 static ACTIVE_COLORS: OnceLock<RwLock<Colors>> = OnceLock::new();
 
-/// Install `config` as the process-wide config. Ignored if already initialized.
 pub fn init(config: Config) {
     set_active_colors(config.colors);
     let _ = CONFIG.set(config);
 }
 
-/// Load the config file from disk and install it as the global, returning a
-/// reference. Call once during startup.
 pub fn init_from_file() -> &'static Config {
     CONFIG.get_or_init(Config::load)
 }
 
-/// The global config, falling back to defaults if never initialized.
 pub fn get() -> &'static Config {
     CONFIG.get_or_init(Config::default)
 }
@@ -829,6 +831,136 @@ pub fn set_active_colors(colors: Colors) {
         .expect("active theme colors lock poisoned") = colors;
 }
 
+pub fn save_settings(
+    theme: &str,
+    appearance: &AppearanceConfig,
+    cursor_shape: CursorShape,
+    agent: &AgentConfig,
+    system: &SystemConfig,
+    remote_session: &RemoteSession,
+    profiles: &[Profile],
+    default_profile: &str,
+) -> std::io::Result<()> {
+    save_settings_to(
+        &config_file_path(),
+        theme,
+        appearance,
+        cursor_shape,
+        agent,
+        system,
+        remote_session,
+        profiles,
+        default_profile,
+    )
+}
+
+fn save_settings_to(
+    path: &Path,
+    theme: &str,
+    appearance: &AppearanceConfig,
+    cursor_shape: CursorShape,
+    agent: &AgentConfig,
+    system: &SystemConfig,
+    remote_session: &RemoteSession,
+    profiles: &[Profile],
+    default_profile: &str,
+) -> std::io::Result<()> {
+    let mut doc = match std::fs::read_to_string(path) {
+        Ok(content) => content.parse::<DocumentMut>().map_err(|err| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("config.toml is not valid TOML, not saving settings: {err}"),
+            )
+        })?,
+        // Missing (or unreadable) file: start from an empty document.
+        Err(_) => DocumentMut::new(),
+    };
+
+    patch_settings_document(
+        &mut doc,
+        theme,
+        appearance,
+        cursor_shape,
+        agent,
+        system,
+        remote_session,
+        profiles,
+        default_profile,
+    );
+
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension("toml.tmp");
+    std::fs::write(&tmp, doc.to_string())?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn patch_settings_document(
+    doc: &mut DocumentMut,
+    theme: &str,
+    appearance: &AppearanceConfig,
+    cursor_shape: CursorShape,
+    agent: &AgentConfig,
+    system: &SystemConfig,
+    remote_session: &RemoteSession,
+    profiles: &[Profile],
+    default_profile: &str,
+) {
+    doc["theme"] = value(theme);
+    ensure_explicit_table(doc, "appearance");
+    doc["appearance"]["input-style"] = value(appearance.input_style.as_str());
+    doc["appearance"]["command-blocks"] = value(appearance.command_blocks);
+    doc["appearance"]["show-daily-token-usage"] = value(appearance.show_daily_token_usage);
+    doc["appearance"]["show-git-status-on-title-bar"] =
+        value(appearance.show_git_status_on_title_bar);
+    doc["appearance"]["git-status-refresh-interval"] =
+        value(appearance.git_status_refresh_interval as i64);
+    doc["appearance"]["tab-width"] = value(appearance.tab_width);
+    doc["appearance"]["ui-font"] = value(&appearance.ui_font);
+    doc["appearance"]["terminal-font-family"] = value(&appearance.terminal_font_family);
+    doc["appearance"]["terminal-font-size"] = value(appearance.terminal_font_size);
+    doc["appearance"]["terminal-line-height"] = value(appearance.terminal_line_height);
+    doc["appearance"]["monospace-only"] = value(appearance.monospace_only);
+    doc["appearance"]["enable-window-transparency"] = value(appearance.window_transparency_enabled);
+    doc["appearance"]["background-opacity"] = value(appearance.background_opacity);
+    if let Some(path) = &appearance.background_image {
+        doc["appearance"]["background-image"] = value(path);
+    } else {
+        doc["appearance"]
+            .as_table_mut()
+            .expect("appearance was normalized to a table")
+            .remove("background-image");
+    }
+    doc["appearance"]["background-image-opacity"] = value(appearance.background_image_opacity);
+
+    ensure_explicit_table(doc, "cursor");
+    doc["cursor"]["shape"] = value(cursor_shape.as_str());
+
+    ensure_explicit_table(doc, "system");
+    system::patch_document(doc, system);
+
+    ensure_explicit_table(doc, "remote-session");
+    remote_session::patch_document(doc, remote_session);
+
+    ensure_explicit_table(doc, "agent");
+    agent::patch_document(doc, agent);
+
+    profile::patch_document(doc, profiles, default_profile);
+}
+
+/// Make `doc[key]` an explicit table so nested managed keys never turn into an
+/// inline table and existing inline or malformed values are normalized safely.
+pub(crate) fn ensure_explicit_table(doc: &mut DocumentMut, key: &str) {
+    let item = doc.entry(key).or_insert_with(|| Item::Table(Table::new()));
+    if !item.is_table() {
+        let previous = std::mem::replace(item, Item::None);
+        *item = Item::Table(previous.into_table().unwrap_or_default());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Write;
@@ -836,6 +968,142 @@ mod tests {
     use colors::hex_to_color_arr;
 
     use super::*;
+
+    fn sample_appearance() -> AppearanceConfig {
+        AppearanceConfig {
+            input_style: appearance::InputStyle::Waterfall,
+            command_blocks: false,
+            show_daily_token_usage: true,
+            show_git_status_on_title_bar: true,
+            git_status_refresh_interval: 15,
+            tab_width: 150.0,
+            ui_font: "Arial".to_string(),
+            terminal_font_family: "Cascadia Code".to_string(),
+            terminal_font_size: 16.0,
+            terminal_line_height: 1.2,
+            monospace_only: false,
+            window_transparency_enabled: true,
+            background_opacity: 0.85,
+            background_image: Some(r"C:\Wallpapers\background.png".to_string()),
+            background_image_opacity: 0.4,
+        }
+    }
+
+    fn sample_system() -> SystemConfig {
+        SystemConfig {
+            restore_last_session_when_opening: false,
+            manage_subprocess_job: true,
+            warn_before_terminating_shell: system::WarnBeforeTerminatingShell::Disabled,
+            confirm_before_closing_workspace: false,
+            prioritize_ui_threads: true,
+        }
+    }
+
+    fn sample_remote_session() -> RemoteSession {
+        RemoteSession { enabled: true }
+    }
+
+    fn sample_agent() -> AgentConfig {
+        AgentConfig {
+            enable_agent_hooks: false,
+            show_agent_usage: false,
+        }
+    }
+
+    fn sample_profiles() -> Vec<Profile> {
+        vec![Profile {
+            name: "PowerShell".to_string(),
+            shell: r"C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe".to_string(),
+            args: "-NoLogo".to_string(),
+        }]
+    }
+
+    fn patch_settings(doc: &mut DocumentMut) {
+        patch_settings_document(
+            doc,
+            "test-theme",
+            &sample_appearance(),
+            CursorShape::Beam,
+            &sample_agent(),
+            &sample_system(),
+            &sample_remote_session(),
+            &sample_profiles(),
+            "PowerShell",
+        );
+    }
+
+    #[test]
+    fn settings_patch_preserves_comments_and_unrelated_keys() {
+        let existing = "# my terminal config\ntheme = \"dark\"\n\n[window]\nwidth = 960\n";
+        let mut doc = existing.parse::<DocumentMut>().unwrap();
+
+        patch_settings(&mut doc);
+        let out = doc.to_string();
+
+        assert!(out.contains("# my terminal config"));
+        assert!(out.contains("width = 960"));
+
+        let config: Config = toml::from_str(&out).unwrap();
+        assert_eq!(config.appearance, sample_appearance());
+        assert_eq!(config.agent, sample_agent());
+        assert_eq!(config.system, sample_system());
+        assert_eq!(config.remote_session, sample_remote_session());
+        assert_eq!(config.profiles.list, sample_profiles());
+        assert_eq!(config.profiles.default, "PowerShell");
+        assert_eq!(config.cursor.shape, CursorShape::Beam);
+    }
+
+    #[test]
+    fn settings_patch_converts_inline_tables() {
+        let mut doc =
+            "fonts = { size = 12.0, hinting = true }\nappearance = { monospace-only = false }\n"
+                .parse::<DocumentMut>()
+                .unwrap();
+        patch_settings(&mut doc);
+
+        let out = doc.to_string();
+        assert!(out.contains("fonts = { size = 12.0, hinting = true }"));
+        let config: Config = toml::from_str(&out).unwrap();
+        assert_eq!(config.appearance, sample_appearance());
+    }
+
+    #[test]
+    fn save_settings_to_creates_updates_and_rejects_invalid() {
+        let dir = std::env::temp_dir().join("NiumaTerm-settings-save-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("config.toml");
+
+        let save = || {
+            save_settings_to(
+                &path,
+                "test-theme",
+                &sample_appearance(),
+                CursorShape::Beam,
+                &sample_agent(),
+                &sample_system(),
+                &sample_remote_session(),
+                &sample_profiles(),
+                "PowerShell",
+            )
+        };
+
+        save().unwrap();
+        let config: Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(config.appearance, sample_appearance());
+        assert_eq!(config.agent, sample_agent());
+        assert_eq!(config.theme, "test-theme");
+
+        save().unwrap();
+        let config: Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(config.profiles.default, "PowerShell");
+        assert!(!path.with_extension("toml.tmp").exists());
+
+        std::fs::write(&path, "not [ valid").unwrap();
+        assert!(save().is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "not [ valid");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn testing_mode_uses_test_subdirectory() {
