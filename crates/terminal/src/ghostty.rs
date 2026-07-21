@@ -964,6 +964,25 @@ impl GhosttyTerminal {
         });
     }
 
+    /// Set the shape used until a program overrides it with DECSCUSR and again
+    /// after that program resets the cursor style with `CSI 0 SP q`.
+    pub fn set_default_cursor_shape(&mut self, shape: crate::ansi::CursorShape) -> Result<()> {
+        let style: vt::TerminalCursorStyle::Type = match shape {
+            crate::ansi::CursorShape::Beam => vt::TerminalCursorStyle::BAR,
+            crate::ansi::CursorShape::Underline => vt::TerminalCursorStyle::UNDERLINE,
+            crate::ansi::CursorShape::Block | crate::ansi::CursorShape::Hidden => {
+                vt::TerminalCursorStyle::BLOCK
+            }
+        };
+        Error::from_code(unsafe {
+            vt::ghostty_terminal_set(
+                self.terminal,
+                vt::TerminalOption::DEFAULT_CURSOR_STYLE,
+                (&style as *const vt::TerminalCursorStyle::Type).cast(),
+            )
+        })
+    }
+
     /// Push default foreground/background/cursor colors and the 256-color
     /// palette into the engine so SGR-indexed and default colors resolve to the
     /// host theme rather than Ghostty's built-in palette.
@@ -3155,6 +3174,22 @@ mod tests {
         );
         t.write_vt(b"\x1b[?25h");
         assert!(t.snapshot().unwrap().cursor_visible(), "shown again");
+    }
+
+    #[test]
+    fn configured_cursor_shape_is_the_decscusr_default() {
+        use crate::ansi::CursorShape;
+        let mut t = GhosttyTerminal::new(20, 5, 100).unwrap();
+
+        t.set_default_cursor_shape(CursorShape::Beam).unwrap();
+        assert_eq!(t.snapshot().unwrap().cursor_shape(), CursorShape::Beam);
+
+        t.write_vt(b"\x1b[2 q");
+        t.set_default_cursor_shape(CursorShape::Underline).unwrap();
+        assert_eq!(t.snapshot().unwrap().cursor_shape(), CursorShape::Block);
+
+        t.write_vt(b"\x1b[0 q");
+        assert_eq!(t.snapshot().unwrap().cursor_shape(), CursorShape::Underline);
     }
 
     /// OSC 10/11 dynamic foreground and background land in the snapshot colors.

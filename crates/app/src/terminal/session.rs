@@ -181,6 +181,7 @@ impl TerminalSession {
                 proxy,
                 id,
                 config.scrollback_lines,
+                config.cursor_shape,
                 engine_blocks,
             )?;
             (None, Some(remote_control), engine, messenger)
@@ -209,6 +210,7 @@ impl TerminalSession {
                 proxy,
                 id,
                 config.scrollback_lines,
+                config.cursor_shape,
                 engine_blocks,
             )?;
             (job_handle, None, engine, messenger)
@@ -349,6 +351,7 @@ fn start_pipe<T>(
     proxy: TerminalEventProxy,
     id: u64,
     scrollback_lines: usize,
+    cursor_shape: nmt_config::CursorShape,
     engine_blocks: bool,
 ) -> Result<(SessionEngine, MsgSender), EngineError>
 where
@@ -375,6 +378,15 @@ where
         )
     })?;
     let engine = pipe.engine();
+    engine
+        .lock()
+        .set_default_cursor_shape(cursor_shape)
+        .map_err(|error| {
+            EngineError::new(
+                EngineErrorCode::EngineInit,
+                format!("failed to configure cursor shape: {error}"),
+            )
+        })?;
     let messenger = pipe.channel();
     drop(pipe.spawn());
     Ok((engine, messenger))
@@ -567,6 +579,8 @@ pub struct TerminalSessionConfig {
     pub starting_title: Option<String>,
     pub cols: u16,
     pub rows: u16,
+    /// Default cursor shape until the running program selects one with DECSCUSR.
+    pub cursor_shape: nmt_config::CursorShape,
     /// Scrollback budget in lines; converted to the engine's byte budget.
     pub scrollback_lines: usize,
     /// Engine-blocks mode is the default because completed commands can freeze
@@ -630,6 +644,7 @@ impl Default for TerminalSessionConfig {
             starting_title: None,
             cols: 80,
             rows: 24,
+            cursor_shape: nmt_config::CursorShape::Block,
             scrollback_lines: 10_000,
             engine_blocks: true,
             remote_session_enabled: false,

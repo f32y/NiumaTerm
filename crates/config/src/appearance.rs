@@ -180,6 +180,7 @@ impl Default for AppearanceConfig {
 pub fn save_settings(
     theme: &str,
     appearance: &AppearanceConfig,
+    cursor_shape: crate::CursorShape,
     agent: &AgentConfig,
     system: &SystemConfig,
     remote_session: &RemoteSession,
@@ -190,6 +191,7 @@ pub fn save_settings(
         &crate::config_file_path(),
         theme,
         appearance,
+        cursor_shape,
         agent,
         system,
         remote_session,
@@ -202,6 +204,7 @@ fn save_settings_to(
     path: &std::path::Path,
     theme: &str,
     appearance: &AppearanceConfig,
+    cursor_shape: crate::CursorShape,
     agent: &AgentConfig,
     system: &SystemConfig,
     remote_session: &RemoteSession,
@@ -223,6 +226,7 @@ fn save_settings_to(
         &mut doc,
         theme,
         appearance,
+        cursor_shape,
         agent,
         system,
         remote_session,
@@ -245,6 +249,7 @@ fn patch_document(
     doc: &mut DocumentMut,
     theme: &str,
     appearance: &AppearanceConfig,
+    cursor_shape: crate::CursorShape,
     agent: &AgentConfig,
     system: &SystemConfig,
     remote_session: &RemoteSession,
@@ -277,6 +282,9 @@ fn patch_document(
             .remove("background-image");
     }
     doc["appearance"]["background-image-opacity"] = value(appearance.background_image_opacity);
+
+    ensure_explicit_table(doc, "cursor");
+    doc["cursor"]["shape"] = value(cursor_shape.as_str());
 
     ensure_explicit_table(doc, "system");
     crate::system::patch_document(doc, system);
@@ -360,6 +368,7 @@ mod tests {
             doc,
             "test-theme",
             &sample_appearance(),
+            crate::CursorShape::Beam,
             &sample_agent(),
             &sample_system(),
             &sample_remote_session(),
@@ -387,6 +396,7 @@ mod tests {
         assert_eq!(config.remote_session, sample_remote_session());
         assert_eq!(config.profiles.list, sample_profiles());
         assert_eq!(config.profiles.default, "PowerShell");
+        assert_eq!(config.cursor.shape, crate::CursorShape::Beam);
     }
 
     #[test]
@@ -415,6 +425,7 @@ mod tests {
                 &path,
                 "test-theme",
                 &sample_appearance(),
+                crate::CursorShape::Beam,
                 &sample_agent(),
                 &sample_system(),
                 &sample_remote_session(),
