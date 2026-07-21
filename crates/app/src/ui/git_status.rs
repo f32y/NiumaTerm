@@ -1,7 +1,3 @@
-//! Git working-tree status shared by the titlebar `+N -M` indicator and the
-//! git sidebar: subprocess helpers, porcelain/numstat/diff parsers, the
-//! polling `GitStatusModel` entity, and the titlebar `GitStatusView`.
-//!
 //! All git invocations run on the background executor with a hidden console
 //! (`CREATE_NO_WINDOW`), following the `token_usage.rs` template.
 
@@ -16,7 +12,6 @@ use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use crate::ui::AppSettings;
 
-/// Hard cap on rendered diff lines; longer diffs get a trailing truncation row.
 const MAX_DIFF_LINES: usize = 100_000;
 
 /// One changed path from `git status`, with its summed staged+unstaged line
@@ -30,7 +25,6 @@ pub(crate) struct FileEntry {
     pub(crate) removed: u64,
 }
 
-/// Parsed result of one status refresh.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct GitSnapshot {
     pub(crate) repo_root: String,
@@ -39,7 +33,6 @@ pub(crate) struct GitSnapshot {
     pub(crate) total_removed: u64,
 }
 
-/// One classified line of a unified diff.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DiffLineKind {
     Added,
@@ -56,11 +49,6 @@ pub(crate) struct DiffLine {
     pub(crate) text: SharedString,
 }
 
-// ---------------------------------------------------------------------------
-// Subprocess helpers (background thread only)
-// ---------------------------------------------------------------------------
-
-/// Run `git -C <dir> <args>` silently; stdout bytes on success.
 fn run_git(dir: &str, args: &[&str]) -> Result<Vec<u8>, String> {
     let output = std::process::Command::new("git")
         .arg("-C")
@@ -80,8 +68,6 @@ fn run_git(dir: &str, args: &[&str]) -> Result<Vec<u8>, String> {
     Ok(output.stdout)
 }
 
-/// Repository root containing `cwd`, or `None` when not inside a git repo
-/// (or git is unavailable).
 pub(crate) fn resolve_repo_root(cwd: &str) -> Option<String> {
     let out = run_git(cwd, &["rev-parse", "--show-toplevel"]).ok()?;
     let root = String::from_utf8_lossy(&out).trim().to_string();
@@ -194,10 +180,6 @@ fn cap_lines(iter: impl Iterator<Item = DiffLine>) -> Vec<DiffLine> {
     lines
 }
 
-// ---------------------------------------------------------------------------
-// Parsers (pure, unit-tested)
-// ---------------------------------------------------------------------------
-
 /// Parse `git status --porcelain=v1 -z` into `(XY, path)` pairs. Rename and
 /// copy entries carry the original path in a second NUL-separated token,
 /// which is consumed and dropped (the list shows the new path).
@@ -271,14 +253,9 @@ pub(crate) fn parse_diff(text: &str) -> Vec<DiffLine> {
     }))
 }
 
-// ---------------------------------------------------------------------------
-// GitStatusModel: the shared poller entity
-// ---------------------------------------------------------------------------
-
 /// Owns the latest [`GitSnapshot`] and the refresh loop. The titlebar
 /// [`GitStatusView`] and the git sidebar both `cx.observe` this entity.
 pub(crate) struct GitStatusModel {
-    /// The active pane's CWD, synced by `Shell` (render-time compare-and-set).
     target_cwd: Option<String>,
     pub(crate) snapshot: Option<GitSnapshot>,
     /// Bumped each time a snapshot lands, so observers can tell data changes
@@ -288,9 +265,7 @@ pub(crate) struct GitStatusModel {
     /// discarded on arrival.
     generation: u64,
     refreshing: bool,
-    /// Mirror of the titlebar setting, for off→on edge refresh.
     enabled: bool,
-    /// Set by `Shell` while the git sidebar is open (keeps the poller live).
     pub(crate) sidebar_open: bool,
 }
 
@@ -339,7 +314,6 @@ impl GitStatusModel {
         }
     }
 
-    /// Whether anyone is displaying the data (titlebar indicator or sidebar).
     fn active(&self) -> bool {
         self.enabled || self.sidebar_open
     }
@@ -439,12 +413,6 @@ impl GitStatusModel {
     }
 }
 
-// ---------------------------------------------------------------------------
-// GitStatusView: the titlebar indicator
-// ---------------------------------------------------------------------------
-
-/// Titlebar `+N -M` indicator. Renders nothing while the setting is off or
-/// the active pane is not inside a git repository.
 pub(crate) struct GitStatusView {
     model: gpui::Entity<GitStatusModel>,
 }
@@ -466,7 +434,6 @@ impl Render for GitStatusView {
         let Some(snapshot) = self.model.read(cx).snapshot.clone() else {
             return div().into_any_element();
         };
-        // A clean repo shows nothing — no titlebar noise for 0/0.
         if snapshot.total_added == 0 && snapshot.total_removed == 0 {
             return div().into_any_element();
         }
@@ -510,7 +477,6 @@ mod tests {
 
     #[test]
     fn numstat_z_parses_counts_binary_and_rename() {
-        // plain, binary, rename (empty path after the second tab).
         let raw = b"3\t1\tsrc/lib.rs\0-\t-\tassets/logo.png\05\t0\t\0old.rs\0new.rs\0";
         let entries = parse_numstat_z(raw);
         assert_eq!(

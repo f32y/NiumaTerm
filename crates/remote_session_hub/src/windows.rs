@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 
 const SUBSCRIBER_QUEUE_CAPACITY: usize = 128;
 
-/// Stable identifier for a terminal session within one hub process.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SessionId(pub u64);
 
@@ -25,7 +24,6 @@ impl fmt::Display for SessionId {
     }
 }
 
-/// Parameters used to start a headless ConPTY session.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SessionOptions {
     pub shell: String,
@@ -56,7 +54,6 @@ impl Default for SessionOptions {
     }
 }
 
-/// A point-in-time VT checkpoint followed by the sequence number it includes.
 #[derive(Debug)]
 pub struct SessionSnapshot {
     pub session_id: SessionId,
@@ -66,7 +63,6 @@ pub struct SessionSnapshot {
     pub rows: u16,
 }
 
-/// Live events emitted after a subscription's checkpoint.
 #[derive(Clone, Debug)]
 pub enum SessionEvent {
     Output { seq: u64, data: Arc<[u8]> },
@@ -98,7 +94,6 @@ impl SessionSubscription {
         &self.receiver
     }
 
-    /// Wake a blocked consumer whenever this subscription receives an event.
     pub(crate) fn set_wake_thread(&self, thread: std::thread::Thread) {
         if let Some(subscriber) = self.stream.lock().subscribers.get_mut(&self.subscriber_id) {
             subscriber.wake_thread = Some(thread);
@@ -275,7 +270,6 @@ impl Drop for RemoteSession {
     }
 }
 
-/// Owns ConPTY sessions independently of any particular remote connection.
 #[derive(Default)]
 pub struct RemoteSessionHub {
     next_session_id: AtomicU64,

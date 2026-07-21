@@ -1,9 +1,3 @@
-//! The workspace's tab strip: gpui-component `TabBar` with hover-close,
-//! a `+` new-tab suffix, drag-to-reorder, and a right-click menu
-//! (Rename / Close) with inline renaming. `TabStrip` owns the strip's scroll
-//! position and active-tab reveal tracker; `Shell` holds one and feeds it the
-//! active workspace's tabs to render.
-
 use gpui::prelude::*;
 use gpui::{
     AnyElement, Context, DragMoveEvent, Entity, KeyDownEvent, MouseButton, Render, ScrollHandle,
@@ -19,7 +13,6 @@ use super::{NewTab, Shell};
 use crate::tabs::{TabId, TabManager};
 use crate::ui::AppSettings;
 
-/// Drag payload for tab reorder: the source tab's position.
 struct TabDrag {
     from: usize,
 }
@@ -56,8 +49,6 @@ impl Render for TabDragPreview {
     }
 }
 
-/// Tab-strip view state: horizontal scroll position plus the active-tab reveal
-/// tracker. Rendered against the active workspace's tabs the shell passes in.
 pub(super) struct TabStrip {
     /// Scroll position of the tab strip (tabs overflow horizontally once their
     /// fixed widths exceed the bar).
@@ -119,10 +110,6 @@ impl TabStrip {
         }
     }
 
-    /// The workspace's tab strip, built from the vendored gpui-component `TabBar`
-    /// so it follows the component theme. Clicking a tab activates it; new/close
-    /// come via shortcuts. `rename`, when it matches a tab id, swaps that tab's
-    /// label for an inline input.
     pub(super) fn render(
         &self,
         tabs: &TabManager<TerminalPaneTree>,

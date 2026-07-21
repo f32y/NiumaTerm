@@ -4,9 +4,6 @@ use gpui_component::ActiveTheme;
 
 use super::view::TerminalPane;
 
-/// A right-edge scrollbar overlay, shown only when there is scrollback. The thumb
-/// size/position reflect the viewport within the total, and clicking or dragging
-/// the track scrolls to that offset.
 struct ScrollbarDrag;
 
 pub(super) fn scrollbar_thumb_geometry(total: f64, offset: f64, len: f64) -> Option<(f32, f32)> {

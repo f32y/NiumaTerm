@@ -1,5 +1,3 @@
-//! Workspace grouping above tabs: Window → Workspace → Surface.
-//!
 //! A `WorkspaceManager` owns one or more workspaces; each workspace owns its own
 //! [`TabManager`] plus display metadata (name, cwd, busy). Exactly one workspace is
 //! active, and the set is never empty — `close_workspace` refuses the last one, so

@@ -310,7 +310,6 @@ impl TerminalSession {
         out
     }
 
-    /// The in-flight command, if one is currently executing.
     pub fn in_flight_block(&self) -> Option<InFlightBlock> {
         self.in_flight.lock().clone()
     }
@@ -320,8 +319,6 @@ impl TerminalSession {
     }
 }
 
-/// The default shell command when none is configured. Single source of truth for
-/// session spawn.
 pub(crate) fn default_shell() -> String {
     "powershell.exe".to_string()
 }
@@ -392,9 +389,6 @@ where
     Ok((engine, messenger))
 }
 
-/// `TerminalEventProxy` for a headless session: enqueues user-visible `TerminalEvent`s onto
-/// the session's host-event queue and signals the shell's render loop. Demand-driven:
-/// terminal-content damage drives a content render while host events drive chrome.
 #[derive(Clone)]
 pub struct TerminalEventProxy {
     events: HostEventQueue,
@@ -425,8 +419,6 @@ pub struct TerminalEventProxy {
 }
 
 impl TerminalEventProxy {
-    /// Signal the render loop from the PTY thread (non-blocking; a closed channel after
-    /// window teardown is ignored).
     fn signal(&self, kind: Wake) {
         if let Some(tx) = &self.wake {
             tx.send(kind);

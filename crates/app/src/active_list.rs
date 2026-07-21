@@ -1,5 +1,3 @@
-//! Ordered, never-empty list with a stable-id active element.
-//!
 //! Shared engine behind `TabManager` and `WorkspaceManager`: both maintain a
 //! `Vec` plus an active index where identity is a stable id that survives
 //! close and reorder. The close-neighbor rule, activation bounds, and the

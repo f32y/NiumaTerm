@@ -1,6 +1,3 @@
-//! Terminal font picker for the settings dialog: a searchable `Select` whose
-//! rows render each font name in that font, with a monospace-only filter.
-//!
 //! The `Select` entity and the font scan are cached in a gpui global for the
 //! app lifetime, because the settings view (and its field closures) is rebuilt
 //! on every render.
@@ -17,7 +14,6 @@ use gpui_component::setting::SettingField;
 
 use crate::ui::AppSettings;
 
-/// One installed font family in the picker list.
 #[derive(Clone)]
 struct FontItem {
     name: SharedString,
@@ -34,14 +30,12 @@ impl SearchableListItem for FontItem {
         &self.name
     }
 
-    /// Dropdown row: the font name rendered in the font itself.
     fn render(&self, _: &mut Window, _: &mut App) -> impl IntoElement {
         div()
             .font_family(self.name.clone())
             .child(self.name.clone())
     }
 
-    /// Trigger button: also rendered in the font itself.
     fn display_title(&self) -> Option<gpui::AnyElement> {
         Some(
             div()
@@ -54,19 +48,14 @@ impl SearchableListItem for FontItem {
 
 type FontSelectState = SelectState<SearchableVec<FontItem>>;
 
-/// Which font setting a picker edits.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum FontTarget {
-    /// The terminal view font; the monospace-only filter applies.
     Terminal,
-    /// The app chrome font; all installed families are shown.
     Ui,
 }
 
-/// Picker state cached across settings-dialog rebuilds.
 struct FontPicker {
     select: Entity<FontSelectState>,
-    /// All installed families with their measured monospace flag.
     fonts: Vec<(SharedString, bool)>,
     /// The `monospace_only` value the current item set was built with.
     applied_monospace_only: bool,
@@ -82,7 +71,6 @@ struct FontPickerGlobal {
 
 impl Global for FontPickerGlobal {}
 
-/// The current family for `target`, read from `AppSettings`.
 fn current_family(target: FontTarget, cx: &App) -> SharedString {
     let settings = cx.global::<AppSettings>();
     match target {
@@ -91,7 +79,6 @@ fn current_family(target: FontTarget, cx: &App) -> SharedString {
     }
 }
 
-/// Whether `target`'s list is filtered to monospace fonts (terminal only).
 fn monospace_filter(target: FontTarget, cx: &App) -> bool {
     matches!(target, FontTarget::Terminal) && cx.global::<AppSettings>().monospace_only
 }
@@ -112,8 +99,6 @@ fn slot_mut(target: FontTarget, cx: &mut App) -> &mut Option<FontPicker> {
     }
 }
 
-/// A "Font Family" setting field: a searchable font `Select` bound to
-/// `target`'s font setting.
 pub fn font_family_field(target: FontTarget) -> SettingField<SharedString> {
     SettingField::render(move |options, window, cx| {
         let select = ensure_picker(target, window, cx);
@@ -123,7 +108,6 @@ pub fn font_family_field(target: FontTarget) -> SettingField<SharedString> {
     })
 }
 
-/// Build (once) or resync the cached picker for `target`, returning its Select.
 fn ensure_picker(target: FontTarget, window: &mut Window, cx: &mut App) -> Entity<FontSelectState> {
     cx.default_global::<FontPickerGlobal>();
 
@@ -159,7 +143,6 @@ fn ensure_picker(target: FontTarget, window: &mut Window, cx: &mut App) -> Entit
     let picker = slot(target, cx).as_ref().expect("set above");
     let select = picker.select.clone();
 
-    // The monospace switch toggled since the item set was built: refilter.
     if picker.applied_monospace_only != monospace_only {
         let items = font_items(&picker.fonts, monospace_only);
         select.update(cx, |state, cx| {

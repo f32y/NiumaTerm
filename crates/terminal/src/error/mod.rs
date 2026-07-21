@@ -42,8 +42,6 @@ impl From<ConfigError> for TerminalError {
 
 #[derive(Clone, PartialEq)]
 pub enum TerminalErrorType {
-    // navigation configuration has changed
-    // NavigationHasChanged,
     InitializationError(String),
 
     // configurlation file was not found
@@ -66,9 +64,6 @@ impl std::fmt::Display for TerminalErrorType {
             TerminalErrorType::ConfigurationNotFound => {
                 write!(f, "Configuration file was not found")
             }
-            // TerminalErrorType::NavigationHasChanged => {
-            //     write!(f, "Navigation has changed\n\nPlease reopen terminal.")
-            // }
             TerminalErrorType::InitializationError(message) => {
                 write!(f, "Error initializing NiumaTerm terminal:\n{message}")
             }

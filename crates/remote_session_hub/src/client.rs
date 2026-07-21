@@ -1,6 +1,3 @@
-//! Parent-side Hub client exposed as an `EventedPty` so the existing terminal
-//! parser and renderer can consume remote-session bytes unchanged.
-
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::io::{self, Read, Write};

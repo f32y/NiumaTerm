@@ -1,5 +1,3 @@
-//! Shared store for hook registrations kept in a user-scope JSON file.
-//!
 //! Claude Code (`~/.claude/settings.json`) and Codex (`~/.codex/hooks.json`)
 //! use the same layout — a root object with a `"hooks"` map of event name to
 //! matcher groups, each group holding a `"hooks"` array of command entries —

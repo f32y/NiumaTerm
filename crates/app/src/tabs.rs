@@ -1,8 +1,3 @@
-//! Multi-session tab model: a set of tabs plus the active index, with all
-//! lifecycle logic (new / close / switch / reorder / title / exited) in one
-//! place. Pure logic — generic over the surface type `S` so it unit-tests
-//! without starting a PTY.
-//!
 //! Invariant: a `TabManager` is never empty. `close` refuses the last tab, so
 //! `active` always points at a real tab. The ordering/activation mechanics
 //! live in [`ActiveList`]; this module adds the tab-specific parts (titles,

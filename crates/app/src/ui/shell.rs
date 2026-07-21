@@ -38,55 +38,33 @@ fn explicit_cwd(cwd: &str) -> Option<String> {
     (!cwd.is_empty() && cwd != ".").then(|| cwd.to_string())
 }
 
-/// Pixels a keyboard pane-resize step moves the divider.
 const PANE_RESIZE_STEP: Pixels = px(30.0);
 
 actions!(
     NiumaTerm,
     [
-        /// Open a new terminal tab in the active workspace.
         NewTab,
-        /// Close the active terminal tab.
         CloseTab,
-        /// Activate the next tab (wraps).
         NextTab,
-        /// Activate the previous tab (wraps).
         PrevTab,
-        /// Create a new workspace with a fresh terminal tab.
         NewWorkspace,
-        /// Activate the next workspace (wraps).
         NextWorkspace,
-        /// Activate the previous workspace (wraps).
         PrevWorkspace,
-        /// Open a new terminal window with a fresh default session.
         NewWindow,
-        /// Create a new pane above the focused pane.
         SplitUp,
-        /// Create a new pane below the focused pane.
         SplitDown,
-        /// Create a new pane left of the focused pane.
         SplitLeft,
-        /// Create a new pane right of the focused pane.
         SplitRight,
-        /// Grow/shrink the focused pane upward.
         ResizePaneUp,
-        /// Grow/shrink the focused pane downward.
         ResizePaneDown,
-        /// Grow/shrink the focused pane leftward.
         ResizePaneLeft,
-        /// Grow/shrink the focused pane rightward.
         ResizePaneRight,
-        /// Collapse or expand the workspace sidebar.
         ToggleSidebar,
-        /// Open or close the right-side git sidebar.
         ToggleGitSidebar,
-        /// Open the settings dialog.
         ShowSettings,
     ]
 );
 
-/// A tab's surface: the split-pane tree whose leaves are `TerminalPane`
-/// entities (each pane owns one `TerminalSurface`).
 pub(crate) type TerminalPaneTree = PaneTree<Entity<TerminalPane>, Entity<ResizableState>>;
 
 struct AgentRouteLocation {
@@ -98,9 +76,6 @@ struct AgentRouteLocation {
     pane: Entity<TerminalPane>,
 }
 
-/// The GPUI root shell entity. Owns the workspace/tab model directly through
-/// `WorkspaceManager`, with each tab holding a pane tree of `TerminalPane`
-/// entities.
 pub(crate) struct Shell {
     pub(crate) workspaces: WorkspaceManager<TerminalPaneTree>,
     /// Monotonic surface-id source shared by tabs and workspaces.

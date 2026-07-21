@@ -8,8 +8,6 @@ use gpui::{AnyElement, App, Context, Pixels, Window, div, px};
 use gpui_component::ActiveTheme as _;
 use gpui_component::animation::Transition;
 
-/// Drag payload for a sidebar width-resize handle; doubles as the (invisible)
-/// drag ghost entity.
 #[derive(Clone)]
 pub(crate) struct ResizeDrag;
 

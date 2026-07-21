@@ -339,7 +339,6 @@ impl TerminalSurface {
         self.session.poll_events()
     }
 
-    /// The in-flight command, if one is executing.
     pub(crate) fn in_flight_block(&self) -> Option<crate::terminal::session::InFlightBlock> {
         self.session.in_flight_block()
     }
@@ -348,7 +347,6 @@ impl TerminalSurface {
         self.session.open_prompt_region()
     }
 
-    /// Whether a PTY mouse-reporting mode is active.
     pub(crate) fn mouse_reporting_active(&self) -> bool {
         self.mouse_mode().is_some()
     }
@@ -357,7 +355,6 @@ impl TerminalSurface {
         self.app_mouse_mode(modifiers).is_some()
     }
 
-    /// Copy `text` to the system clipboard (block copy actions).
     pub(crate) fn copy_text_to_clipboard(&self, text: String) {
         if text.is_empty() {
             return;

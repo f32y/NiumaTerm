@@ -1,11 +1,3 @@
-//! The PTY pipe: the per-session blocking worker ([`PtyPipe`]) that pumps bytes
-//! between ConPTY and the Ghostty engine. It reads PTY output into
-//! `engine.write_vt` + the render buffer, flushes queued UI input back to the
-//! PTY, and hosts the on-read interceptors: the OSC 133 prompt sniffer
-//! (capture / lifecycle events) and ConPTY resize-echo realignment. It runs on
-//! its own blocking thread; separate engine and render-buffer locks keep parsing
-//! from blocking paint.
-
 use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::io::{self, ErrorKind, Read, Write};
@@ -23,7 +15,6 @@ use crate::event::{
 use crate::ghostty::{GhosttyTerminal, mode};
 use crate::render_buffer::RenderBuffer;
 
-/// Like `thread::spawn`, but with a `name` argument.
 pub fn spawn_named<F, T, S>(name: S, f: F) -> JoinHandle<T>
 where
     F: FnOnce() -> T + Send + 'static,

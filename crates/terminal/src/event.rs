@@ -92,7 +92,6 @@ pub struct CommandStart {
 pub enum TerminalEventType {
     Terminal(TerminalEvent),
     Frame,
-    // Message(Message),
 }
 
 #[derive(Debug)]

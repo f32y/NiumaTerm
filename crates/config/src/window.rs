@@ -9,7 +9,6 @@ pub enum WindowMode {
     Maximized,
     #[serde(alias = "fullscreen")]
     Fullscreen,
-    // Windowed will use width and height definition
     #[default]
     #[serde(alias = "windowed")]
     Windowed,
