@@ -744,7 +744,11 @@ impl TerminalSurface {
     fn paste(&self) -> bool {
         let mut clipboard = nmt_terminal::clipboard::Clipboard::default();
         let text = clipboard.get(nmt_terminal::clipboard::ClipboardType::Clipboard);
-        let Some(bytes) = paste_payload(&text, self.modes().contains(Mode::BRACKETED_PASTE)) else {
+        self.paste_text(&text)
+    }
+
+    pub(crate) fn paste_text(&self, text: &str) -> bool {
+        let Some(bytes) = paste_payload(text, self.modes().contains(Mode::BRACKETED_PASTE)) else {
             return false;
         };
         self.write_bytes(&bytes);
