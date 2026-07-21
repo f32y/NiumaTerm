@@ -3,14 +3,11 @@
 //! bar, wrapped in the collapse/expand slide animation. `Sidebar` owns the collapse/width view
 //! state; `Shell` holds one and feeds it the workspace summaries to render.
 
-use std::time::Duration;
-
 use gpui::prelude::*;
 use gpui::{
     AnyElement, Context, DragMoveEvent, Entity, KeyDownEvent, MouseButton, ScrollHandle,
     SharedString, StatefulInteractiveElement, Window, div, px, rgb,
 };
-use gpui_component::animation::Transition;
 use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants};
 use gpui_component::input::{Input, InputState};
 use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
@@ -21,6 +18,7 @@ use nmt_agent_utils::AgentRuntimeStatus;
 
 use super::{AppSettings, NewWorkspace, Shell};
 use crate::ui::codex_usage::CodexUsageView;
+use crate::ui::sidebar_resize::{self, ResizeDrag};
 use crate::window::WindowRegistry;
 use crate::workspace::{WorkspaceId, WorkspaceSummary};
 
@@ -30,17 +28,6 @@ pub(super) const SIDEBAR_WIDTH: f32 = 180.0;
 /// Drag limits: keep the workspace list readable and leave room for the terminal.
 pub(super) const MIN_WIDTH: f32 = 140.0;
 pub(super) const MAX_WIDTH: f32 = 480.0;
-
-/// Drag payload for the width-resize handle; doubles as the (invisible)
-/// drag ghost entity (same pattern as the git sidebar's handle).
-#[derive(Clone)]
-struct ResizeDrag;
-
-impl Render for ResizeDrag {
-    fn render(&mut self, _: &mut gpui::Window, _: &mut Context<Self>) -> impl IntoElement {
-        div()
-    }
-}
 
 /// Sidebar idle indicator glyph (`assets/icons/idle.svg`), a static dot.
 struct IdleIcon;
@@ -518,26 +505,9 @@ impl Sidebar {
             .child(card);
 
         let collapsed = self.collapsed;
-        // Width-resize handle riding the right border: drag starts an
-        // (invisible) gpui drag; `on_drag_move` on the wrapper receives the
-        // window-level move events and turns the mouse x into a new width.
         // Not rendered while collapsed, so the collapsed sidebar can't resize.
-        let resize_handle = (!collapsed).then(|| {
-            div()
-                .id("workspace-sidebar-resize")
-                .absolute()
-                .right_0()
-                .top_0()
-                .bottom_0()
-                .w(px(5.0))
-                .cursor_col_resize()
-                .occlude()
-                .hover(|this| this.bg(cx.theme().drag_border))
-                .on_drag(ResizeDrag, |drag, _, _, cx| {
-                    cx.stop_propagation();
-                    cx.new(|_| drag.clone())
-                })
-        });
+        let resize_handle = (!collapsed)
+            .then(|| sidebar_resize::resize_handle("workspace-sidebar-resize", false, cx));
         let wrapper = div()
             .h_full()
             .flex_none()
@@ -565,23 +535,7 @@ impl Sidebar {
             .children(resize_handle);
         // Until the first toggle, render at the resting width — no slide-in on
         // startup.
-        if !self.animated {
-            let width = if collapsed { px(0.0) } else { px(width) };
-            return wrapper.w(width).into_any_element();
-        }
-
-        // Slide the sidebar in/out by animating the wrapper width. The id encodes
-        // the collapsed state so a toggle restarts the animation from the right
-        // end; unrelated re-renders keep the same id and don't re-animate.
-        let (from, to) = if collapsed {
-            (px(width), px(0.0))
-        } else {
-            (px(0.0), px(width))
-        };
-        Transition::new(Duration::from_millis(180))
-            .width(from, to)
-            .apply(wrapper, ("sidebar", collapsed as usize))
-            .into_any_element()
+        sidebar_resize::slide_width(wrapper, "sidebar", !collapsed, px(width), self.animated)
     }
 }
 

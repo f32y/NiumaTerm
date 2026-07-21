@@ -3,36 +3,23 @@
 //! from the shared [`GitStatusModel`]; the per-file diff is fetched on
 //! demand on the background executor.
 
-use std::time::Duration;
-
 use gpui::prelude::*;
 use gpui::{
     Context, DragMoveEvent, Entity, Pixels, UniformListScrollHandle, Window, div, px, uniform_list,
 };
-use gpui_component::animation::Transition;
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 use gpui_component::{ActiveTheme, IconName, Sizable as _, h_flex, v_flex};
 
 use crate::terminal::metrics;
 use crate::ui::git_status::{DiffLine, DiffLineKind, GitStatusModel, fetch_file_diff};
+use crate::ui::sidebar_resize::{self, ResizeDrag};
 
 /// Default sidebar width; the user can drag the left edge to resize.
 const SIDEBAR_WIDTH: f32 = 360.0;
 /// Drag limits: keep the sidebar usable and leave room for the terminal.
 const MIN_WIDTH: f32 = 240.0;
 const MAX_WIDTH: f32 = 900.0;
-
-/// Drag payload for the width-resize handle; doubles as the (invisible)
-/// drag ghost entity.
-#[derive(Clone)]
-struct ResizeDrag;
-
-impl Render for ResizeDrag {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div()
-    }
-}
 
 pub(crate) struct GitSidebar {
     model: Entity<GitStatusModel>,
@@ -341,25 +328,8 @@ impl Render for GitSidebar {
                 .child("Not a git repository")
                 .into_any_element()
         };
-        // Width-resize handle riding the left border: drag starts an
-        // (invisible) gpui drag; `on_drag_move` on the root receives the
-        // window-level move events and turns the mouse x into a new width.
-        let resize_handle = open.then(|| {
-            div()
-                .id("git-sidebar-resize")
-                .absolute()
-                .left_0()
-                .top_0()
-                .bottom_0()
-                .w(px(5.0))
-                .cursor_col_resize()
-                .occlude()
-                .hover(|this| this.bg(cx.theme().drag_border))
-                .on_drag(ResizeDrag, |drag, _, _, cx| {
-                    cx.stop_propagation();
-                    cx.new(|_| drag.clone())
-                })
-        });
+        let resize_handle =
+            open.then(|| sidebar_resize::resize_handle("git-sidebar-resize", true, cx));
         // The sidebar surface is a floating card (own background, 1px border,
         // large radius) in a gutter cut from the fixed width: right inset
         // clears the window edge, the top inset lines up with the tab pills,
@@ -407,19 +377,6 @@ impl Render for GitSidebar {
 
         // Keep the entity mounted at width zero while closed so it can render
         // the closing frames instead of disappearing in the toggle render.
-        if !self.animated {
-            let width = if open { width } else { px(0.0) };
-            return wrapper.w(width).into_any_element();
-        }
-
-        let (from, to) = if open {
-            (px(0.0), width)
-        } else {
-            (width, px(0.0))
-        };
-        Transition::new(Duration::from_millis(180))
-            .width(from, to)
-            .apply(wrapper, ("git-sidebar", open as usize))
-            .into_any_element()
+        sidebar_resize::slide_width(wrapper, "git-sidebar", open, width, self.animated)
     }
 }

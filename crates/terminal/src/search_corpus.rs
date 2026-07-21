@@ -127,23 +127,29 @@ impl VisibleCorpus {
     /// The nearest match from `origin` in `direction`, wrapping. The match
     /// `start` is the anchor compared against `origin`. Visible-coord.
     pub fn find(&self, re: &Regex, origin: Pos, direction: Direction) -> Option<Match> {
-        let matches = self.find_all(re);
-        if matches.is_empty() {
-            return None;
-        }
-        match direction {
-            Direction::Right => matches
-                .iter()
-                .find(|m| *m.start() >= origin)
-                .or_else(|| matches.first())
-                .cloned(),
-            Direction::Left => matches
-                .iter()
-                .rev()
-                .find(|m| *m.start() <= origin)
-                .or_else(|| matches.last())
-                .cloned(),
-        }
+        nearest_wrapping(&self.find_all(re), origin, direction, |m| *m.start()).cloned()
+    }
+}
+
+/// Nearest element to `origin` in `direction` over an ascending list, wrapping
+/// to the far end when nothing lies in that direction (`None` only when the
+/// list is empty). `key` maps an element to the anchor compared with `origin`.
+fn nearest_wrapping<T, K: PartialOrd>(
+    items: &[T],
+    origin: K,
+    direction: Direction,
+    key: impl Fn(&T) -> K,
+) -> Option<&T> {
+    match direction {
+        Direction::Right => items
+            .iter()
+            .find(|item| key(item) >= origin)
+            .or_else(|| items.first()),
+        Direction::Left => items
+            .iter()
+            .rev()
+            .find(|item| key(item) <= origin)
+            .or_else(|| items.last()),
     }
 }
 
@@ -219,22 +225,7 @@ impl DeepCorpus {
             .filter(|m| m.start() != m.end())
             .map(|m| self.grid_row_of(m.start()))
             .collect();
-        if rows.is_empty() {
-            return None;
-        }
-        match direction {
-            Direction::Right => rows
-                .iter()
-                .find(|&&r| r as i32 >= origin_row)
-                .or_else(|| rows.first())
-                .copied(),
-            Direction::Left => rows
-                .iter()
-                .rev()
-                .find(|&&r| r as i32 <= origin_row)
-                .or_else(|| rows.last())
-                .copied(),
-        }
+        nearest_wrapping(&rows, origin_row, direction, |&r| r as i32).copied()
     }
 }
 

@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::defaults::default_bool_true;
+
 /// Default alphabet for hint labels
 pub const DEFAULT_HINTS_ALPHABET: &str = "jfkdls;ahgurieowpq";
 
@@ -84,7 +86,7 @@ pub struct Hint {
     pub regex: Option<String>,
 
     /// Whether to include OSC 8 hyperlinks
-    #[serde(default = "default_bool_false")]
+    #[serde(default)]
     pub hyperlinks: bool,
 
     /// Whether to apply post-processing to matches
@@ -92,7 +94,7 @@ pub struct Hint {
     pub post_processing: bool,
 
     /// Whether hints persist after selection
-    #[serde(default = "default_bool_false")]
+    #[serde(default)]
     pub persist: bool,
 
     /// Action to perform when hint is activated
@@ -223,12 +225,4 @@ fn default_url_command() -> HintCommand {
         program: "cmd".to_string(),
         args: vec!["/c".to_string(), "start".to_string(), "".to_string()],
     };
-}
-
-fn default_bool_true() -> bool {
-    true
-}
-
-fn default_bool_false() -> bool {
-    false
 }

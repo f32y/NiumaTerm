@@ -141,7 +141,6 @@ impl<S> TabManager<S> {
         &self.tabs.active().surface
     }
 
-    #[allow(unused)]
     pub fn active_mut(&mut self) -> &mut S {
         &mut self.tabs.active_mut().surface
     }

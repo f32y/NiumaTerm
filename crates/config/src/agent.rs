@@ -3,17 +3,15 @@
 use serde::{Deserialize, Serialize};
 use toml_edit::{DocumentMut, value};
 
-fn default_true() -> bool {
-    true
-}
+use crate::defaults::default_bool_true;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentConfig {
     /// Accept lifecycle events delivered by installed Agent hooks.
-    #[serde(default = "default_true", rename = "enable-agent-hooks")]
+    #[serde(default = "default_bool_true", rename = "enable-agent-hooks")]
     pub enable_agent_hooks: bool,
     /// Show Agent account usage in the workspace sidebar.
-    #[serde(default = "default_true", rename = "show-agent-usage")]
+    #[serde(default = "default_bool_true", rename = "show-agent-usage")]
     pub show_agent_usage: bool,
 }
 

@@ -233,22 +233,23 @@ fn clamp_terminal_line_height(line_height: f64) -> f64 {
     }
 }
 
-/// Clamp a persisted background opacity; the 0.2 floor keeps the window
-/// from becoming effectively invisible.
-fn clamp_background_opacity(opacity: f64) -> f64 {
+/// Clamp a persisted opacity into `min..=1.0`; non-finite values (a hand-
+/// edited config) fall back to `fallback`.
+fn clamp_opacity(opacity: f64, min: f64, fallback: f64) -> f64 {
     if opacity.is_finite() {
-        opacity.clamp(0.2, 1.0)
+        opacity.clamp(min, 1.0)
     } else {
-        1.0
+        fallback
     }
 }
 
+/// The 0.2 floor keeps the window from becoming effectively invisible.
+fn clamp_background_opacity(opacity: f64) -> f64 {
+    clamp_opacity(opacity, 0.2, 1.0)
+}
+
 fn clamp_background_image_opacity(opacity: f64) -> f64 {
-    if opacity.is_finite() {
-        opacity.clamp(0.0, 1.0)
-    } else {
-        DEFAULT_BACKGROUND_IMAGE_OPACITY
-    }
+    clamp_opacity(opacity, 0.0, DEFAULT_BACKGROUND_IMAGE_OPACITY)
 }
 
 impl AppSettings {
