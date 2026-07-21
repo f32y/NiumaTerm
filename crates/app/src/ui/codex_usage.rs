@@ -10,76 +10,48 @@ use gpui_component::{Sizable as _, h_flex, v_flex};
 use nmt_agent_utils::codex::usage_fetcher::{self, Usage};
 
 use crate::ui::AppSettings;
-
-const REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
+use crate::ui::auto_refresh::{self, AutoRefresh, RefreshState};
 
 pub(crate) struct CodexUsageView {
     usage: Usage,
-    refreshing: bool,
-    enabled: bool,
+    state: RefreshState,
+}
+
+impl AutoRefresh for CodexUsageView {
+    type Output = Result<Usage, String>;
+    const INTERVAL: Duration = Duration::from_secs(15 * 60);
+
+    fn enabled(settings: &AppSettings) -> bool {
+        settings.show_agent_usage
+    }
+
+    fn state(&mut self) -> &mut RefreshState {
+        &mut self.state
+    }
+
+    fn fetch() -> Self::Output {
+        usage_fetcher::fetch()
+    }
+
+    fn apply(&mut self, output: Self::Output) {
+        match output {
+            Ok(usage) => self.usage = usage,
+            Err(err) => tracing::warn!("Codex usage refresh failed: {err}"),
+        }
+    }
 }
 
 impl CodexUsageView {
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
-        let enabled = cx.global::<AppSettings>().show_agent_usage;
-        cx.observe_global::<AppSettings>(|this, cx| {
-            let enabled = cx.global::<AppSettings>().show_agent_usage;
-            if enabled && !this.enabled {
-                this.refresh(cx);
-            }
-            this.enabled = enabled;
-        })
-        .detach();
-        cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor().timer(REFRESH_INTERVAL).await;
-                if this
-                    .update(cx, |this, cx| {
-                        if this.enabled {
-                            this.refresh(cx);
-                        }
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
-
         let mut this = Self {
             usage: Usage::default(),
-            refreshing: false,
-            enabled,
+            state: RefreshState {
+                refreshing: false,
+                enabled: Self::enabled(cx.global::<AppSettings>()),
+            },
         };
-        if enabled {
-            this.refresh(cx);
-        }
+        auto_refresh::start(&mut this, cx);
         this
-    }
-
-    fn refresh(&mut self, cx: &mut Context<Self>) {
-        if self.refreshing {
-            return;
-        }
-        self.refreshing = true;
-        cx.notify();
-        let fetch = cx
-            .background_executor()
-            .spawn(async move { usage_fetcher::fetch() });
-        cx.spawn(async move |this, cx| {
-            let result = fetch.await;
-            this.update(cx, |this, cx| {
-                this.refreshing = false;
-                match result {
-                    Ok(usage) => this.usage = usage,
-                    Err(err) => tracing::warn!("Codex usage refresh failed: {err}"),
-                }
-                cx.notify();
-            })
-            .ok();
-        })
-        .detach();
     }
 }
 
@@ -117,8 +89,8 @@ impl Render for CodexUsageView {
             .px_0()
             .py_1()
             .child(v_flex().w_full().gap_2().children(rows))
-            .loading(self.refreshing)
-            .on_click(cx.listener(|this, _, _, cx| this.refresh(cx)))
+            .loading(self.state.refreshing)
+            .on_click(cx.listener(|this, _, _, cx| auto_refresh::refresh(this, cx)))
             .into_any_element()
     }
 }
