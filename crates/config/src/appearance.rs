@@ -28,6 +28,10 @@ impl InputStyle {
             Self::FixedBottom => "fixed-bottom",
         }
     }
+
+    pub fn is_fixed_bottom(self) -> bool {
+        matches!(self, Self::FixedBottom)
+    }
 }
 
 fn default_git_status_refresh_interval() -> u64 {
