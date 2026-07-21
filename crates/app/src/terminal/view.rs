@@ -1,13 +1,14 @@
 use std::ops::Range;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use futures::StreamExt;
 use gpui::prelude::*;
 use gpui::{
-    App, AppContext, Bounds, Context, Entity, EntityInputHandler, FocusHandle, Focusable,
-    IntoElement, KeyDownEvent, Keystroke, ListOffset, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, Point, ScrollDelta, ScrollWheelEvent, UTF16Selection, Window, actions,
-    div, list, point, px, rgb, size,
+    App, AppContext, Bounds, Context, Entity, EntityInputHandler, ExternalPaths, FocusHandle,
+    Focusable, IntoElement, KeyDownEvent, Keystroke, ListOffset, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollDelta, ScrollWheelEvent, UTF16Selection,
+    Window, actions, div, list, point, px, rgb, size,
 };
 use gpui_component::notification::Notification;
 use gpui_component::{ActiveTheme, WindowExt as _};
@@ -425,6 +426,13 @@ impl TerminalPane {
             },
             cx,
         );
+    }
+
+    fn on_file_drop(&mut self, paths: &ExternalPaths, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.focus, cx);
+        if self.surface.paste_text(&dropped_paths_text(paths.paths())) {
+            self.invalidate(cx);
+        }
     }
 
     fn on_mouse_down(
@@ -1614,6 +1622,7 @@ impl Render for TerminalPane {
             .on_action(cx.listener(Self::on_next_block))
             .on_key_down(cx.listener(Self::on_key_down))
             .on_modifiers_changed(cx.listener(Self::on_modifiers_changed))
+            .on_drop(cx.listener(Self::on_file_drop))
             // Moving off the pane produces no further mouse-move events here,
             // so hover end is what clears a still-Ctrl-held underline.
             .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
@@ -1726,14 +1735,29 @@ fn should_scroll_to_latest(keystroke: &Keystroke, alt_screen: bool) -> bool {
     !alt_screen && !keystroke.modifiers.modified() && keystroke.key.eq_ignore_ascii_case("end")
 }
 
+fn dropped_paths_text(paths: &[PathBuf]) -> String {
+    paths
+        .iter()
+        .map(|path| {
+            let path = path.to_string_lossy();
+            if path.contains(' ') {
+                format!("\"{path}\"")
+            } else {
+                path.into_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 #[cfg(test)]
 mod tests {
     use gpui::{ScrollDelta, point, px};
     use nmt_terminal::selection::SelectionType;
 
     use super::{
-        metrics, selection_drag_started, selection_type_for_click_count, terminal_cell_at_position,
-        terminal_scroll_lines,
+        dropped_paths_text, metrics, selection_drag_started, selection_type_for_click_count,
+        terminal_cell_at_position, terminal_scroll_lines,
     };
     use crate::terminal::surface::{SurfaceCell, SurfaceCellSide};
 
@@ -1743,6 +1767,17 @@ mod tests {
         assert_eq!(selection_type_for_click_count(2), SelectionType::Semantic);
         assert_eq!(selection_type_for_click_count(3), SelectionType::Lines);
         assert_eq!(selection_type_for_click_count(4), SelectionType::Lines);
+    }
+
+    #[test]
+    fn dropped_paths_are_space_delimited_and_paths_with_spaces_are_quoted() {
+        assert_eq!(
+            dropped_paths_text(&[
+                "C:\\src\\main.rs".into(),
+                "C:\\My Project\\notes.txt".into(),
+            ]),
+            "C:\\src\\main.rs \"C:\\My Project\\notes.txt\""
+        );
     }
 
     #[test]

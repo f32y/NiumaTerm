@@ -204,6 +204,7 @@ fn run_app(argv_url: Option<String>, testing: bool) {
     let platform = Rc::new(
         gpui_windows::WindowsPlatform::new(false).expect("failed to initialize GPUI Windows"),
     );
+    platform.set_file_drop_description("Paste path to terminal");
     let platform_handle = platform.clone();
     Application::with_platform(platform)
         // Serve project icons + gpui-component's embedded icons so `svg().path()`
