@@ -193,6 +193,23 @@ Start-Sleep -Milliseconds 300
     );
 }
 
+#[test]
+fn conpty_osc9_progress_roundtrip() {
+    let script = r#"
+$e = [char]0x1b
+[Console]::Out.Write($e + ']9;4;1;42' + $e + '\')
+[Console]::Out.Write('MARKER_DONE')
+[Console]::Out.Flush()
+Start-Sleep -Milliseconds 300
+"#;
+    let out = drive_conpty(script);
+    assert!(find_subslice(&out, b"MARKER_DONE").is_some());
+    assert!(
+        find_subslice(&out, b"\x1b]9;4;1;42").is_some(),
+        "ConPTY stripped OSC 9;4 progress reporting"
+    );
+}
+
 /// Positive regression: the bundled ConPTY passes a raw kitty graphics APC
 /// (`ESC _ G ... ESC \`) through to conout, so the engine can see transmitted
 /// images and live kitty graphics rendering is possible on Windows.

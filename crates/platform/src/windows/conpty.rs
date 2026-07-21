@@ -355,6 +355,14 @@ fn build_environment_block(overrides: &[(String, String)]) -> Vec<u16> {
     // capability variable, so child TUIs otherwise downgrade computed RGB styles.
     values.retain(|(key, _)| !key.eq_ignore_ascii_case("COLORTERM"));
     values.push(("COLORTERM".into(), "truecolor".into()));
+    // TERM_FEATURES=P advertises OSC 9;4 so progress-aware tools can distinguish a
+    // transient status line from ordinary output instead of relying on CR heuristics.
+    let mut term_features = std::env::var("TERM_FEATURES").unwrap_or_default();
+    if !term_features.contains('P') {
+        term_features.push('P');
+    }
+    values.retain(|(key, _)| !key.eq_ignore_ascii_case("TERM_FEATURES"));
+    values.push(("TERM_FEATURES".into(), term_features.into()));
     for (key, value) in overrides {
         let folded = key.to_lowercase();
         values.retain(|(existing, _)| existing.to_string_lossy().to_lowercase() != folded);
@@ -532,6 +540,16 @@ mod environment_tests {
                 .iter()
                 .any(|entry| entry.eq_ignore_ascii_case("COLORTERM=truecolor"))
         );
+    }
+
+    #[test]
+    fn block_advertises_terminal_progress_by_default() {
+        let block = build_environment_block(&[]);
+        assert!(entries(&block).iter().any(|entry| {
+            entry.split_once('=').is_some_and(|(key, value)| {
+                key.eq_ignore_ascii_case("TERM_FEATURES") && value.contains('P')
+            })
+        }));
     }
 
     #[test]
