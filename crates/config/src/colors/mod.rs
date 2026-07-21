@@ -48,13 +48,27 @@ impl From<&ColorRgb> for ColorArray {
     }
 }
 
+impl From<(u8, u8, u8)> for ColorRgb {
+    fn from((r, g, b): (u8, u8, u8)) -> Self {
+        Self { r, g, b }
+    }
+}
+
 impl ColorRgb {
     pub fn from_color_arr(arr: ColorArray) -> ColorRgb {
+        // Clamp + round (instead of truncating) so a channel like 0.9999
+        // maps back to 255 on float→u8 round-trips.
+        let channel = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
         ColorRgb {
-            r: (arr[0] * 255.0) as u8,
-            g: (arr[1] * 255.0) as u8,
-            b: (arr[2] * 255.0) as u8,
+            r: channel(arr[0]),
+            g: channel(arr[1]),
+            b: channel(arr[2]),
         }
+    }
+
+    /// Packed `0xRRGGBB` form, e.g. for `gpui::rgb`.
+    pub fn rgb_u32(self) -> u32 {
+        ((self.r as u32) << 16) | ((self.g as u32) << 8) | self.b as u32
     }
 
     pub fn to_arr(&self) -> ColorArray {
