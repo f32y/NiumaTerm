@@ -6,19 +6,14 @@ pub(crate) const COLS: u16 = 100;
 pub(crate) const ROWS: u16 = 30;
 pub(crate) const PADDING_PX: f32 = 10.0;
 
-/// Terminal font family from `AppSettings` (seeded from `nmt_config` at startup,
-/// live-updated by the settings dialog).
 pub(crate) fn font_family(cx: &App) -> String {
     cx.global::<AppSettings>().terminal_font_family.to_string()
 }
 
-/// Terminal font size (px) from `AppSettings` (seeded from `nmt_config`,
-/// live-updated by the settings dialog).
 pub(crate) fn font_size_px(cx: &App) -> f32 {
     cx.global::<AppSettings>().terminal_font_size as f32
 }
 
-/// Line height as a multiplier on font size, from `AppSettings`.
 pub(crate) fn line_height_multiplier(cx: &App) -> f32 {
     cx.global::<AppSettings>().terminal_line_height as f32
 }
@@ -81,7 +76,6 @@ mod tests {
             height_px: 18.0,
         };
 
-        // Content rect (padding already excluded): 940/8 = 117, 600/18 = 33.
         assert_eq!(cell.grid_size_for_content(940.0, 600.0), (117, 33));
         assert_eq!(cell.grid_size_for_content(1.0, 1.0), (1, 1));
     }

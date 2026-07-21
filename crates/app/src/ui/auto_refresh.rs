@@ -23,20 +23,14 @@ pub(crate) struct RefreshState {
 }
 
 pub(crate) trait AutoRefresh: Sized + 'static {
-    /// Result of one background fetch.
     type Output: Send + 'static;
     const INTERVAL: Duration;
-    /// The settings toggle gating this widget.
     fn enabled(settings: &AppSettings) -> bool;
     fn state(&mut self) -> &mut RefreshState;
-    /// One fetch; runs on the background executor.
     fn fetch() -> Self::Output;
-    /// Fold a completed fetch back into the view state.
     fn apply(&mut self, output: Self::Output);
 }
 
-/// Wire the observer/timer lifecycle for `view` and run the initial refresh.
-/// Call from the view's constructor once `state().enabled` mirrors the toggle.
 pub(crate) fn start<V: AutoRefresh>(view: &mut V, cx: &mut Context<V>) {
     cx.observe_global::<AppSettings>(|this: &mut V, cx| {
         let enabled = V::enabled(cx.global::<AppSettings>());

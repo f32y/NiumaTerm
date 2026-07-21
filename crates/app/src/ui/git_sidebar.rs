@@ -1,8 +1,3 @@
-//! The right-side git sidebar: changed-file list (top) over the selected
-//! file's diff (bottom), both virtualized with `uniform_list`. Data comes
-//! from the shared [`GitStatusModel`]; the per-file diff is fetched on
-//! demand on the background executor.
-
 use gpui::prelude::*;
 use gpui::{
     Context, DragMoveEvent, Entity, Pixels, UniformListScrollHandle, Window, div, px, uniform_list,
@@ -15,7 +10,6 @@ use crate::terminal::metrics;
 use crate::ui::git_status::{DiffLine, DiffLineKind, GitStatusModel, fetch_file_diff};
 use crate::ui::sidebar_resize::{self, ResizeDrag};
 
-/// Default sidebar width; the user can drag the left edge to resize.
 const SIDEBAR_WIDTH: f32 = 360.0;
 /// Drag limits: keep the sidebar usable and leave room for the terminal.
 const MIN_WIDTH: f32 = 240.0;
@@ -23,7 +17,6 @@ const MAX_WIDTH: f32 = 900.0;
 
 pub(crate) struct GitSidebar {
     model: Entity<GitStatusModel>,
-    /// Repo-relative path of the selected file list row.
     selected: Option<String>,
     diff: Vec<DiffLine>,
     /// Guards a slow diff fetch from overwriting a newer selection's diff.
@@ -33,9 +26,7 @@ pub(crate) struct GitSidebar {
     seen_snapshot_seq: u64,
     files_scroll: UniformListScrollHandle,
     diff_scroll: UniformListScrollHandle,
-    /// Current panel width; adjusted by dragging the left edge.
     width: Pixels,
-    /// Whether the panel occupies its expanded width.
     open: bool,
     /// False on startup and after resizing so only explicit toggles slide.
     animated: bool,
@@ -72,8 +63,6 @@ impl GitSidebar {
         cx.notify();
     }
 
-    /// A new snapshot arrived: re-fetch the selected file's diff, or drop the
-    /// selection when the file is no longer in the change set.
     fn on_snapshot_changed(&mut self, cx: &mut Context<Self>) {
         let Some(selected) = self.selected.clone() else {
             return;
@@ -96,7 +85,6 @@ impl GitSidebar {
     fn select(&mut self, path: String, cx: &mut Context<Self>) {
         if self.selected.as_deref() != Some(&path) {
             self.selected = Some(path);
-            // A new file's diff starts at the top, not the old scroll offset.
             self.diff_scroll
                 .scroll_to_item(0, gpui::ScrollStrategy::Top);
             self.fetch_diff(cx);

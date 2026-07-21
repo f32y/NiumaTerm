@@ -1,8 +1,3 @@
-//! The workspace sidebar: one themed button per workspace with busy/idle
-//! indicator and hover-close, plus the new-workspace button and bottom status
-//! bar, wrapped in the collapse/expand slide animation. `Sidebar` owns the collapse/width view
-//! state; `Shell` holds one and feeds it the workspace summaries to render.
-
 use gpui::prelude::*;
 use gpui::{
     AnyElement, Context, DragMoveEvent, Entity, KeyDownEvent, MouseButton, ScrollHandle,

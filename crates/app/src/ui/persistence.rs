@@ -1,8 +1,3 @@
-//! Session persistence for the shell: building the default session, restoring
-//! a remembered one from `local_state.toml`, and mirroring the live
-//! workspace/tab model back into the `WindowRegistry` so the quit hook can
-//! save it.
-
 use gpui::{App, AppContext as _, Axis, Context, Entity};
 use gpui_component::resizable::ResizableState;
 use nmt_config::local_state::{

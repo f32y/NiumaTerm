@@ -70,8 +70,6 @@ fn get_folder_path(items: Option<&IShellItemArray>) -> Option<String> {
     }
 }
 
-// --- IExplorerCommand: Open in NiumaTerm ---
-
 #[implement(IExplorerCommand)]
 struct NiumaTermNewTabCommand;
 
@@ -125,8 +123,6 @@ impl IExplorerCommand_Impl for NiumaTermNewTabCommand_Impl {
     }
 }
 
-// --- IClassFactory ---
-
 #[implement(IClassFactory)]
 struct NiumaTermClassFactory;
 
@@ -166,8 +162,6 @@ impl IClassFactory_Impl for NiumaTermClassFactory_Impl {
         Ok(())
     }
 }
-
-// --- DLL Exports ---
 
 #[unsafe(no_mangle)]
 unsafe extern "system" fn DllGetClassObject(

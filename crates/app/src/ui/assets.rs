@@ -1,12 +1,7 @@
-//! Asset source for the GPUI shell: serves the project's own icons
-//! (`<workspace>/assets/icons/*.svg`) and falls back to gpui-component's
-//! bundled icons for everything else.
-
 use std::borrow::Cow;
 
 use gpui::{AssetSource, Result, SharedString};
 
-/// The project's icons, embedded at build time.
 #[derive(rust_embed::RustEmbed)]
 #[folder = "$CARGO_MANIFEST_DIR/../../assets"]
 #[include = "icons/**/*.svg"]

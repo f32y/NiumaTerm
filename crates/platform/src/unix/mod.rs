@@ -79,9 +79,6 @@ fn default_shell_command(shell: &str) {
 fn default_shell_command(shell: &str) {
     let command_shell_string = CString::new(shell).unwrap();
     let command_pointer = command_shell_string.as_ptr();
-    // let home = std::env::var("HOME").unwrap();
-    // let args = CString::new(home).unwrap();
-    // let args_pointer = args.as_ptr() as *const i8;
     unsafe {
         libc::execvp(
             command_pointer,

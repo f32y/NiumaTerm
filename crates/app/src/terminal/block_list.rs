@@ -1,5 +1,3 @@
-//! Block-split list rendering.
-//!
 //! Renders history as a real vertical list: frozen items above — each a
 //! finished engine block read directly through a refcounted `BlockRef` —
 //! plus one live item for the current engine viewport (with the active

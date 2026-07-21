@@ -64,7 +64,6 @@ fn test_margin_deserialize_invalid() {
     assert!(result.is_err());
 }
 
-// Panel configuration tests
 #[test]
 fn test_panel_deserialize_full() {
     let toml_str = r#"

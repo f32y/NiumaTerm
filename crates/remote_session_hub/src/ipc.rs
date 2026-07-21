@@ -1,5 +1,3 @@
-//! Shared-memory transport and the compact parent/Hub protocol.
-
 use std::collections::HashMap;
 use std::mem::{align_of, size_of};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -64,8 +62,6 @@ struct Mailbox {
     empty_event: Box<dyn EventImpl>,
 }
 
-/// One endpoint of the bidirectional parent/Hub mapping.
-///
 /// Keep an endpoint on one IPC pump thread. The shared-memory mapping crate
 /// intentionally exposes raw memory, so this type does not claim `Send` or `Sync`.
 pub struct SharedMemoryEndpoint {
@@ -148,7 +144,6 @@ impl SharedMemoryEndpoint {
         self.read_inbound().map(Some)
     }
 
-    /// Wait without periodic wakeups until the other process sends a message.
     pub fn recv_blocking(&mut self) -> Result<Vec<u8>, IpcError> {
         self.inbound
             .ready_event
@@ -688,7 +683,6 @@ fn take<const N: usize>(bytes: &mut &[u8]) -> Result<[u8; N], IpcError> {
     Ok(*value)
 }
 
-/// Run the child-side request loop until the parent sends `Shutdown`.
 pub fn run_hub_host(os_id: &str) -> Result<(), IpcError> {
     let mut endpoint = SharedMemoryEndpoint::open_child(os_id)?;
     let hub = RemoteSessionHub::new();

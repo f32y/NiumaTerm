@@ -393,63 +393,34 @@ pub fn hex_to_color_wgpu(s: &str) -> ColorWGPU {
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
 pub enum NamedColor {
-    /// Black.
     Black = 0,
-    /// Red.
     Red,
-    /// Green.
     Green,
-    /// Yellow.
     Yellow,
-    /// Blue.
     Blue,
-    /// Magenta.
     Magenta,
-    /// Cyan.
     Cyan,
-    /// White.
     White,
-    /// Bright black.
     LightBlack,
-    /// Light red.
     LightRed,
-    /// Light green.
     LightGreen,
-    /// Light yellow.
     LightYellow,
-    /// Light blue.
     LightBlue,
-    /// Light magenta.
     LightMagenta,
-    /// Light cyan.
     LightCyan,
-    /// Light white.
     LightWhite,
-    /// The foreground color.
     Foreground = 256,
-    /// The background color.
     Background,
-    /// Color for the cursor itself.
     Cursor,
-    /// Dim black.
     DimBlack,
-    /// Dim red.
     DimRed,
-    /// Dim green.
     DimGreen,
-    /// Dim yellow.
     DimYellow,
-    /// Dim blue.
     DimBlue,
-    /// Dim magenta.
     DimMagenta,
-    /// Dim cyan.
     DimCyan,
-    /// Dim white.
     DimWhite,
-    /// The bright foreground color.
     LightForeground,
-    /// Dim foreground.
     DimForeground,
 }
 

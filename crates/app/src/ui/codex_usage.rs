@@ -1,5 +1,3 @@
-//! Workspace-sidebar widget showing the active Codex account's remaining rate limits.
-
 use std::time::Duration;
 
 use gpui::prelude::*;

@@ -1,7 +1,3 @@
-//! App settings: the global settings model and the settings dialog content,
-//! built on gpui-component's `Settings` two-pane framework (page sidebar on the
-//! left, setting groups on the right).
-//!
 //! Persisted to `config.toml`: seeded via [`AppSettings::load`] at startup,
 //! written back patch-style via [`AppSettings::save`] once when the settings
 //! dialog closes (see `Shell::on_show_settings`). Field edits mutate the global
@@ -28,20 +24,15 @@ use gpui_component::{
 use nmt_config::CursorShape;
 use nmt_config::system::WarnBeforeTerminatingShell;
 
-/// Default shell for a new profile.
 pub const DEFAULT_SHELL: &str = r"C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe";
 
-/// Used when the config sets no font family.
 pub const DEFAULT_FONT_FAMILY: &str = "Consolas";
 pub const DEFAULT_FONT_SIZE: f64 = 14.0;
 pub const DEFAULT_LINE_HEIGHT: f64 = 1.0;
 const DEFAULT_BACKGROUND_IMAGE_OPACITY: f64 = 0.3;
 
-/// Font family for the app chrome (titlebar, sidebar, tabs, dialogs), used
-/// when the config sets none.
 pub const DEFAULT_UI_FONT: &str = "Segoe UI";
 
-/// Fixed tab width in pixels; the setting ranges from this value to 3x it.
 pub const DEFAULT_TAB_WIDTH: f64 = 120.0;
 pub const MAX_TAB_WIDTH: f64 = DEFAULT_TAB_WIDTH * 3.0;
 
@@ -54,7 +45,6 @@ fn initial_font_family() -> SharedString {
 pub use nmt_config::appearance::InputStyle;
 pub use nmt_config::profile::Profile;
 
-/// Display label for the input-style dropdown; `as_str` is its stable value.
 fn input_style_label(style: InputStyle) -> &'static str {
     match style {
         InputStyle::Waterfall => "Waterfall",
@@ -62,7 +52,6 @@ fn input_style_label(style: InputStyle) -> &'static str {
     }
 }
 
-/// Parse the dropdown value; unknown values fall back to Waterfall.
 fn input_style_from_value(value: &str) -> InputStyle {
     match value {
         "fixed-bottom" => InputStyle::FixedBottom,
@@ -264,8 +253,6 @@ fn clamp_background_image_opacity(opacity: f64) -> f64 {
 }
 
 impl AppSettings {
-    /// Build from the loaded config file: the `[appearance]`, `[system]`, and
-    /// `[[profiles]]` sections, falling back to the built-in defaults.
     pub fn load() -> Self {
         let config = nmt_config::get();
         let appearance = &config.appearance;
@@ -1051,10 +1038,6 @@ fn agent_page() -> SettingPage {
         )
 }
 
-/// The settings dialog body: a two-pane `Settings` view with a single
-/// "Terminal" page holding the Input Style dropdown and the profile fields.
-/// Rebuilt every render; the field closures read/write the `AppSettings`
-/// global directly.
 pub fn settings_view(cx: &App) -> Settings {
     let profiles = cx.global::<AppSettings>().profiles.clone();
     let transparency_enabled = cx.global::<AppSettings>().window_transparency_enabled;
@@ -1538,8 +1521,6 @@ pub fn settings_view(cx: &App) -> Settings {
         )
 }
 
-/// The Profiles page: default selector and add button on top, then one card
-/// (group) per profile with its fields and a remove row.
 fn profiles_page(profiles: &[Profile]) -> SettingPage {
     // Selector options come from the current names; the settings view is
     // rebuilt per render, so renames refresh the list immediately.

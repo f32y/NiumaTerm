@@ -1,5 +1,3 @@
-//! Pure agent lifecycle, ownership, expiry, and unread-notification model.
-
 pub mod claude_code {
     pub mod hook;
 }
@@ -217,8 +215,6 @@ impl RawAgentHookEnvelope {
     }
 }
 
-/// State of an agent CLI's hook registration as managed by the per-agent
-/// installers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HookInstallStatus {
     /// Every event is registered with the current hook command.

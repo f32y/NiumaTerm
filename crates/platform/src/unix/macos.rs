@@ -133,7 +133,6 @@ mod sys {
             buffersize: c_int,
         ) -> c_int;
 
-        // pub fn proc_name(pid: c_int, buffer: *mut c_void, buffersize: u32) -> c_int;
     }
 }
 
@@ -149,15 +148,6 @@ pub fn macos_process_name(pid: libc::c_int) -> String {
             .unwrap_or("")
             .to_string();
     }
-
-    //     // proc_name truncates the name to 16 bytes.
-    //     let mut name_buf: Vec<u8> = Vec::with_capacity(16);    // MAXCOMLEN (max command name remembered)
-    //     let mut var_int_t = 0 as usize;
-    //     unsafe {
-    //         var_int_t = sys::proc_name(pid, name_buf.as_mut_ptr() as *mut libc::c_void, 16) as usize;
-    //         name_buf.set_len(var_int_t);
-    //     };
-    //     name = String::from_utf8(name_buf).unwrap_or("".to_string());
 
     name
 }
