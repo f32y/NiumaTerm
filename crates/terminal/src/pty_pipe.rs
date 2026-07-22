@@ -1079,7 +1079,7 @@ where
         };
 
         // Ship new/changed kitty image pixels + removals via the existing graphics
-        // event → `sugarloaf.image_data`. Empty in steady state.
+        // event to the renderer's image store. Empty in steady state.
         let (pending_images, removed_ids) = image_delta;
 
         if !pending_images.is_empty() || !removed_ids.is_empty() {

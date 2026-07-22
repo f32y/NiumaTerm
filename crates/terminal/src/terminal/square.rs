@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 //
-// In rio it has been rewritten as a packed `u64`. The previous design held
+// Rewritten from the upstream rio design as a packed `u64`. The old design held
 // `c`, `fg`, `bg`, `flags`, and an `Option<Arc<CellExtra>>` inline (24 bytes
 // per cell + per-cell heap allocations for "extras"). All variable-sized
 // data now lives in per-grid side tables (`StyleSet`, `ExtrasTable`); the

@@ -196,7 +196,7 @@ pub enum TerminalEvent {
     /// Glossary coverage — by consulting both `FontLibrary` (system
     /// fonts) and the per-route glyph registry, then writes the
     /// formatted reply back to the same pane's PTY. Asynchronous
-    /// because the dispatcher (in rio-backend) doesn't have access
+    /// because this crate's dispatcher does not have access
     /// to the FontLibrary; the frontend does.
     GlyphProtocolQuery {
         route_id: usize,

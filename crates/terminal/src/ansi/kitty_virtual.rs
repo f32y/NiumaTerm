@@ -431,7 +431,7 @@ pub struct IncompletePlacement {
 
 impl IncompletePlacement {
     /// Decode a single cell. The combining marks are the cell's grapheme
-    /// zerowidth chars (rio's `Extras.zerowidth`); kitty puts up to 3:
+    /// zerowidth chars (the grid's `Extras.zerowidth`); kitty puts up to 3:
     /// `[row, col, image_id_high]`. All three are optional; invalid
     /// diacritics are silently dropped (matches ghostty's "treat as if
     /// they don't exist" comment in `graphics_unicode.zig:453-455`).
