@@ -1019,6 +1019,10 @@ impl AgentMonitor {
         state.notification_generation = state.notification_generation.wrapping_add(1).max(1);
         self.next_notification_order = self.next_notification_order.wrapping_add(1).max(1);
 
+        // Process-global on purpose, despite making the reducer impure: the
+        // native_tag derived from it keys Windows toast replacement, and tags
+        // must be unique across every AgentMonitor instance in the process
+        // (one per window), which a per-monitor counter cannot guarantee.
         let process_order = agent_process().next_notification_counter();
 
         let id = format!(
