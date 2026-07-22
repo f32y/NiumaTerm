@@ -7,8 +7,8 @@
 //! NiumaTerm hook binary are ever touched, and a settings file that fails to
 //! parse is never rewritten.
 
+use std::io;
 use std::path::{Path, PathBuf};
-use std::{env, io};
 
 use serde_json::{Value, json};
 
@@ -94,9 +94,11 @@ pub(crate) fn normalize(
 
 /// `~/.claude/settings.json`, the user-scope Claude Code configuration.
 pub fn settings_path() -> Option<PathBuf> {
-    let home = env::var_os("USERPROFILE").or_else(|| env::var_os("HOME"))?;
-
-    Some(PathBuf::from(home).join(".claude").join("settings.json"))
+    Some(
+        hook_store::home_dir()?
+            .join(".claude")
+            .join("settings.json"),
+    )
 }
 
 pub fn install_hooks(settings_path: &Path) -> io::Result<()> {
@@ -149,7 +151,7 @@ fn write_settings(settings_path: &Path, settings: &Value) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, process};
+    use std::{env, fs, process};
 
     use super::*;
     use crate::hook_store::event_commands;
