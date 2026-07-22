@@ -106,6 +106,7 @@ impl AppWindow {
             }
             None => WindowBounds::Windowed(Bounds::centered(None, size(px(960.0), px(620.0)), cx)),
         };
+
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(window_bounds),

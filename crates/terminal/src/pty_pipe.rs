@@ -41,12 +41,15 @@ const BLOCK_BOUNDARY_CLEAR: &[u8] = b"\x1b[2J\x1b[3J\x1b[H";
 /// under the engine lock on the PTY thread after finish/resize.
 fn engine_blocks_live_list(engine: &GhosttyTerminal) -> Vec<(crate::ghostty::BlockHandle, usize)> {
     let count = engine.block_count();
+
     let mut live = Vec::with_capacity(count);
+
     for index in 0..count {
         if let Some(handle) = engine.block_at(index) {
             live.push((handle, engine.block_row_count(handle).unwrap_or(0)));
         }
     }
+
     live
 }
 
@@ -77,15 +80,19 @@ fn is_conpty_resize_echo_input(bytes: &[u8]) -> bool {
 /// `bytes[final_idx]`. Cold path (resize windows only).
 fn for_each_csi(bytes: &[u8], mut f: impl FnMut(usize, usize)) {
     let mut i = 0;
+
     while i < bytes.len() {
         if bytes[i] == 0x1b && bytes.get(i + 1) == Some(&b'[') {
             let mut fin = i + 2;
+
             while fin < bytes.len() && (bytes[fin].is_ascii_digit() || bytes[fin] == b';') {
                 fin += 1;
             }
+
             if fin < bytes.len() {
                 f(i, fin);
             }
+
             i = fin.saturating_add(1);
         } else {
             i += 1;
@@ -96,6 +103,7 @@ fn for_each_csi(bytes: &[u8], mut f: impl FnMut(usize, usize)) {
 /// Parse `row;col` CUP params; either half is `None` when absent/unparsable.
 fn cup_row_col(params: &[u8]) -> (Option<u16>, Option<u16>) {
     let parse = |s: &[u8]| std::str::from_utf8(s).ok().and_then(|s| s.parse().ok());
+
     match params.iter().position(|b| *b == b';') {
         Some(i) => (parse(&params[..i]), parse(&params[i + 1..])),
         None => (parse(params), None),
@@ -119,40 +127,54 @@ fn rewrite_conpty_resize_echo_cup_rows(bytes: &[u8], target_row_1based: u16) -> 
     // CUP to the cursor row makes the content re-wrap/scroll and accumulate.) When
     // ConPTY's cursor row already matches (delta 0), there is nothing to fix.
     let conpty_cursor_row = last_cup_row(bytes)?;
+
     let delta = target_row_1based as i32 - conpty_cursor_row as i32;
+
     if delta == 0 {
         return None;
     }
 
     let mut out = Vec::with_capacity(bytes.len().saturating_add(8));
     let mut copied = 0usize;
+
     for_each_csi(bytes, |start, fin| {
         if !is_cup(bytes[fin]) {
             return;
         }
+
         let params = &bytes[start + 2..fin];
+
         let (Some(row), _) = cup_row_col(params) else {
             return;
         };
+
         let new_row = (row as i32 + delta).max(1) as u16;
+
         if new_row == row {
             return;
         }
+
         let row_end = params
             .iter()
             .position(|b| *b == b';')
             .unwrap_or(params.len());
+
         out.extend_from_slice(&bytes[copied..start]);
         out.extend_from_slice(b"\x1b[");
         out.extend_from_slice(new_row.to_string().as_bytes());
         out.extend_from_slice(&params[row_end..]);
+
         out.push(bytes[fin]);
+
         copied = fin + 1;
     });
+
     if copied == 0 {
         return None;
     }
+
     out.extend_from_slice(&bytes[copied..]);
+
     Some(out)
 }
 
@@ -160,6 +182,7 @@ fn rewrite_conpty_resize_echo_cup_rows(bytes: &[u8], target_row_1based: u16) -> 
 /// cursor row after a redraw. `None` if there is no CUP with an explicit row.
 fn last_cup_row(bytes: &[u8]) -> Option<u16> {
     let mut last = None;
+
     for_each_csi(bytes, |start, fin| {
         if is_cup(bytes[fin]) {
             if let (Some(r), _) = cup_row_col(&bytes[start + 2..fin]) {
@@ -175,13 +198,16 @@ fn last_cup_row(bytes: &[u8]) -> Option<u16> {
 /// realignment. `(0, 0)` if there is no CUP.
 fn max_cup_row_col(bytes: &[u8]) -> (u16, u16) {
     let (mut max_row, mut max_col) = (0u16, 0u16);
+
     for_each_csi(bytes, |start, fin| {
         if is_cup(bytes[fin]) {
             let (row, col) = cup_row_col(&bytes[start + 2..fin]);
+
             max_row = max_row.max(row.unwrap_or(0));
             max_col = max_col.max(col.unwrap_or(0));
         }
     });
+
     (max_row, max_col)
 }
 
@@ -200,31 +226,40 @@ fn su_realign_count(
     engine_rows: u16,
 ) -> Option<(u16, u16)> {
     let r_conpty = last_cup_row(repaint)?.saturating_sub(1);
+
     let (max_row, max_col) = max_cup_row_col(repaint);
+
     let fits = engine_cols == latched_cols
         && engine_rows == latched_rows
         && max_row <= latched_rows
         && max_col <= latched_cols;
+
     if !fits || r_ghostty <= r_conpty {
         return None;
     }
+
     let n = (r_ghostty - r_conpty).min(r_ghostty);
+
     (n > 0).then_some((n, r_conpty))
 }
 
 fn first_cup_row(bytes: &[u8]) -> Option<u16> {
     let mut first = None;
+
     for_each_csi(bytes, |start, fin| {
         if first.is_none() && is_cup(bytes[fin]) {
             first = cup_row_col(&bytes[start + 2..fin]).0;
         }
     });
+
     first
 }
 
 fn contains_csi_erase_display(bytes: &[u8]) -> bool {
     let mut found = false;
+
     for_each_csi(bytes, |_, fin| found |= bytes[fin] == b'J');
+
     found
 }
 
@@ -232,9 +267,11 @@ fn is_conpty_resize_repaint(bytes: &[u8], target_row_1based: u16) -> bool {
     if target_row_1based == 0 || bytes.is_empty() || bytes.len() > 512 {
         return false;
     }
+
     if bytes.iter().any(|b| *b == b'\r' || *b == b'\n') {
         return false;
     }
+
     if !contains_csi_erase_display(bytes) {
         return false;
     }
@@ -245,6 +282,7 @@ fn is_conpty_resize_repaint(bytes: &[u8], target_row_1based: u16) -> bool {
 /// Escape raw PTY bytes for human-readable vt_trace output.
 fn escape_bytes(bytes: &[u8]) -> String {
     let mut out = String::new();
+
     for &b in bytes {
         match b {
             b'\x1b' => out.push_str("<ESC>"),
@@ -256,6 +294,7 @@ fn escape_bytes(bytes: &[u8]) -> String {
             }
         }
     }
+
     out
 }
 
@@ -347,20 +386,25 @@ fn parse_exit_code(arg: &[u8]) -> Option<i32> {
 /// Parse a potential OSC 133 mark at `s` (caller guarantees `s[0] == 0x1b`).
 fn parse_osc133(s: &[u8]) -> Osc133 {
     let progress_prefix_len = s.len().min(OSC_PROGRESS_PREFIX.len());
+
     if s[..progress_prefix_len] == OSC_PROGRESS_PREFIX[..progress_prefix_len] {
         if s.len() <= OSC_PROGRESS_PREFIX.len() + 1 {
             return Osc133::Incomplete;
         }
+
         let active = match s[OSC_PROGRESS_PREFIX.len()] {
             b'0' => false,
             b'1'..=b'4' => true,
             _ => return Osc133::ProgressMalformed,
         };
+
         if s[OSC_PROGRESS_PREFIX.len() + 1] != b';' {
             return Osc133::ProgressMalformed;
         }
+
         let end = s.len().min(OSC133_MAX);
         let mut i = OSC_PROGRESS_PREFIX.len() + 2;
+
         while i < end {
             match s[i] {
                 0x07 => return Osc133::Progress { len: i + 1, active },
@@ -372,6 +416,7 @@ fn parse_osc133(s: &[u8]) -> Osc133 {
                 _ => i += 1,
             }
         }
+
         return if s.len() < OSC133_MAX {
             Osc133::Incomplete
         } else {
@@ -380,12 +425,15 @@ fn parse_osc133(s: &[u8]) -> Osc133 {
     }
 
     let pn = s.len().min(OSC133_PREFIX.len());
+
     if s[..pn] != OSC133_PREFIX[..pn] {
         return Osc133::NotMark;
     }
+
     if s.len() <= OSC133_PREFIX.len() {
         return Osc133::Incomplete; // prefix matched so far; need the subcommand + terminator
     }
+
     let sub = s[OSC133_PREFIX.len()];
     let arg_start = OSC133_PREFIX.len() + 1;
     let exit_at = |term: usize| {
@@ -393,9 +441,12 @@ fn parse_osc133(s: &[u8]) -> Osc133 {
             .then(|| parse_exit_code(&s[arg_start..term]))
             .flatten()
     };
+
     // Find the terminator: BEL (0x07) or ST (ESC \), bounded by OSC133_MAX.
     let end = s.len().min(OSC133_MAX);
+
     let mut i = OSC133_PREFIX.len();
+
     while i < end {
         match s[i] {
             0x07 => {
@@ -419,6 +470,7 @@ fn parse_osc133(s: &[u8]) -> Osc133 {
             _ => i += 1,
         }
     }
+
     if s.len() < OSC133_MAX {
         Osc133::Incomplete // a terminator may still arrive next read
     } else {
@@ -438,9 +490,11 @@ fn parse_osc133(s: &[u8]) -> Osc133 {
 fn render_command_echo(bytes: &[u8]) -> String {
     let text = String::from_utf8_lossy(bytes);
     let chars: Vec<char> = text.chars().collect();
+
     let mut line: Vec<char> = Vec::new();
     let mut col = 0usize;
     let mut i = 0;
+
     while i < chars.len() {
         match chars[i] {
             '\x1b' => {
@@ -450,12 +504,17 @@ fn render_command_echo(bytes: &[u8]) -> String {
                         // CSI: ESC [ params… final byte (0x40..=0x7e).
                         i += 1;
                         let params_start = i;
+
                         while i < chars.len() && !('\x40'..='\x7e').contains(&chars[i]) {
                             i += 1;
                         }
+
                         let Some(&fin) = chars.get(i) else { break };
+
                         let params: String = chars[params_start..i].iter().collect();
+
                         i += 1;
+
                         let nth = |n: usize, def: usize| {
                             params
                                 .split(';')
@@ -463,6 +522,7 @@ fn render_command_echo(bytes: &[u8]) -> String {
                                 .and_then(|s| s.parse::<usize>().ok())
                                 .unwrap_or(def)
                         };
+
                         match fin {
                             // CUP row;col — only the column matters on our one line.
                             'H' | 'f' => col = nth(1, 1).saturating_sub(1),
@@ -481,6 +541,7 @@ fn render_command_echo(bytes: &[u8]) -> String {
                             'X' => {
                                 // ECH n: blank n cells at the cursor.
                                 let end = (col + nth(0, 1).max(1)).min(line.len());
+
                                 for c in line.iter_mut().take(end).skip(col) {
                                     *c = ' ';
                                 }
@@ -491,15 +552,18 @@ fn render_command_echo(bytes: &[u8]) -> String {
                     Some(']') => {
                         // OSC … (BEL or ST)
                         i += 1;
+
                         while i < chars.len() {
                             if chars[i] == '\x07' {
                                 i += 1;
                                 break;
                             }
+
                             if chars[i] == '\x1b' && chars.get(i + 1) == Some(&'\\') {
                                 i += 2;
                                 break;
                             }
+
                             i += 1;
                         }
                     }
@@ -512,6 +576,7 @@ fn render_command_echo(bytes: &[u8]) -> String {
             }
             '\x08' => {
                 col = col.saturating_sub(1);
+
                 i += 1;
             }
             c if c >= ' ' => {
@@ -614,9 +679,12 @@ impl PromptSniffer {
         if self.carry_len > 0 {
             let cl = self.carry_len;
             let take = (OSC133_MAX - cl).min(input.len());
+
             let mut tmp = [0u8; OSC133_MAX];
+
             tmp[..cl].copy_from_slice(&self.carry[..cl]);
             tmp[cl..cl + take].copy_from_slice(&input[..take]);
+
             match parse_osc133(&tmp[..cl + take]) {
                 Osc133::Mark {
                     len,
@@ -625,21 +693,31 @@ impl PromptSniffer {
                     next,
                 } => {
                     self.apply(sub, next, exit);
+
                     let mark = self.drain_mark(&tmp[..len]);
+
                     on_mark(mark);
+
                     self.carry_len = 0;
+
                     pos = len - cl; // skip the input portion of the mark
                 }
                 Osc133::Progress { len, active } => {
                     self.progress_active = active;
+
                     let mark = self.drain_mark(&tmp[..len]);
+
                     on_mark(mark);
+
                     self.carry_len = 0;
+
                     pos = len - cl;
                 }
                 Osc133::Incomplete if cl + take < OSC133_MAX => {
                     self.carry[cl..cl + take].copy_from_slice(&input[..take]);
+
                     self.carry_len = cl + take;
+
                     return; // still incomplete — wait for the next read
                 }
                 Osc133::NotMark | Osc133::ProgressMalformed => {
@@ -649,17 +727,24 @@ impl PromptSniffer {
                     // carried bytes and rescan the new input; NOT a boundary
                     // glitch, so trust is untouched.
                     let mut tmp2 = [0u8; OSC133_MAX];
+
                     tmp2[..cl].copy_from_slice(&self.carry[..cl]);
+
                     forward(self.region, self.boundary_trusted(), &tmp2[..cl]);
+
                     self.carry_len = 0;
                 }
                 _ => {
                     // Malformed/maxed carry: forward the carried bytes as native output and
                     // reprocess the new input under cleared trust.
                     let mut tmp2 = [0u8; OSC133_MAX];
+
                     tmp2[..cl].copy_from_slice(&self.carry[..cl]);
+
                     self.reset_boundary_state();
+
                     forward(self.region, self.boundary_trusted(), &tmp2[..cl]);
+
                     self.carry_len = 0;
                 }
             }
@@ -667,11 +752,13 @@ impl PromptSniffer {
 
         // Main scan: memchr to the next ESC, classify, forward the run before it.
         let mut seg_start = pos;
+
         while pos < input.len() {
             match memchr::memchr(0x1b, &input[pos..]) {
                 None => break,
                 Some(off) => {
                     let esc = pos + off;
+
                     match parse_osc133(&input[esc..]) {
                         Osc133::Mark {
                             len,
@@ -681,68 +768,91 @@ impl PromptSniffer {
                         } => {
                             if esc > seg_start {
                                 self.pre_forward(&input[seg_start..esc]);
+
                                 forward(
                                     self.region,
                                     self.boundary_trusted(),
                                     &input[seg_start..esc],
                                 );
                             }
+
                             self.apply(sub, next, exit);
+
                             let mark = self.drain_mark(&input[esc..esc + len]);
+
                             on_mark(mark);
+
                             pos = esc + len;
+
                             seg_start = pos;
                         }
                         Osc133::Progress { len, active } => {
                             if esc > seg_start {
                                 self.pre_forward(&input[seg_start..esc]);
+
                                 forward(
                                     self.region,
                                     self.boundary_trusted(),
                                     &input[seg_start..esc],
                                 );
                             }
+
                             self.progress_active = active;
+
                             let mark = self.drain_mark(&input[esc..esc + len]);
+
                             on_mark(mark);
+
                             pos = esc + len;
+
                             seg_start = pos;
                         }
                         Osc133::Incomplete => {
                             if esc > seg_start {
                                 self.pre_forward(&input[seg_start..esc]);
+
                                 forward(
                                     self.region,
                                     self.boundary_trusted(),
                                     &input[seg_start..esc],
                                 );
                             }
+
                             let tail = &input[esc..];
+
                             let n = tail.len().min(OSC133_MAX);
+
                             self.carry[..n].copy_from_slice(&tail[..n]);
                             self.carry_len = n;
+
                             return;
                         }
                         Osc133::NotMark | Osc133::ProgressMalformed => pos = esc + 1,
                         Osc133::Malformed => {
                             if esc > seg_start {
                                 self.pre_forward(&input[seg_start..esc]);
+
                                 forward(
                                     self.region,
                                     self.boundary_trusted(),
                                     &input[seg_start..esc],
                                 );
                             }
+
                             self.reset_boundary_state();
+
                             pos = esc + 1;
+
                             seg_start = esc;
                         }
                     }
                 }
             }
         }
+
         if input.len() > seg_start {
             self.pre_forward(&input[seg_start..]);
+
             forward(self.region, self.boundary_trusted(), &input[seg_start..]);
         }
     }
@@ -779,6 +889,7 @@ impl PromptSniffer {
             if sub == b'K' {
                 self.history_cleared_edge = true;
             }
+
             return;
         };
 
@@ -806,6 +917,7 @@ impl PromptSniffer {
         if r == PromptRegion::Prompt {
             self.prompt_start_edge = true;
         }
+
         // Command output started (;C).
         if r == PromptRegion::Output && self.region != PromptRegion::Output {
             self.command_started_at = Some(std::time::SystemTime::now());
@@ -814,9 +926,11 @@ impl PromptSniffer {
             self.current_command = render_command_echo(&self.command_buf);
             self.command_started_edge = was_trusted && !self.current_command.is_empty();
         }
+
         if r == PromptRegion::Command {
             self.command_buf.clear();
         }
+
         // Command finished (;D) on an ordered lifecycle: finalize a command block — only
         // when trust was already established before this mark (skips the synthetic-prime
         // and trust-recovery cycles) and the command text is non-empty (an empty Enter
@@ -824,7 +938,9 @@ impl PromptSniffer {
         if sub == b'D' && r == PromptRegion::None {
             let started_at = self.command_started_at.take();
             let command = std::mem::take(&mut self.current_command);
+
             self.command_buf.clear();
+
             if was_trusted && !command.is_empty() {
                 if let Some(started_at) = started_at {
                     self.command_finished = Some(CommandCapture {
@@ -838,9 +954,11 @@ impl PromptSniffer {
                 }
             }
         }
+
         if r != self.region && prompt_trace_enabled() {
             eprintln!("[prompt133] {:?} -> {:?}", self.region, r);
         }
+
         self.region = r;
     }
 
@@ -870,6 +988,7 @@ impl PromptSniffer {
 
     fn reset_boundary_state(&mut self) {
         self.set_boundary_trust(false);
+
         self.lifecycle = ShellLifecycleProgress::AwaitPrompt;
         self.region = PromptRegion::None;
         self.command_buf.clear();
@@ -877,6 +996,7 @@ impl PromptSniffer {
         self.current_command.clear();
         self.prompt_start_edge = false;
         self.command_started_edge = false;
+
         // `command_finished` is kept: it was produced by a lifecycle that completed
         // trusted before this glitch, so the block is still valid history (it drains
         // at the very next mark's hook).
@@ -888,6 +1008,7 @@ impl PromptSniffer {
         } else {
             ShellBoundaryTrust::Untrusted
         };
+
         if self.boundary_trust != next {
             self.boundary_trust = next;
             self.boundary_trust_changed = Some(trusted);
@@ -1002,7 +1123,9 @@ pub struct PtyPipe<T: nmt_platform::EventedPty, U: EventListener> {
 fn ghostty_vt_modes(g: &GhosttyTerminal) -> crate::terminal::Mode {
     use crate::ghostty::mode as gm;
     use crate::terminal::Mode;
+
     let mut m = Mode::empty();
+
     m.set(Mode::SHOW_CURSOR, g.mode(gm::CURSOR_VISIBLE));
     m.set(Mode::APP_CURSOR, g.mode(gm::CURSOR_KEYS));
     m.set(Mode::APP_KEYPAD, g.mode(gm::KEYPAD_KEYS));
@@ -1017,9 +1140,11 @@ fn ghostty_vt_modes(g: &GhosttyTerminal) -> crate::terminal::Mode {
     m.set(Mode::LINE_WRAP, g.mode(gm::WRAPAROUND));
     m.set(Mode::INSERT, g.mode(gm::INSERT));
     m.set(Mode::ALT_SCREEN, g.mode(gm::ALT_SCREEN));
+
     // Kitty keyboard protocol flags live in a separate engine stack, not the DEC
     // modes, so fold them in here to enable Kitty press and key-release encoding.
     m |= g.kitty_keyboard_modes();
+
     m
 }
 
@@ -1032,10 +1157,13 @@ fn publish_render_buffer(
     if capture.is_err() {
         return false;
     }
+
     if hide_cursor {
         back.set_cursor_visible(false);
     }
+
     std::mem::swap(&mut *front.lock(), back);
+
     true
 }
 
@@ -1050,6 +1178,7 @@ fn publish_render_buffer(
 /// floors very small budgets at ~one page. `lines == 0` → 0 (engine minimum).
 fn scrollback_bytes(lines: usize, cols: u16) -> usize {
     const BYTES_PER_CELL: usize = 16;
+
     lines
         .saturating_mul(cols as usize)
         .saturating_mul(BYTES_PER_CELL)
@@ -1062,6 +1191,7 @@ pub(crate) fn pwd_to_path(pwd: &str) -> std::path::PathBuf {
             return std::path::PathBuf::from(&rest[slash..]);
         }
     }
+
     std::path::PathBuf::from(pwd)
 }
 
@@ -1147,6 +1277,7 @@ where
         engine_blocks: bool,
     ) -> Result<PtyPipe<T, U>, Box<dyn std::error::Error>> {
         let poll = Poll::new()?;
+
         // The `Waker` is registered on a reserved token; the worker threads (Windows)
         // and the `MsgSender` wake the loop through it.
         let waker = Arc::new(Waker::new(poll.registry(), WAKER_TOKEN)?);
@@ -1159,11 +1290,13 @@ where
             let rb = render_buffer.lock();
             (rb.cols() as u16, rb.rows() as u16)
         };
+
         // `max_scrollback` is a **byte budget** in the engine — the C-binding's
         // "lines" doc is wrong (verified: budgets ≤1 MB floor at ~3297 lines, 10 MB
         // holds ~36k at 20 cols ≈ 273 B/line). `scrollback-history-limit` is
         // in lines, so convert through `scrollback_bytes`.
         let max_scrollback = scrollback_bytes(scrollback_lines, cols.max(1));
+
         let mut ghostty = GhosttyTerminal::new(cols.max(1), rows.max(1), max_scrollback)
             .map_err(|err| Box::new(err) as Box<dyn std::error::Error>)?;
 
@@ -1218,13 +1351,16 @@ where
     /// Emit alt-screen interactive state, edge-triggered so a stable state emits nothing.
     fn emit_interactive_state(&mut self) {
         let on = self.prev_alt_screen;
+
         if on != self.prev_interactive {
             self.prev_interactive = on;
             self.event_proxy
                 .send_event(TerminalEvent::InteractiveState(on), self.window_id);
         }
+
         if self.prev_alt_screen != self.prev_alt_screen_sent {
             self.prev_alt_screen_sent = self.prev_alt_screen;
+
             self.event_proxy.send_event(
                 TerminalEvent::AltScreen(self.prev_alt_screen),
                 self.window_id,
@@ -1259,6 +1395,7 @@ where
     fn pty_read(&mut self, _state: &mut PtyState, buf: &mut [u8]) -> io::Result<()> {
         let mut unprocessed = 0;
         let mut processed = 0;
+
         // True when the loop drained the PTY (WouldBlock/EOF); false when it
         // broke at MAX_LOCKED_READ with more data likely pending.
         let mut caught_up = false;
@@ -1290,17 +1427,23 @@ where
             let output_sink = self.output_sink.clone();
             {
                 let mut engine = self.ghostty.lock();
+
                 let echo_pending_at_entry = cfg!(windows) && self.conpty_resize_echo_pending;
+
                 let mut rewritten = None;
                 let mut synthetic_prefix = None;
+
                 // Some(R_conpty) means SU realignment ran during this read.
                 let mut su_realigned_to: Option<u16> = None;
+
                 let repaint_window =
                     cfg!(windows) && self.conpty_resize_repaint_reads_remaining > 0;
+
                 if repaint_window {
                     self.conpty_resize_repaint_reads_remaining =
                         self.conpty_resize_repaint_reads_remaining.saturating_sub(1);
                 }
+
                 // SU realignment runs before and instead of the legacy CUP rewrite.
                 // On the first repaint of a resize, push ghostty's active-top history rows
                 // into scrollback so its prompt rises to ConPTY's row; then ConPTY's own
@@ -1309,6 +1452,7 @@ where
                 // post-write assertion below guard against a mis-latched resize.
                 if cfg!(windows) && self.su_realign_armed && repaint_window {
                     self.su_realign_armed = false;
+
                     if !engine.mode(mode::ALT_SCREEN) {
                         if let Some((n, r_conpty)) = su_realign_count(
                             &buf[..unprocessed],
@@ -1319,9 +1463,13 @@ where
                             engine.rows(),
                         ) {
                             let realign = format!("\x1b[{n}S").into_bytes();
+
                             engine.write_vt(&realign);
+
                             synthetic_prefix = Some(realign);
+
                             su_realigned_to = Some(r_conpty);
+
                             self.conpty_resize_echo_pending = false;
                         }
                     }
@@ -1346,31 +1494,40 @@ where
                         // always routes to the true prompt row (the frontend still
                         // snaps the *view* to the bottom on keypress for UX).
                         let target_row = active_row.saturating_add(1);
+
                         let repaint_pending = repaint_window
                             && is_conpty_resize_repaint(&buf[..unprocessed], target_row);
+
                         if self.conpty_resize_echo_pending || repaint_pending {
                             rewritten = rewrite_conpty_resize_echo_cup_rows(
                                 &buf[..unprocessed],
                                 target_row,
                             );
                         }
+
                         if rewritten.is_some() || repaint_pending {
                             self.conpty_resize_echo_pending = false;
+
                             if repaint_pending {
                                 self.conpty_resize_repaint_reads_remaining = 0;
                             }
                         }
                     }
                 }
+
                 let bytes = rewritten.as_deref().unwrap_or(&buf[..unprocessed]);
+
                 let observed_output = output_sink.as_ref().map(|_| match synthetic_prefix {
                     Some(mut prefix) => {
                         prefix.extend_from_slice(bytes);
+
                         Arc::from(prefix)
                     }
                     None => Arc::from(bytes),
                 });
+
                 let was_rewritten = rewritten.is_some();
+
                 // Capture the pre-rewrite ConPTY bytes + cursor visibility for the
                 // trace so we can compare original vs rewritten CUP rows.
                 let (orig_escaped, cursor_vis_at_decision) = if crate::vt_trace::enabled()
@@ -1384,6 +1541,7 @@ where
                 } else {
                     (String::new(), None)
                 };
+
                 // Always run the sniffer: it classifies/captures OSC 133 lifecycle state
                 // while every byte, including marks, still reaches the engine.
                 {
@@ -1397,6 +1555,7 @@ where
                         let event_proxy = &self.event_proxy;
                         let window_id = self.window_id;
                         let engine_blocks = self.engine_blocks;
+
                         self.sniffer.feed_hooked(
                             bytes,
                             |_, _, seg| {
@@ -1404,6 +1563,7 @@ where
                             },
                             |mut mark| {
                                 engine_cell.borrow_mut().write_vt(mark.bytes);
+
                                 if mark.prompt_started && mark.trusted {
                                     // The block IS the segment: only the sequence
                                     // number is registered here, for metadata
@@ -1411,24 +1571,32 @@ where
                                     *mark_seq += 1;
                                     event_proxy.send_event(TerminalEvent::PromptStarted, window_id);
                                 }
+
                                 if let Some(mut start) = mark.command_started.take() {
                                     // ;C — latch the launch cwd while the engine still
                                     // holds THIS prompt's OSC 7, and surface the in-flight block.
                                     let cwd = engine_cell.borrow().current_directory();
+
                                     start.seq = *mark_seq;
                                     start.cwd = cwd.clone();
+
                                     *launch_cwd = Some(cwd);
+
                                     event_proxy.send_event(
                                         TerminalEvent::CommandStarted(start),
                                         window_id,
                                     );
                                 }
+
                                 if let Some(mut cmd) = mark.command_finished.take() {
                                     // ;D — attach the launch metadata.
                                     let cwd = launch_cwd.take().unwrap_or(None);
+
                                     cmd.seq = *mark_seq;
                                     cmd.cwd = cwd;
+
                                     let in_alt_screen = engine_cell.borrow().mode(mode::ALT_SCREEN);
+
                                     if mark.trusted && !in_alt_screen && engine_blocks {
                                         // Engine-blocks mode freezes
                                         // the command into a finished engine block
@@ -1440,10 +1608,12 @@ where
                                         // against. Clearing the boundary gives ConPTY's
                                         // cursor model a fresh grid for the next command.
                                         let mut engine = engine_cell.borrow_mut();
+
                                         let events = match engine.finish_block() {
                                             Ok(Some(handle)) => {
                                                 let rows =
                                                     engine.block_row_count(handle).unwrap_or(0);
+
                                                 vec![
                                                     crate::event::BlockEvent::EngineBlock {
                                                         seq: *mark_seq,
@@ -1462,29 +1632,36 @@ where
                                                 Vec::new()
                                             }
                                         };
+
                                         if !events.is_empty() {
                                             event_proxy.send_event(
                                                 TerminalEvent::BlockBatch(events),
                                                 window_id,
                                             );
                                         }
+
                                         engine.write_vt(BLOCK_BOUNDARY_CLEAR);
                                     }
+
                                     // Classic mode keeps one continuous grid:
                                     // no finish, no boundary clear — plain single
                                     // grid; only the metadata event fires.
                                     event_proxy
                                         .send_event(TerminalEvent::CommandFinished(cmd), window_id);
                                 }
+
                                 if mark.history_cleared && mark.trusted && engine_blocks {
                                     // ;K — the Clear-Host wrapper announces a user
                                     // A trusted clear drops every finished engine
                                     // block and wipe the active grid (the shell's
                                     // own clear follows through ConPTY).
                                     let in_alt_screen = engine_cell.borrow().mode(mode::ALT_SCREEN);
+
                                     if !in_alt_screen {
                                         engine_cell.borrow_mut().write_vt(BLOCK_BOUNDARY_CLEAR);
+
                                         engine_cell.borrow_mut().clear_blocks();
+
                                         event_proxy.send_event(
                                             TerminalEvent::BlockBatch(vec![
                                                 crate::event::BlockEvent::HistoryCleared,
@@ -1496,23 +1673,27 @@ where
                             },
                         );
                     }
+
                     if let Some(trusted) = self.sniffer.take_boundary_trust_changed() {
                         self.event_proxy.send_event(
                             TerminalEvent::PromptBoundaryTrusted(trusted),
                             self.window_id,
                         );
                     }
+
                     // No steady-state work per read: the whole command is
                     // frozen once at its `;D` finish (the per-line harvest
                     // this replaced was the throughput cost the per-block
                     // grid exists to delete).
                 }
+
                 // After SU realignment and the original repaint, ConPTY's own
                 // absolute CUP must have pulled the active cursor onto the realigned
                 // prompt row. A mismatch means the realign assumption broke (mis-latched
                 // resize, divergent wrap) — trace + debug_assert, never a prod panic.
                 if let Some(expected) = su_realigned_to {
                     let got = engine.active_cursor_row();
+
                     if got != Some(expected) && crate::vt_trace::enabled() {
                         crate::vt_trace::trace(
                             "su_realign_assert",
@@ -1520,12 +1701,14 @@ where
                             &format!("expected R_conpty={expected} got={got:?}"),
                         );
                     }
+
                     debug_assert_eq!(
                         got,
                         Some(expected),
                         "SU realign: active cursor should land on R_conpty"
                     );
                 }
+
                 // Dump the full VT only for resize-related reads (the ConPTY repaint
                 // window or a realigned echo) — a per-keystroke full dump would be
                 // O(scrollback) on every read.
@@ -1545,10 +1728,12 @@ where
                         ),
                     );
                 }
+
                 if let (Some(sink), Some(output)) = (&output_sink, observed_output) {
                     sink(output);
                 }
             }
+
             // Content changed, so invalidate the cached deep-search corpus.
             self.content_version
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1578,6 +1763,7 @@ where
         // the owned results below with the engine lock released.
         let (responses, bell, clipboard_writes, title, vt_modes, sync_output, capture, image_delta) = {
             let mut engine = self.ghostty.lock();
+
             let responses = engine.take_pty_writes();
             let bell = engine.take_bell();
             let clipboard_writes = engine.take_clipboard_writes();
@@ -1586,12 +1772,16 @@ where
             let sync_output_timed_out = self
                 .sync_output_started_at
                 .is_some_and(|started| started.elapsed() >= SYNC_OUTPUT_TIMEOUT);
+
             if sync_output_timed_out && engine.mode(mode::SYNC_OUTPUT) {
                 engine.write_vt(b"\x1b[?2026l");
             }
+
             let sync_output = engine.mode(mode::SYNC_OUTPUT);
+
             let (capture, image_delta) = if do_snapshot && !sync_output {
                 let capture = engine.snapshot_into(&mut self.back_buffer);
+
                 // Kitty image pixel deltas, under the same lock. Only the PTY
                 // reader path drives image shipping; the scroll path never calls this.
                 let image_delta = match &capture {
@@ -1602,6 +1792,7 @@ where
             } else {
                 (None, (Vec::new(), Vec::new()))
             };
+
             (
                 responses,
                 bell,
@@ -1617,8 +1808,10 @@ where
         // Ship new/changed kitty image pixels + removals via the existing graphics
         // event → `sugarloaf.image_data`. Empty in steady state.
         let (pending_images, removed_ids) = image_delta;
+
         if !pending_images.is_empty() || !removed_ids.is_empty() {
             use crate::graphics::GraphicId;
+
             self.event_proxy.send_event(
                 TerminalEvent::UpdateGraphics {
                     route_id: self.route_id,
@@ -1638,18 +1831,22 @@ where
         if self.terminal_responses_enabled && !responses.is_empty() {
             let _ = self.pty.writer().write_all(&responses);
         }
+
         if bell > 0 {
             self.event_proxy
                 .send_event(TerminalEvent::Bell, self.window_id);
         }
+
         for (ty, text) in clipboard_writes {
             self.event_proxy
                 .send_event(TerminalEvent::ClipboardStore(ty, text), self.window_id);
         }
+
         if let Some(title) = title {
             self.event_proxy
                 .send_event(TerminalEvent::Title(title), self.window_id);
         }
+
         // Publish VT modes lock-free; this PTY thread is the sole writer.
         self.vt_modes
             .store(vt_modes.bits(), std::sync::atomic::Ordering::Relaxed);
@@ -1680,6 +1877,7 @@ where
             }
             return Ok(());
         };
+
         self.last_snapshot_at = std::time::Instant::now();
         self.snapshot_pending = false;
 
@@ -1714,6 +1912,7 @@ where
                     // realigned and the input/prompt accumulates.
                     const RESIZE_ECHO_WINDOW: std::time::Duration =
                         std::time::Duration::from_millis(150);
+
                     if cfg!(windows)
                         && self.conpty_resize_echo_realign
                         && self
@@ -1723,6 +1922,7 @@ where
                     {
                         self.conpty_resize_echo_pending = true;
                     }
+
                     state.write_list.push_back(input)
                 }
                 Msg::Resize(window_size) => {
@@ -1732,8 +1932,10 @@ where
                     let cell_w = (window_size.width / cols).max(1) as u32;
                     let cell_h = (window_size.height / rows).max(1) as u32;
                     let mut blocks_sync: Option<Vec<(crate::ghostty::BlockHandle, usize)>> = None;
+
                     let (snapshot, active_row) = {
                         let mut engine = self.ghostty.lock();
+
                         if crate::vt_trace::enabled() {
                             crate::vt_trace::trace(
                                 "perf_resize_before",
@@ -1749,9 +1951,11 @@ where
                                 ),
                             );
                         }
+
                         if let Err(err) = engine.resize(cols, rows, cell_w, cell_h) {
                             tracing::warn!("engine resize failed: {err:?}");
                         }
+
                         if crate::vt_trace::enabled() {
                             crate::vt_trace::trace(
                                 "perf_resize_after_engine",
@@ -1762,15 +1966,19 @@ where
                                 ),
                             );
                         }
+
                         // Engine-blocks: resize eagerly reflowed every finished
                         // block (new generations + row counts) — ship the fresh
                         // list so the store's cached layout follows the engine reflow.
                         if self.engine_blocks && engine.block_count() > 0 {
                             blocks_sync = Some(engine_blocks_live_list(&engine));
                         }
+
                         let capture = engine.snapshot_into(&mut self.back_buffer);
+
                         (capture, engine.active_cursor_row())
                     };
+
                     if let Some(live) = blocks_sync {
                         self.event_proxy.send_event(
                             TerminalEvent::BlockBatch(vec![
@@ -1779,6 +1987,7 @@ where
                             self.window_id,
                         );
                     }
+
                     if publish_render_buffer(
                         &self.render_buffer,
                         &mut self.back_buffer,
@@ -1792,13 +2001,16 @@ where
                             self.window_id,
                         );
                     }
+
                     // Resize reflows content → invalidate any deep-search corpus.
                     self.content_version
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
                     if cfg!(windows) {
                         self.conpty_resize_echo_realign = true;
                         self.conpty_resize_at = Some(std::time::Instant::now());
                         self.conpty_resize_repaint_reads_remaining = 8;
+
                         // Latch the prompt row and size now so SU realignment uses the
                         // pre-resize cursor position.
                         // `active_cursor_row()` is on the prompt row here, but flips
@@ -1809,6 +2021,7 @@ where
                         self.conpty_resize_rows = rows;
                         self.su_realign_armed = active_row.is_some();
                     }
+
                     if let Err(err) = self.pty.set_winsize(window_size) {
                         tracing::warn!("pty set_winsize failed: {err}");
                     }
@@ -1829,17 +2042,21 @@ where
                 match self.pty.writer().write(current.remaining_bytes()) {
                     Ok(0) => {
                         state.set_current(Some(current));
+
                         break 'write_many;
                     }
                     Ok(n) => {
                         current.advance(n);
+
                         if current.finished() {
                             state.goto_next();
+
                             break 'write_one;
                         }
                     }
                     Err(err) => {
                         state.set_current(Some(current));
+
                         match err.kind() {
                             ErrorKind::Interrupted | ErrorKind::WouldBlock => break 'write_many,
                             _ => return Err(err),
@@ -1887,6 +2104,7 @@ where
                     self.sync_output_started_at
                         .map(|started| SYNC_OUTPUT_TIMEOUT.saturating_sub(started.elapsed()))
                 };
+
                 if let Err(err) = self.poll.poll(&mut events, timeout) {
                     match err.kind() {
                         ErrorKind::Interrupted => continue,
@@ -1910,6 +2128,7 @@ where
                 let mut do_read = false;
                 let mut do_write = false;
                 let mut child_exited = false;
+
                 #[cfg(unix)]
                 let mut hup = false;
 
@@ -1925,6 +2144,7 @@ where
 
                 for event in events.iter() {
                     let token = event.token();
+
                     if token == self.pty.child_event_token() {
                         child_exited = true;
                     } else if token == self.pty.read_token() || token == self.pty.write_token() {
@@ -1949,8 +2169,10 @@ where
                             TerminalEvent::CloseTerminal(self.route_id),
                             self.window_id,
                         );
+
                         self.event_proxy
                             .send_event(TerminalEvent::Render, self.window_id);
+
                         break 'event_loop;
                     }
                 }
@@ -1991,9 +2213,11 @@ where
                 // Re-register interest if a write is pending (real effect on Unix; the
                 // Windows soft-ready path is a no-op).
                 let mut interest = Interest::READABLE;
+
                 if state.needs_write() {
                     interest |= Interest::WRITABLE;
                 }
+
                 self.pty.reregister(&self.poll, interest).unwrap();
             }
 

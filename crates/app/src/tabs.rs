@@ -3,7 +3,7 @@
 //! live in [`ActiveList`]; this module adds the tab-specific parts (titles,
 //! exit flags, surface access).
 
-use crate::active_list::{ActiveList, HasId};
+use crate::ui::{ActiveList, HasId};
 
 /// Stable per-tab identity. Survives close/reorder (index changes, id does not);
 /// wake routing, titles, and drag all key off it. Derived from the shell's
@@ -42,21 +42,26 @@ impl<S> Tab<S> {
             exited: false,
         }
     }
+
     pub fn title(&self) -> &str {
         self.user_title
             .as_deref()
             .or(self.terminal_title.as_deref())
             .unwrap_or(&self.default_title)
     }
+
     pub fn user_title(&self) -> Option<&str> {
         self.user_title.as_deref()
     }
+
     pub fn exited(&self) -> bool {
         self.exited
     }
+
     pub fn surface(&self) -> &S {
         &self.surface
     }
+
     pub fn surface_mut(&mut self) -> &mut S {
         &mut self.surface
     }
@@ -77,6 +82,7 @@ impl<S> TabManager<S> {
     /// Append a tab with its profile-derived default name and make it active.
     pub fn new_tab(&mut self, surface: S, id: TabId, default_title: String) -> TabId {
         self.tabs.push_active(Tab::new(surface, id, default_title));
+
         id
     }
 
@@ -113,8 +119,11 @@ impl<S> TabManager<S> {
         let Some(tab) = self.tabs.find_mut(id) else {
             return false;
         };
+
         let previous = tab.title().to_string();
+
         tab.terminal_title = (!title.is_empty()).then_some(title);
+
         tab.title() != previous
     }
 

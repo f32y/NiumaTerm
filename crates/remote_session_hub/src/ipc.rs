@@ -75,13 +75,16 @@ impl SharedMemoryEndpoint {
         if capacity == 0 || capacity > u32::MAX as usize {
             return Err(IpcError::InvalidCapacity(capacity));
         }
+
         let layout = mapping_layout(capacity)?;
         let total = layout.total;
         let mapping = ShmemConf::new().size(total).create()?;
         let base = mapping.as_ptr();
+
         if !(base as usize).is_multiple_of(align_of::<MappingHeader>()) {
             return Err(IpcError::InvalidLayout);
         }
+
         unsafe {
             // The mapping is newly created and inaccessible to the child until its
             // identifier is handed over, so initializing the header has no reader.
@@ -125,15 +128,23 @@ impl SharedMemoryEndpoint {
                 capacity: self.outbound.capacity,
             });
         }
+
         wait_event(&*self.outbound.empty_event, timeout)?;
+
         unsafe {
             ensure_state(&self.outbound, EMPTY)?;
+
             ptr::copy_nonoverlapping(message.as_ptr(), self.outbound.data, message.len());
+
             let control = &*self.outbound.control;
+
             control.len.store(message.len() as u32, Ordering::Relaxed);
+
             control.state.store(READY, Ordering::Release);
         }
+
         set_event(&*self.outbound.ready_event, EventState::Signaled)?;
+
         Ok(())
     }
 
@@ -141,6 +152,7 @@ impl SharedMemoryEndpoint {
         if !wait_event_optional(&*self.inbound.ready_event, timeout) {
             return Ok(None);
         }
+
         self.read_inbound().map(Some)
     }
 
@@ -149,24 +161,32 @@ impl SharedMemoryEndpoint {
             .ready_event
             .wait(Timeout::Infinite)
             .map_err(|error| IpcError::Sync(error.to_string()))?;
+
         self.read_inbound()
     }
 
     fn read_inbound(&mut self) -> Result<Vec<u8>, IpcError> {
         unsafe {
             ensure_state(&self.inbound, READY)?;
+
             let control = &*self.inbound.control;
             let len = control.len.load(Ordering::Relaxed) as usize;
+
             if len > self.inbound.capacity {
                 return Err(IpcError::CorruptLength {
                     len,
                     capacity: self.inbound.capacity,
                 });
             }
+
             let mut message = vec![0; len];
+
             ptr::copy_nonoverlapping(self.inbound.data, message.as_mut_ptr(), len);
+
             control.state.store(EMPTY, Ordering::Release);
+
             set_event(&*self.inbound.empty_event, EventState::Signaled)?;
+
             Ok(message)
         }
     }
@@ -175,16 +195,23 @@ impl SharedMemoryEndpoint {
         if mapping.len() < size_of::<MappingHeader>() {
             return Err(IpcError::InvalidLayout);
         }
+
         let base = mapping.as_ptr();
+
         if !(base as usize).is_multiple_of(align_of::<MappingHeader>()) {
             return Err(IpcError::InvalidLayout);
         }
+
         let header = unsafe { &*base.cast::<MappingHeader>() };
+
         if header.magic != MAGIC || header.version != VERSION {
             return Err(IpcError::ProtocolMismatch);
         }
+
         let capacity = header.capacity as usize;
+
         let layout = mapping_layout(capacity)?;
+
         // Windows reports an opened view rounded up to its allocation granularity,
         // while the creating process retains the requested length.
         if capacity == 0
@@ -195,8 +222,10 @@ impl SharedMemoryEndpoint {
         }
 
         let mut events = Vec::with_capacity(EVENT_COUNT);
+
         for index in 0..EVENT_COUNT {
             let event_ptr = unsafe { base.add(layout.events_offset + index * layout.event_size) };
+
             let (event, used) = unsafe {
                 if create_events {
                     Event::new(event_ptr, true)
@@ -205,14 +234,19 @@ impl SharedMemoryEndpoint {
                 }
             }
             .map_err(|error| IpcError::Sync(error.to_string()))?;
+
             if used != layout.event_size {
                 return Err(IpcError::InvalidLayout);
             }
+
             events.push(event);
         }
+
         let mut events = events.into_iter();
+
         let first_data = unsafe { base.add(layout.data_offset) };
         let second_data = unsafe { first_data.add(capacity) };
+
         let parent_to_child = Mailbox {
             control: ptr::addr_of!(header.parent_to_child).cast_mut(),
             data: first_data,
@@ -220,6 +254,7 @@ impl SharedMemoryEndpoint {
             ready_event: events.next().expect("four events were created"),
             empty_event: events.next().expect("four events were created"),
         };
+
         let child_to_parent = Mailbox {
             control: ptr::addr_of!(header.child_to_parent).cast_mut(),
             data: second_data,
@@ -227,14 +262,17 @@ impl SharedMemoryEndpoint {
             ready_event: events.next().expect("four events were created"),
             empty_event: events.next().expect("four events were created"),
         };
+
         if create_events {
             set_event(&*parent_to_child.empty_event, EventState::Signaled)?;
             set_event(&*child_to_parent.empty_event, EventState::Signaled)?;
         }
+
         let (outbound, inbound) = match role {
             Role::Parent => (parent_to_child, child_to_parent),
             Role::Child => (child_to_parent, parent_to_child),
         };
+
         Ok(Self {
             mapping,
             outbound,
@@ -252,16 +290,20 @@ struct MappingLayout {
 
 fn mapping_layout(capacity: usize) -> Result<MappingLayout, IpcError> {
     let event_size = Event::size_of(None);
+
     let events_offset = align_up(size_of::<MappingHeader>(), align_of::<u32>())?;
+
     let data_offset = event_size
         .checked_mul(EVENT_COUNT)
         .and_then(|events| events_offset.checked_add(events))
         .and_then(|offset| align_up(offset, 64).ok())
         .ok_or(IpcError::InvalidCapacity(capacity))?;
+
     let total = capacity
         .checked_mul(2)
         .and_then(|buffers| data_offset.checked_add(buffers))
         .ok_or(IpcError::InvalidCapacity(capacity))?;
+
     Ok(MappingLayout {
         event_size,
         events_offset,
@@ -279,6 +321,7 @@ fn align_up(value: usize, alignment: usize) -> Result<usize, IpcError> {
 
 fn ensure_state(mailbox: &Mailbox, expected: u32) -> Result<(), IpcError> {
     let state = unsafe { &*mailbox.control }.state.load(Ordering::Acquire);
+
     if state == expected {
         Ok(())
     } else {
@@ -408,7 +451,9 @@ impl HubRequest {
                 options,
             } => {
                 out.push(1);
+
                 put_u64(&mut out, *request_id);
+
                 out.extend_from_slice(
                     &serde_json::to_vec(options)
                         .map_err(|error| IpcError::Options(error.to_string()))?,
@@ -416,7 +461,9 @@ impl HubRequest {
             }
             Self::Input { session_id, data } => {
                 out.push(2);
+
                 put_u64(&mut out, session_id.0);
+
                 out.extend_from_slice(data);
             }
             Self::Resize {
@@ -425,6 +472,7 @@ impl HubRequest {
                 rows,
             } => {
                 out.push(3);
+
                 put_u64(&mut out, session_id.0);
                 put_u16(&mut out, *cols);
                 put_u16(&mut out, *rows);
@@ -434,11 +482,13 @@ impl HubRequest {
                 session_id,
             } => {
                 out.push(4);
+
                 put_u64(&mut out, *request_id);
                 put_u64(&mut out, session_id.0);
             }
             Self::Detach { session_id } => {
                 out.push(5);
+
                 put_u64(&mut out, session_id.0);
             }
             Self::Kill {
@@ -446,6 +496,7 @@ impl HubRequest {
                 session_id,
             } => {
                 out.push(6);
+
                 put_u64(&mut out, *request_id);
                 put_u64(&mut out, session_id.0);
             }
@@ -455,6 +506,7 @@ impl HubRequest {
                 session_id,
             } => {
                 out.push(8);
+
                 put_u64(&mut out, *request_id);
                 put_u64(&mut out, session_id.0);
             }
@@ -466,12 +518,16 @@ impl HubRequest {
         let (&kind, mut payload) = bytes
             .split_first()
             .ok_or(IpcError::MalformedMessage("empty request"))?;
+
         let request = match kind {
             1 => {
                 let request_id = take_u64(&mut payload)?;
+
                 let options = serde_json::from_slice(payload)
                     .map_err(|error| IpcError::Options(error.to_string()))?;
+
                 payload = &[];
+
                 Self::Open {
                     request_id,
                     options,
@@ -504,9 +560,11 @@ impl HubRequest {
             },
             _ => return Err(IpcError::MalformedMessage("unknown request kind")),
         };
+
         if !payload.is_empty() {
             return Err(IpcError::MalformedMessage("trailing request bytes"));
         }
+
         Ok(request)
     }
 }
@@ -556,6 +614,7 @@ impl HubResponse {
                 session_id,
             } => {
                 out.push(0x81);
+
                 put_u64(&mut out, *request_id);
                 put_u64(&mut out, session_id.0);
             }
@@ -568,11 +627,13 @@ impl HubResponse {
                 vt,
             } => {
                 out.push(0x82);
+
                 put_u64(&mut out, *request_id);
                 put_u64(&mut out, session_id.0);
                 put_u64(&mut out, *base_seq);
                 put_u16(&mut out, *cols);
                 put_u16(&mut out, *rows);
+
                 out.extend_from_slice(vt);
             }
             Self::Output {
@@ -581,21 +642,26 @@ impl HubResponse {
                 data,
             } => {
                 out.push(0x83);
+
                 put_u64(&mut out, session_id.0);
                 put_u64(&mut out, *seq);
+
                 out.extend_from_slice(data);
             }
             Self::Exited { session_id, seq } => {
                 out.push(0x84);
+
                 put_u64(&mut out, session_id.0);
                 put_u64(&mut out, *seq);
             }
             Self::Ack { request_id } => {
                 out.push(0x85);
+
                 put_u64(&mut out, *request_id);
             }
             Self::ChildProcessCount { request_id, count } => {
                 out.push(0x86);
+
                 put_u64(&mut out, *request_id);
                 put_u64(&mut out, *count);
             }
@@ -604,7 +670,9 @@ impl HubResponse {
                 message,
             } => {
                 out.push(0xff);
+
                 put_u64(&mut out, *request_id);
+
                 out.extend_from_slice(message.as_bytes());
             }
         }
@@ -615,6 +683,7 @@ impl HubResponse {
         let (&kind, mut payload) = bytes
             .split_first()
             .ok_or(IpcError::MalformedMessage("empty response"))?;
+
         let response = match kind {
             0x81 => Self::Opened {
                 request_id: take_u64(&mut payload)?,
@@ -652,9 +721,11 @@ impl HubResponse {
             },
             _ => return Err(IpcError::MalformedMessage("unknown response kind")),
         };
+
         if !payload.is_empty() {
             return Err(IpcError::MalformedMessage("trailing response bytes"));
         }
+
         Ok(response)
     }
 }
@@ -679,31 +750,41 @@ fn take<const N: usize>(bytes: &mut &[u8]) -> Result<[u8; N], IpcError> {
     let (value, rest) = bytes
         .split_first_chunk::<N>()
         .ok_or(IpcError::MalformedMessage("truncated integer"))?;
+
     *bytes = rest;
+
     Ok(*value)
 }
 
 pub fn run_hub_host(os_id: &str) -> Result<(), IpcError> {
     let mut endpoint = SharedMemoryEndpoint::open_child(os_id)?;
+
     let hub = RemoteSessionHub::new();
+
     let mut subscriptions = HashMap::<SessionId, SessionSubscription>::new();
+
     let (request_sender, request_receiver) = std::sync::mpsc::channel();
     let host_thread = std::thread::current();
     let reader_wake = host_thread.clone();
     let reader_os_id = os_id.to_owned();
+
     std::thread::Builder::new()
         .name("remote-session-hub-ipc-reader".to_owned())
         .spawn(move || {
             let result = (|| -> Result<(), IpcError> {
                 let mut reader = SharedMemoryEndpoint::open_child(&reader_os_id)?;
+
                 loop {
                     let message = reader.recv_blocking()?;
+
                     if request_sender.send(Ok(message)).is_err() {
                         return Ok(());
                     }
+
                     reader_wake.unpark();
                 }
             })();
+
             if let Err(error) = result {
                 let _ = request_sender.send(Err(error.to_string()));
                 reader_wake.unpark();
@@ -713,9 +794,12 @@ pub fn run_hub_host(os_id: &str) -> Result<(), IpcError> {
 
     loop {
         let mut did_work = false;
+
         while let Ok(message) = request_receiver.try_recv() {
             did_work = true;
+
             let message = message.map_err(IpcError::Sync)?;
+
             let request = match HubRequest::decode(&message) {
                 Ok(request) => request,
                 Err(error) => {
@@ -726,6 +810,7 @@ pub fn run_hub_host(os_id: &str) -> Result<(), IpcError> {
                             message: error.to_string(),
                         },
                     )?;
+
                     continue;
                 }
             };
@@ -763,7 +848,9 @@ pub fn run_hub_host(os_id: &str) -> Result<(), IpcError> {
                 } => match hub.attach(session_id) {
                     Ok(subscription) => {
                         subscription.set_wake_thread(host_thread.clone());
+
                         let snapshot = subscription.snapshot();
+
                         send_response(
                             &mut endpoint,
                             HubResponse::Snapshot {
@@ -775,6 +862,7 @@ pub fn run_hub_host(os_id: &str) -> Result<(), IpcError> {
                                 vt: snapshot.vt.clone(),
                             },
                         )?;
+
                         subscriptions.insert(session_id, subscription);
                     }
                     Err(error) => send_error(&mut endpoint, request_id, error)?,
@@ -807,12 +895,14 @@ pub fn run_hub_host(os_id: &str) -> Result<(), IpcError> {
         }
 
         let mut events = Vec::new();
+
         // Scanning every subscription and fully draining each queue keeps dispatch
         // simple, but many concurrently busy sessions can delay colder ones. If load
         // tests expose cross-session latency or outbound-mailbox head-of-line blocking,
         // use a ready-session queue with a per-session byte budget here.
         subscriptions.retain(|session_id, subscription| {
             let mut keep = true;
+
             while let Ok(event) = subscription.events().try_recv() {
                 match event {
                     SessionEvent::Output { seq, data } => events.push(HubResponse::Output {
@@ -832,10 +922,13 @@ pub fn run_hub_host(os_id: &str) -> Result<(), IpcError> {
             }
             keep
         });
+
         did_work |= !events.is_empty();
+
         for event in events {
             send_response(&mut endpoint, event)?;
         }
+
         if !did_work {
             std::thread::park();
         }

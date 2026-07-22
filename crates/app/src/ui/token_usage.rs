@@ -28,6 +28,7 @@ pub(crate) struct TokenUsageView {
 
 impl AutoRefresh for TokenUsageView {
     type Output = Result<String, String>;
+
     const INTERVAL: Duration = Duration::from_secs(60);
 
     fn enabled(settings: &AppSettings) -> bool {
@@ -60,7 +61,9 @@ impl TokenUsageView {
                 enabled: Self::enabled(cx.global::<AppSettings>()),
             },
         };
+
         auto_refresh::start(&mut this, cx);
+
         this
     }
 }
@@ -88,6 +91,7 @@ fn fetch_usage(today: &str) -> Result<String, String> {
         .creation_flags(CREATE_NO_WINDOW)
         .output()
         .map_err(|err| format!("failed to run ccusage: {err}"))?;
+
     if !output.status.success() {
         return Err(format!(
             "ccusage exited with {}: {}",
@@ -95,8 +99,10 @@ fn fetch_usage(today: &str) -> Result<String, String> {
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
+
     let json: serde_json::Value = serde_json::from_slice(&output.stdout)
         .map_err(|err| format!("ccusage output is not valid JSON: {err}"))?;
+
     Ok(format_usage(&json))
 }
 
@@ -105,6 +111,7 @@ fn fetch_usage(today: &str) -> Result<String, String> {
 fn format_usage(json: &serde_json::Value) -> String {
     let totals = &json["totals"];
     let field = |key: &str| totals[key].as_u64().unwrap_or(0);
+
     format!(
         "i:{} o:{} cw:{} cr:{}",
         compact(field("inputTokens")),

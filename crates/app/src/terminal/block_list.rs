@@ -150,14 +150,17 @@ impl FrozenHitInfo {
             .take_while(|(ry, ..)| *ry <= y)
             .last()
             .filter(|(ry, ..)| y < ry + cell_h * (1.0 + pad_rows))?;
+
         let local = (x / cell_w.max(1.0)).floor().max(0.0) as u32;
         let col = local.min(cols.saturating_sub(1)).min(cell_count);
+
         if item == usize::MAX {
             return Some(BlockListPoint::LiveHistory {
                 row: row.min(u32::MAX as usize) as u32,
                 col: col.min(u16::MAX as u32) as u16,
             });
         }
+
         Some(BlockListPoint::Frozen(FrozenPoint {
             item,
             line: row,
@@ -256,6 +259,7 @@ fn item_header(meta: &SegmentMeta) -> Option<String> {
         .zip(meta.ended_at)
         .and_then(|(s, e)| e.duration_since(s).ok())
         .map(format_duration);
+
     let status = match (meta.exit_code, duration) {
         (Some(0), Some(d)) => format!("✓ {d}"),
         (Some(0), None) => "✓".to_string(),
@@ -263,6 +267,7 @@ fn item_header(meta: &SegmentMeta) -> Option<String> {
         (Some(code), None) => format!("✗ {code}"),
         (None, _) => unreachable!("running items returned above"),
     };
+
     Some(command_header(command, &status))
 }
 
@@ -270,11 +275,13 @@ fn running_header(command: &str, started_at: Option<std::time::SystemTime>) -> O
     if command.trim().is_empty() {
         return None;
     }
+
     let status = started_at
         .and_then(|started_at| std::time::SystemTime::now().duration_since(started_at).ok())
         .map(format_duration)
         .map(|duration| format!("⟳ {duration}"))
         .unwrap_or_else(|| "⟳".to_string());
+
     Some(command_header(command, &status))
 }
 
@@ -298,6 +305,7 @@ pub(crate) fn live_chrome(
     if rows == 0 {
         return None;
     }
+
     let (accent, header) = match running {
         Some((command, started_at)) => (
             crate::terminal::element::BLOCK_RUNNING_COLOR,
@@ -305,6 +313,7 @@ pub(crate) fn live_chrome(
         ),
         None => (crate::terminal::element::BLOCK_INPUT_COLOR, None),
     };
+
     Some(FrozenItemChrome {
         item,
         top: 0.0,
@@ -319,6 +328,7 @@ pub(crate) fn live_chrome(
 /// `1.2s` / `815ms` / `2m05s` — the header's duration label.
 pub(crate) fn format_duration(d: std::time::Duration) -> String {
     let secs = d.as_secs();
+
     if secs >= 60 {
         format!("{}m{:02}s", secs / 60, secs % 60)
     } else if secs >= 1 {
@@ -349,10 +359,12 @@ impl EngineRowBuilder {
         default_fg: TerminalColor,
     ) {
         use nmt_terminal::ghostty::CellWide;
+
         match wide {
             CellWide::SpacerTail | CellWide::SpacerHead => return,
             CellWide::Narrow | CellWide::Wide => {}
         }
+
         let default_style = StyleRun {
             len: 0,
             fg: default_fg,
@@ -361,6 +373,7 @@ impl EngineRowBuilder {
             underline: false,
             strikethrough: false,
         };
+
         while self.col < x {
             self.line
                 .push_segment(std::iter::once('\u{00a0}'), default_style, false);
@@ -382,6 +395,7 @@ impl EngineRowBuilder {
         } else {
             cell_text.replace([' ', '\t'], "\u{00a0}")
         };
+
         self.line.push_segment(
             display.chars(),
             StyleRun {
@@ -394,6 +408,7 @@ impl EngineRowBuilder {
             },
             is_wide,
         );
+
         self.line.push_cell(TerminalCell {
             col: x,
             ch: cell_text.chars().next().unwrap_or('\0'),
@@ -426,6 +441,7 @@ pub(crate) struct HandleItemInfo {
 
 pub(crate) fn handle_item_info(item: &BlockItem) -> Option<HandleItemInfo> {
     let handle = item.handle()?;
+
     Some(HandleItemInfo {
         handle,
         rows: item.engine_rows(),
@@ -445,14 +461,17 @@ pub(crate) fn visible_rows(
     pad_rows: f32,
 ) -> std::ops::Range<usize> {
     const OVERDRAW: f32 = 260.0;
+
     let pad = pad_rows * cell_h;
     let visible_top = (-item_top_in_window - OVERDRAW).max(0.0);
     let visible_bottom = viewport_h - item_top_in_window + OVERDRAW;
     if visible_bottom <= 0.0 || cell_h <= 0.0 {
         return 0..0;
     }
+
     let first = ((visible_top - pad) / cell_h).floor().max(0.0) as usize;
     let last = (((visible_bottom - pad) / cell_h).ceil().max(0.0) as usize).min(item_rows);
+
     first.min(last)..last
 }
 
@@ -480,6 +499,7 @@ pub(crate) fn frozen_block_view(
     let selection = selection.map(|(a, b)| if a <= b { (a, b) } else { (b, a) });
     let rows = info.rows;
     let pad = pad_rows * cell_h;
+
     let mut view = FrozenView {
         rows: Vec::new(),
         items_chrome: Vec::new(),
@@ -487,9 +507,11 @@ pub(crate) fn frozen_block_view(
         images: Vec::new(),
         active_top: (rows as f32 + 2.0 * pad_rows) * cell_h,
     };
+
     if rows == 0 {
         return view;
     }
+
     // Every block opens with a rule on its top edge; the neighbors' pad rows
     // give it a blank line on each side.
     view.separators.push(0.0);
@@ -502,15 +524,19 @@ pub(crate) fn frozen_block_view(
         header: info.header.clone(),
         selected: selected_item == Some(item_idx),
     });
+
     let Some((block, palette)) = block else {
         return view;
     };
+
     let handle = block.handle();
     let cols = u32::from(block.cols());
+
     // The snapshot is the reading truth; the cached row count is the layout
     // truth. Read only rows both agree on (a lagging sync converges next
     // frame).
     let read_rows = rows.min(block.row_count());
+
     for row in visible.start..visible.end.min(read_rows) {
         let mut builder = EngineRowBuilder::default();
         let ok = block
@@ -520,12 +546,15 @@ pub(crate) fn frozen_block_view(
             .ok()
             .flatten()
             .is_some();
+
         if !ok {
             break;
         }
+
         let line = builder.finish();
         let selected =
             selected_span(selection, item_idx, row, cols).map(|span| expand_wide_span(&line, span));
+
         view.rows.push(FrozenRow {
             y: pad + row as f32 * cell_h,
             line,
@@ -557,25 +586,32 @@ pub(crate) fn frozen_block_images(
 ) -> Vec<FrozenImage> {
     let pad = pad_rows * cell_h;
     let mut out = Vec::new();
+
     for p in placements {
         if p.grid_rows == 0 || p.grid_cols == 0 {
             continue;
         }
+
         let Some(generation) = generations.get(&p.image_id) else {
             continue; // pixels unavailable (evicted mid-read); retry next frame
         };
+
         let size = generation.image().size(0);
         let (iw, ih) = (size.width.0.max(0) as f32, size.height.0.max(0) as f32);
+
         if iw <= 0.0 || ih <= 0.0 {
             continue;
         }
+
         for k in 0..p.grid_rows {
             let row = p.screen_row as usize + k as usize;
             if !visible.contains(&row) {
                 continue;
             }
+
             let sy0 = p.source_y + p.source_height.saturating_mul(k) / p.grid_rows;
             let sy1 = p.source_y + p.source_height.saturating_mul(k + 1) / p.grid_rows;
+
             out.push(FrozenImage {
                 generation: generation.clone(),
                 z: p.z,
@@ -600,7 +636,9 @@ pub(crate) fn frozen_block_images(
 fn block_row_shape_key(handle: nmt_terminal::ghostty::BlockHandle, row: usize) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
+
     (handle.id, handle.generation, row).hash(&mut hasher);
+
     hasher.finish()
 }
 
@@ -624,6 +662,7 @@ pub(crate) fn live_history_view(
         images: Vec::new(),
         active_top: pad + total_rows as f32 * cell_h,
     };
+
     for (row, line) in lines {
         let selected = usize::try_from(row)
             .ok()
@@ -631,6 +670,7 @@ pub(crate) fn live_history_view(
             .and_then(|row| row_selection_for(selection, row, cols as usize))
             .map(|span| (span.lo, span.hi.saturating_add(1)))
             .map(|span| expand_wide_span(&line, span));
+
         view.rows.push(FrozenRow {
             y: pad + row as f32 * cell_h,
             line,
@@ -656,12 +696,14 @@ pub(crate) fn nav_item_top(
 ) -> Option<f32> {
     let mut tops = Vec::new();
     let mut y = 0.0f32;
+
     for item in store.items() {
         if item_rows(item, cols) > 0 {
             tops.push(y);
         }
         y += item_px(item, cols, cell_h, pad_rows);
     }
+
     // Half-pixel slop so the item currently at the top does not match itself.
     if direction < 0 {
         tops.into_iter().rev().find(|t| *t < from_px - 0.5)
@@ -680,16 +722,20 @@ fn selected_span(
 ) -> Option<(u16, u16)> {
     let (a, b) = selection?;
     let here = (item, row);
+
     if here < (a.item, a.line) || here > (b.item, b.line) {
         return None;
     }
+
     let lo = if here == (a.item, a.line) { a.col } else { 0 };
+
     let hi = if here == (b.item, b.line) {
         b.col.saturating_add(1)
     } else {
         cols.max(1)
     }
     .min(cols.max(1));
+
     (lo < hi).then(|| {
         (
             lo.min(u16::MAX as u32) as u16,
@@ -703,10 +749,13 @@ fn expand_wide_span(line: &TerminalLine, (mut start, mut end): (u16, u16)) -> (u
         if cell.wide != Wide::Wide {
             continue;
         }
+
         let spacer = cell.col.saturating_add(1);
+
         if start == spacer {
             start = cell.col;
         }
+
         if end == spacer {
             end = spacer.saturating_add(1);
         }
@@ -735,14 +784,18 @@ pub(crate) fn frozen_selection_pieces(
     b: FrozenPoint,
 ) -> Vec<FrozenSelectionPiece> {
     let (a, b) = if a <= b { (a, b) } else { (b, a) };
+
     let mut out = Vec::new();
+
     for (item_idx, item) in store.items().iter().enumerate() {
         if item_idx < a.item || item_idx > b.item {
             continue;
         }
+
         let Some(handle) = item.handle() else {
             continue;
         };
+
         out.push(FrozenSelectionPiece {
             handle,
             start: (item_idx == a.item).then_some((a.line, a.col)),
@@ -786,12 +839,15 @@ pub(crate) fn paint_frozen(
             bounds, &row.line, row.y, cell_w, cell_h, window,
         );
     }
+
     // Selection tint under the glyphs (over the cell backgrounds).
     let selection_bg = theme_selection_background();
+
     for row in &view.rows {
         let Some((start, end)) = row.selected else {
             continue;
         };
+
         window.paint_quad(gpui::fill(
             Bounds::new(
                 point(
@@ -803,6 +859,7 @@ pub(crate) fn paint_frozen(
             gpui::rgb(selection_bg.rgb_u32()),
         ));
     }
+
     crate::terminal::element::paint_glyph_rows(
         bounds,
         view.rows
@@ -843,6 +900,7 @@ pub(crate) fn paint_frozen_chrome(
         let top = bounds.top() + px(chrome.top);
         let height = px(chrome.bottom - chrome.top);
         let gutter_alpha = if chrome.selected { 0xe6 } else { 0x59 };
+
         window.paint_quad(gpui::fill(
             Bounds::new(
                 point(
@@ -855,6 +913,7 @@ pub(crate) fn paint_frozen_chrome(
             ),
             gpui::rgba((chrome.accent << 8) | gutter_alpha),
         ));
+
         if chrome.selected {
             window.paint_quad(gpui::fill(
                 Bounds::new(point(bounds.left(), top), size(bounds.size.width, height)),
@@ -869,6 +928,7 @@ pub(crate) fn paint_frozen_chrome(
         let Some(header) = chrome.header.as_deref() else {
             continue;
         };
+
         let runs = [TextRun {
             len: header.len(),
             font: style.font(),
@@ -877,12 +937,14 @@ pub(crate) fn paint_frozen_chrome(
             underline: None,
             strikethrough: None,
         }];
+
         let shaped = window.text_system().shape_line(
             SharedString::from(header.to_string()),
             font_size,
             &runs,
             Some(bounds.size.width),
         );
+
         let _ = shaped.paint(
             point(bounds.left(), bounds.top() + px(chrome.header_y)),
             px(0.0),

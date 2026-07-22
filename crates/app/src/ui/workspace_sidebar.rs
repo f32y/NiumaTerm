@@ -91,10 +91,12 @@ impl Render for WorkspaceDragPreview {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (indicator, status_label) =
             agent_status_indicator(self.agent_status, "workspace-drag-busy");
+
         let indicator = div()
             .id("workspace-drag-status")
             .aria_label(status_label)
             .child(indicator);
+
         let background = cx
             .theme()
             .background
@@ -191,11 +193,13 @@ impl Sidebar {
         // centered on the item's left. SVG tint is applied as text color.
         let (indicator, status_label) =
             agent_status_indicator(ws.agent_status, ("workspace-busy", idx));
+
         let indicator = div()
             .id(("workspace-status", idx))
             .aria_label(status_label)
             .child(indicator)
             .into_any_element();
+
         let ws_id = ws.id;
 
         let renaming = rename
@@ -227,6 +231,7 @@ impl Sidebar {
         } else {
             div().px_1().child("").into_any_element()
         };
+
         let suffix = h_flex()
             .gap_1()
             .children((ws.unread_count > 0).then(|| {
@@ -243,6 +248,7 @@ impl Sidebar {
                     .child(ws.unread_count.to_string())
             }))
             .child(controls);
+
         let secondary = ws.cwd.clone();
         let name = div()
             .id(("workspace-secondary", idx))
@@ -251,6 +257,7 @@ impl Sidebar {
             .text_left()
             .text_sm()
             .truncate();
+
         let name: AnyElement = if let Some(input) = renaming {
             name.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .capture_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| {
@@ -270,9 +277,11 @@ impl Sidebar {
         } else {
             name.child(ws.name.clone()).into_any_element()
         };
+
         let drag_name: SharedString = ws.name.clone().into();
         let drag_cwd: SharedString = ws.cwd.clone().into();
         let drag_agent_status = ws.agent_status;
+
         // Replicate the item's rendered width: sidebar width minus the card
         // gutter/border and the card's inner paddings around the list.
         let drag_width = (self.width - 36.0).max(80.0);
@@ -333,6 +342,7 @@ impl Sidebar {
         let closeable = ws.closeable;
         let pin_label = if pinned { "Unpin" } else { "Pin" };
         let cwd = ws.cwd.clone();
+
         div()
             .id(("workspace-menu", idx))
             .w_full()
@@ -372,8 +382,10 @@ impl Sidebar {
                 // The list-level fallback handler must not also reorder this
                 // drop.
                 cx.stop_propagation();
+
                 this.sidebar.drag_over = None;
                 this.sidebar.dragging = None;
+
                 this.reorder_workspaces(drag.from, idx, window, cx);
             }))
             .context_menu(move |menu, _, _| {
@@ -381,6 +393,7 @@ impl Sidebar {
                 let close_shell = shell.clone();
                 let pin_shell = shell.clone();
                 let cwd = cwd.clone();
+
                 menu.item(PopupMenuItem::new("Rename").on_click(move |_, window, cx| {
                     rename_shell.update(cx, |this, cx| {
                         this.start_workspace_rename(ws_id, window, cx)
@@ -424,7 +437,9 @@ impl Sidebar {
             self.drag_over = None;
             self.dragging = None;
         }
+
         let width = self.width;
+
         // Fixed-width content; the animated wrapper below clips it so the buttons
         // don't reflow while the sidebar slides. The sidebar surface itself is
         // a floating card — 1px border, large radius, its own background —
@@ -463,9 +478,11 @@ impl Sidebar {
                     // instead of silently ending the drag.
                     .on_drop(cx.listener(|this, drag: &WorkspaceDrag, window, cx| {
                         this.sidebar.dragging = None;
+
                         if let Some(to) = this.sidebar.drag_over.take() {
                             this.reorder_workspaces(drag.from, to, window, cx);
                         }
+
                         cx.notify();
                     }))
                     .children(
@@ -486,6 +503,7 @@ impl Sidebar {
                     .border_color(cx.theme().sidebar_border)
                     .child(codex_usage)
             }));
+
         // Gutter floating the card inside the chrome; no right inset — the
         // terminal column carries its own 6px gutter, which doubles as the gap
         // between the two cards and keeps the resize handle riding the card
@@ -500,9 +518,11 @@ impl Sidebar {
             .child(card);
 
         let collapsed = self.collapsed;
+
         // Not rendered while collapsed, so the collapsed sidebar can't resize.
         let resize_handle = (!collapsed)
             .then(|| sidebar_resize::resize_handle("workspace-sidebar-resize", false, cx));
+
         let wrapper = div()
             .h_full()
             .flex_none()
@@ -514,20 +534,25 @@ impl Sidebar {
                 let width = (e.event.position.x - e.bounds.left())
                     .as_f32()
                     .clamp(MIN_WIDTH, MAX_WIDTH);
+
                 if width != this.sidebar.width {
                     this.sidebar.width = width;
                     // Render at the live width; the next toggle re-arms the
                     // slide animation.
+
                     this.sidebar.animated = false;
+
                     // Stash in the registry; the quit hook persists it.
                     if let Some(entry) = cx.global_mut::<WindowRegistry>().get_mut(this.window_id) {
                         entry.sidebar_width = Some(width);
                     }
+
                     cx.notify();
                 }
             }))
             .child(content)
             .children(resize_handle);
+
         // Until the first toggle, render at the resting width — no slide-in on
         // startup.
         sidebar_resize::slide_width(wrapper, "sidebar", !collapsed, px(width), self.animated)

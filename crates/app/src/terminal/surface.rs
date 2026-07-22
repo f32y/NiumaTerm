@@ -101,12 +101,15 @@ impl TerminalSurface {
     pub(crate) fn set_cursor_shape(&self, shape: nmt_config::CursorShape) -> bool {
         let next = {
             let mut engine = self.session.engine.lock();
+
             if let Err(error) = engine.set_default_cursor_shape(shape) {
                 tracing::warn!("failed to update cursor shape: {error}");
                 return false;
             }
+
             engine.snapshot()
         };
+
         let next = match next {
             Ok(next) => next,
             Err(error) => {
@@ -114,7 +117,9 @@ impl TerminalSurface {
                 return false;
             }
         };
+
         *self.session.render_buffer.lock() = next;
+
         true
     }
 
@@ -158,6 +163,7 @@ impl TerminalSurface {
         let wake_sender = WakeSender::from_fn(move |kind: Wake| {
             wake.signal(kind);
         });
+
         let config = TerminalSessionConfig {
             shell: shell.clone(),
             args: args.clone(),
@@ -170,7 +176,9 @@ impl TerminalSurface {
             environment_overrides,
             ..TerminalSessionConfig::default()
         };
+
         let _ = fixed_bottom_requested;
+
         Self::new(config, surface_id, Some(wake_sender))
     }
 
@@ -217,13 +225,16 @@ impl TerminalSurface {
         let engine = self.session.engine.lock();
         let palette = engine.color_palette();
         let cols = engine.cols() as usize;
+
         let mut chars: Vec<char> = Vec::with_capacity(cols);
+
         let meta = engine
             .read_screen_row_visit(row, &palette, |x, text, _wide, _style| {
                 push_pointer_cell(&mut chars, x, text.as_str());
             })
             .ok()
             .flatten()?;
+
         Some(pointer_row(chars, cols, meta))
     }
 
@@ -236,13 +247,16 @@ impl TerminalSurface {
         let engine = self.session.engine.lock();
         let palette = engine.color_palette();
         let cols = engine.block_cols(handle).unwrap_or_else(|| engine.cols()) as usize;
+
         let mut chars: Vec<char> = Vec::with_capacity(cols);
+
         let meta = engine
             .read_block_row_visit(handle, row, &palette, |x, text, _wide, _style| {
                 push_pointer_cell(&mut chars, x, text.as_str());
             })
             .ok()
             .flatten()?;
+
         Some(pointer_row(chars, cols, meta))
     }
 
@@ -282,10 +296,12 @@ impl TerminalSurface {
         image_id: u32,
     ) -> Option<std::sync::Arc<crate::terminal::graphics::ImageGeneration>> {
         let release = self.session.generation_store().lock().release_queue();
+
         let data = {
             let engine = self.session.engine.lock();
             engine.block_image_pixels(block, image_id)?
         };
+
         crate::terminal::graphics::graphic_to_generation(data, &release)
     }
 
@@ -300,9 +316,11 @@ impl TerminalSurface {
         if rows.is_empty() {
             return Vec::new();
         }
+
         let engine = self.session.engine.lock();
         let palette = engine.color_palette();
         let default_fg = crate::terminal::frame::theme_default_foreground();
+
         rows.filter_map(|row| {
             let mut builder = crate::terminal::block_list::EngineRowBuilder::default();
             engine
@@ -359,7 +377,9 @@ impl TerminalSurface {
         if text.is_empty() {
             return;
         }
+
         let mut clipboard = nmt_terminal::clipboard::Clipboard::default();
+
         clipboard.set(nmt_terminal::clipboard::ClipboardType::Clipboard, text);
     }
 
@@ -379,7 +399,9 @@ impl TerminalSurface {
         if bytes.is_empty() || self.read_only.load(Ordering::Relaxed) {
             return;
         }
+
         self.scroll_viewport_bottom_before_input();
+
         self.session.write_input(bytes);
     }
 
@@ -389,17 +411,22 @@ impl TerminalSurface {
                 if bytes.is_empty() || self.read_only.load(Ordering::Relaxed) {
                     return TerminalKeyResult::Ignored;
                 }
+
                 self.write_bytes(&bytes);
+
                 TerminalKeyResult::Handled
             }
             TerminalKeyAction::CopyOrWrite(bytes) => {
                 if self.copy_selection() {
                     return TerminalKeyResult::Copied;
                 }
+
                 if bytes.is_empty() || self.read_only.load(Ordering::Relaxed) {
                     return TerminalKeyResult::Ignored;
                 }
+
                 self.write_bytes(&bytes);
+
                 TerminalKeyResult::Handled
             }
             TerminalKeyAction::Paste => {
@@ -428,6 +455,7 @@ impl TerminalSurface {
                     let Some(code) = button.and_then(mouse_button_code) else {
                         return false;
                     };
+
                     self.report_mouse(
                         mode,
                         code,
@@ -441,6 +469,7 @@ impl TerminalSurface {
                     let Some(code) = mouse_motion_code(mode, button) else {
                         return false;
                     };
+
                     self.report_mouse(mode, code, true, cell.col, cell.row, modifiers)
                 }
             };
@@ -449,7 +478,9 @@ impl TerminalSurface {
         if button != Some(SurfaceMouseButton::Left) {
             return false;
         }
+
         let pos = Pos::new(Line(cell.row as i32), Column(cell.col as usize));
+
         self.apply_selection_at(self.screen_pos(pos), side, kind, selection_type)
     }
 
@@ -466,6 +497,7 @@ impl TerminalSurface {
         let Ok(row) = i32::try_from(cell.row) else {
             return false;
         };
+
         self.apply_selection_at(
             Pos::new(Line(row), Column(cell.col as usize)),
             side,
@@ -484,6 +516,7 @@ impl TerminalSurface {
         let engine = self.session.engine.lock();
         let palette = engine.color_palette();
         let block = engine.block_acquire(handle)?;
+
         block_selection_range(&block, &palette, line, col, selection_type)
     }
 
@@ -496,10 +529,13 @@ impl TerminalSurface {
         if lines == 0 {
             return false;
         }
+
         if let Some(mode) = self.mouse_mode() {
             let button = if lines > 0 { 64 } else { 65 };
+
             return self.report_mouse(mode, button, true, cell.col, cell.row, modifiers);
         }
+
         self.scroll_lines(-(lines as isize))
     }
 
@@ -507,22 +543,31 @@ impl TerminalSurface {
         if delta == 0 {
             return false;
         }
+
         let before = self.session.render_buffer.lock().scrollbar();
+
         if before.total <= before.len {
             return false;
         }
+
         let snap = {
             let mut engine = self.session.engine.lock();
             engine.scroll_viewport_delta(delta);
             engine.snapshot()
         };
+
         let Ok(mut next) = snap else {
             return false;
         };
+
         let changed = next.scrollbar() != before;
+
         let mut buf = self.session.render_buffer.lock();
+
         next.set_cursor_visible(buf.cursor_visible());
+
         std::mem::swap(&mut *buf, &mut next);
+
         changed
     }
 
@@ -540,22 +585,27 @@ impl TerminalSurface {
         cell: metrics::CellMetrics,
     ) -> bool {
         let (cols, rows) = cell.grid_size_for_content(width_px, height_px);
+
         if self.grid_size == (cols, rows) {
             return false;
         }
+
         self.grid_size = (cols, rows);
+
         self.resize(
             cols,
             rows,
             metrics::pixel_u16(width_px),
             metrics::pixel_u16(height_px),
         );
+
         true
     }
 
     pub(crate) fn frame(&self, previous: Option<&TerminalFrame>) -> TerminalFrame {
         let total_start = std::time::Instant::now();
         let selection = self.selection_range();
+
         // Resolve live image generations before taking the render-buffer lock so the
         // generation-store and render locks are never nested. A graphics-free
         // session skips the store entirely via the lock-free live-image check, so it
@@ -565,7 +615,9 @@ impl TerminalSurface {
         } else {
             std::collections::HashMap::new()
         };
+
         let sel_us = total_start.elapsed().as_micros();
+
         let frame = self.with_render_buffer(|buf| {
             // Time spent here is *after* the render_buffer lock is acquired, so
             // (total - sel - extract) is the lock-wait + selection lock cost.
@@ -573,6 +625,7 @@ impl TerminalSurface {
             let frame =
                 TerminalFrame::from_render_buffer_reusing(buf, selection, &generations, previous);
             let extract_us = extract_start.elapsed().as_micros();
+
             tracing::trace!(
                 target: "perf",
                 rows = buf.rows(),
@@ -580,19 +633,23 @@ impl TerminalSurface {
                 extract_us,
                 "frame extract (inside render_buffer lock)"
             );
+
             frame
         });
+
         tracing::trace!(
             target: "perf",
             sel_us,
             total_us = total_start.elapsed().as_micros(),
             "frame total (selection + lock-wait + extract)"
         );
+
         frame
     }
 
     pub fn with_render_buffer<R>(&self, read: impl FnOnce(&RenderBuffer) -> R) -> R {
         let buf = self.session.render_buffer.lock();
+
         read(&buf)
     }
 
@@ -611,6 +668,7 @@ impl TerminalSurface {
         let guard = self.selection.lock();
         let selection = guard.as_ref()?;
         let buf = self.session.render_buffer.lock();
+
         selection_screen_range(selection, &buf, viewport_top)
     }
 
@@ -618,6 +676,7 @@ impl TerminalSurface {
         let guard = self.selection.lock();
         let sel = guard.as_ref()?;
         let buf = self.session.render_buffer.lock();
+
         sel.to_range_engine(&buf, viewport_top, WORD_DELIMITERS)
     }
 
@@ -645,8 +704,10 @@ impl TerminalSurface {
     fn scroll_viewport_bottom_before_input(&self) {
         let should_scroll = {
             let sb = self.session.render_buffer.lock().scrollbar();
+
             should_scroll_to_bottom_before_input(sb.offset, sb.total, sb.len)
         };
+
         if should_scroll {
             self.session.engine.lock().scroll_viewport_bottom();
         }
@@ -675,6 +736,7 @@ impl TerminalSurface {
             SurfaceCellSide::Left => Side::Left,
             SurfaceCellSide::Right => Side::Right,
         };
+
         match kind {
             SurfaceMouseEventKind::Down => self.begin_selection(pos, side, selection_type),
             SurfaceMouseEventKind::Move => self.update_selection(pos, side),
@@ -684,25 +746,33 @@ impl TerminalSurface {
 
     fn begin_selection(&self, pos: Pos, side: Side, selection_type: SelectionType) -> bool {
         let mut guard = self.selection.lock();
+
         let had_selection = guard.is_some();
+
         *guard = Some(Selection::new(selection_type, pos, side));
+
         had_selection || selection_type != SelectionType::Simple
     }
 
     fn update_selection(&self, pos: Pos, side: Side) -> bool {
         let mut guard = self.selection.lock();
+
         let Some(selection) = guard.as_mut() else {
             return false;
         };
+
         selection.update(pos, side);
+
         true
     }
 
     fn finish_selection(&self) -> bool {
         let mut guard = self.selection.lock();
+
         if guard.as_ref().is_some_and(Selection::is_empty) {
             *guard = None;
         }
+
         false
     }
 
@@ -710,9 +780,11 @@ impl TerminalSurface {
     /// extract real content instead of stopping at the viewport.
     fn selection_text(&self) -> Option<String> {
         let range = self.selection_screen_range()?;
+
         if range.start.row.0 < 0 || range.end.row.0 < 0 {
             return None;
         }
+
         self.session
             .engine
             .lock()
@@ -732,18 +804,25 @@ impl TerminalSurface {
         let Some(text) = self.selection_text() else {
             return false;
         };
+
         if text.is_empty() {
             return false;
         }
+
         let mut clipboard = nmt_terminal::clipboard::Clipboard::default();
+
         clipboard.set(nmt_terminal::clipboard::ClipboardType::Clipboard, text);
+
         self.clear_selection();
+
         true
     }
 
     fn paste(&self) -> bool {
         let mut clipboard = nmt_terminal::clipboard::Clipboard::default();
+
         let text = clipboard.get(nmt_terminal::clipboard::ClipboardType::Clipboard);
+
         self.paste_text(&text)
     }
 
@@ -751,17 +830,21 @@ impl TerminalSurface {
         let Some(bytes) = paste_payload(text, self.modes().contains(Mode::BRACKETED_PASTE)) else {
             return false;
         };
+
         self.write_bytes(&bytes);
+
         true
     }
 
     fn modes(&self) -> Mode {
         let bits = self.session.vt_modes.load(Ordering::Relaxed);
+
         Mode::from_bits_truncate(bits)
     }
 
     fn mouse_mode(&self) -> Option<Mode> {
         let mode = self.modes();
+
         mode.intersects(Mode::MOUSE_MODE).then_some(mode)
     }
 
@@ -769,6 +852,7 @@ impl TerminalSurface {
         if modifiers.shift_key() {
             return None;
         }
+
         self.mouse_mode()
     }
 
@@ -791,7 +875,9 @@ impl TerminalSurface {
         ) else {
             return false;
         };
+
         self.write_bytes(&msg);
+
         true
     }
 }
@@ -802,8 +888,10 @@ fn selection_screen_range(
     viewport_top: i32,
 ) -> Option<SelectionRange> {
     let mut range = selection.to_range_engine(buf, viewport_top, WORD_DELIMITERS)?;
+
     range.start.row += viewport_top;
     range.end.row += viewport_top;
+
     Some(range)
 }
 
@@ -815,6 +903,7 @@ fn block_selection_range(
     selection_type: SelectionType,
 ) -> Option<((usize, u32), (usize, u32))> {
     let cols = usize::from(block.cols());
+
     if cols == 0 || line >= block.row_count() {
         return None;
     }
@@ -826,11 +915,15 @@ fn block_selection_range(
             .flatten()
             .map(|meta| meta.wrapped)
     };
+
     let mut first = line;
+
     while first > 0 && wrapped(first - 1)? {
         first -= 1;
     }
+
     let mut last = line;
+
     while last + 1 < block.row_count() && wrapped(last)? {
         last += 1;
     }
@@ -838,6 +931,7 @@ fn block_selection_range(
     if selection_type == SelectionType::Lines {
         return Some(((first, 0), (last, cols.saturating_sub(1) as u32)));
     }
+
     if selection_type != SelectionType::Semantic {
         let col = col.min(cols.saturating_sub(1) as u32);
         return Some(((line, col), (line, col)));
@@ -847,15 +941,20 @@ fn block_selection_range(
     // Expanding one class matches terminal double-click behavior for words,
     // delimiter runs, and blank runs while retaining cell-accurate wide text.
     let mut classes = vec![0u8; (last - first + 1) * cols];
+
     for row in first..=last {
         let offset = (row - first) * cols;
+
         block
             .read_row_visit(row, palette, |x, text, wide, _| {
                 use nmt_terminal::ghostty::CellWide;
+
                 if matches!(wide, CellWide::SpacerHead | CellWide::SpacerTail) {
                     return;
                 }
+
                 let ch = text.as_str().chars().next().unwrap_or(' ');
+
                 let class = if ch.is_whitespace() {
                     0
                 } else if WORD_DELIMITERS.contains(ch) {
@@ -863,7 +962,9 @@ fn block_selection_range(
                 } else {
                     2
                 };
+
                 let x = usize::from(x);
+
                 if x < cols {
                     classes[offset + x] = class;
                     if wide == CellWide::Wide && x + 1 < cols {
@@ -877,14 +978,19 @@ fn block_selection_range(
 
     let clicked = (line - first) * cols + (col as usize).min(cols - 1);
     let class = classes[clicked];
+
     let mut start = clicked;
+
     while start > 0 && classes[start - 1] == class {
         start -= 1;
     }
+
     let mut end = clicked;
+
     while end + 1 < classes.len() && classes[end + 1] == class {
         end += 1;
     }
+
     Some((
         (first + start / cols, (start % cols) as u32),
         (first + end / cols, (end % cols) as u32),
@@ -893,9 +999,11 @@ fn block_selection_range(
 
 fn tab_state_with_cwd(launch: &TabState, last_cwd: Option<String>) -> TabState {
     let mut state = launch.clone();
+
     if last_cwd.is_some() {
         state.cwd = last_cwd;
     }
+
     state
 }
 
@@ -906,10 +1014,13 @@ fn normalize_osc7_pwd(pwd: &str) -> String {
     let Some(rest) = pwd.strip_prefix("file://") else {
         return pwd.to_string();
     };
+
     let Some(slash) = rest.find('/') else {
         return pwd.to_string();
     };
+
     let path = &rest[slash..];
+
     // "/C:/x" → "C:/x": Windows drive paths carry no leading slash.
     if path.as_bytes().get(2) == Some(&b':') {
         path[1..].to_string()
@@ -923,9 +1034,11 @@ fn normalize_osc7_pwd(pwd: &str) -> String {
 /// is kept so char index stays == grid column.
 fn push_pointer_cell(chars: &mut Vec<char>, x: u16, text: &str) {
     let x = x as usize;
+
     if chars.len() < x {
         chars.resize(x, ' ');
     }
+
     if chars.len() == x {
         chars.push(text.chars().next().unwrap_or(' '));
     }
@@ -942,6 +1055,7 @@ fn pointer_row(
     if chars.len() < cols {
         chars.resize(cols, ' ');
     }
+
     PointerRow {
         text: chars.into_iter().collect(),
         wrapped: meta.wrapped,
@@ -953,10 +1067,13 @@ fn paste_payload(text: &str, bracketed: bool) -> Option<Vec<u8>> {
     if text.is_empty() {
         return None;
     }
+
     let mut body = text.replace("\r\n", "\r").replace('\n', "\r");
+
     if bracketed {
         body = body.replace("\x1b[201~", "");
     }
+
     Some(nmt_input::bracket_paste(body.as_bytes(), bracketed))
 }
 
@@ -970,6 +1087,7 @@ fn mouse_button_code(button: SurfaceMouseButton) -> Option<u8> {
 
 fn mouse_motion_code(mode: Mode, button: Option<SurfaceMouseButton>) -> Option<u8> {
     let button = button.and_then(mouse_button_code);
+
     if mode.contains(Mode::MOUSE_MOTION) {
         // DECSET 1003 reports every move; no pressed button uses the X10
         // no-button id 3, while a pressed button keeps its own id.
@@ -984,15 +1102,19 @@ fn mouse_motion_code(mode: Mode, button: Option<SurfaceMouseButton>) -> Option<u
 
 fn mouse_report_mods(modifiers: ModifiersState) -> u8 {
     let mut mods = 0;
+
     if modifiers.shift_key() {
         mods += 4;
     }
+
     if modifiers.alt_key() {
         mods += 8;
     }
+
     if modifiers.control_key() {
         mods += 16;
     }
+
     mods
 }
 

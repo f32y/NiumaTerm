@@ -70,8 +70,10 @@ impl<T: Clone + Default> Row<T> {
 
             for _ in 1..columns {
                 ptr::write(ptr, T::default());
+
                 ptr = ptr.offset(1);
             }
+
             ptr::write(ptr, T::default());
 
             inner.set_len(columns);
@@ -120,10 +122,12 @@ impl<T: Clone + Default> Row<T> {
 
         // Split off cells for a new row.
         let mut new_row = self.inner.split_off(columns);
+
         let index = new_row
             .iter()
             .rposition(|c| !c.is_empty())
             .map_or(0, |i| i + 1);
+
         new_row.truncate(index);
 
         self.occ = min(self.occ, columns);
@@ -149,9 +153,11 @@ impl<T: Clone + Default> Row<T> {
         // the rightmost cell — that optimization was based on the inline
         // bg-color field on the cell, which no longer exists.
         let len = self.inner.len();
+
         for item in &mut self.inner[0..len] {
             item.reset(template);
         }
+
         self.occ = 0;
         self.kitty_virtual_placeholder = false;
         self.has_extras = false;
@@ -186,6 +192,7 @@ impl<T> Row<T> {
     pub fn last_mut(&mut self) -> Option<&mut T> {
         self.occ = self.inner.len();
         self.dirty = true;
+
         self.inner.last_mut()
     }
 
@@ -197,6 +204,7 @@ impl<T> Row<T> {
         self.occ += vec.len();
         self.dirty = true;
         self.has_extras = true;
+
         self.inner.append(vec);
     }
 
@@ -207,6 +215,7 @@ impl<T> Row<T> {
         self.has_extras = true;
 
         vec.append(&mut self.inner);
+
         self.inner = vec;
     }
 
@@ -216,7 +225,9 @@ impl<T> Row<T> {
         self.dirty = true;
 
         let mut split = self.inner.split_off(at);
+
         std::mem::swap(&mut split, &mut self.inner);
+
         split
     }
 
@@ -231,6 +242,7 @@ impl<T> Row<T> {
 
 impl<'a, T> IntoIterator for &'a Row<T> {
     type IntoIter = slice::Iter<'a, T>;
+
     type Item = &'a T;
 
     #[inline]
@@ -241,12 +253,15 @@ impl<'a, T> IntoIterator for &'a Row<T> {
 
 impl<'a, T> IntoIterator for &'a mut Row<T> {
     type IntoIter = slice::IterMut<'a, T>;
+
     type Item = &'a mut T;
 
     #[inline]
     fn into_iter(self) -> slice::IterMut<'a, T> {
         self.occ = self.len();
+
         self.dirty = true;
+
         self.inner.iter_mut()
     }
 }
@@ -264,7 +279,9 @@ impl<T> IndexMut<Column> for Row<T> {
     #[inline]
     fn index_mut(&mut self, index: Column) -> &mut T {
         self.occ = max(self.occ, *index + 1);
+
         self.dirty = true;
+
         &mut self.inner[index.0]
     }
 }
@@ -282,7 +299,9 @@ impl<T> IndexMut<Range<Column>> for Row<T> {
     #[inline]
     fn index_mut(&mut self, index: Range<Column>) -> &mut [T] {
         self.occ = max(self.occ, *index.end);
+
         self.dirty = true;
+
         &mut self.inner[(index.start.0)..(index.end.0)]
     }
 }
@@ -300,7 +319,9 @@ impl<T> IndexMut<RangeTo<Column>> for Row<T> {
     #[inline]
     fn index_mut(&mut self, index: RangeTo<Column>) -> &mut [T] {
         self.occ = max(self.occ, *index.end);
+
         self.dirty = true;
+
         &mut self.inner[..(index.end.0)]
     }
 }
@@ -318,7 +339,9 @@ impl<T> IndexMut<RangeFrom<Column>> for Row<T> {
     #[inline]
     fn index_mut(&mut self, index: RangeFrom<Column>) -> &mut [T] {
         self.occ = self.len();
+
         self.dirty = true;
+
         &mut self.inner[(index.start.0)..]
     }
 }
@@ -336,7 +359,9 @@ impl<T> IndexMut<RangeFull> for Row<T> {
     #[inline]
     fn index_mut(&mut self, _: RangeFull) -> &mut [T] {
         self.occ = self.len();
+
         self.dirty = true;
+
         &mut self.inner[..]
     }
 }
@@ -354,7 +379,9 @@ impl<T> IndexMut<RangeToInclusive<Column>> for Row<T> {
     #[inline]
     fn index_mut(&mut self, index: RangeToInclusive<Column>) -> &mut [T] {
         self.occ = max(self.occ, *index.end);
+
         self.dirty = true;
+
         &mut self.inner[..=(index.end.0)]
     }
 }

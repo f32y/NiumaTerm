@@ -43,6 +43,7 @@ impl GitSidebar {
             cx.notify();
         })
         .detach();
+
         Self {
             model,
             selected: None,
@@ -60,6 +61,7 @@ impl GitSidebar {
     pub(crate) fn set_open(&mut self, open: bool, cx: &mut Context<Self>) {
         self.open = open;
         self.animated = true;
+
         cx.notify();
     }
 
@@ -67,12 +69,14 @@ impl GitSidebar {
         let Some(selected) = self.selected.clone() else {
             return;
         };
+
         let still_listed = self
             .model
             .read(cx)
             .snapshot
             .as_ref()
             .is_some_and(|s| s.files.iter().any(|f| f.path == selected));
+
         if still_listed {
             self.fetch_diff(cx);
         } else {
@@ -85,9 +89,12 @@ impl GitSidebar {
     fn select(&mut self, path: String, cx: &mut Context<Self>) {
         if self.selected.as_deref() != Some(&path) {
             self.selected = Some(path);
+
             self.diff_scroll
                 .scroll_to_item(0, gpui::ScrollStrategy::Top);
+
             self.fetch_diff(cx);
+
             cx.notify();
         }
     }
@@ -98,18 +105,25 @@ impl GitSidebar {
         else {
             return;
         };
+
         let root = snapshot.repo_root.clone();
+
         let untracked = snapshot
             .files
             .iter()
             .any(|f| f.path == path && f.status == "??");
+
         self.diff_seq += 1;
+
         let seq = self.diff_seq;
+
         let fetch = cx
             .background_executor()
             .spawn(async move { fetch_file_diff(&root, &path, untracked) });
+
         cx.spawn(async move |this, cx| {
             let lines = fetch.await;
+
             this.update(cx, |this, cx| {
                 if this.diff_seq == seq {
                     this.diff = lines;
@@ -128,6 +142,7 @@ impl GitSidebar {
             .snapshot
             .as_ref()
             .map_or(0, |s| s.files.len());
+
         if file_count == 0 {
             return div()
                 .flex_1()
@@ -139,9 +154,11 @@ impl GitSidebar {
                 .child("No changes")
                 .into_any_element();
         }
+
         let model = self.model.clone();
         let sidebar = cx.entity();
         let selected = self.selected.clone();
+
         div()
             .flex_1()
             .relative()
@@ -151,6 +168,7 @@ impl GitSidebar {
                     let Some(snapshot) = model.read(cx).snapshot.as_ref() else {
                         return Vec::new();
                     };
+
                     range
                         .filter_map(|ix| snapshot.files.get(ix).cloned().map(|f| (ix, f)))
                         .map(|(ix, file)| {
@@ -158,6 +176,7 @@ impl GitSidebar {
                             let sidebar = sidebar.clone();
                             let path = file.path.clone();
                             let theme = cx.theme();
+
                             h_flex()
                                 .id(("git-file", ix))
                                 // Full width pins the row to the list width so
@@ -214,8 +233,10 @@ impl GitSidebar {
                 .child("Select a file to view its diff")
                 .into_any_element();
         }
+
         let line_count = self.diff.len();
         let sidebar = cx.entity();
+
         div()
             .flex_1()
             .relative()
@@ -226,6 +247,7 @@ impl GitSidebar {
                 uniform_list("git-diff", line_count, move |range, _window, cx| {
                     let theme = cx.theme();
                     let sidebar = sidebar.read(cx);
+
                     range
                         .filter_map(|ix| sidebar.diff.get(ix))
                         .map(|line| {
@@ -238,6 +260,7 @@ impl GitSidebar {
                                 }
                                 DiffLineKind::Context => theme.foreground,
                             };
+
                             div()
                                 // Full width + truncate clips long diff lines
                                 // at the sidebar edge (ellipsis marks the cut)
@@ -280,6 +303,7 @@ impl Render for GitSidebar {
         let open = self.open;
         let model = self.model.clone();
         let in_repo = model.read(cx).snapshot.is_some();
+
         let header = h_flex()
             .px_2()
             .py_1()
@@ -297,6 +321,7 @@ impl Render for GitSidebar {
                         this.model.update(cx, |model, cx| model.refresh(cx));
                     })),
             );
+
         let body: gpui::AnyElement = if in_repo {
             v_flex()
                 .flex_1()
@@ -316,8 +341,10 @@ impl Render for GitSidebar {
                 .child("Not a git repository")
                 .into_any_element()
         };
+
         let resize_handle =
             open.then(|| sidebar_resize::resize_handle("git-sidebar-resize", true, cx));
+
         // The sidebar surface is a floating card (own background, 1px border,
         // large radius) in a gutter cut from the fixed width: right inset
         // clears the window edge, the top inset lines up with the tab pills,
@@ -332,6 +359,7 @@ impl Render for GitSidebar {
             .overflow_hidden()
             .child(header)
             .child(body);
+
         let content = div()
             .w(width)
             .h_full()
@@ -341,6 +369,7 @@ impl Render for GitSidebar {
             .pt(px(4.))
             .pb(px(6.))
             .child(card);
+
         let wrapper = div()
             .h_full()
             .flex_none()

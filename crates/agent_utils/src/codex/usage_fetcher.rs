@@ -40,7 +40,9 @@ pub fn fetch() -> Result<Usage, String> {
     let mut stdin = child.stdin.take().ok_or("Codex stdin unavailable")?;
     let stdout = child.stdout.take().ok_or("Codex stdout unavailable")?;
     let mut stderr = child.stderr.take().ok_or("Codex stderr unavailable")?;
+
     let (line_tx, line_rx) = mpsc::channel();
+
     let stdout_reader = std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines() {
             if line_tx.send(line).is_err() {
@@ -48,9 +50,12 @@ pub fn fetch() -> Result<Usage, String> {
             }
         }
     });
+
     let stderr_reader = std::thread::spawn(move || {
         let mut text = String::new();
+
         let _ = stderr.read_to_string(&mut text);
+
         text
     });
 
@@ -61,24 +66,31 @@ pub fn fetch() -> Result<Usage, String> {
             r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"NiumaTerm","version":"0.1.0"}}}"#,
         )
         .map_err(|err| format!("failed to initialize Codex app-server: {err}"))?;
+
         stdin
             .flush()
             .map_err(|err| format!("failed to flush Codex request: {err}"))?;
 
         let deadline = Instant::now() + FETCH_TIMEOUT;
+
         let mut requested_limits = false;
+
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
+
             if remaining.is_zero() {
                 return Err("Codex app-server timed out".to_string());
             }
+
             let line = line_rx
                 .recv_timeout(remaining)
                 .map_err(|_| "Codex app-server timed out".to_string())?
                 .map_err(|err| format!("failed to read Codex response: {err}"))?;
+
             let Ok(message) = serde_json::from_str::<serde_json::Value>(&line) else {
                 continue;
             };
+
             match message["id"].as_u64() {
                 Some(1) if !requested_limits => {
                     writeln!(
@@ -95,6 +107,7 @@ pub fn fetch() -> Result<Usage, String> {
                     })
                     .and_then(|_| stdin.flush())
                     .map_err(|err| format!("failed to request Codex rate limits: {err}"))?;
+
                     requested_limits = true;
                 }
                 Some(2) => return parse_rate_limits(&message),
@@ -107,17 +120,25 @@ pub fn fetch() -> Result<Usage, String> {
     // app-server observe EOF and exit too; killing only cmd.exe leaves the
     // descendant holding the output pipes and would strand reader threads.
     drop(stdin);
+
     let cleanup_deadline = Instant::now() + Duration::from_secs(2);
+
     while child.try_wait().ok().flatten().is_none() && Instant::now() < cleanup_deadline {
         std::thread::sleep(Duration::from_millis(10));
     }
+
     let _ = child.kill();
     let _ = child.wait();
+
     drop(line_rx);
+
     let _ = stdout_reader.join();
+
     let stderr = stderr_reader.join().unwrap_or_default();
+
     result.map_err(|err| {
         let stderr = stderr.trim();
+
         if stderr.is_empty() {
             err
         } else {
@@ -130,7 +151,9 @@ fn parse_rate_limits(message: &serde_json::Value) -> Result<Usage, String> {
     if let Some(error) = message["error"]["message"].as_str() {
         return Err(error.to_string());
     }
+
     let limits = &message["result"]["rateLimits"];
+
     let left = |duration_mins| {
         ["primary", "secondary"].into_iter().find_map(|name| {
             let window = &limits[name];
@@ -140,12 +163,17 @@ fn parse_rate_limits(message: &serde_json::Value) -> Result<Usage, String> {
                 .map(|used| (100.0 - used).clamp(0.0, 100.0).round() as u8)
         })
     };
+
     let five_hour = left(5 * 60);
+
     let weekly = left(7 * 24 * 60);
+
     let usage = Usage { five_hour, weekly };
+
     if usage == Usage::default() {
         return Err("Codex response did not include rate limits".to_string());
     }
+
     Ok(usage)
 }
 

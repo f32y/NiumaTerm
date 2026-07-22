@@ -39,6 +39,7 @@ pub(crate) fn key_action(event: &Keystroke) -> TerminalKeyAction {
     }
 
     let input = key_input(event);
+
     nmt_input::encode_terminal_input(
         &input,
         modifiers_state(event.modifiers),
@@ -56,14 +57,19 @@ pub(crate) fn key_action(event: &Keystroke) -> TerminalKeyAction {
 /// Ctrl+<letter> press encodes to nothing at all.
 fn legacy_ctrl_byte(event: &Keystroke) -> Option<u8> {
     let m = &event.modifiers;
+
     if !m.control || m.alt || m.platform || m.shift {
         return None;
     }
+
     let mut chars = event.key.chars();
+
     let (c, rest) = (chars.next()?, chars.next());
+
     if rest.is_some() {
         return None;
     }
+
     match c {
         'a'..='z' => Some(c as u8 - b'a' + 1),
         '@' => Some(0x00),
@@ -80,6 +86,7 @@ fn key_input(event: &Keystroke) -> KeyInput {
     let logical_key = named_key(&event.key)
         .map(Key::Named)
         .unwrap_or_else(|| Key::Character(event.key.as_str().into()));
+
     KeyInput {
         logical_key: logical_key.clone(),
         key_without_modifiers: logical_key,
@@ -126,18 +133,23 @@ fn is_old_clipboard_shortcut(event: &Keystroke) -> bool {
 
 pub(crate) fn modifiers_state(modifiers: Modifiers) -> ModifiersState {
     let mut out = ModifiersState::empty();
+
     if modifiers.shift {
         out |= ModifiersState::SHIFT;
     }
+
     if modifiers.alt {
         out |= ModifiersState::ALT;
     }
+
     if modifiers.control {
         out |= ModifiersState::CONTROL;
     }
+
     if modifiers.platform {
         out |= ModifiersState::SUPER;
     }
+
     out
 }
 

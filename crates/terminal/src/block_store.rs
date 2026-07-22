@@ -89,9 +89,11 @@ impl BlockStore {
                         handle,
                         rows,
                     };
+
                     if let Some(meta) = self.pending_meta.remove(&seq) {
                         item.meta = meta;
                     }
+
                     self.items.push(item);
                 }
                 // Prune items whose engine block is gone (byte-budget
@@ -101,7 +103,9 @@ impl BlockStore {
                 BlockEvent::EngineBlocksSync(live) => {
                     let by_id: HashMap<u64, (BlockHandle, usize)> =
                         live.into_iter().map(|(h, r)| (h.id, (h, r))).collect();
+
                     let evicted = &mut self.evicted_items;
+
                     self.items
                         .retain_mut(|item| match by_id.get(&item.handle.id) {
                             Some(&(fresh, rows)) => {

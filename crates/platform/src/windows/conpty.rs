@@ -59,9 +59,12 @@ impl ConptyApi {
              to the executable (copied by pty's build.rs). The in-box system ConPTY \
              corrupts scrollback on resize and is not supported.",
         );
+
         {
             use std::io::Write as _;
+
             let path = std::env::temp_dir().join("rio_conpty.log");
+
             if let Ok(mut f) = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -70,7 +73,9 @@ impl ConptyApi {
                 let _ = writeln!(f, "[conpty] backend=conpty.dll");
             }
         }
+
         info!("Using bundled conpty.dll for pseudoconsole");
+
         api
     }
 
@@ -82,39 +87,48 @@ impl ConptyApi {
     /// rio's executable directory.
     fn load_conpty() -> Option<Self> {
         type LoadedFn = unsafe extern "system" fn() -> isize;
+
         unsafe {
             // Prefer our bundled conpty.dll (copied next to the exe by build.rs) so the
             // reflow behavior matches the calibrated engine patches; fall back to a
             // newer Windows Terminal OpenConsoleProxy.dll only if it is on the search
             // path.
             let mut hmodule = LoadLibraryW(w!("conpty.dll"));
+
             if hmodule.is_null() {
                 hmodule = LoadLibraryW(w!("OpenConsoleProxy.dll"));
             }
+
             // Newer ConPTY (OpenConsoleProxy.dll) exports `Conpty`-prefixed names;
             // the older in-box conpty.dll uses the unprefixed names.
             let null = hmodule.is_null();
+
             let create_fn = if null {
                 None
             } else {
                 GetProcAddress(hmodule, s!("ConptyCreatePseudoConsole"))
                     .or_else(|| GetProcAddress(hmodule, s!("CreatePseudoConsole")))
             };
+
             let resize_fn = if null {
                 None
             } else {
                 GetProcAddress(hmodule, s!("ConptyResizePseudoConsole"))
                     .or_else(|| GetProcAddress(hmodule, s!("ResizePseudoConsole")))
             };
+
             let close_fn = if null {
                 None
             } else {
                 GetProcAddress(hmodule, s!("ConptyClosePseudoConsole"))
                     .or_else(|| GetProcAddress(hmodule, s!("ClosePseudoConsole")))
             };
+
             {
                 use std::io::Write as _;
+
                 let path = std::env::temp_dir().join("rio_conpty.log");
+
                 if let Ok(mut f) = std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)
@@ -160,6 +174,7 @@ impl Drop for Conpty {
         //
         // See PR #3084 and https://docs.microsoft.com/en-us/windows/console/closepseudoconsole.
         unsafe { (self.api.close)(self.handle) }
+
         // After the console teardown, closing the job reaps whatever is left
         // of the tree (detached/GUI descendants included).
         if let Some(job) = self.job.take() {
@@ -203,6 +218,7 @@ pub fn new(
     // on resize the way the in-box ConPTY does, so the engine's scrollback
     // survives a window resize (in-box ConPTY clears it — Microsoft bug #3490).
     let coord: COORD = winsize.into();
+
     let result = unsafe {
         (api.create)(
             coord,
@@ -226,6 +242,7 @@ pub fn new(
     // ConPTY projects this console title as OSC 0/2. Seeding it avoids exposing
     // the executable path before an application deliberately changes its title.
     let mut title = starting_title.map(win32_string);
+
     startup_info_ex.StartupInfo.lpTitle = title
         .as_mut()
         .map_or(std::ptr::null_mut(), |title| title.as_mut_ptr());
@@ -292,6 +309,7 @@ pub fn new(
 
     let cmdline = win32_string(&cmdline(shell));
     let cwd = working_directory.as_ref().map(win32_string);
+
     let mut environment = build_environment_block(environment_overrides);
 
     let mut proc_info: PROCESS_INFORMATION = unsafe { mem::zeroed() };
@@ -322,12 +340,14 @@ pub fn new(
 
     let job = if use_job {
         let job = unsafe { create_kill_on_close_job(proc_info.hProcess) };
+
         // The shell was created suspended; resume it whether or not the job
         // setup succeeded (failure degrades to unmanaged, it must not hang).
         unsafe {
             ResumeThread(proc_info.hThread);
             CloseHandle(proc_info.hThread);
         }
+
         job
     } else {
         None
@@ -337,6 +357,7 @@ pub fn new(
     let conout = EventedAnonRead::new(conout);
 
     let child_watcher = ChildExitWatcher::new(proc_info.hProcess)?;
+
     let conpty = Conpty {
         handle: pty_handle as HPCON,
         api,
@@ -354,20 +375,29 @@ fn build_environment_block(overrides: &[(String, String)]) -> Vec<u16> {
     // ConPTY supports 24-bit SGR colors, but Windows does not provide a standard
     // capability variable, so child TUIs otherwise downgrade computed RGB styles.
     values.retain(|(key, _)| !key.eq_ignore_ascii_case("COLORTERM"));
+
     values.push(("COLORTERM".into(), "truecolor".into()));
+
     // TERM_FEATURES=P advertises OSC 9;4 so progress-aware tools can distinguish a
     // transient status line from ordinary output instead of relying on CR heuristics.
     let mut term_features = std::env::var("TERM_FEATURES").unwrap_or_default();
+
     if !term_features.contains('P') {
         term_features.push('P');
     }
+
     values.retain(|(key, _)| !key.eq_ignore_ascii_case("TERM_FEATURES"));
+
     values.push(("TERM_FEATURES".into(), term_features.into()));
+
     for (key, value) in overrides {
         let folded = key.to_lowercase();
+
         values.retain(|(existing, _)| existing.to_string_lossy().to_lowercase() != folded);
+
         values.push((key.into(), value.into()));
     }
+
     values.sort_by(|(left, _), (right, _)| {
         left.to_string_lossy()
             .to_lowercase()
@@ -375,13 +405,16 @@ fn build_environment_block(overrides: &[(String, String)]) -> Vec<u16> {
     });
 
     let mut block = Vec::new();
+
     for (key, value) in values {
         block.extend(key.encode_wide());
         block.push('=' as u16);
         block.extend(value.encode_wide());
         block.push(0);
     }
+
     block.push(0);
+
     block
 }
 
@@ -402,7 +435,9 @@ pub fn job_other_process_count(job: isize) -> usize {
         list: JOBOBJECT_BASIC_PROCESS_ID_LIST,
         _extra: [usize; 7],
     }
+
     let mut buf: PidListBuf = unsafe { mem::zeroed() };
+
     let ok = unsafe {
         QueryInformationJobObject(
             job as HANDLE,
@@ -412,6 +447,7 @@ pub fn job_other_process_count(job: isize) -> usize {
             ptr::null_mut(),
         )
     };
+
     if ok != 0 || unsafe { GetLastError() } == ERROR_MORE_DATA {
         (buf.list.NumberOfAssignedProcesses as usize).saturating_sub(1)
     } else {
@@ -425,19 +461,23 @@ pub fn job_other_process_count(job: isize) -> usize {
 unsafe fn create_kill_on_close_job(process: HANDLE) -> Option<HANDLE> {
     unsafe {
         let job = CreateJobObjectW(ptr::null(), ptr::null());
+
         if job.is_null() {
             warn!("CreateJobObjectW failed: {}", Error::last_os_error());
             return None;
         }
 
         let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = mem::zeroed();
+
         info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+
         let ok = SetInformationJobObject(
             job,
             JobObjectExtendedLimitInformation,
             &info as *const _ as *const std::ffi::c_void,
             mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
         ) > 0;
+
         if !ok {
             warn!("SetInformationJobObject failed: {}", Error::last_os_error());
             CloseHandle(job);
@@ -472,6 +512,7 @@ impl From<Winsize> for COORD {
     fn from(window_size: Winsize) -> Self {
         let lines = window_size.ws_row;
         let columns = window_size.ws_col;
+
         COORD {
             X: columns as i16,
             Y: lines as i16,

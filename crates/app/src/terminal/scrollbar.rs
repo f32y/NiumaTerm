@@ -10,15 +10,18 @@ pub(super) fn scrollbar_thumb_geometry(total: f64, offset: f64, len: f64) -> Opt
     if total <= len {
         return None;
     }
+
     let thumb_height = (len / total).clamp(0.03, 1.0) as f32;
     let scrollable = total - len;
     let thumb_top = (offset.clamp(0.0, scrollable) / scrollable) as f32 * (1.0 - thumb_height);
+
     Some((thumb_top, thumb_height))
 }
 
 pub(super) fn scrollbar_offset_for_thumb(total: f64, len: f64, thumb_top: f32) -> Option<f64> {
     let (_, thumb_height) = scrollbar_thumb_geometry(total, 0.0, len)?;
     let thumb_travel = 1.0 - thumb_height;
+
     Some((thumb_top / thumb_travel).clamp(0.0, 1.0) as f64 * (total - len))
 }
 
@@ -29,6 +32,7 @@ pub(super) fn scrollbar_element(
 ) -> Option<gpui::Stateful<gpui::Div>> {
     let (thumb_top, thumb_height) =
         scrollbar_thumb_geometry(sb.total as f64, sb.offset as f64, sb.len as f64)?;
+
     Some(
         div()
             .id("terminal-scrollbar")
@@ -44,7 +48,9 @@ pub(super) fn scrollbar_element(
                 cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
                     cx.stop_propagation();
                     this.scrollbar_dragging = true;
+
                     let fraction = this.scrollbar_fraction(event.position.y);
+
                     if (thumb_top..thumb_top + thumb_height).contains(&fraction) {
                         // Grab the thumb where the pointer hit it — no jump.
                         this.scrollbar_grab = fraction - thumb_top;
@@ -53,6 +59,7 @@ pub(super) fn scrollbar_element(
                         this.scrollbar_grab = thumb_height / 2.0;
                         this.scroll_thumb_to(fraction - this.scrollbar_grab, cx);
                     }
+
                     this.mark_scroll_activity(cx);
                 }),
             )
@@ -92,14 +99,19 @@ pub(super) fn scrollbar_opacity(
     if dragging {
         return Some(1.0);
     }
+
     let elapsed = elapsed_since_scroll?;
+
     if elapsed < SCROLLBAR_LINGER {
         return Some(1.0);
     }
+
     if elapsed >= SCROLLBAR_LINGER + SCROLLBAR_FADE {
         return None;
     }
+
     let fade_elapsed = elapsed - SCROLLBAR_LINGER;
+
     Some(1.0 - fade_elapsed.as_secs_f32() / SCROLLBAR_FADE.as_secs_f32())
 }
 

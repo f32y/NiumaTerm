@@ -71,9 +71,12 @@ impl Element for TerminalView {
         cx: &mut App,
     ) -> (LayoutId, Style) {
         let mut style = Style::default();
+
         style.size.width = relative(1.0).into();
         style.size.height = relative(1.0).into();
+
         let layout_id = window.request_layout(style.clone(), [], cx);
+
         (layout_id, style)
     }
 
@@ -89,8 +92,10 @@ impl Element for TerminalView {
         // Feed the real content rect back to the pane so it resizes the surface to
         // its actual area (below the tab bar), not the full window.
         let cell = self.cell;
+
         self.pane
             .update(cx, |pane, cx| pane.set_content_bounds(bounds, cell, cx));
+
         shape_frame(bounds, &self.frame, self.cell, window)
     }
 
@@ -105,6 +110,7 @@ impl Element for TerminalView {
         cx: &mut App,
     ) {
         let offsets = bottom_anchor_offsets(&self.frame, self.cell.height_px, self.fixed_bottom);
+
         paint_frame(
             bounds,
             &self.frame,
@@ -114,6 +120,7 @@ impl Element for TerminalView {
             window,
             cx,
         );
+
         // Register commit-only IME for the focused pane; self-gates on focus.
         window.handle_input(
             &self.focus,
@@ -162,9 +169,12 @@ impl Element for BlockListView {
         cx: &mut App,
     ) -> (LayoutId, Style) {
         let mut style = Style::default();
+
         style.size.width = relative(1.0).into();
         style.size.height = relative(1.0).into();
+
         let layout_id = window.request_layout(style.clone(), [], cx);
+
         (layout_id, style)
     }
 
@@ -178,8 +188,10 @@ impl Element for BlockListView {
         cx: &mut App,
     ) {
         let cell = self.cell;
+
         self.pane
             .update(cx, |pane, cx| pane.begin_block_list_frame(bounds, cell, cx));
+
         self.list.layout_as_root(
             size(
                 AvailableSpace::Definite(bounds.size.width),
@@ -188,6 +200,7 @@ impl Element for BlockListView {
             window,
             cx,
         );
+
         self.list.prepaint_at(bounds.origin, window, cx);
     }
 
@@ -204,13 +217,17 @@ impl Element for BlockListView {
         let pane = self.pane.read(cx);
         let separators = pane.frozen_separators.clone();
         let chrome = pane.frozen_chrome.clone();
+
         if self.show_chrome {
             crate::terminal::block_list::paint_frozen_separators(bounds, &separators, window);
         }
+
         self.list.paint(window, cx);
+
         if self.show_chrome {
             crate::terminal::block_list::paint_frozen_chrome(bounds, &chrome, window, cx);
         }
+
         window.handle_input(
             &self.focus,
             ElementInputHandler::new(bounds, self.pane.clone()),
@@ -289,8 +306,11 @@ impl Element for BlockListItem {
         cx: &mut App,
     ) -> (LayoutId, Style) {
         let mut style = Style::default();
+
         style.size.width = relative(1.0).into();
+
         let pad_rows = block_pad_rows(cx);
+
         let height = match self {
             BlockListItem::Frozen {
                 item_idx,
@@ -300,6 +320,7 @@ impl Element for BlockListItem {
                 ..
             } => {
                 let store = store.lock();
+
                 store
                     .items()
                     .get(*item_idx)
@@ -321,8 +342,11 @@ impl Element for BlockListItem {
             ),
         }
         .max(0.0);
+
         style.size.height = px(height).into();
+
         let layout_id = window.request_layout(style.clone(), [], cx);
+
         (layout_id, style)
     }
 
@@ -338,6 +362,7 @@ impl Element for BlockListItem {
         let origin_y = self.pane().read(cx).content_origin().y;
         let item_top = (bounds.top() - origin_y).as_f32();
         let pad_rows = block_pad_rows(cx);
+
         match self {
             BlockListItem::Frozen {
                 item_idx,
@@ -358,6 +383,7 @@ impl Element for BlockListItem {
                         .get(*item_idx)
                         .and_then(crate::terminal::block_list::handle_item_info)
                 };
+
                 let mut view = match handle_info {
                     Some(info) => {
                         let visible = crate::terminal::block_list::visible_rows(
@@ -367,7 +393,9 @@ impl Element for BlockListItem {
                             cell.height_px,
                             pad_rows,
                         );
+
                         let acquired = pane.read(cx).surface.acquire_block(info.handle);
+
                         let mut view = crate::terminal::block_list::frozen_block_view(
                             acquired.as_ref().map(|acq| (&acq.block, &acq.palette)),
                             &info,
@@ -378,6 +406,7 @@ impl Element for BlockListItem {
                             *selection,
                             *selected_item,
                         );
+
                         // Resolve each frozen Kitty placement's
                         // generation from the session's (block_id, image_id)
                         // cache; misses read pixels out of the acquired block
@@ -387,7 +416,9 @@ impl Element for BlockListItem {
                         {
                             let ids: std::collections::HashSet<u32> =
                                 acq.placements.iter().map(|p| p.image_id).collect();
+
                             let surface = &pane.read(cx).surface;
+
                             let generations: std::collections::HashMap<_, _> = ids
                                 .into_iter()
                                 .filter_map(|id| {
@@ -406,6 +437,7 @@ impl Element for BlockListItem {
                                         .map(|generation| (id, generation))
                                 })
                                 .collect();
+
                             view.images = crate::terminal::block_list::frozen_block_images(
                                 &acq.placements,
                                 &generations,
@@ -418,13 +450,17 @@ impl Element for BlockListItem {
                     }
                     None => Default::default(),
                 };
+
                 pane.update(cx, |pane, _| pane.record_frozen_view(&view, item_top));
+
                 view.items_chrome.clear();
+
                 let shaped = crate::terminal::block_list::shape_frozen_rows(
                     &view.rows,
                     cell.width_px,
                     window,
                 );
+
                 BlockListItemPrepaint::Frozen { view, shaped }
             }
             BlockListItem::Live {
@@ -449,11 +485,14 @@ impl Element for BlockListItem {
                         cell.height_px,
                         pad_rows,
                     );
+
                     let pane = pane.read(cx);
+
                     let lines = pane
                         .surface
                         .live_history_lines(visible.start as u64..visible.end as u64);
                     let selection = pane.surface.selection_screen_range();
+
                     crate::terminal::block_list::live_history_view(
                         lines,
                         *history_rows,
@@ -463,7 +502,9 @@ impl Element for BlockListItem {
                         selection,
                     )
                 };
+
                 let live_rows = frame_content_rows(frame);
+
                 let live_chrome = block_list_live_chrome(
                     *live_index,
                     live_rows,
@@ -472,28 +513,38 @@ impl Element for BlockListItem {
                     *has_open_prompt,
                     *selected_item == Some(*live_index),
                 );
+
                 pane.update(cx, |pane, _| {
                     pane.record_frozen_view(&tail_view, item_top);
+
                     let active_top = item_top + tail_view.active_top;
+
                     pane.frozen_hit.set_active_top(active_top);
+
                     if let Some(mut chrome) = live_chrome {
                         chrome.bottom = tail_view.active_top
                             + live_rows as f32 * cell.height_px
                             + pad_rows * cell.height_px;
+
                         chrome.header_y = tail_view.active_top;
+
                         pane.record_frozen_chrome(chrome, item_top);
                     }
                 });
+
                 let tail_shaped = crate::terminal::block_list::shape_frozen_rows(
                     &tail_view.rows,
                     cell.width_px,
                     window,
                 );
+
                 let active_bounds = Bounds::new(
                     point(bounds.left(), bounds.top() + px(tail_view.active_top)),
                     size(bounds.size.width, px(live_rows as f32 * cell.height_px)),
                 );
+
                 let active_shaped = shape_frame(active_bounds, frame, *cell, window);
+
                 BlockListItemPrepaint::Live {
                     tail_view,
                     tail_shaped,
@@ -519,6 +570,7 @@ impl Element for BlockListItem {
                 BlockListItemPrepaint::Frozen { view, shaped },
             ) => {
                 paint_frozen_images(bounds, view, *cell, window, false);
+
                 crate::terminal::block_list::paint_frozen(
                     bounds,
                     view,
@@ -528,6 +580,7 @@ impl Element for BlockListItem {
                     window,
                     cx,
                 );
+
                 paint_frozen_images(bounds, view, *cell, window, true);
             }
             (
@@ -547,6 +600,7 @@ impl Element for BlockListItem {
                     window,
                     cx,
                 );
+
                 let active_bounds = Bounds::new(
                     point(bounds.left(), bounds.top() + px(tail_view.active_top)),
                     size(
@@ -554,6 +608,7 @@ impl Element for BlockListItem {
                         px(active_shaped.len() as f32 * cell.height_px),
                     ),
                 );
+
                 paint_frame(
                     active_bounds,
                     frame,
@@ -579,16 +634,20 @@ impl BlockListItem {
 
 pub(crate) fn frame_content_rows(frame: &TerminalFrame) -> usize {
     let lines = frame.lines();
+
     let mut content_end = 0;
+
     for (row, line) in lines.iter().enumerate().rev() {
         if terminal_line_has_content(line) {
             content_end = row + 1;
             break;
         }
     }
+
     if let Some(cursor) = frame.cursor() {
         content_end = content_end.max(cursor.row as usize + 1);
     }
+
     content_end.min(lines.len())
 }
 
@@ -600,8 +659,11 @@ pub(crate) fn bottom_anchor_offsets(
     if !fixed_bottom {
         return Vec::new();
     }
+
     let rows = frame.lines().len();
+
     let slack = rows.saturating_sub(frame_content_rows(frame)) as f32 * cell_height;
+
     if slack > 0.0 {
         vec![slack; rows]
     } else {
@@ -611,18 +673,22 @@ pub(crate) fn bottom_anchor_offsets(
 
 pub(crate) fn live_frame_text(frame: &TerminalFrame) -> Option<String> {
     let rows = frame_content_rows(frame);
+
     if rows == 0 {
         return None;
     }
+
     let mut lines = frame
         .lines()
         .iter()
         .take(rows)
         .map(terminal_line_plain_text)
         .collect::<Vec<_>>();
+
     while lines.last().is_some_and(|line| line.is_empty()) {
         lines.pop();
     }
+
     (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
@@ -647,11 +713,13 @@ pub(crate) fn terminal_row_at_y(y: f32, cell_height: f32, offsets: &[f32]) -> u1
     if offsets.is_empty() {
         return (y / cell_height).floor().max(0.0) as u16;
     }
+
     for (row, off) in offsets.iter().enumerate() {
         if y < (row as f32 + 1.0) * cell_height + off {
             return row as u16;
         }
     }
+
     offsets.len().saturating_sub(1) as u16
 }
 
@@ -668,6 +736,7 @@ pub(crate) fn block_separator_bounds(
 ) -> Bounds<Pixels> {
     let left = bounds.left() - px(metrics::PADDING_PX);
     let right = bounds.right() + px(metrics::PADDING_PX);
+
     Bounds::new(point(left, y), size(right - left, px(thickness)))
 }
 
@@ -689,6 +758,7 @@ fn shape_frame(
 ) -> Vec<ShapedLine> {
     let row_count =
         ((bounds.size.height.as_f32() / cell.height_px).ceil() as usize).min(frame.lines().len());
+
     shape_lines(
         frame
             .lines()
@@ -710,6 +780,7 @@ pub(crate) fn shape_lines<'a>(
     let style = window.text_style();
     let font_size = style.font_size.to_pixels(window.rem_size());
     let base = style.to_run(0);
+
     lines
         .map(|(key, line)| {
             let runs = terminal_text_runs(line, &base);
@@ -731,21 +802,28 @@ pub(crate) fn terminal_text_runs(line: &TerminalLine, base: &TextRun) -> Vec<Tex
     if line.runs().is_empty() {
         // Blank row: keep the single zero/whitespace run path GPUI already handles.
         let mut run = base.clone();
+
         run.len = line.text().len();
+
         return vec![run];
     }
+
     line.runs()
         .iter()
         .map(|run| {
             let mut text_run = base.clone();
+
             text_run.len = run.len;
             text_run.color = rgb(run.fg.rgb_u32()).into();
+
             if run.bold {
                 text_run.font.weight = FontWeight::BOLD;
             }
+
             if run.italic {
                 text_run.font.style = FontStyle::Italic;
             }
+
             if run.underline {
                 text_run.underline = Some(UnderlineStyle {
                     thickness: px(1.0),
@@ -753,12 +831,14 @@ pub(crate) fn terminal_text_runs(line: &TerminalLine, base: &TextRun) -> Vec<Tex
                     wavy: false,
                 });
             }
+
             if run.strikethrough {
                 text_run.strikethrough = Some(StrikethroughStyle {
                     thickness: px(1.0),
                     color: None,
                 });
             }
+
             text_run
         })
         .collect()
@@ -774,6 +854,7 @@ fn paint_frame(
     cx: &mut App,
 ) {
     use crate::terminal::frame::ZLayer;
+
     // Kitty images below cell backgrounds (z < i32::MIN/2).
     paint_frame_images(
         bounds,
@@ -783,6 +864,7 @@ fn paint_frame(
         offsets,
         window,
     );
+
     for (row, line) in frame.lines().iter().take(lines.len()).enumerate() {
         paint_line_backgrounds_at(
             bounds,
@@ -793,6 +875,7 @@ fn paint_frame(
             window,
         );
     }
+
     // Kitty images above backgrounds, below cursor/text (i32::MIN/2 <= z < 0).
     paint_frame_images(bounds, frame, ZLayer::BelowText, cell, offsets, window);
     paint_cursor(bounds, frame.cursor(), cell, offsets, window);
@@ -809,6 +892,7 @@ fn paint_frame(
         window,
         cx,
     );
+
     // Kitty images above cursor/text (z >= 0).
     paint_frame_images(bounds, frame, ZLayer::AboveText, cell, offsets, window);
 }
@@ -849,19 +933,23 @@ fn paint_frame_images(
     window: &mut Window,
 ) {
     let images = frame.images();
+
     if images.is_empty() {
         return; // no graphics: zero work
     }
+
     for img in images {
         if img.z_layer() != layer {
             continue;
         }
+
         let top = img.top_row();
         let row_offset = if top >= 0 {
             row_y_offset(offsets, top as usize)
         } else {
             0.0
         };
+
         let Some((dest, source)) = img.destination(
             cell.width_px,
             cell.height_px,
@@ -871,6 +959,7 @@ fn paint_frame_images(
         ) else {
             continue;
         };
+
         paint_generation(window, dest, source, &img.generation);
     }
 }
@@ -889,16 +978,19 @@ fn paint_frozen_images(
     if view.images.is_empty() {
         return;
     }
+
     for img in &view.images {
         if (img.z >= 0) != above_text {
             continue;
         }
+
         let dest = [
             f32::from(bounds.left()) + img.col as f32 * cell.width_px,
             f32::from(bounds.top()) + img.y,
             img.width as f32 * cell.width_px,
             cell.height_px,
         ];
+
         paint_generation(window, dest, img.source, &img.generation);
     }
 }
@@ -916,7 +1008,9 @@ fn paint_generation(
     let Some(full) = crate::terminal::graphics::expanded_full_bounds(dest, source) else {
         return;
     };
+
     paint_image_clipped(window, dest, full, generation.image().clone());
+
     generation.mark_uploaded();
 }
 
@@ -933,9 +1027,11 @@ fn paint_image_clipped(
         origin: point(px(b[0]), px(b[1])),
         size: size(px(b[2]), px(b[3])),
     };
+
     let mask = ContentMask {
         bounds: to_bounds(dest),
     };
+
     window.with_content_mask(Some(mask), |w| {
         let _ = w.paint_image(to_bounds(full), Corners::default(), image, 0, false);
     });
@@ -955,11 +1051,14 @@ pub(crate) fn paint_line_backgrounds_at(
     let mut run_start = 0u16;
     let mut run_width = 0u16;
     let mut run_color: Option<TerminalColor> = None;
+
     let flush = |start: u16, width: u16, color: Option<TerminalColor>, window: &mut Window| {
         let Some(color) = color else { return };
+
         if width == 0 {
             return;
         }
+
         window.paint_quad(fill(
             Bounds::new(
                 point(
@@ -977,15 +1076,19 @@ pub(crate) fn paint_line_backgrounds_at(
         } else {
             1
         };
+
         if run_color == cell_data.background && run_start + run_width == cell_data.col {
             run_width += width;
             continue;
         }
+
         flush(run_start, run_width, run_color, window);
+
         run_start = cell_data.col;
         run_width = width;
         run_color = cell_data.background;
     }
+
     flush(run_start, run_width, run_color, window);
 }
 
@@ -999,10 +1102,13 @@ fn paint_cursor(
     let Some(cursor) = cursor else {
         return;
     };
+
     let y_offset = row_y_offset(offsets, cursor.row as usize);
+
     let Some(bounds) = cursor_bounds(bounds, cursor, cell, y_offset) else {
         return;
     };
+
     window.paint_quad(fill(bounds, rgb(cursor.color.rgb_u32())));
 }
 
@@ -1017,6 +1123,7 @@ pub(crate) fn cursor_bounds(
     let thickness = px((cell.width_px.min(cell.height_px) / 8.0)
         .round()
         .clamp(1.0, 2.0));
+
     Some(match cursor.shape {
         CursorShape::Block => Bounds::new(point(x, y), size(px(cell.width_px), px(cell.height_px))),
         CursorShape::Beam => Bounds::new(point(x, y), size(thickness, px(cell.height_px))),

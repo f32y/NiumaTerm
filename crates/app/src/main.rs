@@ -9,7 +9,6 @@ use futures::StreamExt as _;
 use gpui::{App, Application, KeyBinding};
 use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 
-mod active_list;
 mod cli;
 mod error;
 mod ipc;
@@ -122,12 +121,16 @@ fn run_app(argv_url: Option<String>, testing: bool) {
             .display()
             .to_string(),
     );
+
     if testing {
         nmt_config::enable_testing_mode();
     }
+
     // Hold the appender guard for the whole app lifetime; `main` blocks until exit.
     let _log_guard = crate::logging::init_logging().expect("init logging");
+
     let startup_files = load_startup_files_or_exit();
+
     // A second launch forwards its action to the existing process so one process
     // URL (or an activate request) to the running instance and exits. A
     // malformed URL degrades to activate — the primary just comes forward.
@@ -137,6 +140,7 @@ fn run_app(argv_url: Option<String>, testing: bool) {
             CliAction::Activate
         })
     });
+
     if !nmt_platform::windows::ipc::try_become_primary(testing) {
         let action = argv_action.clone().unwrap_or(CliAction::Activate);
         match nmt_platform::windows::ipc::send(
@@ -150,18 +154,25 @@ fn run_app(argv_url: Option<String>, testing: bool) {
         // The mutex holder never answered (booting forever, or hung): serve
         // the user with a fresh primary rather than doing nothing.
     }
+
     let (cli_tx, mut cli_rx) = futures::channel::mpsc::unbounded::<ipc::IpcAction>();
+
     ipc::spawn_pipe_server(cli_tx.clone(), testing);
+
     if let Some(action) = argv_action {
         // The primary's own argv URL joins the same dispatch path as
         // forwarded ones, applied after startup (and session restore).
         let _ = cli_tx.unbounded_send(ipc::IpcAction::Cli(action));
     }
+
     let platform = Rc::new(
         gpui_windows::WindowsPlatform::new(false).expect("failed to initialize GPUI Windows"),
     );
+
     platform.set_file_drop_description("Paste path to terminal");
+
     let platform_handle = platform.clone();
+
     Application::with_platform(platform)
         // Serve project icons + gpui-component's embedded icons so `svg().path()`
         // resolves both.
@@ -170,33 +181,45 @@ fn run_app(argv_url: Option<String>, testing: bool) {
             // Initialize gpui-component (theme, root, component globals) before any
             // component renders. Themes without `[colors.ui]` retain the dark default.
             gpui_component::init(cx);
+
             crate::ui::apply_ui_theme(nmt_config::get().ui_theme.as_ref(), cx);
+
             let notification = &mut gpui_component::Theme::global_mut(cx).notification;
             notification.placement = gpui::Anchor::TopCenter;
             notification.margins.top = gpui::px(16.);
+
             cx.set_global(AppSettings::load());
+
             crate::ui::apply_window_translucency(cx);
+
             nmt_platform::set_job_management(cx.global::<AppSettings>().manage_subprocess_job);
+
             // The platform remembers the choice and applies it to the vsync
             // thread when that spawns (after this closure returns).
             if cx.global::<AppSettings>().prioritize_ui_threads {
                 platform_handle.set_ui_thread_priority(true);
             }
+
             cx.set_global(PlatformHandle(platform_handle));
+
             // Keep live behavior in sync on any settings change. Persistence is
             // deferred to when the settings dialog closes (see Shell::on_show_settings).
             cx.observe_global::<AppSettings>(|cx| {
                 nmt_platform::set_job_management(cx.global::<AppSettings>().manage_subprocess_job);
+
                 // Opacity changes retint the theme and switch each window
                 // between acrylic composition and opaque presentation.
                 crate::ui::apply_window_translucency(cx);
+
                 let background = crate::ui::window_background_appearance(cx);
+
                 let handles: Vec<_> = cx
                     .global::<ShellRegistry>()
                     .0
                     .iter()
                     .map(|entry| entry.handle)
                     .collect();
+
                 for handle in handles {
                     handle
                         .update(cx, |_, window, _| {
@@ -204,6 +227,7 @@ fn run_app(argv_url: Option<String>, testing: bool) {
                         })
                         .ok();
                 }
+
                 cx.refresh_windows();
             })
             .detach();
@@ -247,7 +271,9 @@ fn run_app(argv_url: Option<String>, testing: bool) {
 
             // Restore local state; first run centers and starts one default tab.
             let remembered_state = startup_files.remembered_state.clone();
+
             let restore_session = cx.global::<AppSettings>().restore_last_session_when_opening;
+
             let mut initials: Vec<AppWindow> = if restore_session {
                 remembered_state
                     .windows
@@ -263,6 +289,7 @@ fn run_app(argv_url: Option<String>, testing: bool) {
                     .unwrap_or_default();
                 vec![AppWindow::from_local_state(&first, false)]
             };
+
             if initials.is_empty() {
                 initials.push(AppWindow {
                     bounds: None,
@@ -271,19 +298,23 @@ fn run_app(argv_url: Option<String>, testing: bool) {
                     initial_cwd: None,
                 });
             }
+
             // Restore disabled with saved sessions: rewrite the file without
             // them now, so a crash before quit can't resurrect them.
             if !restore_session && remembered_state.windows.iter().any(|w| w.session.is_some()) {
                 let clean = LocalState {
                     windows: initials.iter().map(|w| w.to_local_state(false)).collect(),
                 };
+
                 if let Err(err) = nmt_config::local_state::save(&clean) {
                     tracing::warn!("failed to clear sessions from local_state.toml: {err}");
                 }
             }
+
             cx.set_global(WindowRegistry(Vec::new()));
             cx.set_global(ShellRegistry(Vec::new()));
             cx.set_global(LastActiveWindow(None));
+
             // A closed window is discarded — except the last one: GPUI's
             // LastWindowClosed quit follows, and the quit hook saves it.
             cx.on_window_closed(|cx, window_id| {
@@ -297,8 +328,10 @@ fn run_app(argv_url: Option<String>, testing: bool) {
                 }
             })
             .detach();
+
             cx.on_app_quit(|cx| {
                 let save_session = cx.global::<AppSettings>().restore_last_session_when_opening;
+
                 let state = LocalState {
                     windows: cx
                         .global::<WindowRegistry>()
@@ -307,17 +340,20 @@ fn run_app(argv_url: Option<String>, testing: bool) {
                         .map(|(_, w)| w.to_local_state(save_session))
                         .collect(),
                 };
+
                 if !state.windows.is_empty()
                     && let Err(err) = nmt_config::local_state::save(&state)
                 {
                     tracing::warn!("failed to save local_state.toml: {err}");
                 }
+
                 // Quit confirmation has already completed before this hook runs.
                 // Waiting here prevents the out-of-process terminal owner from
                 // surviving after the application process has fully exited.
                 if let Err(err) = nmt_remote_session_hub::shutdown_default() {
                     tracing::warn!("failed to stop SessionHub during app quit: {err}");
                 }
+
                 async {}
             })
             .detach();
@@ -325,6 +361,7 @@ fn run_app(argv_url: Option<String>, testing: bool) {
             for initial in initials {
                 AppWindow::open(cx, initial);
             }
+
             // Apply CLI actions (argv + forwarded over the IPC pipe) on the
             // foreground; windows above exist before the first poll.
             cx.spawn(async move |cx| {
@@ -336,6 +373,7 @@ fn run_app(argv_url: Option<String>, testing: bool) {
                 }
             })
             .detach();
+
             cx.activate(true);
         });
 }

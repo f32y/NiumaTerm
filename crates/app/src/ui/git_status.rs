@@ -57,6 +57,7 @@ fn run_git(dir: &str, args: &[&str]) -> Result<Vec<u8>, String> {
         .creation_flags(CREATE_NO_WINDOW)
         .output()
         .map_err(|err| format!("failed to run git: {err}"))?;
+
     if !output.status.success() {
         return Err(format!(
             "git {} exited with {}: {}",
@@ -65,6 +66,7 @@ fn run_git(dir: &str, args: &[&str]) -> Result<Vec<u8>, String> {
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
+
     Ok(output.stdout)
 }
 
@@ -81,6 +83,7 @@ pub(crate) fn fetch_snapshot(root: &str) -> Result<GitSnapshot, String> {
         root,
         &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
     )?;
+
     let entries = parse_status_z(&status);
     let mut counts: HashMap<String, (u64, u64)> = HashMap::new();
 
@@ -96,16 +99,20 @@ pub(crate) fn fetch_snapshot(root: &str) -> Result<GitSnapshot, String> {
             }
         }
     }
+
     let mut files = Vec::with_capacity(entries.len());
     let (mut total_added, mut total_removed) = (0u64, 0u64);
+
     for (status, path) in entries {
         let (added, removed) = if status == "??" {
             (count_file_lines(root, &path), 0)
         } else {
             counts.get(&path).copied().unwrap_or((0, 0))
         };
+
         total_added += added;
         total_removed += removed;
+
         files.push(FileEntry {
             path,
             status,
@@ -113,6 +120,7 @@ pub(crate) fn fetch_snapshot(root: &str) -> Result<GitSnapshot, String> {
             removed,
         });
     }
+
     Ok(GitSnapshot {
         repo_root: root.to_string(),
         files,
@@ -127,6 +135,7 @@ fn count_file_lines(root: &str, path: &str) -> u64 {
     let Ok(bytes) = std::fs::read(std::path::Path::new(root).join(path)) else {
         return 0;
     };
+
     count_lines(&bytes)
 }
 
@@ -134,7 +143,9 @@ fn count_lines(bytes: &[u8]) -> u64 {
     if bytes.is_empty() || bytes.contains(&0) {
         return 0;
     }
+
     let newlines = bytes.iter().filter(|b| **b == b'\n').count() as u64;
+
     // A trailing fragment without a newline is still a line (matches numstat).
     newlines + u64::from(*bytes.last().unwrap() != b'\n')
 }
@@ -146,15 +157,19 @@ pub(crate) fn fetch_file_diff(root: &str, path: &str, untracked: bool) -> Vec<Di
         let Ok(bytes) = std::fs::read(std::path::Path::new(root).join(path)) else {
             return vec![line(DiffLineKind::FileHeader, "unreadable file")];
         };
+
         if bytes.contains(&0) {
             return vec![line(DiffLineKind::FileHeader, "Binary file")];
         }
+
         let text = String::from_utf8_lossy(&bytes);
+
         return cap_lines(
             text.lines()
                 .map(|l| line(DiffLineKind::Added, format!("+{l}"))),
         );
     }
+
     match run_git(root, &["diff", "HEAD", "--", path]) {
         Ok(out) => {
             let text = String::from_utf8_lossy(&out);
@@ -173,6 +188,7 @@ fn line(kind: DiffLineKind, text: impl Into<SharedString>) -> DiffLine {
 
 fn cap_lines(iter: impl Iterator<Item = DiffLine>) -> Vec<DiffLine> {
     let mut lines: Vec<DiffLine> = iter.take(MAX_DIFF_LINES + 1).collect();
+
     if lines.len() > MAX_DIFF_LINES {
         lines.truncate(MAX_DIFF_LINES);
         lines.push(line(DiffLineKind::Truncated, "··· diff truncated ···"));
@@ -190,11 +206,14 @@ pub(crate) fn parse_status_z(raw: &[u8]) -> Vec<(String, String)> {
         if token.len() < 4 {
             continue;
         }
+
         let status = String::from_utf8_lossy(&token[..2]).to_string();
         let path = String::from_utf8_lossy(&token[3..]).to_string();
+
         if status.contains('R') || status.contains('C') {
             tokens.next(); // the pre-rename path
         }
+
         out.push((status, path));
     }
     out
@@ -206,15 +225,20 @@ pub(crate) fn parse_status_z(raw: &[u8]) -> Vec<(String, String)> {
 pub(crate) fn parse_numstat_z(raw: &[u8]) -> Vec<(String, u64, u64)> {
     let mut out = Vec::new();
     let mut tokens = raw.split(|b| *b == 0).filter(|t| !t.is_empty());
+
     while let Some(token) = tokens.next() {
         let text = String::from_utf8_lossy(token);
+
         let mut fields = text.splitn(3, '\t');
+
         let (Some(added), Some(removed)) = (fields.next(), fields.next()) else {
             continue;
         };
+
         // `-` marks a binary file.
         let added = added.parse::<u64>().unwrap_or(0);
         let removed = removed.parse::<u64>().unwrap_or(0);
+
         let path = match fields.next() {
             // Rename: the counts token ends at the tab, old and new paths
             // follow as their own NUL tokens.
@@ -227,6 +251,7 @@ pub(crate) fn parse_numstat_z(raw: &[u8]) -> Vec<(String, u64, u64)> {
             }
             Some(path) => path.to_string(),
         };
+
         out.push((path, added, removed));
     }
     out
@@ -249,6 +274,7 @@ pub(crate) fn parse_diff(text: &str) -> Vec<DiffLine> {
             // diff --git, index, mode, similarity, "\ No newline" …
             DiffLineKind::FileHeader
         };
+
         line(kind, l.to_string())
     }))
 }
@@ -272,14 +298,18 @@ pub(crate) struct GitStatusModel {
 impl GitStatusModel {
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
         let enabled = cx.global::<AppSettings>().show_git_status_on_title_bar;
+
         cx.observe_global::<AppSettings>(|this, cx| {
             let enabled = cx.global::<AppSettings>().show_git_status_on_title_bar;
+
             if enabled && !this.enabled {
                 this.refresh(cx);
             }
+
             this.enabled = enabled;
         })
         .detach();
+
         // Interval loop; the period is re-read each tick so the settings
         // dropdown takes effect at the next tick without restart plumbing.
         cx.spawn(async move |this, cx| {
@@ -289,20 +319,24 @@ impl GitStatusModel {
                 }) else {
                     break;
                 };
+
                 cx.background_executor()
                     .timer(Duration::from_secs(interval.max(1)))
                     .await;
+
                 let alive = this.update(cx, |this, cx| {
                     if this.active() {
                         this.refresh(cx);
                     }
                 });
+
                 if alive.is_err() {
                     break;
                 }
             }
         })
         .detach();
+
         Self {
             target_cwd: None,
             snapshot: None,
@@ -324,8 +358,10 @@ impl GitStatusModel {
         if cwd == self.target_cwd {
             return;
         }
+
         self.target_cwd = cwd;
         self.generation += 1;
+
         if self.active() {
             self.refresh(cx);
         }
@@ -338,21 +374,29 @@ impl GitStatusModel {
         if self.refreshing {
             return;
         }
+
         let Some(cwd) = self.target_cwd.clone() else {
             if self.snapshot.take().is_some() {
                 self.snapshot_seq += 1;
+
                 cx.notify();
             }
+
             return;
         };
+
         self.refreshing = true;
+
         let generation = self.generation;
+
         cx.notify();
+
         cx.spawn(async move |this, cx| {
             let root = cx
                 .background_executor()
                 .spawn(async move { resolve_repo_root(&cwd) })
                 .await;
+
             let proceed = this
                 .update(cx, |this, cx| {
                     if this.generation != generation {
@@ -361,6 +405,7 @@ impl GitStatusModel {
                         this.refresh(cx);
                         return None;
                     }
+
                     match root {
                         None => {
                             // Not a repo: clear and stop.
@@ -385,19 +430,24 @@ impl GitStatusModel {
                 })
                 .ok()
                 .flatten();
+
             let Some(root) = proceed else {
                 return;
             };
+
             let snapshot = cx
                 .background_executor()
                 .spawn(async move { fetch_snapshot(&root) })
                 .await;
+
             this.update(cx, |this, cx| {
                 this.refreshing = false;
+
                 if this.generation != generation {
                     this.refresh(cx);
                     return;
                 }
+
                 match snapshot {
                     Ok(snapshot) => {
                         this.snapshot = Some(snapshot);
@@ -405,6 +455,7 @@ impl GitStatusModel {
                     }
                     Err(err) => tracing::warn!("git status refresh failed: {err}"),
                 }
+
                 cx.notify();
             })
             .ok();
@@ -420,8 +471,10 @@ pub(crate) struct GitStatusView {
 impl GitStatusView {
     pub(crate) fn new(model: gpui::Entity<GitStatusModel>, cx: &mut Context<Self>) -> Self {
         cx.observe(&model, |_, _, cx| cx.notify()).detach();
+
         cx.observe_global::<AppSettings>(|_, cx| cx.notify())
             .detach();
+
         Self { model }
     }
 }
@@ -431,12 +484,15 @@ impl Render for GitStatusView {
         if !cx.global::<AppSettings>().show_git_status_on_title_bar {
             return div().into_any_element();
         }
+
         let Some(snapshot) = self.model.read(cx).snapshot.clone() else {
             return div().into_any_element();
         };
+
         if snapshot.total_added == 0 && snapshot.total_removed == 0 {
             return div().into_any_element();
         }
+
         h_flex()
             .gap_1()
             .px_2()

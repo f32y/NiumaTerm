@@ -24,10 +24,15 @@ pub(crate) struct RefreshState {
 
 pub(crate) trait AutoRefresh: Sized + 'static {
     type Output: Send + 'static;
+
     const INTERVAL: Duration;
+
     fn enabled(settings: &AppSettings) -> bool;
+
     fn state(&mut self) -> &mut RefreshState;
+
     fn fetch() -> Self::Output;
+
     fn apply(&mut self, output: Self::Output);
 }
 
@@ -40,6 +45,7 @@ pub(crate) fn start<V: AutoRefresh>(view: &mut V, cx: &mut Context<V>) {
         this.state().enabled = enabled;
     })
     .detach();
+
     cx.spawn(async move |this, cx| {
         loop {
             cx.background_executor().timer(V::INTERVAL).await;
@@ -54,6 +60,7 @@ pub(crate) fn start<V: AutoRefresh>(view: &mut V, cx: &mut Context<V>) {
         }
     })
     .detach();
+
     if view.state().enabled {
         refresh(view, cx);
     }
@@ -63,9 +70,13 @@ pub(crate) fn refresh<V: AutoRefresh>(view: &mut V, cx: &mut Context<V>) {
     if view.state().refreshing {
         return;
     }
+
     view.state().refreshing = true;
+
     cx.notify();
+
     let fetch = cx.background_executor().spawn(async move { V::fetch() });
+
     cx.spawn(async move |this, cx| {
         let output = fetch.await;
         this.update(cx, |this, cx| {

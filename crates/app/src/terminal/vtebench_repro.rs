@@ -21,7 +21,9 @@ fn integration_config() -> TerminalSessionConfig {
     // No canonicalize: its `\\?\` prefix breaks PowerShell dot-sourcing.
     let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..\\..\\assets\\windows\\pwsh-integration.ps1");
+
     assert!(script.exists(), "missing {}", script.display());
+
     TerminalSessionConfig {
         shell: Some("powershell.exe".into()),
         args: vec![
@@ -41,7 +43,9 @@ fn integration_config() -> TerminalSessionConfig {
 fn pump(session: &TerminalSession, all: &mut Vec<HostEvent>) -> usize {
     let new = session.poll_events();
     let n = new.len();
+
     all.extend(new);
+
     n
 }
 
@@ -53,14 +57,18 @@ fn wait_for(
     mut pred: impl FnMut(&[HostEvent]) -> bool,
 ) -> bool {
     let end = Instant::now() + timeout;
+
     loop {
         pump(session, all);
+
         if pred(all) {
             return true;
         }
+
         if Instant::now() >= end {
             return false;
         }
+
         std::thread::sleep(Duration::from_millis(50));
     }
 }
@@ -85,12 +93,14 @@ fn block_texts(session: &TerminalSession) -> Vec<(Option<String>, String)> {
     let items: Vec<(Option<String>, Option<nmt_terminal::ghostty::BlockHandle>)> = {
         let store = session.block_store();
         let store = store.lock();
+
         store
             .items()
             .iter()
             .map(|item| (item.meta.command.clone(), item.handle()))
             .collect()
     };
+
     items
         .into_iter()
         .map(|(command, handle)| {
@@ -99,10 +109,13 @@ fn block_texts(session: &TerminalSession) -> Vec<(Option<String>, String)> {
                     let engine = session.engine.lock();
                     engine.block_acquire(handle).and_then(|block| {
                         let rows = block.row_count();
+
                         if rows == 0 {
                             return Some(String::new());
                         }
+
                         let last_col = block.cols().saturating_sub(1);
+
                         block
                             .format_range((0, 0), (rows - 1, last_col), true, true)
                             .ok()
@@ -127,9 +140,13 @@ fn run_command_within(
         .iter()
         .filter(|e| matches!(e, HostEvent::CommandFinished))
         .count();
+
     session.write_input(cmd.as_bytes());
+
     std::thread::sleep(Duration::from_millis(300));
+
     session.write_input(b"\r");
+
     wait_for(session, all, timeout, |evs| {
         evs.contains(&HostEvent::Exit)
             || evs
@@ -153,13 +170,16 @@ fn trusted_session() -> Option<(TerminalSession, Vec<HostEvent>)> {
             return None;
         }
     };
+
     let mut all = Vec::new();
+
     assert!(
         wait_for(&session, &mut all, Duration::from_secs(20), |evs| evs
             .contains(&HostEvent::PromptBoundaryTrusted(true)),),
         "integrated prompt never became trusted; events: {all:?}\nscreen:\n{}",
         screen_text(&session)
     );
+
     Some((session, all))
 }
 

@@ -168,8 +168,11 @@ impl<L, S: Clone> PaneTree<L, S> {
                 }
             }
         }
+
         let mut out = Vec::new();
+
         walk(&self.root, &mut out);
+
         out
     }
 
@@ -201,7 +204,9 @@ impl<L, S: Clone> PaneTree<L, S> {
             make_state,
         )
         .expect("focused always names an existing leaf");
+
         self.focused = new_id;
+
         outcome
     }
 
@@ -227,6 +232,7 @@ impl<L, S: Clone> PaneTree<L, S> {
                 .position(|c| matches!(c, PaneNode::Leaf { id, .. } if *id == at))
         {
             let insert_at = if before { index } else { index + 1 };
+
             children.insert(
                 insert_at,
                 PaneNode::Leaf {
@@ -234,6 +240,7 @@ impl<L, S: Clone> PaneTree<L, S> {
                     pane: new_pane,
                 },
             );
+
             return Some(SplitOutcome::Inserted {
                 state: state.clone(),
                 index,
@@ -253,13 +260,16 @@ impl<L, S: Clone> PaneTree<L, S> {
                         pending_ratios: None,
                     },
                 );
+
                 let new_leaf = PaneNode::Leaf {
                     id: new_id,
                     pane: new_pane,
                 };
+
                 let PaneNode::Split { children, .. } = node else {
                     unreachable!()
                 };
+
                 if before {
                     children.extend([new_leaf, old]);
                 } else {
@@ -275,6 +285,7 @@ impl<L, S: Clone> PaneTree<L, S> {
                     if !child.contains(at) {
                         return None;
                     }
+
                     Self::split_at(
                         child,
                         at,
@@ -297,16 +308,20 @@ impl<L, S: Clone> PaneTree<L, S> {
         if self.is_single_leaf() {
             return None;
         }
+
         let (pane, outcome) = Self::remove_at(&mut self.root, id)?;
+
         // Collapse a root split reduced to a single child.
         if let PaneNode::Split { children, .. } = &mut self.root
             && children.len() == 1
         {
             self.root = children.pop().expect("len checked");
         }
+
         if self.focused == id {
             self.focused = self.root.first_leaf_id();
         }
+
         Some((pane, outcome))
     }
 
@@ -317,6 +332,7 @@ impl<L, S: Clone> PaneTree<L, S> {
         else {
             return None;
         };
+
         if let Some(index) = children
             .iter()
             .position(|c| matches!(c, PaneNode::Leaf { id: leaf, .. } if *leaf == id))
@@ -324,6 +340,7 @@ impl<L, S: Clone> PaneTree<L, S> {
             let PaneNode::Leaf { pane, .. } = children.remove(index) else {
                 unreachable!()
             };
+
             let outcome = if children.len() == 1 {
                 RemoveOutcome::Collapsed
             } else {
@@ -332,12 +349,14 @@ impl<L, S: Clone> PaneTree<L, S> {
                     index,
                 }
             };
+
             return Some((pane, outcome));
         }
         let result = children
             .iter_mut()
             .find(|c| c.contains(id))
             .and_then(|c| Self::remove_at(c, id))?;
+
         // Collapse any child split reduced to a single child.
         for child in children.iter_mut() {
             if let PaneNode::Split {
@@ -369,11 +388,14 @@ impl<L, S: Clone> PaneTree<L, S> {
             else {
                 return None;
             };
+
             let index = children.iter().position(|c| c.contains(at))?;
+
             // Deepest match wins (nearest ancestor); recurse first.
             if let Some(found) = walk(&children[index], at, axis) {
                 return Some(found);
             }
+
             (*split_axis == axis).then(|| (state.clone(), index, children.len()))
         }
         walk(&self.root, self.focused, axis)
@@ -394,6 +416,7 @@ impl<L, S: Clone> PaneTree<L, S> {
                 children.iter_mut().for_each(|c| walk(c, f));
             }
         }
+
         walk(&mut self.root, f);
     }
 

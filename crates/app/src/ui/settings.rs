@@ -255,18 +255,22 @@ fn clamp_background_image_opacity(opacity: f64) -> f64 {
 impl AppSettings {
     pub fn load() -> Self {
         let config = nmt_config::get();
+
         let appearance = &config.appearance;
+
         let profiles: Vec<Profile> = if config.profiles.list.is_empty() {
             vec![builtin_profile()]
         } else {
             config.profiles.list.clone()
         };
+
         // An unset or dangling default falls back to the first profile.
         let default_profile = if profiles.iter().any(|p| p.name == config.profiles.default) {
             config.profiles.default.clone()
         } else {
             profiles[0].name.clone()
         };
+
         Self {
             theme: if config.theme.is_empty() {
                 nmt_config::defaults::default_theme()
@@ -312,6 +316,7 @@ impl AppSettings {
     /// Append a new profile with a unique placeholder name.
     pub fn add_profile(&mut self) {
         let mut n = self.profiles.len() + 1;
+
         let name = loop {
             let candidate = format!("Profile {n}");
             if !self.profiles.iter().any(|p| p.name == candidate) {
@@ -319,6 +324,7 @@ impl AppSettings {
             }
             n += 1;
         };
+
         self.profiles.push(Profile {
             name,
             ..builtin_profile()
@@ -331,7 +337,9 @@ impl AppSettings {
         if self.profiles.len() <= 1 || ix >= self.profiles.len() {
             return;
         }
+
         let removed = self.profiles.remove(ix);
+
         if self.default_profile == removed.name {
             self.default_profile = self.profiles[0].name.clone();
         }
@@ -342,6 +350,7 @@ impl AppSettings {
         if self.profiles[ix].name == self.default_profile {
             self.default_profile = name.clone();
         }
+
         self.profiles[ix].name = name;
     }
 
@@ -354,6 +363,7 @@ impl AppSettings {
             .iter()
             .find(|p| p.name == self.default_profile)
             .or_else(|| self.profiles.first());
+
         match profile {
             Some(p) if !p.shell.trim().is_empty() => (
                 Some(p.shell.trim().to_string()),
@@ -369,6 +379,7 @@ impl AppSettings {
             .find(|profile| {
                 let profile_shell =
                     (!profile.shell.trim().is_empty()).then(|| profile.shell.trim());
+
                 profile_shell.is_some_and(|value| {
                     shell.is_some_and(|shell| value.eq_ignore_ascii_case(shell))
                 }) && profile
@@ -401,10 +412,12 @@ impl AppSettings {
             background_image: self.background_image.clone(),
             background_image_opacity: self.background_image_opacity,
         };
+
         let agent = nmt_config::agent::AgentConfig {
             enable_agent_hooks: self.enable_agent_hooks,
             show_agent_usage: self.show_agent_usage,
         };
+
         let system = nmt_config::system::SystemConfig {
             restore_last_session_when_opening: self.restore_last_session_when_opening,
             manage_subprocess_job: self.manage_subprocess_job,
@@ -412,10 +425,13 @@ impl AppSettings {
             confirm_before_closing_workspace: self.confirm_before_closing_workspace,
             prioritize_ui_threads: self.prioritize_ui_threads,
         };
+
         let remote_session = nmt_config::remote_session::RemoteSession {
             enabled: self.remote_session_enabled,
         };
+
         let profiles = self.profiles.clone();
+
         if let Err(err) = nmt_config::save_settings(
             &self.theme,
             &appearance,
@@ -441,6 +457,7 @@ fn effective_surface_background_opacity(window_opacity: f64, image_opacity: Opti
 
 pub(crate) fn surface_background_opacity(cx: &gpui::App) -> f32 {
     let settings = cx.global::<AppSettings>();
+
     effective_surface_background_opacity(
         effective_background_opacity(
             settings.window_transparency_enabled,
@@ -455,6 +472,7 @@ pub(crate) fn surface_background_opacity(cx: &gpui::App) -> f32 {
 
 fn effective_background_image_layer_opacity(window_opacity: f64, image_opacity: f64) -> f64 {
     let uncovered = 1.0 - effective_surface_background_opacity(window_opacity, Some(image_opacity));
+
     if uncovered > 0.0 {
         window_opacity * image_opacity / uncovered
     } else {
@@ -464,6 +482,7 @@ fn effective_background_image_layer_opacity(window_opacity: f64, image_opacity: 
 
 pub(crate) fn background_image_layer_opacity(cx: &gpui::App) -> f32 {
     let settings = cx.global::<AppSettings>();
+
     effective_background_image_layer_opacity(
         effective_background_opacity(
             settings.window_transparency_enabled,
@@ -478,6 +497,7 @@ pub(crate) fn background_image_layer_opacity(cx: &gpui::App) -> f32 {
 pub(crate) fn apply_ui_theme(value: Option<&nmt_config::theme::UiTheme>, cx: &mut App) {
     let configured = value.and_then(|value| {
         let mut config = toml::Table::new();
+
         config.insert("name".to_string(), toml::Value::String(value.name.clone()));
         config.insert(
             "mode".to_string(),
@@ -489,7 +509,9 @@ pub(crate) fn apply_ui_theme(value: Option<&nmt_config::theme::UiTheme>, cx: &mu
                 .to_string(),
             ),
         );
+
         let mut colors = value.colors.clone();
+
         // Size/behavior tokens live at the top level of `ThemeConfig`, but the
         // theme file format keeps everything under `[colors.ui]` — lift them
         // out so themes can set corner radii (they'd otherwise be silently
@@ -501,19 +523,24 @@ pub(crate) fn apply_ui_theme(value: Option<&nmt_config::theme::UiTheme>, cx: &mu
                 }
             }
         }
+
         config.insert("colors".to_string(), colors);
+
         toml::Value::Table(config)
             .try_into::<gpui_component::ThemeConfig>()
             .map(Rc::new)
             .map_err(|err| tracing::warn!("failed to load UI theme: {err}"))
             .ok()
     });
+
     let theme = configured.unwrap_or_else(|| {
         gpui_component::ThemeRegistry::global(cx)
             .default_dark_theme()
             .clone()
     });
+
     let mode = theme.mode;
+
     gpui_component::Theme::global_mut(cx).apply_config(&theme);
     gpui_component::Theme::change(mode, None, cx);
 }
@@ -524,12 +551,17 @@ fn select_theme(name: String, cx: &mut App) {
     } else {
         nmt_config::Config::load_named_theme(&name)
     };
+
     match theme {
         Ok(theme) => {
             nmt_config::set_active_colors(theme.colors.terminal);
+
             apply_ui_theme(theme.ui_theme().as_ref(), cx);
+
             cx.update_global(|settings: &mut AppSettings, _| settings.theme = name);
+
             apply_window_translucency(cx);
+
             cx.refresh_windows();
         }
         Err(err) => tracing::warn!("failed to select theme {name}: {err}"),
@@ -542,7 +574,9 @@ fn load_theme_choices() -> Vec<(String, nmt_config::theme::Theme)> {
 
 fn reload_themes(cx: &mut App) {
     cx.global_mut::<AppSettings>().themes = load_theme_choices();
+
     let selected = cx.global::<AppSettings>().theme.clone();
+
     if selected.is_empty() {
         cx.refresh_windows();
     } else {
@@ -554,12 +588,16 @@ pub(crate) fn watch_themes(cx: &mut App) -> Option<gpui::Task<()>> {
     use notify::Watcher as _;
 
     reload_themes(cx);
+
     let themes_dir = nmt_config::config_dir_path().join("themes");
+
     if let Err(err) = std::fs::create_dir_all(&themes_dir) {
         tracing::warn!("failed to create themes directory: {err}");
         return None;
     }
+
     let (tx, mut rx) = futures::channel::mpsc::unbounded();
+
     let mut watcher =
         match notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
             if event.is_ok() {
@@ -572,12 +610,15 @@ pub(crate) fn watch_themes(cx: &mut App) -> Option<gpui::Task<()>> {
                 return None;
             }
         };
+
     if let Err(err) = watcher.watch(&themes_dir, notify::RecursiveMode::NonRecursive) {
         tracing::warn!("failed to watch themes directory: {err}");
         return None;
     }
+
     Some(cx.spawn(async move |cx| {
         let _watcher = watcher;
+
         while rx.next().await.is_some() {
             let _ = cx.update(reload_themes);
         }
@@ -586,6 +627,7 @@ pub(crate) fn watch_themes(cx: &mut App) -> Option<gpui::Task<()>> {
 
 fn preview_color(color: nmt_config::colors::ColorArray) -> gpui::Hsla {
     let channel = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u32;
+
     rgba(
         channel(color[0]) << 24
             | channel(color[1]) << 16
@@ -604,6 +646,7 @@ fn theme_preview(colors: nmt_config::colors::Colors) -> gpui::Div {
         colors.blue,
         colors.magenta,
     ];
+
     v_flex()
         .w_full()
         .h(px(72.0))
@@ -643,6 +686,7 @@ fn theme_preview(colors: nmt_config::colors::Colors) -> gpui::Div {
 fn theme_list(cx: &mut App) -> gpui::Div {
     let selected = cx.global::<AppSettings>().theme.clone();
     let filter = cx.global::<AppSettings>().theme_filter.to_lowercase();
+
     let themes = cx
         .global::<AppSettings>()
         .themes
@@ -655,6 +699,7 @@ fn theme_list(cx: &mut App) -> gpui::Div {
                 || theme.name.to_lowercase().contains(&filter)
         })
         .collect::<Vec<_>>();
+
     let border = cx.theme().border;
     let selected_border = cx.theme().primary;
     let selected_background = cx.theme().tokens.secondary;
@@ -685,12 +730,14 @@ fn theme_list(cx: &mut App) -> gpui::Div {
                 .enumerate()
                 .map(|(index, (name, theme))| {
                     let is_selected = name == selected;
+
                     let display_name = if theme.name.is_empty() {
                         if name.is_empty() { "Default" } else { &name }
                     } else {
                         &theme.name
                     }
                     .to_string();
+
                     div()
                         .id(("theme-card", index))
                         .w_full()
@@ -721,18 +768,23 @@ fn theme_list(cx: &mut App) -> gpui::Div {
 pub(crate) fn apply_window_translucency(cx: &mut gpui::App) {
     let opacity = surface_background_opacity(cx);
     let theme = gpui_component::Theme::global_mut(cx);
+
     let palette = if theme.mode.is_dark() {
         theme.dark_theme.clone()
     } else {
         theme.light_theme.clone()
     };
+
     theme.apply_config(&palette);
+
     if opacity < 1.0 {
         theme.colors.sidebar = theme.colors.sidebar.opacity(opacity);
+
         // The shell paints this across the whole window as the chrome base
         // layer; it must dim with the rest of the chrome or translucency would
         // be defeated by an opaque backdrop.
         theme.colors.background = theme.colors.background.opacity(opacity);
+
         for token in [
             &mut theme.tokens.title_bar,
             &mut theme.tokens.tab_bar,
@@ -797,20 +849,25 @@ fn opacity_slider_field(target: OpacityTarget) -> SettingField<SharedString> {
                         .step(0.05)
                         .default_value(value)
                 });
+
                 let subscription = cx.subscribe(&slider, move |_, event: &SliderEvent, cx| {
                     let (SliderEvent::Change(value) | SliderEvent::Release(value)) = event;
                     target.set(value.end() as f64, cx.global_mut::<AppSettings>());
                 });
+
                 (slider, subscription)
             };
+
             let (window_slider, window_subscription) = make_slider(OpacityTarget::Window, cx);
             let (image_slider, image_subscription) = make_slider(OpacityTarget::Image, cx);
+
             cx.set_global(OpacitySliderState {
                 window: window_slider,
                 image: image_slider,
                 _subscriptions: [window_subscription, image_subscription],
             });
         }
+
         let sliders = cx.global::<OpacitySliderState>();
         let slider = match target {
             OpacityTarget::Window => &sliders.window,
@@ -819,6 +876,7 @@ fn opacity_slider_field(target: OpacityTarget) -> SettingField<SharedString> {
         .clone();
 
         let current = target.value(cx.global::<AppSettings>()) as f32;
+
         if (slider.read(cx).value().end() - current).abs() > 0.001 {
             slider.update(cx, |state, cx| state.set_value(current, window, cx));
         }
@@ -953,6 +1011,7 @@ fn agent_hook_item(
     let detected = detection_path.as_ref().is_some_and(|path| path.is_file());
     let status_path = hooks_path.clone();
     let action_path = hooks_path;
+
     SettingItem::new(
         name,
         SettingField::checkbox(
@@ -967,14 +1026,17 @@ fn agent_hook_item(
                 let Some(path) = action_path.as_deref() else {
                     return;
                 };
+
                 let result = if enabled {
                     install(path)
                 } else {
                     uninstall(path)
                 };
+
                 if let Err(error) = result {
                     tracing::warn!("failed to update {name} hooks: {error}");
                 }
+
                 cx.refresh_windows();
             },
         ),
@@ -1043,6 +1105,7 @@ pub fn settings_view(cx: &App) -> Settings {
     let transparency_enabled = cx.global::<AppSettings>().window_transparency_enabled;
     let background_image_enabled = cx.global::<AppSettings>().background_image.is_some();
     let shell_integration_mismatched = nmt_platform::shell_integration_dll_mismatched();
+
     let sidebar_style = gpui::StyleRefinement::default()
         .bg(cx.theme().sidebar)
         .border_t_1()
@@ -1051,6 +1114,7 @@ pub fn settings_view(cx: &App) -> Settings {
         .border_color(cx.theme().sidebar_border)
         .rounded(cx.theme().radius_lg)
         .overflow_hidden();
+
     Settings::new("app-settings")
         .sidebar_width(px(240.0))
         .sidebar_style(&sidebar_style)
@@ -1466,6 +1530,7 @@ pub fn settings_view(cx: &App) -> Settings {
                                         } else {
                                             nmt_platform::unregister_shell_integration()
                                         };
+
                                         if let Err(err) = result {
                                             tracing::warn!(
                                                 "failed to toggle Windows context menu: {err:#}"
@@ -1509,6 +1574,7 @@ pub fn settings_view(cx: &App) -> Settings {
                                 |cx| cx.global::<AppSettings>().prioritize_ui_threads,
                                 |value, cx| {
                                     cx.global_mut::<AppSettings>().prioritize_ui_threads = value;
+
                                     cx.global::<crate::PlatformHandle>()
                                         .0
                                         .set_ui_thread_priority(value);
@@ -1533,6 +1599,7 @@ fn profiles_page(profiles: &[Profile]) -> SettingPage {
             } else {
                 p.name.clone()
             };
+
             (
                 SharedString::from(p.name.clone()),
                 SharedString::from(label),
@@ -1579,6 +1646,7 @@ fn profiles_page(profiles: &[Profile]) -> SettingPage {
         } else {
             profile.name.clone()
         };
+
         page = page.group(
             SettingGroup::new()
                 // Rounded outline box so each profile reads as one card.
@@ -1653,14 +1721,18 @@ fn profiles_page(profiles: &[Profile]) -> SettingPage {
 fn shell_path_field(ix: usize) -> SettingField<SharedString> {
     SettingField::render(move |options, window, cx| {
         let value = SharedString::from(cx.global::<AppSettings>().profiles[ix].shell.clone());
+
         let state =
             window.use_keyed_state(SharedString::from(format!("shell-path-state-{ix}")), cx, {
                 let value = value.clone();
+
                 move |window, cx| {
                     let input = cx.new(|cx| InputState::new(window, cx).default_value(value));
+
                     let _subscription = cx.subscribe(&input, move |_, input, event, cx| {
                         if matches!(event, InputEvent::Change) {
                             let value = input.read(cx).value().to_string();
+
                             if let Some(profile) =
                                 cx.global_mut::<AppSettings>().profiles.get_mut(ix)
                             {
@@ -1677,6 +1749,7 @@ fn shell_path_field(ix: usize) -> SettingField<SharedString> {
             });
 
         let input = state.read(cx).input.clone();
+
         if input.read(cx).value() != value {
             input.update(cx, |input, cx| {
                 input.set_value(value.clone(), window, cx);
@@ -1684,6 +1757,7 @@ fn shell_path_field(ix: usize) -> SettingField<SharedString> {
         }
 
         let browse_input = input.clone();
+
         v_flex()
             .gap_2()
             .map(|this| {
@@ -1717,13 +1791,16 @@ fn shell_path_field(ix: usize) -> SettingField<SharedString> {
                                     extensions: vec!["exe".into()],
                                 }],
                             });
+
                             let input = browse_input.clone();
+
                             window
                                 .spawn(cx, async move |cx| {
                                     if let Ok(Ok(Some(paths))) = rx.await
                                         && let Some(path) = paths.first()
                                     {
                                         let value = path.display().to_string();
+
                                         let _ = input.update_in(cx, |input, window, cx| {
                                             input.set_value(value, window, cx);
                                         });

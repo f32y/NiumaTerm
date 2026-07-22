@@ -73,6 +73,7 @@ impl EventedAnonRead {
 
         let thread = {
             let inner = inner.clone();
+
             spawn(move || {
                 use std::io::Read;
 
@@ -88,11 +89,14 @@ impl EventedAnonRead {
 
                     // Write from the temp buffer into the producer
                     let mut written = 0usize;
+
                     while written < nbytes {
                         // Wait for buffer to clear if need be.
                         if producer.is_full() {
                             let mut wait_tag = inner.wait_tag.lock();
+
                             inner.sig_buffer_not_full.wait(&mut wait_tag);
+
                             if inner.done.load(Ordering::SeqCst) {
                                 return;
                             }
@@ -127,6 +131,7 @@ impl io::Read for EventedAnonRead {
             Ok(err) => {
                 // Other thread will be closing
                 self.thread.take().unwrap().join().unwrap();
+
                 return Err(io::Error::new(io::ErrorKind::BrokenPipe, err));
             }
             Err(TryRecvError::Disconnected) => {
@@ -225,6 +230,7 @@ impl EventedAnonWrite {
 
         let thread = {
             let inner = inner.clone();
+
             spawn(move || {
                 use std::io::Write;
                 let mut tmp_buf = [0u8; 65535];
@@ -242,7 +248,9 @@ impl EventedAnonWrite {
                         // Wait for buffer to have contents
                         if consumer.is_empty() {
                             let mut wait_tag = inner.wait_tag.lock();
+
                             inner.sig_buffer_not_empty.wait(&mut wait_tag);
+
                             if inner.done.load(Ordering::SeqCst) {
                                 return;
                             }
@@ -259,6 +267,7 @@ impl EventedAnonWrite {
                     };
 
                     let mut written = 0usize;
+
                     while written < nbytes {
                         written +=
                             try_or_send!(pipe.write(&tmp_buf[written..nbytes]), error_sender);
@@ -286,6 +295,7 @@ impl io::Write for EventedAnonWrite {
             Ok(err) => {
                 // Other thread will be closing
                 self.thread.take().unwrap().join().unwrap();
+
                 return Err(io::Error::new(io::ErrorKind::BrokenPipe, err));
             }
             Err(TryRecvError::Disconnected) => {
@@ -308,6 +318,7 @@ impl io::Write for EventedAnonWrite {
         }
 
         self.inner.sig_buffer_not_empty.notify_one();
+
         Ok(nbytes)
     }
 

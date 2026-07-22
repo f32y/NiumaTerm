@@ -26,14 +26,19 @@ pub fn row_selection_for(
     cols: usize,
 ) -> Option<RowSelection> {
     let sel = sel?;
+
     if cols == 0 {
         return None;
     }
+
     let line = Line(y as i32);
+
     if line < sel.start.row || line > sel.end.row {
         return None;
     }
+
     let cols_max = cols.saturating_sub(1);
+
     // Block selections: every row inside the band uses the same span.
     if sel.is_block {
         let lo = sel.start.col.0.min(cols_max);
@@ -43,16 +48,19 @@ pub fn row_selection_for(
             hi: hi as u16,
         });
     }
+
     let lo = if line == sel.start.row {
         sel.start.col.0
     } else {
         0
     };
+
     let hi = if line == sel.end.row {
         sel.end.col.0
     } else {
         cols_max
     };
+
     Some(RowSelection {
         lo: lo.min(cols_max) as u16,
         hi: hi.min(cols_max) as u16,

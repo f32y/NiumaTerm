@@ -3,35 +3,33 @@
 //! active, and the set is never empty — `close_workspace` refuses the last one, so
 //! `active` always points at a real workspace (mirrors `TabManager`'s invariant).
 //!
-//! Pure logic — generic over the surface type `S` so it unit-tests without a PTY.
-
 use nmt_agent_utils::AgentRuntimeStatus;
 
-use crate::active_list::{ActiveList, HasId};
 use crate::tabs::{TabId, TabManager};
+use crate::ui::{ActiveList, HasId, TerminalPaneTree};
 
 /// Stable per-workspace identity. Survives close (index changes, id does not).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct WorkspaceId(pub u64);
 
-pub struct Workspace<S> {
+pub struct Workspace {
     id: WorkspaceId,
     name: String,
     cwd: String,
     busy: bool,
     pinned: bool,
-    tabs: TabManager<S>,
+    tabs: TabManager<TerminalPaneTree>,
 }
 
-impl<S> HasId for Workspace<S> {
+impl HasId for Workspace {
     type Id = WorkspaceId;
     fn id(&self) -> WorkspaceId {
         self.id
     }
 }
 
-pub struct WorkspaceManager<S> {
-    workspaces: ActiveList<Workspace<S>>,
+pub struct WorkspaceManager {
+    workspaces: ActiveList<Workspace>,
 }
 
 pub const DEFAULT_WORKSPACE_NAME: &str = "New Workspace";
@@ -85,10 +83,10 @@ pub struct WorkspaceSummary {
     pub closeable: bool,
 }
 
-impl<S> WorkspaceManager<S> {
+impl WorkspaceManager {
     /// Start with a single active workspace. There is no empty state.
     pub fn new(
-        tabs: TabManager<S>,
+        tabs: TabManager<TerminalPaneTree>,
         id: WorkspaceId,
         name: String,
         cwd: String,
@@ -109,7 +107,7 @@ impl<S> WorkspaceManager<S> {
     /// Append a workspace (already seeded with its tab set) and make it active.
     pub fn new_workspace(
         &mut self,
-        tabs: TabManager<S>,
+        tabs: TabManager<TerminalPaneTree>,
         id: WorkspaceId,
         name: String,
         cwd: String,
@@ -129,7 +127,7 @@ impl<S> WorkspaceManager<S> {
     /// Add a restored workspace with its saved pin state.
     pub fn new_workspace_with_pinned(
         &mut self,
-        tabs: TabManager<S>,
+        tabs: TabManager<TerminalPaneTree>,
         id: WorkspaceId,
         name: String,
         cwd: String,
@@ -176,7 +174,7 @@ impl<S> WorkspaceManager<S> {
     /// surfaces. Refuses the last workspace and pinned workspaces (`None`).
     /// After closing the active workspace the active falls to the right
     /// neighbour, or the left when there is no right neighbour.
-    pub fn close_workspace(&mut self, id: WorkspaceId) -> Option<Workspace<S>> {
+    pub fn close_workspace(&mut self, id: WorkspaceId) -> Option<Workspace> {
         if self.workspaces.find(id)?.pinned {
             return None;
         }
@@ -188,7 +186,7 @@ impl<S> WorkspaceManager<S> {
         self.workspaces.activate(index);
     }
 
-    pub fn active_tabs(&self) -> &TabManager<S> {
+    pub fn active_tabs(&self) -> &TabManager<TerminalPaneTree> {
         &self.workspaces.active().tabs
     }
 
@@ -207,17 +205,17 @@ impl<S> WorkspaceManager<S> {
         }
     }
 
-    pub fn active_tabs_mut(&mut self) -> &mut TabManager<S> {
+    pub fn active_tabs_mut(&mut self) -> &mut TabManager<TerminalPaneTree> {
         &mut self.workspaces.active_mut().tabs
     }
 
     /// The tab set of the workspace with `id`.
-    pub fn tabs_of(&self, id: WorkspaceId) -> Option<&TabManager<S>> {
+    pub fn tabs_of(&self, id: WorkspaceId) -> Option<&TabManager<TerminalPaneTree>> {
         self.workspaces.find(id).map(|ws| &ws.tabs)
     }
 
     /// Tab sets of every workspace (the window-close process sweep).
-    pub fn all_tabs(&self) -> impl Iterator<Item = &TabManager<S>> {
+    pub fn all_tabs(&self) -> impl Iterator<Item = &TabManager<TerminalPaneTree>> {
         self.workspaces.items().iter().map(|ws| &ws.tabs)
     }
 
@@ -227,7 +225,7 @@ impl<S> WorkspaceManager<S> {
 
     /// The tab set that contains `tab_id`, searched across all workspaces (a
     /// background workspace's surface still polls host events).
-    pub fn tab_manager_for(&self, tab_id: TabId) -> Option<&TabManager<S>> {
+    pub fn tab_manager_for(&self, tab_id: TabId) -> Option<&TabManager<TerminalPaneTree>> {
         self.workspaces
             .items()
             .iter()
@@ -237,7 +235,7 @@ impl<S> WorkspaceManager<S> {
 
     /// Id of the tab whose surface matches `pred`, searched across all
     /// workspaces (host events arrive from background workspaces too).
-    pub fn find_tab_id(&self, pred: impl Fn(&S) -> bool) -> Option<TabId> {
+    pub fn find_tab_id(&self, pred: impl Fn(&TerminalPaneTree) -> bool) -> Option<TabId> {
         self.workspaces
             .items()
             .iter()
@@ -246,7 +244,10 @@ impl<S> WorkspaceManager<S> {
             .map(|tab| tab.id())
     }
 
-    pub fn tab_manager_for_mut(&mut self, tab_id: TabId) -> Option<&mut TabManager<S>> {
+    pub fn tab_manager_for_mut(
+        &mut self,
+        tab_id: TabId,
+    ) -> Option<&mut TabManager<TerminalPaneTree>> {
         self.workspaces
             .items_mut()
             .iter_mut()
@@ -296,111 +297,6 @@ impl<S> WorkspaceManager<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A manager of `n` workspaces, each holding a one-tab `TabManager<u32>`. The
-    /// workspace id and its single tab's surface value both equal the 1-based index
-    /// for easy assertions.
-    fn manager(n: u32) -> WorkspaceManager<u32> {
-        let tabs = || TabManager::new(1u32, TabId(1), "PowerShell".into());
-        let mut mgr = WorkspaceManager::new(
-            tabs(),
-            WorkspaceId(1),
-            "Workspace 1".into(),
-            "/".into(),
-            false,
-        );
-        for i in 2..=n {
-            mgr.new_workspace(
-                tabs(),
-                WorkspaceId(i as u64),
-                format!("Workspace {i}"),
-                "/".into(),
-                false,
-            );
-        }
-        mgr
-    }
-
-    #[test]
-    fn starts_with_one_active_workspace() {
-        let mgr = manager(1);
-        assert_eq!(mgr.len(), 1);
-        assert_eq!(mgr.active_index(), 0);
-        assert_eq!(mgr.active_id(), WorkspaceId(1));
-    }
-
-    #[test]
-    fn new_workspace_becomes_active() {
-        let mut mgr = manager(1);
-        mgr.new_workspace(
-            TabManager::new(9u32, TabId(9), "PowerShell".into()),
-            WorkspaceId(2),
-            "Workspace 2".into(),
-            "/".into(),
-            false,
-        );
-        assert_eq!(mgr.active_index(), 1);
-        assert_eq!(mgr.active_id(), WorkspaceId(2));
-    }
-
-    #[test]
-    fn close_is_refused_for_single_workspace() {
-        let mut mgr = manager(1);
-        assert!(mgr.close_workspace(WorkspaceId(1)).is_none());
-        assert_eq!(mgr.len(), 1);
-    }
-
-    #[test]
-    fn close_active_falls_to_right_neighbour() {
-        let mut mgr = manager(3); // active = ws3 (index 2)
-        mgr.activate(1); // active = ws2
-        let removed = mgr.close_workspace(WorkspaceId(2));
-        assert!(removed.is_some());
-        assert_eq!(mgr.active_id(), WorkspaceId(3));
-        assert_eq!(mgr.active_index(), 1);
-    }
-
-    #[test]
-    fn close_active_with_no_right_neighbour_falls_left() {
-        let mut mgr = manager(3); // active = ws3 (rightmost)
-        mgr.close_workspace(WorkspaceId(3));
-        assert_eq!(mgr.active_id(), WorkspaceId(2));
-        assert_eq!(mgr.active_index(), 1);
-    }
-
-    #[test]
-    fn activate_out_of_range_is_ignored() {
-        let mut mgr = manager(2);
-        mgr.activate(0);
-        mgr.activate(5);
-        assert_eq!(mgr.active_index(), 0);
-    }
-
-    #[test]
-    fn active_tabs_routes_to_active_workspace() {
-        let mut mgr = manager(1);
-        mgr.new_workspace(
-            TabManager::new(42u32, TabId(42), "PowerShell".into()),
-            WorkspaceId(2),
-            "Workspace 2".into(),
-            "/".into(),
-            false,
-        );
-        assert_eq!(*mgr.active_tabs().active(), 42);
-        mgr.activate(0);
-        assert_eq!(*mgr.active_tabs().active(), 1);
-    }
-
-    #[test]
-    fn rename_updates_name() {
-        let mut mgr = manager(1);
-        mgr.rename(WorkspaceId(1), "project".into());
-        assert_eq!(mgr.summaries()[0].name, "project");
-        // Blank and unknown-id renames are ignored.
-        mgr.rename(WorkspaceId(1), "   ".into());
-        mgr.rename(WorkspaceId(9), "ghost".into());
-        assert_eq!(mgr.summaries()[0].name, "project");
-    }
 
     /// Summaries with the given cwds, ids = 1-based position.
     fn summaries(cwds: &[&str]) -> Vec<WorkspaceSummary> {
@@ -466,101 +362,5 @@ mod tests {
     #[test]
     fn tie_on_depth_goes_to_the_earlier_workspace() {
         assert_eq!(matched(&["C:/A", "c:/a"], "C:/A/B"), Some(WorkspaceId(1)));
-    }
-
-    fn ids(mgr: &WorkspaceManager<u32>) -> Vec<WorkspaceId> {
-        mgr.summaries().into_iter().map(|ws| ws.id).collect()
-    }
-
-    #[test]
-    fn pinning_moves_to_end_of_pinned_group() {
-        let mut mgr = manager(4);
-        mgr.set_pinned(WorkspaceId(2), true);
-        mgr.set_pinned(WorkspaceId(4), true);
-        assert_eq!(
-            ids(&mgr),
-            vec![
-                WorkspaceId(2),
-                WorkspaceId(4),
-                WorkspaceId(1),
-                WorkspaceId(3)
-            ]
-        );
-        assert!(mgr.summaries()[0].pinned);
-        assert!(!mgr.summaries()[2].pinned);
-    }
-
-    #[test]
-    fn unpinning_moves_to_start_of_unpinned_group() {
-        let mut mgr = manager(4);
-        mgr.set_pinned(WorkspaceId(2), true);
-        mgr.set_pinned(WorkspaceId(4), true);
-        mgr.set_pinned(WorkspaceId(2), false);
-        assert_eq!(
-            ids(&mgr),
-            vec![
-                WorkspaceId(4),
-                WorkspaceId(2),
-                WorkspaceId(1),
-                WorkspaceId(3)
-            ]
-        );
-    }
-
-    #[test]
-    fn reorder_moves_within_pin_group_only() {
-        let mut mgr = manager(4);
-        mgr.set_pinned(WorkspaceId(2), true);
-        mgr.set_pinned(WorkspaceId(4), true);
-        mgr.reorder(0, 1);
-        assert_eq!(
-            ids(&mgr),
-            vec![
-                WorkspaceId(4),
-                WorkspaceId(2),
-                WorkspaceId(1),
-                WorkspaceId(3)
-            ]
-        );
-        mgr.reorder(2, 3);
-        assert_eq!(
-            ids(&mgr),
-            vec![
-                WorkspaceId(4),
-                WorkspaceId(2),
-                WorkspaceId(3),
-                WorkspaceId(1)
-            ]
-        );
-        mgr.reorder(1, 2);
-        assert_eq!(
-            ids(&mgr),
-            vec![
-                WorkspaceId(4),
-                WorkspaceId(2),
-                WorkspaceId(3),
-                WorkspaceId(1)
-            ]
-        );
-    }
-
-    #[test]
-    fn active_workspace_follows_pin_and_reorder() {
-        let mut mgr = manager(4);
-        mgr.activate(1);
-        mgr.set_pinned(WorkspaceId(2), true);
-        assert_eq!(mgr.active_id(), WorkspaceId(2));
-        mgr.set_pinned(WorkspaceId(4), true);
-        mgr.reorder(1, 0);
-        assert_eq!(mgr.active_id(), WorkspaceId(2));
-    }
-
-    #[test]
-    fn close_refuses_pinned_workspace() {
-        let mut mgr = manager(2);
-        mgr.set_pinned(WorkspaceId(1), true);
-        assert!(mgr.close_workspace(WorkspaceId(1)).is_none());
-        assert_eq!(mgr.len(), 2);
-        assert!(!mgr.summaries()[0].closeable);
     }
 }

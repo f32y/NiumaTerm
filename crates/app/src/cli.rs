@@ -83,12 +83,16 @@ pub(crate) fn parse_nmt_url(url: &str) -> Result<CliAction, String> {
                             .map_err(|_| format!("{name} in {url} is not UTF-8"))
                     })
             };
+
             let route = AgentRoute::parse(&value("route")?)
                 .map_err(|_| format!("invalid route in {url}"))?;
+
             let notification_id = value("notification_id")?;
+
             if notification_id.len() > 512 || notification_id.chars().any(char::is_control) {
                 return Err(format!("invalid notification_id in {url}"));
             }
+
             Ok(CliAction::FocusNotification {
                 route,
                 notification_id,
@@ -100,11 +104,14 @@ pub(crate) fn parse_nmt_url(url: &str) -> Result<CliAction, String> {
                 .find_map(|kv| kv.strip_prefix("path="))
                 .filter(|v| !v.is_empty())
                 .ok_or_else(|| format!("missing path in {url}"))?;
+
             let decoded = percent_decode_str(encoded)
                 .decode_utf8()
                 .map_err(|err| format!("path in {url} is not UTF-8: {err}"))?;
+
             let path = std::path::absolute(Path::new(decoded.as_ref()))
                 .map_err(|err| format!("cannot resolve path in {url}: {err}"))?;
+
             Ok(if verb == "new_tab" {
                 CliAction::NewTab { path }
             } else {

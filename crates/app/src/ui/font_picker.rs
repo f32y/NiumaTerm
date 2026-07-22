@@ -73,6 +73,7 @@ impl Global for FontPickerGlobal {}
 
 fn current_family(target: FontTarget, cx: &App) -> SharedString {
     let settings = cx.global::<AppSettings>();
+
     match target {
         FontTarget::Terminal => settings.terminal_font_family.clone(),
         FontTarget::Ui => settings.ui_font_family.clone(),
@@ -85,6 +86,7 @@ fn monospace_filter(target: FontTarget, cx: &App) -> bool {
 
 fn slot(target: FontTarget, cx: &App) -> &Option<FontPicker> {
     let global = cx.global::<FontPickerGlobal>();
+
     match target {
         FontTarget::Terminal => &global.terminal,
         FontTarget::Ui => &global.ui,
@@ -93,6 +95,7 @@ fn slot(target: FontTarget, cx: &App) -> &Option<FontPicker> {
 
 fn slot_mut(target: FontTarget, cx: &mut App) -> &mut Option<FontPicker> {
     let global = cx.global_mut::<FontPickerGlobal>();
+
     match target {
         FontTarget::Terminal => &mut global.terminal,
         FontTarget::Ui => &mut global.ui,
@@ -102,6 +105,7 @@ fn slot_mut(target: FontTarget, cx: &mut App) -> &mut Option<FontPicker> {
 pub fn font_family_field(target: FontTarget) -> SettingField<SharedString> {
     SettingField::render(move |options, window, cx| {
         let select = ensure_picker(target, window, cx);
+
         Select::new(&select)
             .menu_width(px(320.))
             .when(options.layout.is_vertical(), |this| this.w_full())
@@ -117,21 +121,26 @@ fn ensure_picker(target: FontTarget, window: &mut Window, cx: &mut App) -> Entit
     if slot(target, cx).is_none() {
         let fonts = scan_fonts(window);
         let items = font_items(&fonts, monospace_only);
+
         let select = cx.new(|cx| {
             SelectState::new(SearchableVec::new(items), None, window, cx).searchable(true)
         });
+
         select.update(cx, |state, cx| {
             state.set_selected_value(&family, window, cx);
         });
+
         let confirm = cx.subscribe(&select, move |_, event: &SelectEvent<_>, cx| {
             if let SelectEvent::Confirm(Some(name)) = event {
                 let settings = cx.global_mut::<AppSettings>();
+
                 match target {
                     FontTarget::Terminal => settings.terminal_font_family = name.clone(),
                     FontTarget::Ui => settings.ui_font_family = name.clone(),
                 }
             }
         });
+
         *slot_mut(target, cx) = Some(FontPicker {
             select,
             fonts,
@@ -145,10 +154,12 @@ fn ensure_picker(target: FontTarget, window: &mut Window, cx: &mut App) -> Entit
 
     if picker.applied_monospace_only != monospace_only {
         let items = font_items(&picker.fonts, monospace_only);
+
         select.update(cx, |state, cx| {
             state.set_items(SearchableVec::new(items), window, cx);
             state.set_selected_value(&family, window, cx);
         });
+
         slot_mut(target, cx)
             .as_mut()
             .expect("set above")
@@ -185,6 +196,7 @@ fn scan_fonts(window: &mut Window) -> Vec<(SharedString, bool)> {
 /// proportional, which is fine for a list filter.
 fn is_monospace(family: &str, window: &mut Window) -> bool {
     const SAMPLE: &str = "iM";
+
     let run = TextRun {
         len: SAMPLE.len(),
         font: gpui::font(family),
@@ -193,10 +205,13 @@ fn is_monospace(family: &str, window: &mut Window) -> bool {
         underline: None,
         strikethrough: None,
     };
+
     let line = window
         .text_system()
         .shape_line(SAMPLE.into(), px(14.), &[run], None);
+
     let i_width = line.x_for_index(1).as_f32();
     let m_width = (line.x_for_index(2) - line.x_for_index(1)).as_f32();
+
     i_width > 0.0 && (i_width - m_width).abs() < 0.5
 }

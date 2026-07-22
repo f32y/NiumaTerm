@@ -37,10 +37,13 @@ impl CellMetrics {
 
 pub(crate) fn terminal_text_style(window: &Window, cx: &App) -> TextStyle {
     let mut style = window.text_style();
+
     let size = font_size_px(cx);
+
     style.font_family = font_family(cx).into();
     style.font_size = px(size).into();
     style.line_height = px(size * line_height_multiplier(cx)).into();
+
     style
 }
 
@@ -52,6 +55,7 @@ pub(crate) fn measure_cell(window: &mut Window, cx: &App) -> CellMetrics {
         window
             .text_system()
             .shape_line("0".into(), font_size, std::slice::from_ref(&run), None);
+
     CellMetrics {
         width_px: shaped.width().as_f32().max(1.0),
         height_px: style

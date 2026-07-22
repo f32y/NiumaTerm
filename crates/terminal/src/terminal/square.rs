@@ -181,7 +181,9 @@ impl HyperlinkInner {
                 let mut id = HYPERLINK_ID_SUFFIX
                     .fetch_add(1, Ordering::Relaxed)
                     .to_string();
+
                 id.push_str("_yt");
+
                 id
             }
         };
@@ -244,6 +246,7 @@ impl Square {
     #[inline]
     pub fn c(self) -> char {
         let cp = ((self.0 >> CODEPOINT_SHIFT) & CODEPOINT_MASK) as u32;
+
         // Safety: we only ever store valid Unicode scalar values via set_c.
         char::from_u32(cp).unwrap_or('\0')
     }
@@ -251,7 +254,9 @@ impl Square {
     #[inline]
     pub fn set_c(&mut self, c: char) {
         let cp = c as u32 as u64;
+
         debug_assert!(cp <= CODEPOINT_MASK, "codepoint exceeds 21 bits");
+
         self.0 = (self.0 & !CODEPOINT_MASK) | ((cp & CODEPOINT_MASK) << CODEPOINT_SHIFT);
     }
 
@@ -279,14 +284,18 @@ impl Square {
     #[inline]
     pub fn insert_cell_flag(&mut self, f: CellFlags) {
         let mut cur = self.cell_flags();
+
         cur.insert(f);
+
         self.set_cell_flags(cur);
     }
 
     #[inline]
     pub fn remove_cell_flag(&mut self, f: CellFlags) {
         let mut cur = self.cell_flags();
+
         cur.remove(f);
+
         self.set_cell_flags(cur);
     }
 
@@ -321,12 +330,14 @@ impl Square {
     #[inline(always)]
     pub fn extras_id(self) -> Option<ExtrasId> {
         let id = ((self.0 & EXTRAS_ID_MASK) >> EXTRAS_ID_SHIFT) as ExtrasId;
+
         if id == 0 { None } else { Some(id) }
     }
 
     #[inline]
     pub fn set_extras_id(&mut self, id: Option<ExtrasId>) {
         let bits = id.unwrap_or(0) as u64;
+
         self.0 = (self.0 & !EXTRAS_ID_MASK) | (bits << EXTRAS_ID_SHIFT);
     }
 
@@ -341,6 +352,7 @@ impl Square {
     #[inline]
     pub fn set_bg_palette(&mut self, idx: u8) {
         let preserved = self.0 & CELL_FLAGS_MASK;
+
         self.0 = preserved
             | ((ContentTag::BgPalette as u64) << CONTENT_TAG_SHIFT)
             | ((idx as u64) << BG_PALETTE_SHIFT);
@@ -350,6 +362,7 @@ impl Square {
     #[inline]
     pub fn set_bg_rgb(&mut self, r: u8, g: u8, b: u8) {
         let preserved = self.0 & CELL_FLAGS_MASK;
+
         self.0 = preserved
             | ((ContentTag::BgRgb as u64) << CONTENT_TAG_SHIFT)
             | ((r as u64) << BG_RGB_R_SHIFT)
