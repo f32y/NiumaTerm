@@ -197,20 +197,26 @@ fn selected_config_dir(path: PathBuf) -> PathBuf {
     config_dir_for_mode(path, TESTING_MODE.load(Ordering::Relaxed))
 }
 
+/// Home directory with a temp-dir fallback: a session without a resolvable
+/// home (stripped-down service accounts) gets per-boot config instead of a
+/// startup panic.
+fn home_dir_or_temp() -> PathBuf {
+    home_dir().unwrap_or_else(env::temp_dir)
+}
+
 #[cfg(target_os = "macos")]
 #[inline]
 fn base_config_dir_path() -> PathBuf {
     env::var("NMT_CONFIG_HOME")
         .map(PathBuf::from)
-        .unwrap_or(home_dir().unwrap().join(".config").join("NiumaTerm"))
+        .unwrap_or(home_dir_or_temp().join(".config").join("NiumaTerm"))
 }
 
 #[cfg(target_os = "windows")]
 #[inline]
 fn base_config_dir_path() -> PathBuf {
     env::var("NMT_CONFIG_HOME").map(PathBuf::from).unwrap_or(
-        home_dir()
-            .unwrap()
+        home_dir_or_temp()
             .join("AppData")
             .join("Local")
             .join("NiumaTerm"),
@@ -223,7 +229,7 @@ fn base_config_dir_path() -> PathBuf {
     env::var("NMT_CONFIG_HOME").map(PathBuf::from).unwrap_or(
         env::var("XDG_CONFIG_HOME")
             .map(PathBuf::from)
-            .unwrap_or(home_dir().unwrap().join(".config"))
+            .unwrap_or(home_dir_or_temp().join(".config"))
             .join("NiumaTerm"),
     )
 }
