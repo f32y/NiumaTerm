@@ -618,6 +618,11 @@ fn handle_response(
                         let _ = reply.send(Err(HubClientError::new(message)));
                     }
                 }
+            } else {
+                // Fire-and-forget requests (Input/Resize) carry request_id 0,
+                // so their failures have no pending entry to resolve; without
+                // this log they would vanish entirely.
+                tracing::warn!("SessionHub reported an error (request {request_id}): {message}");
             }
         }
         HubResponse::Ack { .. } => {}

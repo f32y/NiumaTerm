@@ -19,6 +19,7 @@ nmt_terminal.workspace = true
 parking_lot.workspace = true
 raw_sync.workspace = true
 serde.workspace = true
+tracing.workspace = true
 serde_json.workspace = true
 shared_memory.workspace = true
 windows-sys.workspace = true
