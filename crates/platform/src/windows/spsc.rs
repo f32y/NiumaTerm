@@ -2,19 +2,24 @@
 
 use std::cell::UnsafeCell;
 use std::io::{self, Read, Write};
-use std::mem;
+use std::ptr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+// Per-byte UnsafeCell instead of UnsafeCell<Box<[u8]>>: reader and writer copy
+// through raw pointers derived from a shared `&[UnsafeCell<u8>]`, so neither
+// side ever materializes a `&mut` over the whole buffer while the other thread
+// accesses its disjoint region. UnsafeCell<u8> is repr(transparent), so the
+// slice base pointer can be cast to *mut u8 for bulk copies.
 struct SpscBuffer {
-    buf: UnsafeCell<Box<[u8]>>,
+    buf: Box<[UnsafeCell<u8>]>,
     len: AtomicUsize,
 }
 
 impl SpscBuffer {
     fn new(size: usize) -> Self {
         Self {
-            buf: UnsafeCell::new(vec![0; size].into_boxed_slice()),
+            buf: (0..size).map(|_| UnsafeCell::new(0)).collect(),
             len: AtomicUsize::new(0),
         }
     }
@@ -24,7 +29,11 @@ impl SpscBuffer {
     }
 
     fn capacity(&self) -> usize {
-        unsafe { &*self.buf.get() }.len()
+        self.buf.len()
+    }
+
+    fn data_ptr(&self) -> *mut u8 {
+        self.buf.as_ptr() as *mut u8
     }
 
     fn is_empty(&self) -> bool {
@@ -71,10 +80,7 @@ impl SpscBufferReader {
     pub fn read_to_slice(&mut self, buf: &mut [u8]) -> usize {
         use std::cmp::min;
 
-        #[allow(clippy::transmute_ptr_to_ref)]
-        let ringbuf: &mut Box<[u8]> = unsafe { mem::transmute(self.buffer.buf.get()) };
-
-        let ringbuf_capacity = ringbuf.len();
+        let ringbuf_capacity = self.buffer.capacity();
         let ringbuf_len = self.buffer.len.load(Ordering::SeqCst);
 
         // Max number of bytes we might read
@@ -82,7 +88,16 @@ impl SpscBufferReader {
         let contents_until_end = ringbuf_capacity - self.start;
         let read_size = min(max_read_size, contents_until_end);
 
-        buf[..read_size].copy_from_slice(&ringbuf[self.start..self.start + read_size]);
+        // Safety: `len` guarantees [start, start + read_size) holds published
+        // data the writer will not touch until we fetch_sub below, and the
+        // range is in bounds of the allocation.
+        unsafe {
+            ptr::copy_nonoverlapping(
+                self.buffer.data_ptr().add(self.start),
+                buf.as_mut_ptr(),
+                read_size,
+            );
+        }
         self.start = (self.start + read_size) % ringbuf_capacity;
         self.buffer.len.fetch_sub(read_size, Ordering::SeqCst);
 
@@ -133,18 +148,24 @@ impl SpscBufferWriter {
     pub fn write_from_slice(&mut self, buf: &[u8]) -> usize {
         use std::cmp::min;
 
-        #[allow(clippy::transmute_ptr_to_ref)]
-        let ringbuf: &mut Box<[u8]> = unsafe { mem::transmute(self.buffer.buf.get()) };
-
-        let ringbuf_capacity = ringbuf.len();
+        let ringbuf_capacity = self.buffer.capacity();
         let ringbuf_len = self.buffer.len.load(Ordering::SeqCst);
 
-        // Max number of bytes we might read
+        // Max number of bytes we might write
         let max_write_size = min(buf.len(), ringbuf_capacity - ringbuf_len);
         let space_until_end = ringbuf_capacity - self.end;
         let write_size = min(max_write_size, space_until_end);
 
-        ringbuf[self.end..self.end + write_size].copy_from_slice(&buf[..write_size]);
+        // Safety: `len` guarantees [end, end + write_size) is free space the
+        // reader will not touch until we fetch_add below, and the range is in
+        // bounds of the allocation.
+        unsafe {
+            ptr::copy_nonoverlapping(
+                buf.as_ptr(),
+                self.buffer.data_ptr().add(self.end),
+                write_size,
+            );
+        }
         self.end = (self.end + write_size) % ringbuf_capacity;
         self.buffer.len.fetch_add(write_size, Ordering::SeqCst);
 
