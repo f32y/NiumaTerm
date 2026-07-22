@@ -181,7 +181,9 @@ impl StreamState {
         if self.exited {
             return;
         }
+
         let seq = self.take_seq();
+
         self.publish(SessionEvent::Output { seq, data });
     }
 
@@ -189,14 +191,19 @@ impl StreamState {
         if self.exited {
             return;
         }
+
         self.exited = true;
+
         let seq = self.take_seq();
+
         self.publish(SessionEvent::Exited { seq });
     }
 
     fn take_seq(&mut self) -> u64 {
         let seq = self.next_seq;
+
         self.next_seq = self.next_seq.saturating_add(1);
+
         seq
     }
 
@@ -210,6 +217,7 @@ impl StreamState {
                     if let Some(thread) = &subscriber.wake_thread {
                         thread.unpark();
                     }
+
                     true
                 }
                 Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => false,
@@ -251,6 +259,7 @@ impl RemoteSession {
         if self.stream.lock().exited {
             return Err(HubError::SessionExited(self.id));
         }
+
         self.messenger
             .send(message)
             .map_err(|_| HubError::ChannelClosed(self.id))
@@ -259,6 +268,7 @@ impl RemoteSession {
     fn shutdown(&self) {
         if !self.shutdown_sent.swap(true, Ordering::AcqRel) {
             self.stream.lock().publish_exit();
+
             let _ = self.messenger.send(Msg::Shutdown);
         }
     }
@@ -290,13 +300,17 @@ impl RemoteSessionHub {
             options.cols as usize,
             options.rows as usize,
         )));
+
         let vt_modes = Arc::new(AtomicU32::new(0));
         let stream = Arc::new(Mutex::new(StreamState::default()));
+
         let pty = {
             // The platform toggle is process-wide, so spawning is serialized to
             // preserve each session's requested Job Object policy.
             let _spawn = self.spawn_lock.lock();
+
             nmt_platform::set_job_management(options.manage_process_tree);
+
             nmt_platform::create_pty_with_env(
                 &options.shell,
                 options.args.clone(),
@@ -308,6 +322,7 @@ impl RemoteSessionHub {
             )
             .map_err(HubError::Spawn)?
         };
+
         let job_handle = pty.job_handle().map(|handle| handle as isize);
 
         let mut pipe = PtyPipe::new(
@@ -329,7 +344,9 @@ impl RemoteSessionHub {
         // the sole responder to DA/DSR/OSC queries. Replying here as well sends
         // duplicate device reports and exposes the Hub process's default colors.
         pipe.set_terminal_responses_enabled(false);
+
         let output_stream = Arc::clone(&stream);
+
         pipe.set_output_sink(move |data| output_stream.lock().publish_output(data));
 
         let session = Arc::new(RemoteSession {
@@ -342,8 +359,11 @@ impl RemoteSessionHub {
             shutdown_sent: AtomicBool::new(false),
             job_handle,
         });
+
         drop(pipe.spawn());
+
         self.sessions.lock().insert(id, session);
+
         Ok(id)
     }
 
@@ -355,18 +375,26 @@ impl RemoteSessionHub {
         // The checkpoint and subscription registration therefore form one stream
         // boundary: every byte is either in the checkpoint or in a later event.
         let mut engine = session.engine.lock();
+
         let vt = engine
             .format_vt_state()
             .map_err(|error| HubError::Engine(error.to_string()))?;
+
         let cols = engine.cols();
         let rows = engine.rows();
+
         let mut stream = session.stream.lock();
+
         if stream.exited {
             return Err(HubError::SessionExited(id));
         }
+
         let subscriber_id = stream.next_subscriber_id;
+
         stream.next_subscriber_id = stream.next_subscriber_id.saturating_add(1);
+
         let base_seq = stream.next_seq.saturating_sub(1);
+
         stream.subscribers.insert(
             subscriber_id,
             Subscriber {
@@ -374,6 +402,7 @@ impl RemoteSessionHub {
                 wake_thread: None,
             },
         );
+
         drop(stream);
         drop(engine);
 
@@ -395,11 +424,13 @@ impl RemoteSessionHub {
         if data.is_empty() {
             return Ok(());
         }
+
         self.get(id)?.send(Msg::Input(Cow::Owned(data.to_vec())))
     }
 
     pub fn resize(&self, id: SessionId, cols: u16, rows: u16) -> Result<(), HubError> {
         validate_size(cols, rows)?;
+
         self.get(id)?.send(Msg::Resize(WinsizeBuilder {
             cols,
             rows,
@@ -414,7 +445,9 @@ impl RemoteSessionHub {
             .lock()
             .remove(&id)
             .ok_or(HubError::SessionNotFound(id))?;
+
         session.shutdown();
+
         Ok(())
     }
 

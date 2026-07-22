@@ -75,12 +75,16 @@ impl ProcessExit {
 
     fn wait(&self, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
+
         let mut exited = self.exited.lock();
+
         while !*exited {
             let remaining = deadline.saturating_duration_since(Instant::now());
+
             if remaining.is_zero() {
                 return false;
             }
+
             self.changed.wait_for(&mut exited, remaining);
         }
         true
@@ -90,14 +94,20 @@ impl ProcessExit {
 impl HubClient {
     pub fn connect_default() -> Result<Arc<Self>, HubClientError> {
         let slot = DEFAULT_CLIENT.get_or_init(|| Mutex::new(DefaultClient::default()));
+
         let mut slot = slot.lock();
+
         if let Some(client) = slot.client.upgrade() {
             return Ok(client);
         }
+
         let executable = default_hub_executable()?;
+
         let client = Self::spawn(&executable)?;
+
         slot.client = Arc::downgrade(&client);
         slot.exit = Arc::downgrade(&client.exit);
+
         Ok(client)
     }
 
@@ -107,17 +117,22 @@ impl HubClient {
         let executable = executable.to_owned();
         let exit = Arc::new(ProcessExit::default());
         let client_exit = Arc::clone(&exit);
+
         let handle = std::thread::Builder::new()
             .name("session-hub-client".to_owned())
             .spawn(move || client_loop(&executable, command_rx, startup_tx, client_exit))
             .map_err(|error| HubClientError::new(format!("failed to start Hub client: {error}")))?;
+
         let worker = handle.thread().clone();
+
         // Dropping the JoinHandle detaches the pump. The command channel and Hub
         // process own its actual lifetime, avoiding a UI-thread join during teardown.
         drop(handle);
+
         startup_rx.recv_timeout(OPEN_TIMEOUT).map_err(|error| {
             HubClientError::new(format!("SessionHub startup timed out: {error}"))
         })??;
+
         Ok(Arc::new(Self {
             commands,
             worker,
@@ -128,13 +143,16 @@ impl HubClient {
 
     pub fn open(self: &Arc<Self>, options: SessionOptions) -> Result<RemotePty, HubClientError> {
         let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+
         self.send(ClientCommand::Open {
             options,
             reply: reply_tx,
         })?;
+
         let (session_id, state) = reply_rx.recv_timeout(OPEN_TIMEOUT).map_err(|error| {
             HubClientError::new(format!("SessionHub open timed out: {error}"))
         })??;
+
         Ok(RemotePty::new(session_id, state, Arc::clone(self)))
     }
 
@@ -142,13 +160,17 @@ impl HubClient {
         self.commands
             .send(command)
             .map_err(|_| HubClientError::new("SessionHub client is not running"))?;
+
         self.worker.unpark();
+
         Ok(())
     }
 
     fn child_process_count(&self, session_id: SessionId) -> Result<usize, HubClientError> {
         let (reply, result) = mpsc::sync_channel(1);
+
         self.send(ClientCommand::ChildProcessCount { session_id, reply })?;
+
         result.recv_timeout(REQUEST_TIMEOUT).map_err(|error| {
             HubClientError::new(format!("SessionHub process count timed out: {error}"))
         })?
@@ -161,6 +183,7 @@ impl HubClient {
                 .map_err(|_| HubClientError::new("SessionHub client is not running"))?;
             self.worker.unpark();
         }
+
         if self.exit.wait(SHUTDOWN_TIMEOUT) {
             Ok(())
         } else {
@@ -186,10 +209,12 @@ pub fn shutdown_default() -> Result<(), HubClientError> {
     let Some(slot) = DEFAULT_CLIENT.get() else {
         return Ok(());
     };
+
     let (client, exit) = {
         let slot = slot.lock();
         (slot.client.upgrade(), slot.exit.upgrade())
     };
+
     if let Some(client) = client {
         client.shutdown()
     } else if let Some(exit) = exit {
@@ -209,6 +234,7 @@ fn default_hub_executable() -> Result<PathBuf, HubClientError> {
     let current = std::env::current_exe().map_err(|error| {
         HubClientError::new(format!("cannot locate NiumaTerm executable: {error}"))
     })?;
+
     Ok(current.with_file_name("SessionHub.exe"))
 }
 
@@ -276,7 +302,9 @@ fn run_client_loop(
 ) -> Result<(), HubClientError> {
     let mut endpoint =
         SharedMemoryEndpoint::create_parent(DEFAULT_MAILBOX_CAPACITY).map_err(client_ipc_error)?;
+
     let os_id = endpoint.os_id().to_owned();
+
     let mut child = Command::new(executable)
         .arg(&os_id)
         .stdin(Stdio::null())
@@ -293,7 +321,9 @@ fn run_client_loop(
 
     let (events_tx, events_rx) = mpsc::channel();
     let pump = std::thread::current();
+
     spawn_response_reader(&os_id, events_tx.clone(), pump.clone())?;
+
     std::thread::Builder::new()
         .name("session-hub-process-wait".to_owned())
         .spawn(move || {
@@ -303,6 +333,7 @@ fn run_client_loop(
             pump.unpark();
         })
         .map_err(|error| HubClientError::new(format!("failed to watch SessionHub: {error}")))?;
+
     startup
         .send(Ok(()))
         .map_err(|_| HubClientError::new("SessionHub startup receiver was dropped"))?;
@@ -319,6 +350,7 @@ fn run_client_loop(
                 ClientCommand::Open { options, reply } => {
                     let request_id = take_request_id(&mut next_request_id);
                     let state = Arc::new(SessionState::default());
+
                     send_request(
                         &mut endpoint,
                         HubRequest::Open {
@@ -326,6 +358,7 @@ fn run_client_loop(
                             options,
                         },
                     )?;
+
                     pending.insert(request_id, PendingRequest::Open { state, reply });
                 }
                 ClientCommand::Input { session_id, data } => {
@@ -345,6 +378,7 @@ fn run_client_loop(
                 )?,
                 ClientCommand::Kill { session_id } => {
                     sessions.remove(&session_id);
+
                     send_request(
                         &mut endpoint,
                         HubRequest::Kill {
@@ -355,6 +389,7 @@ fn run_client_loop(
                 }
                 ClientCommand::ChildProcessCount { session_id, reply } => {
                     let request_id = take_request_id(&mut next_request_id);
+
                     send_request(
                         &mut endpoint,
                         HubRequest::ChildProcessCount {
@@ -362,10 +397,12 @@ fn run_client_loop(
                             session_id,
                         },
                     )?;
+
                     pending.insert(request_id, PendingRequest::ChildProcessCount { reply });
                 }
                 ClientCommand::Shutdown => {
                     let _ = send_request(&mut endpoint, HubRequest::Shutdown);
+
                     return Ok(());
                 }
             }
@@ -383,11 +420,14 @@ fn run_client_loop(
                 )?,
                 ReaderEvent::Failed(message) => {
                     fail_all(&mut pending, &sessions, &message);
+
                     return Err(HubClientError::new(message));
                 }
                 ReaderEvent::ChildExited => {
                     let message = "SessionHub exited unexpectedly";
+
                     fail_all(&mut pending, &sessions, message);
+
                     return Err(HubClientError::new(message));
                 }
             }
@@ -410,16 +450,21 @@ fn spawn_response_reader(
         .spawn(move || {
             let result = (|| -> Result<(), IpcError> {
                 let mut endpoint = SharedMemoryEndpoint::open_parent(&os_id)?;
+
                 loop {
                     let message = endpoint.recv_blocking()?;
+
                     if sender.send(ReaderEvent::Message(message)).is_err() {
                         return Ok(());
                     }
+
                     pump.unpark();
                 }
             })();
+
             if let Err(error) = result {
                 let _ = sender.send(ReaderEvent::Failed(error.to_string()));
+
                 pump.unpark();
             }
         })
@@ -442,7 +487,9 @@ fn handle_response(
             let Some(PendingRequest::Open { state, reply }) = pending.remove(&request_id) else {
                 return Ok(());
             };
+
             let attach_id = take_request_id(next_request_id);
+
             send_request(
                 endpoint,
                 HubRequest::Attach {
@@ -450,6 +497,7 @@ fn handle_response(
                     session_id,
                 },
             )?;
+
             pending.insert(
                 attach_id,
                 PendingRequest::Attach {
@@ -474,15 +522,20 @@ fn handle_response(
             else {
                 return Ok(());
             };
+
             if session_id != expected_id {
                 let _ = reply.send(Err(HubClientError::new(
                     "SessionHub returned a snapshot for the wrong session",
                 )));
                 return Ok(());
             }
+
             state.next_seq.store(base_seq + 1, Ordering::Release);
+
             state.push_output(vt);
+
             sessions.insert(session_id, Arc::clone(&state));
+
             let _ = reply.send(Ok((session_id, state)));
         }
         HubResponse::Output {
@@ -492,8 +545,10 @@ fn handle_response(
         } => {
             if let Some(state) = sessions.get(&session_id) {
                 let expected = state.next_seq.load(Ordering::Acquire);
+
                 if seq == expected {
                     state.next_seq.store(expected + 1, Ordering::Release);
+
                     state.push_output(data);
                 } else if seq > expected {
                     // A sequence gap means bytes were lost before the local VT parser.
@@ -512,6 +567,7 @@ fn handle_response(
             else {
                 return Ok(());
             };
+
             let _ = reply.send(Ok(count.try_into().unwrap_or(usize::MAX)));
         }
         HubResponse::Error {
@@ -549,6 +605,7 @@ fn fail_all(
             }
         }
     }
+
     for state in sessions.values() {
         state.mark_exited();
     }
@@ -559,6 +616,7 @@ fn send_request(
     request: HubRequest,
 ) -> Result<(), HubClientError> {
     let bytes = request.encode().map_err(client_ipc_error)?;
+
     endpoint
         .send(&bytes, IPC_SEND_TIMEOUT)
         .map_err(client_ipc_error)
@@ -570,7 +628,9 @@ fn client_ipc_error(error: IpcError) -> HubClientError {
 
 fn take_request_id(next: &mut u64) -> u64 {
     let id = *next;
+
     *next = (*next).wrapping_add(1).max(1);
+
     id
 }
 
@@ -589,12 +649,15 @@ impl SessionState {
         if data.is_empty() {
             return;
         }
+
         self.output.lock().extend(data);
+
         self.read_ready.set_ready();
     }
 
     fn mark_exited(&self) {
         self.exited.store(true, Ordering::Release);
+
         self.child_ready.set_ready();
     }
 }
@@ -629,6 +692,7 @@ impl RemotePty {
 
     pub fn spawn(mut options: SessionOptions) -> Result<Self, HubClientError> {
         options.manage_process_tree = nmt_platform::job_management_enabled();
+
         HubClient::connect_default()?.open(options)
     }
 
@@ -667,22 +731,29 @@ impl Read for RemoteReader {
         if buffer.is_empty() {
             return Ok(0);
         }
+
         let mut output = self.0.output.lock();
+
         if output.is_empty() {
             self.0.read_ready.clear();
+
             return if self.0.exited.load(Ordering::Acquire) {
                 Ok(0)
             } else {
                 Err(io::ErrorKind::WouldBlock.into())
             };
         }
+
         let count = buffer.len().min(output.len());
+
         for byte in &mut buffer[..count] {
             *byte = output.pop_front().expect("output length was checked");
         }
+
         if output.is_empty() {
             self.0.read_ready.clear();
         }
+
         Ok(count)
     }
 }
@@ -697,12 +768,14 @@ impl Write for RemoteWriter {
         if buffer.is_empty() {
             return Ok(0);
         }
+
         self.client
             .send(ClientCommand::Input {
                 session_id: self.session_id,
                 data: buffer.to_vec(),
             })
             .map_err(io::Error::other)?;
+
         Ok(buffer.len())
     }
 
@@ -713,6 +786,7 @@ impl Write for RemoteWriter {
 
 impl ProcessReadWrite for RemotePty {
     type Reader = RemoteReader;
+
     type Writer = RemoteWriter;
 
     fn reader(&mut self) -> &mut Self::Reader {
@@ -751,8 +825,10 @@ impl ProcessReadWrite for RemotePty {
         self.read_token = tokens.next().expect("PtyPipe supplies a read token");
         self.write_token = tokens.next().expect("PtyPipe supplies a write token");
         self.child_token = tokens.next().expect("PtyPipe supplies a child token");
+
         self.state.read_ready.set_waker(Arc::clone(waker));
         self.state.child_ready.set_waker(Arc::clone(waker));
+
         Ok(())
     }
 
@@ -766,15 +842,19 @@ impl ProcessReadWrite for RemotePty {
 
     fn drain_ready(&self) -> Vec<Token> {
         let mut ready = Vec::with_capacity(3);
+
         if self.state.read_ready.is_ready() {
             ready.push(self.read_token);
         }
+
         // Hub input is accepted into an unbounded in-process command queue, so it
         // is writable whenever PtyPipe wakes for a pending input message.
         ready.push(self.write_token);
+
         if self.state.child_ready.is_ready() {
             ready.push(self.child_token);
         }
+
         ready
     }
 
@@ -793,6 +873,7 @@ impl EventedPty for RemotePty {
             && !self.state.exit_delivered.swap(true, Ordering::AcqRel)
         {
             self.state.child_ready.clear();
+
             Some(ChildEvent::Exited)
         } else {
             None

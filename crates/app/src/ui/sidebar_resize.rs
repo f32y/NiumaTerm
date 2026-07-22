@@ -35,6 +35,7 @@ pub(crate) fn resize_handle(id: &'static str, pin_left: bool, cx: &App) -> impl 
             cx.stop_propagation();
             cx.new(|_| drag.clone())
         });
+
     if pin_left {
         handle.left_0()
     } else {
@@ -58,11 +59,13 @@ pub(crate) fn slide_width<E: IntoElement + Styled + 'static>(
         let width = if open { width } else { px(0.0) };
         return wrapper.w(width).into_any_element();
     }
+
     let (from, to) = if open {
         (px(0.0), width)
     } else {
         (width, px(0.0))
     };
+
     Transition::new(Duration::from_millis(180))
         .width(from, to)
         .apply(wrapper, (id, open as usize))

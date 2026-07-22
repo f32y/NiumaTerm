@@ -42,7 +42,9 @@ pub(crate) fn normalize(
     expected_token: &str,
 ) -> Option<AgentEvent> {
     let session_id = payload.get("session_id")?.as_str()?;
+
     let hook = payload.get("hook_event_name")?.as_str()?;
+
     let (kind, title, body) = match hook {
         "SessionStart" => (AgentEventKind::SessionStarted, "", ""),
         "UserPromptSubmit" => (AgentEventKind::PromptSubmitted, "", ""),
@@ -67,10 +69,12 @@ pub(crate) fn normalize(
         ),
         _ => return None,
     };
+
     // Claude Code hook payloads carry no turn identifier, so the session is
     // the finest ownership granularity available. Replays across turns are
     // harmless: PromptSubmitted resets the pane state either way.
     let turn_id = (kind != AgentEventKind::SessionStarted).then_some(session_id);
+
     AgentEvent::validate(
         AgentEventInput {
             route,
@@ -91,12 +95,15 @@ pub(crate) fn normalize(
 /// `~/.claude/settings.json`, the user-scope Claude Code configuration.
 pub fn settings_path() -> Option<PathBuf> {
     let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))?;
+
     Some(PathBuf::from(home).join(".claude").join("settings.json"))
 }
 
 pub fn install_hooks(settings_path: &Path) -> io::Result<()> {
     let mut settings = read_settings(settings_path)?;
+
     install_into(&mut settings, HOOK_COMMAND)?;
+
     write_settings(settings_path, &settings)
 }
 
@@ -104,8 +111,11 @@ pub fn uninstall_hooks(settings_path: &Path) -> io::Result<()> {
     if !settings_path.exists() {
         return Ok(());
     }
+
     let mut settings = read_settings(settings_path)?;
+
     uninstall_from(&mut settings);
+
     write_settings(settings_path, &settings)
 }
 

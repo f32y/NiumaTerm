@@ -64,16 +64,20 @@ impl WakeSignal {
             let _ = self.tx.unbounded_send(wake);
             return true;
         }
+
         if self.queued.swap(true, Ordering::AcqRel) {
             self.resignal.store(true, Ordering::Release);
             return false;
         }
+
         let _ = self.tx.unbounded_send(wake);
+
         true
     }
 
     pub(crate) fn mark_delivered(&self, surface_id: u64) {
         self.queued.store(false, Ordering::Release);
+
         if self.resignal.swap(false, Ordering::AcqRel) {
             self.signal(Wake::Content(surface_id));
         }

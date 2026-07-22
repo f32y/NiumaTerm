@@ -43,15 +43,19 @@ fn wide(value: &str) -> Vec<u16> {
 /// until process exit.
 pub fn try_become_primary(testing: bool) -> bool {
     let name = wide(mutex_name(testing));
+
     unsafe {
         let handle = CreateMutexW(std::ptr::null(), 1, name.as_ptr());
+
         if handle.is_null() {
             tracing::warn!(
                 "CreateMutexW failed ({}); skipping single-instance",
                 GetLastError()
             );
+
             return true;
         }
+
         GetLastError() != ERROR_ALREADY_EXISTS
     }
 }
@@ -59,6 +63,7 @@ pub fn try_become_primary(testing: bool) -> bool {
 /// Send one UTF-8 line to the primary process, retrying until `timeout` elapses.
 pub fn send(message: &str, timeout: Duration, testing: bool) -> std::io::Result<()> {
     let deadline = Instant::now() + timeout;
+
     loop {
         match std::fs::OpenOptions::new()
             .write(true)
@@ -78,6 +83,7 @@ pub fn spawn_server(testing: bool, mut on_message: impl FnMut(Vec<u8>) -> bool +
         .name("nmt-ipc".into())
         .spawn(move || {
             let name = wide(pipe_name(testing));
+
             loop {
                 let handle = unsafe {
                     CreateNamedPipeW(
@@ -91,19 +97,25 @@ pub fn spawn_server(testing: bool, mut on_message: impl FnMut(Vec<u8>) -> bool +
                         std::ptr::null(),
                     )
                 };
+
                 if handle == INVALID_HANDLE_VALUE {
                     tracing::warn!("CreateNamedPipeW failed ({}); IPC disabled", unsafe {
                         GetLastError()
                     });
                     return;
                 }
+
                 let connected = unsafe { ConnectNamedPipe(handle, std::ptr::null_mut()) } != 0
                     || unsafe { GetLastError() } == ERROR_PIPE_CONNECTED;
+
                 let mut pipe = unsafe { File::from_raw_handle(handle as _) };
+
                 if !connected {
                     continue;
                 }
+
                 let mut bytes = Vec::new();
+
                 if Read::take(&mut pipe, (MAX_MESSAGE_BYTES + 1) as u64)
                     .read_to_end(&mut bytes)
                     .is_err()

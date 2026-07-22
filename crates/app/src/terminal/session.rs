@@ -131,6 +131,7 @@ impl TerminalSession {
             cols as usize,
             rows as usize,
         )));
+
         let vt_modes = Arc::new(AtomicU32::new(0));
         // Created before the PtyPipe so the listener and the session share it.
         let events: HostEventQueue = Arc::new(Mutex::new(std::collections::VecDeque::new()));
@@ -155,6 +156,7 @@ impl TerminalSession {
             id,
             wake,
         };
+
         let (job_handle, remote_control, engine, messenger) = if config.remote_session_enabled {
             let pty = RemotePty::spawn(SessionOptions {
                 shell: shell.clone(),
@@ -173,7 +175,9 @@ impl TerminalSession {
                     format!("failed to start shell '{shell}' through SessionHub: {error}"),
                 )
             })?;
+
             let remote_control = pty.control();
+
             let (engine, messenger) = start_pipe(
                 Arc::clone(&render_buffer),
                 Arc::clone(&vt_modes),
@@ -184,6 +188,7 @@ impl TerminalSession {
                 config.cursor_shape,
                 engine_blocks,
             )?;
+
             (None, Some(remote_control), engine, messenger)
         } else {
             let pty = nmt_platform::create_pty_with_env(
@@ -202,7 +207,9 @@ impl TerminalSession {
                     format!("failed to start shell '{shell}' via ConPTY: {error}"),
                 )
             })?;
+
             let job_handle = pty.job_handle().map(|handle| handle as isize);
+
             let (engine, messenger) = start_pipe(
                 Arc::clone(&render_buffer),
                 Arc::clone(&vt_modes),
@@ -213,6 +220,7 @@ impl TerminalSession {
                 config.cursor_shape,
                 engine_blocks,
             )?;
+
             (job_handle, None, engine, messenger)
         };
 
@@ -271,6 +279,7 @@ impl TerminalSession {
                 1
             });
         }
+
         self.job_handle
             .map_or(0, nmt_platform::job_other_process_count)
     }
@@ -280,6 +289,7 @@ impl TerminalSession {
         if data.is_empty() {
             return;
         }
+
         let _ = self.messenger.send(Msg::Input(data.to_vec().into()));
     }
 
@@ -300,13 +310,17 @@ impl TerminalSession {
     pub fn poll_events(&self) -> Vec<HostEvent> {
         let mut out = Vec::new();
         let mut q = self.events.lock();
+
         while let Some(e) = q.pop_front() {
             out.push(e);
         }
+
         drop(q);
+
         if let Some(pwd) = self.engine.lock().poll_pwd() {
             out.push(HostEvent::Cwd(pwd));
         }
+
         out
     }
 
@@ -374,7 +388,9 @@ where
             format!("libghostty-vt engine init failed: {error}"),
         )
     })?;
+
     let engine = pipe.engine();
+
     engine
         .lock()
         .set_default_cursor_shape(cursor_shape)
@@ -384,8 +400,11 @@ where
                 format!("failed to configure cursor shape: {error}"),
             )
         })?;
+
     let messenger = pipe.channel();
+
     drop(pipe.spawn());
+
     Ok((engine, messenger))
 }
 
@@ -454,6 +473,7 @@ impl EventListener for TerminalEventProxy {
         ) {
             self.flush_staged_blocks();
             self.signal(Wake::Content(self.id));
+
             return;
         }
 
@@ -464,17 +484,24 @@ impl EventListener for TerminalEventProxy {
             if route_id != self.id as usize {
                 return;
             }
+
             let mut store = self.generation_store.lock();
+
             for (image_id, data) in queues.pending_images {
                 store.install(image_id, data);
             }
+
             for gid in queues.remove_queue {
                 store.remove(gid.0 as u32);
             }
+
             // Publish the live count lock-free so the render path can skip the store.
             self.live_image_count.store(store.len(), Ordering::Relaxed);
+
             drop(store);
+
             self.signal(Wake::Content(self.id));
+
             return;
         }
         let host = match event {
@@ -483,15 +510,20 @@ impl EventListener for TerminalEventProxy {
             TerminalEvent::Bell => HostEvent::Bell,
             TerminalEvent::ClipboardStore(ty, text) => {
                 let mut clipboard = nmt_terminal::clipboard::Clipboard::default();
+
                 clipboard.set(ty, text);
+
                 return;
             }
             TerminalEvent::CloseTerminal(_) => {
                 // The shell died: no ;D is coming for a running command, and any
                 // half-staged block batch for the interrupted read is discarded.
                 *self.in_flight.lock() = None;
+
                 *self.open_prompt.lock() = false;
+
                 self.staged_blocks.lock().clear();
+
                 HostEvent::Exit
             }
             TerminalEvent::DesktopNotification { title, body } => {
@@ -507,10 +539,12 @@ impl EventListener for TerminalEventProxy {
                     *self.in_flight.lock() = None;
                     *self.open_prompt.lock() = false;
                 }
+
                 HostEvent::PromptBoundaryTrusted(on)
             }
             TerminalEvent::PromptStarted => {
                 *self.open_prompt.lock() = true;
+
                 HostEvent::PromptStarted
             }
             TerminalEvent::BlockBatch(batch) => {
@@ -518,10 +552,12 @@ impl EventListener for TerminalEventProxy {
                 // read's damage wake, after `UpdateGraphics` installs the generations
                 // its slices bind to. No chrome/content wake here.
                 self.staged_blocks.lock().extend(batch);
+
                 return;
             }
             TerminalEvent::CommandStarted(cmd) => {
                 *self.open_prompt.lock() = false;
+
                 // Marry the command metadata to its block item; the
                 // segment materializes later, when its rows scroll out.
                 self.block_store
@@ -531,31 +567,39 @@ impl EventListener for TerminalEventProxy {
                         m.cwd = cmd.cwd.as_ref().map(|p| p.to_string_lossy().into_owned());
                         m.started_at = Some(cmd.started_at);
                     });
+
                 let block = InFlightBlock {
                     command: cmd.command,
                     started_at: cmd.started_at,
                 };
+
                 *self.in_flight.lock() = Some(block);
+
                 HostEvent::CommandStarted
             }
             TerminalEvent::CommandFinished(cmd) => {
                 *self.in_flight.lock() = None;
+
                 self.block_store
                     .lock()
                     .update_meta(cmd.seq, |m: &mut SegmentMeta| {
                         m.exit_code = cmd.exit_code;
                         m.ended_at = Some(cmd.ended_at);
                     });
+
                 tracing::debug!(
                     command = %cmd.command,
                     exit_code = ?cmd.exit_code,
                     "command block metadata recorded"
                 );
+
                 HostEvent::CommandFinished
             }
             _ => return,
         };
+
         self.events.lock().push_back(host);
+
         // A user-visible event changes chrome (tab title, status, attention).
         self.signal(Wake::Chrome(self.id));
     }
@@ -624,6 +668,7 @@ impl TerminalSessionConfig {
 
 fn encode_powershell_command(script: &str) -> String {
     let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 

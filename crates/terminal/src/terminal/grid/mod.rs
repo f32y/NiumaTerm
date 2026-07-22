@@ -72,15 +72,19 @@ impl Dimensions for (usize, usize) {
     fn total_lines(&self) -> usize {
         self.0
     }
+
     fn screen_lines(&self) -> usize {
         self.0
     }
+
     fn columns(&self) -> usize {
         self.1
     }
+
     fn square_width(&self) -> f32 {
         0.
     }
+
     fn square_height(&self) -> f32 {
         0.
     }

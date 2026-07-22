@@ -30,17 +30,22 @@ fn parse_message(bytes: &[u8], expected_token: &str) -> Result<IpcAction, String
     if bytes.len() > MAX_MESSAGE_BYTES {
         return Err("message exceeds 64 KiB".into());
     }
+
     let text = std::str::from_utf8(bytes).map_err(|_| "message is not UTF-8")?;
     let text = text.trim_end_matches(['\r', '\n', ' ', '\t']);
+
     if text.is_empty() {
         return Err("empty message".into());
     }
+
     if text.contains(['\r', '\n']) {
         return Err("connection contains more than one message".into());
     }
+
     if text.starts_with('{') {
         let value: serde_json::Value =
             serde_json::from_str(text).map_err(|_| "invalid agent envelope")?;
+
         match value.get("action").and_then(serde_json::Value::as_str) {
             Some("agent_event") => serde_json::from_value::<AgentEventEnvelope>(value)
                 .map_err(|_| "invalid agent envelope")?

@@ -34,6 +34,7 @@ pub(crate) fn normalize(
 ) -> Option<AgentEvent> {
     let session_id = payload.get("session_id")?.as_str()?;
     let hook = payload.get("hook_event_name")?.as_str()?;
+
     let (kind, title, body) = match hook {
         "SessionStart" => (AgentEventKind::SessionStarted, "", ""),
         "UserPromptSubmit" => (AgentEventKind::PromptSubmitted, "", ""),
@@ -58,7 +59,9 @@ pub(crate) fn normalize(
         ),
         _ => return None,
     };
+
     let turn_id = payload.get("turn_id").and_then(Value::as_str);
+
     AgentEvent::validate(
         AgentEventInput {
             route,
@@ -79,23 +82,28 @@ pub(crate) fn normalize(
 /// `~/.codex/config.toml`, the user-scope Codex configuration.
 pub fn config_path() -> Option<PathBuf> {
     let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))?;
+
     Some(PathBuf::from(home).join(".codex").join("config.toml"))
 }
 
 /// `~/.codex/hooks.json`, the user-scope Codex Hook configuration.
 pub fn hooks_path() -> Option<PathBuf> {
     let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))?;
+
     Some(PathBuf::from(home).join(".codex").join("hooks.json"))
 }
 
 pub fn install_hooks(hooks_path: &Path) -> io::Result<()> {
     let command = hook_command()?;
+
     install_hooks_with_command(hooks_path, &command)
 }
 
 fn install_hooks_with_command(hooks_path: &Path, command: &str) -> io::Result<()> {
     let mut settings = read_hooks(hooks_path)?;
+
     install_into(&mut settings, command)?;
+
     write_hooks(hooks_path, &settings)
 }
 
@@ -103,8 +111,11 @@ pub fn uninstall_hooks(hooks_path: &Path) -> io::Result<()> {
     if !hooks_path.exists() {
         return Ok(());
     }
+
     let mut settings = read_hooks(hooks_path)?;
+
     uninstall_from(&mut settings);
+
     write_hooks(hooks_path, &settings)
 }
 
@@ -112,6 +123,7 @@ pub fn hooks_status(hooks_path: &Path) -> HookInstallStatus {
     let Ok(settings) = read_hooks(hooks_path) else {
         return HookInstallStatus::NotInstalled;
     };
+
     match hook_command() {
         Ok(command) => status_of(&settings, &command),
         Err(_)
@@ -132,6 +144,7 @@ pub fn hook_command() -> io::Result<String> {
     let executable = crate::agent_process()
         .hook_executable()
         .ok_or_else(|| invalid("NiumaTerm Hook executable path is unavailable"))?;
+
     build_windows_hook_command(executable, "codex")
 }
 

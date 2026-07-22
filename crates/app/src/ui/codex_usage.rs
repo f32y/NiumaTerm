@@ -17,6 +17,7 @@ pub(crate) struct CodexUsageView {
 
 impl AutoRefresh for CodexUsageView {
     type Output = Result<Usage, String>;
+
     const INTERVAL: Duration = Duration::from_secs(15 * 60);
 
     fn enabled(settings: &AppSettings) -> bool {
@@ -48,7 +49,9 @@ impl CodexUsageView {
                 enabled: Self::enabled(cx.global::<AppSettings>()),
             },
         };
+
         auto_refresh::start(&mut this, cx);
+
         this
     }
 }

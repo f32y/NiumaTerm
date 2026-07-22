@@ -43,29 +43,39 @@ fn get_exe_path() -> String {
 
 fn dll_path() -> Option<PathBuf> {
     let mut buf = [0u16; 32768];
+
     let len = unsafe { GetModuleFileNameW(Some(DLL_INSTANCE.into()), &mut buf) };
+
     (len > 0).then(|| PathBuf::from(String::from_utf16_lossy(&buf[..len as usize])))
 }
 
 fn alloc_co_task_str(s: &str) -> PWSTR {
     let wide: Vec<u16> = s.encode_utf16().chain(std::iter::once(0)).collect();
     let byte_len = wide.len() * std::mem::size_of::<u16>();
+
     unsafe {
         let ptr = CoTaskMemAlloc(byte_len) as *mut u16;
+
         if !ptr.is_null() {
             std::ptr::copy_nonoverlapping(wide.as_ptr(), ptr, wide.len());
         }
+
         PWSTR(ptr)
     }
 }
 
 fn get_folder_path(items: Option<&IShellItemArray>) -> Option<String> {
     let items = items?;
+
     unsafe {
         let item = items.GetItemAt(0).ok()?;
+
         let name = item.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+
         let path = name.to_string().ok()?;
+
         windows::Win32::System::Com::CoTaskMemFree(Some(name.0 as *const _));
+
         Some(path)
     }
 }
@@ -105,12 +115,16 @@ impl IExplorerCommand_Impl for NiumaTermNewTabCommand_Impl {
         _bind_ctx: Ref<'_, IBindCtx>,
     ) -> windows::core::Result<()> {
         let exe = get_exe_path();
+
         let path = get_folder_path(items.as_ref()).unwrap_or_default();
+
         let uri = format!(
             "nmt://action/new_tab?path={}",
             utf8_percent_encode(&path, NON_ALPHANUMERIC)
         );
+
         let _ = std::process::Command::new(&exe).arg(&uri).spawn();
+
         Ok(())
     }
 
@@ -159,6 +173,7 @@ impl IClassFactory_Impl for NiumaTermClassFactory_Impl {
         } else {
             DLL_REF_COUNT.fetch_sub(1, Ordering::Relaxed);
         }
+
         Ok(())
     }
 }

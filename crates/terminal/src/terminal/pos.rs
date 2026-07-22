@@ -179,8 +179,10 @@ impl Pos {
     {
         let cols = dimensions.columns();
         let line_changes = (rhs + cols - 1).saturating_sub(self.col.0) / cols;
+
         self.row -= line_changes;
         self.col = Column((cols + self.col.0 - rhs % cols) % cols);
+
         self.grid_clamp(dimensions, boundary)
     }
 
@@ -190,8 +192,10 @@ impl Pos {
         D: Dimensions,
     {
         let cols = dimensions.columns();
+
         self.row += (rhs + self.col.0) / cols;
         self.col = Column((self.col.0 + rhs) % cols);
+
         self.grid_clamp(dimensions, boundary)
     }
 
@@ -200,6 +204,7 @@ impl Pos {
         D: Dimensions,
     {
         let last_column = dimensions.last_column();
+
         self.col = min(self.col, last_column);
 
         let topmost_line = dimensions.topmost_line();
@@ -235,6 +240,7 @@ impl Line {
             Boundary::Grid => {
                 let bottommost_line = dimensions.bottommost_line();
                 let topmost_line = dimensions.topmost_line();
+
                 max(topmost_line, min(bottommost_line, self))
             }
             Boundary::None => {
@@ -244,10 +250,12 @@ impl Line {
                 if self >= screen_lines {
                     let topmost_line = dimensions.topmost_line();
                     let extra = (self.0 - screen_lines) % total_lines;
+
                     topmost_line + extra
                 } else {
                     let bottommost_line = dimensions.bottommost_line();
                     let extra = (self.0 - screen_lines + 1) % total_lines;
+
                     bottommost_line + extra
                 }
             }

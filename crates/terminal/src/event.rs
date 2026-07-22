@@ -131,10 +131,12 @@ impl MsgSender {
 
     pub fn send(&self, msg: Msg) -> Result<(), std::sync::mpsc::SendError<Msg>> {
         self.tx.send(msg)?;
+
         // Wake the loop so it drains the receiver. A failed wake means the loop is gone.
         if let Some(waker) = &self.waker {
             let _ = waker.wake();
         }
+
         Ok(())
     }
 }

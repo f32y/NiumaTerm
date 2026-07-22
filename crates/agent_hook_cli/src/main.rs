@@ -36,9 +36,11 @@ fn main() {
     {
         return;
     }
+
     let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&input) else {
         return;
     };
+
     let Ok(message) = serde_json::to_string(&RawAgentHookEnvelope {
         action: action.into(),
         version,
@@ -48,10 +50,12 @@ fn main() {
     }) else {
         return;
     };
+
     if message.len() > MAX_MESSAGE_BYTES {
         return;
     }
 
     let testing = std::env::var(AGENT_TESTING_ENV).is_ok_and(|value| value == "1");
+
     let _ = send(&message, Duration::ZERO, testing);
 }

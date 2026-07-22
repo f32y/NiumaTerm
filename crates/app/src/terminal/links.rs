@@ -36,27 +36,35 @@ fn is_url_char(c: char) -> bool {
 /// rather than the URL.
 fn url_at_col(text: &str, col: usize) -> Option<(String, Range<usize>)> {
     let chars: Vec<char> = text.chars().collect();
+
     if !chars.get(col).copied().is_some_and(is_url_char) {
         return None;
     }
+
     let start = (0..col)
         .rev()
         .take_while(|&i| is_url_char(chars[i]))
         .last()
         .unwrap_or(col);
+
     let end = (col..chars.len())
         .take_while(|&i| is_url_char(chars[i]))
         .last()
         .map_or(col, |i| i + 1);
+
     let token: String = chars[start..end].iter().collect();
+
     // The scheme anchors the URL start; anything before it in the token
     // (quotes, parens, "url=") is surrounding text.
     let lower = token.to_ascii_lowercase();
+
     let scheme_at = URL_SCHEMES
         .iter()
         .filter_map(|scheme| lower.find(scheme))
         .min()?;
+
     let mut url = token[scheme_at..].trim_end_matches(['.', ',', ';', ':', '!', '?', '\'']);
+
     // Trailing closers are kept only while balanced, so a URL with literal
     // parens survives but the closer of a surrounding "(...)" is dropped.
     for (open, close) in [('(', ')'), ('[', ']')] {
@@ -64,8 +72,10 @@ fn url_at_col(text: &str, col: usize) -> Option<(String, Range<usize>)> {
             url = &url[..url.len() - 1];
         }
     }
+
     // The click must land inside the URL itself, past any trimmed tail.
     let url_range = start + scheme_at..start + scheme_at + url.len();
+
     (url_range.contains(&col) && open_allowed(url)).then(|| (url.to_string(), url_range))
 }
 
@@ -81,9 +91,11 @@ impl TerminalPane {
         let inside = self
             .content_bounds
             .is_some_and(|bounds| bounds.contains(&position));
+
         let hit = (inside && modifiers.control && !modifiers.alt && !modifiers.shift)
             .then(|| self.link_at_position(position, cx))
             .flatten();
+
         if self.hovered_link != hit {
             self.hovered_link = hit;
             cx.notify();
@@ -107,6 +119,7 @@ impl TerminalPane {
     /// yields underline rects (content-origin-relative) for hover feedback.
     pub(super) fn link_at_position(&self, position: Point<Pixels>, cx: &App) -> Option<LinkHit> {
         let cell_metrics = self.cell_metrics?;
+
         enum RowSource {
             Screen(i64),
             Block {
@@ -115,11 +128,15 @@ impl TerminalPane {
                 line: i64,
             },
         }
+
         let block_list = self.block_list_mode(cx);
+
         // Bottom-anchor slack is uniform across rows (see
         // `bottom_anchor_offsets`), so one value shifts every underline.
         let slack = self.current_row_offsets(cx).first().copied().unwrap_or(0.0);
+
         let viewport_top = self.surface.viewport_top_screen_row();
+
         let (source, col) = match self.block_list_point_at(position, cx) {
             Some(BlockListPoint::Frozen(pt)) => {
                 // The handle lookup releases the store lock before the engine
@@ -144,10 +161,13 @@ impl TerminalPane {
             }
             None => {
                 let offsets = self.current_row_offsets(cx);
+
                 let mut origin = self.content_origin();
+
                 if block_list {
                     origin.y += px(self.frozen_hit.active_top);
                 }
+
                 let (cell, _) = terminal_cell_at_position(position, origin, cell_metrics, &offsets);
                 (
                     RowSource::Screen(viewport_top? as i64 + cell.row as i64),
@@ -155,6 +175,7 @@ impl TerminalPane {
                 )
             }
         };
+
         let row_at = |delta: i64| match source {
             RowSource::Screen(row) => u32::try_from(row + delta)
                 .ok()
@@ -163,6 +184,7 @@ impl TerminalPane {
                 .ok()
                 .and_then(|line| self.surface.pointer_block_row(handle, line)),
         };
+
         // Content-local y of the row `delta` rows below the pointed-at one;
         // `None` when it is scrolled out of view (that segment gets no rect).
         let row_y = |delta: i64| -> Option<f32> {
@@ -170,13 +192,16 @@ impl TerminalPane {
                 RowSource::Screen(row) => {
                     let row = row + delta;
                     let top = viewport_top? as i64;
+
                     if row < top {
                         // A live-history row above the engine viewport.
                         return self
                             .frozen_hit
                             .row_top(usize::MAX, usize::try_from(row).ok()?);
                     }
+
                     let below = (row - top) as f32 * cell_metrics.height_px;
+
                     Some(if block_list {
                         self.frozen_hit.active_top + below
                     } else {
@@ -190,6 +215,7 @@ impl TerminalPane {
         };
         let underline = |delta: i64, start_col: usize, cols: usize| -> Option<Bounds<Pixels>> {
             let y = row_y(delta)?;
+
             Some(Bounds::new(
                 point(
                     px(start_col as f32 * cell_metrics.width_px),
@@ -198,7 +224,9 @@ impl TerminalPane {
                 size(px(cols as f32 * cell_metrics.width_px), px(1.0)),
             ))
         };
+
         let pointed = row_at(0)?;
+
         if let Some((start, end, uri)) = pointed
             .hyperlinks
             .iter()
@@ -207,6 +235,7 @@ impl TerminalPane {
             if !open_allowed(uri) {
                 return None;
             }
+
             return Some(LinkHit {
                 url: uri.clone(),
                 rects: underline(0, *start as usize, (*end - *start) as usize + 1)
@@ -214,40 +243,56 @@ impl TerminalPane {
                     .collect(),
             });
         }
+
         // Join cap bounds the engine row reads per hover/click: a wrapped
         // logical line can chain through the whole scrollback (e.g. `cat` of
         // a minified file), and each joined row is a locked engine read. A
         // URL wrapping further than ±8 rows truncates at the cap.
         const JOIN_CAP: i64 = 8;
+
         let width = pointed.text.chars().count();
+
         let mut text = pointed.text;
         let mut col = col;
         let mut wrapped_down = pointed.wrapped;
+
         for delta in 1..=JOIN_CAP {
             if !wrapped_down {
                 break;
             }
+
             let Some(next) = row_at(delta) else { break };
+
             text.push_str(&next.text);
+
             wrapped_down = next.wrapped;
         }
+
         let mut back = 0i64;
+
         for delta in 1..=JOIN_CAP {
             let Some(prev) = row_at(-delta).filter(|prev| prev.wrapped) else {
                 break;
             };
+
             back = delta;
+
             col += prev.text.chars().count();
+
             text.insert_str(0, &prev.text);
         }
+
         let (url, range) = url_at_col(&text, col)?;
+
         // Every joined segment is exactly `width` chars (rows are padded to
         // the grid width), so the URL's char range maps directly onto rows.
         let mut rects = Vec::new();
+
         if width > 0 {
             for seg in range.start / width..=(range.end - 1) / width {
                 let start = range.start.max(seg * width);
                 let end = range.end.min((seg + 1) * width);
+
                 rects.extend(underline(
                     seg as i64 - back,
                     start - seg * width,

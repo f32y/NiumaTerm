@@ -31,6 +31,7 @@ struct Verb {
 pub fn register_shell_integration() -> Result<()> {
     let exe_path = std::env::current_exe()?;
     let dll_path = shell_extension_path(&exe_path);
+
     register_shell_integration_paths(&exe_path, &dll_path)
 }
 
@@ -38,6 +39,7 @@ pub fn unregister_shell_integration() -> Result<()> {
     for path in context_menu_owned_registry_roots() {
         let _ = CURRENT_USER.remove_tree(path);
     }
+
     Ok(())
 }
 
@@ -58,6 +60,7 @@ pub fn shell_integration_dll_mismatched() -> bool {
     let Ok(exe_path) = std::env::current_exe() else {
         return true;
     };
+
     let expected = shell_extension_path(&exe_path);
 
     VERBS.iter().any(|verb| {
@@ -77,15 +80,18 @@ pub fn set_system_notification_enabled(enabled: bool) -> Result<()> {
         let exe_path = path_string(&exe_path);
         let icon = format!("{exe_path},0");
         let protocol = CURRENT_USER.create(NMT_PROTOCOL_ROOT)?;
+
         protocol.set_string("", "URL:NiumaTerm Protocol")?;
         protocol.set_string("URL Protocol", "")?;
         protocol.create("DefaultIcon")?.set_string("", &icon)?;
         protocol
             .create(r"shell\open\command")?
             .set_string("", protocol_command(&exe_path))?;
+
         notifier::register_identity(Path::new(&exe_path)).map_err(anyhow::Error::msg)
     } else {
         let _ = CURRENT_USER.remove_tree(NMT_PROTOCOL_ROOT);
+
         notifier::unregister_identity().map_err(anyhow::Error::msg)
     }
 }
@@ -108,14 +114,18 @@ pub(crate) fn register_shell_integration_paths(exe_path: &Path, dll_path: &Path)
 
     for verb in VERBS {
         let clsid = CURRENT_USER.create(format!(r"Software\Classes\CLSID\{}", verb.clsid))?;
+
         clsid.set_string("", verb.title)?;
+
         let inproc = clsid.create("InprocServer32")?;
+
         inproc.set_string("", &dll_path)?;
         inproc.set_string("ThreadingModel", "Apartment")?;
 
         for item_type in ITEM_TYPES {
             let path = format!(r"Software\Classes\{item_type}\shell\{}", verb.id);
             let key = CURRENT_USER.create(path)?;
+
             key.set_string("MUIVerb", verb.title)?;
             key.set_string("Icon", &icon)?;
             key.set_string("ExplorerCommandHandler", verb.clsid)?;
@@ -139,13 +149,17 @@ fn protocol_command(exe_path: &str) -> String {
 
 fn context_menu_owned_registry_roots() -> Vec<String> {
     let mut roots = Vec::new();
+
     for verb in VERBS {
         roots.push(format!(r"Software\Classes\CLSID\{}", verb.clsid));
+
         for item_type in ITEM_TYPES {
             roots.push(format!(r"Software\Classes\{item_type}\shell\{}", verb.id));
         }
     }
+
     roots.extend(LEGACY_NEW_WINDOW_ROOTS.map(String::from));
+
     roots
 }
 
@@ -156,10 +170,12 @@ fn context_menu_registered_registry_roots() -> Vec<String> {
             r"Software\Classes\CLSID\{}\InprocServer32",
             verb.clsid
         ));
+
         for item_type in ITEM_TYPES {
             roots.push(format!(r"Software\Classes\{item_type}\shell\{}", verb.id));
         }
     }
+
     roots
 }
 

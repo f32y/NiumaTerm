@@ -243,6 +243,7 @@ impl RenderBuffer {
 
     pub(crate) fn begin_capture(&mut self, cols: usize, rows: usize) {
         let cols = cols.max(1);
+
         if cols != self.cols || rows != self.rows {
             self.cols = cols;
             self.rows = rows;
@@ -255,6 +256,7 @@ impl RenderBuffer {
                 row.dirty = true;
             }
         }
+
         self.extras.clear();
         self.next_extras_id = 1;
         self.row_wrapped.clear();
@@ -275,17 +277,23 @@ impl RenderBuffer {
         }
 
         let id = self.styles.intern(style_from_snapshot(style));
+
         let mut chars = text.chars();
+
         let base = chars.next().unwrap_or(' ');
         let sq = &mut self.grid[y][Column(x)];
+
         sq.set_c(base);
         sq.set_style_id(id);
         sq.set_wide(wide_from(wide));
 
         let zerowidth: Vec<char> = chars.collect();
+
         if !zerowidth.is_empty() {
             let extras_id = self.next_extras_id;
+
             self.next_extras_id = self.next_extras_id.saturating_add(1);
+
             self.extras.insert(
                 extras_id,
                 Extras {
@@ -293,7 +301,9 @@ impl RenderBuffer {
                     ..Extras::default()
                 },
             );
+
             sq.set_extras_id(Some(extras_id));
+
             self.grid[y].has_extras = true;
         }
     }
@@ -302,6 +312,7 @@ impl RenderBuffer {
         if let Some(value) = self.row_wrapped.get_mut(y) {
             *value = wrapped;
         }
+
         if let Some(row) = self.grid.get_mut(y) {
             row.kitty_virtual_placeholder = placeholder;
         }
@@ -317,18 +328,23 @@ impl RenderBuffer {
     ) {
         let cx = (cursor.x as usize).min(self.cols.saturating_sub(1));
         let cy = (cursor.y as usize).min(self.rows.saturating_sub(1));
+
         self.cursor = Pos::new(Line(cy as i32), Column(cx));
         self.cursor_visible = cursor.visible;
         self.cursor_shape = cursor.shape;
         self.cursor_blinking = cursor.blinking;
 
         use nmt_config::colors::NamedColor;
+
         let mut term_colors = nmt_config::colors::term::TermColors::default();
+
         term_colors[NamedColor::Foreground] = Some(colors.fg.to_arr());
         term_colors[NamedColor::Background] = Some(colors.bg.to_arr());
+
         if let Some(color) = colors.cursor {
             term_colors[NamedColor::Cursor] = Some(color.to_arr());
         }
+
         self.colors = term_colors;
         self.window_bg_override = colors.bg_override;
         self.placements = placements;

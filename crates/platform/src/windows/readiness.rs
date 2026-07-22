@@ -45,6 +45,7 @@ impl SoftReady {
     /// later poll picks it up.
     pub fn set_ready(&self) {
         self.inner.ready.store(true, Ordering::SeqCst);
+
         if let Some(waker) = self.inner.waker.lock().as_ref() {
             // A failed wake just means the `Poll` is gone; the source is tearing down.
             let _ = waker.wake();

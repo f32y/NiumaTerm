@@ -118,7 +118,7 @@ impl Shell {
         default_profile: (Option<String>, Vec<String>),
         next_id: &mut u64,
         cx: &mut Context<Self>,
-    ) -> WorkspaceManager<TerminalPaneTree> {
+    ) -> WorkspaceManager {
         // The default (no-CLI) branch keeps spawning with no cwd — the shell
         // then starts in its own default directory, as before.
         let (cwd, spawn_cwd) = match initial_cwd {
@@ -130,6 +130,7 @@ impl Shell {
                 None,
             ),
         };
+
         let surface_id = Self::alloc_id(next_id);
         let pane = Self::spawn_default_pane(cx, surface_id, default_profile, spawn_cwd);
         let title = pane.read(cx).profile_name().to_string();
@@ -139,6 +140,7 @@ impl Shell {
             title,
         );
         let workspace_id = Self::alloc_id(next_id);
+
         WorkspaceManager::new(
             tabs,
             WorkspaceId(workspace_id),
@@ -153,10 +155,11 @@ impl Shell {
         default_profile: (Option<String>, Vec<String>),
         next_id: &mut u64,
         cx: &mut Context<Self>,
-    ) -> Option<WorkspaceManager<TerminalPaneTree>> {
+    ) -> Option<WorkspaceManager> {
         let session = session?;
         let saved_active = session.active_workspace;
-        let mut workspaces: Option<WorkspaceManager<TerminalPaneTree>> = None;
+
+        let mut workspaces: Option<WorkspaceManager> = None;
         let mut restored_count = 0usize;
 
         for workspace in session.workspaces {
@@ -167,12 +170,15 @@ impl Shell {
                 active_tab,
                 tabs,
             } = workspace;
+
             let Some(tab_manager) =
                 Self::restore_tabs(tabs, active_tab, default_profile.clone(), next_id, cx)
             else {
                 continue;
             };
+
             restored_count += 1;
+
             let workspace_id = WorkspaceId(Self::alloc_id(next_id));
             let name = if name.trim().is_empty() {
                 format!("Workspace {restored_count}")
@@ -208,7 +214,9 @@ impl Shell {
         }
 
         let mut workspaces = workspaces?;
+
         workspaces.activate(saved_active.min(workspaces.len() - 1));
+
         Some(workspaces)
     }
 
@@ -220,13 +228,16 @@ impl Shell {
         cx: &mut Context<Self>,
     ) -> Option<TabManager<TerminalPaneTree>> {
         let mut restored = Vec::new();
+
         for mut tab_state in tabs {
             resolve_restored_launch(&mut tab_state, cx.global::<AppSettings>());
+
             let name = tab_state
                 .name
                 .clone()
                 .filter(|n| !n.trim().is_empty())
                 .filter(|n| tab_state.user_named || !legacy_generated_tab_title(n));
+
             // A saved pane layout rebuilds the split tree (one fresh shell per
             // leaf); an unusable layout degrades to the flat single-pane path.
             let tree = tab_state
@@ -234,6 +245,7 @@ impl Shell {
                 .as_ref()
                 .and_then(|panes| Self::restore_pane_node(panes, next_id, cx))
                 .map(PaneTree::from_root);
+
             let entry = if let Some(tree) = tree {
                 Some((tree, TabId(Self::alloc_id(next_id))))
             } else {
@@ -253,6 +265,7 @@ impl Shell {
                     }
                 }
             };
+
             if let Some((tree, tab_id)) = entry {
                 let default_title = tree.focused_pane().read(cx).profile_name().to_string();
                 restored.push((tree, tab_id, name, default_title));
@@ -260,18 +273,24 @@ impl Shell {
         }
 
         let mut restored = restored.into_iter();
+
         let (first_pane, first_id, first_name, first_default_title) = restored.next()?;
+
         let mut tab_manager = TabManager::new(first_pane, first_id, first_default_title);
+
         if let Some(name) = first_name {
             tab_manager.rename(first_id, name);
         }
+
         for (pane, id, name, default_title) in restored {
             tab_manager.new_tab(pane, id, default_title);
             if let Some(name) = name {
                 tab_manager.rename(id, name);
             }
         }
+
         tab_manager.activate(active_tab.min(tab_manager.len() - 1));
+
         Some(tab_manager)
     }
 
@@ -287,6 +306,7 @@ impl Shell {
         match node {
             PaneNodeState::Leaf { shell, args, cwd } => {
                 let surface_id = Self::alloc_id(next_id);
+
                 let mut launch = TabState {
                     name: None,
                     user_named: false,
@@ -295,7 +315,9 @@ impl Shell {
                     cwd: cwd.clone(),
                     panes: None,
                 };
+
                 resolve_restored_launch(&mut launch, cx.global::<AppSettings>());
+
                 // Spawn retries without the saved cwd internally.
                 match TerminalPane::spawn(cx, surface_id, Some(launch), (None, Vec::new())) {
                     Ok(pane) => {
@@ -317,6 +339,7 @@ impl Shell {
                     .iter()
                     .filter_map(|child| Self::restore_pane_node(child, next_id, cx))
                     .collect();
+
                 match built.len() {
                     0 => None,
                     1 => built.into_iter().next(),
@@ -351,6 +374,7 @@ impl Shell {
             cwd: Some(cwd),
             ..TabState::default()
         });
+
         let spawned =
             TerminalPane::spawn(cx, surface_id, launch, default_profile.clone()).or_else(|error| {
                 tracing::warn!(
@@ -358,6 +382,7 @@ impl Shell {
                 );
                 TerminalPane::spawn(cx, surface_id, None, default_profile.clone())
             });
+
         let pane = match spawned {
             Ok(pane) => pane,
             Err(error) => {
@@ -366,7 +391,9 @@ impl Shell {
                     .expect("GPUI terminal surface")
             }
         };
+
         Self::watch_pane(&pane, cx);
+
         pane
     }
 
@@ -376,17 +403,22 @@ impl Shell {
         // the kept workspaces.
         let mut active_workspace = 0usize;
         let mut workspaces = Vec::new();
+
         let default_profile = cx.global::<AppSettings>().default_profile_command();
+
         for workspace in self.workspaces.summaries() {
             if Some(workspace.id) == self.doomed_workspace {
                 continue;
             }
+
             let Some(tabs) = self.workspaces.tabs_of(workspace.id) else {
                 continue;
             };
+
             if workspace.active {
                 active_workspace = workspaces.len();
             }
+
             workspaces.push(WorkspaceState {
                 name: workspace.name,
                 cwd: (!workspace.cwd.is_empty()).then_some(workspace.cwd),
@@ -412,6 +444,7 @@ impl Shell {
                     .collect(),
             });
         }
+
         SessionState {
             active_workspace,
             workspaces,

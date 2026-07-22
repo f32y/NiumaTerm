@@ -46,8 +46,10 @@ impl AgentProcess {
     fn new() -> Self {
         let mut nonce = [0u8; 16];
         let mut hook_token = [0u8; 32];
+
         getrandom::fill(&mut nonce).expect("Windows cryptographic random source");
         getrandom::fill(&mut hook_token).expect("Windows cryptographic random source");
+
         Self {
             nonce: format!("{:x}-{}", std::process::id(), hex(&nonce)),
             hook_token: hex(&hook_token),
@@ -102,18 +104,22 @@ impl AgentProcess {
                 AGENT_HOOK_PROTOCOL_VERSION.to_string(),
             ),
         ];
+
         if let Some(path) = self.hook_executable.get() {
             environment.push((AGENT_HOOK_EXE_ENV.into(), path.clone()));
         }
+
         if self.testing.load(Ordering::Relaxed) {
             environment.push((AGENT_TESTING_ENV.into(), "1".into()));
         }
+
         environment
     }
 }
 
 pub fn agent_process() -> &'static AgentProcess {
     static PROCESS: OnceLock<AgentProcess> = OnceLock::new();
+
     PROCESS.get_or_init(AgentProcess::new)
 }
 
@@ -134,10 +140,13 @@ pub fn exact_window_is_active(
 
 fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
+
     let mut output = String::with_capacity(bytes.len() * 2);
+
     for byte in bytes {
         write!(output, "{byte:02x}").expect("writing to String cannot fail");
     }
+
     output
 }
 
@@ -147,6 +156,7 @@ pub struct AgentRoute(String);
 impl AgentRoute {
     pub fn parse(value: &str) -> Result<Self, AgentValidationError> {
         validate_identity(value, MAX_ROUTE_BYTES, AgentValidationError::InvalidRoute)?;
+
         Ok(Self(value.to_owned()))
     }
 
@@ -205,6 +215,7 @@ impl RawAgentHookEnvelope {
             "claude_hook" => claude_code::hook::normalize,
             _ => return None,
         };
+
         normalize(
             self.payload,
             &self.route,
@@ -230,6 +241,7 @@ pub enum HookInstallStatus {
 /// through either cmd.exe or PowerShell.
 pub fn build_windows_hook_command(executable: &str, argument: &str) -> io::Result<String> {
     let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+
     build_windows_hook_command_for(executable, argument, &system_root)
 }
 
@@ -244,6 +256,7 @@ fn build_windows_hook_command_for(
             "hook executable path is invalid",
         ));
     }
+
     if argument.is_empty()
         || !argument
             .bytes()
@@ -268,16 +281,19 @@ fn build_windows_hook_command_for(
     // path out of the outer agent shell's parser.
     let quoted = executable.replace('\'', "''");
     let script = format!("& '{quoted}' {argument}; exit $LASTEXITCODE");
+
     let encoded = base64::engine::general_purpose::STANDARD.encode(
         script
             .encode_utf16()
             .flat_map(u16::to_le_bytes)
             .collect::<Vec<_>>(),
     );
+
     let powershell = format!(
         "{}/System32/WindowsPowerShell/v1.0/powershell.exe",
         system_root.trim_end_matches(['\\', '/']).replace('\\', "/")
     );
+
     Ok(format!(
         "{powershell} -NoProfile -ExecutionPolicy Bypass -EncodedCommand {encoded}"
     ))
@@ -292,22 +308,28 @@ pub fn hook_command_contains(command: &str, marker: &str) -> bool {
 
 fn decode_powershell_command(command: &str) -> Option<String> {
     let mut parts = command.split_whitespace();
+
     let encoded = loop {
         if parts.next()?.eq_ignore_ascii_case("-EncodedCommand") {
             break parts.next()?;
         }
     };
+
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(encoded)
         .ok()?;
+
     let mut chunks = bytes.chunks_exact(2);
+
     let units = chunks
         .by_ref()
         .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
         .collect::<Vec<_>>();
+
     if !chunks.remainder().is_empty() {
         return None;
     }
+
     String::from_utf16(&units).ok()
 }
 
@@ -341,6 +363,7 @@ impl AgentEventEnvelope {
         if self.action != "agent_event" {
             return Err(AgentValidationError::UnsupportedAction);
         }
+
         AgentEvent::validate(
             AgentEventInput {
                 route: &self.event.route,
@@ -409,20 +432,25 @@ impl AgentEvent {
         if input.version != AGENT_HOOK_PROTOCOL_VERSION {
             return Err(AgentValidationError::UnsupportedVersion);
         }
+
         if expected_token.is_empty() || !constant_time_eq(input.token, expected_token) {
             return Err(AgentValidationError::InvalidToken);
         }
+
         let route = AgentRoute::parse(input.route)?;
+
         validate_identity(
             input.agent,
             MAX_AGENT_BYTES,
             AgentValidationError::InvalidAgent,
         )?;
+
         validate_identity(
             input.session_id,
             MAX_PROVIDER_ID_BYTES,
             AgentValidationError::InvalidSessionId,
         )?;
+
         match (input.kind, input.turn_id) {
             (AgentEventKind::SessionStarted, None) => {}
             (AgentEventKind::SessionStarted, Some(_)) | (_, None) => {
@@ -470,11 +498,15 @@ fn validate_identity(
 fn constant_time_eq(left: &str, right: &str) -> bool {
     let left = left.as_bytes();
     let right = right.as_bytes();
+
     let mut different = left.len() ^ right.len();
+
     let length = left.len().max(right.len());
+
     for index in 0..length {
         different |= usize::from(*left.get(index).unwrap_or(&0) ^ *right.get(index).unwrap_or(&0));
     }
+
     different == 0
 }
 
@@ -490,6 +522,7 @@ fn normalize_presentation(value: &str, max_chars: usize, preserve_newlines: bool
     let mut normalized = String::new();
     let mut last_was_space = false;
     let mut chars = value.chars().peekable();
+
     while let Some(ch) = chars.next() {
         let ch = if preserve_newlines && ch == '\r' {
             if chars.peek() == Some(&'\n') {
@@ -508,6 +541,7 @@ fn normalize_presentation(value: &str, max_chars: usize, preserve_newlines: bool
             if !last_was_space {
                 normalized.push(ch);
             }
+
             last_was_space = true;
         } else {
             normalized.push(ch);
@@ -556,11 +590,14 @@ impl AgentPaneState {
 
     fn set_status(&mut self, status: AgentRuntimeStatus, now: Instant) -> bool {
         let changed = self.status != status;
+
         if changed {
             self.status = status;
             self.state_started_at = now;
         }
+
         self.updated_at = now;
+
         changed
     }
 }
@@ -589,9 +626,11 @@ pub struct MonitorMutation {
 impl MonitorMutation {
     fn merge(&mut self, mut other: Self) {
         self.visible_changed |= other.visible_changed;
+
         if other.created_notification.is_some() {
             self.created_notification = other.created_notification.take();
         }
+
         self.removed_notifications
             .append(&mut other.removed_notifications);
     }
@@ -661,11 +700,14 @@ impl AgentMonitor {
         let Some(notification) = self.notifications.get_mut(route) else {
             return false;
         };
+
         if notification.id != notification_id || notification.read || notification.native_requested
         {
             return false;
         }
+
         notification.native_requested = true;
+
         true
     }
 
@@ -673,63 +715,84 @@ impl AgentMonitor {
         if !self.panes.contains_key(&event.route) {
             return MonitorMutation::default();
         }
+
         let route = event.route.clone();
+
         match event.kind {
             AgentEventKind::SessionStarted => {
                 let state = self.panes.get_mut(&route).expect("live route");
+
                 if state.current_owner.is_none() || state.status == AgentRuntimeStatus::Idle {
                     state.candidate = Some((event.agent, event.session_id));
                     state.updated_at = now;
                 }
+
                 MonitorMutation::default()
             }
             AgentEventKind::PromptSubmitted => {
                 let owner = event.owner().expect("validated prompt has turn id");
                 let state = self.panes.get_mut(&route).expect("live route");
+
                 let same_turn = state.current_owner.as_ref() == Some(&owner);
                 if !same_turn {
                     state.turn_generation = state.turn_generation.wrapping_add(1).max(1);
                 }
+
                 state.current_owner = Some(owner);
                 state.candidate = None;
                 state.has_work_evidence = true;
                 state.pending_completion = None;
+
                 let status_changed = state.set_status(AgentRuntimeStatus::Running, now);
+
                 let mut mutation = self.remove_notification(&route);
+
                 mutation.visible_changed |= status_changed || !same_turn;
+
                 mutation
             }
             AgentEventKind::ToolStarted | AgentEventKind::ToolFinished => {
                 let Some(owner) = event.owner() else {
                     return MonitorMutation::default();
                 };
+
                 let state = self.panes.get_mut(&route).expect("live route");
                 if state.current_owner.as_ref() != Some(&owner) {
                     return MonitorMutation::default();
                 }
+
                 let codex_permission_resolved =
                     owner.agent == "codex" && state.status == AgentRuntimeStatus::NeedsInput;
+
                 state.has_work_evidence = true;
                 state.pending_completion = None;
+
                 let visible_changed = state.set_status(AgentRuntimeStatus::Running, now);
+
                 let mut mutation = if codex_permission_resolved {
                     self.remove_notification(&route)
                 } else {
                     MonitorMutation::default()
                 };
+
                 mutation.visible_changed |= visible_changed;
+
                 mutation
             }
             AgentEventKind::PermissionRequested => {
                 let Some(owner) = event.owner() else {
                     return MonitorMutation::default();
                 };
+
                 let state = self.panes.get_mut(&route).expect("live route");
                 if state.current_owner.as_ref() != Some(&owner) || !state.has_work_evidence {
                     return MonitorMutation::default();
                 }
+
                 state.pending_completion = None;
+
                 let status_changed = state.set_status(AgentRuntimeStatus::NeedsInput, now);
+
                 // Codex emits PermissionRequest before an automatic reviewer
                 // settles, but its hook payload carries no final approval result.
                 // Delay native delivery so same-turn tool progress can cancel
@@ -740,13 +803,16 @@ impl AgentMonitor {
                     event.body,
                     (event.agent == "codex").then_some(now + COMPLETION_QUIET_WINDOW),
                 );
+
                 mutation.visible_changed |= status_changed;
+
                 mutation
             }
             AgentEventKind::Stopped => {
                 let Some(owner) = event.owner() else {
                     return MonitorMutation::default();
                 };
+
                 let state = self.panes.get_mut(&route).expect("live route");
                 if state.current_owner.as_ref() != Some(&owner)
                     || !state.has_work_evidence
@@ -754,7 +820,9 @@ impl AgentMonitor {
                 {
                     return MonitorMutation::default();
                 }
+
                 let generation = state.turn_generation;
+
                 if state.pending_completion.as_ref().is_none_or(|pending| {
                     pending.owner != owner || pending.turn_generation != generation
                 }) {
@@ -773,13 +841,16 @@ impl AgentMonitor {
 
     pub fn process_due(&mut self, now: Instant) -> MonitorMutation {
         let routes: Vec<_> = self.panes.keys().cloned().collect();
+
         let mut result = MonitorMutation::default();
+
         for route in routes {
             let completion = self
                 .panes
                 .get(&route)
                 .and_then(|state| state.pending_completion.clone())
                 .filter(|pending| pending.deadline <= now);
+
             if let Some(pending) = completion {
                 let commit = self.panes.get(&route).is_some_and(|state| {
                     state.current_owner.as_ref() == Some(&pending.owner)
@@ -787,14 +858,21 @@ impl AgentMonitor {
                         && state.has_work_evidence
                         && state.status != AgentRuntimeStatus::Idle
                 });
+
                 let state = self.panes.get_mut(&route).expect("route still registered");
+
                 state.pending_completion = None;
+
                 if commit {
                     state.has_work_evidence = false;
+
                     let status_changed = state.set_status(AgentRuntimeStatus::Idle, now);
+
                     let mut mutation =
                         self.create_notification(&route, pending.title, pending.body, None);
+
                     mutation.visible_changed |= status_changed;
+
                     result.merge(mutation);
                 }
             }
@@ -805,10 +883,13 @@ impl AgentMonitor {
                     AgentRuntimeStatus::Running | AgentRuntimeStatus::NeedsInput
                 ) && state.updated_at + ACTIVE_STATE_STALE_AFTER <= now
             });
+
             if stale {
                 let state = self.panes.get_mut(&route).expect("route still registered");
+
                 state.pending_completion = None;
                 state.has_work_evidence = false;
+
                 result.visible_changed |= state.set_status(AgentRuntimeStatus::Idle, now);
             }
         }
@@ -819,6 +900,7 @@ impl AgentMonitor {
         if !self.panes.contains_key(route) {
             return MonitorMutation::default();
         }
+
         self.create_notification(route, normalize_title(title), normalize_body(body), None)
     }
 
@@ -826,16 +908,22 @@ impl AgentMonitor {
         let Some(state) = self.panes.get_mut(route) else {
             return MonitorMutation::default();
         };
+
         if state.status == AgentRuntimeStatus::Idle {
             return MonitorMutation::default();
         }
+
         state.candidate = None;
         state.current_owner = None;
         state.has_work_evidence = false;
         state.pending_completion = None;
+
         let status_changed = state.set_status(AgentRuntimeStatus::Idle, now);
+
         let mut mutation = self.remove_notification(route);
+
         mutation.visible_changed |= status_changed;
+
         mutation
     }
 
@@ -853,12 +941,14 @@ impl AgentMonitor {
                 completion.into_iter().chain(stale)
             })
             .min();
+
         let native_deadline = self
             .notifications
             .values()
             .filter(|notification| !notification.read && !notification.native_requested)
             .filter_map(|notification| notification.native_after)
             .min();
+
         pane_deadline.into_iter().chain(native_deadline).min()
     }
 
@@ -866,10 +956,13 @@ impl AgentMonitor {
         let Some(notification) = self.notifications.get_mut(route) else {
             return MonitorMutation::default();
         };
+
         if notification.id != notification_id || notification.read {
             return MonitorMutation::default();
         }
+
         notification.read = true;
+
         MonitorMutation {
             visible_changed: true,
             removed_notifications: vec![notification.clone()],
@@ -879,8 +972,11 @@ impl AgentMonitor {
 
     pub fn remove_route(&mut self, route: &AgentRoute) -> MonitorMutation {
         let removed_state = self.panes.remove(route).is_some();
+
         let mut mutation = self.remove_notification(route);
+
         mutation.visible_changed |= removed_state;
+
         mutation
     }
 
@@ -888,12 +984,15 @@ impl AgentMonitor {
         let mut status = AgentRuntimeStatus::Idle;
         let mut unread_count = 0;
         let mut latest: Option<&AgentNotification> = None;
+
         for route in routes {
             if let Some(state) = self.panes.get(route) {
                 status = higher_status(status, state.status);
             }
+
             if let Some(notification) = self.notifications.get(route).filter(|n| !n.read) {
                 unread_count += 1;
+
                 if latest.is_none_or(|current| notification.order > current.order) {
                     latest = Some(notification);
                 }
@@ -920,13 +1019,17 @@ impl AgentMonitor {
         native_after: Option<Instant>,
     ) -> MonitorMutation {
         let state = self.panes.get_mut(route).expect("live route");
+
         state.notification_generation = state.notification_generation.wrapping_add(1).max(1);
         self.next_notification_order = self.next_notification_order.wrapping_add(1).max(1);
+
         let process_order = agent_process().next_notification_counter();
+
         let id = format!(
             "{}:{}:{}:{process_order}",
             self.process_instance, route.0, state.notification_generation,
         );
+
         let notification = AgentNotification {
             id: id.clone(),
             route: route.clone(),
@@ -939,9 +1042,11 @@ impl AgentMonitor {
             native_requested: false,
             native_after,
         };
+
         let removed = self
             .notifications
             .insert(route.clone(), notification.clone());
+
         MonitorMutation {
             visible_changed: true,
             created_notification: Some(notification),
@@ -951,6 +1056,7 @@ impl AgentMonitor {
 
     fn remove_notification(&mut self, route: &AgentRoute) -> MonitorMutation {
         let removed_notifications: Vec<_> = self.notifications.remove(route).into_iter().collect();
+
         MonitorMutation {
             visible_changed: !removed_notifications.is_empty(),
             removed_notifications,
@@ -967,6 +1073,7 @@ fn higher_status(left: AgentRuntimeStatus, right: AgentRuntimeStatus) -> AgentRu
             AgentRuntimeStatus::NeedsInput => 2,
         }
     }
+
     if priority(right) > priority(left) {
         right
     } else {

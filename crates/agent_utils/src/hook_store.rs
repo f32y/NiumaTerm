@@ -30,17 +30,23 @@ pub(crate) fn install_into(
     let root = settings
         .as_object_mut()
         .expect("hook settings reads only yield objects");
+
     let hooks = root.entry("hooks").or_insert_with(|| json!({}));
+
     let hooks = hooks
         .as_object_mut()
         .ok_or_else(|| invalid("existing \"hooks\" value is not an object"))?;
+
     for event in events {
         let entries = hooks.entry(*event).or_insert_with(|| json!([]));
+
         let entries = entries
             .as_array_mut()
             .ok_or_else(|| invalid("existing hook event value is not an array"))?;
+
         entries.push(entry(command));
     }
+
     Ok(())
 }
 
@@ -48,15 +54,18 @@ pub(crate) fn uninstall_from(settings: &mut Value) {
     let Some(hooks) = settings.get_mut("hooks").and_then(Value::as_object_mut) else {
         return;
     };
+
     for entries in hooks.values_mut() {
         let Some(groups) = entries.as_array_mut() else {
             continue;
         };
+
         for group in groups.iter_mut() {
             if let Some(commands) = group.get_mut("hooks").and_then(Value::as_array_mut) {
                 commands.retain(|hook| !is_niuma_hook(hook));
             }
         }
+
         // A matcher group with no commands does nothing; pruning it keeps the
         // file as clean as before the install.
         groups.retain(|group| {
@@ -66,7 +75,9 @@ pub(crate) fn uninstall_from(settings: &mut Value) {
                 .is_none_or(|commands| !commands.is_empty())
         });
     }
+
     hooks.retain(|_, entries| entries.as_array().is_none_or(|groups| !groups.is_empty()));
+
     if hooks.is_empty() {
         settings
             .as_object_mut()
@@ -81,6 +92,7 @@ pub(crate) fn status_of(settings: &Value, events: &[&str], command: &str) -> Hoo
         .flat_map(|event| event_commands(settings, event))
         .filter(|value| is_marked(value))
         .collect();
+
     if marked.is_empty() {
         HookInstallStatus::NotInstalled
     } else if marked.iter().all(|value| *value == command)
@@ -129,11 +141,14 @@ pub(crate) fn read(path: &Path, file_label: &str) -> io::Result<Value> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(json!({})),
         Err(error) => return Err(error),
     };
+
     if text.trim().is_empty() {
         return Ok(json!({}));
     }
+
     let value: Value = serde_json::from_str(&text)
         .map_err(|_| invalid(&format!("{file_label} is not valid JSON")))?;
+
     if value.is_object() {
         Ok(value)
     } else {
@@ -146,9 +161,13 @@ pub(crate) fn write(path: &Path, settings: &Value) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+
     let mut text = serde_json::to_string_pretty(settings).map_err(io::Error::other)?;
+
     text.push('\n');
+
     let temp = path.with_extension("json.niumaterm-tmp");
+
     std::fs::write(&temp, text)?;
     std::fs::rename(&temp, path)
 }

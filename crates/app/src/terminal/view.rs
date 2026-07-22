@@ -157,13 +157,16 @@ impl TerminalPane {
         // filling it here keeps the hardcoded built-in fallback in the session layer
         // from swallowing the configured profile.
         let mut tab_state = tab_state.unwrap_or_default();
+
         if tab_state.shell.is_none() {
             tab_state.shell = default_profile.0;
             tab_state.args = default_profile.1;
         }
+
         let profile_name = cx.read_global(|settings: &AppSettings, _| {
             settings.profile_name_for_command(tab_state.shell.as_deref(), &tab_state.args)
         });
+
         let (wake, wake_rx) = wake::wake_channel();
         let agent_route = agent_process().allocate_route();
         let environment = agent_process().environment_for(&agent_route);
@@ -173,6 +176,7 @@ impl TerminalPane {
                 settings.cursor_shape,
             )
         });
+
         let remote_session_enabled = nmt_config::get().remote_session.enabled;
         let surface = terminal_surface_for_tab(
             &wake,
@@ -184,6 +188,7 @@ impl TerminalPane {
             remote_session_enabled,
             environment,
         )?;
+
         Ok(cx.new(|cx| {
             Self::from_surface(
                 cx,
@@ -216,15 +221,21 @@ impl TerminalPane {
             let settings = cx.global::<AppSettings>();
             let fixed_bottom = settings.input_style.is_fixed_bottom();
             let cursor_shape = settings.cursor_shape;
+
             this.block_list
                 .list
                 .set_alignment(block_list_alignment(fixed_bottom));
+
             this.surface.set_theme_colors(&nmt_config::active_colors());
+
             if cursor_shape != this.cursor_shape && this.surface.set_cursor_shape(cursor_shape) {
                 this.cursor_shape = cursor_shape;
             }
+
             this.cell_metrics = None;
+
             this.frame_cache.invalidate_full();
+
             cx.notify();
         })
         .detach();
@@ -289,9 +300,12 @@ impl TerminalPane {
     pub(super) fn mark_scroll_activity(&mut self, cx: &mut Context<Self>) {
         self.last_scroll_activity = Some(std::time::Instant::now());
         self.scroll_activity_gen += 1;
+
         let generation = self.scroll_activity_gen;
+
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(SCROLLBAR_LINGER).await;
+
             let _ = this.update(cx, |this, cx| {
                 // Stale timers from earlier scroll ticks no-op; only the newest
                 // one repaints (with the linger expired, starting fade-out).
@@ -326,6 +340,7 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) {
         self.content_bounds = Some(bounds);
+
         if self.surface.resize_for_content(
             bounds.size.width.as_f32(),
             bounds.size.height.as_f32(),
@@ -338,12 +353,14 @@ impl TerminalPane {
 
     fn refresh_frame(&mut self) {
         let previous = self.frame_cache.reusable_frame();
+
         self.frame_cache
             .rebuild(self.surface.frame(previous.as_ref()));
     }
 
     fn invalidate(&mut self, cx: &mut Context<Self>) {
         self.frame_cache.invalidate();
+
         if self.dirty.mark() {
             cx.notify();
         }
@@ -351,7 +368,9 @@ impl TerminalPane {
 
     fn invalidate_chrome(&mut self, cx: &mut Context<Self>) {
         self.frame_cache.invalidate();
+
         self.dirty.mark();
+
         // Background panes cannot clear their dirty bit by rendering, but the
         // shell observer still needs every chrome wake to refresh tab state.
         cx.notify();
@@ -363,14 +382,17 @@ impl TerminalPane {
         {
             return;
         }
+
         // Plain printable text arrives through the char/IME path
         // (`replace_text_in_range`); encoding it here too would double it.
         if input::should_defer_to_ime(&event.keystroke) {
             return;
         }
+
         let action = input::key_action(&event.keystroke);
         let interrupts_agent = matches!(event.keystroke.key.as_str(), "escape" | "esc")
             && !event.keystroke.modifiers.modified();
+
         // Block-split: copy the frozen-region selection on the copy chord.
         if let (SurfaceKeyAction::CopyOrWrite(_), Some((a, b))) = (&action, self.frozen_selection) {
             let text = self.frozen_selection_to_text(a, b);
@@ -382,14 +404,18 @@ impl TerminalPane {
                 return;
             }
         }
+
         let result = self.surface.apply_key_action(action);
+
         if result == SurfaceKeyResult::Copied {
             show_text_copied(window, cx);
         }
+
         if result != SurfaceKeyResult::Ignored {
             if interrupts_agent {
                 cx.emit(AgentInterrupted);
             }
+
             self.invalidate(cx);
         }
     }
@@ -430,6 +456,7 @@ impl TerminalPane {
 
     fn on_file_drop(&mut self, paths: &ExternalPaths, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
+
         if self.surface.paste_text(&dropped_paths_text(paths.paths())) {
             self.invalidate(cx);
         }
@@ -442,7 +469,9 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) {
         window.focus(&self.focus, cx);
+
         self.selection_drag_origin = None;
+
         // Ctrl+left-click opens the URL under the pointer (OSC 8 target or
         // URL-shaped text). It wins over selection and mouse reporting so
         // links stay clickable inside TUIs, matching common terminal behavior.
@@ -457,6 +486,7 @@ impl TerminalPane {
                 return;
             }
         }
+
         // A left-click on a block-list gutter selects the item instead of
         // starting a text selection.
         if event.button == MouseButton::Left && self.block_chrome_enabled(cx) {
@@ -464,14 +494,18 @@ impl TerminalPane {
                 return;
             }
         }
+
         // Block-split: a left press in the frozen region starts a frozen
         // selection (and drops the engine one); any other press clears it.
         let reports_mouse = self
             .surface
             .mouse_reporting_active_for(input::modifiers_state(event.modifiers));
+
         let selection_type = selection_type_for_click_count(event.click_count);
+
         self.selection_drag_origin =
             (event.button == MouseButton::Left && !reports_mouse).then_some(event.position);
+
         if self.block_list_mode(cx) && !reports_mouse {
             if event.button == MouseButton::Left {
                 if let Some(BlockListPoint::Frozen(pt)) =
@@ -480,6 +514,7 @@ impl TerminalPane {
                     // The engine highlight is baked into the cached frame, so
                     // clearing the selection needs a frame rebuild too.
                     self.surface.clear_selection();
+
                     if selection_type == SelectionType::Simple {
                         self.frozen_selection = None;
                         self.frozen_select_anchor = Some(pt);
@@ -487,15 +522,20 @@ impl TerminalPane {
                         self.frozen_selection = self.expanded_frozen_selection(pt, selection_type);
                         self.frozen_select_anchor = None;
                     }
+
                     self.invalidate(cx);
+
                     cx.notify();
+
                     return;
                 }
             }
+
             if self.frozen_selection.take().is_some() {
                 cx.notify();
             }
         }
+
         self.apply_mouse_event(
             event.position,
             Some(event.button),
@@ -511,6 +551,7 @@ impl TerminalPane {
     pub(super) fn scrollbar_fraction(&self, y: Pixels) -> f32 {
         let bounds = self.content_bounds.unwrap_or_default();
         let height = bounds.size.height.as_f32().max(1.0);
+
         ((y.as_f32() - bounds.origin.y.as_f32()) / height).clamp(0.0, 1.0)
     }
 
@@ -519,23 +560,31 @@ impl TerminalPane {
     fn scroll_to_latest(&mut self, cx: &mut Context<Self>) -> bool {
         if self.block_list_mode(cx) {
             let (offset, max) = self.block_list.scrollbar;
+
             if offset >= max {
                 return false;
             }
+
             self.block_list.list.scroll_to_end();
             self.block_list.scrollbar.0 = max;
+
             self.mark_scroll_activity(cx);
+
             cx.notify();
+
             return true;
         }
 
         let scrolled = self.frame_cache.current().is_some_and(|frame| {
             let scrollbar = frame.scrollbar();
+
             scrollbar.offset < scrollbar.total.saturating_sub(scrollbar.len)
         });
+
         if scrolled {
             self.scroll_thumb_to(1.0, cx);
         }
+
         scrolled
     }
 
@@ -548,11 +597,14 @@ impl TerminalPane {
                 .map(|b| b.size.height.as_f32())
                 .unwrap_or(0.0);
             let total = max_scroll + viewport;
+
             let Some(new) = scrollbar_offset_for_thumb(total as f64, viewport as f64, thumb_top)
             else {
                 return;
             };
+
             let new = new as f32;
+
             if let (Some(frame), Some(cell)) = (self.frame_cache.current(), self.cell_metrics) {
                 let cols = self.content_cols();
                 let pad_rows = block_pad_rows(cx);
@@ -563,39 +615,53 @@ impl TerminalPane {
                 self.block_list.list.scroll_to(offset);
                 self.block_list.scrollbar.0 = new;
             }
+
             self.mark_scroll_activity(cx);
+
             cx.notify();
+
             return;
         }
+
         let sb = self
             .frame_cache
             .current()
             .map(|frame| frame.scrollbar())
             .unwrap_or_default();
+
         let scrollable = sb.total.saturating_sub(sb.len);
+
         if scrollable == 0 {
             return;
         }
+
         let target = scrollbar_offset_for_thumb(sb.total as f64, sb.len as f64, thumb_top)
             .unwrap_or_default()
             .round() as u64;
+
         let delta = target as isize - sb.offset as isize;
+
         if delta != 0 && self.surface.scroll_lines(delta) {
             self.mark_scroll_activity(cx);
+
             self.invalidate(cx);
         }
     }
 
     fn on_mouse_up(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
         self.selection_drag_origin = None;
+
         if self.scrollbar_dragging {
             // Drag ended: start the linger countdown that hides the bar.
             self.mark_scroll_activity(cx);
         }
+
         self.scrollbar_dragging = false;
+
         if self.frozen_select_anchor.take().is_some() {
             return;
         }
+
         self.apply_mouse_event(
             event.position,
             Some(event.button),
@@ -614,36 +680,48 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) {
         self.last_mouse_position = Some(event.position);
+
         if event.pressed_button.is_none() {
             self.update_hovered_link(event.position, event.modifiers, cx);
         }
+
         if self.scrollbar_dragging {
             let fraction = self.scrollbar_fraction(event.position.y);
             self.scroll_thumb_to(fraction - self.scrollbar_grab, cx);
             return;
         }
+
         if let Some(origin) = self.selection_drag_origin {
             let cell_width = self.cell_metrics(window, cx).width_px;
+
             if !selection_drag_started(origin, event.position, cell_width) {
                 return;
             }
+
             self.selection_drag_origin = None;
         }
+
         if let Some(anchor) = self.frozen_select_anchor {
             // Clamp into the frozen region so a drag past the seam sticks to
             // the last frozen row instead of vanishing.
             let mut pos = event.position;
+
             let origin = self.content_origin();
             let max_y = origin.y + px((self.frozen_hit.active_top - 1.0).max(0.0));
+
             if pos.y > max_y {
                 pos.y = max_y;
             }
+
             if let Some(BlockListPoint::Frozen(head)) = self.block_list_point_at(pos, cx) {
                 self.frozen_selection = Some((anchor, head));
+
                 cx.notify();
             }
+
             return;
         }
+
         self.apply_mouse_event(
             event.position,
             event.pressed_button,
@@ -666,28 +744,36 @@ impl TerminalPane {
         if self.hovered_link.take().is_some() {
             cx.notify();
         }
+
         let cell_metrics = self.cell_metrics(window, cx);
+
         let lines = terminal_scroll_lines(event.delta, cell_metrics);
+
         if lines == 0 {
             return;
         }
+
         // Block-split: scrolling is list state; the engine viewport stays
         // pinned. TUI mouse reporting still goes to the program.
         if self.block_list_mode(cx) && !self.surface.mouse_reporting_active() {
             return;
         }
+
         let offsets = self.current_row_offsets(cx);
+
         let (cell, _) = terminal_cell_at_position(
             event.position,
             self.content_origin(),
             cell_metrics,
             &offsets,
         );
+
         if self
             .surface
             .apply_scroll(cell, lines, input::modifiers_state(event.modifiers))
         {
             self.mark_scroll_activity(cx);
+
             self.invalidate(cx);
         }
     }
@@ -703,7 +789,9 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) {
         let cell_metrics = self.cell_metrics(window, cx);
+
         let modifiers = input::modifiers_state(modifiers);
+
         if self.block_list_mode(cx)
             && !self.surface.mouse_reporting_active_for(modifiers)
             && button == Some(MouseButton::Left)
@@ -711,6 +799,7 @@ impl TerminalPane {
         {
             let (_, side) =
                 terminal_cell_at_position(position, self.content_origin(), cell_metrics, &[]);
+
             let cell = match point {
                 BlockListPoint::LiveHistory { row, col } => SurfaceScreenCell { row, col },
                 // An engine selection cannot cross into an immutable finished
@@ -721,22 +810,29 @@ impl TerminalPane {
                     col: point.col.min(u16::MAX as u32) as u16,
                 },
             };
+
             if self
                 .surface
                 .apply_screen_selection(cell, side, kind, selection_type)
             {
                 self.invalidate(cx);
             }
+
             return;
         }
+
         let offsets = self.current_row_offsets(cx);
+
         // Block-split: the live grid starts at `active_top` in the list, so
         // shift the mapping origin.
         let mut origin = self.content_origin();
+
         if self.block_list_mode(cx) {
             origin.y += px(self.frozen_hit.active_top);
         }
+
         let (cell, side) = terminal_cell_at_position(position, origin, cell_metrics, &offsets);
+
         let handled = self.surface.apply_mouse(
             cell,
             side,
@@ -745,6 +841,7 @@ impl TerminalPane {
             modifiers,
             selection_type,
         );
+
         if handled {
             self.invalidate(cx);
         }
@@ -755,10 +852,13 @@ impl TerminalPane {
         if self.block_list_mode(cx) {
             return Vec::new();
         }
+
         let (Some(frame), Some(cell)) = (self.frame_cache.current(), self.cell_metrics) else {
             return Vec::new();
         };
+
         let fixed_bottom = cx.global::<AppSettings>().input_style.is_fixed_bottom();
+
         bottom_anchor_offsets(&frame, cell.height_px, fixed_bottom)
     }
 
@@ -793,6 +893,7 @@ impl TerminalPane {
     /// every pane — active or background — driven by the shell's observer.
     pub(crate) fn drain_host_events(&mut self) -> Vec<HostEvent> {
         let events = self.surface.poll_events();
+
         for event in &events {
             match event {
                 HostEvent::Exit => self.surface.mark_read_only(),
@@ -818,7 +919,9 @@ impl TerminalPane {
                     // immutable block, so live selection anchors no longer
                     // address the content they were created for.
                     self.surface.clear_selection();
+
                     self.frame_cache.invalidate();
+
                     self.refresh_blocks();
                 }
                 // Mirror the session's split block state for the render path.
@@ -879,6 +982,7 @@ impl TerminalPane {
             .iter()
             .map(|item| crate::terminal::block_list::item_px(item, cols, cell_h, pad_rows))
             .sum();
+
         frozen
             + self.live_history_rows(frame) as f32 * cell_h
             + frame_content_rows(frame) as f32 * cell_h
@@ -891,7 +995,9 @@ impl TerminalPane {
         if !self.surface.engine_blocks() {
             return 0;
         }
+
         let sb = frame.scrollbar();
+
         sb.total.saturating_sub(sb.len)
     }
 
@@ -905,6 +1011,7 @@ impl TerminalPane {
         target: f32,
     ) -> ListOffset {
         let mut y = 0.0f32;
+
         for (ix, item) in store.items().iter().enumerate() {
             let h = crate::terminal::block_list::item_px(item, cols, cell_h, pad_rows);
             if target < y + h {
@@ -915,7 +1022,9 @@ impl TerminalPane {
             }
             y += h;
         }
+
         let live_h = self.block_list_total_px(store, frame, cols, cell_h, pad_rows) - y;
+
         if target < y + live_h {
             ListOffset {
                 item_ix: store.items().len(),
@@ -936,6 +1045,7 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) {
         self.set_content_bounds(bounds, cell, cx);
+
         self.frozen_hit.clear();
         self.frozen_hit.set_active_top(self.block_list.active_top);
         self.frozen_chrome.clear();
@@ -949,10 +1059,12 @@ impl TerminalPane {
     ) {
         self.frozen_separators
             .extend(view.separators.iter().map(|y| item_top + y));
+
         for row in &view.rows {
             self.frozen_hit
                 .push_row(item_top + row.y, row.item, row.row, row.cell_count);
         }
+
         for chrome in &view.items_chrome {
             self.frozen_chrome
                 .push(offset_frozen_chrome(chrome.clone(), item_top));
@@ -978,13 +1090,16 @@ impl TerminalPane {
         if !self.block_list_mode(cx) {
             return None;
         }
+
         let cell = self.cell_metrics?;
         let origin = self.content_origin();
         let local_x = (position.x - origin.x).as_f32();
         let local_y = (position.y - origin.y).as_f32();
+
         if local_y >= self.frozen_hit.active_top {
             return None;
         }
+
         self.frozen_hit.hit_test(
             local_x,
             local_y,
@@ -1003,24 +1118,33 @@ impl TerminalPane {
         if self.surface.mouse_reporting_active() {
             return false;
         }
+
         let origin = self.content_origin();
+
         if block_gutter_hit(position.x.as_f32(), origin.x.as_f32()) {
             let y = (position.y - origin.y).as_f32();
+
             let hit = self
                 .frozen_chrome
                 .iter()
                 .find(|chrome| (chrome.top..chrome.bottom).contains(&y))
                 .map(|chrome| chrome.item);
+
             if let Some(item) = hit {
                 self.selected_frozen_item = Some(item);
+
                 cx.notify();
+
                 return true;
             }
         }
+
         let cleared_frozen = self.selected_frozen_item.take().is_some();
+
         if cleared_frozen {
             cx.notify();
         }
+
         false
     }
 
@@ -1030,12 +1154,15 @@ impl TerminalPane {
         let Some(cell) = self.cell_metrics else {
             return;
         };
+
         let cols = self.content_cols();
         let pad_rows = block_pad_rows(cx);
         let (resolved, max_scroll) = self.block_list.scrollbar;
         let store = self.surface.block_store();
+
         let target = {
             let store = store.lock();
+
             crate::terminal::block_list::nav_item_top(
                 &store,
                 cols,
@@ -1045,11 +1172,14 @@ impl TerminalPane {
                 direction,
             )
         };
+
         let Some(target) = target else {
             return;
         };
+
         let store = self.surface.block_store();
         let store = store.lock();
+
         if let Some(frame) = self.frame_cache.current() {
             self.block_list.list.scroll_to(self.list_offset_for_px(
                 &store,
@@ -1060,8 +1190,11 @@ impl TerminalPane {
                 target,
             ));
         }
+
         self.block_list.scrollbar.0 = target.min(max_scroll);
+
         self.mark_scroll_activity(cx);
+
         cx.notify();
     }
 
@@ -1069,11 +1202,14 @@ impl TerminalPane {
     /// elapsed time advances even with no PTY output.
     fn schedule_block_tick(&mut self, cx: &mut Context<Self>) {
         self.block_list.tick_gen += 1;
+
         let generation = self.block_list.tick_gen;
+
         cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(std::time::Duration::from_secs(1))
                 .await;
+
             let _ = this.update(cx, |this, cx| {
                 if this.block_list.tick_gen == generation && this.in_flight.is_some() {
                     this.invalidate(cx);
@@ -1089,12 +1225,15 @@ impl TerminalPane {
         let item = self.selected_frozen_item?;
         let store = self.surface.block_store();
         let store = store.lock();
+
         if item < store.items().len() {
             return store.items().get(item)?.meta.command.clone();
         }
+
         if item == store.items().len() {
             return self.in_flight.as_ref().map(|block| block.command.clone());
         }
+
         None
     }
 
@@ -1102,21 +1241,28 @@ impl TerminalPane {
         let item = self.selected_frozen_item?;
         let store = self.surface.block_store();
         let store = store.lock();
+
         if item < store.items().len() {
             // Block items format through the engine after the store lock
             // drops (the two locks never nest).
             let handle = store.items().get(item)?.handle()?;
+
             drop(store);
+
             return self.format_block_range(handle, None, None);
         }
+
         let is_live = item == store.items().len();
+
         drop(store);
+
         if is_live {
             return self
                 .frame_cache
                 .current()
                 .and_then(|frame| live_frame_text(&frame));
         }
+
         None
     }
 
@@ -1132,9 +1278,11 @@ impl TerminalPane {
             let store = store.lock();
             store.items().get(point.item)?.handle()?
         };
+
         let ((start_line, start_col), (end_line, end_col)) =
             self.surface
                 .frozen_selection_range(handle, point.line, point.col, selection_type)?;
+
         Some((
             FrozenPoint {
                 item: point.item,
@@ -1160,8 +1308,10 @@ impl TerminalPane {
         let pieces = {
             let store = self.surface.block_store();
             let store = store.lock();
+
             crate::terminal::block_list::frozen_selection_pieces(&store, a, b)
         };
+
         pieces
             .into_iter()
             .filter_map(|piece| self.format_block_range(piece.handle, piece.start, piece.end))
@@ -1203,6 +1353,7 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) {
         let text = self.selected_frozen_output();
+
         if let Some(text) = text.filter(|t| !t.is_empty()) {
             self.surface.copy_text_to_clipboard(text);
             cx.notify();
@@ -1211,11 +1362,14 @@ impl TerminalPane {
 
     fn on_rerun_block(&mut self, _: &RerunBlock, _: &mut Window, cx: &mut Context<Self>) {
         let command = self.selected_frozen_command();
+
         let Some(command) = command else {
             return;
         };
+
         self.surface.write_text(&command);
         self.surface.write_text("\r");
+
         self.invalidate(cx);
     }
 
@@ -1266,8 +1420,10 @@ fn terminal_surface_for_tab(
         environment_overrides.clone(),
     ) {
         Ok(surface) => Ok(surface),
+
         Err(error) if state.cwd.is_some() => {
             tracing::warn!("restored tab failed with saved cwd, retrying without cwd: {error}");
+
             TerminalSurface::for_gpui(
                 wake.clone(),
                 surface_id,
@@ -1306,7 +1462,9 @@ impl EntityInputHandler for TerminalPane {
         if text.is_empty() {
             return;
         }
+
         self.surface.write_text(text);
+
         self.invalidate(cx);
     }
 
@@ -1319,15 +1477,19 @@ impl EntityInputHandler for TerminalPane {
     ) -> Option<Bounds<Pixels>> {
         let cursor = self.frame_cache.current()?.cursor()?;
         let cell = self.cell_metrics?;
+
         // `element_bounds` is the terminal leaf's content rect (padding already
         // excluded), so the cursor cell offsets from its origin directly — plus
         // the inter-block gap offset for the cursor's row.
         let offsets = self.current_row_offsets(cx);
+
         let mut y_offset = row_y_offset(&offsets, cursor.row as usize);
+
         // Block list: the live grid starts at `active_top` in the list.
         if self.block_list_mode(cx) {
             y_offset += self.frozen_hit.active_top;
         }
+
         Some(Bounds::new(
             point(
                 element_bounds.left() + px(cursor.col as f32 * cell.width_px),
@@ -1395,15 +1557,18 @@ impl EntityInputHandler for TerminalPane {
 impl Render for TerminalPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.dirty.begin_frame();
+
         self.wake.mark_delivered(self.id);
 
         // Host events are drained by the shell pump (observer), and the surface
         // is resized from the leaf's actual bounds in paint — neither happens
         // here, so background tabs and chrome offsets are handled correctly.
         let cell = self.cell_metrics(window, cx);
+
         if self.frame_cache.needs_rebuild() {
             self.refresh_frame();
         }
+
         let frame = self.frame_cache.current().unwrap_or_default();
 
         // Release the atlas tiles of Kitty images whose final reference dropped
@@ -1421,6 +1586,7 @@ impl Render for TerminalPane {
         let show_block_chrome = settings.command_blocks;
 
         let block_list_mode = self.block_list_mode(cx);
+
         // The tick only repaints the running header's elapsed time; compact
         // presentation hides headers, so skip it there.
         if block_list_mode && show_block_chrome && self.in_flight.is_some() {
@@ -1452,17 +1618,21 @@ impl Render for TerminalPane {
                     self.block_list.list.logical_scroll_top(),
                 )
             };
+
             let store_len = metrics.store_len;
             let evicted_items = metrics.evicted_items;
             let item_count = metrics.item_count;
             let evicted_delta =
                 evicted_items.saturating_sub(self.block_list.evicted_items) as usize;
+
             self.selected_frozen_item = shift_selected_item_for_eviction(
                 self.selected_frozen_item,
                 evicted_delta,
                 store_len,
             );
+
             let mut mirrored_count = self.block_list.item_count;
+
             if evicted_delta > 0 {
                 let old_frozen = mirrored_count.saturating_sub(1);
                 if evicted_delta > old_frozen {
@@ -1473,6 +1643,7 @@ impl Render for TerminalPane {
                     mirrored_count -= evicted_delta;
                 }
             }
+
             if item_count < mirrored_count {
                 self.block_list.list.reset(item_count);
             } else if item_count != mirrored_count {
@@ -1481,6 +1652,7 @@ impl Render for TerminalPane {
                     .list
                     .splice(old_live..mirrored_count, item_count - old_live);
             }
+
             self.block_list.item_count = item_count;
             self.block_list.evicted_items = evicted_items;
 
@@ -1492,6 +1664,7 @@ impl Render for TerminalPane {
                 tail_px: metrics.tail_px,
                 live_rows,
             };
+
             if self
                 .last_list_measure_key
                 .is_some_and(|prev| prev.layout != measure_key.layout)
@@ -1501,9 +1674,11 @@ impl Render for TerminalPane {
                 let start = store_len.saturating_sub(1);
                 self.block_list.list.remeasure_items(start..item_count);
             }
+
             self.last_list_measure_key = Some(measure_key);
 
             let pane = cx.entity();
+
             if !self.block_list.scroll_handler_set {
                 self.block_list.list.set_scroll_handler({
                     let pane = pane.clone();
@@ -1511,12 +1686,14 @@ impl Render for TerminalPane {
                         let _ = pane.update(cx, |pane, cx| pane.mark_scroll_activity(cx));
                     }
                 });
+
                 self.block_list.scroll_handler_set = true;
             }
 
             let total_px = metrics.total_px;
             let max_scroll = (total_px - viewport_px).max(0.0);
             let offset_px = metrics.offset_px.min(max_scroll);
+
             self.block_list.scrollbar = (offset_px, max_scroll);
             self.block_list.active_top = block_list_active_top_px(
                 metrics.frozen_px,
@@ -1535,6 +1712,7 @@ impl Render for TerminalPane {
             let pane_for_items = pane.clone();
             let store_for_items = store.clone();
             let live_index = item_count.saturating_sub(1);
+
             Some(
                 list(self.block_list.list.clone(), move |ix, _window, _cx| {
                     if ix < live_index {
@@ -1575,9 +1753,11 @@ impl Render for TerminalPane {
             self.scrollbar_dragging,
             self.last_scroll_activity.map(|at| at.elapsed()),
         );
+
         if scrollbar_opacity.is_some_and(|opacity| opacity < 1.0) {
             window.request_animation_frame();
         }
+
         let scrollbar_info = if block_list_element.is_some() {
             nmt_terminal::ghostty::ScrollbarInfo {
                 total: (self.block_list.scrollbar.1 + viewport_px).max(0.0) as u64,
@@ -1587,6 +1767,7 @@ impl Render for TerminalPane {
         } else {
             frame.scrollbar()
         };
+
         // Keep the transparent track hit-testable so hovering the scrollbar
         // region can reveal it after the activity fade has completed.
         let scrollbar = scrollbar_element(scrollbar_info, scrollbar_opacity.unwrap_or(0.0), cx);
@@ -1677,6 +1858,7 @@ impl Render for TerminalPane {
 fn selection_drag_started(origin: Point<Pixels>, position: Point<Pixels>, cell_width: f32) -> bool {
     let dx = position.x.as_f32() - origin.x.as_f32();
     let dy = position.y.as_f32() - origin.y.as_f32();
+
     dx * dx + dy * dy >= cell_width * cell_width / 16.0
 }
 
@@ -1700,11 +1882,13 @@ pub(super) fn terminal_cell_at_position(
     let col = (x / cell.width_px).floor() as u16;
     let row = terminal_row_at_y(y, cell.height_px, offsets);
     let cell_x = x - (col as f32 * cell.width_px);
+
     let side = if cell_x < cell.width_px / 2.0 {
         SurfaceCellSide::Left
     } else {
         SurfaceCellSide::Right
     };
+
     (SurfaceCell { col, row }, side)
 }
 
@@ -1724,6 +1908,7 @@ fn terminal_scroll_lines(delta: ScrollDelta, cell: metrics::CellMetrics) -> i32 
         ScrollDelta::Lines(point) => point.y * WHEEL_LINES_PER_STEP,
         ScrollDelta::Pixels(point) => point.y.as_f32() / cell.height_px.max(1.0),
     };
+
     if raw.abs() < 0.5 {
         0
     } else {

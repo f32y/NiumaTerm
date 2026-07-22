@@ -122,12 +122,15 @@ impl TerminalFrame {
 
         let mut lines = Vec::with_capacity(buf.rows());
         let mut line_states = Vec::with_capacity(buf.rows());
+
         for row in 0..buf.rows() {
             let state = TerminalLineState {
                 version: buf.row_versions().get(row).copied().unwrap_or_default(),
                 selection: row_selection_for(selection, row, buf.cols()),
             };
+
             let row_cursor = cursor_for_row(cursor, row);
+
             let line = reusable
                 .filter(|frame| {
                     frame.line_states[row] == state
@@ -137,7 +140,9 @@ impl TerminalFrame {
                     || extract_row_with_colors(buf, row, row_cursor, &colors, state.selection),
                     |frame| frame.lines[row].clone(),
                 );
+
             lines.push(line);
+
             line_states.push(state);
         }
 
@@ -145,6 +150,7 @@ impl TerminalFrame {
         // rebuild allocates nothing for `images` (an empty `Vec::into::<Arc<[_]>>()`
         // still allocates the Arc header).
         let images_vec = extract_frame_images(buf, generations);
+
         let images = if images_vec.is_empty() {
             empty_images()
         } else {
@@ -209,6 +215,7 @@ impl TerminalLine {
     ) -> Self {
         let text_hash = hash_line(&text, &runs);
         let _ = cursor_col;
+
         Self(Arc::new(TerminalLineData {
             text: text.into(),
             text_hash,
@@ -268,11 +275,15 @@ impl LineBuilder {
         wide: bool,
     ) {
         let start = self.text.len();
+
         self.text.extend(display);
+
         if wide {
             self.text.push('\u{00a0}');
         }
+
         let seg_len = self.text.len() - start;
+
         match self.runs.last_mut() {
             Some(last)
                 if StyleRun {
@@ -359,6 +370,7 @@ pub(crate) enum ZLayer {
 /// refcount bump, so the common case allocates nothing.
 fn empty_images() -> Arc<[FrameImage]> {
     static EMPTY: std::sync::OnceLock<Arc<[FrameImage]>> = std::sync::OnceLock::new();
+
     EMPTY.get_or_init(|| Arc::from(Vec::new())).clone()
 }
 
@@ -401,9 +413,11 @@ impl FrameImage {
                     origin_y + viewport_row as f32 * cell_h + row_offset + cell_y_offset as f32;
                 let dw = grid_cols as f32 * cell_w;
                 let dh = grid_rows as f32 * cell_h;
+
                 if dw <= 0.0 || dh <= 0.0 {
                     return None;
                 }
+
                 Some(([dx, dy, dw, dh], source))
             }
             FrameImageKind::Virtual {
@@ -431,6 +445,7 @@ impl FrameImage {
                     0,
                     screen_col,
                 )?;
+
                 Some(([g.x, g.y, g.width, g.height], g.source_rect))
             }
         }
@@ -461,15 +476,19 @@ pub(crate) fn extract_frame_images(
     if buf.placements().is_empty() {
         return Vec::new();
     }
+
     let mut out = Vec::new();
+
     extract_ordinary_images(buf, generations, &mut out);
     extract_virtual_images(buf, generations, &mut out);
+
     out
 }
 
 fn image_pixel_size(generation: &crate::terminal::graphics::ImageGeneration) -> Option<(u32, u32)> {
     let size = generation.image().size(0);
     let (w, h) = (size.width.0.max(0) as u32, size.height.0.max(0) as u32);
+
     (w > 0 && h > 0).then_some((w, h))
 }
 
@@ -482,9 +501,11 @@ fn extract_ordinary_images(
         let Some(generation) = generations.get(&placement.image_id) else {
             continue; // pixels not cached yet; skip until the update arrives
         };
+
         let Some((iw, ih)) = image_pixel_size(generation) else {
             continue;
         };
+
         out.push(FrameImage {
             generation: generation.clone(),
             z: placement.z,
@@ -511,10 +532,12 @@ fn normalized_source_rect(
     if placement.source_width == 0 || placement.source_height == 0 {
         return [0.0, 0.0, 1.0, 1.0];
     }
+
     let x0 = placement.source_x as f32 / image_w;
     let y0 = placement.source_y as f32 / image_h;
     let x1 = (placement.source_x + placement.source_width) as f32 / image_w;
     let y1 = (placement.source_y + placement.source_height) as f32 / image_h;
+
     [x0, y0, x1.min(1.0), y1.min(1.0)]
 }
 
@@ -532,14 +555,17 @@ fn extract_virtual_images(
         }
 
         let mut current: Option<(IncompletePlacement, usize)> = None;
+
         for col in 0..buf.cols() {
             let cell = buf.cell(col, row);
             let is_placeholder =
                 cell.content_tag() == ContentTag::Codepoint && cell.c() == PLACEHOLDER;
+
             if !is_placeholder {
                 if let Some((run, start)) = current.take() {
                     push_virtual_run(buf, generations, run, start, row, out);
                 }
+
                 continue;
             }
 
@@ -549,6 +575,7 @@ fn extract_virtual_images(
                 .and_then(|id| buf.extras().get(&id))
                 .map(|extras| extras.zerowidth.as_slice())
                 .unwrap_or(&[]);
+
             let inc = IncompletePlacement::from_cell(style.fg, style.underline_color, combining);
 
             match &mut current {
@@ -557,6 +584,7 @@ fn extract_virtual_images(
                     if let Some((run, start)) = current.take() {
                         push_virtual_run(buf, generations, run, start, row, out);
                     }
+
                     current = Some((inc, col));
                 }
             }
@@ -579,6 +607,7 @@ fn push_virtual_run(
     out: &mut Vec<FrameImage>,
 ) {
     let run = incomplete.complete();
+
     let Some(placement) = buf
         .placements()
         .iter()
@@ -586,12 +615,15 @@ fn push_virtual_run(
     else {
         return; // no matching placement metadata
     };
+
     let Some(generation) = generations.get(&run.image_id) else {
         return; // image not cached
     };
+
     let Some((iw, ih)) = image_pixel_size(generation) else {
         return;
     };
+
     out.push(FrameImage {
         generation: generation.clone(),
         z: placement.z,
@@ -644,6 +676,7 @@ fn extract_row_with_colors(
     for col in 0..buf.cols() {
         let cell = buf.cell(col, row);
         let wide = cell.wide();
+
         if matches!(wide, Wide::Spacer | Wide::LeadingSpacer) {
             continue;
         }
@@ -653,6 +686,7 @@ fn extract_row_with_colors(
         let cursor_shape = cursor
             .filter(|cursor| cursor.col == col as u16)
             .map(|cursor| cursor.shape);
+
         let background = if cell_is_selected(row_selection, col as u16) {
             Some(colors.selection_background)
         } else {
@@ -689,16 +723,19 @@ fn extract_row_with_colors(
                 strikethrough: false,
             }
         };
+
         if cursor_shape == Some(CursorShape::Block) {
             // An opaque block replaces the cell background, so painting its glyph
             // with that original background preserves inverse-video contrast.
             style.fg = background.unwrap_or_else(|| colors.named(NamedColor::Background));
         }
+
         builder.push_segment(
             std::iter::once(display_char(source_ch)).chain(extras.iter().copied()),
             style,
             wide == Wide::Wide,
         );
+
         builder.push_cell(TerminalCell {
             col: col as u16,
             ch: source_ch,
@@ -779,6 +816,7 @@ impl BackgroundColors {
     fn color(&self, color: &AnsiColor, flags: StyleFlags, foreground: bool) -> TerminalColor {
         let dim = foreground && flags.contains(StyleFlags::DIM);
         let bold = foreground && flags.contains(StyleFlags::BOLD);
+
         match color {
             AnsiColor::Named(named) => {
                 let named = if foreground && bold && !dim {
@@ -806,6 +844,7 @@ impl BackgroundColors {
                     (false, true, false, 0..=7) => NamedColor::DimBlack as usize + *index as usize,
                     _ => *index as usize,
                 };
+
                 self.indexed(index)
             }
         }
@@ -856,6 +895,7 @@ fn display_char(ch: char) -> char {
 fn hash_line(text: &str, runs: &[StyleRun]) -> u64 {
     let mut hasher = DefaultHasher::new();
     text.hash(&mut hasher);
+
     // Fold style into the key so a same-text/different-color row invalidates the
     // shaped-line cache (otherwise recolored output would keep stale glyph runs).
     for run in runs {
@@ -868,6 +908,7 @@ fn hash_line(text: &str, runs: &[StyleRun]) -> u64 {
         run.underline.hash(&mut hasher);
         run.strikethrough.hash(&mut hasher);
     }
+
     hasher.finish()
 }
 

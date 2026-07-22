@@ -93,14 +93,18 @@ impl TabStrip {
         cx: &mut Context<Shell>,
     ) {
         let changed = self.last_active != Some(active_id);
+
         if changed || self.reveal_retry {
             self.reveal_retry = changed && self.last_active.is_none();
             self.last_active = Some(active_id);
+
             self.scroll.scroll_to_item(active_index);
+
             if self.reveal_retry {
                 cx.notify();
             }
         }
+
         // Runs every render: close the make-way gap once the drag is gone
         // without a drop on the strip (cancelled via Escape, or released
         // elsewhere) — the cancel itself refreshes the window, so this always
@@ -118,6 +122,7 @@ impl TabStrip {
         cx: &mut Context<Shell>,
     ) -> AnyElement {
         let active_idx = tabs.active_index();
+
         let items: Vec<(u64, String, bool)> = tabs
             .tabs()
             .iter()
@@ -127,10 +132,13 @@ impl TabStrip {
                 } else {
                     tab.title().to_string()
                 };
+
                 if tab.exited() {
                     label.push_str(" [exited]");
                 }
+
                 let unread = unread_tabs.contains(&tab.id());
+
                 (tab.id().0, label, unread)
             })
             .collect();
@@ -148,9 +156,11 @@ impl TabStrip {
 
         let closeable = items.len() > 1;
         let shell = cx.entity();
+
         // Fixed width from the Appearance setting; long titles clip inside
         // the tab's own overflow_hidden.
         let tab_width = cx.global::<AppSettings>().tab_width as f32;
+
         let bar = TabBar::new("shell-tabs")
             // Soft-rounded pills floating on the chrome (VS Code Modern UI
             // look); Small keeps the strip compact above the terminal card.
@@ -182,6 +192,7 @@ impl TabStrip {
                                 cx.stop_propagation();
                                 this.request_close_tab(TabId(id), window, cx);
                             }));
+
                         // Inline rename: the label swaps for an input. The mouse-down
                         // stopper keeps clicks in the input from activating the tab
                         // (and blurring the input); Escape cancels before the input
@@ -189,6 +200,7 @@ impl TabStrip {
                         let renaming = rename
                             .filter(|(rid, _)| *rid == TabId(id))
                             .map(|(_, input)| input.clone());
+
                         let content: AnyElement = if let Some(input) = renaming {
                             div()
                                 .flex_1()
@@ -227,6 +239,7 @@ impl TabStrip {
                                 .context_menu(move |menu, _, _| {
                                     let rename_shell = menu_shell.clone();
                                     let close_shell = menu_shell.clone();
+
                                     menu.item(PopupMenuItem::new("Rename").on_click(
                                         move |_, window, cx| {
                                             rename_shell.update(cx, |this, cx| {
@@ -283,9 +296,11 @@ impl TabStrip {
                                     if !e.bounds.contains(&e.event.position) {
                                         return;
                                     }
+
                                     // No gap over the drag's own tab: dropping
                                     // there is a no-op.
                                     let target = (e.drag(cx).from != index).then_some(index);
+
                                     if this.tab_strip.drag_over != target {
                                         this.tab_strip.drag_over = target;
                                         cx.notify();
@@ -296,18 +311,23 @@ impl TabStrip {
                                 // The strip-level fallback handler must not
                                 // also reorder this drop.
                                 cx.stop_propagation();
+
                                 this.tab_strip.drag_over = None;
                                 this.workspaces.active_tabs_mut().reorder(drag.from, index);
+
                                 this.focus_active(window, cx);
                                 this.sync_session_memory(cx);
+
                                 cx.notify();
                             }))
                     }),
             )
             .on_click(cx.listener(|this, ix: &usize, window, cx| {
                 this.workspaces.active_tabs_mut().activate(*ix);
+
                 this.focus_active(window, cx);
                 this.sync_session_memory(cx);
+
                 cx.notify();
             }));
         // Fallback drop target for the whole strip: a drop released over the
@@ -320,6 +340,7 @@ impl TabStrip {
             .on_drop(cx.listener(|this, drag: &TabDrag, window, cx| {
                 if let Some(to) = this.tab_strip.drag_over.take() {
                     this.workspaces.active_tabs_mut().reorder(drag.from, to);
+
                     this.focus_active(window, cx);
                     this.sync_session_memory(cx);
                 }

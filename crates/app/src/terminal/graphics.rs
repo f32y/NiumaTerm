@@ -21,6 +21,7 @@ use parking_lot::Mutex;
 // and the wrapper must cross threads. The compile-time assertion enforces the invariant.
 const _: fn() = || {
     fn assert_send_sync<T: Send + Sync>() {}
+
     assert_send_sync::<RenderImage>();
     assert_send_sync::<ImageGeneration>();
 };
@@ -85,21 +86,28 @@ impl Drop for ImageGeneration {
 pub fn expanded_full_bounds(dest: [f32; 4], source: [f32; 4]) -> Option<[f32; 4]> {
     let [dx, dy, dw, dh] = dest;
     let [u0, v0, u1, v1] = source;
+
     if !dest.iter().chain(source.iter()).all(|f| f.is_finite()) {
         return None;
     }
+
     if dw <= 0.0 || dh <= 0.0 {
         return None;
     }
+
     let (du, dv) = (u1 - u0, v1 - v0);
+
     if du <= 0.0 || dv <= 0.0 {
         return None;
     }
+
     let full_w = dw / du;
     let full_h = dh / dv;
+
     if !full_w.is_finite() || !full_h.is_finite() {
         return None;
     }
+
     // Offset the full image so the source origin (u0, v0) lands at the destination's
     // top-left; the caller clips the overflow to `dest`.
     Some([dx - u0 * full_w, dy - v0 * full_h, full_w, full_h])
@@ -119,25 +127,32 @@ pub fn graphic_to_bgra(
     if width == 0 || height == 0 {
         return None;
     }
+
     let pixel_count = width.checked_mul(height)?;
+
     match color_type {
         ColorType::Rgba => {
             if pixels.len() != pixel_count.checked_mul(4)? {
                 return None;
             }
+
             for px in pixels.chunks_exact_mut(4) {
                 px.swap(0, 2); // RGBA -> BGRA
             }
+
             Some(pixels)
         }
         ColorType::Rgb => {
             if pixels.len() != pixel_count.checked_mul(3)? {
                 return None;
             }
+
             let mut out = Vec::with_capacity(pixel_count * 4);
+
             for px in pixels.chunks_exact(3) {
                 out.extend_from_slice(&[px[2], px[1], px[0], 255]); // BGRA
             }
+
             Some(out)
         }
     }
@@ -151,9 +166,11 @@ pub fn graphic_to_generation(
 ) -> Option<Arc<ImageGeneration>> {
     let (width, height) = (data.width, data.height);
     let bgra = graphic_to_bgra(width, height, data.color_type, data.pixels)?;
+
     // `from_raw` re-validates length against the dimensions and never allocates.
     let buffer = RgbaImage::from_raw(width as u32, height as u32, bgra)?;
     let image = Arc::new(RenderImage::new(vec![Frame::new(buffer)]));
+
     Some(ImageGeneration::new(image, release.clone()))
 }
 
@@ -175,11 +192,13 @@ pub(crate) fn prune_frozen_images(
     events: &[nmt_terminal::event::BlockEvent],
 ) {
     use nmt_terminal::event::BlockEvent;
+
     for event in events {
         match event {
             BlockEvent::EngineBlocksSync(live) => {
                 let alive: std::collections::HashSet<u64> =
                     live.iter().map(|(handle, _)| handle.id).collect();
+
                 cache
                     .lock()
                     .retain(|(block_id, _), _| alive.contains(block_id));
@@ -218,7 +237,9 @@ impl GenerationStore {
     /// atlas release.
     pub fn install(&mut self, id: u32, data: GraphicData) -> Option<Arc<ImageGeneration>> {
         let generation = graphic_to_generation(data, &self.release)?;
+
         self.generations.insert(id, generation.clone());
+
         Some(generation)
     }
 
