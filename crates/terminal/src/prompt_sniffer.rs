@@ -438,6 +438,12 @@ impl PromptSniffer {
 
                     tmp2[..cl].copy_from_slice(&self.carry[..cl]);
 
+                    // Same as the main-scan path: carried bytes inside the
+                    // command region must also land in command_buf, or a
+                    // read boundary through an ordinary escape drops
+                    // characters from the captured command text.
+                    self.pre_forward(&tmp2[..cl]);
+
                     forward(self.region, self.boundary_trusted(), &tmp2[..cl]);
 
                     self.carry_len = 0;
@@ -1035,6 +1041,23 @@ mod prompt_sniffer_tests {
             "the trust-establishing ;D must not produce a block"
         );
         s
+    }
+
+    #[test]
+    fn escape_split_inside_command_region_keeps_captured_text() {
+        // An ordinary escape split by the read boundary inside the ;B→;C echo
+        // region: the carried ESC must still land in the command buffer so the
+        // capture normalization sees the complete escape sequence and strips
+        // it. Dropping the carry leaves a bare "[31m" behind as literal
+        // command text ("echo [31mhi").
+        let mut s = primed();
+        let mut cmds = feed_commands(&mut s, b"\x1b]133;A\x07PS> \x1b]133;B\x07echo \x1b");
+        cmds.extend(feed_commands(
+            &mut s,
+            b"[31mhi\r\n\x1b]133;C\x07hi\r\n\x1b]133;D;0\x07",
+        ));
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0].command, "echo hi");
     }
 
     #[test]
