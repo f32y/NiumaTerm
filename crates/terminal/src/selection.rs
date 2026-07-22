@@ -9,7 +9,7 @@
 
 use std::cmp::min;
 use std::mem;
-use std::ops::{Bound, Range, RangeBounds};
+use std::ops::{self, Bound, Range, RangeBounds};
 
 use crate::ansi::CursorShape;
 use crate::render_buffer::RenderBuffer;
@@ -66,7 +66,7 @@ impl SelectionRange {
     /// without scanning unrelated rows. The hint-hover clear path uses it to mark the old
     /// highlight's `visible_rows[y].dirty` so `RowsToRebuild::Dirty` clears it.
     /// `start <= end` is guaranteed by `SelectionRange::new`.
-    pub fn visible_rows_clamped(&self, rows: usize) -> Option<std::ops::RangeInclusive<usize>> {
+    pub fn visible_rows_clamped(&self, rows: usize) -> Option<ops::RangeInclusive<usize>> {
         if rows == 0 {
             return None;
         }

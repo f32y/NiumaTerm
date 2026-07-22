@@ -20,18 +20,22 @@ mod spsc;
 
 use std::ffi::OsStr;
 use std::io::{self};
-use std::iter::once;
+use std::iter::{self, once};
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::TryRecvError;
+use std::sync::{self};
 
 use conpty::Conpty as Backend;
 use pipes::{EventedAnonRead as ReadPipe, EventedAnonWrite as WritePipe};
+use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::System::Threading::{CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW};
 
 use crate::windows::child::ChildExitWatcher;
-use crate::{ChildEvent, EventedPty, ProcessReadWrite, Winsize, WinsizeBuilder};
+use crate::{
+    ChildEvent, EventedPty, Interest, Poll, ProcessReadWrite, Token, Waker, Winsize, WinsizeBuilder,
+};
 
 pub struct Pty {
     // Backend is required to be the first field, to ensure correct drop order. Dropping
@@ -39,9 +43,9 @@ pub struct Pty {
     backend: Backend,
     conout: ReadPipe,
     conin: WritePipe,
-    read_token: mio::Token,
-    write_token: mio::Token,
-    child_event_token: mio::Token,
+    read_token: Token,
+    write_token: Token,
+    child_event_token: Token,
     child_watcher: ChildExitWatcher,
 }
 
@@ -53,7 +57,7 @@ pub fn create_pty(
     working_directory: &Option<String>,
     columns: u16,
     rows: u16,
-) -> Result<Pty, std::io::Error> {
+) -> Result<Pty, io::Error> {
     create_pty_with_env(shell, args, working_directory, columns, rows, &[], None)
 }
 
@@ -66,7 +70,7 @@ pub fn create_pty_with_env(
     rows: u16,
     environment_overrides: &[(String, String)],
     starting_title: Option<&str>,
-) -> Result<Pty, std::io::Error> {
+) -> Result<Pty, io::Error> {
     let exec = command_line(shell, &args);
     conpty::new(
         &exec,
@@ -89,16 +93,16 @@ impl Pty {
             backend: backend.into(),
             conout: conout.into(),
             conin: conin.into(),
-            read_token: mio::Token(0),
-            write_token: mio::Token(0),
-            child_event_token: mio::Token(0),
+            read_token: Token(0),
+            write_token: Token(0),
+            child_event_token: Token(0),
             child_watcher,
         }
     }
 
     /// The Job Object managing the shell's process tree, present when job
     /// management was enabled at spawn time (diagnostic/test accessor).
-    pub fn job_handle(&self) -> Option<windows_sys::Win32::Foundation::HANDLE> {
+    pub fn job_handle(&self) -> Option<HANDLE> {
         self.backend.job()
     }
 
@@ -114,10 +118,10 @@ impl ProcessReadWrite for Pty {
     #[inline]
     fn register(
         &mut self,
-        _poll: &mio::Poll,
-        token: &mut dyn Iterator<Item = mio::Token>,
-        _interest: mio::Interest,
-        waker: &std::sync::Arc<mio::Waker>,
+        _poll: &Poll,
+        token: &mut dyn Iterator<Item = Token>,
+        _interest: Interest,
+        waker: &sync::Arc<Waker>,
     ) -> io::Result<()> {
         self.read_token = token.next().unwrap();
         self.write_token = token.next().unwrap();
@@ -133,7 +137,7 @@ impl ProcessReadWrite for Pty {
     }
 
     #[inline]
-    fn reregister(&mut self, _poll: &mio::Poll, _interest: mio::Interest) -> io::Result<()> {
+    fn reregister(&mut self, _poll: &Poll, _interest: Interest) -> io::Result<()> {
         // Nothing to re-arm: the per-source soft-ready flags are level-like and the
         // worker threads keep them current. Write interest is implicit — the
         // conin flag is set whenever the buffer has space.
@@ -141,7 +145,7 @@ impl ProcessReadWrite for Pty {
     }
 
     #[inline]
-    fn deregister(&mut self, _poll: &mio::Poll) -> io::Result<()> {
+    fn deregister(&mut self, _poll: &Poll) -> io::Result<()> {
         // No real OS sources were registered (the `Waker` is owned by the loop).
         Ok(())
     }
@@ -152,7 +156,7 @@ impl ProcessReadWrite for Pty {
     }
 
     #[inline]
-    fn read_token(&self) -> mio::Token {
+    fn read_token(&self) -> Token {
         self.read_token
     }
 
@@ -162,12 +166,12 @@ impl ProcessReadWrite for Pty {
     }
 
     #[inline]
-    fn write_token(&self) -> mio::Token {
+    fn write_token(&self) -> Token {
         self.write_token
     }
 
     #[inline]
-    fn drain_ready(&self) -> Vec<mio::Token> {
+    fn drain_ready(&self) -> Vec<Token> {
         let mut ready = Vec::with_capacity(3);
         if self.conout.soft().is_ready() {
             ready.push(self.read_token);
@@ -194,7 +198,7 @@ impl ProcessReadWrite for Pty {
     }
 
     #[inline]
-    fn set_winsize(&mut self, winsize_builder: WinsizeBuilder) -> Result<(), std::io::Error> {
+    fn set_winsize(&mut self, winsize_builder: WinsizeBuilder) -> Result<(), io::Error> {
         let winsize: Winsize = winsize_builder.build();
         self.backend.on_resize(winsize);
         Ok(())
@@ -202,7 +206,7 @@ impl ProcessReadWrite for Pty {
 }
 
 impl EventedPty for Pty {
-    fn child_event_token(&self) -> mio::Token {
+    fn child_event_token(&self) -> Token {
         self.child_event_token
     }
 
@@ -246,19 +250,19 @@ fn quote_command_arg(arg: &str) -> String {
         match ch {
             '\\' => backslashes += 1,
             '"' => {
-                out.extend(std::iter::repeat_n('\\', backslashes * 2 + 1));
+                out.extend(iter::repeat_n('\\', backslashes * 2 + 1));
                 out.push('"');
                 backslashes = 0;
             }
             _ => {
-                out.extend(std::iter::repeat_n('\\', backslashes));
+                out.extend(iter::repeat_n('\\', backslashes));
                 out.push(ch);
                 backslashes = 0;
             }
         }
     }
 
-    out.extend(std::iter::repeat_n('\\', backslashes * 2));
+    out.extend(iter::repeat_n('\\', backslashes * 2));
     out.push('"');
     out
 }

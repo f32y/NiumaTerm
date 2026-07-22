@@ -1,20 +1,28 @@
 //! One terminal surface's runtime state: libghostty-vt engine, render buffer, and
 //! the ConPTY-backed PTY worker so platform details stay outside the UI layer.
 
-use std::collections::VecDeque;
+use std::collections::{self, VecDeque};
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock};
+use std::{mem, time};
 
 use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
+use nmt_config::local_state::TabState;
+use nmt_config::{CursorShape, active_colors};
+use nmt_platform::{EventedPty, WinsizeBuilder, create_pty_with_env, job_other_process_count};
 use nmt_remote_session_hub::{RemotePty, RemoteSessionControl, SessionOptions};
 use nmt_terminal::block_store::{BlockStore, SegmentMeta};
+use nmt_terminal::clipboard::Clipboard;
 use nmt_terminal::event::{BlockEvent, EventListener, Msg, MsgSender, TerminalEvent, WindowId};
 use nmt_terminal::ghostty::GhosttyTerminal;
 use nmt_terminal::pty_pipe::PtyPipe;
 use nmt_terminal::render_buffer::RenderBuffer;
 use parking_lot::{FairMutex, Mutex};
+use tracing::{debug, error, warn};
 
 use crate::error::{EngineError, EngineErrorCode};
+use crate::terminal;
 use crate::terminal::graphics::GenerationStore;
 use crate::terminal::wake::{Wake, WakeSender};
 use crate::utils::POWERSHELL_INTEGRATION;
@@ -64,7 +72,7 @@ pub enum HostEvent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InFlightBlock {
     pub command: String,
-    pub started_at: std::time::SystemTime,
+    pub started_at: time::SystemTime,
 }
 
 /// One terminal surface's runtime state — a thin headless bundle over terminal's
@@ -91,7 +99,7 @@ pub struct TerminalSession {
     /// Lazily-read frozen Kitty generations keyed `(block_id, image_id)`;
     /// lives beside the (gpui-free) block store because the values are gpui
     /// images. Pruned by the proxy on the same batches that feed the store.
-    frozen_images: crate::terminal::graphics::FrozenImageCache,
+    frozen_images: terminal::graphics::FrozenImageCache,
     /// Raw Job Object handle managing the shell tree (when job management was
     /// on at spawn). Owned by the PTY; only queried while the session lives.
     job_handle: Option<isize>,
@@ -134,14 +142,13 @@ impl TerminalSession {
 
         let vt_modes = Arc::new(AtomicU32::new(0));
         // Created before the PtyPipe so the listener and the session share it.
-        let events: HostEventQueue = Arc::new(Mutex::new(std::collections::VecDeque::new()));
-        let block_store: Arc<Mutex<BlockStore>> =
-            Arc::new(Mutex::new(nmt_terminal::block_store::BlockStore::default()));
+        let events: HostEventQueue = Arc::new(Mutex::new(collections::VecDeque::new()));
+        let block_store: Arc<Mutex<BlockStore>> = Arc::new(Mutex::new(BlockStore::default()));
         let generation_store: SessionGraphics = Arc::new(Mutex::new(GenerationStore::new()));
         let live_image_count = Arc::new(AtomicUsize::new(0));
         let in_flight: Arc<Mutex<Option<InFlightBlock>>> = Arc::new(Mutex::new(None));
         let open_prompt: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
-        let frozen_images: crate::terminal::graphics::FrozenImageCache = Default::default();
+        let frozen_images: terminal::graphics::FrozenImageCache = Default::default();
 
         let engine_blocks = config.engine_blocks;
         let proxy = TerminalEventProxy {
@@ -191,7 +198,7 @@ impl TerminalSession {
 
             (None, Some(remote_control), engine, messenger)
         } else {
-            let pty = nmt_platform::create_pty_with_env(
+            let pty = create_pty_with_env(
                 &shell,
                 config.args.clone(),
                 &config.working_dir,
@@ -201,7 +208,7 @@ impl TerminalSession {
                 config.starting_title.as_deref(),
             )
             .map_err(|error| {
-                tracing::error!("session create_pty failed: {error:?}");
+                error!("session create_pty failed: {error:?}");
                 EngineError::new(
                     EngineErrorCode::PtySpawn,
                     format!("failed to start shell '{shell}' via ConPTY: {error}"),
@@ -253,7 +260,7 @@ impl TerminalSession {
     }
 
     /// Shared frozen Kitty generation cache (renderer read/insert side).
-    pub(crate) fn frozen_images(&self) -> crate::terminal::graphics::FrozenImageCache {
+    pub(crate) fn frozen_images(&self) -> terminal::graphics::FrozenImageCache {
         Arc::clone(&self.frozen_images)
     }
 
@@ -275,13 +282,12 @@ impl TerminalSession {
             return control.child_process_count().unwrap_or_else(|error| {
                 // An unavailable count must not silently bypass the destructive
                 // close confirmation while the remote shell may still be alive.
-                tracing::warn!("failed to query SessionHub child processes: {error}");
+                warn!("failed to query SessionHub child processes: {error}");
                 1
             });
         }
 
-        self.job_handle
-            .map_or(0, nmt_platform::job_other_process_count)
+        self.job_handle.map_or(0, job_other_process_count)
     }
 
     /// Write input bytes (already terminal-encoded) to the session's PTY.
@@ -294,14 +300,12 @@ impl TerminalSession {
     }
 
     pub fn resize(&self, cols: u16, rows: u16, width: u16, height: u16) {
-        let _ = self
-            .messenger
-            .send(Msg::Resize(nmt_platform::WinsizeBuilder {
-                cols,
-                rows,
-                width,
-                height,
-            }));
+        let _ = self.messenger.send(Msg::Resize(WinsizeBuilder {
+            cols,
+            rows,
+            width,
+            height,
+        }));
     }
 
     /// Drain all pending host events. Queued events (title/bell/exit/
@@ -362,11 +366,11 @@ fn start_pipe<T>(
     proxy: TerminalEventProxy,
     id: u64,
     scrollback_lines: usize,
-    cursor_shape: nmt_config::CursorShape,
+    cursor_shape: CursorShape,
     engine_blocks: bool,
 ) -> Result<(SessionEngine, MsgSender), EngineError>
 where
-    T: nmt_platform::EventedPty + Send + 'static,
+    T: EventedPty + Send + 'static,
 {
     // The same parser/render pipeline consumes local ConPTY and SessionHub byte
     // streams, keeping terminal semantics independent of process placement.
@@ -377,12 +381,12 @@ where
         proxy,
         WindowId::dummy(),
         id as usize,
-        nmt_config::active_colors(),
+        active_colors(),
         scrollback_lines,
         engine_blocks,
     )
     .map_err(|error| {
-        tracing::error!("session PtyPipe::new failed: {error:?}");
+        error!("session PtyPipe::new failed: {error:?}");
         EngineError::new(
             EngineErrorCode::EngineInit,
             format!("libghostty-vt engine init failed: {error}"),
@@ -430,7 +434,7 @@ pub struct TerminalEventProxy {
     open_prompt: Arc<Mutex<bool>>,
     /// Frozen Kitty generation cache, pruned on the same batches that feed
     /// the block store (evicted blocks drop their cached images).
-    frozen_images: crate::terminal::graphics::FrozenImageCache,
+    frozen_images: terminal::graphics::FrozenImageCache,
     /// Source surface id, stamped onto every wake so the shell can route by tab.
     id: u64,
     /// Render-wakeup sender; `None` for sessions/tests without a live shell.
@@ -448,11 +452,11 @@ impl TerminalEventProxy {
     /// Called on the read's damage wake so items land together with the
     /// render they belong to. Empty in steady state.
     fn flush_staged_blocks(&self) {
-        let batch = std::mem::take(&mut *self.staged_blocks.lock());
+        let batch = mem::take(&mut *self.staged_blocks.lock());
         if batch.is_empty() {
             return;
         }
-        crate::terminal::graphics::prune_frozen_images(&self.frozen_images, &batch);
+        terminal::graphics::prune_frozen_images(&self.frozen_images, &batch);
         self.block_store.lock().apply(batch);
     }
 }
@@ -509,7 +513,7 @@ impl EventListener for TerminalEventProxy {
             TerminalEvent::ResetTitle => HostEvent::Title(String::new()),
             TerminalEvent::Bell => HostEvent::Bell,
             TerminalEvent::ClipboardStore(ty, text) => {
-                let mut clipboard = nmt_terminal::clipboard::Clipboard::default();
+                let mut clipboard = Clipboard::default();
 
                 clipboard.set(ty, text);
 
@@ -587,7 +591,7 @@ impl EventListener for TerminalEventProxy {
                         m.ended_at = Some(cmd.ended_at);
                     });
 
-                tracing::debug!(
+                debug!(
                     command = %cmd.command,
                     exit_code = ?cmd.exit_code,
                     "command block metadata recorded"
@@ -616,7 +620,7 @@ pub struct TerminalSessionConfig {
     pub cols: u16,
     pub rows: u16,
     /// Default cursor shape until the running program selects one with DECSCUSR.
-    pub cursor_shape: nmt_config::CursorShape,
+    pub cursor_shape: CursorShape,
     /// Scrollback budget in lines; converted to the engine's byte budget.
     pub scrollback_lines: usize,
     /// Engine-blocks mode is the default because completed commands can freeze
@@ -633,8 +637,8 @@ pub struct TerminalSessionConfig {
 }
 
 impl TerminalSessionConfig {
-    pub(crate) fn restorable_tab_state(&self) -> nmt_config::local_state::TabState {
-        nmt_config::local_state::TabState {
+    pub(crate) fn restorable_tab_state(&self) -> TabState {
+        TabState {
             name: None,
             user_named: false,
             shell: self.shell.clone(),
@@ -669,7 +673,7 @@ impl TerminalSessionConfig {
 fn encode_powershell_command(script: &str) -> String {
     let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
 
-    base64::engine::general_purpose::STANDARD.encode(bytes)
+    STANDARD.encode(bytes)
 }
 
 impl Default for TerminalSessionConfig {
@@ -681,7 +685,7 @@ impl Default for TerminalSessionConfig {
             starting_title: None,
             cols: 80,
             rows: 24,
-            cursor_shape: nmt_config::CursorShape::Block,
+            cursor_shape: CursorShape::Block,
             scrollback_lines: 10_000,
             engine_blocks: true,
             remote_session_enabled: false,
@@ -693,11 +697,15 @@ impl Default for TerminalSessionConfig {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use std::{collections, sync, time};
 
-    use nmt_terminal::event::TerminalEvent;
+    use base64::engine::general_purpose::STANDARD;
+    use nmt_terminal::block_store::BlockStore;
+    use nmt_terminal::event::{BlockEvent, TerminalEvent};
     use parking_lot::Mutex;
 
     use crate::error::EngineErrorCode;
+    use crate::terminal;
     use crate::terminal::session::{
         HostEvent, HostEventQueue, SessionGraphics, TerminalEventProxy, TerminalSession,
         TerminalSessionConfig,
@@ -741,9 +749,7 @@ mod tests {
 
         let config = TerminalSessionConfig::default().with_shell_integration();
         let encoded = &config.args[2];
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(encoded)
-            .unwrap();
+        let bytes = STANDARD.decode(encoded).unwrap();
         let utf16: Vec<u16> = bytes
             .chunks_exact(2)
             .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
@@ -796,18 +802,16 @@ mod tests {
     fn host_events_map_from_terminal_events() {
         use nmt_terminal::event::{EventListener, TerminalEvent, WindowId};
 
-        let events: HostEventQueue = Arc::new(Mutex::new(std::collections::VecDeque::new()));
+        let events: HostEventQueue = Arc::new(Mutex::new(collections::VecDeque::new()));
         let listener = TerminalEventProxy {
             events: Arc::clone(&events),
-            block_store: Arc::new(Mutex::new(nmt_terminal::block_store::BlockStore::default())),
+            block_store: Arc::new(Mutex::new(BlockStore::default())),
             in_flight: Arc::new(Mutex::new(None)),
             open_prompt: Arc::new(Mutex::new(false)),
-            generation_store: Arc::new(Mutex::new(
-                crate::terminal::graphics::GenerationStore::new(),
-            )),
+            generation_store: Arc::new(Mutex::new(terminal::graphics::GenerationStore::new())),
             staged_blocks: Arc::new(Mutex::new(Vec::new())),
             frozen_images: Default::default(),
-            live_image_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            live_image_count: Arc::new(sync::atomic::AtomicUsize::new(0)),
             id: 1,
             wake: None,
         };
@@ -847,18 +851,16 @@ mod tests {
         };
         use nmt_terminal::event::{EventListener, TerminalEvent, WindowId};
 
-        let events: HostEventQueue = Arc::new(Mutex::new(std::collections::VecDeque::new()));
+        let events: HostEventQueue = Arc::new(Mutex::new(collections::VecDeque::new()));
         let listener = TerminalEventProxy {
             events: Arc::clone(&events),
-            block_store: Arc::new(Mutex::new(nmt_terminal::block_store::BlockStore::default())),
+            block_store: Arc::new(Mutex::new(BlockStore::default())),
             in_flight: Arc::new(Mutex::new(None)),
             open_prompt: Arc::new(Mutex::new(false)),
-            generation_store: Arc::new(Mutex::new(
-                crate::terminal::graphics::GenerationStore::new(),
-            )),
+            generation_store: Arc::new(Mutex::new(terminal::graphics::GenerationStore::new())),
             staged_blocks: Arc::new(Mutex::new(Vec::new())),
             frozen_images: Default::default(),
-            live_image_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            live_image_count: Arc::new(sync::atomic::AtomicUsize::new(0)),
             id: 1,
             wake: None,
         };
@@ -923,20 +925,18 @@ mod tests {
             }
         }
 
-        let events: HostEventQueue = Arc::new(Mutex::new(std::collections::VecDeque::new()));
+        let events: HostEventQueue = Arc::new(Mutex::new(collections::VecDeque::new()));
         let in_flight = Arc::new(Mutex::new(None));
         let open_prompt = Arc::new(Mutex::new(false));
         let proxy = TerminalEventProxy {
             events: Arc::clone(&events),
-            block_store: Arc::new(Mutex::new(nmt_terminal::block_store::BlockStore::default())),
+            block_store: Arc::new(Mutex::new(BlockStore::default())),
             in_flight: Arc::clone(&in_flight),
             open_prompt: Arc::clone(&open_prompt),
-            generation_store: Arc::new(Mutex::new(
-                crate::terminal::graphics::GenerationStore::new(),
-            )),
+            generation_store: Arc::new(Mutex::new(terminal::graphics::GenerationStore::new())),
             staged_blocks: Arc::new(Mutex::new(Vec::new())),
             frozen_images: Default::default(),
-            live_image_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            live_image_count: Arc::new(sync::atomic::AtomicUsize::new(0)),
             id: 1,
             wake: None,
         };
@@ -998,18 +998,16 @@ mod tests {
         };
         use nmt_terminal::ghostty::BlockHandle;
 
-        let store = Arc::new(Mutex::new(nmt_terminal::block_store::BlockStore::default()));
+        let store = Arc::new(Mutex::new(BlockStore::default()));
         let proxy = TerminalEventProxy {
-            events: Arc::new(Mutex::new(std::collections::VecDeque::new())),
+            events: Arc::new(Mutex::new(collections::VecDeque::new())),
             block_store: Arc::clone(&store),
             in_flight: Arc::new(Mutex::new(None)),
             open_prompt: Arc::new(Mutex::new(false)),
-            generation_store: Arc::new(Mutex::new(
-                crate::terminal::graphics::GenerationStore::new(),
-            )),
+            generation_store: Arc::new(Mutex::new(terminal::graphics::GenerationStore::new())),
             staged_blocks: Arc::new(Mutex::new(Vec::new())),
             frozen_images: Default::default(),
-            live_image_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            live_image_count: Arc::new(sync::atomic::AtomicUsize::new(0)),
             id: 1,
             wake: None,
         };
@@ -1072,8 +1070,8 @@ mod tests {
         use crate::terminal::graphics::GenerationStore;
         use crate::terminal::wake::WakeSender;
 
-        let events: HostEventQueue = Arc::new(Mutex::new(std::collections::VecDeque::new()));
-        let block_store = Arc::new(Mutex::new(nmt_terminal::block_store::BlockStore::default()));
+        let events: HostEventQueue = Arc::new(Mutex::new(collections::VecDeque::new()));
+        let block_store = Arc::new(Mutex::new(BlockStore::default()));
         let generation_store = Arc::new(Mutex::new(GenerationStore::new()));
         let staged_blocks = Arc::new(Mutex::new(Vec::new()));
         let wakes = Arc::new(Mutex::new(Vec::new()));
@@ -1084,7 +1082,7 @@ mod tests {
             generation_store: Arc::clone(&generation_store),
             staged_blocks: Arc::clone(&staged_blocks),
             frozen_images: Default::default(),
-            live_image_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            live_image_count: Arc::new(sync::atomic::AtomicUsize::new(0)),
             in_flight: Arc::new(Mutex::new(None)),
             open_prompt: Arc::new(Mutex::new(false)),
             id,
@@ -1106,9 +1104,9 @@ mod tests {
 
     struct GraphicsProbes {
         events: HostEventQueue,
-        block_store: Arc<Mutex<nmt_terminal::block_store::BlockStore>>,
+        block_store: Arc<Mutex<BlockStore>>,
         generation_store: SessionGraphics,
-        staged_blocks: Arc<Mutex<Vec<nmt_terminal::event::BlockEvent>>>,
+        staged_blocks: Arc<Mutex<Vec<BlockEvent>>>,
         wakes: Arc<Mutex<Vec<Wake>>>,
     }
 
@@ -1125,7 +1123,7 @@ mod tests {
             resize: None,
             display_width: None,
             display_height: None,
-            transmit_time: std::time::Instant::now(),
+            transmit_time: time::Instant::now(),
         };
         TerminalEvent::UpdateGraphics {
             route_id,

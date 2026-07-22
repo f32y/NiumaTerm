@@ -12,9 +12,13 @@
 //!
 //! The frontend reads this copy without holding the engine lock during paint.
 
-use nmt_config::colors::{AnsiColor, NamedColor};
+use std::mem;
+
+use nmt_config::colors::term::TermColors;
+use nmt_config::colors::{AnsiColor, ColorRgb, NamedColor};
 use rustc_hash::FxHashMap;
 
+use crate::ansi;
 use crate::ghostty::{
     CellWide, ScrollbarInfo, SnapshotColors, SnapshotCursor, SnapshotPlacement, SnapshotStyle,
     Underline,
@@ -90,16 +94,16 @@ pub struct RenderBuffer {
     cursor: Pos,
     cursor_visible: bool,
     /// DECSCUSR shape + modes-based blink captured from the engine render-state.
-    cursor_shape: crate::ansi::CursorShape,
+    cursor_shape: ansi::CursorShape,
     cursor_blinking: bool,
     /// Effective default colors captured from the render-state: the
     /// `term_colors` OSC-override layer (Foreground/Background/Cursor) over the
     /// renderer's config palette. Other slots stay `None` (config fallback).
-    colors: nmt_config::colors::term::TermColors,
+    colors: TermColors,
     /// OSC 11 window-background override: `Some` only when a program
     /// explicitly set it, so the renderer falls back to the config window bg /
     /// opacity otherwise.
-    window_bg_override: Option<nmt_config::colors::ColorRgb>,
+    window_bg_override: Option<ColorRgb>,
     /// Engine scrollbar geometry captured with this snapshot. The frontend
     /// draws the scrollbar from here, avoiding a per-frame engine read.
     scrollbar: ScrollbarInfo,
@@ -125,9 +129,9 @@ impl RenderBuffer {
             row_versions: vec![0; rows],
             cursor: Pos::default(),
             cursor_visible: false,
-            cursor_shape: crate::ansi::CursorShape::Block,
+            cursor_shape: ansi::CursorShape::Block,
             cursor_blinking: false,
-            colors: nmt_config::colors::term::TermColors::default(),
+            colors: TermColors::default(),
             window_bg_override: None,
             scrollbar: ScrollbarInfo::default(),
             placements: Vec::new(),
@@ -139,7 +143,7 @@ impl RenderBuffer {
     /// Returns whether capture ran since the previous call, then clears it.
     /// The frontend uses `true` to invalidate its cached terminal frame.
     pub fn take_content_changed(&mut self) -> bool {
-        std::mem::replace(&mut self.content_changed, false)
+        mem::replace(&mut self.content_changed, false)
     }
 
     /// Kitty-graphics placements captured this snapshot.
@@ -149,18 +153,18 @@ impl RenderBuffer {
 
     /// The `term_colors` OSC-override layer captured from the render-state. The
     /// frontend falls back to its config palette for unset slots.
-    pub fn colors(&self) -> nmt_config::colors::term::TermColors {
+    pub fn colors(&self) -> TermColors {
         self.colors
     }
 
     /// The OSC 11 window-background override, or `None` for the
     /// config window bg / opacity.
-    pub fn window_bg_override(&self) -> Option<nmt_config::colors::ColorRgb> {
+    pub fn window_bg_override(&self) -> Option<ColorRgb> {
         self.window_bg_override
     }
 
     /// The cursor's DECSCUSR shape captured from the render-state.
-    pub fn cursor_shape(&self) -> crate::ansi::CursorShape {
+    pub fn cursor_shape(&self) -> ansi::CursorShape {
         self.cursor_shape
     }
 
@@ -336,7 +340,7 @@ impl RenderBuffer {
 
         use nmt_config::colors::NamedColor;
 
-        let mut term_colors = nmt_config::colors::term::TermColors::default();
+        let mut term_colors = TermColors::default();
 
         term_colors[NamedColor::Foreground] = Some(colors.fg.to_arr());
         term_colors[NamedColor::Background] = Some(colors.bg.to_arr());

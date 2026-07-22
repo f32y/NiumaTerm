@@ -2,6 +2,7 @@ use std::io::Error;
 use std::os::unix::io::AsRawFd;
 
 use mio::event::Source;
+use mio::net::UnixStream;
 use mio::unix::SourceFd;
 use mio::{Interest, Registry, Token};
 
@@ -78,7 +79,7 @@ macro_rules! implement_signals_with_pipe {
     };
 }
 
-implement_signals_with_pipe!(mio::net::UnixStream);
+implement_signals_with_pipe!(UnixStream);
 
 impl Source for Signals {
     fn register(

@@ -1,6 +1,7 @@
-use std::fmt::Display;
+use std::fmt::{self, Display};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use tracing::warn;
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Renderer {
@@ -80,7 +81,7 @@ pub enum Backend {
 impl<'de> Deserialize<'de> for Backend {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'de>,
+        D: Deserializer<'de>,
     {
         let value = String::deserialize(deserializer)?;
         Ok(match value.as_str() {
@@ -88,7 +89,7 @@ impl<'de> Deserialize<'de> for Backend {
             "D3D12" | "d3d12" | "dx12" => Backend::D3D12,
             "Cpu" | "cpu" => Backend::Cpu,
             other => {
-                tracing::warn!("unknown renderer backend {other:?}, using default");
+                warn!("unknown renderer backend {other:?}, using default");
                 Backend::default()
             }
         })
@@ -110,7 +111,7 @@ impl Default for Backend {
 }
 
 impl Display for Backend {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             #[cfg(windows)]
             Backend::D3D12 => write!(f, "D3D12"),

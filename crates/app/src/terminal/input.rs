@@ -1,12 +1,12 @@
 use gpui::{Keystroke, Modifiers};
 use nmt_input::event::ElementState;
 use nmt_input::keyboard::{Key, KeyLocation, ModifiersState, NamedKey};
-use nmt_input::{KeyEncodeFlags, KeyInput};
+use nmt_input::{KeyEncodeFlags, KeyInput, encode_terminal_input};
 
 use crate::terminal::surface::TerminalKeyAction;
 
 #[cfg(test)]
-pub(crate) fn pty_bytes_for_key(event: &gpui::Keystroke) -> Option<Vec<u8>> {
+pub(crate) fn pty_bytes_for_key(event: &Keystroke) -> Option<Vec<u8>> {
     match key_action(event) {
         TerminalKeyAction::Write(bytes) => Some(bytes),
         TerminalKeyAction::CopyOrWrite(_)
@@ -40,7 +40,7 @@ pub(crate) fn key_action(event: &Keystroke) -> TerminalKeyAction {
 
     let input = key_input(event);
 
-    nmt_input::encode_terminal_input(
+    encode_terminal_input(
         &input,
         modifiers_state(event.modifiers),
         KeyEncodeFlags::empty(),
@@ -189,6 +189,7 @@ fn named_key(name: &str) -> Option<NamedKey> {
 mod tests {
     use gpui::{Keystroke, Modifiers};
 
+    use super::{key_action, pty_bytes_for_key, should_defer_to_ime};
     use crate::terminal::surface::TerminalKeyAction;
 
     fn key(name: &str, key_char: Option<&str>) -> Keystroke {
@@ -206,7 +207,7 @@ mod tests {
     }
 
     fn bytes(name: &str, key_char: Option<&str>) -> Vec<u8> {
-        match super::key_action(&key(name, key_char)) {
+        match key_action(&key(name, key_char)) {
             TerminalKeyAction::Write(bytes) => bytes,
             action => panic!("expected write action, got {action:?}"),
         }
@@ -231,20 +232,19 @@ mod tests {
         ctrl_alt.alt = true;
 
         assert_eq!(
-            super::pty_bytes_for_key(&modified("enter", Some("\r"), Modifiers::none())).as_deref(),
+            pty_bytes_for_key(&modified("enter", Some("\r"), Modifiers::none())).as_deref(),
             Some(&b"\r"[..])
         );
         assert_eq!(
-            super::pty_bytes_for_key(&modified("enter", Some("\r"), Modifiers::control()))
-                .as_deref(),
+            pty_bytes_for_key(&modified("enter", Some("\r"), Modifiers::control())).as_deref(),
             Some(&b"\n"[..])
         );
         assert_eq!(
-            super::pty_bytes_for_key(&modified("enter", Some("\r"), Modifiers::alt())).as_deref(),
+            pty_bytes_for_key(&modified("enter", Some("\r"), Modifiers::alt())).as_deref(),
             Some(&b"\x1b\r"[..])
         );
         assert_eq!(
-            super::pty_bytes_for_key(&modified("enter", Some("\r"), ctrl_alt)).as_deref(),
+            pty_bytes_for_key(&modified("enter", Some("\r"), ctrl_alt)).as_deref(),
             Some(&b"\x1b\n"[..])
         );
     }
@@ -275,14 +275,14 @@ mod tests {
         ctrl_left.modifiers.control = true;
 
         assert_eq!(
-            super::pty_bytes_for_key(&ctrl_left).as_deref(),
+            pty_bytes_for_key(&ctrl_left).as_deref(),
             Some(&b"\x1b[1;5D"[..])
         );
 
         let mut shift_tab = key("tab", None);
         shift_tab.modifiers.shift = true;
         assert_eq!(
-            super::pty_bytes_for_key(&shift_tab).as_deref(),
+            pty_bytes_for_key(&shift_tab).as_deref(),
             Some(&b"\x1b[Z"[..])
         );
     }
@@ -293,7 +293,7 @@ mod tests {
         // ride the `legacy_ctrl_byte` fallback.
         for (name, byte) in [("z", 0x1au8), ("d", 0x04), ("\\", 0x1c)] {
             assert_eq!(
-                super::pty_bytes_for_key(&modified(name, None, Modifiers::control())).as_deref(),
+                pty_bytes_for_key(&modified(name, None, Modifiers::control())).as_deref(),
                 Some(&[byte][..]),
                 "ctrl-{name}"
             );
@@ -301,31 +301,28 @@ mod tests {
         // Ctrl-Shift chords stay with the UI (copy/paste shortcuts).
         let mut ctrl_shift = Modifiers::control();
         ctrl_shift.shift = true;
-        assert_eq!(
-            super::pty_bytes_for_key(&modified("x", None, ctrl_shift)),
-            None
-        );
+        assert_eq!(pty_bytes_for_key(&modified("x", None, ctrl_shift)), None);
     }
 
     #[test]
     fn plain_text_defers_to_ime_but_special_keys_do_not() {
         // Plain printable char: char path handles it, so on_key_down must defer.
-        assert!(super::should_defer_to_ime(&key("a", Some("a"))));
-        assert!(super::should_defer_to_ime(&modified(
+        assert!(should_defer_to_ime(&key("a", Some("a"))));
+        assert!(should_defer_to_ime(&modified(
             "A",
             Some("A"),
             Modifiers::shift()
         )));
         // Named keys and modified keys still encode in on_key_down.
-        assert!(!super::should_defer_to_ime(&key("enter", Some("\r"))));
-        assert!(!super::should_defer_to_ime(&key("tab", Some("\t"))));
-        assert!(!super::should_defer_to_ime(&modified(
+        assert!(!should_defer_to_ime(&key("enter", Some("\r"))));
+        assert!(!should_defer_to_ime(&key("tab", Some("\t"))));
+        assert!(!should_defer_to_ime(&modified(
             "c",
             Some("c"),
             Modifiers::control()
         )));
         // A key with no committed character never defers.
-        assert!(!super::should_defer_to_ime(&key("left", None)));
+        assert!(!should_defer_to_ime(&key("left", None)));
     }
 
     #[test]
@@ -334,11 +331,11 @@ mod tests {
         let paste = modified("v", Some("v"), Modifiers::control());
 
         assert_eq!(
-            super::key_action(&copy),
+            key_action(&copy),
             TerminalKeyAction::CopyOrWrite(vec![0x03])
         );
-        assert_eq!(super::key_action(&paste), TerminalKeyAction::Paste);
-        assert_eq!(super::pty_bytes_for_key(&copy), None);
+        assert_eq!(key_action(&paste), TerminalKeyAction::Paste);
+        assert_eq!(pty_bytes_for_key(&copy), None);
     }
 
     #[test]
@@ -346,7 +343,7 @@ mod tests {
         let copy = modified("c", Some("c"), Modifiers::control_shift());
         let paste = modified("v", Some("v"), Modifiers::control_shift());
 
-        assert_eq!(super::key_action(&copy), TerminalKeyAction::Ignore);
-        assert_eq!(super::key_action(&paste), TerminalKeyAction::Ignore);
+        assert_eq!(key_action(&copy), TerminalKeyAction::Ignore);
+        assert_eq!(key_action(&paste), TerminalKeyAction::Ignore);
     }
 }

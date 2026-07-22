@@ -8,12 +8,14 @@
 //! share generations by `Arc`, so a generation lives exactly as long as something can
 //! still paint it.
 
-use std::collections::HashMap;
+use std::collections::{self, HashMap};
+use std::mem;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use gpui::RenderImage;
 use image_rs::{Frame, RgbaImage};
+use nmt_terminal::event::BlockEvent;
 use nmt_terminal::graphics::{ColorType, GraphicData};
 use parking_lot::Mutex;
 
@@ -187,16 +189,11 @@ pub(crate) type FrozenImageCache = Arc<Mutex<HashMap<(u64, u32), Arc<ImageGenera
 /// evicted blocks die on `EngineBlocksSync`, and a user clear (`;K`) drops
 /// everything. Called on the PTY-event path, right where the same batch
 /// feeds the block store.
-pub(crate) fn prune_frozen_images(
-    cache: &FrozenImageCache,
-    events: &[nmt_terminal::event::BlockEvent],
-) {
-    use nmt_terminal::event::BlockEvent;
-
+pub(crate) fn prune_frozen_images(cache: &FrozenImageCache, events: &[BlockEvent]) {
     for event in events {
         match event {
             BlockEvent::EngineBlocksSync(live) => {
-                let alive: std::collections::HashSet<u64> =
+                let alive: collections::HashSet<u64> =
                     live.iter().map(|(handle, _)| handle.id).collect();
 
                 cache
@@ -265,7 +262,7 @@ impl GenerationStore {
     /// Take the accumulated atlas releases so the UI can drain them through
     /// `Window::drop_image`. Includes releases from frozen blocks sharing this queue.
     pub fn drain_released(&self) -> Vec<Arc<RenderImage>> {
-        std::mem::take(&mut *self.release.lock())
+        mem::take(&mut *self.release.lock())
     }
 
     pub fn len(&self) -> usize {
@@ -280,6 +277,8 @@ impl GenerationStore {
 
 #[cfg(test)]
 mod tests {
+    use std::time;
+
     use nmt_terminal::graphics::GraphicId;
 
     use super::*;
@@ -295,7 +294,7 @@ mod tests {
             resize: None,
             display_width: None,
             display_height: None,
-            transmit_time: std::time::Instant::now(),
+            transmit_time: time::Instant::now(),
         }
     }
 

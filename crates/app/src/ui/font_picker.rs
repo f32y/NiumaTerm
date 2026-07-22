@@ -4,8 +4,8 @@
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    App, AppContext as _, Entity, Global, IntoElement, ParentElement as _, SharedString,
-    Styled as _, Subscription, TextRun, Window, div, px,
+    AnyElement, App, AppContext as _, Entity, Global, IntoElement, ParentElement as _,
+    SharedString, Styled as _, Subscription, TextRun, Window, black, div, font, px,
 };
 use gpui_component::AxisExt as _;
 use gpui_component::searchable_list::{SearchableListItem, SearchableVec};
@@ -36,7 +36,7 @@ impl SearchableListItem for FontItem {
             .child(self.name.clone())
     }
 
-    fn display_title(&self) -> Option<gpui::AnyElement> {
+    fn display_title(&self) -> Option<AnyElement> {
         Some(
             div()
                 .font_family(self.name.clone())
@@ -199,8 +199,8 @@ fn is_monospace(family: &str, window: &mut Window) -> bool {
 
     let run = TextRun {
         len: SAMPLE.len(),
-        font: gpui::font(family),
-        color: gpui::black(),
+        font: font(family),
+        color: black(),
         background_color: None,
         underline: None,
         strikethrough: None,

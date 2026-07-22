@@ -1,6 +1,7 @@
 #![cfg(target_os = "windows")]
 
-use std::io::Read;
+use std::env;
+use std::io::{self, Read};
 use std::time::Duration;
 
 use nmt_agent_utils::{
@@ -8,18 +9,19 @@ use nmt_agent_utils::{
     AGENT_TESTING_ENV, RawAgentHookEnvelope,
 };
 use nmt_platform::windows::ipc::{MAX_MESSAGE_BYTES, send};
+use serde_json::{Value, from_slice, to_string};
 
 fn main() {
-    let action = match std::env::args().nth(1).as_deref() {
+    let action = match env::args().nth(1).as_deref() {
         Some("codex") => "codex_hook",
         Some("claude") => "claude_hook",
         _ => return,
     };
 
     let (Ok(route), Ok(token), Some(version)) = (
-        std::env::var(AGENT_ROUTE_ENV),
-        std::env::var(AGENT_HOOK_TOKEN_ENV),
-        std::env::var(AGENT_HOOK_VERSION_ENV)
+        env::var(AGENT_ROUTE_ENV),
+        env::var(AGENT_HOOK_TOKEN_ENV),
+        env::var(AGENT_HOOK_VERSION_ENV)
             .ok()
             .and_then(|value| value.parse::<u32>().ok()),
     ) else {
@@ -27,7 +29,7 @@ fn main() {
     };
 
     let mut input = Vec::new();
-    if std::io::stdin()
+    if io::stdin()
         .take(MAX_MESSAGE_BYTES as u64 + 1)
         .read_to_end(&mut input)
         .is_err()
@@ -37,11 +39,11 @@ fn main() {
         return;
     }
 
-    let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&input) else {
+    let Ok(payload) = from_slice::<Value>(&input) else {
         return;
     };
 
-    let Ok(message) = serde_json::to_string(&RawAgentHookEnvelope {
+    let Ok(message) = to_string(&RawAgentHookEnvelope {
         action: action.into(),
         version,
         token,
@@ -55,7 +57,7 @@ fn main() {
         return;
     }
 
-    let testing = std::env::var(AGENT_TESTING_ENV).is_ok_and(|value| value == "1");
+    let testing = env::var(AGENT_TESTING_ENV).is_ok_and(|value| value == "1");
 
     let _ = send(&message, Duration::ZERO, testing);
 }

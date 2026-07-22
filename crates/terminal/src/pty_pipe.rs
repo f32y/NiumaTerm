@@ -2,18 +2,24 @@ use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::io::{self, ErrorKind, Read, Write};
 use std::sync::atomic::{AtomicU32, AtomicU64};
-use std::sync::{Arc, mpsc};
+use std::sync::{self, Arc, mpsc};
 use std::thread::{Builder, JoinHandle};
+use std::{cell, env, error, fmt, mem, path, str, time};
 
-use nmt_platform::{Events, Interest, Poll, Token, Waker};
+#[cfg(target_os = "linux")]
+use libc::EIO;
+use memchr::memchr;
+use nmt_config::colors::Colors;
+use nmt_platform::{ChildEvent, EventedPty, Events, Interest, Poll, Token, Waker};
 use parking_lot::FairMutex;
-use tracing::error;
+use tracing::{error, warn};
 
 use crate::event::{
-    CommandCapture, CommandStart, EventListener, Msg, MsgSender, TerminalEvent, WindowId,
+    self, CommandCapture, CommandStart, EventListener, Msg, MsgSender, TerminalEvent, WindowId,
 };
-use crate::ghostty::{GhosttyTerminal, mode};
+use crate::ghostty::{self, GhosttyTerminal, mode};
 use crate::render_buffer::RenderBuffer;
+use crate::{ansi, terminal, vt_trace};
 
 pub fn spawn_named<F, T, S>(name: S, f: F) -> JoinHandle<T>
 where
@@ -39,7 +45,7 @@ const BLOCK_BOUNDARY_CLEAR: &[u8] = b"\x1b[2J\x1b[3J\x1b[H";
 /// with current row counts — the payload of
 /// [`crate::event::BlockEvent::EngineBlocksSync`]. Cheap FFI walk; called
 /// under the engine lock on the PTY thread after finish/resize.
-fn engine_blocks_live_list(engine: &GhosttyTerminal) -> Vec<(crate::ghostty::BlockHandle, usize)> {
+fn engine_blocks_live_list(engine: &GhosttyTerminal) -> Vec<(ghostty::BlockHandle, usize)> {
     let count = engine.block_count();
 
     let mut live = Vec::with_capacity(count);
@@ -63,10 +69,10 @@ fn engine_blocks_live_list(engine: &GhosttyTerminal) -> Vec<(crate::ghostty::Blo
 /// high-refresh displays still get a fresh grid every frame; plumb the real
 /// monitor refresh rate here if 240 Hz+ becomes a target. A caught-up read
 /// (interactive echo) always snapshots — this only coalesces under saturation.
-const SNAPSHOT_MIN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(5);
+const SNAPSHOT_MIN_INTERVAL: time::Duration = time::Duration::from_millis(5);
 /// Match Windows Terminal's upper bound so a missing DEC 2026 reset cannot
 /// leave the last committed frame visible indefinitely.
-const SYNC_OUTPUT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(100);
+const SYNC_OUTPUT_TIMEOUT: time::Duration = time::Duration::from_millis(100);
 
 fn is_conpty_resize_echo_input(bytes: &[u8]) -> bool {
     !bytes.is_empty()
@@ -102,7 +108,7 @@ fn for_each_csi(bytes: &[u8], mut f: impl FnMut(usize, usize)) {
 
 /// Parse `row;col` CUP params; either half is `None` when absent/unparsable.
 fn cup_row_col(params: &[u8]) -> (Option<u16>, Option<u16>) {
-    let parse = |s: &[u8]| std::str::from_utf8(s).ok().and_then(|s| s.parse().ok());
+    let parse = |s: &[u8]| str::from_utf8(s).ok().and_then(|s| s.parse().ok());
 
     match params.iter().position(|b| *b == b';') {
         Some(i) => (parse(&params[..i]), parse(&params[i + 1..])),
@@ -290,7 +296,7 @@ fn escape_bytes(bytes: &[u8]) -> String {
             b'\n' => out.push_str("<LF>"),
             0x20..=0x7e => out.push(b as char),
             _ => {
-                let _ = std::fmt::Write::write_fmt(&mut out, format_args!("\\x{b:02x}"));
+                let _ = fmt::Write::write_fmt(&mut out, format_args!("\\x{b:02x}"));
             }
         }
     }
@@ -380,7 +386,7 @@ fn region_for(sub: u8) -> Option<PromptRegion> {
 /// terminator (`;42` for `ESC]133;D;42<BEL>`; empty for a bare `;D`).
 fn parse_exit_code(arg: &[u8]) -> Option<i32> {
     let digits = arg.strip_prefix(b";")?;
-    std::str::from_utf8(digits).ok()?.parse().ok()
+    str::from_utf8(digits).ok()?.parse().ok()
 }
 
 /// Parse a potential OSC 133 mark at `s` (caller guarantees `s[0] == 0x1b`).
@@ -614,7 +620,7 @@ pub(crate) struct PromptSniffer {
     /// the shell lifecycle. Cleared at each `;B`; never grows on the output hot path.
     command_buf: Vec<u8>,
     /// When command output started (`;C`) — the block's `started_at`.
-    command_started_at: Option<std::time::SystemTime>,
+    command_started_at: Option<time::SystemTime>,
     /// The command echo rendered once at `;C` (`render_command_echo`); reused by the
     /// `;D` capture so the echo emulation runs once per command.
     current_command: String,
@@ -754,7 +760,7 @@ impl PromptSniffer {
         let mut seg_start = pos;
 
         while pos < input.len() {
-            match memchr::memchr(0x1b, &input[pos..]) {
+            match memchr(0x1b, &input[pos..]) {
                 None => break,
                 Some(off) => {
                     let esc = pos + off;
@@ -863,17 +869,17 @@ impl PromptSniffer {
         SnifferMark {
             bytes,
             trusted: self.boundary_trusted(),
-            prompt_started: std::mem::take(&mut self.prompt_start_edge),
-            command_started: std::mem::take(&mut self.command_started_edge).then(|| CommandStart {
+            prompt_started: mem::take(&mut self.prompt_start_edge),
+            command_started: mem::take(&mut self.command_started_edge).then(|| CommandStart {
                 seq: 0, // stamped by the mark-closure caller (block-split)
                 command: self.current_command.clone(),
                 cwd: None,
                 started_at: self
                     .command_started_at
-                    .unwrap_or_else(std::time::SystemTime::now),
+                    .unwrap_or_else(time::SystemTime::now),
             }),
             command_finished: self.command_finished.take(),
-            history_cleared: std::mem::take(&mut self.history_cleared_edge),
+            history_cleared: mem::take(&mut self.history_cleared_edge),
         }
     }
 
@@ -920,7 +926,7 @@ impl PromptSniffer {
 
         // Command output started (;C).
         if r == PromptRegion::Output && self.region != PromptRegion::Output {
-            self.command_started_at = Some(std::time::SystemTime::now());
+            self.command_started_at = Some(time::SystemTime::now());
             // Render the echo once here; the ;D capture reuses it. A trusted,
             // non-empty start becomes the in-flight block.
             self.current_command = render_command_echo(&self.command_buf);
@@ -937,7 +943,7 @@ impl PromptSniffer {
         // carries no useful metadata; Warp builds no block for it either).
         if sub == b'D' && r == PromptRegion::None {
             let started_at = self.command_started_at.take();
-            let command = std::mem::take(&mut self.current_command);
+            let command = mem::take(&mut self.current_command);
 
             self.command_buf.clear();
 
@@ -949,7 +955,7 @@ impl PromptSniffer {
                         exit_code: exit,
                         cwd: None, // filled by the caller from its ;C latch
                         started_at,
-                        ended_at: std::time::SystemTime::now(),
+                        ended_at: time::SystemTime::now(),
                     });
                 }
             }
@@ -1027,11 +1033,11 @@ impl PromptSniffer {
 /// Gated on `NMT_PROMPT_TRACE` so live OSC 133 region transitions can be logged during
 /// classify-only validation; zero-cost when unset (one `OnceLock` load).
 fn prompt_trace_enabled() -> bool {
-    static EN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *EN.get_or_init(|| std::env::var_os("NMT_PROMPT_TRACE").is_some())
+    static EN: sync::OnceLock<bool> = sync::OnceLock::new();
+    *EN.get_or_init(|| env::var_os("NMT_PROMPT_TRACE").is_some())
 }
 
-pub struct PtyPipe<T: nmt_platform::EventedPty, U: EventListener> {
+pub struct PtyPipe<T: EventedPty, U: EventListener> {
     sender: MsgSender,
     receiver: mpsc::Receiver<Msg>,
     pty: T,
@@ -1075,7 +1081,7 @@ pub struct PtyPipe<T: nmt_platform::EventedPty, U: EventListener> {
     /// the resize repaint, whose ConPTY echo lands at a stale CUP. Without a time
     /// bound, ordinary typing long after a resize keeps tripping the gate and
     /// accumulates (the "type 120 x's after a resize and the prompt repeats" bug).
-    conpty_resize_at: Option<std::time::Instant>,
+    conpty_resize_at: Option<time::Instant>,
     /// SU-realign latch. `active_cursor_row()` is captured at resize time
     /// (it flips within one frame during the ConPTY repaint storm, so it can't be read
     /// live). `*_cols/_rows` let the first repaint sanity-check it answers this resize.
@@ -1089,7 +1095,7 @@ pub struct PtyPipe<T: nmt_platform::EventedPty, U: EventListener> {
     /// NOT be read at `;D`, by which point the ps1 has already reported the NEXT
     /// prompt's OSC 7 directory (which would mislabel every `cd`). Attached to the
     /// CommandFinished event. PTY-thread-private.
-    launch_cwd: Option<Option<std::path::PathBuf>>,
+    launch_cwd: Option<Option<path::PathBuf>>,
     /// Engine-blocks mode is the default: at
     /// each trusted `;D` the engine freezes the command into a finished
     /// block (`finish_block`, O(1)) whose handle is shipped to the app's
@@ -1108,19 +1114,19 @@ pub struct PtyPipe<T: nmt_platform::EventedPty, U: EventListener> {
     prev_alt_screen_sent: bool,
     /// When the last `snapshot()` readback ran, for saturation coalescing
     /// (`SNAPSHOT_MIN_INTERVAL`). PTY-thread-private.
-    last_snapshot_at: std::time::Instant,
+    last_snapshot_at: time::Instant,
     /// True when a saturated batch or synchronized update deferred its readback.
     /// Makes the event loop run `pty_read` without requiring new PTY bytes.
     snapshot_pending: bool,
     /// Start of the current DEC 2026 transaction. The event-loop poll uses this
     /// deadline to recover when an application omits the matching reset.
-    sync_output_started_at: Option<std::time::Instant>,
+    sync_output_started_at: Option<time::Instant>,
 }
 
 /// Read the VT-controlled modes from the Ghostty engine into `Mode`.
 /// bits (e.g. `Mode::VI`) are not touched here — see
 /// [`Crosswords::sync_vt_modes`].
-fn ghostty_vt_modes(g: &GhosttyTerminal) -> crate::terminal::Mode {
+fn ghostty_vt_modes(g: &GhosttyTerminal) -> terminal::Mode {
     use crate::ghostty::mode as gm;
     use crate::terminal::Mode;
 
@@ -1151,7 +1157,7 @@ fn ghostty_vt_modes(g: &GhosttyTerminal) -> crate::terminal::Mode {
 fn publish_render_buffer(
     front: &FairMutex<RenderBuffer>,
     back: &mut RenderBuffer,
-    capture: crate::ghostty::Result<()>,
+    capture: ghostty::Result<()>,
     hide_cursor: bool,
 ) -> bool {
     if capture.is_err() {
@@ -1162,7 +1168,7 @@ fn publish_render_buffer(
         back.set_cursor_visible(false);
     }
 
-    std::mem::swap(&mut *front.lock(), back);
+    mem::swap(&mut *front.lock(), back);
 
     true
 }
@@ -1184,15 +1190,15 @@ fn scrollback_bytes(lines: usize, cols: u16) -> usize {
         .saturating_mul(BYTES_PER_CELL)
 }
 
-pub(crate) fn pwd_to_path(pwd: &str) -> std::path::PathBuf {
+pub(crate) fn pwd_to_path(pwd: &str) -> path::PathBuf {
     if let Some(rest) = pwd.strip_prefix("file://") {
         // rest = "host/path"; the path starts at the first '/'.
         if let Some(slash) = rest.find('/') {
-            return std::path::PathBuf::from(&rest[slash..]);
+            return path::PathBuf::from(&rest[slash..]);
         }
     }
 
-    std::path::PathBuf::from(pwd)
+    path::PathBuf::from(pwd)
 }
 
 #[derive(Default)]
@@ -1262,7 +1268,7 @@ impl Writing {
 
 impl<T, U> PtyPipe<T, U>
 where
-    T: nmt_platform::EventedPty + Send + 'static,
+    T: EventedPty + Send + 'static,
     U: EventListener + Send + 'static,
 {
     pub fn new(
@@ -1272,10 +1278,10 @@ where
         event_proxy: U,
         window_id: WindowId,
         route_id: usize,
-        colors: nmt_config::colors::Colors,
+        colors: Colors,
         scrollback_lines: usize,
         engine_blocks: bool,
-    ) -> Result<PtyPipe<T, U>, Box<dyn std::error::Error>> {
+    ) -> Result<PtyPipe<T, U>, Box<dyn error::Error>> {
         let poll = Poll::new()?;
 
         // The `Waker` is registered on a reserved token; the worker threads (Windows)
@@ -1298,7 +1304,7 @@ where
         let max_scrollback = scrollback_bytes(scrollback_lines, cols.max(1));
 
         let mut ghostty = GhosttyTerminal::new(cols.max(1), rows.max(1), max_scrollback)
-            .map_err(|err| Box::new(err) as Box<dyn std::error::Error>)?;
+            .map_err(|err| Box::new(err) as Box<dyn error::Error>)?;
 
         // Push the host theme's default colors + 256-palette into the engine so
         // SGR-indexed and default colors resolve to theme.
@@ -1308,7 +1314,7 @@ where
         // LINE_WRAP, …) so the facade is correct before the first PTY batch.
         vt_modes.store(
             ghostty_vt_modes(&ghostty).bits(),
-            std::sync::atomic::Ordering::Relaxed,
+            sync::atomic::Ordering::Relaxed,
         );
 
         Ok(PtyPipe {
@@ -1342,7 +1348,7 @@ where
             prev_alt_screen: false,
             prev_interactive: false,
             prev_alt_screen_sent: false,
-            last_snapshot_at: std::time::Instant::now(),
+            last_snapshot_at: time::Instant::now(),
             snapshot_pending: false,
             sync_output_started_at: None,
         })
@@ -1530,7 +1536,7 @@ where
 
                 // Capture the pre-rewrite ConPTY bytes + cursor visibility for the
                 // trace so we can compare original vs rewritten CUP rows.
-                let (orig_escaped, cursor_vis_at_decision) = if crate::vt_trace::enabled()
+                let (orig_escaped, cursor_vis_at_decision) = if vt_trace::enabled()
                     && (repaint_window || was_rewritten || echo_pending_at_entry)
                 {
                     let orig = &buf[..unprocessed];
@@ -1549,7 +1555,7 @@ where
                         // Both feed closures need the engine (segment/mark forwarding
                         // writes; cwd latch reads) and never run at the same time, so a
                         // RefCell shares the one borrow.
-                        let engine_cell = std::cell::RefCell::new(&mut *engine);
+                        let engine_cell = cell::RefCell::new(&mut *engine);
                         let launch_cwd = &mut self.launch_cwd;
                         let mark_seq = &mut self.mark_seq;
                         let event_proxy = &self.event_proxy;
@@ -1615,12 +1621,12 @@ where
                                                     engine.block_row_count(handle).unwrap_or(0);
 
                                                 vec![
-                                                    crate::event::BlockEvent::EngineBlock {
+                                                    event::BlockEvent::EngineBlock {
                                                         seq: *mark_seq,
                                                         handle,
                                                         rows,
                                                     },
-                                                    crate::event::BlockEvent::EngineBlocksSync(
+                                                    event::BlockEvent::EngineBlocksSync(
                                                         engine_blocks_live_list(&engine),
                                                     ),
                                                 ]
@@ -1628,7 +1634,7 @@ where
                                             // Empty command: no block, no segment.
                                             Ok(None) => Vec::new(),
                                             Err(err) => {
-                                                tracing::warn!("finish_block failed: {err:?}");
+                                                warn!("finish_block failed: {err:?}");
                                                 Vec::new()
                                             }
                                         };
@@ -1664,7 +1670,7 @@ where
 
                                         event_proxy.send_event(
                                             TerminalEvent::BlockBatch(vec![
-                                                crate::event::BlockEvent::HistoryCleared,
+                                                event::BlockEvent::HistoryCleared,
                                             ]),
                                             window_id,
                                         );
@@ -1694,8 +1700,8 @@ where
                 if let Some(expected) = su_realigned_to {
                     let got = engine.active_cursor_row();
 
-                    if got != Some(expected) && crate::vt_trace::enabled() {
-                        crate::vt_trace::trace(
+                    if got != Some(expected) && vt_trace::enabled() {
+                        vt_trace::trace(
                             "su_realign_assert",
                             &mut engine,
                             &format!("expected R_conpty={expected} got={got:?}"),
@@ -1712,10 +1718,9 @@ where
                 // Dump the full VT only for resize-related reads (the ConPTY repaint
                 // window or a realigned echo) — a per-keystroke full dump would be
                 // O(scrollback) on every read.
-                if crate::vt_trace::enabled()
-                    && (repaint_window || was_rewritten || echo_pending_at_entry)
+                if vt_trace::enabled() && (repaint_window || was_rewritten || echo_pending_at_entry)
                 {
-                    crate::vt_trace::trace(
+                    vt_trace::trace(
                         "pty_resize_read",
                         &mut engine,
                         &format!(
@@ -1736,7 +1741,7 @@ where
 
             // Content changed, so invalidate the cached deep-search corpus.
             self.content_version
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                .fetch_add(1, sync::atomic::Ordering::Relaxed);
 
             processed += unprocessed;
             unprocessed = 0;
@@ -1815,7 +1820,7 @@ where
             self.event_proxy.send_event(
                 TerminalEvent::UpdateGraphics {
                     route_id: self.route_id,
-                    queues: crate::ansi::graphics::UpdateQueues {
+                    queues: ansi::graphics::UpdateQueues {
                         pending: Vec::new(),
                         pending_images,
                         remove_queue: removed_ids
@@ -1849,17 +1854,17 @@ where
 
         // Publish VT modes lock-free; this PTY thread is the sole writer.
         self.vt_modes
-            .store(vt_modes.bits(), std::sync::atomic::Ordering::Relaxed);
+            .store(vt_modes.bits(), sync::atomic::Ordering::Relaxed);
 
         if sync_output {
             self.sync_output_started_at
-                .get_or_insert_with(std::time::Instant::now);
+                .get_or_insert_with(time::Instant::now);
         } else {
             self.sync_output_started_at = None;
         }
 
         // Interactive-state detection: full-screen TUIs set alt-screen.
-        self.prev_alt_screen = vt_modes.contains(crate::terminal::Mode::ALT_SCREEN);
+        self.prev_alt_screen = vt_modes.contains(terminal::Mode::ALT_SCREEN);
         self.emit_interactive_state();
 
         // Readback skipped under saturation: self-wake so another `pty_read`
@@ -1878,7 +1883,7 @@ where
             return Ok(());
         };
 
-        self.last_snapshot_at = std::time::Instant::now();
+        self.last_snapshot_at = time::Instant::now();
         self.snapshot_pending = false;
 
         if publish_render_buffer(
@@ -1910,8 +1915,7 @@ where
                     // fast burst (one channel drain → one `pty_read`), so bound it by
                     // time. Without this, ordinary typing after a resize keeps being
                     // realigned and the input/prompt accumulates.
-                    const RESIZE_ECHO_WINDOW: std::time::Duration =
-                        std::time::Duration::from_millis(150);
+                    const RESIZE_ECHO_WINDOW: time::Duration = time::Duration::from_millis(150);
 
                     if cfg!(windows)
                         && self.conpty_resize_echo_realign
@@ -1931,13 +1935,13 @@ where
                     let rows = window_size.rows.max(1);
                     let cell_w = (window_size.width / cols).max(1) as u32;
                     let cell_h = (window_size.height / rows).max(1) as u32;
-                    let mut blocks_sync: Option<Vec<(crate::ghostty::BlockHandle, usize)>> = None;
+                    let mut blocks_sync: Option<Vec<(ghostty::BlockHandle, usize)>> = None;
 
                     let (snapshot, active_row) = {
                         let mut engine = self.ghostty.lock();
 
-                        if crate::vt_trace::enabled() {
-                            crate::vt_trace::trace(
+                        if vt_trace::enabled() {
+                            vt_trace::trace(
                                 "perf_resize_before",
                                 &mut engine,
                                 &format!(
@@ -1953,11 +1957,11 @@ where
                         }
 
                         if let Err(err) = engine.resize(cols, rows, cell_w, cell_h) {
-                            tracing::warn!("engine resize failed: {err:?}");
+                            warn!("engine resize failed: {err:?}");
                         }
 
-                        if crate::vt_trace::enabled() {
-                            crate::vt_trace::trace(
+                        if vt_trace::enabled() {
+                            vt_trace::trace(
                                 "perf_resize_after_engine",
                                 &mut engine,
                                 &format!(
@@ -1981,9 +1985,9 @@ where
 
                     if let Some(live) = blocks_sync {
                         self.event_proxy.send_event(
-                            TerminalEvent::BlockBatch(vec![
-                                crate::event::BlockEvent::EngineBlocksSync(live),
-                            ]),
+                            TerminalEvent::BlockBatch(vec![event::BlockEvent::EngineBlocksSync(
+                                live,
+                            )]),
                             self.window_id,
                         );
                     }
@@ -2004,11 +2008,11 @@ where
 
                     // Resize reflows content → invalidate any deep-search corpus.
                     self.content_version
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        .fetch_add(1, sync::atomic::Ordering::Relaxed);
 
                     if cfg!(windows) {
                         self.conpty_resize_echo_realign = true;
-                        self.conpty_resize_at = Some(std::time::Instant::now());
+                        self.conpty_resize_at = Some(time::Instant::now());
                         self.conpty_resize_repaint_reads_remaining = 8;
 
                         // Latch the prompt row and size now so SU realignment uses the
@@ -2023,7 +2027,7 @@ where
                     }
 
                     if let Err(err) = self.pty.set_winsize(window_size) {
-                        tracing::warn!("pty set_winsize failed: {err}");
+                        warn!("pty set_winsize failed: {err}");
                     }
                 }
                 Msg::Shutdown => return false,
@@ -2099,7 +2103,7 @@ where
                 // and keeps blocking (real OS readiness, re-armed by EPOLL_CTL_MOD).
                 events.clear();
                 let timeout = if self.pty.has_ready() {
-                    Some(std::time::Duration::ZERO)
+                    Some(time::Duration::ZERO)
                 } else {
                     self.sync_output_started_at
                         .map(|started| SYNC_OUTPUT_TIMEOUT.saturating_sub(started.elapsed()))
@@ -2163,7 +2167,7 @@ where
                 }
 
                 if child_exited {
-                    if let Some(nmt_platform::ChildEvent::Exited) = self.pty.next_child_event() {
+                    if let Some(ChildEvent::Exited) = self.pty.next_child_event() {
                         // Emit `CloseTerminal` directly; PtyPipe owns the event proxy and route id.
                         self.event_proxy.send_event(
                             TerminalEvent::CloseTerminal(self.route_id),
@@ -2193,7 +2197,7 @@ where
                             // with `EIO` if the client side hangs up. In that case, just
                             // loop back round for the inevitable `Exited` event.
                             #[cfg(target_os = "linux")]
-                            if err.raw_os_error() == Some(libc::EIO) {
+                            if err.raw_os_error() == Some(EIO) {
                                 continue;
                             }
 
@@ -2231,6 +2235,8 @@ where
 
 #[cfg(test)]
 mod prompt_sniffer_tests {
+    use std::cell;
+
     use super::{PromptRegion, PromptSniffer};
 
     /// Collect every forwarded (region, bytes) segment from feeding `chunks` in order,
@@ -2247,7 +2253,7 @@ mod prompt_sniffer_tests {
     /// Concatenate what production writes to the engine: segments plus mark bytes.
     fn engine_stream(chunks: &[&[u8]]) -> Vec<u8> {
         let mut s = PromptSniffer::default();
-        let out = std::cell::RefCell::new(Vec::new());
+        let out = cell::RefCell::new(Vec::new());
         for c in chunks {
             s.feed_hooked(
                 c,
@@ -2669,7 +2675,7 @@ mod prompt_sniffer_tests {
     #[test]
     fn mark_hook_fires_in_stream_order_with_edges() {
         let mut s = primed();
-        let log = std::cell::RefCell::new(Vec::<String>::new());
+        let log = cell::RefCell::new(Vec::<String>::new());
         s.feed_hooked(
             b"\x1b]133;A\x07p>\x1b]133;B\x07cmd\x1b]133;C\x07OUT",
             |_, _, seg| {
@@ -2709,7 +2715,7 @@ mod prompt_sniffer_tests {
     #[test]
     fn mark_hook_receives_raw_mark_bytes_including_carry() {
         let mut s = PromptSniffer::default();
-        let marks = std::cell::RefCell::new(Vec::<Vec<u8>>::new());
+        let marks = cell::RefCell::new(Vec::<Vec<u8>>::new());
         let feed = |s: &mut PromptSniffer, input: &[u8]| {
             s.feed_hooked(
                 input,
@@ -2732,7 +2738,7 @@ mod prompt_sniffer_tests {
     #[test]
     fn command_started_only_for_trusted_nonempty_commands() {
         let mut s = PromptSniffer::default();
-        let starts = std::cell::RefCell::new(Vec::<String>::new());
+        let starts = cell::RefCell::new(Vec::<String>::new());
         let feed = |s: &mut PromptSniffer, input: &[u8]| {
             s.feed_hooked(
                 input,
@@ -2806,16 +2812,20 @@ mod scrollback_tests {
 mod ghostty_mirror_tests {
     use std::sync::Arc;
     use std::sync::atomic::AtomicU32;
+    use std::{io, sync, time};
 
-    use parking_lot::FairMutex;
+    use nmt_config::colors::Colors;
+    use nmt_platform::{ChildEvent, EventedPty, ProcessReadWrite, WinsizeBuilder};
+    use parking_lot::{FairMutex, Mutex};
 
     use super::{
         Interest, Poll, PtyPipe, PtyState, READ_BUFFER_SIZE, SYNC_OUTPUT_TIMEOUT, Token, Waker,
         max_cup_row_col, mode, publish_render_buffer, rewrite_conpty_resize_echo_cup_rows,
         su_realign_count,
     };
-    use crate::event::VoidListener;
+    use crate::event::{self, VoidListener};
     use crate::render_buffer::RenderBuffer;
+    use crate::{ansi, ghostty};
 
     #[test]
     fn failed_capture_does_not_publish_back_buffer() {
@@ -2825,7 +2835,7 @@ mod ghostty_mirror_tests {
         assert!(!publish_render_buffer(
             &front,
             &mut back,
-            Err(crate::ghostty::Error::InvalidValue),
+            Err(ghostty::Error::InvalidValue),
             false,
         ));
         assert_eq!(front.lock().cols(), 2);
@@ -2931,10 +2941,10 @@ mod ghostty_mirror_tests {
         data: Vec<u8>,
     }
 
-    impl std::io::Read for FakeReader {
-        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+    impl io::Read for FakeReader {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
             if self.data.is_empty() {
-                return Err(std::io::ErrorKind::WouldBlock.into());
+                return Err(io::ErrorKind::WouldBlock.into());
             }
             let n = self.data.len().min(buf.len());
             buf[..n].copy_from_slice(&self.data[..n]);
@@ -2948,13 +2958,13 @@ mod ghostty_mirror_tests {
         data: Vec<u8>,
     }
 
-    impl std::io::Write for FakeWriter {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+    impl io::Write for FakeWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
             self.data.extend_from_slice(buf);
             Ok(buf.len())
         }
 
-        fn flush(&mut self) -> std::io::Result<()> {
+        fn flush(&mut self) -> io::Result<()> {
             Ok(())
         }
     }
@@ -2964,7 +2974,7 @@ mod ghostty_mirror_tests {
         writer: FakeWriter,
     }
 
-    impl nmt_platform::ProcessReadWrite for FakePty {
+    impl ProcessReadWrite for FakePty {
         type Reader = FakeReader;
         type Writer = FakeWriter;
 
@@ -2984,7 +2994,7 @@ mod ghostty_mirror_tests {
             Token(2)
         }
 
-        fn set_winsize(&mut self, _: nmt_platform::WinsizeBuilder) -> std::io::Result<()> {
+        fn set_winsize(&mut self, _: WinsizeBuilder) -> io::Result<()> {
             Ok(())
         }
 
@@ -2993,16 +3003,16 @@ mod ghostty_mirror_tests {
             _: &Poll,
             _: &mut dyn Iterator<Item = Token>,
             _: Interest,
-            _: &std::sync::Arc<Waker>,
-        ) -> std::io::Result<()> {
+            _: &sync::Arc<Waker>,
+        ) -> io::Result<()> {
             Ok(())
         }
 
-        fn reregister(&mut self, _: &Poll, _: Interest) -> std::io::Result<()> {
+        fn reregister(&mut self, _: &Poll, _: Interest) -> io::Result<()> {
             Ok(())
         }
 
-        fn deregister(&mut self, _: &Poll) -> std::io::Result<()> {
+        fn deregister(&mut self, _: &Poll) -> io::Result<()> {
             Ok(())
         }
 
@@ -3011,12 +3021,12 @@ mod ghostty_mirror_tests {
         }
     }
 
-    impl nmt_platform::EventedPty for FakePty {
+    impl EventedPty for FakePty {
         fn child_event_token(&self) -> Token {
             Token(3)
         }
 
-        fn next_child_event(&mut self) -> Option<nmt_platform::ChildEvent> {
+        fn next_child_event(&mut self) -> Option<ChildEvent> {
             None
         }
     }
@@ -3035,14 +3045,14 @@ mod ghostty_mirror_tests {
             Arc::new(AtomicU32::new(0)),
             pty,
             VoidListener {},
-            crate::event::WindowId::from(0),
+            event::WindowId::from(0),
             0,
-            nmt_config::colors::Colors::default(),
+            Colors::default(),
             1000,
             false,
         )
         .unwrap();
-        let forwarded = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let forwarded = Arc::new(Mutex::new(Vec::new()));
         let forwarded_sink = Arc::clone(&forwarded);
         machine.set_output_sink(move |bytes| forwarded_sink.lock().extend_from_slice(&bytes));
         machine.set_terminal_responses_enabled(false);
@@ -3068,9 +3078,9 @@ mod ghostty_mirror_tests {
             vt_modes,
             pty,
             VoidListener {},
-            crate::event::WindowId::from(0),
+            event::WindowId::from(0),
             0,
-            nmt_config::colors::Colors::default(),
+            Colors::default(),
             1000,
             false,
         )
@@ -3083,7 +3093,7 @@ mod ghostty_mirror_tests {
 
         machine
             .sender
-            .send(crate::event::Msg::Resize(nmt_platform::WinsizeBuilder {
+            .send(event::Msg::Resize(WinsizeBuilder {
                 rows: 5,
                 cols: 20,
                 width: 240,
@@ -3113,9 +3123,9 @@ mod ghostty_mirror_tests {
             Arc::new(AtomicU32::new(0)),
             pty,
             VoidListener {},
-            crate::event::WindowId::from(0),
+            event::WindowId::from(0),
             0,
-            nmt_config::colors::Colors::default(),
+            Colors::default(),
             1000,
             false,
         )
@@ -3163,7 +3173,7 @@ mod ghostty_mirror_tests {
             .data
             .extend_from_slice(b"\x1b[?2026h\x1b[2;1HStuck");
         machine.pty_read(&mut state, &mut buf).unwrap();
-        machine.sync_output_started_at = Some(std::time::Instant::now() - SYNC_OUTPUT_TIMEOUT);
+        machine.sync_output_started_at = Some(time::Instant::now() - SYNC_OUTPUT_TIMEOUT);
         machine.pty_read(&mut state, &mut buf).unwrap();
 
         {
@@ -3188,9 +3198,9 @@ mod ghostty_mirror_tests {
             Arc::new(AtomicU32::new(0)),
             pty,
             VoidListener {},
-            crate::event::WindowId::from(0),
+            event::WindowId::from(0),
             0,
-            nmt_config::colors::Colors::default(),
+            Colors::default(),
             1000,
             false,
         )
@@ -3198,7 +3208,7 @@ mod ghostty_mirror_tests {
         machine
             .ghostty
             .lock()
-            .set_default_cursor_shape(crate::ansi::CursorShape::Beam)
+            .set_default_cursor_shape(ansi::CursorShape::Beam)
             .unwrap();
         let mut state = PtyState::default();
         let mut buf = [0u8; READ_BUFFER_SIZE];
@@ -3212,7 +3222,7 @@ mod ghostty_mirror_tests {
         machine.pty_read(&mut state, &mut buf).unwrap();
         {
             let buffer = render_buffer.lock();
-            assert_eq!(buffer.cursor_shape(), crate::ansi::CursorShape::Beam);
+            assert_eq!(buffer.cursor_shape(), ansi::CursorShape::Beam);
             assert!(!buffer.cursor_visible(), "active progress hides the cursor");
         }
 
@@ -3243,9 +3253,9 @@ mod ghostty_mirror_tests {
             vt_modes,
             pty,
             VoidListener {},
-            crate::event::WindowId::from(0),
+            event::WindowId::from(0),
             0,
-            nmt_config::colors::Colors::default(),
+            Colors::default(),
             1000,
             false,
         )
@@ -3285,9 +3295,9 @@ mod ghostty_mirror_tests {
             vt_modes,
             pty,
             VoidListener {},
-            crate::event::WindowId::from(0),
+            event::WindowId::from(0),
             0,
-            nmt_config::colors::Colors::default(),
+            Colors::default(),
             1000,
             false,
         )
@@ -3334,9 +3344,9 @@ mod ghostty_mirror_tests {
             vt_modes,
             pty,
             VoidListener {},
-            crate::event::WindowId::from(0),
+            event::WindowId::from(0),
             0,
-            nmt_config::colors::Colors::default(),
+            Colors::default(),
             1000,
             false,
         )
@@ -3399,9 +3409,9 @@ mod ghostty_mirror_tests {
             vt_modes,
             pty,
             VoidListener {},
-            crate::event::WindowId::from(0),
+            event::WindowId::from(0),
             0,
-            nmt_config::colors::Colors::default(),
+            Colors::default(),
             1000,
             false,
         )
@@ -3456,14 +3466,14 @@ mod ghostty_mirror_tests {
     // ---- command-blocks: pty_read emits CommandFinished with the launch cwd ----
 
     #[derive(Clone)]
-    struct CollectingListener(Arc<parking_lot::Mutex<Vec<crate::event::TerminalEvent>>>);
+    struct CollectingListener(Arc<Mutex<Vec<event::TerminalEvent>>>);
 
-    impl crate::event::EventListener for CollectingListener {
-        fn event(&self) -> (Option<crate::event::TerminalEvent>, bool) {
+    impl event::EventListener for CollectingListener {
+        fn event(&self) -> (Option<event::TerminalEvent>, bool) {
             (None, false)
         }
 
-        fn send_event(&self, event: crate::event::TerminalEvent, _: crate::event::WindowId) {
+        fn send_event(&self, event: event::TerminalEvent, _: event::WindowId) {
             self.0.lock().push(event);
         }
     }
@@ -3473,10 +3483,10 @@ mod ghostty_mirror_tests {
     fn pty_read_events(
         stream: &[u8],
     ) -> (
-        Vec<crate::event::TerminalEvent>,
+        Vec<event::TerminalEvent>,
         PtyPipe<FakePty, CollectingListener>,
     ) {
-        let events = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let events = Arc::new(Mutex::new(Vec::new()));
         let pty = FakePty {
             reader: FakeReader {
                 data: stream.to_vec(),
@@ -3488,9 +3498,9 @@ mod ghostty_mirror_tests {
             Arc::new(AtomicU32::new(0)),
             pty,
             CollectingListener(Arc::clone(&events)),
-            crate::event::WindowId::from(0),
+            event::WindowId::from(0),
             0,
-            nmt_config::colors::Colors::default(),
+            Colors::default(),
             1000,
             true,
         )
@@ -3503,12 +3513,12 @@ mod ghostty_mirror_tests {
         (collected, machine)
     }
 
-    fn command_finished_events(stream: &[u8]) -> Vec<crate::event::CommandCapture> {
+    fn command_finished_events(stream: &[u8]) -> Vec<event::CommandCapture> {
         let (events, _machine) = pty_read_events(stream);
         events
             .iter()
             .filter_map(|e| match e {
-                crate::event::TerminalEvent::CommandFinished(c) => Some(c.clone()),
+                event::TerminalEvent::CommandFinished(c) => Some(c.clone()),
                 _ => None,
             })
             .collect()
@@ -3650,7 +3660,7 @@ vim\r\n\x1b]133;C\x07\x1b[?1049hTUI\x1b]133;D;0\x07";
         let (_events, machine) = pty_read_events(stream);
 
         let mut engine = machine.ghostty.lock();
-        assert!(engine.mode(crate::ghostty::mode::ALT_SCREEN));
+        assert!(engine.mode(ghostty::mode::ALT_SCREEN));
         let snapshot = engine.snapshot().unwrap();
         let rows: Vec<_> = (0..snapshot.rows() as u16)
             .map(|y| snapshot_row_text(&snapshot, y))

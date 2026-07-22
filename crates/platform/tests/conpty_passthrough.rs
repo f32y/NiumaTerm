@@ -8,6 +8,7 @@
 #![cfg(windows)]
 
 use std::io::Read;
+use std::thread;
 use std::time::{Duration, Instant};
 
 use nmt_platform::{ProcessReadWrite, create_pty_with_env};
@@ -68,11 +69,11 @@ fn drive_conpty_with_title(script: &str, title: Option<&str>) -> Vec<u8> {
             break;
         }
         match pty.reader().read(&mut buf) {
-            Ok(0) => std::thread::sleep(Duration::from_millis(20)),
+            Ok(0) => thread::sleep(Duration::from_millis(20)),
             Ok(n) => {
                 collected.extend_from_slice(&buf[..n]);
                 if find_subslice(&collected, marker).is_some() {
-                    std::thread::sleep(Duration::from_millis(50));
+                    thread::sleep(Duration::from_millis(50));
                     if let Ok(n2) = pty.reader().read(&mut buf) {
                         collected.extend_from_slice(&buf[..n2]);
                     }

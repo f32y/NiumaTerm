@@ -2,8 +2,10 @@
 // Alacritty is licensed under Apache 2.0 license.
 // https://github.com/alacritty/alacritty/pull/4763/files
 
-use std::mem;
 use std::sync::{Arc, Weak};
+#[cfg(test)]
+use std::thread;
+use std::{collections, mem, time};
 
 #[cfg(feature = "sixel")]
 use nmt_config::colors::ColorRgb;
@@ -12,6 +14,7 @@ use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use tracing::debug;
 
+use crate::ansi;
 #[cfg(feature = "sixel")]
 use crate::ansi::sixel;
 use crate::graphics::{GraphicData, GraphicId};
@@ -87,7 +90,7 @@ pub const KITTY_PLACEHOLDER: char = '\u{10EEEE}';
 #[derive(Debug, Clone, PartialEq)]
 pub struct StoredImage {
     pub data: GraphicData,
-    pub transmission_time: std::time::Instant,
+    pub transmission_time: time::Instant,
 }
 
 /// Overlay placement for a kitty graphics image.
@@ -126,7 +129,7 @@ pub struct KittyPlacement {
     /// Z-index layer for rendering order.
     pub z_index: i32,
     /// Transmission timestamp for cache invalidation.
-    pub transmit_time: std::time::Instant,
+    pub transmit_time: time::Instant,
 }
 
 /// Virtual placement metadata for Kitty graphics protocol
@@ -203,7 +206,7 @@ pub struct Graphics {
 
     /// Kitty graphics: State for chunked image transmissions
     /// Stores incomplete transmissions and tracks current transmission key
-    pub kitty_chunking_state: crate::ansi::kitty_graphics_protocol::KittyGraphicsState,
+    pub kitty_chunking_state: ansi::kitty_graphics_protocol::KittyGraphicsState,
 
     /// Total bytes of image data currently stored in memory
     /// Includes both pending graphics and stored Kitty images
@@ -215,7 +218,7 @@ pub struct Graphics {
 
     /// Tracks when each graphic was added (for eviction priority)
     /// Maps GraphicId to insertion timestamp
-    pub image_timestamps: FxHashMap<GraphicId, std::time::Instant>,
+    pub image_timestamps: FxHashMap<GraphicId, time::Instant>,
 
     /// Weak references to placed textures, for O(1) liveness checks.
     /// Avoids scanning the entire grid to find which graphics are in use.
@@ -263,8 +266,7 @@ impl Default for Graphics {
             kitty_images: FxHashMap::default(),
             kitty_image_numbers: FxHashMap::default(),
             kitty_virtual_placements: FxHashMap::default(),
-            kitty_chunking_state: crate::ansi::kitty_graphics_protocol::KittyGraphicsState::default(
-            ),
+            kitty_chunking_state: ansi::kitty_graphics_protocol::KittyGraphicsState::default(),
             total_bytes: 0,
             total_limit: 320 * 1024 * 1024,
             image_timestamps: FxHashMap::default(),
@@ -354,19 +356,19 @@ impl Graphics {
     /// virtual placements. Marks the kitty overlay layer dirty so the
     /// renderer rebuilds its overlay set against the new active screen.
     pub fn swap_kitty_screen_state(&mut self) {
-        std::mem::swap(
+        mem::swap(
             &mut self.kitty_images,
             &mut self.kitty_inactive_screen.kitty_images,
         );
-        std::mem::swap(
+        mem::swap(
             &mut self.kitty_image_numbers,
             &mut self.kitty_inactive_screen.kitty_image_numbers,
         );
-        std::mem::swap(
+        mem::swap(
             &mut self.kitty_placements,
             &mut self.kitty_inactive_screen.kitty_placements,
         );
-        std::mem::swap(
+        mem::swap(
             &mut self.kitty_virtual_placements,
             &mut self.kitty_inactive_screen.kitty_virtual_placements,
         );
@@ -401,14 +403,14 @@ impl Graphics {
         image_number: Option<u32>,
         mut data: GraphicData,
     ) {
-        let now = std::time::Instant::now();
+        let now = time::Instant::now();
         data.transmit_time = now;
 
         // Evict before storing to protect images with active placements
         let new_bytes = data.pixels.len();
         if self.total_bytes + new_bytes > self.total_limit {
             // Collect active IDs — images with placements are protected
-            let mut active = std::collections::HashSet::new();
+            let mut active = collections::HashSet::new();
             for placement in self.kitty_placements.values() {
                 active.insert(placement.image_id as u64);
             }
@@ -475,7 +477,7 @@ impl Graphics {
     pub fn evict_images(
         &mut self,
         required_bytes: usize,
-        used_ids: &std::collections::HashSet<u64>,
+        used_ids: &collections::HashSet<u64>,
     ) -> bool {
         use tracing::debug;
 
@@ -515,7 +517,7 @@ impl Graphics {
         }
 
         // Candidate: (sentinel GraphicId, timestamp, is_used, bytes, source)
-        let mut candidates: Vec<(GraphicId, std::time::Instant, bool, usize, CandidateSource)> =
+        let mut candidates: Vec<(GraphicId, time::Instant, bool, usize, CandidateSource)> =
             Vec::new();
 
         // Check pending graphics (sixel/iTerm2 — atlas based, single screen)
@@ -627,11 +629,10 @@ impl Graphics {
         //     graphic with the same numeric id as a kitty image is
         //     evicted (the test_eviction_removes_dangling_placements
         //     test pins this defensive behaviour)
-        let active_ids: std::collections::HashSet<u32> =
-            self.kitty_images.keys().copied().collect();
+        let active_ids: collections::HashSet<u32> = self.kitty_images.keys().copied().collect();
         self.kitty_placements
             .retain(|_, p| active_ids.contains(&p.image_id));
-        let inactive_ids: std::collections::HashSet<u32> = self
+        let inactive_ids: collections::HashSet<u32> = self
             .kitty_inactive_screen
             .kitty_images
             .keys()
@@ -659,9 +660,9 @@ impl Graphics {
 
     /// Collect IDs of graphics still displayed in the grid or as overlays.
     /// O(number of placements) instead of O(rows * cols).
-    pub fn collect_active_graphic_ids(&mut self) -> std::collections::HashSet<u64> {
+    pub fn collect_active_graphic_ids(&mut self) -> collections::HashSet<u64> {
         // Clean up stale entries and collect live ones in one pass
-        let mut active = std::collections::HashSet::new();
+        let mut active = collections::HashSet::new();
         // Cell-based (sixel) liveness
         self.placed_textures.retain(|id, weak| {
             if weak.strong_count() > 0 {
@@ -681,7 +682,7 @@ impl Graphics {
     /// Track a new graphic's memory usage and timestamp
     pub fn track_graphic(&mut self, graphic_id: GraphicId, bytes: usize) {
         self.image_timestamps
-            .insert(graphic_id, std::time::Instant::now());
+            .insert(graphic_id, time::Instant::now());
         self.total_bytes += bytes;
         debug!(
             "Tracked graphic id={}, bytes={}, total_bytes={}",
@@ -717,7 +718,7 @@ fn test_graphics_memory_tracking() {
         resize: None,
         display_width: None,
         display_height: None,
-        transmit_time: std::time::Instant::now(),
+        transmit_time: time::Instant::now(),
     };
 
     let bytes = Graphics::calculate_graphic_bytes(&graphic);
@@ -743,7 +744,7 @@ fn test_graphics_eviction_unused_first() {
     };
 
     // Add 3 graphics (50KB each = 150KB total, will exceed limit)
-    let mut used_ids = std::collections::HashSet::new();
+    let mut used_ids = collections::HashSet::new();
 
     // Graphic 1: 50KB, used
     let pixels1 = vec![255u8; 50_000];
@@ -757,13 +758,13 @@ fn test_graphics_eviction_unused_first() {
         resize: None,
         display_width: None,
         display_height: None,
-        transmit_time: std::time::Instant::now(),
+        transmit_time: time::Instant::now(),
     };
     graphics.pending.push(graphic1);
     graphics.track_graphic(GraphicId::new(1), pixels1.len());
     used_ids.insert(1); // Mark as used
 
-    std::thread::sleep(std::time::Duration::from_millis(10));
+    thread::sleep(time::Duration::from_millis(10));
 
     // Graphic 2: 50KB, unused (should be evicted first)
     let pixels2 = vec![255u8; 50_000];
@@ -777,7 +778,7 @@ fn test_graphics_eviction_unused_first() {
         resize: None,
         display_width: None,
         display_height: None,
-        transmit_time: std::time::Instant::now(),
+        transmit_time: time::Instant::now(),
     };
     graphics.pending.push(graphic2);
     graphics.track_graphic(GraphicId::new(2), pixels2.len());
@@ -803,7 +804,7 @@ fn test_graphics_eviction_oldest_first() {
         ..Graphics::default()
     };
 
-    let used_ids = std::collections::HashSet::new(); // No images used
+    let used_ids = collections::HashSet::new(); // No images used
 
     // Add 3 graphics, all unused
     // Graphic 1: oldest
@@ -818,12 +819,12 @@ fn test_graphics_eviction_oldest_first() {
         resize: None,
         display_width: None,
         display_height: None,
-        transmit_time: std::time::Instant::now(),
+        transmit_time: time::Instant::now(),
     };
     graphics.pending.push(graphic1);
     graphics.track_graphic(GraphicId::new(1), pixels1.len());
 
-    std::thread::sleep(std::time::Duration::from_millis(10));
+    thread::sleep(time::Duration::from_millis(10));
 
     // Graphic 2: middle
     let pixels2 = vec![255u8; 50_000];
@@ -837,7 +838,7 @@ fn test_graphics_eviction_oldest_first() {
         resize: None,
         display_width: None,
         display_height: None,
-        transmit_time: std::time::Instant::now(),
+        transmit_time: time::Instant::now(),
     };
     graphics.pending.push(graphic2);
     graphics.track_graphic(GraphicId::new(2), pixels2.len());
@@ -860,7 +861,7 @@ fn test_graphics_eviction_fails_when_not_enough_space() {
         ..Graphics::default()
     };
 
-    let mut used_ids = std::collections::HashSet::new();
+    let mut used_ids = collections::HashSet::new();
 
     // Add one 90KB graphic that's in use
     let pixels1 = vec![255u8; 90_000];
@@ -874,7 +875,7 @@ fn test_graphics_eviction_fails_when_not_enough_space() {
         resize: None,
         display_width: None,
         display_height: None,
-        transmit_time: std::time::Instant::now(),
+        transmit_time: time::Instant::now(),
     };
     graphics.pending.push(graphic1);
     graphics.track_graphic(GraphicId::new(1), pixels1.len());
@@ -901,7 +902,7 @@ fn test_graphics_no_eviction_when_under_limit() {
         ..Graphics::default()
     };
 
-    let used_ids = std::collections::HashSet::new();
+    let used_ids = collections::HashSet::new();
 
     // Add one 50KB graphic
     let pixels1 = vec![255u8; 50_000];
@@ -915,7 +916,7 @@ fn test_graphics_no_eviction_when_under_limit() {
         resize: None,
         display_width: None,
         display_height: None,
-        transmit_time: std::time::Instant::now(),
+        transmit_time: time::Instant::now(),
     };
     graphics.pending.push(graphic1);
     graphics.track_graphic(GraphicId::new(1), pixels1.len());

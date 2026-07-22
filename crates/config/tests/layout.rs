@@ -1,5 +1,6 @@
 use nmt_config::layout::*;
 use serde::Deserialize;
+use toml::from_str;
 
 #[test]
 fn test_margin_from_css_single_value() {
@@ -45,7 +46,7 @@ fn test_margin_deserialize_single() {
     struct Config {
         margin: Margin,
     }
-    let config: Config = toml::from_str(toml_str).unwrap();
+    let config: Config = from_str(toml_str).unwrap();
     assert_eq!(config.margin.top, 10.0);
     assert_eq!(config.margin.right, 10.0);
     assert_eq!(config.margin.bottom, 10.0);
@@ -60,7 +61,7 @@ fn test_margin_deserialize_invalid() {
     struct Config {
         margin: Margin,
     }
-    let result: Result<Config, _> = toml::from_str(toml_str);
+    let result: Result<Config, _> = from_str(toml_str);
     assert!(result.is_err());
 }
 
@@ -78,7 +79,7 @@ fn test_panel_deserialize_full() {
         panel: Panel,
     }
 
-    let config: Config = toml::from_str(toml_str).unwrap();
+    let config: Config = from_str(toml_str).unwrap();
     assert_eq!(config.panel.margin, Margin::all(8.0));
     assert_eq!(config.panel.row_gap, 2.0);
     assert_eq!(config.panel.column_gap, 3.0);

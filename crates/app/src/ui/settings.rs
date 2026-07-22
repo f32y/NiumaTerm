@@ -4,12 +4,15 @@
 //! live for preview; only closing the dialog persists them.
 
 use std::rc::Rc;
+use std::{fs, io, path};
 
 use futures::StreamExt as _;
+use futures::channel::mpsc::unbounded;
 use gpui::prelude::{FluentBuilder as _, InteractiveElement as _, StatefulInteractiveElement as _};
 use gpui::{
-    App, AppContext as _, BorrowAppContext as _, Entity, FileDialogFilter, Global,
-    ParentElement as _, PathPromptOptions, SharedString, Styled as _, div, px, relative, rgba,
+    App, AppContext as _, BorrowAppContext as _, Div, Entity, FileDialogFilter, Global, Hsla,
+    ParentElement as _, PathPromptOptions, SharedString, StyleRefinement, Styled as _,
+    Subscription, Task, WindowBackgroundAppearance, div, px, relative, rgba,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::group_box::GroupBoxVariant;
@@ -19,10 +22,32 @@ use gpui_component::setting::{
 };
 use gpui_component::slider::{Slider, SliderEvent, SliderState};
 use gpui_component::{
-    ActiveTheme as _, AxisExt as _, Disableable as _, Sizable as _, h_flex, v_flex,
+    ActiveTheme as _, AxisExt as _, Disableable as _, Sizable as _, Theme as ComponentTheme,
+    ThemeConfig as ComponentThemeConfig, ThemeRegistry as ComponentThemeRegistry,
+    ThemeToken as ComponentThemeToken, h_flex, v_flex,
 };
-use nmt_config::CursorShape;
-use nmt_config::system::WarnBeforeTerminatingShell;
+use nmt_agent_utils::HookInstallStatus;
+use nmt_agent_utils::claude_code::hook as claude_hook;
+use nmt_agent_utils::codex::hook as codex_hook;
+use nmt_config::agent::AgentConfig;
+use nmt_config::appearance::AppearanceConfig;
+use nmt_config::colors::{ColorArray, Colors};
+use nmt_config::defaults::default_theme;
+use nmt_config::remote_session::RemoteSession;
+use nmt_config::system::{SystemConfig, WarnBeforeTerminatingShell};
+use nmt_config::theme::{AppearanceTheme, Theme, UiTheme};
+use nmt_config::{Config, CursorShape, config_dir_path, get, save_settings, set_active_colors};
+use nmt_platform::{
+    is_shell_integration_registered, register_shell_integration, set_system_notification_enabled,
+    shell_integration_dll_mismatched, system_notification_enabled, unregister_shell_integration,
+};
+use notify::{
+    Event as NotifyEvent, RecursiveMode, Result as NotifyResult, Watcher as _, recommended_watcher,
+};
+use toml::{Table as TomlTable, Value as TomlValue};
+use tracing::warn;
+
+use crate::{PlatformHandle, ui};
 
 pub const DEFAULT_SHELL: &str = r"C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe";
 
@@ -83,7 +108,7 @@ pub struct AppSettings {
     /// Ephemeral filter for the theme list; it is not persisted.
     pub theme_filter: String,
     /// Parsed theme files, refreshed when the themes directory changes.
-    pub themes: Vec<(String, nmt_config::theme::Theme)>,
+    pub themes: Vec<(String, Theme)>,
     pub input_style: InputStyle,
     pub cursor_shape: CursorShape,
     pub profiles: Vec<Profile>,
@@ -177,7 +202,7 @@ impl Global for AppSettings {}
 
 struct ShellPathFieldState {
     input: Entity<InputState>,
-    _subscription: gpui::Subscription,
+    _subscription: Subscription,
 }
 
 /// Snap a persisted refresh interval to the allowed set, falling back to 30.
@@ -254,7 +279,7 @@ fn clamp_background_image_opacity(opacity: f64) -> f64 {
 
 impl AppSettings {
     pub fn load() -> Self {
-        let config = nmt_config::get();
+        let config = get();
 
         let appearance = &config.appearance;
 
@@ -273,7 +298,7 @@ impl AppSettings {
 
         Self {
             theme: if config.theme.is_empty() {
-                nmt_config::defaults::default_theme()
+                default_theme()
             } else {
                 config.theme.clone()
             },
@@ -395,7 +420,7 @@ impl AppSettings {
     /// preserving unrelated content). Called once on dialog close. Failures are
     /// logged, never fatal.
     pub fn save(&self) {
-        let appearance = nmt_config::appearance::AppearanceConfig {
+        let appearance = AppearanceConfig {
             input_style: self.input_style,
             command_blocks: self.command_blocks,
             show_daily_token_usage: self.show_daily_token_usage,
@@ -413,12 +438,12 @@ impl AppSettings {
             background_image_opacity: self.background_image_opacity,
         };
 
-        let agent = nmt_config::agent::AgentConfig {
+        let agent = AgentConfig {
             enable_agent_hooks: self.enable_agent_hooks,
             show_agent_usage: self.show_agent_usage,
         };
 
-        let system = nmt_config::system::SystemConfig {
+        let system = SystemConfig {
             restore_last_session_when_opening: self.restore_last_session_when_opening,
             manage_subprocess_job: self.manage_subprocess_job,
             warn_before_terminating_shell: self.warn_before_terminating_shell,
@@ -426,13 +451,13 @@ impl AppSettings {
             prioritize_ui_threads: self.prioritize_ui_threads,
         };
 
-        let remote_session = nmt_config::remote_session::RemoteSession {
+        let remote_session = RemoteSession {
             enabled: self.remote_session_enabled,
         };
 
         let profiles = self.profiles.clone();
 
-        if let Err(err) = nmt_config::save_settings(
+        if let Err(err) = save_settings(
             &self.theme,
             &appearance,
             self.cursor_shape,
@@ -442,7 +467,7 @@ impl AppSettings {
             &profiles,
             &self.default_profile,
         ) {
-            tracing::warn!("failed to save settings to config.toml: {err}");
+            warn!("failed to save settings to config.toml: {err}");
         }
     }
 }
@@ -455,7 +480,7 @@ fn effective_surface_background_opacity(window_opacity: f64, image_opacity: Opti
     window_opacity * (1.0 - image_opacity.unwrap_or(0.0))
 }
 
-pub(crate) fn surface_background_opacity(cx: &gpui::App) -> f32 {
+pub(crate) fn surface_background_opacity(cx: &App) -> f32 {
     let settings = cx.global::<AppSettings>();
 
     effective_surface_background_opacity(
@@ -480,7 +505,7 @@ fn effective_background_image_layer_opacity(window_opacity: f64, image_opacity: 
     }
 }
 
-pub(crate) fn background_image_layer_opacity(cx: &gpui::App) -> f32 {
+pub(crate) fn background_image_layer_opacity(cx: &App) -> f32 {
     let settings = cx.global::<AppSettings>();
 
     effective_background_image_layer_opacity(
@@ -494,17 +519,17 @@ pub(crate) fn background_image_layer_opacity(cx: &gpui::App) -> f32 {
 
 /// Apply the UI half of a terminal theme, falling back to the built-in dark
 /// palette when the theme does not define `[colors.ui]` or contains invalid UI data.
-pub(crate) fn apply_ui_theme(value: Option<&nmt_config::theme::UiTheme>, cx: &mut App) {
+pub(crate) fn apply_ui_theme(value: Option<&UiTheme>, cx: &mut App) {
     let configured = value.and_then(|value| {
-        let mut config = toml::Table::new();
+        let mut config = TomlTable::new();
 
-        config.insert("name".to_string(), toml::Value::String(value.name.clone()));
+        config.insert("name".to_string(), TomlValue::String(value.name.clone()));
         config.insert(
             "mode".to_string(),
-            toml::Value::String(
+            TomlValue::String(
                 match value.mode {
-                    nmt_config::theme::AppearanceTheme::Dark => "dark",
-                    nmt_config::theme::AppearanceTheme::Light => "light",
+                    AppearanceTheme::Dark => "dark",
+                    AppearanceTheme::Light => "light",
                 }
                 .to_string(),
             ),
@@ -526,35 +551,35 @@ pub(crate) fn apply_ui_theme(value: Option<&nmt_config::theme::UiTheme>, cx: &mu
 
         config.insert("colors".to_string(), colors);
 
-        toml::Value::Table(config)
-            .try_into::<gpui_component::ThemeConfig>()
+        TomlValue::Table(config)
+            .try_into::<ComponentThemeConfig>()
             .map(Rc::new)
-            .map_err(|err| tracing::warn!("failed to load UI theme: {err}"))
+            .map_err(|err| warn!("failed to load UI theme: {err}"))
             .ok()
     });
 
     let theme = configured.unwrap_or_else(|| {
-        gpui_component::ThemeRegistry::global(cx)
+        ComponentThemeRegistry::global(cx)
             .default_dark_theme()
             .clone()
     });
 
     let mode = theme.mode;
 
-    gpui_component::Theme::global_mut(cx).apply_config(&theme);
-    gpui_component::Theme::change(mode, None, cx);
+    ComponentTheme::global_mut(cx).apply_config(&theme);
+    ComponentTheme::change(mode, None, cx);
 }
 
 fn select_theme(name: String, cx: &mut App) {
     let theme = if name.is_empty() {
-        Ok(nmt_config::theme::Theme::default())
+        Ok(Theme::default())
     } else {
-        nmt_config::Config::load_named_theme(&name)
+        Config::load_named_theme(&name)
     };
 
     match theme {
         Ok(theme) => {
-            nmt_config::set_active_colors(theme.colors.terminal);
+            set_active_colors(theme.colors.terminal);
 
             apply_ui_theme(theme.ui_theme().as_ref(), cx);
 
@@ -564,12 +589,12 @@ fn select_theme(name: String, cx: &mut App) {
 
             cx.refresh_windows();
         }
-        Err(err) => tracing::warn!("failed to select theme {name}: {err}"),
+        Err(err) => warn!("failed to select theme {name}: {err}"),
     }
 }
 
-fn load_theme_choices() -> Vec<(String, nmt_config::theme::Theme)> {
-    nmt_config::Config::load_themes()
+fn load_theme_choices() -> Vec<(String, Theme)> {
+    Config::load_themes()
 }
 
 fn reload_themes(cx: &mut App) {
@@ -584,35 +609,32 @@ fn reload_themes(cx: &mut App) {
     }
 }
 
-pub(crate) fn watch_themes(cx: &mut App) -> Option<gpui::Task<()>> {
-    use notify::Watcher as _;
-
+pub(crate) fn watch_themes(cx: &mut App) -> Option<Task<()>> {
     reload_themes(cx);
 
-    let themes_dir = nmt_config::config_dir_path().join("themes");
+    let themes_dir = config_dir_path().join("themes");
 
-    if let Err(err) = std::fs::create_dir_all(&themes_dir) {
-        tracing::warn!("failed to create themes directory: {err}");
+    if let Err(err) = fs::create_dir_all(&themes_dir) {
+        warn!("failed to create themes directory: {err}");
         return None;
     }
 
-    let (tx, mut rx) = futures::channel::mpsc::unbounded();
+    let (tx, mut rx) = unbounded();
 
-    let mut watcher =
-        match notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-            if event.is_ok() {
-                let _ = tx.unbounded_send(());
-            }
-        }) {
-            Ok(watcher) => watcher,
-            Err(err) => {
-                tracing::warn!("failed to watch themes directory: {err}");
-                return None;
-            }
-        };
+    let mut watcher = match recommended_watcher(move |event: NotifyResult<NotifyEvent>| {
+        if event.is_ok() {
+            let _ = tx.unbounded_send(());
+        }
+    }) {
+        Ok(watcher) => watcher,
+        Err(err) => {
+            warn!("failed to watch themes directory: {err}");
+            return None;
+        }
+    };
 
-    if let Err(err) = watcher.watch(&themes_dir, notify::RecursiveMode::NonRecursive) {
-        tracing::warn!("failed to watch themes directory: {err}");
+    if let Err(err) = watcher.watch(&themes_dir, RecursiveMode::NonRecursive) {
+        warn!("failed to watch themes directory: {err}");
         return None;
     }
 
@@ -625,7 +647,7 @@ pub(crate) fn watch_themes(cx: &mut App) -> Option<gpui::Task<()>> {
     }))
 }
 
-fn preview_color(color: nmt_config::colors::ColorArray) -> gpui::Hsla {
+fn preview_color(color: ColorArray) -> Hsla {
     let channel = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u32;
 
     rgba(
@@ -637,7 +659,7 @@ fn preview_color(color: nmt_config::colors::ColorArray) -> gpui::Hsla {
     .into()
 }
 
-fn theme_preview(colors: nmt_config::colors::Colors) -> gpui::Div {
+fn theme_preview(colors: Colors) -> Div {
     let swatches = [
         colors.red,
         colors.yellow,
@@ -683,7 +705,7 @@ fn theme_preview(colors: nmt_config::colors::Colors) -> gpui::Div {
         })))
 }
 
-fn theme_list(cx: &mut App) -> gpui::Div {
+fn theme_list(cx: &mut App) -> Div {
     let selected = cx.global::<AppSettings>().theme.clone();
     let filter = cx.global::<AppSettings>().theme_filter.to_lowercase();
 
@@ -765,9 +787,9 @@ fn theme_list(cx: &mut App) -> gpui::Div {
 /// Retint the component theme for the foreground surface opacity. A configured
 /// image shows through by reducing this tint; without an image it remains the
 /// effective window opacity. Reset first so repeated calls do not compound alpha.
-pub(crate) fn apply_window_translucency(cx: &mut gpui::App) {
+pub(crate) fn apply_window_translucency(cx: &mut App) {
     let opacity = surface_background_opacity(cx);
-    let theme = gpui_component::Theme::global_mut(cx);
+    let theme = ComponentTheme::global_mut(cx);
 
     let palette = if theme.mode.is_dark() {
         theme.dark_theme.clone()
@@ -791,7 +813,7 @@ pub(crate) fn apply_window_translucency(cx: &mut gpui::App) {
             &mut theme.tokens.tab_active,
         ] {
             let color = token.color.opacity(opacity);
-            *token = gpui_component::ThemeToken::new(color, color.into());
+            *token = ComponentThemeToken::new(color, color.into());
         }
     }
 }
@@ -832,7 +854,7 @@ impl OpacityTarget {
 struct OpacitySliderState {
     window: Entity<SliderState>,
     image: Entity<SliderState>,
-    _subscriptions: [gpui::Subscription; 2],
+    _subscriptions: [Subscription; 2],
 }
 
 impl Global for OpacitySliderState {}
@@ -903,14 +925,14 @@ fn opacity_slider_field(target: OpacityTarget) -> SettingField<SharedString> {
             // neutral-950 panel, so use `primary`, which contrasts with the
             // panel in both modes.
             .child(
-                gpui::div().flex_1().px_2().child(
+                div().flex_1().px_2().child(
                     Slider::new(&slider)
                         .disabled(options.disabled)
                         .text_color(cx.theme().primary),
                 ),
             )
             .child(
-                gpui::div()
+                div()
                     .flex_shrink_0()
                     .child(SharedString::from(format!("{current:.2}"))),
             )
@@ -985,28 +1007,26 @@ fn background_image_field() -> SettingField<SharedString> {
     })
 }
 
-fn window_background_appearance_for(
-    transparency_enabled: bool,
-) -> gpui::WindowBackgroundAppearance {
+fn window_background_appearance_for(transparency_enabled: bool) -> WindowBackgroundAppearance {
     if transparency_enabled {
-        gpui::WindowBackgroundAppearance::Blurred
+        WindowBackgroundAppearance::Blurred
     } else {
-        gpui::WindowBackgroundAppearance::Opaque
+        WindowBackgroundAppearance::Opaque
     }
 }
 
 /// Select acrylic composition only while the alpha-capable target is enabled.
-pub(crate) fn window_background_appearance(cx: &gpui::App) -> gpui::WindowBackgroundAppearance {
+pub(crate) fn window_background_appearance(cx: &App) -> WindowBackgroundAppearance {
     window_background_appearance_for(cx.global::<AppSettings>().window_transparency_enabled)
 }
 
 fn agent_hook_item(
     name: &'static str,
-    detection_path: Option<std::path::PathBuf>,
-    hooks_path: Option<std::path::PathBuf>,
-    status: fn(&std::path::Path) -> nmt_agent_utils::HookInstallStatus,
-    install: fn(&std::path::Path) -> std::io::Result<()>,
-    uninstall: fn(&std::path::Path) -> std::io::Result<()>,
+    detection_path: Option<path::PathBuf>,
+    hooks_path: Option<path::PathBuf>,
+    status: fn(&path::Path) -> HookInstallStatus,
+    install: fn(&path::Path) -> io::Result<()>,
+    uninstall: fn(&path::Path) -> io::Result<()>,
 ) -> SettingItem {
     let detected = detection_path.as_ref().is_some_and(|path| path.is_file());
     let status_path = hooks_path.clone();
@@ -1018,9 +1038,9 @@ fn agent_hook_item(
             // Settings renders only the active page, so a disk-backed getter
             // refreshes Hook state whenever the user enters the Agent page.
             move |_| {
-                status_path.as_deref().is_some_and(|path| {
-                    status(path) == nmt_agent_utils::HookInstallStatus::Installed
-                })
+                status_path
+                    .as_deref()
+                    .is_some_and(|path| status(path) == HookInstallStatus::Installed)
             },
             move |enabled, cx| {
                 let Some(path) = action_path.as_deref() else {
@@ -1034,7 +1054,7 @@ fn agent_hook_item(
                 };
 
                 if let Err(error) = result {
-                    tracing::warn!("failed to update {name} hooks: {error}");
+                    warn!("failed to update {name} hooks: {error}");
                 }
 
                 cx.refresh_windows();
@@ -1083,19 +1103,19 @@ fn agent_page() -> SettingPage {
                 .title("Installed Agents")
                 .item(agent_hook_item(
                     "Claude Code",
-                    nmt_agent_utils::claude_code::hook::settings_path(),
-                    nmt_agent_utils::claude_code::hook::settings_path(),
-                    nmt_agent_utils::claude_code::hook::hooks_status,
-                    nmt_agent_utils::claude_code::hook::install_hooks,
-                    nmt_agent_utils::claude_code::hook::uninstall_hooks,
+                    claude_hook::settings_path(),
+                    claude_hook::settings_path(),
+                    claude_hook::hooks_status,
+                    claude_hook::install_hooks,
+                    claude_hook::uninstall_hooks,
                 ))
                 .item(agent_hook_item(
                     "Codex",
-                    nmt_agent_utils::codex::hook::config_path(),
-                    nmt_agent_utils::codex::hook::hooks_path(),
-                    nmt_agent_utils::codex::hook::hooks_status,
-                    nmt_agent_utils::codex::hook::install_hooks,
-                    nmt_agent_utils::codex::hook::uninstall_hooks,
+                    codex_hook::config_path(),
+                    codex_hook::hooks_path(),
+                    codex_hook::hooks_status,
+                    codex_hook::install_hooks,
+                    codex_hook::uninstall_hooks,
                 )),
         )
 }
@@ -1104,9 +1124,9 @@ pub fn settings_view(cx: &App) -> Settings {
     let profiles = cx.global::<AppSettings>().profiles.clone();
     let transparency_enabled = cx.global::<AppSettings>().window_transparency_enabled;
     let background_image_enabled = cx.global::<AppSettings>().background_image.is_some();
-    let shell_integration_mismatched = nmt_platform::shell_integration_dll_mismatched();
+    let shell_integration_mismatched = shell_integration_dll_mismatched();
 
-    let sidebar_style = gpui::StyleRefinement::default()
+    let sidebar_style = StyleRefinement::default()
         .bg(cx.theme().sidebar)
         .border_t_1()
         .border_b_1()
@@ -1257,8 +1277,8 @@ pub fn settings_view(cx: &App) -> Settings {
                     SettingGroup::new().title("Interface").item(
                         SettingItem::new(
                             "UI Font",
-                            crate::ui::font_picker::font_family_field(
-                                crate::ui::font_picker::FontTarget::Ui,
+                            ui::font_picker::font_family_field(
+                                ui::font_picker::FontTarget::Ui,
                             ),
                         )
                         .description("Font for the app chrome (titlebar, sidebar, tabs, dialogs)."),
@@ -1270,8 +1290,8 @@ pub fn settings_view(cx: &App) -> Settings {
                         .item(
                             SettingItem::new(
                                 "Font Family",
-                                crate::ui::font_picker::font_family_field(
-                                    crate::ui::font_picker::FontTarget::Terminal,
+                                ui::font_picker::font_family_field(
+                                    ui::font_picker::FontTarget::Terminal,
                                 ),
                             )
                             .description("Font used by the terminal view."),
@@ -1523,16 +1543,16 @@ pub fn settings_view(cx: &App) -> Settings {
                                     "Enable Windows Context Menu"
                                 },
                                 SettingField::switch(
-                                    |_| nmt_platform::is_shell_integration_registered(),
+                                    |_| is_shell_integration_registered(),
                                     |value, _| {
                                         let result = if value {
-                                            nmt_platform::register_shell_integration()
+                                            register_shell_integration()
                                         } else {
-                                            nmt_platform::unregister_shell_integration()
+                                            unregister_shell_integration()
                                         };
 
                                         if let Err(err) = result {
-                                            tracing::warn!(
+                                            warn!(
                                                 "failed to toggle Windows context menu: {err:#}"
                                             );
                                         }
@@ -1549,12 +1569,12 @@ pub fn settings_view(cx: &App) -> Settings {
                             SettingItem::new(
                                 "Enable System Notification",
                                 SettingField::switch(
-                                    |_| nmt_platform::system_notification_enabled(),
+                                    |_| system_notification_enabled(),
                                     |value, _| {
                                         if let Err(err) =
-                                            nmt_platform::set_system_notification_enabled(value)
+                                            set_system_notification_enabled(value)
                                         {
-                                            tracing::warn!(
+                                            warn!(
                                                 "failed to toggle system notifications: {err:#}"
                                             );
                                         }
@@ -1575,7 +1595,7 @@ pub fn settings_view(cx: &App) -> Settings {
                                 |value, cx| {
                                     cx.global_mut::<AppSettings>().prioritize_ui_threads = value;
 
-                                    cx.global::<crate::PlatformHandle>()
+                                    cx.global::<PlatformHandle>()
                                         .0
                                         .set_ui_thread_priority(value);
                                 },
@@ -1884,11 +1904,11 @@ mod tests {
         assert!((surface + (1.0 - surface) * image - 0.65).abs() < 1e-12);
         assert_eq!(
             window_background_appearance_for(true),
-            gpui::WindowBackgroundAppearance::Blurred
+            WindowBackgroundAppearance::Blurred
         );
         assert_eq!(
             window_background_appearance_for(false),
-            gpui::WindowBackgroundAppearance::Opaque
+            WindowBackgroundAppearance::Opaque
         );
     }
 

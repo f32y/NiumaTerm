@@ -1,9 +1,10 @@
 use std::{fs, io};
 
+use tracing_appender::non_blocking;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{EnvFilter, fmt};
+use tracing_subscriber::{EnvFilter, fmt, registry};
 
 use crate::utils::get_data_dir;
 
@@ -50,7 +51,7 @@ pub fn init_logging() -> io::Result<WorkerGuard> {
         .append(true)
         .open(log_file)?;
 
-    let (non_blocking, guard) = tracing_appender::non_blocking(file);
+    let (non_blocking, guard) = non_blocking(file);
 
     let file_layer = fmt::layer()
         .with_writer(non_blocking)
@@ -61,10 +62,7 @@ pub fn init_logging() -> io::Result<WorkerGuard> {
 
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
-    tracing_subscriber::registry()
-        .with(filter)
-        .with(file_layer)
-        .init();
+    registry().with(filter).with(file_layer).init();
 
     Ok(guard)
 }

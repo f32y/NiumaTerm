@@ -1,7 +1,8 @@
 use std::borrow::Cow;
 use std::collections::VecDeque;
-use std::fmt::{Debug, Formatter};
-use std::sync::Arc;
+use std::fmt::{self, Debug, Formatter};
+use std::sync::{self, Arc};
+use std::{option, path, time};
 
 use nmt_config::colors::ColorRgb;
 use nmt_platform::{Waker, WinsizeBuilder};
@@ -9,6 +10,7 @@ use nmt_platform::{Waker, WinsizeBuilder};
 use crate::ansi::graphics::UpdateQueues;
 use crate::clipboard::ClipboardType;
 use crate::error::TerminalError;
+use crate::ghostty;
 use crate::terminal::Match;
 use crate::terminal::pos::{Direction, Pos};
 
@@ -47,7 +49,7 @@ pub enum BlockEvent {
     /// so layout never takes the engine lock.
     EngineBlock {
         seq: u64,
-        handle: crate::ghostty::BlockHandle,
+        handle: ghostty::BlockHandle,
         rows: usize,
     },
     /// The engine's current live block list, oldest first, with per-block
@@ -55,7 +57,7 @@ pub enum BlockEvent {
     /// re-wraps rows) and after each finish (budget eviction may have
     /// dropped oldest blocks). The store prunes items whose handle is gone
     /// and refreshes cached rows/generation for the rest.
-    EngineBlocksSync(Vec<(crate::ghostty::BlockHandle, usize)>),
+    EngineBlocksSync(Vec<(ghostty::BlockHandle, usize)>),
 }
 
 /// A completed integrated-shell command, captured from the OSC 133 lifecycle by the PTY
@@ -71,9 +73,9 @@ pub struct CommandCapture {
     pub seq: u64,
     pub command: String,
     pub exit_code: Option<i32>,
-    pub cwd: Option<std::path::PathBuf>,
-    pub started_at: std::time::SystemTime,
-    pub ended_at: std::time::SystemTime,
+    pub cwd: Option<path::PathBuf>,
+    pub started_at: time::SystemTime,
+    pub ended_at: time::SystemTime,
 }
 
 /// An integrated-shell command that just began executing (trusted `;C` with a non-empty
@@ -84,8 +86,8 @@ pub struct CommandStart {
     /// See [`CommandCapture::seq`].
     pub seq: u64,
     pub command: String,
-    pub cwd: Option<std::path::PathBuf>,
-    pub started_at: std::time::SystemTime,
+    pub cwd: Option<path::PathBuf>,
+    pub started_at: time::SystemTime,
 }
 
 #[derive(Debug, Clone)]
@@ -110,12 +112,12 @@ pub enum Msg {
 /// `std::sync::mpsc` channel is paired with the loop's `Waker`.
 #[derive(Clone)]
 pub struct MsgSender {
-    tx: std::sync::mpsc::Sender<Msg>,
+    tx: sync::mpsc::Sender<Msg>,
     waker: Option<Arc<Waker>>,
 }
 
 impl MsgSender {
-    pub fn new(tx: std::sync::mpsc::Sender<Msg>, waker: Arc<Waker>) -> Self {
+    pub fn new(tx: sync::mpsc::Sender<Msg>, waker: Arc<Waker>) -> Self {
         Self {
             tx,
             waker: Some(waker),
@@ -125,11 +127,11 @@ impl MsgSender {
     /// A sender with no live loop behind it (dead/placeholder context). Sends fail
     /// silently (the receiver is already dropped) and never wake anything.
     pub fn disconnected() -> Self {
-        let (tx, _rx) = std::sync::mpsc::channel();
+        let (tx, _rx) = sync::mpsc::channel();
         Self { tx, waker: None }
     }
 
-    pub fn send(&self, msg: Msg) -> Result<(), std::sync::mpsc::SendError<Msg>> {
+    pub fn send(&self, msg: Msg) -> Result<(), sync::mpsc::SendError<Msg>> {
         self.tx.send(msg)?;
 
         // Wake the loop so it drains the receiver. A failed wake means the loop is gone.
@@ -347,7 +349,7 @@ pub enum TerminalEvent {
 }
 
 impl Debug for TerminalEvent {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             TerminalEvent::ClipboardStore(ty, text) => {
                 write!(f, "ClipboardStore({ty:?}, {text})")
@@ -479,7 +481,7 @@ impl From<TerminalEvent> for TerminalEventType {
 }
 
 impl EventListener for VoidListener {
-    fn event(&self) -> (std::option::Option<TerminalEvent>, bool) {
+    fn event(&self) -> (option::Option<TerminalEvent>, bool) {
         (None, false)
     }
 }

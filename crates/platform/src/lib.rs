@@ -1,9 +1,11 @@
-extern crate libc;
-
 /// The `mio` types this crate's `ProcessReadWrite`/`EventedPty` surface is built
 /// on, re-exported so consumers drive the PTY event loop through
 /// `nmt_platform::{Poll, ...}` without taking their own (possibly mismatched)
 /// `mio` dependency.
+use std::path;
+use std::{sync, thread};
+
+use libc::c_ushort;
 pub use mio::{Events, Interest, Poll, Token, Waker};
 
 #[cfg(not(windows))]
@@ -28,14 +30,14 @@ pub const APP_ID: &str = "NiumaTerm";
 /// (`KILL_ON_JOB_CLOSE`), so closing a tab kills the shell's entire process
 /// tree. Read at spawn time — only affects PTYs created afterwards. No-op on
 /// non-Windows platforms.
-static JOB_MANAGEMENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static JOB_MANAGEMENT: sync::atomic::AtomicBool = sync::atomic::AtomicBool::new(false);
 
 pub fn set_job_management(enabled: bool) {
-    JOB_MANAGEMENT.store(enabled, std::sync::atomic::Ordering::Relaxed);
+    JOB_MANAGEMENT.store(enabled, sync::atomic::Ordering::Relaxed);
 }
 
 pub fn job_management_enabled() -> bool {
-    JOB_MANAGEMENT.load(std::sync::atomic::Ordering::Relaxed)
+    JOB_MANAGEMENT.load(sync::atomic::Ordering::Relaxed)
 }
 
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -45,19 +47,19 @@ pub(crate) fn job_management() -> bool {
 
 #[repr(C)]
 pub struct Winsize {
-    ws_row: libc::c_ushort,
-    ws_col: libc::c_ushort,
-    ws_xpixel: libc::c_ushort,
-    ws_ypixel: libc::c_ushort,
+    ws_row: c_ushort,
+    ws_col: c_ushort,
+    ws_xpixel: c_ushort,
+    ws_ypixel: c_ushort,
 }
 
 pub trait ProcessReadWrite {
     type Reader: io::Read;
     type Writer: io::Write;
     fn reader(&mut self) -> &mut Self::Reader;
-    fn read_token(&self) -> mio::Token;
+    fn read_token(&self) -> Token;
     fn writer(&mut self) -> &mut Self::Writer;
-    fn write_token(&self) -> mio::Token;
+    fn write_token(&self) -> Token;
     fn set_winsize(&mut self, _: WinsizeBuilder) -> Result<(), io::Error>;
 
     /// Register the PTY's sources with the event loop's `Poll`, pulling tokens from
@@ -66,19 +68,19 @@ pub trait ProcessReadWrite {
     /// this waker. The Unix path registers real fds and ignores the waker.
     fn register(
         &mut self,
-        _: &mio::Poll,
-        _: &mut dyn Iterator<Item = mio::Token>,
-        _: mio::Interest,
-        _: &std::sync::Arc<mio::Waker>,
+        _: &Poll,
+        _: &mut dyn Iterator<Item = Token>,
+        _: Interest,
+        _: &sync::Arc<Waker>,
     ) -> io::Result<()>;
-    fn reregister(&mut self, _: &mio::Poll, _: mio::Interest) -> io::Result<()>;
-    fn deregister(&mut self, _: &mio::Poll) -> io::Result<()>;
+    fn reregister(&mut self, _: &Poll, _: Interest) -> io::Result<()>;
+    fn deregister(&mut self, _: &Poll) -> io::Result<()>;
 
     /// Tokens whose soft-ready flag is currently set (Windows ConPTY worker-thread
     /// readiness). The Unix path has real OS readiness and returns an empty iterator.
     /// The event loop feeds these through the same `match token` arms it uses for
     /// real `Poll` events.
-    fn drain_ready(&self) -> Vec<mio::Token>;
+    fn drain_ready(&self) -> Vec<Token>;
 
     /// Whether any soft-ready flag is currently set (Windows ConPTY level readiness),
     /// without allocating or clearing it. The event loop checks this before blocking
@@ -97,7 +99,7 @@ pub enum ChildEvent {
 }
 
 pub trait EventedPty: ProcessReadWrite {
-    fn child_event_token(&self) -> mio::Token;
+    fn child_event_token(&self) -> Token;
 
     /// Tries to retrieve an event.
     ///
@@ -115,10 +117,10 @@ pub struct WinsizeBuilder {
 
 impl WinsizeBuilder {
     fn build(&self) -> Winsize {
-        let ws_row = self.rows as libc::c_ushort;
-        let ws_col = self.cols as libc::c_ushort;
-        let ws_xpixel = self.width as libc::c_ushort;
-        let ws_ypixel = self.height as libc::c_ushort;
+        let ws_row = self.rows as c_ushort;
+        let ws_col = self.cols as c_ushort;
+        let ws_xpixel = self.width as c_ushort;
+        let ws_ypixel = self.height as c_ushort;
 
         Winsize {
             ws_row,
@@ -149,7 +151,7 @@ pub fn send_notification(title: &str, body: &str) {
 
     let body = body.to_string();
 
-    std::thread::spawn(move || {
+    thread::spawn(move || {
         let _ = platform::show(&NativeNotification {
             title,
             body,
@@ -177,7 +179,7 @@ pub fn remove_notification(tag: &str, group: &str) -> Result<(), String> {
     platform::remove(tag, group)
 }
 
-pub fn register_application_identity(exe_path: &std::path::Path) -> Result<(), String> {
+pub fn register_application_identity(exe_path: &path::Path) -> Result<(), String> {
     platform::register_identity(exe_path)
 }
 

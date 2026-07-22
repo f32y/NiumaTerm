@@ -1,4 +1,6 @@
 use nmt_config::hints::*;
+use onig::Regex as OnigRegex;
+use toml::{from_str, to_string};
 
 #[test]
 fn test_hints_default() {
@@ -27,15 +29,15 @@ fn test_hint_serialization() {
         binding: None,
     };
 
-    let serialized = toml::to_string(&hint).unwrap();
-    let deserialized: Hint = toml::from_str(&serialized).unwrap();
+    let serialized = to_string(&hint).unwrap();
+    let deserialized: Hint = from_str(&serialized).unwrap();
     assert_eq!(hint, deserialized);
 }
 
 /// Given input text, return every leftmost non-overlapping match produced
 /// by `DEFAULT_URL_REGEX`. Used to verify the path branches.
 fn find_all(input: &str) -> Vec<&str> {
-    let re = onig::Regex::new(DEFAULT_URL_REGEX).unwrap();
+    let re = OnigRegex::new(DEFAULT_URL_REGEX).unwrap();
     re.find_iter(input).map(|(s, e)| &input[s..e]).collect()
 }
 
@@ -139,7 +141,7 @@ key = "T"
 mods = ["Control"]
 "#;
 
-    let config: Config = toml::from_str(config_toml).unwrap();
+    let config: Config = from_str(config_toml).unwrap();
     assert_eq!(config.hints.alphabet, "abcdef");
     assert_eq!(config.hints.rules.len(), 1);
 

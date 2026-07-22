@@ -1,3 +1,5 @@
+use std::slice;
+
 use gpui::{App, TextStyle, Window, px};
 
 use crate::ui::AppSettings;
@@ -54,7 +56,7 @@ pub(crate) fn measure_cell(window: &mut Window, cx: &App) -> CellMetrics {
     let shaped =
         window
             .text_system()
-            .shape_line("0".into(), font_size, std::slice::from_ref(&run), None);
+            .shape_line("0".into(), font_size, slice::from_ref(&run), None);
 
     CellMetrics {
         width_px: shaped.width().as_f32().max(1.0),

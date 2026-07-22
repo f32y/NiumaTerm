@@ -1,7 +1,11 @@
+use std::{collections, path, thread, time};
+
+use dirs::home_dir;
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, Axis, Context, Entity, FocusHandle, Focusable, MouseDownEvent, ObjectFit,
-    PathPromptOptions, Pixels, Render, SharedString, Window, WindowId, actions, div, img, px,
+    PathPromptOptions, Pixels, Render, SharedString, Task, Window, WindowBounds, WindowId, actions,
+    div, img, px,
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::dialog::{DialogAction, DialogButtonProps, DialogClose, DialogFooter};
@@ -14,22 +18,30 @@ use nmt_agent_utils::{
     AgentEvent, AgentMonitor, AgentNotification, AgentRoute, agent_process, exact_window_is_active,
     request_native_delivery,
 };
+use nmt_config::get;
+use nmt_config::local_state::WindowState;
 use nmt_config::system::WarnBeforeTerminatingShell;
+use nmt_platform::{
+    NativeNotification, remove_notification, show_notification, system_notification_enabled,
+};
+use tracing::warn;
+use windows_sys::Win32::Foundation::HWND;
 
 use crate::cli::CliAction;
 use crate::pane_tree::{PaneId, PaneNode, PaneTree, RemoveOutcome, SplitDirection, SplitOutcome};
 use crate::tabs::{TabId, TabManager};
 use crate::terminal::session::HostEvent;
 use crate::terminal::view::{AgentInterrupted, TerminalPane};
+use crate::ui;
 use crate::ui::codex_usage::CodexUsageView;
 use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::git_status::{GitStatusModel, GitStatusView};
 use crate::ui::settings::{AppSettings, settings_view};
 use crate::ui::tab_bar::TabStrip;
 use crate::ui::token_usage::TokenUsageView;
-use crate::ui::workspace_sidebar::Sidebar;
+use crate::ui::workspace_sidebar::{self, Sidebar};
 use crate::window::{AppWindow, LastActiveWindow, ShellEntry, ShellRegistry, WindowRegistry};
-use crate::workspace::{DEFAULT_WORKSPACE_NAME, WorkspaceId, WorkspaceManager, best_match};
+use crate::workspace::{self, DEFAULT_WORKSPACE_NAME, WorkspaceId, WorkspaceManager, best_match};
 
 /// A workspace cwd as a shell working directory: `None` for empty or the
 /// legacy `"."` placeholder (shells then start in their default directory).
@@ -100,7 +112,7 @@ pub(crate) struct Shell {
     /// re-renders the shell, which draws the dialog layer). Set on first render.
     root_observed: bool,
     /// Theme directory watcher, alive only while this shell's settings dialog is open.
-    theme_watcher: Option<gpui::Task<()>>,
+    theme_watcher: Option<Task<()>>,
     focus: FocusHandle,
     /// This shell's window in the `WindowRegistry`; all state writes target
     /// this entry.
@@ -150,12 +162,12 @@ impl Shell {
             let bounds = window_bounds.get_bounds();
 
             if let Some(entry) = cx.global_mut::<WindowRegistry>().get_mut(id) {
-                entry.bounds = Some(nmt_config::local_state::WindowState {
+                entry.bounds = Some(WindowState {
                     x: bounds.origin.x.as_f32(),
                     y: bounds.origin.y.as_f32(),
                     width: bounds.size.width.as_f32(),
                     height: bounds.size.height.as_f32(),
-                    maximized: matches!(window_bounds, gpui::WindowBounds::Maximized(_)),
+                    maximized: matches!(window_bounds, WindowBounds::Maximized(_)),
                 });
             }
         })
@@ -204,13 +216,8 @@ impl Shell {
 
         let sidebar_width = registry_entry
             .and_then(|entry| entry.sidebar_width)
-            .map(|width| {
-                width.clamp(
-                    super::workspace_sidebar::MIN_WIDTH,
-                    super::workspace_sidebar::MAX_WIDTH,
-                )
-            })
-            .unwrap_or(super::workspace_sidebar::SIDEBAR_WIDTH);
+            .map(|width| width.clamp(workspace_sidebar::MIN_WIDTH, workspace_sidebar::MAX_WIDTH))
+            .unwrap_or(workspace_sidebar::SIDEBAR_WIDTH);
 
         let mut restore_next_id = 1;
 
@@ -229,7 +236,7 @@ impl Shell {
             (workspaces, next_id)
         };
 
-        let now = std::time::Instant::now();
+        let now = time::Instant::now();
 
         let mut agent_monitor = AgentMonitor::new(agent_process().process_instance());
 
@@ -282,7 +289,7 @@ impl Shell {
             .read(cx)
             .tab_state()
             .cwd
-            .or_else(|| nmt_config::get().working_dir.clone());
+            .or_else(|| get().working_dir.clone());
 
         self.git_model
             .update(cx, |model, cx| model.set_target_cwd(cwd, cx));
@@ -320,10 +327,8 @@ impl Shell {
     }
 
     fn register_agent_pane(&mut self, pane: &Entity<TerminalPane>, cx: &App) {
-        self.agent_monitor.register_route(
-            pane.read(cx).agent_route().clone(),
-            std::time::Instant::now(),
-        );
+        self.agent_monitor
+            .register_route(pane.read(cx).agent_route().clone(), time::Instant::now());
     }
 
     fn remove_agent_route(&mut self, route: &AgentRoute, cx: &mut Context<Self>) {
@@ -343,8 +348,8 @@ impl Shell {
             let tag = notification.native_tag.clone();
             let group = notification.native_group.clone();
 
-            std::thread::spawn(move || {
-                let _ = nmt_platform::remove_notification(&tag, &group);
+            thread::spawn(move || {
+                let _ = remove_notification(&tag, &group);
             });
         }
     }
@@ -361,7 +366,7 @@ impl Shell {
             return false;
         };
 
-        let hwnd = handle.hwnd.get() as windows_sys::Win32::Foundation::HWND;
+        let hwnd = handle.hwnd.get() as HWND;
         let foreground = unsafe { GetForegroundWindow() };
         let gpui_active = window.is_window_active();
         let foreground_matches = foreground == hwnd;
@@ -388,7 +393,7 @@ impl Shell {
     }
 
     fn process_native_notifications(&mut self, cx: &mut Context<Self>) {
-        let system_notifications_enabled = nmt_platform::system_notification_enabled();
+        let system_notifications_enabled = system_notification_enabled();
 
         let visible_route = self
             .window_active
@@ -396,7 +401,7 @@ impl Shell {
 
         for notification in self
             .agent_monitor
-            .pending_native_notifications(std::time::Instant::now())
+            .pending_native_notifications(time::Instant::now())
         {
             if !request_native_delivery(visible_route.as_ref(), &notification.route) {
                 self.acknowledge_notification(&notification.route, &notification.id, cx);
@@ -421,8 +426,8 @@ impl Shell {
             }
             .to_url();
 
-            std::thread::spawn(move || {
-                match nmt_platform::show_notification(&nmt_platform::NativeNotification {
+            thread::spawn(move || {
+                match show_notification(&NativeNotification {
                     title: notification.title,
                     body: notification.body,
                     activation_url,
@@ -430,7 +435,7 @@ impl Shell {
                     group: notification.native_group,
                 }) {
                     Ok(()) => {}
-                    Err(error) => tracing::warn!("native notification failed: {error}"),
+                    Err(error) => warn!("native notification failed: {error}"),
                 }
             });
         }
@@ -526,7 +531,7 @@ impl Shell {
             return false;
         }
 
-        let mutation = self.agent_monitor.apply(event, std::time::Instant::now());
+        let mutation = self.agent_monitor.apply(event, time::Instant::now());
 
         Self::remove_native_notifications(&mutation.removed_notifications);
 
@@ -550,7 +555,7 @@ impl Shell {
             return;
         };
 
-        let delay = deadline.saturating_duration_since(std::time::Instant::now());
+        let delay = deadline.saturating_duration_since(time::Instant::now());
 
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(delay).await;
@@ -560,7 +565,7 @@ impl Shell {
                     return;
                 }
 
-                let mutation = this.agent_monitor.process_due(std::time::Instant::now());
+                let mutation = this.agent_monitor.process_due(time::Instant::now());
 
                 Self::remove_native_notifications(&mutation.removed_notifications);
 
@@ -587,7 +592,7 @@ impl Shell {
         AppWindow::open(
             cx,
             AppWindow {
-                bounds: Some(nmt_config::local_state::WindowState {
+                bounds: Some(WindowState {
                     x: bounds.origin.x.as_f32() + 30.0,
                     y: bounds.origin.y.as_f32() + 30.0,
                     width: bounds.size.width.as_f32(),
@@ -655,7 +660,7 @@ impl Shell {
         self.acknowledge_notification(&route, &id, cx);
     }
 
-    fn projected_workspace_summaries(&self, cx: &App) -> Vec<crate::workspace::WorkspaceSummary> {
+    fn projected_workspace_summaries(&self, cx: &App) -> Vec<workspace::WorkspaceSummary> {
         let mut summaries = self.workspaces.summaries();
         for summary in &mut summaries {
             let routes: Vec<_> = self
@@ -676,7 +681,7 @@ impl Shell {
         summaries
     }
 
-    fn unread_tabs(&self, cx: &App) -> std::collections::HashSet<TabId> {
+    fn unread_tabs(&self, cx: &App) -> collections::HashSet<TabId> {
         self.workspaces
             .active_tabs()
             .tabs()
@@ -703,9 +708,7 @@ impl Shell {
         cx.subscribe(pane, |this, pane, _: &AgentInterrupted, cx| {
             let route = pane.read(cx).agent_route().clone();
 
-            let mutation = this
-                .agent_monitor
-                .interrupt(&route, std::time::Instant::now());
+            let mutation = this.agent_monitor.interrupt(&route, time::Instant::now());
 
             Self::remove_native_notifications(&mutation.removed_notifications);
 
@@ -859,7 +862,7 @@ impl Shell {
     /// nothing matches, preserving the user's target.
     pub(crate) fn open_dir_tab(
         &mut self,
-        path: &std::path::Path,
+        path: &path::Path,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1387,7 +1390,7 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let home = dirs::home_dir()
+        let home = home_dir()
             .map(|home| home.display().to_string())
             .unwrap_or_default();
 
@@ -1976,7 +1979,7 @@ impl Shell {
     /// closes the dialog — mask clicks and Escape are disabled so a stray click
     /// can't dismiss it.
     fn on_show_settings(&mut self, _: &ShowSettings, window: &mut Window, cx: &mut Context<Self>) {
-        self.theme_watcher = crate::ui::watch_themes(cx);
+        self.theme_watcher = ui::watch_themes(cx);
 
         // Sized as a fraction of the window, so a large window gets a
         // proportionally large dialog.
@@ -2099,12 +2102,12 @@ impl Render for Shell {
             .background_image
             .clone()
             .map(|path| {
-                img(std::path::PathBuf::from(path))
+                img(path::PathBuf::from(path))
                     .absolute()
                     .inset_0()
                     .size_full()
                     .object_fit(ObjectFit::Cover)
-                    .opacity(crate::ui::background_image_layer_opacity(cx))
+                    .opacity(ui::background_image_layer_opacity(cx))
             });
 
         div()

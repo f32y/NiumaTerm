@@ -1,4 +1,4 @@
-use crate::{CursorShape, Shell};
+use crate::{CursorShape, Shell, layout};
 
 #[inline]
 pub fn default_bool_true() -> bool {
@@ -30,15 +30,15 @@ pub fn default_title_content() -> String {
 }
 
 #[inline]
-pub fn default_margin() -> crate::layout::Margin {
-    crate::layout::Margin::all(2.0)
+pub fn default_margin() -> layout::Margin {
+    layout::Margin::all(2.0)
 }
 
 #[inline]
-pub fn default_shell() -> crate::Shell {
+pub fn default_shell() -> Shell {
     #[cfg(not(target_os = "windows"))]
     {
-        crate::Shell {
+        Shell {
             program: String::from(""),
             args: vec![String::from("--login")],
         }
@@ -46,7 +46,7 @@ pub fn default_shell() -> crate::Shell {
 
     #[cfg(target_os = "windows")]
     {
-        crate::Shell {
+        Shell {
             program: String::from("powershell"),
             args: vec![],
         }

@@ -1,6 +1,11 @@
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+#[cfg(unix)]
+use std::ptr;
+use std::time::{self, Duration, Instant};
+use std::{fs, io, iter, mem, slice, str};
 
+#[cfg(unix)]
+use libc;
 use smallvec::SmallVec;
 use tracing::debug;
 
@@ -360,7 +365,7 @@ pub fn parse(params: &[&[u8]], state: &mut KittyGraphicsState) -> Option<KittyGr
             "  param[{}] length={}, preview={:?}",
             i,
             param.len(),
-            std::str::from_utf8(&param[..param.len().min(50)]).unwrap_or("(invalid utf8)")
+            str::from_utf8(&param[..param.len().min(50)]).unwrap_or("(invalid utf8)")
         );
     }
 
@@ -369,7 +374,7 @@ pub fn parse(params: &[&[u8]], state: &mut KittyGraphicsState) -> Option<KittyGr
     // Parse control data if present
     if let Some(control) = params.get(1) {
         if !control.is_empty() {
-            let control_data = std::str::from_utf8(control).ok()?;
+            let control_data = str::from_utf8(control).ok()?;
             parse_control_data(&mut cmd, control_data);
         }
     }
@@ -1005,8 +1010,7 @@ fn create_graphic_data(cmd: &KittyGraphicsCommand) -> Result<GraphicData, Graphi
             // Payload is already base64-decoded by parse(); the bytes
             // directly represent the file path.
             debug!("File path payload: {} bytes", cmd.payload.len());
-            let path_str =
-                std::str::from_utf8(&cmd.payload).map_err(|_| GraphicError::InvalidData)?;
+            let path_str = str::from_utf8(&cmd.payload).map_err(|_| GraphicError::InvalidData)?;
             debug!("File path: {}", path_str);
             let path = Path::new(path_str);
 
@@ -1044,7 +1048,7 @@ fn create_graphic_data(cmd: &KittyGraphicsCommand) -> Result<GraphicData, Graphi
                 // Read specific size from offset
                 if cmd.offset > 0 {
                     use std::io::Seek;
-                    file.seek(std::io::SeekFrom::Start(cmd.offset as u64))
+                    file.seek(io::SeekFrom::Start(cmd.offset as u64))
                         .map_err(|_| GraphicError::InvalidData)?;
                 }
                 data.resize(cmd.size as usize, 0);
@@ -1064,7 +1068,7 @@ fn create_graphic_data(cmd: &KittyGraphicsCommand) -> Result<GraphicData, Graphi
 
             // Delete temp file if requested
             if cmd.medium == TransmissionMedium::TempFile {
-                let _ = std::fs::remove_file(path);
+                let _ = fs::remove_file(path);
             }
 
             data
@@ -1079,7 +1083,7 @@ fn create_graphic_data(cmd: &KittyGraphicsCommand) -> Result<GraphicData, Graphi
                 // directly represent the shared memory name.
                 debug!("Shared memory name payload: {} bytes", cmd.payload.len());
                 let shm_name_str =
-                    std::str::from_utf8(&cmd.payload).map_err(|_| GraphicError::InvalidData)?;
+                    str::from_utf8(&cmd.payload).map_err(|_| GraphicError::InvalidData)?;
                 let shm_name = CString::new(shm_name_str).map_err(|_| GraphicError::InvalidData)?;
 
                 debug!(
@@ -1093,7 +1097,7 @@ fn create_graphic_data(cmd: &KittyGraphicsCommand) -> Result<GraphicData, Graphi
                     let fd: RawFd = libc::shm_open(shm_name.as_ptr(), libc::O_RDONLY, 0);
 
                     if fd < 0 {
-                        let err = std::io::Error::last_os_error();
+                        let err = io::Error::last_os_error();
                         let errno = err.raw_os_error().unwrap_or(-1);
                         debug!(
                             "Failed to open shared memory '{}': {} (errno: {})",
@@ -1103,7 +1107,7 @@ fn create_graphic_data(cmd: &KittyGraphicsCommand) -> Result<GraphicData, Graphi
                     }
 
                     // Get size of shared memory
-                    let mut stat: libc::stat = std::mem::zeroed();
+                    let mut stat: libc::stat = mem::zeroed();
                     if libc::fstat(fd, &mut stat) < 0 {
                         libc::close(fd);
                         libc::shm_unlink(shm_name.as_ptr());
@@ -1139,7 +1143,7 @@ fn create_graphic_data(cmd: &KittyGraphicsCommand) -> Result<GraphicData, Graphi
 
                     // Map shared memory
                     let ptr = libc::mmap(
-                        std::ptr::null_mut(),
+                        ptr::null_mut(),
                         data_size,
                         libc::PROT_READ,
                         libc::MAP_SHARED,
@@ -1154,7 +1158,7 @@ fn create_graphic_data(cmd: &KittyGraphicsCommand) -> Result<GraphicData, Graphi
                     }
 
                     // Copy data from shared memory
-                    let data = std::slice::from_raw_parts(ptr as *const u8, data_size).to_vec();
+                    let data = slice::from_raw_parts(ptr as *const u8, data_size).to_vec();
 
                     // Cleanup
                     libc::munmap(ptr, data_size);
@@ -1180,7 +1184,7 @@ fn create_graphic_data(cmd: &KittyGraphicsCommand) -> Result<GraphicData, Graphi
                 // directly represent the shared memory name.
                 debug!("Shared memory name payload: {} bytes", cmd.payload.len());
                 let shm_name_str =
-                    std::str::from_utf8(&cmd.payload).map_err(|_| GraphicError::InvalidData)?;
+                    str::from_utf8(&cmd.payload).map_err(|_| GraphicError::InvalidData)?;
 
                 debug!("Opening shared memory: {}", shm_name_str);
 
@@ -1188,14 +1192,14 @@ fn create_graphic_data(cmd: &KittyGraphicsCommand) -> Result<GraphicData, Graphi
                     // Convert to wide string for Windows API
                     let wide_name: Vec<u16> = OsStr::new(shm_name_str)
                         .encode_wide()
-                        .chain(std::iter::once(0))
+                        .chain(iter::once(0))
                         .collect();
 
                     // Open the file mapping
                     let handle = OpenFileMappingW(FILE_MAP_READ, 0, wide_name.as_ptr());
 
                     if handle.is_null() {
-                        let err = std::io::Error::last_os_error();
+                        let err = io::Error::last_os_error();
                         debug!("Failed to open shared memory '{}': {}", shm_name_str, err);
                         return Err(GraphicError::FileNotFound);
                     }
@@ -1204,18 +1208,18 @@ fn create_graphic_data(cmd: &KittyGraphicsCommand) -> Result<GraphicData, Graphi
                     let base_ptr = MapViewOfFile(handle, FILE_MAP_READ, 0, 0, 0);
 
                     if base_ptr.Value.is_null() {
-                        let err = std::io::Error::last_os_error();
+                        let err = io::Error::last_os_error();
                         debug!("Failed to map view of file: {}", err);
                         CloseHandle(handle);
                         return Err(GraphicError::InvalidData);
                     }
 
                     // Query memory to get size
-                    let mut mem_info: MEMORY_BASIC_INFORMATION = std::mem::zeroed();
+                    let mut mem_info: MEMORY_BASIC_INFORMATION = mem::zeroed();
                     if VirtualQuery(
                         base_ptr.Value,
                         &mut mem_info,
-                        std::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
+                        mem::size_of::<MEMORY_BASIC_INFORMATION>(),
                     ) == 0
                     {
                         debug!("Failed to query memory information");
@@ -1253,7 +1257,7 @@ fn create_graphic_data(cmd: &KittyGraphicsCommand) -> Result<GraphicData, Graphi
 
                     // Copy data from shared memory
                     let data_ptr = (base_ptr.Value as *const u8).add(cmd.offset as usize);
-                    let data = std::slice::from_raw_parts(data_ptr, data_size).to_vec();
+                    let data = slice::from_raw_parts(data_ptr, data_size).to_vec();
 
                     // Cleanup
                     UnmapViewOfFile(base_ptr);
@@ -1299,10 +1303,10 @@ fn create_graphic_data(cmd: &KittyGraphicsCommand) -> Result<GraphicData, Graphi
     match cmd.format {
         Format::Png => {
             // Decode PNG data
-            use image_rs::ImageFormat;
+            use image_rs::{ImageFormat, load_from_memory_with_format};
 
             debug!("Decoding PNG, pixel_data length: {}", pixel_data.len());
-            let img = match image_rs::load_from_memory_with_format(&pixel_data, ImageFormat::Png) {
+            let img = match load_from_memory_with_format(&pixel_data, ImageFormat::Png) {
                 Ok(img) => {
                     debug!("PNG decoded successfully: {}x{}", img.width(), img.height());
                     img
@@ -1356,7 +1360,7 @@ fn create_graphic_data(cmd: &KittyGraphicsCommand) -> Result<GraphicData, Graphi
                 resize,
                 display_width: None,
                 display_height: None,
-                transmit_time: std::time::Instant::now(),
+                transmit_time: time::Instant::now(),
             })
         }
         Format::Gray | Format::GrayAlpha | Format::Rgb24 | Format::Rgba32 => {
@@ -1465,7 +1469,7 @@ fn create_graphic_data(cmd: &KittyGraphicsCommand) -> Result<GraphicData, Graphi
                 resize,
                 display_width: None,
                 display_height: None,
-                transmit_time: std::time::Instant::now(),
+                transmit_time: time::Instant::now(),
             })
         }
     }
@@ -1473,6 +1477,8 @@ fn create_graphic_data(cmd: &KittyGraphicsCommand) -> Result<GraphicData, Graphi
 
 #[cfg(test)]
 mod tests {
+    use std::{env, path};
+
     use base64::Engine as _;
     use base64::engine::general_purpose::STANDARD as BASE64;
 
@@ -2184,9 +2190,9 @@ mod tests {
     fn test_file_transmission_medium() {
         // Create a temporary file
         use std::io::Write;
-        let temp_path = std::env::temp_dir().join("test_kitty_image.rgba");
+        let temp_path = env::temp_dir().join("test_kitty_image.rgba");
         let temp_path = temp_path.to_str().unwrap();
-        let mut file = std::fs::File::create(temp_path).unwrap();
+        let mut file = fs::File::create(temp_path).unwrap();
         file.write_all(&[255, 0, 0, 255]).unwrap(); // 1x1 red pixel
         drop(file);
 
@@ -2199,16 +2205,16 @@ mod tests {
         assert!(response.graphic_data.is_some());
 
         // Cleanup
-        let _ = std::fs::remove_file(temp_path);
+        let _ = fs::remove_file(temp_path);
     }
 
     #[test]
     fn test_temp_file_transmission_medium() {
         // Create a temporary file with required naming
         use std::io::Write;
-        let temp_path = std::env::temp_dir().join("tty-graphics-protocol-test.rgba");
+        let temp_path = env::temp_dir().join("tty-graphics-protocol-test.rgba");
         let temp_path = temp_path.to_str().unwrap();
-        let mut file = std::fs::File::create(temp_path).unwrap();
+        let mut file = fs::File::create(temp_path).unwrap();
         file.write_all(&[255, 0, 0, 255]).unwrap(); // 1x1 red pixel
         drop(file);
 
@@ -2217,7 +2223,7 @@ mod tests {
         let result = parse_kitty_graphics_protocol("a=t,t=t,f=32,s=1,v=1,i=1", &encoded_path);
 
         // File should be deleted after reading
-        assert!(!std::path::Path::new(temp_path).exists());
+        assert!(!path::Path::new(temp_path).exists());
 
         assert!(result.is_some());
         let response = result.unwrap();

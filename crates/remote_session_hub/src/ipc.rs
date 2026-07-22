@@ -1,12 +1,13 @@
 use std::collections::HashMap;
-use std::mem::{align_of, size_of};
+use std::mem::{self, align_of, size_of};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
-use std::{fmt, ptr};
+use std::{error, fmt, ptr, str, sync, thread};
 
 use raw_sync::Timeout;
 use raw_sync::events::{Event, EventImpl, EventInit, EventState};
-use shared_memory::{Shmem, ShmemConf};
+use serde_json::{from_slice, to_vec};
+use shared_memory::{Shmem, ShmemConf, ShmemError};
 
 use crate::{RemoteSessionHub, SessionEvent, SessionId, SessionOptions, SessionSubscription};
 
@@ -347,7 +348,7 @@ fn set_event(event: &dyn EventImpl, state: EventState) -> Result<(), IpcError> {
 
 #[derive(Debug)]
 pub enum IpcError {
-    SharedMemory(shared_memory::ShmemError),
+    SharedMemory(ShmemError),
     InvalidCapacity(usize),
     InvalidLayout,
     ProtocolMismatch,
@@ -394,8 +395,8 @@ impl fmt::Display for IpcError {
     }
 }
 
-impl std::error::Error for IpcError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl error::Error for IpcError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self {
             Self::SharedMemory(error) => Some(error),
             _ => None,
@@ -403,8 +404,8 @@ impl std::error::Error for IpcError {
     }
 }
 
-impl From<shared_memory::ShmemError> for IpcError {
-    fn from(error: shared_memory::ShmemError) -> Self {
+impl From<ShmemError> for IpcError {
+    fn from(error: ShmemError) -> Self {
         Self::SharedMemory(error)
     }
 }
@@ -455,8 +456,7 @@ impl HubRequest {
                 put_u64(&mut out, *request_id);
 
                 out.extend_from_slice(
-                    &serde_json::to_vec(options)
-                        .map_err(|error| IpcError::Options(error.to_string()))?,
+                    &to_vec(options).map_err(|error| IpcError::Options(error.to_string()))?,
                 );
             }
             Self::Input { session_id, data } => {
@@ -523,8 +523,8 @@ impl HubRequest {
             1 => {
                 let request_id = take_u64(&mut payload)?;
 
-                let options = serde_json::from_slice(payload)
-                    .map_err(|error| IpcError::Options(error.to_string()))?;
+                let options =
+                    from_slice(payload).map_err(|error| IpcError::Options(error.to_string()))?;
 
                 payload = &[];
 
@@ -535,7 +535,7 @@ impl HubRequest {
             }
             2 => Self::Input {
                 session_id: SessionId(take_u64(&mut payload)?),
-                data: std::mem::take(&mut payload).to_vec(),
+                data: mem::take(&mut payload).to_vec(),
             },
             3 => Self::Resize {
                 session_id: SessionId(take_u64(&mut payload)?),
@@ -695,12 +695,12 @@ impl HubResponse {
                 base_seq: take_u64(&mut payload)?,
                 cols: take_u16(&mut payload)?,
                 rows: take_u16(&mut payload)?,
-                vt: std::mem::take(&mut payload).to_vec(),
+                vt: mem::take(&mut payload).to_vec(),
             },
             0x83 => Self::Output {
                 session_id: SessionId(take_u64(&mut payload)?),
                 seq: take_u64(&mut payload)?,
-                data: std::mem::take(&mut payload).to_vec(),
+                data: mem::take(&mut payload).to_vec(),
             },
             0x84 => Self::Exited {
                 session_id: SessionId(take_u64(&mut payload)?),
@@ -715,7 +715,7 @@ impl HubResponse {
             },
             0xff => Self::Error {
                 request_id: take_u64(&mut payload)?,
-                message: std::str::from_utf8(std::mem::take(&mut payload))
+                message: str::from_utf8(mem::take(&mut payload))
                     .map_err(|_| IpcError::InvalidUtf8)?
                     .to_owned(),
             },
@@ -763,12 +763,12 @@ pub fn run_hub_host(os_id: &str) -> Result<(), IpcError> {
 
     let mut subscriptions = HashMap::<SessionId, SessionSubscription>::new();
 
-    let (request_sender, request_receiver) = std::sync::mpsc::channel();
-    let host_thread = std::thread::current();
+    let (request_sender, request_receiver) = sync::mpsc::channel();
+    let host_thread = thread::current();
     let reader_wake = host_thread.clone();
     let reader_os_id = os_id.to_owned();
 
-    std::thread::Builder::new()
+    thread::Builder::new()
         .name("remote-session-hub-ipc-reader".to_owned())
         .spawn(move || {
             let result = (|| -> Result<(), IpcError> {
@@ -930,7 +930,7 @@ pub fn run_hub_host(os_id: &str) -> Result<(), IpcError> {
         }
 
         if !did_work {
-            std::thread::park();
+            thread::park();
         }
     }
 }
@@ -958,6 +958,8 @@ fn send_response(
 
 #[cfg(test)]
 mod tests {
+    use std::time;
+
     use super::*;
 
     #[test]
@@ -977,13 +979,13 @@ mod tests {
     fn blocking_receive_is_released_by_the_cross_process_event() {
         let mut parent = SharedMemoryEndpoint::create_parent(64).unwrap();
         let os_id = parent.os_id().to_owned();
-        let sender = std::thread::spawn(move || {
+        let sender = thread::spawn(move || {
             let mut child = SharedMemoryEndpoint::open_child(&os_id).unwrap();
-            std::thread::sleep(Duration::from_millis(25));
+            thread::sleep(Duration::from_millis(25));
             child.send(b"wake", Duration::from_secs(1)).unwrap();
         });
 
-        let started = std::time::Instant::now();
+        let started = time::Instant::now();
         assert_eq!(parent.recv_blocking().unwrap(), b"wake");
         assert!(started.elapsed() >= Duration::from_millis(20));
         sender.join().unwrap();

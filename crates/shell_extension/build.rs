@@ -1,6 +1,8 @@
 use std::env;
 use std::path::PathBuf;
 
+use winres::WindowsResource;
+
 fn main() {
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
@@ -13,7 +15,7 @@ fn main() {
     println!("cargo:rerun-if-changed={}", def.display());
     println!("cargo:rustc-link-arg-cdylib=/DEF:{}", def.display());
 
-    winres::WindowsResource::new()
+    WindowsResource::new()
         .set("FileDescription", "NiumaTerm Shell Extension")
         .set("ProductName", "NiumaTerm")
         .set("InternalName", "NiumaTerm Shell Extension")

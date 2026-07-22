@@ -1,9 +1,12 @@
 use std::path::{Path, PathBuf};
+use std::{env, fs, io};
+
+use windows::core::Error as WindowsError;
 
 use crate::{APP_ID, NativeNotification};
 
 fn shortcut_path() -> Result<PathBuf, String> {
-    let app_data = std::env::var_os("APPDATA").ok_or("APPDATA is unavailable")?;
+    let app_data = env::var_os("APPDATA").ok_or("APPDATA is unavailable")?;
     Ok(PathBuf::from(app_data)
         .join("Microsoft")
         .join("Windows")
@@ -67,7 +70,7 @@ pub(crate) fn register_identity(exe_path: &Path) -> Result<(), String> {
     use windows::core::{Error, GUID, HSTRING, Interface};
 
     let shortcut = shortcut_path()?;
-    std::fs::create_dir_all(shortcut.parent().expect("shortcut has parent"))
+    fs::create_dir_all(shortcut.parent().expect("shortcut has parent"))
         .map_err(|error| error.to_string())?;
     let initialized = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
     if initialized.is_err() {
@@ -92,16 +95,16 @@ pub(crate) fn register_identity(exe_path: &Path) -> Result<(), String> {
         let persist: IPersistFile = link.cast()?;
         persist.Save(&HSTRING::from(shortcut.to_string_lossy().as_ref()), true)
     })()
-    .map_err(|error: windows::core::Error| error.to_string());
+    .map_err(|error: WindowsError| error.to_string());
     unsafe { CoUninitialize() };
     result
 }
 
 pub(crate) fn unregister_identity() -> Result<(), String> {
     let shortcut = shortcut_path()?;
-    match std::fs::remove_file(shortcut) {
+    match fs::remove_file(shortcut) {
         Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error.to_string()),
     }
 }
@@ -180,7 +183,7 @@ mod tests {
     #[test]
     #[ignore = "shows a real Windows Toast"]
     fn windows_toast_smoke() {
-        register_identity(&std::env::current_exe().unwrap())
+        register_identity(&env::current_exe().unwrap())
             .expect("smoke executable should register its native identity");
         let notification = NativeNotification {
             title: "NiumaTerm Toast smoke test".into(),
@@ -197,7 +200,7 @@ mod tests {
     #[test]
     #[ignore = "leaves a real Windows Toast in Notification Center"]
     fn windows_toast_visual_smoke() {
-        register_identity(&std::env::current_exe().unwrap())
+        register_identity(&env::current_exe().unwrap())
             .expect("smoke executable should register its native identity");
         show(&NativeNotification {
             title: "NiumaTerm visual smoke test".into(),

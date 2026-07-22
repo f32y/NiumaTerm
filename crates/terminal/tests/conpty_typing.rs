@@ -2,9 +2,11 @@
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
+use std::thread;
 use std::time::Duration;
 
 use nmt_config::colors::Colors;
+use nmt_platform::{WinsizeBuilder, create_pty};
 use nmt_terminal::event::{Msg, VoidListener, WindowId};
 use nmt_terminal::ghostty::GhosttyTerminal;
 use nmt_terminal::pty_pipe::PtyPipe;
@@ -39,7 +41,7 @@ fn typing_past_right_edge_does_not_duplicate() {
     )));
     let vt_modes = Arc::new(AtomicU32::new(0));
 
-    let pty = match nmt_platform::create_pty("powershell.exe", vec![], &None, cols, rows) {
+    let pty = match create_pty("powershell.exe", vec![], &None, cols, rows) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("skipping: could not spawn powershell.exe: {e:?}");
@@ -64,13 +66,13 @@ fn typing_past_right_edge_does_not_duplicate() {
     let _io = machine.spawn();
 
     // Let the prompt settle.
-    std::thread::sleep(Duration::from_millis(2000));
+    thread::sleep(Duration::from_millis(2000));
 
     // Type 120 'x' (well past the 80-col right edge) so the input wraps.
     sender
         .send(Msg::Input(vec![b'x'; 120].into()))
         .expect("send input");
-    std::thread::sleep(Duration::from_millis(2000));
+    thread::sleep(Duration::from_millis(2000));
 
     let text = snapshot_text(&engine);
     let total_x: usize = text.iter().map(|l| l.matches('x').count()).sum();
@@ -92,7 +94,7 @@ fn typing_after_resize_does_not_duplicate() {
     let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(80, 24)));
     let vt_modes = Arc::new(AtomicU32::new(0));
 
-    let pty = match nmt_platform::create_pty("powershell.exe", vec![], &None, 80, 24) {
+    let pty = match create_pty("powershell.exe", vec![], &None, 80, 24) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("skipping: could not spawn powershell.exe: {e:?}");
@@ -116,23 +118,23 @@ fn typing_after_resize_does_not_duplicate() {
     let sender = machine.channel();
     let _io = machine.spawn();
 
-    std::thread::sleep(Duration::from_millis(2000));
+    thread::sleep(Duration::from_millis(2000));
 
     // Resize to a wider window, the way the app does on startup.
     sender
-        .send(Msg::Resize(nmt_platform::WinsizeBuilder {
+        .send(Msg::Resize(WinsizeBuilder {
             rows: 30,
             cols: 100,
             width: 800,
             height: 480,
         }))
         .expect("send resize");
-    std::thread::sleep(Duration::from_millis(1000));
+    thread::sleep(Duration::from_millis(1000));
 
     sender
         .send(Msg::Input(vec![b'x'; 120].into()))
         .expect("send input");
-    std::thread::sleep(Duration::from_millis(2000));
+    thread::sleep(Duration::from_millis(2000));
 
     let text = snapshot_text(&engine);
     let total_x: usize = text.iter().map(|l| l.matches('x').count()).sum();
@@ -154,7 +156,7 @@ fn per_keystroke_typing_does_not_duplicate() {
     let rb = Arc::clone(&render_buffer);
     let vt_modes = Arc::new(AtomicU32::new(0));
 
-    let pty = match nmt_platform::create_pty("powershell.exe", vec![], &None, 80, 24) {
+    let pty = match create_pty("powershell.exe", vec![], &None, 80, 24) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("skipping: could not spawn powershell.exe: {e:?}");
@@ -178,7 +180,7 @@ fn per_keystroke_typing_does_not_duplicate() {
     let sender = machine.channel();
     let _io = machine.spawn();
 
-    std::thread::sleep(Duration::from_millis(2000));
+    thread::sleep(Duration::from_millis(2000));
 
     for _ in 0..120 {
         let scrolled_up = {
@@ -189,9 +191,9 @@ fn per_keystroke_typing_does_not_duplicate() {
             engine.lock().scroll_viewport_bottom();
         }
         sender.send(Msg::Input(vec![b'x'].into())).expect("send x");
-        std::thread::sleep(Duration::from_millis(5));
+        thread::sleep(Duration::from_millis(5));
     }
-    std::thread::sleep(Duration::from_millis(2000));
+    thread::sleep(Duration::from_millis(2000));
 
     // Check both the engine snapshot and the render buffer (what the app reads).
     let engine_text = snapshot_text(&engine);
@@ -226,7 +228,7 @@ fn resize_then_fast_per_keystroke_does_not_duplicate() {
     let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(80, 24)));
     let vt_modes = Arc::new(AtomicU32::new(0));
 
-    let pty = match nmt_platform::create_pty("powershell.exe", vec![], &None, 80, 24) {
+    let pty = match create_pty("powershell.exe", vec![], &None, 80, 24) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("skipping: could not spawn powershell.exe: {e:?}");
@@ -250,24 +252,24 @@ fn resize_then_fast_per_keystroke_does_not_duplicate() {
     let sender = machine.channel();
     let _io = machine.spawn();
 
-    std::thread::sleep(Duration::from_millis(2000));
+    thread::sleep(Duration::from_millis(2000));
 
     // Resize to the live app's observed size (111x42), the way startup does.
     sender
-        .send(Msg::Resize(nmt_platform::WinsizeBuilder {
+        .send(Msg::Resize(WinsizeBuilder {
             rows: 42,
             cols: 111,
             width: 111 * 12,
             height: 42 * 24,
         }))
         .expect("resize");
-    std::thread::sleep(Duration::from_millis(800));
+    thread::sleep(Duration::from_millis(800));
 
     // Fast individual keystrokes (no sleep), like SendKeys.
     for _ in 0..120 {
         sender.send(Msg::Input(vec![b'x'].into())).expect("x");
     }
-    std::thread::sleep(Duration::from_millis(2500));
+    thread::sleep(Duration::from_millis(2500));
 
     let text = snapshot_text(&engine);
     let total_x: usize = text.iter().map(|l| l.matches('x').count()).sum();

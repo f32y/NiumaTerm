@@ -2,10 +2,15 @@
 //!
 //! The Windows mutex and Named Pipe implementation live in `nmt_platform`.
 
-use futures::channel::mpsc::UnboundedSender;
-use nmt_agent_utils::{AgentEvent, AgentEventEnvelope, agent_process};
-use nmt_platform::windows::ipc::MAX_MESSAGE_BYTES;
+use std::str;
 
+use futures::channel::mpsc::UnboundedSender;
+use nmt_agent_utils::{AgentEvent, AgentEventEnvelope, RawAgentHookEnvelope, agent_process};
+use nmt_platform::windows::ipc::{MAX_MESSAGE_BYTES, spawn_server};
+use serde_json::{Value, from_str, from_value};
+use tracing::warn;
+
+use crate::cli;
 use crate::cli::CliAction;
 
 pub(crate) enum IpcAction {
@@ -17,10 +22,10 @@ pub(crate) enum IpcAction {
 /// a time, read its line(s), parse, and send each action into `tx`. Runs for
 /// the process lifetime.
 pub(crate) fn spawn_pipe_server(tx: UnboundedSender<IpcAction>, testing: bool) {
-    nmt_platform::windows::ipc::spawn_server(testing, move |bytes| {
+    spawn_server(testing, move |bytes| {
         match parse_message(&bytes, agent_process().hook_token()) {
             Ok(action) => return tx.unbounded_send(action).is_ok(),
-            Err(error) => tracing::warn!("ignoring IPC message: {error}"),
+            Err(error) => warn!("ignoring IPC message: {error}"),
         }
         true
     });
@@ -31,7 +36,7 @@ fn parse_message(bytes: &[u8], expected_token: &str) -> Result<IpcAction, String
         return Err("message exceeds 64 KiB".into());
     }
 
-    let text = std::str::from_utf8(bytes).map_err(|_| "message is not UTF-8")?;
+    let text = str::from_utf8(bytes).map_err(|_| "message is not UTF-8")?;
     let text = text.trim_end_matches(['\r', '\n', ' ', '\t']);
 
     if text.is_empty() {
@@ -43,26 +48,23 @@ fn parse_message(bytes: &[u8], expected_token: &str) -> Result<IpcAction, String
     }
 
     if text.starts_with('{') {
-        let value: serde_json::Value =
-            serde_json::from_str(text).map_err(|_| "invalid agent envelope")?;
+        let value: Value = from_str(text).map_err(|_| "invalid agent envelope")?;
 
-        match value.get("action").and_then(serde_json::Value::as_str) {
-            Some("agent_event") => serde_json::from_value::<AgentEventEnvelope>(value)
+        match value.get("action").and_then(Value::as_str) {
+            Some("agent_event") => from_value::<AgentEventEnvelope>(value)
                 .map_err(|_| "invalid agent envelope")?
                 .into_event(expected_token)
                 .map(IpcAction::Agent)
                 .map_err(|_| "invalid agent envelope fields".into()),
-            Some("codex_hook" | "claude_hook") => {
-                serde_json::from_value::<nmt_agent_utils::RawAgentHookEnvelope>(value)
-                    .map_err(|_| "invalid agent Hook envelope")?
-                    .into_event(expected_token)
-                    .map(IpcAction::Agent)
-                    .ok_or_else(|| "invalid agent Hook fields".into())
-            }
+            Some("codex_hook" | "claude_hook") => from_value::<RawAgentHookEnvelope>(value)
+                .map_err(|_| "invalid agent Hook envelope")?
+                .into_event(expected_token)
+                .map(IpcAction::Agent)
+                .ok_or_else(|| "invalid agent Hook fields".into()),
             _ => Err("unsupported IPC action".into()),
         }
     } else {
-        crate::cli::parse_nmt_url(text)
+        cli::parse_nmt_url(text)
             .map(IpcAction::Cli)
             .map_err(|_| "invalid nmt URL".into())
     }
@@ -76,11 +78,12 @@ mod tests {
         AGENT_HOOK_PROTOCOL_VERSION, AgentEvent, AgentEventInput, AgentEventKind, AgentMonitor,
         AgentRoute, AgentRuntimeStatus, COMPLETION_QUIET_WINDOW,
     };
+    use serde_json::{json, to_string, to_vec};
 
     use super::*;
 
     fn raw_codex_line(route: &str, event: &str, session: &str, turn: Option<&str>) -> String {
-        let mut payload = serde_json::json!({
+        let mut payload = json!({
             "hook_event_name": event,
             "session_id": session,
             "last_assistant_message": "Finished through public ingress"
@@ -88,7 +91,7 @@ mod tests {
         if let Some(turn) = turn {
             payload["turn_id"] = turn.into();
         }
-        serde_json::json!({
+        json!({
             "action": "codex_hook",
             "version": 1,
             "token": "token",
@@ -121,7 +124,7 @@ mod tests {
             token,
         )
         .unwrap();
-        serde_json::to_string(&AgentEventEnvelope::from_event(event, token.into())).unwrap()
+        to_string(&AgentEventEnvelope::from_event(event, token.into())).unwrap()
     }
 
     #[test]
@@ -162,8 +165,7 @@ mod tests {
                 "token",
             )
             .unwrap();
-            let line =
-                serde_json::to_vec(&AgentEventEnvelope::from_event(event, "token".into())).unwrap();
+            let line = to_vec(&AgentEventEnvelope::from_event(event, "token".into())).unwrap();
             let Ok(IpcAction::Agent(decoded)) = parse_message(&line, "token") else {
                 panic!("event envelope should round-trip");
             };
@@ -173,7 +175,7 @@ mod tests {
 
     #[test]
     fn raw_codex_hook_is_authenticated_and_normalized_by_primary() {
-        let line = serde_json::json!({
+        let line = json!({
             "action": "codex_hook",
             "version": 1,
             "token": "token",
@@ -194,7 +196,7 @@ mod tests {
 
     #[test]
     fn raw_claude_hook_is_normalized_with_session_scoped_turn() {
-        let line = serde_json::json!({
+        let line = json!({
             "action": "claude_hook",
             "version": 1,
             "token": "token",
@@ -217,8 +219,7 @@ mod tests {
     #[test]
     fn rejects_wrong_token_version_malformed_and_second_message() {
         assert!(parse_message(agent_line("old").as_bytes(), "current").is_err());
-        let mut unsupported: serde_json::Value =
-            serde_json::from_str(&agent_line("token")).unwrap();
+        let mut unsupported: Value = from_str(&agent_line("token")).unwrap();
         unsupported["version"] = 2.into();
         assert!(parse_message(unsupported.to_string().as_bytes(), "token").is_err());
         assert!(parse_message(b"{broken", "token").is_err());

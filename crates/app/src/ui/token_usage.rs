@@ -7,12 +7,16 @@
 //! the widget refreshes immediately.
 
 use std::os::windows::process::CommandExt as _;
+use std::process;
 use std::time::Duration;
 
+use chrono::Local;
 use gpui::prelude::*;
 use gpui::{Context, SharedString, Window};
 use gpui_component::Sizable as _;
 use gpui_component::button::{Button, ButtonVariants as _};
+use serde_json::{Value, from_slice};
+use tracing::warn;
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use crate::ui::AppSettings;
@@ -40,14 +44,14 @@ impl AutoRefresh for TokenUsageView {
     }
 
     fn fetch() -> Self::Output {
-        let today = chrono::Local::now().format("%Y%m%d").to_string();
+        let today = Local::now().format("%Y%m%d").to_string();
         fetch_usage(&today)
     }
 
     fn apply(&mut self, output: Self::Output) {
         match output {
             Ok(text) => self.text = text.into(),
-            Err(err) => tracing::warn!("token usage refresh failed: {err}"),
+            Err(err) => warn!("token usage refresh failed: {err}"),
         }
     }
 }
@@ -83,7 +87,7 @@ impl Render for TokenUsageView {
 fn fetch_usage(today: &str) -> Result<String, String> {
     // `npx` is a `.cmd` shim on Windows, so it must be launched through
     // cmd.exe; `CREATE_NO_WINDOW` keeps the run silent (no console flash).
-    let output = std::process::Command::new("cmd")
+    let output = process::Command::new("cmd")
         .args([
             "/C",
             &format!("npx ccusage@latest -j --offline --since {today}"),
@@ -100,7 +104,7 @@ fn fetch_usage(today: &str) -> Result<String, String> {
         ));
     }
 
-    let json: serde_json::Value = serde_json::from_slice(&output.stdout)
+    let json: Value = from_slice(&output.stdout)
         .map_err(|err| format!("ccusage output is not valid JSON: {err}"))?;
 
     Ok(format_usage(&json))
@@ -108,7 +112,7 @@ fn fetch_usage(today: &str) -> Result<String, String> {
 
 /// `i:<input> o:<output> cw:<cache_write> cr:<cache_read>` from the report's
 /// `totals` object; missing fields read as 0.
-fn format_usage(json: &serde_json::Value) -> String {
+fn format_usage(json: &Value) -> String {
     let totals = &json["totals"];
     let field = |key: &str| totals[key].as_u64().unwrap_or(0);
 
@@ -134,11 +138,13 @@ fn compact(n: u64) -> String {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::from_str;
+
     use super::*;
 
     #[test]
     fn format_usage_reads_totals() {
-        let json: serde_json::Value = serde_json::from_str(
+        let json: Value = from_str(
             r#"{
                 "daily": [{"date": "2026-07-03"}],
                 "totals": {
@@ -155,7 +161,7 @@ mod tests {
 
     #[test]
     fn format_usage_defaults_missing_fields_to_zero() {
-        let json: serde_json::Value = serde_json::from_str("{}").unwrap();
+        let json: Value = from_str("{}").unwrap();
         assert_eq!(format_usage(&json), "i:0 o:0 cw:0 cr:0");
     }
 }

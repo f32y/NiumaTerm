@@ -7,8 +7,8 @@
 //! NiumaTerm hook binary are ever touched, and a settings file that fails to
 //! parse is never rewritten.
 
-use std::io;
 use std::path::{Path, PathBuf};
+use std::{env, io};
 
 use serde_json::{Value, json};
 
@@ -94,7 +94,7 @@ pub(crate) fn normalize(
 
 /// `~/.claude/settings.json`, the user-scope Claude Code configuration.
 pub fn settings_path() -> Option<PathBuf> {
-    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))?;
+    let home = env::var_os("USERPROFILE").or_else(|| env::var_os("HOME"))?;
 
     Some(PathBuf::from(home).join(".claude").join("settings.json"))
 }
@@ -149,6 +149,8 @@ fn write_settings(settings_path: &Path, settings: &Value) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::{fs, process};
+
     use super::*;
     use crate::hook_store::event_commands;
     use crate::{AGENT_HOOK_PROTOCOL_VERSION, RawAgentHookEnvelope};
@@ -172,7 +174,7 @@ mod tests {
             ("Stop", AgentEventKind::Stopped, Some("s")),
         ];
         for (hook, kind, turn) in cases {
-            let payload = serde_json::json!({
+            let payload = json!({
                 "session_id": "s",
                 "transcript_path": "C:\\Users\\u\\.claude\\projects\\p\\s.jsonl",
                 "cwd": "C:\\repo",
@@ -195,14 +197,14 @@ mod tests {
 
     #[test]
     fn claude_notification_message_becomes_body_and_subagent_stop_is_ignored() {
-        let notification = serde_json::json!({
+        let notification = json!({
             "session_id": "s",
             "hook_event_name": "Notification",
             "message": "Claude needs your permission to use Bash",
         });
         let event = normalize(notification, "route", "token", 1, "token").unwrap();
         assert_eq!(event.body, "Claude needs your permission to use Bash");
-        let subagent_stop = serde_json::json!({
+        let subagent_stop = json!({
             "session_id": "s",
             "hook_event_name": "SubagentStop",
         });
@@ -286,20 +288,20 @@ mod tests {
         let mut event_not_array = json!({ "hooks": { "Stop": {} } });
         assert!(install_into(&mut event_not_array, HOOK_COMMAND).is_err());
 
-        let dir = std::env::temp_dir().join(format!("nmt-installer-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = env::temp_dir().join(format!("nmt-installer-{}", process::id()));
+        fs::create_dir_all(&dir).unwrap();
         let path = dir.join("settings.json");
-        std::fs::write(&path, "{ broken").unwrap();
+        fs::write(&path, "{ broken").unwrap();
         assert!(install_hooks(&path).is_err());
         assert_eq!(hooks_status(&path), HookInstallStatus::NotInstalled);
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ broken");
-        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "{ broken");
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn file_round_trip_installs_and_uninstalls() {
-        let dir = std::env::temp_dir().join(format!("nmt-installer-rt-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = env::temp_dir().join(format!("nmt-installer-rt-{}", process::id()));
+        fs::create_dir_all(&dir).unwrap();
         let path = dir.join("settings.json");
 
         assert_eq!(hooks_status(&path), HookInstallStatus::NotInstalled);
@@ -307,8 +309,8 @@ mod tests {
         assert_eq!(hooks_status(&path), HookInstallStatus::Installed);
         uninstall_hooks(&path).unwrap();
         assert_eq!(hooks_status(&path), HookInstallStatus::NotInstalled);
-        let text = std::fs::read_to_string(&path).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
         assert_eq!(text.trim(), "{}");
-        std::fs::remove_dir_all(&dir).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -1,3 +1,5 @@
+use std::{collections, panic, sync};
+
 use gpui::{
     AnyElement, App, AvailableSpace, Bounds, ContentMask, Corners, Element, ElementId,
     ElementInputHandler, Entity, FocusHandle, FontStyle, FontWeight, GlobalElementId,
@@ -5,12 +7,16 @@ use gpui::{
     Style, TextAlign, TextRun, UnderlineStyle, Window, fill, point, px, relative, rgb, size,
 };
 use nmt_terminal::ansi::CursorShape;
+use nmt_terminal::block_store::BlockStore;
+use nmt_terminal::terminal::square::Wide;
+use parking_lot::Mutex;
 
 use super::block_list::{block_list_live_chrome, block_pad_rows};
 use super::frame::{TerminalColor, TerminalCursor, TerminalFrame, TerminalLine};
 use super::metrics;
 use super::session::InFlightBlock;
 use super::view::TerminalPane;
+use crate::terminal;
 
 /// The terminal viewport as a custom GPUI leaf element: prepaint shapes the
 /// visible rows (multi-run, per-cell foreground), paint draws backgrounds, the
@@ -59,7 +65,7 @@ impl Element for TerminalView {
         None
     }
 
-    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+    fn source_location(&self) -> Option<&'static panic::Location<'static>> {
         None
     }
 
@@ -157,7 +163,7 @@ impl Element for BlockListView {
         None
     }
 
-    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+    fn source_location(&self) -> Option<&'static panic::Location<'static>> {
         None
     }
 
@@ -219,13 +225,13 @@ impl Element for BlockListView {
         let chrome = pane.frozen_chrome.clone();
 
         if self.show_chrome {
-            crate::terminal::block_list::paint_frozen_separators(bounds, &separators, window);
+            terminal::block_list::paint_frozen_separators(bounds, &separators, window);
         }
 
         self.list.paint(window, cx);
 
         if self.show_chrome {
-            crate::terminal::block_list::paint_frozen_chrome(bounds, &chrome, window, cx);
+            terminal::block_list::paint_frozen_chrome(bounds, &chrome, window, cx);
         }
 
         window.handle_input(
@@ -236,7 +242,7 @@ impl Element for BlockListView {
     }
 }
 
-type SharedBlockStore = std::sync::Arc<parking_lot::Mutex<nmt_terminal::block_store::BlockStore>>;
+type SharedBlockStore = sync::Arc<Mutex<BlockStore>>;
 
 pub(crate) enum BlockListItem {
     Frozen {
@@ -245,8 +251,8 @@ pub(crate) enum BlockListItem {
         cols: u32,
         cell: metrics::CellMetrics,
         selection: Option<(
-            crate::terminal::block_list::FrozenPoint,
-            crate::terminal::block_list::FrozenPoint,
+            terminal::block_list::FrozenPoint,
+            terminal::block_list::FrozenPoint,
         )>,
         selected_item: Option<usize>,
         pane: Entity<TerminalPane>,
@@ -276,11 +282,11 @@ impl IntoElement for BlockListItem {
 
 pub(crate) enum BlockListItemPrepaint {
     Frozen {
-        view: crate::terminal::block_list::FrozenView,
+        view: terminal::block_list::FrozenView,
         shaped: Vec<ShapedLine>,
     },
     Live {
-        tail_view: crate::terminal::block_list::FrozenView,
+        tail_view: terminal::block_list::FrozenView,
         tail_shaped: Vec<ShapedLine>,
         active_shaped: Vec<ShapedLine>,
     },
@@ -294,7 +300,7 @@ impl Element for BlockListItem {
         None
     }
 
-    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+    fn source_location(&self) -> Option<&'static panic::Location<'static>> {
         None
     }
 
@@ -325,7 +331,7 @@ impl Element for BlockListItem {
                     .items()
                     .get(*item_idx)
                     .map(|item| {
-                        crate::terminal::block_list::item_px(item, *cols, cell.height_px, pad_rows)
+                        terminal::block_list::item_px(item, *cols, cell.height_px, pad_rows)
                     })
                     .unwrap_or(0.0)
             }
@@ -334,7 +340,7 @@ impl Element for BlockListItem {
                 history_rows,
                 cell,
                 ..
-            } => crate::terminal::block_list::live_item_px(
+            } => terminal::block_list::live_item_px(
                 *history_rows,
                 frame_content_rows(frame),
                 cell.height_px,
@@ -381,12 +387,12 @@ impl Element for BlockListItem {
                     store
                         .items()
                         .get(*item_idx)
-                        .and_then(crate::terminal::block_list::handle_item_info)
+                        .and_then(terminal::block_list::handle_item_info)
                 };
 
                 let mut view = match handle_info {
                     Some(info) => {
-                        let visible = crate::terminal::block_list::visible_rows(
+                        let visible = terminal::block_list::visible_rows(
                             bounds.top().as_f32(),
                             info.rows,
                             window.viewport_size().height.as_f32(),
@@ -396,7 +402,7 @@ impl Element for BlockListItem {
 
                         let acquired = pane.read(cx).surface.acquire_block(info.handle);
 
-                        let mut view = crate::terminal::block_list::frozen_block_view(
+                        let mut view = terminal::block_list::frozen_block_view(
                             acquired.as_ref().map(|acq| (&acq.block, &acq.palette)),
                             &info,
                             *item_idx,
@@ -414,12 +420,12 @@ impl Element for BlockListItem {
                         if let Some(acq) = &acquired
                             && !acq.placements.is_empty()
                         {
-                            let ids: std::collections::HashSet<u32> =
+                            let ids: collections::HashSet<u32> =
                                 acq.placements.iter().map(|p| p.image_id).collect();
 
                             let surface = &pane.read(cx).surface;
 
-                            let generations: std::collections::HashMap<_, _> = ids
+                            let generations: collections::HashMap<_, _> = ids
                                 .into_iter()
                                 .filter_map(|id| {
                                     surface
@@ -438,7 +444,7 @@ impl Element for BlockListItem {
                                 })
                                 .collect();
 
-                            view.images = crate::terminal::block_list::frozen_block_images(
+                            view.images = terminal::block_list::frozen_block_images(
                                 &acq.placements,
                                 &generations,
                                 &visible,
@@ -455,11 +461,8 @@ impl Element for BlockListItem {
 
                 view.items_chrome.clear();
 
-                let shaped = crate::terminal::block_list::shape_frozen_rows(
-                    &view.rows,
-                    cell.width_px,
-                    window,
-                );
+                let shaped =
+                    terminal::block_list::shape_frozen_rows(&view.rows, cell.width_px, window);
 
                 BlockListItemPrepaint::Frozen { view, shaped }
             }
@@ -478,7 +481,7 @@ impl Element for BlockListItem {
                 // grid, visible range only; a running command's
                 // scroll-up history).
                 let tail_view = {
-                    let visible = crate::terminal::block_list::visible_rows(
+                    let visible = terminal::block_list::visible_rows(
                         bounds.top().as_f32(),
                         (*history_rows).min(usize::MAX as u64) as usize,
                         window.viewport_size().height.as_f32(),
@@ -493,7 +496,7 @@ impl Element for BlockListItem {
                         .live_history_lines(visible.start as u64..visible.end as u64);
                     let selection = pane.surface.selection_screen_range();
 
-                    crate::terminal::block_list::live_history_view(
+                    terminal::block_list::live_history_view(
                         lines,
                         *history_rows,
                         *cols,
@@ -532,11 +535,8 @@ impl Element for BlockListItem {
                     }
                 });
 
-                let tail_shaped = crate::terminal::block_list::shape_frozen_rows(
-                    &tail_view.rows,
-                    cell.width_px,
-                    window,
-                );
+                let tail_shaped =
+                    terminal::block_list::shape_frozen_rows(&tail_view.rows, cell.width_px, window);
 
                 let active_bounds = Bounds::new(
                     point(bounds.left(), bounds.top() + px(tail_view.active_top)),
@@ -571,7 +571,7 @@ impl Element for BlockListItem {
             ) => {
                 paint_frozen_images(bounds, view, *cell, window, false);
 
-                crate::terminal::block_list::paint_frozen(
+                terminal::block_list::paint_frozen(
                     bounds,
                     view,
                     shaped,
@@ -591,7 +591,7 @@ impl Element for BlockListItem {
                     active_shaped,
                 },
             ) => {
-                crate::terminal::block_list::paint_frozen(
+                terminal::block_list::paint_frozen(
                     bounds,
                     tail_view,
                     tail_shaped,
@@ -927,7 +927,7 @@ pub(crate) fn paint_glyph_rows<'a>(
 fn paint_frame_images(
     bounds: Bounds<Pixels>,
     frame: &TerminalFrame,
-    layer: crate::terminal::frame::ZLayer,
+    layer: terminal::frame::ZLayer,
     cell: metrics::CellMetrics,
     offsets: &[f32],
     window: &mut Window,
@@ -970,7 +970,7 @@ fn paint_frame_images(
 /// source-crop primitive as live images; clips to each slice's destination cell rect.
 fn paint_frozen_images(
     bounds: Bounds<Pixels>,
-    view: &crate::terminal::block_list::FrozenView,
+    view: &terminal::block_list::FrozenView,
     cell: metrics::CellMetrics,
     window: &mut Window,
     above_text: bool,
@@ -1003,9 +1003,9 @@ fn paint_generation(
     window: &mut Window,
     dest: [f32; 4],
     source: [f32; 4],
-    generation: &crate::terminal::graphics::ImageGeneration,
+    generation: &terminal::graphics::ImageGeneration,
 ) {
-    let Some(full) = crate::terminal::graphics::expanded_full_bounds(dest, source) else {
+    let Some(full) = terminal::graphics::expanded_full_bounds(dest, source) else {
         return;
     };
 
@@ -1021,7 +1021,7 @@ fn paint_image_clipped(
     window: &mut Window,
     dest: [f32; 4],
     full: [f32; 4],
-    image: std::sync::Arc<RenderImage>,
+    image: sync::Arc<RenderImage>,
 ) {
     let to_bounds = |b: [f32; 4]| Bounds {
         origin: point(px(b[0]), px(b[1])),
@@ -1071,11 +1071,7 @@ pub(crate) fn paint_line_backgrounds_at(
         ));
     };
     for cell_data in line.cells() {
-        let width: u16 = if cell_data.wide == nmt_terminal::terminal::square::Wide::Wide {
-            2
-        } else {
-            1
-        };
+        let width: u16 = if cell_data.wide == Wide::Wide { 2 } else { 1 };
 
         if run_color == cell_data.background && run_start + run_width == cell_data.col {
             run_width += width;
@@ -1142,12 +1138,12 @@ mod tests {
     use nmt_terminal::render_buffer::RenderBuffer;
 
     use super::{bottom_anchor_offsets, cursor_bounds, metrics};
+    use crate::terminal;
     use crate::terminal::frame::TerminalCursor;
 
     #[test]
     fn bottom_anchor_offsets_pin_content_to_the_floor() {
-        let frame =
-            crate::terminal::frame::TerminalFrame::from_render_buffer(&RenderBuffer::new(80, 3));
+        let frame = terminal::frame::TerminalFrame::from_render_buffer(&RenderBuffer::new(80, 3));
 
         assert_eq!(
             bottom_anchor_offsets(&frame, 10.0, false),

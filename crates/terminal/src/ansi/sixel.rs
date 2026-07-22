@@ -23,7 +23,7 @@
 //!   aspect ratio, but multiple implementations always use 1:1, so these
 //!   parameters have no real effect.
 use std::cmp::max;
-use std::{fmt, mem};
+use std::{fmt, mem, time};
 
 use nmt_config::colors::ColorRgb;
 use tracing::trace;
@@ -621,7 +621,7 @@ impl Parser {
             resize: None,
             display_width: None,
             display_height: None,
-            transmit_time: std::time::Instant::now(),
+            transmit_time: time::Instant::now(),
         };
 
         Ok((data, self.color_registers))

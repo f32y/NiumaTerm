@@ -6,10 +6,10 @@
 //! the NiumaTerm hook binary are ever touched, and a file that fails to parse
 //! is never rewritten.
 
-use std::io;
 use std::path::Path;
+use std::{fs, io};
 
-use serde_json::{Value, json};
+use serde_json::{Value, from_str, json, to_string_pretty};
 
 use crate::{AGENT_HOOK_EXE_ENV, HookInstallStatus, hook_command_contains};
 
@@ -136,7 +136,7 @@ pub(crate) fn is_marked(command: &str) -> bool {
 /// surfaced as an error so a broken file is never overwritten. `file_label`
 /// names the file in error messages.
 pub(crate) fn read(path: &Path, file_label: &str) -> io::Result<Value> {
-    let text = match std::fs::read_to_string(path) {
+    let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(json!({})),
         Err(error) => return Err(error),
@@ -146,8 +146,8 @@ pub(crate) fn read(path: &Path, file_label: &str) -> io::Result<Value> {
         return Ok(json!({}));
     }
 
-    let value: Value = serde_json::from_str(&text)
-        .map_err(|_| invalid(&format!("{file_label} is not valid JSON")))?;
+    let value: Value =
+        from_str(&text).map_err(|_| invalid(&format!("{file_label} is not valid JSON")))?;
 
     if value.is_object() {
         Ok(value)
@@ -159,17 +159,17 @@ pub(crate) fn read(path: &Path, file_label: &str) -> io::Result<Value> {
 /// Write-then-rename so a crash mid-write cannot truncate the user's file.
 pub(crate) fn write(path: &Path, settings: &Value) -> io::Result<()> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+        fs::create_dir_all(parent)?;
     }
 
-    let mut text = serde_json::to_string_pretty(settings).map_err(io::Error::other)?;
+    let mut text = to_string_pretty(settings).map_err(io::Error::other)?;
 
     text.push('\n');
 
     let temp = path.with_extension("json.niumaterm-tmp");
 
-    std::fs::write(&temp, text)?;
-    std::fs::rename(&temp, path)
+    fs::write(&temp, text)?;
+    fs::rename(&temp, path)
 }
 
 pub(crate) fn invalid(message: &str) -> io::Error {

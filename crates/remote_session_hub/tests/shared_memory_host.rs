@@ -1,8 +1,9 @@
 #![cfg(windows)]
 
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use nmt_platform::ProcessReadWrite;
@@ -106,7 +107,7 @@ fn child_hub_carries_conpty_io_through_shared_memory() {
             child.finished = true;
             return;
         }
-        std::thread::sleep(Duration::from_millis(10));
+        thread::sleep(Duration::from_millis(10));
     }
     panic!("Hub child did not stop");
 }
@@ -134,8 +135,8 @@ fn remote_pty_adapter_carries_terminal_io() {
         match pty.reader().read(&mut buffer) {
             Ok(count) if count > 0 => output.extend_from_slice(&buffer[..count]),
             Ok(_) => break,
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(10));
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(10));
             }
             Err(error) => panic!("read remote PTY: {error}"),
         }
@@ -171,7 +172,7 @@ fn remote_control_counts_children_and_shutdown_waits_for_hub() {
             client.shutdown().expect("stop SessionHub synchronously");
             return;
         }
-        std::thread::sleep(Duration::from_millis(25));
+        thread::sleep(Duration::from_millis(25));
     }
     panic!("SessionHub did not report the shell child process");
 }

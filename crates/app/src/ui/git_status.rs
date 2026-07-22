@@ -4,10 +4,12 @@
 use std::collections::HashMap;
 use std::os::windows::process::CommandExt as _;
 use std::time::Duration;
+use std::{fs, path, process};
 
 use gpui::prelude::*;
-use gpui::{Context, SharedString, Window, div};
+use gpui::{Context, Entity, SharedString, Window, div};
 use gpui_component::{ActiveTheme, h_flex};
+use tracing::warn;
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use crate::ui::AppSettings;
@@ -50,7 +52,7 @@ pub(crate) struct DiffLine {
 }
 
 fn run_git(dir: &str, args: &[&str]) -> Result<Vec<u8>, String> {
-    let output = std::process::Command::new("git")
+    let output = process::Command::new("git")
         .arg("-C")
         .arg(dir)
         .args(args)
@@ -132,7 +134,7 @@ pub(crate) fn fetch_snapshot(root: &str) -> Result<GitSnapshot, String> {
 /// Line count of an untracked file (its "all added" count); 0 for binary
 /// (NUL-containing) or unreadable files.
 fn count_file_lines(root: &str, path: &str) -> u64 {
-    let Ok(bytes) = std::fs::read(std::path::Path::new(root).join(path)) else {
+    let Ok(bytes) = fs::read(path::Path::new(root).join(path)) else {
         return 0;
     };
 
@@ -154,7 +156,7 @@ fn count_lines(bytes: &[u8]) -> u64 {
 /// their full content as added lines; binary content gets a placeholder.
 pub(crate) fn fetch_file_diff(root: &str, path: &str, untracked: bool) -> Vec<DiffLine> {
     if untracked {
-        let Ok(bytes) = std::fs::read(std::path::Path::new(root).join(path)) else {
+        let Ok(bytes) = fs::read(path::Path::new(root).join(path)) else {
             return vec![line(DiffLineKind::FileHeader, "unreadable file")];
         };
 
@@ -453,7 +455,7 @@ impl GitStatusModel {
                         this.snapshot = Some(snapshot);
                         this.snapshot_seq += 1;
                     }
-                    Err(err) => tracing::warn!("git status refresh failed: {err}"),
+                    Err(err) => warn!("git status refresh failed: {err}"),
                 }
 
                 cx.notify();
@@ -465,11 +467,11 @@ impl GitStatusModel {
 }
 
 pub(crate) struct GitStatusView {
-    model: gpui::Entity<GitStatusModel>,
+    model: Entity<GitStatusModel>,
 }
 
 impl GitStatusView {
-    pub(crate) fn new(model: gpui::Entity<GitStatusModel>, cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new(model: Entity<GitStatusModel>, cx: &mut Context<Self>) -> Self {
         cx.observe(&model, |_, _, cx| cx.notify()).detach();
 
         cx.observe_global::<AppSettings>(|_, cx| cx.notify())

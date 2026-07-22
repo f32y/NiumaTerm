@@ -1,4 +1,5 @@
 use crate::colors::{ColorArray, ColorComposition};
+use crate::render_types;
 
 /// Parse a `"#RRGGBB"` literal into an `[r, g, b, 1.0]` sRGB array at compile
 /// time. Defaults are constant, so this avoids the per-call regex compile and
@@ -25,7 +26,7 @@ pub fn background() -> ColorComposition {
     let color = hex("#0F0D0E");
     (
         color,
-        crate::render_types::Color {
+        render_types::Color {
             r: color[0] as f64,
             g: color[1] as f64,
             b: color[2] as f64,

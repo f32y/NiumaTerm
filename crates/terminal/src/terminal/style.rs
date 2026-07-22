@@ -8,10 +8,10 @@
 //     lookup at render time.
 //   - A row of 200 characters with the same SGR state shares one id.
 //   - The `Square` struct stays at u64.
-
 use bitflags::bitflags;
 use nmt_config::colors::{AnsiColor, NamedColor};
 use rustc_hash::FxHashMap;
+use tracing::warn;
 
 /// Index into the per-grid `StyleSet`. Id `0` is always the default style
 /// (`Style::default()`), so a freshly-zeroed cell renders correctly without
@@ -148,7 +148,7 @@ impl StyleSet {
             return id;
         }
         if self.styles.len() >= u16::MAX as usize {
-            tracing::warn!(
+            warn!(
                 "StyleSet hit u16::MAX styles ({}); falling back to default",
                 self.styles.len()
             );

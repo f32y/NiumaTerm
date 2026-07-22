@@ -3,10 +3,21 @@
 
 use std::ffi::OsString;
 use std::rc::Rc;
+use std::{env, path, process, ptr, time};
 
 use clap::{Arg, ArgAction, Command as ClapCommand};
 use futures::StreamExt as _;
-use gpui::{App, Application, KeyBinding};
+use futures::channel::mpsc::unbounded;
+use gpui::{Anchor, AnyWindowHandle, App, Application, Global, KeyBinding, WeakEntity, px};
+use gpui_component::{Theme as ComponentTheme, init as init_components};
+use gpui_windows::WindowsPlatform;
+use nmt_agent_utils::{AgentEvent, AgentRoute, agent_process};
+use nmt_config::local_state::{self, LocalState};
+use nmt_config::{Config, enable_testing_mode, get, init};
+use nmt_platform::set_job_management;
+use nmt_platform::windows::ipc as platform_ipc;
+use nmt_remote_session_hub::shutdown_default;
+use tracing::warn;
 use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 
 mod cli;
@@ -20,8 +31,6 @@ mod ui;
 mod utils;
 mod window;
 mod workspace;
-
-use nmt_config::local_state::LocalState;
 
 use crate::cli::CliAction;
 use crate::terminal::view::{
@@ -45,9 +54,9 @@ struct StartupFiles {
 
 /// The concrete Windows platform, kept as a gpui global so settings toggles
 /// can reach platform-level knobs (UI thread priority).
-pub(crate) struct PlatformHandle(pub(crate) Rc<gpui_windows::WindowsPlatform>);
+pub(crate) struct PlatformHandle(pub(crate) Rc<WindowsPlatform>);
 
-impl gpui::Global for PlatformHandle {}
+impl Global for PlatformHandle {}
 
 fn main() {
     let StartupArgs { url, testing } = parse_startup_args();
@@ -55,7 +64,7 @@ fn main() {
 }
 
 fn parse_startup_args() -> StartupArgs {
-    parse_startup_args_from(std::env::args_os())
+    parse_startup_args_from(env::args_os())
 }
 
 fn parse_startup_args_from<I, T>(args: I) -> StartupArgs
@@ -92,7 +101,7 @@ where
         .try_get_matches_from(args)
         .unwrap_or_else(|err| {
             eprintln!("{err}");
-            std::process::exit(2);
+            process::exit(2);
         });
 
     StartupArgs {
@@ -114,8 +123,8 @@ where
 }
 
 fn run_app(argv_url: Option<String>, testing: bool) {
-    nmt_agent_utils::agent_process().set_testing(testing);
-    nmt_agent_utils::agent_process().set_hook_executable(
+    agent_process().set_testing(testing);
+    agent_process().set_hook_executable(
         utils::get_exe_dir()
             .join("NiumaTermHook.exe")
             .display()
@@ -123,11 +132,11 @@ fn run_app(argv_url: Option<String>, testing: bool) {
     );
 
     if testing {
-        nmt_config::enable_testing_mode();
+        enable_testing_mode();
     }
 
     // Hold the appender guard for the whole app lifetime; `main` blocks until exit.
-    let _log_guard = crate::logging::init_logging().expect("init logging");
+    let _log_guard = logging::init_logging().expect("init logging");
 
     let startup_files = load_startup_files_or_exit();
 
@@ -136,26 +145,22 @@ fn run_app(argv_url: Option<String>, testing: bool) {
     // malformed URL degrades to activate — the primary just comes forward.
     let argv_action = argv_url.map(|url| {
         cli::parse_nmt_url(&url).unwrap_or_else(|err| {
-            tracing::warn!("ignoring command line: {err}");
+            warn!("ignoring command line: {err}");
             CliAction::Activate
         })
     });
 
-    if !nmt_platform::windows::ipc::try_become_primary(testing) {
+    if !platform_ipc::try_become_primary(testing) {
         let action = argv_action.clone().unwrap_or(CliAction::Activate);
-        match nmt_platform::windows::ipc::send(
-            &action.to_url(),
-            std::time::Duration::from_secs(2),
-            testing,
-        ) {
+        match platform_ipc::send(&action.to_url(), time::Duration::from_secs(2), testing) {
             Ok(()) => return,
-            Err(error) => tracing::warn!("primary instance pipe unreachable: {error}"),
+            Err(error) => warn!("primary instance pipe unreachable: {error}"),
         }
         // The mutex holder never answered (booting forever, or hung): serve
         // the user with a fresh primary rather than doing nothing.
     }
 
-    let (cli_tx, mut cli_rx) = futures::channel::mpsc::unbounded::<ipc::IpcAction>();
+    let (cli_tx, mut cli_rx) = unbounded::<ipc::IpcAction>();
 
     ipc::spawn_pipe_server(cli_tx.clone(), testing);
 
@@ -165,9 +170,7 @@ fn run_app(argv_url: Option<String>, testing: bool) {
         let _ = cli_tx.unbounded_send(ipc::IpcAction::Cli(action));
     }
 
-    let platform = Rc::new(
-        gpui_windows::WindowsPlatform::new(false).expect("failed to initialize GPUI Windows"),
-    );
+    let platform = Rc::new(WindowsPlatform::new(false).expect("failed to initialize GPUI Windows"));
 
     platform.set_file_drop_description("Paste path to terminal");
 
@@ -180,19 +183,19 @@ fn run_app(argv_url: Option<String>, testing: bool) {
         .run(move |cx: &mut App| {
             // Initialize gpui-component (theme, root, component globals) before any
             // component renders. Themes without `[colors.ui]` retain the dark default.
-            gpui_component::init(cx);
+            init_components(cx);
 
-            crate::ui::apply_ui_theme(nmt_config::get().ui_theme.as_ref(), cx);
+            ui::apply_ui_theme(get().ui_theme.as_ref(), cx);
 
-            let notification = &mut gpui_component::Theme::global_mut(cx).notification;
-            notification.placement = gpui::Anchor::TopCenter;
-            notification.margins.top = gpui::px(16.);
+            let notification = &mut ComponentTheme::global_mut(cx).notification;
+            notification.placement = Anchor::TopCenter;
+            notification.margins.top = px(16.);
 
             cx.set_global(AppSettings::load());
 
-            crate::ui::apply_window_translucency(cx);
+            ui::apply_window_translucency(cx);
 
-            nmt_platform::set_job_management(cx.global::<AppSettings>().manage_subprocess_job);
+            set_job_management(cx.global::<AppSettings>().manage_subprocess_job);
 
             // The platform remembers the choice and applies it to the vsync
             // thread when that spawns (after this closure returns).
@@ -205,13 +208,13 @@ fn run_app(argv_url: Option<String>, testing: bool) {
             // Keep live behavior in sync on any settings change. Persistence is
             // deferred to when the settings dialog closes (see Shell::on_show_settings).
             cx.observe_global::<AppSettings>(|cx| {
-                nmt_platform::set_job_management(cx.global::<AppSettings>().manage_subprocess_job);
+                set_job_management(cx.global::<AppSettings>().manage_subprocess_job);
 
                 // Opacity changes retint the theme and switch each window
                 // between acrylic composition and opaque presentation.
-                crate::ui::apply_window_translucency(cx);
+                ui::apply_window_translucency(cx);
 
-                let background = crate::ui::window_background_appearance(cx);
+                let background = ui::window_background_appearance(cx);
 
                 let handles: Vec<_> = cx
                     .global::<ShellRegistry>()
@@ -306,8 +309,8 @@ fn run_app(argv_url: Option<String>, testing: bool) {
                     windows: initials.iter().map(|w| w.to_local_state(false)).collect(),
                 };
 
-                if let Err(err) = nmt_config::local_state::save(&clean) {
-                    tracing::warn!("failed to clear sessions from local_state.toml: {err}");
+                if let Err(err) = local_state::save(&clean) {
+                    warn!("failed to clear sessions from local_state.toml: {err}");
                 }
             }
 
@@ -342,16 +345,16 @@ fn run_app(argv_url: Option<String>, testing: bool) {
                 };
 
                 if !state.windows.is_empty()
-                    && let Err(err) = nmt_config::local_state::save(&state)
+                    && let Err(err) = local_state::save(&state)
                 {
-                    tracing::warn!("failed to save local_state.toml: {err}");
+                    warn!("failed to save local_state.toml: {err}");
                 }
 
                 // Quit confirmation has already completed before this hook runs.
                 // Waiting here prevents the out-of-process terminal owner from
                 // surviving after the application process has fully exited.
-                if let Err(err) = nmt_remote_session_hub::shutdown_default() {
-                    tracing::warn!("failed to stop SessionHub during app quit: {err}");
+                if let Err(err) = shutdown_default() {
+                    warn!("failed to stop SessionHub during app quit: {err}");
                 }
 
                 async {}
@@ -379,12 +382,12 @@ fn run_app(argv_url: Option<String>, testing: bool) {
 }
 
 fn load_startup_files_or_exit() -> StartupFiles {
-    let config = nmt_config::Config::load_for_startup().unwrap_or_else(|err| {
+    let config = Config::load_for_startup().unwrap_or_else(|err| {
         startup_error_and_exit("config.toml", &err.to_string());
     });
-    nmt_config::init(config);
+    init(config);
 
-    let remembered_state = nmt_config::local_state::try_load().unwrap_or_else(|err| {
+    let remembered_state = local_state::try_load().unwrap_or_else(|err| {
         startup_error_and_exit("local_state.toml", &err.to_string());
     });
 
@@ -393,7 +396,7 @@ fn load_startup_files_or_exit() -> StartupFiles {
 
 fn startup_error_and_exit(file: &str, error: &str) -> ! {
     show_startup_error_dialog(&format!("Failed to parse {file}:\n\n{error}"));
-    std::process::exit(1);
+    process::exit(1);
 }
 
 fn show_startup_error_dialog(message: &str) {
@@ -404,7 +407,7 @@ fn show_startup_error_dialog(message: &str) {
     let message: Vec<u16> = message.encode_utf16().chain(Some(0)).collect();
     unsafe {
         MessageBoxW(
-            std::ptr::null_mut(),
+            ptr::null_mut(),
             message.as_ptr(),
             title.as_ptr(),
             MB_OK | MB_ICONERROR,
@@ -456,9 +459,7 @@ mod tests {
 
 /// The most recently active window's shell, falling back to the newest open
 /// window when none was activated yet (or the active one just closed).
-fn last_active_shell(
-    cx: &App,
-) -> Option<(gpui::AnyWindowHandle, gpui::WeakEntity<crate::ui::Shell>)> {
+fn last_active_shell(cx: &App) -> Option<(AnyWindowHandle, WeakEntity<ui::Shell>)> {
     let registry = cx.global::<ShellRegistry>();
     let last = cx.global::<LastActiveWindow>().0;
     registry
@@ -494,7 +495,7 @@ fn dispatch_cli_action(action: CliAction, cx: &mut App) {
         }
         CliAction::NewTab { path } | CliAction::NewWindow { path } => {
             if !path.is_dir() {
-                tracing::warn!("nmt:// target is not a directory: {}", path.display());
+                warn!("nmt:// target is not a directory: {}", path.display());
                 foreground_last_active(cx);
                 return;
             }
@@ -528,11 +529,7 @@ fn dispatch_cli_action(action: CliAction, cx: &mut App) {
     }
 }
 
-fn dispatch_focus_notification(
-    route: &nmt_agent_utils::AgentRoute,
-    notification_id: &str,
-    cx: &mut App,
-) {
+fn dispatch_focus_notification(route: &AgentRoute, notification_id: &str, cx: &mut App) {
     let targets: Vec<_> = cx
         .global::<ShellRegistry>()
         .0
@@ -553,10 +550,10 @@ fn dispatch_focus_notification(
             return;
         }
     }
-    tracing::warn!("ignoring stale notification focus action");
+    warn!("ignoring stale notification focus action");
 }
 
-fn dispatch_agent_event(event: nmt_agent_utils::AgentEvent, cx: &mut App) {
+fn dispatch_agent_event(event: AgentEvent, cx: &mut App) {
     if !cx.global::<AppSettings>().enable_agent_hooks {
         return;
     }
@@ -578,12 +575,12 @@ fn dispatch_agent_event(event: nmt_agent_utils::AgentEvent, cx: &mut App) {
         }
     }
 
-    tracing::warn!("ignoring agent event for unknown or closed route");
+    warn!("ignoring agent event for unknown or closed route");
 }
 
 /// CLI `new_window`: a fresh window (default geometry) whose single
 /// workspace is rooted at `path`.
-fn open_window_at(path: &std::path::Path, cx: &mut App) {
+fn open_window_at(path: &path::Path, cx: &mut App) {
     AppWindow::open(
         cx,
         AppWindow {

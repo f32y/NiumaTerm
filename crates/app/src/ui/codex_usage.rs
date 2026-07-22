@@ -6,6 +6,7 @@ use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::progress::Progress;
 use gpui_component::{Sizable as _, h_flex, v_flex};
 use nmt_agent_utils::codex::usage_fetcher::{self, Usage};
+use tracing::warn;
 
 use crate::ui::AppSettings;
 use crate::ui::auto_refresh::{self, AutoRefresh, RefreshState};
@@ -35,7 +36,7 @@ impl AutoRefresh for CodexUsageView {
     fn apply(&mut self, output: Self::Output) {
         match output {
             Ok(usage) => self.usage = usage,
-            Err(err) => tracing::warn!("Codex usage refresh failed: {err}"),
+            Err(err) => warn!("Codex usage refresh failed: {err}"),
         }
     }
 }

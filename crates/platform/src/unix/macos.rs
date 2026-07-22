@@ -2,10 +2,12 @@
 
 use std::ffi::{CStr, CString, IntoStringError};
 use std::fmt::{self, Display, Formatter};
-use std::io;
 use std::mem::MaybeUninit;
 use std::os::raw::c_int;
 use std::path::PathBuf;
+use std::{error, io};
+
+use libc::c_void;
 
 /// Error during working directory retrieval.
 #[derive(Debug)]
@@ -19,8 +21,8 @@ pub enum Error {
     InvalidSize,
 }
 
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl error::Error for Error {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self {
             Error::InvalidSize => None,
             Error::Io(err) => err.source(),
@@ -136,14 +138,14 @@ mod sys {
     }
 }
 
-pub fn macos_process_name(pid: libc::c_int) -> String {
+pub fn macos_process_name(pid: c_int) -> String {
     let mut name = String::new();
 
     if pid >= 0 {
         let proc_path = get_proc_path(pid);
-        name = std::path::Path::new(&proc_path)
+        name = path::Path::new(&proc_path)
             .file_name()
-            .unwrap_or(std::ffi::OsStr::new(""))
+            .unwrap_or(ffi::OsStr::new(""))
             .to_str()
             .unwrap_or("")
             .to_string();
@@ -161,7 +163,7 @@ fn get_proc_path(pid: i32) -> String {
     unsafe {
         ret = sys::proc_pidpath(
             pid,
-            pathbuf.as_mut_ptr() as *mut libc::c_void,
+            pathbuf.as_mut_ptr() as *mut c_void,
             pathbuf.capacity() as u32,
         );
     };
@@ -176,10 +178,10 @@ fn get_proc_path(pid: i32) -> String {
     out
 }
 
-pub fn macos_cwd(pid: libc::c_int) -> Result<PathBuf, Error> {
+pub fn macos_cwd(pid: c_int) -> Result<PathBuf, Error> {
     let mut info = MaybeUninit::<sys::proc_vnodepathinfo>::uninit();
-    let info_ptr = info.as_mut_ptr() as *mut libc::c_void;
-    let size = std::mem::size_of::<sys::proc_vnodepathinfo>() as c_int;
+    let info_ptr = info.as_mut_ptr() as *mut c_void;
+    let size = mem::size_of::<sys::proc_vnodepathinfo>() as c_int;
 
     let c_str = unsafe {
         let pidinfo_size = sys::proc_pidinfo(pid, sys::PROC_PIDVNODEPATHINFO, 0, info_ptr, size);

@@ -1,11 +1,14 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
+use std::{error, fmt, io, thread};
 
-use nmt_platform::WinsizeBuilder;
+use nmt_config::active_colors;
+use nmt_platform::{
+    WinsizeBuilder, create_pty_with_env, job_other_process_count, set_job_management,
+};
 use nmt_terminal::event::{EventListener, Msg, MsgSender, TerminalEvent, WindowId};
 use nmt_terminal::ghostty::GhosttyTerminal;
 use nmt_terminal::pty_pipe::PtyPipe;
@@ -94,7 +97,7 @@ impl SessionSubscription {
         &self.receiver
     }
 
-    pub(crate) fn set_wake_thread(&self, thread: std::thread::Thread) {
+    pub(crate) fn set_wake_thread(&self, thread: thread::Thread) {
         if let Some(subscriber) = self.stream.lock().subscribers.get_mut(&self.subscriber_id) {
             subscriber.wake_thread = Some(thread);
         }
@@ -121,7 +124,7 @@ pub enum HubError {
     SessionNotFound(SessionId),
     SessionExited(SessionId),
     InvalidSize { cols: u16, rows: u16 },
-    Spawn(std::io::Error),
+    Spawn(io::Error),
     Engine(String),
     ChannelClosed(SessionId),
 }
@@ -144,8 +147,8 @@ impl fmt::Display for HubError {
     }
 }
 
-impl std::error::Error for HubError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl error::Error for HubError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self {
             Self::Spawn(error) => Some(error),
             _ => None,
@@ -162,7 +165,7 @@ struct StreamState {
 
 struct Subscriber {
     sender: SyncSender<SessionEvent>,
-    wake_thread: Option<std::thread::Thread>,
+    wake_thread: Option<thread::Thread>,
 }
 
 impl Default for StreamState {
@@ -309,9 +312,9 @@ impl RemoteSessionHub {
             // preserve each session's requested Job Object policy.
             let _spawn = self.spawn_lock.lock();
 
-            nmt_platform::set_job_management(options.manage_process_tree);
+            set_job_management(options.manage_process_tree);
 
-            nmt_platform::create_pty_with_env(
+            create_pty_with_env(
                 &options.shell,
                 options.args.clone(),
                 &options.working_directory,
@@ -334,7 +337,7 @@ impl RemoteSessionHub {
             },
             WindowId::dummy(),
             id.0 as usize,
-            nmt_config::active_colors(),
+            active_colors(),
             options.scrollback_lines,
             false,
         )
@@ -452,10 +455,7 @@ impl RemoteSessionHub {
     }
 
     pub fn child_process_count(&self, id: SessionId) -> Result<usize, HubError> {
-        Ok(self
-            .get(id)?
-            .job_handle
-            .map_or(0, nmt_platform::job_other_process_count))
+        Ok(self.get(id)?.job_handle.map_or(0, job_other_process_count))
     }
 
     pub fn list_sessions(&self) -> Vec<SessionInfo> {

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{Shell, navigation, renderer as config_renderer, window};
+use crate::colors::deserialize_to_arr_opt;
+use crate::{Shell, colors, navigation, render_types, renderer as config_renderer, window};
 
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct Platform {
@@ -48,7 +49,7 @@ pub struct PlatformWindow {
         rename = "background-image",
         skip_serializing
     )]
-    pub background_image: Option<crate::render_types::ImageProperties>,
+    pub background_image: Option<render_types::ImageProperties>,
     #[serde(default = "Option::default")]
     pub decorations: Option<window::Decorations>,
     #[serde(default = "Option::default", rename = "macos-use-unified-titlebar")]
@@ -101,10 +102,10 @@ pub struct PlatformNavigation {
     pub unfocused_split_opacity: Option<f32>,
     #[serde(
         default = "Option::default",
-        deserialize_with = "crate::colors::deserialize_to_arr_opt",
+        deserialize_with = "deserialize_to_arr_opt",
         rename = "unfocused-split-fill"
     )]
-    pub unfocused_split_fill: Option<crate::colors::ColorArray>,
+    pub unfocused_split_fill: Option<colors::ColorArray>,
 }
 
 /// Platform-specific renderer config with optional fields for selective override

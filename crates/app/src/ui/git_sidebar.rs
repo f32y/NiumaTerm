@@ -1,6 +1,7 @@
 use gpui::prelude::*;
 use gpui::{
-    Context, DragMoveEvent, Entity, Pixels, UniformListScrollHandle, Window, div, px, uniform_list,
+    AnyElement, Context, DragMoveEvent, Entity, Pixels, ScrollStrategy, UniformListScrollHandle,
+    Window, div, px, uniform_list,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::scroll::{Scrollbar, ScrollbarShow};
@@ -90,8 +91,7 @@ impl GitSidebar {
         if self.selected.as_deref() != Some(&path) {
             self.selected = Some(path);
 
-            self.diff_scroll
-                .scroll_to_item(0, gpui::ScrollStrategy::Top);
+            self.diff_scroll.scroll_to_item(0, ScrollStrategy::Top);
 
             self.fetch_diff(cx);
 
@@ -135,7 +135,7 @@ impl GitSidebar {
         .detach();
     }
 
-    fn render_file_list(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+    fn render_file_list(&self, cx: &mut Context<Self>) -> AnyElement {
         let file_count = self
             .model
             .read(cx)
@@ -221,7 +221,7 @@ impl GitSidebar {
             .into_any_element()
     }
 
-    fn render_diff(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+    fn render_diff(&self, cx: &mut Context<Self>) -> AnyElement {
         if self.selected.is_none() {
             return div()
                 .flex_1()
@@ -322,7 +322,7 @@ impl Render for GitSidebar {
                     })),
             );
 
-        let body: gpui::AnyElement = if in_repo {
+        let body: AnyElement = if in_repo {
             v_flex()
                 .flex_1()
                 .overflow_hidden()

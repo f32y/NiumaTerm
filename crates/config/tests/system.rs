@@ -1,8 +1,10 @@
+use nmt_config::Config;
 use nmt_config::system::*;
+use toml::from_str;
 
 #[test]
 fn system_section_defaults_when_absent() {
-    let config: nmt_config::Config = toml::from_str("").unwrap();
+    let config: Config = from_str("").unwrap();
     assert_eq!(config.system, SystemConfig::default());
     assert!(config.system.restore_last_session_when_opening);
     assert!(!config.system.manage_subprocess_job);
@@ -24,17 +26,14 @@ fn warn_before_terminating_shell_accepts_modes_and_rejects_booleans() {
         ),
         ("\"always\"", WarnBeforeTerminatingShell::Always),
     ] {
-        let config: nmt_config::Config = toml::from_str(&format!(
+        let config: Config = from_str(&format!(
             "[system]\nwarn-before-terminating-shell = {value}"
         ))
         .unwrap();
         assert_eq!(config.system.warn_before_terminating_shell, expected);
     }
 
-    assert!(
-        toml::from_str::<nmt_config::Config>("[system]\nwarn-before-terminating-shell = true")
-            .is_err()
-    );
+    assert!(from_str::<Config>("[system]\nwarn-before-terminating-shell = true").is_err());
 }
 
 #[test]

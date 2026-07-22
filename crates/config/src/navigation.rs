@@ -1,5 +1,8 @@
+use std::{fmt, str};
+
 use serde::{Deserialize, Serialize};
 
+use crate::colors::defaults::tabs as default_tabs;
 use crate::colors::{ColorArray, deserialize_to_arr, deserialize_to_arr_opt};
 use crate::default_bool_true;
 
@@ -72,8 +75,8 @@ pub fn modes_as_vec_string() -> Vec<String> {
     .collect()
 }
 
-impl std::fmt::Display for NavigationMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl fmt::Display for NavigationMode {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.as_str())
     }
 }
@@ -81,7 +84,7 @@ impl std::fmt::Display for NavigationMode {
 #[derive(Debug, PartialEq, Eq)]
 pub struct ParseNavigationModeError;
 
-impl std::str::FromStr for NavigationMode {
+impl str::FromStr for NavigationMode {
     type Err = ParseNavigationModeError;
 
     fn from_str(s: &str) -> Result<NavigationMode, ParseNavigationModeError> {
@@ -101,10 +104,7 @@ pub struct ColorAutomation {
     pub program: String,
     #[serde(default = "String::new")]
     pub path: String,
-    #[serde(
-        deserialize_with = "deserialize_to_arr",
-        default = "crate::colors::defaults::tabs"
-    )]
+    #[serde(deserialize_with = "deserialize_to_arr", default = "default_tabs")]
     pub color: ColorArray,
 }
 

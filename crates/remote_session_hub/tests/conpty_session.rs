@@ -1,8 +1,9 @@
 #![cfg(windows)]
 
+use std::thread;
 use std::time::{Duration, Instant};
 
-use nmt_remote_session_hub::{RemoteSessionHub, SessionOptions};
+use nmt_remote_session_hub::{RemoteSessionHub, SessionEvent, SessionOptions, SessionSubscription};
 
 #[test]
 fn session_survives_detach_and_reconnects_from_a_vt_checkpoint() {
@@ -41,7 +42,7 @@ fn session_survives_detach_and_reconnects_from_a_vt_checkpoint() {
             "detached output never reached checkpoint"
         );
         drop(subscription);
-        std::thread::sleep(Duration::from_millis(25));
+        thread::sleep(Duration::from_millis(25));
     };
 
     assert_eq!((second.snapshot().cols, second.snapshot().rows), (100, 30));
@@ -52,11 +53,11 @@ fn session_survives_detach_and_reconnects_from_a_vt_checkpoint() {
     assert!(hub.list_sessions().is_empty());
 }
 
-fn wait_for_live_output(subscription: &nmt_remote_session_hub::SessionSubscription, needle: &[u8]) {
+fn wait_for_live_output(subscription: &SessionSubscription, needle: &[u8]) {
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut output = Vec::new();
     while Instant::now() < deadline {
-        if let Ok(nmt_remote_session_hub::SessionEvent::Output { data, .. }) = subscription
+        if let Ok(SessionEvent::Output { data, .. }) = subscription
             .events()
             .recv_timeout(Duration::from_millis(250))
         {
@@ -72,14 +73,14 @@ fn wait_for_live_output(subscription: &nmt_remote_session_hub::SessionSubscripti
     );
 }
 
-fn wait_for_exit(subscription: &nmt_remote_session_hub::SessionSubscription) {
+fn wait_for_exit(subscription: &SessionSubscription) {
     let deadline = Instant::now() + Duration::from_secs(2);
     while Instant::now() < deadline {
         if matches!(
             subscription
                 .events()
                 .recv_timeout(Duration::from_millis(100)),
-            Ok(nmt_remote_session_hub::SessionEvent::Exited { .. })
+            Ok(SessionEvent::Exited { .. })
         ) {
             return;
         }

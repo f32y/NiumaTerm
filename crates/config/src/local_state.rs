@@ -5,8 +5,13 @@
 //! rewritten wholesale on save.
 
 use std::path::{Path, PathBuf};
+use std::{fs, io};
 
 use serde::{Deserialize, Serialize};
+use toml::de::Error as TomlError;
+use toml::{from_str as parse_toml, to_string as serialize_toml};
+
+use crate::config_dir_path;
 
 fn is_false(value: &bool) -> bool {
     !*value
@@ -140,7 +145,7 @@ pub enum PaneSplitAxis {
 }
 
 pub fn local_state_file_path() -> PathBuf {
-    crate::config_dir_path().join("local_state.toml")
+    config_dir_path().join("local_state.toml")
 }
 
 /// A missing or invalid file loads as the default (empty) state.
@@ -153,43 +158,43 @@ fn load_from(path: &Path) -> LocalState {
 }
 
 /// A missing file loads as default; invalid TOML is reported to startup.
-pub fn try_load() -> Result<LocalState, toml::de::Error> {
+pub fn try_load() -> Result<LocalState, TomlError> {
     try_load_from(&local_state_file_path())
 }
 
-fn try_load_from(path: &Path) -> Result<LocalState, toml::de::Error> {
-    std::fs::read_to_string(path)
+fn try_load_from(path: &Path) -> Result<LocalState, TomlError> {
+    fs::read_to_string(path)
         .ok()
-        .map_or(Ok(LocalState::default()), |content| {
-            toml::from_str(&content)
-        })
+        .map_or(Ok(LocalState::default()), |content| parse_toml(&content))
 }
 
 /// Atomic write (temp file + rename).
-pub fn save(state: &LocalState) -> std::io::Result<()> {
+pub fn save(state: &LocalState) -> io::Result<()> {
     save_to(&local_state_file_path(), state)
 }
 
-fn save_to(path: &Path, state: &LocalState) -> std::io::Result<()> {
-    let content = toml::to_string(state)
-        .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err.to_string()))?;
+fn save_to(path: &Path, state: &LocalState) -> io::Result<()> {
+    let content = serialize_toml(state)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
+        fs::create_dir_all(dir)?;
     }
     let tmp = path.with_extension("toml.tmp");
-    std::fs::write(&tmp, content)?;
-    std::fs::rename(&tmp, path)?;
+    fs::write(&tmp, content)?;
+    fs::rename(&tmp, path)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use std::env;
+
     use super::*;
 
     #[test]
     fn save_load_roundtrip_and_bad_file_defaults() {
-        let dir = std::env::temp_dir().join("NiumaTerm-local-state-test");
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = env::temp_dir().join("NiumaTerm-local-state-test");
+        let _ = fs::remove_dir_all(&dir);
         let path = dir.join("local_state.toml");
 
         // Missing file: default state.
@@ -239,20 +244,16 @@ mod tests {
         };
         save_to(&path, &state).unwrap();
         assert_eq!(load_from(&path), state);
+        assert!(fs::read_to_string(&path).unwrap().contains("pinned = true"));
         assert!(
-            std::fs::read_to_string(&path)
-                .unwrap()
-                .contains("pinned = true")
-        );
-        assert!(
-            std::fs::read_to_string(&path)
+            fs::read_to_string(&path)
                 .unwrap()
                 .contains("user_named = true")
         );
         assert!(!path.with_extension("toml.tmp").exists());
 
         // Legacy single-window format: no `windows` list, loads as default.
-        std::fs::write(
+        fs::write(
             &path,
             "window = { x = 1.0, y = 2.0, width = 3.0, height = 4.0 }",
         )
@@ -260,31 +261,31 @@ mod tests {
         assert_eq!(load_from(&path), LocalState::default());
 
         // Corrupt file: default state instead of an error.
-        std::fs::write(&path, "not [ valid").unwrap();
+        fs::write(&path, "not [ valid").unwrap();
         assert_eq!(load_from(&path), LocalState::default());
 
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn try_load_defaults_when_missing_and_errors_on_bad_toml() {
-        let dir = std::env::temp_dir().join("NiumaTerm-local-state-try-load-test");
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = env::temp_dir().join("NiumaTerm-local-state-try-load-test");
+        let _ = fs::remove_dir_all(&dir);
         let path = dir.join("local_state.toml");
 
         assert_eq!(try_load_from(&path).unwrap(), LocalState::default());
 
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(&path, "not [ valid").unwrap();
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(&path, "not [ valid").unwrap();
         assert!(try_load_from(&path).is_err());
 
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn pane_layout_roundtrips_and_old_snapshots_load_without_it() {
-        let dir = std::env::temp_dir().join("NiumaTerm-pane-layout-test");
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = env::temp_dir().join("NiumaTerm-pane-layout-test");
+        let _ = fs::remove_dir_all(&dir);
         let path = dir.join("local_state.toml");
 
         // A split tab: h[ leaf, v[leaf, leaf] ] with saved ratios.
@@ -359,10 +360,10 @@ mod tests {
             }],
         };
         save_to(&path, &flat).unwrap();
-        assert!(!std::fs::read_to_string(&path).unwrap().contains("panes"));
+        assert!(!fs::read_to_string(&path).unwrap().contains("panes"));
 
         // A pre-pane-layout snapshot (no `panes` key) loads with `panes: None`.
-        std::fs::write(
+        fs::write(
             &path,
             r#"
 [[windows]]
@@ -383,6 +384,6 @@ shell = "pwsh.exe"
         assert_eq!(tab.panes, None);
         assert!(!loaded.windows[0].session.as_ref().unwrap().workspaces[0].pinned);
 
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&dir);
     }
 }
