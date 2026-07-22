@@ -459,6 +459,12 @@ pub trait OnResize {
 }
 
 /// Event Loop for notifying the renderer about terminal events.
+///
+/// `send_event` may be called from the PTY reader thread while it still holds
+/// the engine lock (e.g. sniffer-mark events emitted mid-chunk), and that lock
+/// is a non-reentrant FairMutex. Implementations must therefore never lock the
+/// engine synchronously from inside `send_event` — queue the event and process
+/// it on another thread/tick instead, or the reader thread deadlocks.
 pub trait EventListener {
     fn event(&self) -> (Option<TerminalEvent>, bool);
 
