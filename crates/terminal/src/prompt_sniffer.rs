@@ -50,7 +50,9 @@ const OSC_PROGRESS_PREFIX: &[u8] = b"\x1b]9;4;";
 /// mark longer than this resyncs as ordinary bytes; also bounds the inline carry buffer.
 const OSC133_MAX: usize = 32;
 
-enum Osc133 {
+/// Outcome of scanning an ESC in the PTY stream for sequences the sniffer
+/// cares about: OSC 133 prompt marks and OSC 9;4 progress reports.
+enum SniffedOsc {
     /// A complete mark: consume `len` bytes; `next` is the region to switch to (`None` =
     /// a recognized 133 mark with no transition, e.g. `;P` right-prompt). `exit` is the
     /// command exit code carried by a `;D;<code>` mark (`None` for a bare `;D`).
@@ -92,22 +94,22 @@ fn parse_exit_code(arg: &[u8]) -> Option<i32> {
 }
 
 /// Parse a potential OSC 133 mark at `s` (caller guarantees `s[0] == 0x1b`).
-fn parse_osc133(s: &[u8]) -> Osc133 {
+fn parse_sniffed_osc(s: &[u8]) -> SniffedOsc {
     let progress_prefix_len = s.len().min(OSC_PROGRESS_PREFIX.len());
 
     if s[..progress_prefix_len] == OSC_PROGRESS_PREFIX[..progress_prefix_len] {
         if s.len() <= OSC_PROGRESS_PREFIX.len() + 1 {
-            return Osc133::Incomplete;
+            return SniffedOsc::Incomplete;
         }
 
         let active = match s[OSC_PROGRESS_PREFIX.len()] {
             b'0' => false,
             b'1'..=b'4' => true,
-            _ => return Osc133::ProgressMalformed,
+            _ => return SniffedOsc::ProgressMalformed,
         };
 
         if s[OSC_PROGRESS_PREFIX.len() + 1] != b';' {
-            return Osc133::ProgressMalformed;
+            return SniffedOsc::ProgressMalformed;
         }
 
         let end = s.len().min(OSC133_MAX);
@@ -115,31 +117,31 @@ fn parse_osc133(s: &[u8]) -> Osc133 {
 
         while i < end {
             match s[i] {
-                0x07 => return Osc133::Progress { len: i + 1, active },
+                0x07 => return SniffedOsc::Progress { len: i + 1, active },
                 0x1b if i + 1 < s.len() && s[i + 1] == b'\\' => {
-                    return Osc133::Progress { len: i + 2, active };
+                    return SniffedOsc::Progress { len: i + 2, active };
                 }
-                0x1b if i + 1 == s.len() => return Osc133::Incomplete,
-                0x1b => return Osc133::ProgressMalformed,
+                0x1b if i + 1 == s.len() => return SniffedOsc::Incomplete,
+                0x1b => return SniffedOsc::ProgressMalformed,
                 _ => i += 1,
             }
         }
 
         return if s.len() < OSC133_MAX {
-            Osc133::Incomplete
+            SniffedOsc::Incomplete
         } else {
-            Osc133::ProgressMalformed
+            SniffedOsc::ProgressMalformed
         };
     }
 
     let pn = s.len().min(OSC133_PREFIX.len());
 
     if s[..pn] != OSC133_PREFIX[..pn] {
-        return Osc133::NotMark;
+        return SniffedOsc::NotMark;
     }
 
     if s.len() <= OSC133_PREFIX.len() {
-        return Osc133::Incomplete; // prefix matched so far; need the subcommand + terminator
+        return SniffedOsc::Incomplete; // prefix matched so far; need the subcommand + terminator
     }
 
     let sub = s[OSC133_PREFIX.len()];
@@ -158,7 +160,7 @@ fn parse_osc133(s: &[u8]) -> Osc133 {
     while i < end {
         match s[i] {
             0x07 => {
-                return Osc133::Mark {
+                return SniffedOsc::Mark {
                     len: i + 1,
                     sub,
                     exit: exit_at(i),
@@ -166,23 +168,23 @@ fn parse_osc133(s: &[u8]) -> Osc133 {
                 };
             }
             0x1b if i + 1 < s.len() && s[i + 1] == 0x5c => {
-                return Osc133::Mark {
+                return SniffedOsc::Mark {
                     len: i + 2,
                     sub,
                     exit: exit_at(i),
                     next: region_for(sub),
                 };
             }
-            0x1b if i + 1 == s.len() => return Osc133::Incomplete, // maybe a split ST
-            0x1b => return Osc133::Malformed,                      // ESC mid-mark that isn't ST
+            0x1b if i + 1 == s.len() => return SniffedOsc::Incomplete, // maybe a split ST
+            0x1b => return SniffedOsc::Malformed,                      // ESC mid-mark that isn't ST
             _ => i += 1,
         }
     }
 
     if s.len() < OSC133_MAX {
-        Osc133::Incomplete // a terminator may still arrive next read
+        SniffedOsc::Incomplete // a terminator may still arrive next read
     } else {
-        Osc133::Malformed // too long, resync on the ESC
+        SniffedOsc::Malformed // too long, resync on the ESC
     }
 }
 
@@ -393,8 +395,8 @@ impl PromptSniffer {
             tmp[..cl].copy_from_slice(&self.carry[..cl]);
             tmp[cl..cl + take].copy_from_slice(&input[..take]);
 
-            match parse_osc133(&tmp[..cl + take]) {
-                Osc133::Mark {
+            match parse_sniffed_osc(&tmp[..cl + take]) {
+                SniffedOsc::Mark {
                     len,
                     sub,
                     exit,
@@ -410,7 +412,7 @@ impl PromptSniffer {
 
                     pos = len - cl; // skip the input portion of the mark
                 }
-                Osc133::Progress { len, active } => {
+                SniffedOsc::Progress { len, active } => {
                     self.progress_active = active;
 
                     let mark = self.drain_mark(&tmp[..len]);
@@ -421,14 +423,14 @@ impl PromptSniffer {
 
                     pos = len - cl;
                 }
-                Osc133::Incomplete if cl + take < OSC133_MAX => {
+                SniffedOsc::Incomplete if cl + take < OSC133_MAX => {
                     self.carry[cl..cl + take].copy_from_slice(&input[..take]);
 
                     self.carry_len = cl + take;
 
                     return; // still incomplete — wait for the next read
                 }
-                Osc133::NotMark | Osc133::ProgressMalformed => {
+                SniffedOsc::NotMark | SniffedOsc::ProgressMalformed => {
                     // The carried ESC resolved to an ordinary escape split across
                     // reads (any chunk ending in "\x1b" or "\x1b]…" lands here —
                     // constant under ESC-dense output like vtebench). Forward the
@@ -473,8 +475,8 @@ impl PromptSniffer {
                 Some(off) => {
                     let esc = pos + off;
 
-                    match parse_osc133(&input[esc..]) {
-                        Osc133::Mark {
+                    match parse_sniffed_osc(&input[esc..]) {
+                        SniffedOsc::Mark {
                             len,
                             sub,
                             exit,
@@ -500,7 +502,7 @@ impl PromptSniffer {
 
                             seg_start = pos;
                         }
-                        Osc133::Progress { len, active } => {
+                        SniffedOsc::Progress { len, active } => {
                             if esc > seg_start {
                                 self.pre_forward(&input[seg_start..esc]);
 
@@ -521,7 +523,7 @@ impl PromptSniffer {
 
                             seg_start = pos;
                         }
-                        Osc133::Incomplete => {
+                        SniffedOsc::Incomplete => {
                             if esc > seg_start {
                                 self.pre_forward(&input[seg_start..esc]);
 
@@ -541,8 +543,8 @@ impl PromptSniffer {
 
                             return;
                         }
-                        Osc133::NotMark | Osc133::ProgressMalformed => pos = esc + 1,
-                        Osc133::Malformed => {
+                        SniffedOsc::NotMark | SniffedOsc::ProgressMalformed => pos = esc + 1,
+                        SniffedOsc::Malformed => {
                             if esc > seg_start {
                                 self.pre_forward(&input[seg_start..esc]);
 
