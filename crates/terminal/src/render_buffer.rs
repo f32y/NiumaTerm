@@ -266,6 +266,15 @@ impl RenderBuffer {
         self.row_wrapped.clear();
         self.row_wrapped.resize(rows, false);
         self.placements.clear();
+
+        // Every capture rewrites every visible cell (the grid was just
+        // cleared above) and re-interns each cell's style, so no style id
+        // survives into the next capture. Resetting the interner here bounds
+        // it to one grid's worth of distinct styles; a persistent interner
+        // grows monotonically under truecolor-gradient output until it
+        // saturates at u16::MAX, after which every new style silently renders
+        // as the default style.
+        self.styles.clear();
     }
 
     pub(crate) fn write_cell(
