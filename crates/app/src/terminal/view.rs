@@ -27,8 +27,9 @@ use super::surface::TerminalSurface;
 use super::{input, metrics, wake};
 use crate::terminal;
 use crate::terminal::block_list::{
-    BlockListMeasureKey, BlockListPoint, BlockListState, FrozenPoint, block_list_active_top_px,
-    block_list_alignment, block_list_render_metrics, block_pad_rows, offset_frozen_chrome,
+    BlockListMeasureKey, BlockListPoint, BlockListState, FrozenPoint, ListReconcile,
+    RemeasureScope, block_list_active_top_px, block_list_alignment, block_list_render_metrics,
+    block_pad_rows, offset_frozen_chrome, plan_list_reconcile, plan_remeasure,
     shift_selected_item_for_eviction,
 };
 use crate::terminal::dirty::DirtyState;
@@ -1629,26 +1630,20 @@ impl Render for TerminalPane {
                 store_len,
             );
 
-            let mut mirrored_count = self.block_list.item_count;
+            match plan_list_reconcile(self.block_list.item_count, evicted_delta, item_count) {
+                ListReconcile::Reset => self.block_list.list.reset(item_count),
+                ListReconcile::Patch {
+                    front_evict,
+                    tail_splice,
+                } => {
+                    if front_evict > 0 {
+                        self.block_list.list.splice(0..front_evict, 0);
+                    }
 
-            if evicted_delta > 0 {
-                let old_frozen = mirrored_count.saturating_sub(1);
-                if evicted_delta > old_frozen {
-                    self.block_list.list.reset(item_count);
-                    mirrored_count = item_count;
-                } else {
-                    self.block_list.list.splice(0..evicted_delta, 0);
-                    mirrored_count -= evicted_delta;
+                    if let Some((range, count)) = tail_splice {
+                        self.block_list.list.splice(range, count);
+                    }
                 }
-            }
-
-            if item_count < mirrored_count {
-                self.block_list.list.reset(item_count);
-            } else if item_count != mirrored_count {
-                let old_live = mirrored_count.saturating_sub(1);
-                self.block_list
-                    .list
-                    .splice(old_live..mirrored_count, item_count - old_live);
             }
 
             self.block_list.item_count = item_count;
@@ -1663,14 +1658,13 @@ impl Render for TerminalPane {
                 live_rows,
             };
 
-            if self
-                .last_list_measure_key
-                .is_some_and(|prev| prev.layout != measure_key.layout)
-            {
-                self.block_list.list.remeasure();
-            } else if self.last_list_measure_key != Some(measure_key) {
-                let start = store_len.saturating_sub(1);
-                self.block_list.list.remeasure_items(start..item_count);
+            match plan_remeasure(self.last_list_measure_key, measure_key) {
+                RemeasureScope::All => self.block_list.list.remeasure(),
+                RemeasureScope::Tail => {
+                    let start = store_len.saturating_sub(1);
+                    self.block_list.list.remeasure_items(start..item_count);
+                }
+                RemeasureScope::None => {}
             }
 
             self.last_list_measure_key = Some(measure_key);
