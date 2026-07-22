@@ -5,15 +5,22 @@
 //! Scrolling is pure UI state over the list — the engine viewport stays
 //! pinned at the bottom.
 
+use std::{collections, iter, ops, sync, time};
+
 use gpui::{
-    App, Bounds, FollowMode, ListAlignment, ListOffset, ListState, Pixels, ShapedLine,
-    SharedString, TextAlign, TextRun, Window, point, px, size,
+    App, Bounds, FollowMode, Hsla, ListAlignment, ListOffset, ListState, Pixels, Rgba, ShapedLine,
+    SharedString, TextAlign, TextRun, Window, fill, point, px, rgb, rgba, size,
 };
 use nmt_terminal::block_store::{BlockItem, BlockStore, SegmentMeta};
+use nmt_terminal::ghostty::{
+    BlockHandle, BlockRef, CellText, CellWide, Palette, PlacementScreenPos, SnapshotStyle,
+    Underline,
+};
 use nmt_terminal::grid_emit::row_selection_for;
 use nmt_terminal::selection::SelectionRange;
 use nmt_terminal::terminal::square::Wide;
 
+use crate::terminal;
 use crate::terminal::frame::{
     LineBuilder, StyleRun, TerminalCell, TerminalColor, TerminalLine, theme_default_foreground,
     theme_selection_background,
@@ -189,7 +196,7 @@ pub(crate) struct FrozenItemChrome {
 /// cell-row-high slice of a placement, with the generation shared
 /// by `Arc` from the store's lazy `(block_id, image_id)` cache.
 pub(crate) struct FrozenImage {
-    pub generation: std::sync::Arc<crate::terminal::graphics::ImageGeneration>,
+    pub generation: sync::Arc<terminal::graphics::ImageGeneration>,
     pub z: i32,
     /// Element-local y of the row's top edge.
     pub y: f32,
@@ -241,9 +248,9 @@ pub(crate) fn live_item_px(history_rows: u64, live_rows: usize, cell_h: f32, pad
 /// Gutter/header accent for a frozen item, keyed off the exit code.
 fn item_accent(meta: &SegmentMeta) -> u32 {
     match meta.exit_code {
-        None => crate::terminal::element::BLOCK_RUNNING_COLOR,
-        Some(0) => crate::terminal::element::BLOCK_SUCCESS_COLOR,
-        Some(_) => crate::terminal::element::BLOCK_FAILURE_COLOR,
+        None => terminal::element::BLOCK_RUNNING_COLOR,
+        Some(0) => terminal::element::BLOCK_SUCCESS_COLOR,
+        Some(_) => terminal::element::BLOCK_FAILURE_COLOR,
     }
 }
 
@@ -271,13 +278,13 @@ fn item_header(meta: &SegmentMeta) -> Option<String> {
     Some(command_header(command, &status))
 }
 
-fn running_header(command: &str, started_at: Option<std::time::SystemTime>) -> Option<String> {
+fn running_header(command: &str, started_at: Option<time::SystemTime>) -> Option<String> {
     if command.trim().is_empty() {
         return None;
     }
 
     let status = started_at
-        .and_then(|started_at| std::time::SystemTime::now().duration_since(started_at).ok())
+        .and_then(|started_at| time::SystemTime::now().duration_since(started_at).ok())
         .map(format_duration)
         .map(|duration| format!("⟳ {duration}"))
         .unwrap_or_else(|| "⟳".to_string());
@@ -288,7 +295,7 @@ fn running_header(command: &str, started_at: Option<std::time::SystemTime>) -> O
 fn command_header(command: &str, status: &str) -> String {
     format!(
         "{} · {status}",
-        crate::terminal::element::truncate_command(command, 32)
+        terminal::element::truncate_command(command, 32)
     )
 }
 
@@ -299,7 +306,7 @@ pub(crate) fn live_chrome(
     item: usize,
     rows: usize,
     cell_h: f32,
-    running: Option<(&str, std::time::SystemTime)>,
+    running: Option<(&str, time::SystemTime)>,
     selected: bool,
 ) -> Option<FrozenItemChrome> {
     if rows == 0 {
@@ -308,10 +315,10 @@ pub(crate) fn live_chrome(
 
     let (accent, header) = match running {
         Some((command, started_at)) => (
-            crate::terminal::element::BLOCK_RUNNING_COLOR,
+            terminal::element::BLOCK_RUNNING_COLOR,
             running_header(command, Some(started_at)),
         ),
-        None => (crate::terminal::element::BLOCK_INPUT_COLOR, None),
+        None => (terminal::element::BLOCK_INPUT_COLOR, None),
     };
 
     Some(FrozenItemChrome {
@@ -326,7 +333,7 @@ pub(crate) fn live_chrome(
 }
 
 /// `1.2s` / `815ms` / `2m05s` — the header's duration label.
-pub(crate) fn format_duration(d: std::time::Duration) -> String {
+pub(crate) fn format_duration(d: time::Duration) -> String {
     let secs = d.as_secs();
 
     if secs >= 60 {
@@ -353,9 +360,9 @@ impl EngineRowBuilder {
     pub(crate) fn push(
         &mut self,
         x: u16,
-        cell_text: nmt_terminal::ghostty::CellText,
-        wide: nmt_terminal::ghostty::CellWide,
-        style: &nmt_terminal::ghostty::SnapshotStyle,
+        cell_text: CellText,
+        wide: CellWide,
+        style: &SnapshotStyle,
         default_fg: TerminalColor,
     ) {
         use nmt_terminal::ghostty::CellWide;
@@ -376,7 +383,7 @@ impl EngineRowBuilder {
 
         while self.col < x {
             self.line
-                .push_segment(std::iter::once('\u{00a0}'), default_style, false);
+                .push_segment(iter::once('\u{00a0}'), default_style, false);
             self.col += 1;
         }
 
@@ -403,7 +410,7 @@ impl EngineRowBuilder {
                 fg,
                 bold: style.bold,
                 italic: style.italic,
-                underline: style.underline != nmt_terminal::ghostty::Underline::None,
+                underline: style.underline != Underline::None,
                 strikethrough: style.strikethrough,
             },
             is_wide,
@@ -432,7 +439,7 @@ impl EngineRowBuilder {
 /// engine locks must never nest (surface lock discipline).
 #[derive(Clone)]
 pub(crate) struct HandleItemInfo {
-    pub handle: nmt_terminal::ghostty::BlockHandle,
+    pub handle: BlockHandle,
     /// Cached engine row count — the layout height source.
     pub rows: usize,
     pub accent: u32,
@@ -459,7 +466,7 @@ pub(crate) fn visible_rows(
     viewport_h: f32,
     cell_h: f32,
     pad_rows: f32,
-) -> std::ops::Range<usize> {
+) -> ops::Range<usize> {
     const OVERDRAW: f32 = 260.0;
 
     let pad = pad_rows * cell_h;
@@ -483,13 +490,10 @@ pub(crate) fn visible_rows(
 /// frame.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn frozen_block_view(
-    block: Option<(
-        &nmt_terminal::ghostty::BlockRef,
-        &nmt_terminal::ghostty::Palette,
-    )>,
+    block: Option<(&BlockRef, &Palette)>,
     info: &HandleItemInfo,
     item_idx: usize,
-    visible: std::ops::Range<usize>,
+    visible: ops::Range<usize>,
     cell_h: f32,
     pad_rows: f32,
     selection: Option<(FrozenPoint, FrozenPoint)>,
@@ -575,12 +579,9 @@ pub(crate) fn frozen_block_view(
 /// positions are block-relative rows straight from the engine; generations
 /// come from the store's `(block_id, image_id)` lazy cache.
 pub(crate) fn frozen_block_images(
-    placements: &[nmt_terminal::ghostty::PlacementScreenPos],
-    generations: &std::collections::HashMap<
-        u32,
-        std::sync::Arc<crate::terminal::graphics::ImageGeneration>,
-    >,
-    visible: &std::ops::Range<usize>,
+    placements: &[PlacementScreenPos],
+    generations: &collections::HashMap<u32, sync::Arc<terminal::graphics::ImageGeneration>>,
+    visible: &ops::Range<usize>,
     cell_h: f32,
     pad_rows: f32,
 ) -> Vec<FrozenImage> {
@@ -633,9 +634,9 @@ pub(crate) fn frozen_block_images(
 /// Shaped-line cache key for an engine-block row: `(block_id, generation,
 /// row)`. Content is immutable per generation, so the layout
 /// caches across frames without hashing the row text.
-fn block_row_shape_key(handle: nmt_terminal::ghostty::BlockHandle, row: usize) -> u64 {
+fn block_row_shape_key(handle: BlockHandle, row: usize) -> u64 {
     use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let mut hasher = collections::hash_map::DefaultHasher::new();
 
     (handle.id, handle.generation, row).hash(&mut hasher);
 
@@ -769,7 +770,7 @@ fn expand_wide_span(line: &TerminalLine, (mut start, mut end): (u16, u16)) -> (u
 /// engine → store, so the reverse nesting would deadlock).
 #[derive(Debug)]
 pub(crate) struct FrozenSelectionPiece {
-    pub handle: nmt_terminal::ghostty::BlockHandle,
+    pub handle: BlockHandle,
     /// `(row, col)` start within the block; `None` = the block's start.
     pub start: Option<(usize, u32)>,
     /// Inclusive `(row, col)` end within the block; `None` = the block's end.
@@ -812,7 +813,7 @@ pub(crate) fn shape_frozen_rows(
     cell_w: f32,
     window: &mut Window,
 ) -> Vec<ShapedLine> {
-    crate::terminal::element::shape_lines(
+    terminal::element::shape_lines(
         rows.iter().map(|row| {
             (
                 row.shape_key.unwrap_or_else(|| row.line.text_hash()),
@@ -832,10 +833,10 @@ pub(crate) fn paint_frozen(
     cell_w: f32,
     cell_h: f32,
     window: &mut Window,
-    cx: &mut gpui::App,
+    cx: &mut App,
 ) {
     for row in &view.rows {
-        crate::terminal::element::paint_line_backgrounds_at(
+        terminal::element::paint_line_backgrounds_at(
             bounds, &row.line, row.y, cell_w, cell_h, window,
         );
     }
@@ -848,7 +849,7 @@ pub(crate) fn paint_frozen(
             continue;
         };
 
-        window.paint_quad(gpui::fill(
+        window.paint_quad(fill(
             Bounds::new(
                 point(
                     bounds.left() + px(start as f32 * cell_w),
@@ -856,11 +857,11 @@ pub(crate) fn paint_frozen(
                 ),
                 size(px((end - start) as f32 * cell_w), px(cell_h)),
             ),
-            gpui::rgb(selection_bg.rgb_u32()),
+            rgb(selection_bg.rgb_u32()),
         ));
     }
 
-    crate::terminal::element::paint_glyph_rows(
+    terminal::element::paint_glyph_rows(
         bounds,
         view.rows
             .iter()
@@ -878,9 +879,9 @@ pub(crate) fn paint_frozen_separators(
     window: &mut Window,
 ) {
     for y in separators {
-        window.paint_quad(gpui::fill(
-            crate::terminal::element::block_separator_bounds(bounds, bounds.top() + px(*y), 1.0),
-            gpui::Rgba {
+        window.paint_quad(fill(
+            terminal::element::block_separator_bounds(bounds, bounds.top() + px(*y), 1.0),
+            Rgba {
                 r: ((SEPARATOR_COLOR >> 16) & 0xff) as f32 / 255.0,
                 g: ((SEPARATOR_COLOR >> 8) & 0xff) as f32 / 255.0,
                 b: (SEPARATOR_COLOR & 0xff) as f32 / 255.0,
@@ -894,30 +895,29 @@ pub(crate) fn paint_frozen_chrome(
     bounds: Bounds<Pixels>,
     items_chrome: &[FrozenItemChrome],
     window: &mut Window,
-    cx: &mut gpui::App,
+    cx: &mut App,
 ) {
     for chrome in items_chrome {
         let top = bounds.top() + px(chrome.top);
         let height = px(chrome.bottom - chrome.top);
         let gutter_alpha = if chrome.selected { 0xe6 } else { 0x59 };
 
-        window.paint_quad(gpui::fill(
+        window.paint_quad(fill(
             Bounds::new(
                 point(
                     bounds.left()
-                        - px(crate::terminal::view::BLOCK_GUTTER_GAP
-                            + crate::terminal::view::BLOCK_GUTTER_WIDTH),
+                        - px(terminal::view::BLOCK_GUTTER_GAP + terminal::view::BLOCK_GUTTER_WIDTH),
                     top,
                 ),
-                size(px(crate::terminal::view::BLOCK_GUTTER_WIDTH), height),
+                size(px(terminal::view::BLOCK_GUTTER_WIDTH), height),
             ),
-            gpui::rgba((chrome.accent << 8) | gutter_alpha),
+            rgba((chrome.accent << 8) | gutter_alpha),
         ));
 
         if chrome.selected {
-            window.paint_quad(gpui::fill(
+            window.paint_quad(fill(
                 Bounds::new(point(bounds.left(), top), size(bounds.size.width, height)),
-                gpui::rgba(crate::terminal::element::BLOCK_SELECTED_TINT),
+                rgba(terminal::element::BLOCK_SELECTED_TINT),
             ));
         }
     }
@@ -932,7 +932,7 @@ pub(crate) fn paint_frozen_chrome(
         let runs = [TextRun {
             len: header.len(),
             font: style.font(),
-            color: gpui::Hsla::from(gpui::rgb(0x7f8c98)),
+            color: Hsla::from(rgb(0x7f8c98)),
             background_color: None,
             underline: None,
             strikethrough: None,
@@ -987,7 +987,7 @@ mod tests {
         let info = HandleItemInfo {
             handle,
             rows,
-            accent: crate::terminal::element::BLOCK_SUCCESS_COLOR,
+            accent: terminal::element::BLOCK_SUCCESS_COLOR,
             header: Some("cmd · ✓".into()),
         };
         (t, info)
@@ -1348,12 +1348,12 @@ mod tests {
                 rows: 1,
             },
         ]);
-        let t0 = std::time::UNIX_EPOCH;
+        let t0 = time::UNIX_EPOCH;
         store.update_meta(1, |m| {
             m.command = Some("build".into());
             m.exit_code = Some(0);
             m.started_at = Some(t0);
-            m.ended_at = Some(t0 + std::time::Duration::from_secs(2));
+            m.ended_at = Some(t0 + time::Duration::from_secs(2));
         });
         store.update_meta(2, |m| {
             m.command = Some("bad".into());
@@ -1361,10 +1361,10 @@ mod tests {
         });
 
         let info1 = handle_item_info(&store.items()[0]).unwrap();
-        assert_eq!(info1.accent, crate::terminal::element::BLOCK_SUCCESS_COLOR);
+        assert_eq!(info1.accent, terminal::element::BLOCK_SUCCESS_COLOR);
         assert_eq!(info1.header.as_deref(), Some("build · ✓ 2.0s"));
         let info2 = handle_item_info(&store.items()[1]).unwrap();
-        assert_eq!(info2.accent, crate::terminal::element::BLOCK_FAILURE_COLOR);
+        assert_eq!(info2.accent, terminal::element::BLOCK_FAILURE_COLOR);
         assert_eq!(info2.header.as_deref(), Some("bad · ✗ 127"));
     }
 
@@ -1417,10 +1417,10 @@ mod tests {
 
     #[test]
     fn live_chrome_marks_running_pending_item() {
-        let running = Some(("build", std::time::UNIX_EPOCH));
+        let running = Some(("build", time::UNIX_EPOCH));
         let chrome = live_chrome(3, 2, 10.0, running, true).unwrap();
         assert_eq!((chrome.item, chrome.top, chrome.bottom), (3, 0.0, 20.0));
-        assert_eq!(chrome.accent, crate::terminal::element::BLOCK_RUNNING_COLOR);
+        assert_eq!(chrome.accent, terminal::element::BLOCK_RUNNING_COLOR);
         assert!(chrome.header.as_deref().unwrap().starts_with("build · ⟳ "));
         assert!(chrome.selected);
 
@@ -1431,7 +1431,7 @@ mod tests {
     fn live_chrome_marks_idle_prompt() {
         let chrome = live_chrome(2, 3, 10.0, None, true).unwrap();
         assert_eq!((chrome.item, chrome.top, chrome.bottom), (2, 0.0, 30.0));
-        assert_eq!(chrome.accent, crate::terminal::element::BLOCK_INPUT_COLOR);
+        assert_eq!(chrome.accent, terminal::element::BLOCK_INPUT_COLOR);
         assert_eq!(chrome.header, None);
         assert!(chrome.selected);
 
@@ -1488,7 +1488,7 @@ mod tests {
 
         let q: ReleaseQueue = Default::default();
         let generation = graphic_to_generation(data, &q).unwrap();
-        let mut generations = std::collections::HashMap::new();
+        let mut generations = collections::HashMap::new();
         generations.insert(1u32, generation);
 
         let images = frozen_block_images(&placements, &generations, &(0..3), 10.0, ITEM_PAD_ROWS);
@@ -1547,7 +1547,7 @@ mod tests {
 /// use this one value per frame so heights, hit-testing, and scroll math agree.
 pub(crate) fn block_pad_rows(cx: &App) -> f32 {
     if cx.global::<AppSettings>().command_blocks {
-        crate::terminal::block_list::ITEM_PAD_ROWS
+        terminal::block_list::ITEM_PAD_ROWS
     } else {
         0.0
     }
@@ -1587,7 +1587,7 @@ pub(crate) struct BlockListRenderMetrics {
 }
 
 pub(crate) fn block_list_render_metrics(
-    store: &nmt_terminal::block_store::BlockStore,
+    store: &BlockStore,
     live_rows: usize,
     history_rows: u64,
     cols: u32,
@@ -1603,7 +1603,7 @@ pub(crate) fn block_list_render_metrics(
     let mut last_item_px = 0.0;
 
     for (ix, item) in items.iter().enumerate() {
-        let item_px = crate::terminal::block_list::item_px(item, cols, cell_h, pad_rows);
+        let item_px = terminal::block_list::item_px(item, cols, cell_h, pad_rows);
         if ix < offset.item_ix {
             offset_px += item_px;
         }
@@ -1614,8 +1614,8 @@ pub(crate) fn block_list_render_metrics(
     }
 
     let tail_px = history_rows as f32 * cell_h;
-    let total_px = frozen_px
-        + crate::terminal::block_list::live_item_px(history_rows, live_rows, cell_h, pad_rows);
+    let total_px =
+        frozen_px + terminal::block_list::live_item_px(history_rows, live_rows, cell_h, pad_rows);
     if offset.item_ix >= item_count {
         offset_px = total_px;
     } else if offset.item_ix <= store_len {
@@ -1641,18 +1641,18 @@ pub(crate) fn block_list_live_chrome(
     in_flight: Option<&InFlightBlock>,
     has_open_prompt: bool,
     selected: bool,
-) -> Option<crate::terminal::block_list::FrozenItemChrome> {
+) -> Option<terminal::block_list::FrozenItemChrome> {
     let running = in_flight.map(|block| (block.command.as_str(), block.started_at));
     if running.is_none() && !has_open_prompt {
         return None;
     }
-    crate::terminal::block_list::live_chrome(live_index, live_rows, cell_h, running, selected)
+    terminal::block_list::live_chrome(live_index, live_rows, cell_h, running, selected)
 }
 
 pub(crate) fn offset_frozen_chrome(
-    mut chrome: crate::terminal::block_list::FrozenItemChrome,
+    mut chrome: terminal::block_list::FrozenItemChrome,
     item_top: f32,
-) -> crate::terminal::block_list::FrozenItemChrome {
+) -> terminal::block_list::FrozenItemChrome {
     chrome.top += item_top;
     chrome.bottom += item_top;
     chrome.header_y += item_top;
@@ -1692,6 +1692,8 @@ mod layout_tests {
     use nmt_terminal::event::BlockEvent;
     use nmt_terminal::ghostty::BlockHandle;
 
+    use crate::terminal;
+
     fn block_item(seq: u64, id: u64, rows: usize) -> BlockEvent {
         BlockEvent::EngineBlock {
             seq,
@@ -1708,14 +1710,14 @@ mod layout_tests {
         store.apply([block_item(1, 1, 1)]);
         // One 1-row item = 1 content row + 2 pad rows = 30px; the live grid
         // then starts after its own top pad (10px), minus the 5px scroll.
-        let pad = crate::terminal::block_list::ITEM_PAD_ROWS;
+        let pad = terminal::block_list::ITEM_PAD_ROWS;
         let frozen_px: f32 = store
             .items()
             .iter()
-            .map(|item| crate::terminal::block_list::item_px(item, 80, 10.0, pad))
+            .map(|item| terminal::block_list::item_px(item, 80, 10.0, pad))
             .sum();
         assert_eq!(
-            crate::terminal::block_list::block_list_active_top_px(frozen_px, 0.0, 10.0, pad, 5.0),
+            terminal::block_list::block_list_active_top_px(frozen_px, 0.0, 10.0, pad, 5.0),
             35.0
         );
         // Compact presentation: no pads anywhere, so the live grid starts
@@ -1723,11 +1725,11 @@ mod layout_tests {
         let compact_px: f32 = store
             .items()
             .iter()
-            .map(|item| crate::terminal::block_list::item_px(item, 80, 10.0, 0.0))
+            .map(|item| terminal::block_list::item_px(item, 80, 10.0, 0.0))
             .sum();
         assert_eq!(compact_px, 10.0, "1 content row, no pad rows");
         assert_eq!(
-            crate::terminal::block_list::block_list_active_top_px(compact_px, 0.0, 10.0, 0.0, 5.0),
+            terminal::block_list::block_list_active_top_px(compact_px, 0.0, 10.0, 0.0, 5.0),
             5.0
         );
     }
@@ -1739,13 +1741,13 @@ mod layout_tests {
         let mut store = BlockStore::default();
         store.apply([block_item(1, 1, 1)]);
 
-        let metrics = crate::terminal::block_list::block_list_render_metrics(
+        let metrics = terminal::block_list::block_list_render_metrics(
             &store,
             2,
             1,
             80,
             10.0,
-            crate::terminal::block_list::ITEM_PAD_ROWS,
+            terminal::block_list::ITEM_PAD_ROWS,
             ListOffset {
                 item_ix: 1,
                 offset_in_item: px(3.0),
@@ -1767,20 +1769,20 @@ mod layout_tests {
     #[test]
     fn selected_item_tracks_store_head_eviction() {
         assert_eq!(
-            crate::terminal::block_list::shift_selected_item_for_eviction(Some(4), 2, 10),
+            terminal::block_list::shift_selected_item_for_eviction(Some(4), 2, 10),
             Some(2)
         );
         assert_eq!(
-            crate::terminal::block_list::shift_selected_item_for_eviction(Some(1), 2, 10),
+            terminal::block_list::shift_selected_item_for_eviction(Some(1), 2, 10),
             None
         );
         assert_eq!(
-            crate::terminal::block_list::shift_selected_item_for_eviction(Some(10), 3, 7),
+            terminal::block_list::shift_selected_item_for_eviction(Some(10), 3, 7),
             Some(7),
             "old live index shifts to the new live index"
         );
         assert_eq!(
-            crate::terminal::block_list::shift_selected_item_for_eviction(Some(11), 3, 7),
+            terminal::block_list::shift_selected_item_for_eviction(Some(11), 3, 7),
             None
         );
     }
@@ -1788,11 +1790,11 @@ mod layout_tests {
     #[test]
     fn block_list_alignment_follows_input_style_anchor() {
         assert_eq!(
-            crate::terminal::block_list::block_list_alignment(false),
+            terminal::block_list::block_list_alignment(false),
             ListAlignment::Top
         );
         assert_eq!(
-            crate::terminal::block_list::block_list_alignment(true),
+            terminal::block_list::block_list_alignment(true),
             ListAlignment::Bottom
         );
     }
@@ -1800,32 +1802,30 @@ mod layout_tests {
     #[test]
     fn block_list_live_chrome_marks_idle_open_prompt() {
         let chrome =
-            crate::terminal::block_list::block_list_live_chrome(4, 2, 10.0, None, true, false)
-                .unwrap();
+            terminal::block_list::block_list_live_chrome(4, 2, 10.0, None, true, false).unwrap();
         assert_eq!(chrome.item, 4);
-        assert_eq!(chrome.accent, crate::terminal::element::BLOCK_INPUT_COLOR);
+        assert_eq!(chrome.accent, terminal::element::BLOCK_INPUT_COLOR);
         assert_eq!(chrome.header, None);
         assert!(!chrome.selected);
 
         assert!(
-            crate::terminal::block_list::block_list_live_chrome(4, 2, 10.0, None, false, false)
-                .is_none()
+            terminal::block_list::block_list_live_chrome(4, 2, 10.0, None, false, false).is_none()
         );
     }
 
     #[test]
     fn frozen_chrome_offset_moves_header_with_item() {
-        let chrome = crate::terminal::block_list::FrozenItemChrome {
+        let chrome = terminal::block_list::FrozenItemChrome {
             item: 0,
             top: 0.0,
             bottom: 40.0,
             header_y: 10.0,
-            accent: crate::terminal::element::BLOCK_SUCCESS_COLOR,
+            accent: terminal::element::BLOCK_SUCCESS_COLOR,
             header: Some("build · ✓".into()),
             selected: false,
         };
 
-        let chrome = crate::terminal::block_list::offset_frozen_chrome(chrome, 80.0);
+        let chrome = terminal::block_list::offset_frozen_chrome(chrome, 80.0);
         assert_eq!(
             (chrome.top, chrome.bottom, chrome.header_y),
             (80.0, 120.0, 90.0)

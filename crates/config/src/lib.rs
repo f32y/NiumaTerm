@@ -24,10 +24,16 @@ use std::default::Default;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{OnceLock, RwLock};
+use std::{env, fs, io, mem};
 
 use colors::Colors;
+use dirs::home_dir;
+use nmt_themes::{THEMES as BUILTIN_THEMES, get as get_builtin_theme};
 use serde::{Deserialize, Serialize};
 use theme::{AdaptiveColors, AdaptiveTheme, AppearanceTheme, Theme, UiTheme};
+use toml::de::Error as TomlDeError;
+use toml::ser::Error as TomlSerError;
+use toml::{from_str as parse_toml, to_string as serialize_toml};
 use toml_edit::{DocumentMut, Item, Table, value};
 use tracing::warn;
 
@@ -227,36 +233,32 @@ fn selected_config_dir(path: PathBuf) -> PathBuf {
 #[cfg(target_os = "macos")]
 #[inline]
 fn base_config_dir_path() -> PathBuf {
-    std::env::var("NMT_CONFIG_HOME")
+    env::var("NMT_CONFIG_HOME")
         .map(PathBuf::from)
-        .unwrap_or(dirs::home_dir().unwrap().join(".config").join("NiumaTerm"))
+        .unwrap_or(home_dir().unwrap().join(".config").join("NiumaTerm"))
 }
 
 #[cfg(target_os = "windows")]
 #[inline]
 fn base_config_dir_path() -> PathBuf {
-    std::env::var("NMT_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or(
-            dirs::home_dir()
-                .unwrap()
-                .join("AppData")
-                .join("Local")
-                .join("NiumaTerm"),
-        )
+    env::var("NMT_CONFIG_HOME").map(PathBuf::from).unwrap_or(
+        home_dir()
+            .unwrap()
+            .join("AppData")
+            .join("Local")
+            .join("NiumaTerm"),
+    )
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 #[inline]
 fn base_config_dir_path() -> PathBuf {
-    std::env::var("NMT_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or(
-            std::env::var("XDG_CONFIG_HOME")
-                .map(PathBuf::from)
-                .unwrap_or(dirs::home_dir().unwrap().join(".config"))
-                .join("NiumaTerm"),
-        )
+    env::var("NMT_CONFIG_HOME").map(PathBuf::from).unwrap_or(
+        env::var("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .unwrap_or(home_dir().unwrap().join(".config"))
+            .join("NiumaTerm"),
+    )
 }
 
 #[inline]
@@ -277,8 +279,8 @@ impl Config {
     #[cfg(test)]
     fn load_from_path(path: &PathBuf) -> Self {
         if path.exists() {
-            let content = std::fs::read_to_string(path).unwrap();
-            let decoded: Config = toml::from_str(&content).unwrap_or_else(|_| Config::default());
+            let content = fs::read_to_string(path).unwrap();
+            let decoded: Config = parse_toml(&content).unwrap_or_else(|_| Config::default());
             decoded
         } else {
             Config::default()
@@ -287,15 +289,15 @@ impl Config {
     #[cfg(test)]
     fn load_from_path_without_fallback(path: &PathBuf) -> Result<Self, String> {
         if path.exists() {
-            let content = std::fs::read_to_string(path).unwrap();
-            match toml::from_str::<Config>(&content) {
+            let content = fs::read_to_string(path).unwrap();
+            match parse_toml::<Config>(&content) {
                 Ok(mut decoded) => {
                     let theme = &decoded.theme;
                     if theme.is_empty() {
                         return Ok(decoded);
                     }
 
-                    let tmp = std::env::temp_dir();
+                    let tmp = env::temp_dir();
                     let path = theme_file_path(&tmp, theme);
                     if let Ok(loaded_theme) = Config::load_theme(&path) {
                         decoded.ui_theme = loaded_theme.ui_theme();
@@ -342,17 +344,17 @@ impl Config {
 
     fn load_theme(path: &PathBuf) -> Result<Theme, String> {
         let content = if path.exists() {
-            std::fs::read_to_string(path).map_err(|err| err.to_string())?
+            fs::read_to_string(path).map_err(|err| err.to_string())?
         } else {
             let name = path
                 .file_stem()
                 .and_then(|name| name.to_str())
                 .ok_or_else(|| String::from("invalid theme filepath"))?;
-            nmt_themes::get(name)
+            get_builtin_theme(name)
                 .map(str::to_owned)
                 .ok_or_else(|| String::from("filepath does not exist"))?
         };
-        toml::from_str::<Theme>(&content)
+        parse_toml::<Theme>(&content)
             .map_err(|err_message| format!("error parsing: {err_message:?}"))
     }
 
@@ -367,9 +369,9 @@ impl Config {
 
     /// Load every valid `.toml` theme in the per-user themes directory.
     pub fn load_themes() -> Vec<(String, Theme)> {
-        let mut themes = nmt_themes::THEMES
+        let mut themes = BUILTIN_THEMES
             .iter()
-            .filter_map(|builtin| match toml::from_str::<Theme>(builtin.source) {
+            .filter_map(|builtin| match parse_toml::<Theme>(builtin.source) {
                 Ok(theme) => Some((builtin.name.to_string(), theme)),
                 Err(err) => {
                     warn!("ignored invalid built-in theme {}: {err}", builtin.name);
@@ -385,7 +387,7 @@ impl Config {
     }
 
     fn load_themes_from(path: &Path) -> Vec<(String, Theme)> {
-        let Ok(entries) = std::fs::read_dir(path) else {
+        let Ok(entries) = fs::read_dir(path) else {
             return Vec::new();
         };
         let mut themes = entries
@@ -407,16 +409,16 @@ impl Config {
         themes
     }
 
-    pub fn to_string(&self) -> Result<String, toml::ser::Error> {
-        toml::to_string(self)
+    pub fn to_string(&self) -> Result<String, TomlSerError> {
+        serialize_toml(self)
     }
 
     pub fn load() -> Self {
         let config_path = config_dir_path();
         let path = config_file_path();
         if path.exists() {
-            let content = std::fs::read_to_string(path).unwrap();
-            match toml::from_str::<Config>(&content) {
+            let content = fs::read_to_string(path).unwrap();
+            match parse_toml::<Config>(&content) {
                 Ok(mut decoded) => {
                     let theme = &decoded.theme;
                     if theme.is_empty() {
@@ -445,15 +447,15 @@ impl Config {
         }
     }
 
-    pub fn load_for_startup() -> Result<Self, toml::de::Error> {
+    pub fn load_for_startup() -> Result<Self, TomlDeError> {
         Config::load_for_startup_from(&config_file_path(), &config_dir_path())
     }
 
-    fn load_for_startup_from(path: &Path, config_dir: &Path) -> Result<Self, toml::de::Error> {
-        let Some(content) = std::fs::read_to_string(path).ok() else {
+    fn load_for_startup_from(path: &Path, config_dir: &Path) -> Result<Self, TomlDeError> {
+        let Some(content) = fs::read_to_string(path).ok() else {
             return Ok(Config::default());
         };
-        let mut decoded = toml::from_str::<Config>(&content)?;
+        let mut decoded = parse_toml::<Config>(&content)?;
         let theme = &decoded.theme;
         if !theme.is_empty() {
             let path = theme_file_path(&config_dir.join("themes"), theme);
@@ -471,8 +473,8 @@ impl Config {
     pub fn try_load() -> Result<Self, ConfigError> {
         let path = config_file_path();
         if path.exists() {
-            match std::fs::read_to_string(path) {
-                Ok(content) => match toml::from_str::<Config>(&content) {
+            match fs::read_to_string(path) {
+                Ok(content) => match parse_toml::<Config>(&content) {
                     Ok(mut decoded) => {
                         let theme = &decoded.theme;
                         let theme_path = config_dir_path().join("themes");
@@ -652,9 +654,8 @@ impl Config {
 
         // Clamp after platform merge so both the base and any override go
         // through the same bound.
-        self.navigation.unfocused_split_opacity = crate::navigation::clamp_unfocused_split_opacity(
-            self.navigation.unfocused_split_opacity,
-        );
+        self.navigation.unfocused_split_opacity =
+            navigation::clamp_unfocused_split_opacity(self.navigation.unfocused_split_opacity);
 
         // Merge renderer fields individually
         if let Some(renderer_overwrite) = &platform_config.renderer {
@@ -840,7 +841,7 @@ pub fn save_settings(
     remote_session: &RemoteSession,
     profiles: &[Profile],
     default_profile: &str,
-) -> std::io::Result<()> {
+) -> io::Result<()> {
     save_settings_to(
         &config_file_path(),
         theme,
@@ -864,11 +865,11 @@ fn save_settings_to(
     remote_session: &RemoteSession,
     profiles: &[Profile],
     default_profile: &str,
-) -> std::io::Result<()> {
-    let mut doc = match std::fs::read_to_string(path) {
+) -> io::Result<()> {
+    let mut doc = match fs::read_to_string(path) {
         Ok(content) => content.parse::<DocumentMut>().map_err(|err| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
+            io::Error::new(
+                io::ErrorKind::InvalidData,
                 format!("config.toml is not valid TOML, not saving settings: {err}"),
             )
         })?,
@@ -889,11 +890,11 @@ fn save_settings_to(
     );
 
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
+        fs::create_dir_all(dir)?;
     }
     let tmp = path.with_extension("toml.tmp");
-    std::fs::write(&tmp, doc.to_string())?;
-    std::fs::rename(&tmp, path)?;
+    fs::write(&tmp, doc.to_string())?;
+    fs::rename(&tmp, path)?;
     Ok(())
 }
 
@@ -956,7 +957,7 @@ fn patch_settings_document(
 pub(crate) fn ensure_explicit_table(doc: &mut DocumentMut, key: &str) {
     let item = doc.entry(key).or_insert_with(|| Item::Table(Table::new()));
     if !item.is_table() {
-        let previous = std::mem::replace(item, Item::None);
+        let previous = mem::replace(item, Item::None);
         *item = Item::Table(previous.into_table().unwrap_or_default());
     }
 }
@@ -1043,7 +1044,7 @@ mod tests {
         assert!(out.contains("# my terminal config"));
         assert!(out.contains("width = 960"));
 
-        let config: Config = toml::from_str(&out).unwrap();
+        let config: Config = parse_toml(&out).unwrap();
         assert_eq!(config.appearance, sample_appearance());
         assert_eq!(config.agent, sample_agent());
         assert_eq!(config.system, sample_system());
@@ -1063,14 +1064,14 @@ mod tests {
 
         let out = doc.to_string();
         assert!(out.contains("fonts = { size = 12.0, hinting = true }"));
-        let config: Config = toml::from_str(&out).unwrap();
+        let config: Config = parse_toml(&out).unwrap();
         assert_eq!(config.appearance, sample_appearance());
     }
 
     #[test]
     fn save_settings_to_creates_updates_and_rejects_invalid() {
-        let dir = std::env::temp_dir().join("NiumaTerm-settings-save-test");
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = env::temp_dir().join("NiumaTerm-settings-save-test");
+        let _ = fs::remove_dir_all(&dir);
         let path = dir.join("config.toml");
 
         let save = || {
@@ -1088,21 +1089,21 @@ mod tests {
         };
 
         save().unwrap();
-        let config: Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let config: Config = parse_toml(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(config.appearance, sample_appearance());
         assert_eq!(config.agent, sample_agent());
         assert_eq!(config.theme, "test-theme");
 
         save().unwrap();
-        let config: Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let config: Config = parse_toml(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(config.profiles.default, "PowerShell");
         assert!(!path.with_extension("toml.tmp").exists());
 
-        std::fs::write(&path, "not [ valid").unwrap();
+        fs::write(&path, "not [ valid").unwrap();
         assert!(save().is_err());
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "not [ valid");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "not [ valid");
 
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1113,12 +1114,12 @@ mod tests {
     }
 
     fn tmp_dir() -> PathBuf {
-        std::env::temp_dir()
+        env::temp_dir()
     }
 
     fn create_temporary_config(prefix: &str, toml_str: &str) -> Config {
         let file_name = tmp_dir().join(format!("test-rio-{prefix}-config.toml"));
-        let mut file = std::fs::File::create(&file_name).unwrap();
+        let mut file = fs::File::create(&file_name).unwrap();
         writeln!(file, "{toml_str}").unwrap();
 
         match Config::load_from_path_without_fallback(&file_name) {
@@ -1130,7 +1131,7 @@ mod tests {
     /// Terminal palette of the built-in default theme, which a config that
     /// doesn't name a theme resolves to.
     fn default_theme_colors() -> Colors {
-        toml::from_str::<Theme>(nmt_themes::get(&default_theme()).unwrap())
+        parse_toml::<Theme>(get_builtin_theme(&default_theme()).unwrap())
             .unwrap()
             .colors
             .terminal
@@ -1138,7 +1139,7 @@ mod tests {
 
     fn create_temporary_theme(theme: &str, toml_str: &str) {
         let file_name = tmp_dir().join(theme).with_extension("toml");
-        let mut file = std::fs::File::create(file_name).unwrap();
+        let mut file = fs::File::create(file_name).unwrap();
         writeln!(file, "{toml_str}").unwrap();
     }
 
@@ -1159,17 +1160,17 @@ mod tests {
     #[test]
     fn startup_load_defaults_when_missing_and_errors_on_bad_toml() {
         let dir = tmp_dir().join("NiumaTerm-startup-config-test");
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&dir);
         let path = dir.join("config.toml");
 
         let missing = Config::load_for_startup_from(&path, &dir).unwrap();
         assert_eq!(missing, Config::default());
 
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(&path, "not [ valid").unwrap();
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(&path, "not [ valid").unwrap();
         assert!(Config::load_for_startup_from(&path, &dir).is_err());
 
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1204,7 +1205,7 @@ mod tests {
         let file_name = tmp_dir()
             .join("test-rio-invalid-config")
             .with_extension("toml");
-        let mut file = std::fs::File::create(&file_name).unwrap();
+        let mut file = fs::File::create(&file_name).unwrap();
         writeln!(file, "{toml_str}").unwrap();
 
         let result = Config::load_from_path(&file_name);
@@ -1228,7 +1229,7 @@ mod tests {
         "#,
         );
 
-        assert_eq!(result.renderer.backend, crate::renderer::Backend::Cpu);
+        assert_eq!(result.renderer.backend, renderer::Backend::Cpu);
         assert_eq!(result.theme, default_theme());
         // Colors
         assert_eq!(result.colors, default_theme_colors());
@@ -1336,9 +1337,9 @@ mod tests {
         assert_eq!(result.window.opacity, 0.5);
         assert_eq!(
             result.window.background_image,
-            Some(crate::render_types::ImageProperties {
+            Some(render_types::ImageProperties {
                 path: String::from("my-image-path.png"),
-                ..crate::render_types::ImageProperties::default()
+                ..render_types::ImageProperties::default()
             })
         );
         // Colors
@@ -1404,21 +1405,21 @@ mod tests {
 
     #[test]
     fn theme_list_loads_valid_toml_files_in_name_order() {
-        let dir = std::env::temp_dir().join("NiumaTerm-theme-list-test");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
+        let dir = env::temp_dir().join("NiumaTerm-theme-list-test");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
             dir.join("Zulu.toml"),
             "[colors.terminal]\nbackground = '#111111'\n",
         )
         .unwrap();
-        std::fs::write(
+        fs::write(
             dir.join("alpha.toml"),
             "[colors.terminal]\nbackground = '#222222'\n",
         )
         .unwrap();
-        std::fs::write(dir.join("invalid.toml"), "[colors\n").unwrap();
-        std::fs::write(dir.join("ignored.txt"), "[colors.terminal]\n").unwrap();
+        fs::write(dir.join("invalid.toml"), "[colors\n").unwrap();
+        fs::write(dir.join("ignored.txt"), "[colors.terminal]\n").unwrap();
 
         let themes = Config::load_themes_from(&dir);
         assert_eq!(
@@ -1429,12 +1430,12 @@ mod tests {
             ["alpha", "Zulu"]
         );
 
-        std::fs::remove_dir_all(dir).unwrap();
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
     fn built_in_themes_load_without_user_files() {
-        for builtin in nmt_themes::THEMES {
+        for builtin in BUILTIN_THEMES {
             let path = tmp_dir()
                 .join("NiumaTerm-missing-builtins")
                 .join(builtin.name)
@@ -1530,7 +1531,7 @@ mod tests {
         "#,
         );
 
-        assert_eq!(result.renderer.backend, crate::renderer::Backend::Cpu);
+        assert_eq!(result.renderer.backend, renderer::Backend::Cpu);
         // Developer
         assert_eq!(result.developer.log_level, String::from("INFO"));
         assert!(result.developer.enable_fps_counter);
@@ -1727,7 +1728,7 @@ mod tests {
         result.overwrite_based_on_platform();
 
         // Backend should be set
-        assert_eq!(result.renderer.backend, crate::renderer::Backend::Cpu);
+        assert_eq!(result.renderer.backend, renderer::Backend::Cpu);
         // Other fields should be preserved
         assert!(result.renderer.disable_unfocused_render);
     }

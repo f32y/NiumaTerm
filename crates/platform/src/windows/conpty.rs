@@ -1,9 +1,11 @@
-use std::ffi::OsString;
+use std::ffi::{self, OsString};
 use std::io::{Error, Result};
 use std::os::windows::ffi::OsStrExt as _;
 use std::os::windows::io::IntoRawHandle;
-use std::{mem, ptr};
+use std::{env, fs, mem, ptr};
 
+use libc::c_ushort;
+use miow::pipe::anonymous;
 use tracing::*;
 use windows_sys::Win32::Foundation::{CloseHandle, ERROR_MORE_DATA, GetLastError, HANDLE, S_OK};
 use windows_sys::Win32::System::Console::{COORD, HPCON};
@@ -22,10 +24,10 @@ use windows_sys::Win32::System::Threading::{
 use windows_sys::core::{HRESULT, PWSTR};
 use windows_sys::{s, w};
 
-use crate::Winsize;
 use crate::windows::child::ChildExitWatcher;
 use crate::windows::pipes::{EventedAnonRead, EventedAnonWrite};
 use crate::windows::{Pty, cmdline, win32_string};
+use crate::{Winsize, job_management};
 
 /// Load the pseudoconsole API from conpty.dll if possible, otherwise use the
 /// standard Windows API.
@@ -63,13 +65,9 @@ impl ConptyApi {
         {
             use std::io::Write as _;
 
-            let path = std::env::temp_dir().join("rio_conpty.log");
+            let path = env::temp_dir().join("rio_conpty.log");
 
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&path)
-            {
+            if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&path) {
                 let _ = writeln!(f, "[conpty] backend=conpty.dll");
             }
         }
@@ -175,21 +173,21 @@ pub fn new(
     starting_title: Option<&str>,
 ) -> Result<Pty> {
     let api = ConptyApi::new();
-    let use_job = crate::job_management();
+    let use_job = job_management();
     let mut pty_handle: HPCON = 0;
 
     // Passing 0 as the size parameter allows the "system default" buffer
     // size to be used. There may be small performance and memory advantages
     // to be gained by tuning this in the future, but it's likely a reasonable
     // start point.
-    let (conout, conout_pty_handle) = miow::pipe::anonymous(0)?;
-    let (conin_pty_handle, conin) = miow::pipe::anonymous(0)?;
+    let (conout, conout_pty_handle) = anonymous(0)?;
+    let (conin_pty_handle, conin) = anonymous(0)?;
 
     let winsize = Winsize {
-        ws_row: rows as libc::c_ushort,
-        ws_col: columns as libc::c_ushort,
-        ws_xpixel: 0 as libc::c_ushort,
-        ws_ypixel: 0 as libc::c_ushort,
+        ws_row: rows as c_ushort,
+        ws_col: columns as c_ushort,
+        ws_xpixel: 0 as c_ushort,
+        ws_ypixel: 0 as c_ushort,
     };
 
     // Create the Pseudo Console, using the pipes. Prefer Windows Terminal's
@@ -225,7 +223,7 @@ pub fn new(
 
     startup_info_ex.StartupInfo.lpTitle = title
         .as_mut()
-        .map_or(std::ptr::null_mut(), |title| title.as_mut_ptr());
+        .map_or(ptr::null_mut(), |title| title.as_mut_ptr());
 
     startup_info_ex.StartupInfo.cb = mem::size_of::<STARTUPINFOEXW>() as u32;
 
@@ -276,7 +274,7 @@ pub fn new(
             startup_info_ex.lpAttributeList,
             0,
             PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE as usize,
-            pty_handle as *mut std::ffi::c_void,
+            pty_handle as *mut ffi::c_void,
             mem::size_of::<HPCON>(),
             ptr::null_mut(),
             ptr::null_mut(),
@@ -351,7 +349,7 @@ pub fn new(
 /// Windows environment names are case-insensitive, so an override replaces an
 /// inherited spelling such as `Path` even when it is supplied as `PATH`.
 fn build_environment_block(overrides: &[(String, String)]) -> Vec<u16> {
-    let mut values: Vec<(OsString, OsString)> = std::env::vars_os().collect();
+    let mut values: Vec<(OsString, OsString)> = env::vars_os().collect();
     // ConPTY supports 24-bit SGR colors, but Windows does not provide a standard
     // capability variable, so child TUIs otherwise downgrade computed RGB styles.
     values.retain(|(key, _)| !key.eq_ignore_ascii_case("COLORTERM"));
@@ -360,7 +358,7 @@ fn build_environment_block(overrides: &[(String, String)]) -> Vec<u16> {
 
     // TERM_FEATURES=P advertises OSC 9;4 so progress-aware tools can distinguish a
     // transient status line from ordinary output instead of relying on CR heuristics.
-    let mut term_features = std::env::var("TERM_FEATURES").unwrap_or_default();
+    let mut term_features = env::var("TERM_FEATURES").unwrap_or_default();
 
     if !term_features.contains('P') {
         term_features.push('P');
@@ -422,7 +420,7 @@ pub fn job_other_process_count(job: isize) -> usize {
         QueryInformationJobObject(
             job as HANDLE,
             JobObjectBasicProcessIdList,
-            &mut buf as *mut _ as *mut std::ffi::c_void,
+            &mut buf as *mut _ as *mut ffi::c_void,
             mem::size_of::<PidListBuf>() as u32,
             ptr::null_mut(),
         )
@@ -454,7 +452,7 @@ unsafe fn create_kill_on_close_job(process: HANDLE) -> Option<HANDLE> {
         let ok = SetInformationJobObject(
             job,
             JobObjectExtendedLimitInformation,
-            &info as *const _ as *const std::ffi::c_void,
+            &info as *const _ as *const ffi::c_void,
             mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
         ) > 0;
 
@@ -502,7 +500,7 @@ impl From<Winsize> for COORD {
 
 #[cfg(test)]
 mod environment_tests {
-    use std::{mem, ptr};
+    use std::{env, fs, io, mem, process, ptr};
 
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{
@@ -523,21 +521,21 @@ mod environment_tests {
     #[test]
     fn overrides_replace_names_case_insensitively_without_mutating_parent() {
         let key = "NMT_PTY_ENV_REPLACEMENT_TEST";
-        unsafe { std::env::set_var(key, "parent") };
+        unsafe { env::set_var(key, "parent") };
         let block = build_environment_block(&[(key.to_lowercase(), "child".into())]);
         let matching: Vec<_> = entries(&block)
             .into_iter()
             .filter(|entry| entry.to_lowercase().starts_with(&key.to_lowercase()))
             .collect();
         assert_eq!(matching, [format!("{}=child", key.to_lowercase())]);
-        assert_eq!(std::env::var(key).as_deref(), Ok("parent"));
-        unsafe { std::env::remove_var(key) };
+        assert_eq!(env::var(key).as_deref(), Ok("parent"));
+        unsafe { env::remove_var(key) };
     }
 
     #[test]
     fn block_preserves_unrelated_values_and_unicode() {
         let inherited = "NMT_PTY_ENV_PRESERVE_TEST";
-        unsafe { std::env::set_var(inherited, "kept") };
+        unsafe { env::set_var(inherited, "kept") };
         let block = build_environment_block(&[("NMT_UNICODE".into(), "牛马终端🦀".into())]);
         let entries = entries(&block);
         assert!(
@@ -550,7 +548,7 @@ mod environment_tests {
                 .iter()
                 .any(|entry| entry == "NMT_UNICODE=牛马终端🦀")
         );
-        unsafe { std::env::remove_var(inherited) };
+        unsafe { env::remove_var(inherited) };
     }
 
     #[test]
@@ -596,8 +594,8 @@ mod environment_tests {
 
     #[test]
     fn create_process_receives_exact_agent_overrides() {
-        let output = std::env::temp_dir().join(format!("nmt-pty-env-{}.txt", std::process::id()));
-        let _ = std::fs::remove_file(&output);
+        let output = env::temp_dir().join(format!("nmt-pty-env-{}.txt", process::id()));
+        let _ = fs::remove_file(&output);
         let overrides = [
             ("NMT_AGENT_ROUTE".into(), "route-exact".into()),
             ("NMT_AGENT_HOOK_TOKEN".into(), "token-exact".into()),
@@ -626,14 +624,14 @@ mod environment_tests {
                 &mut process,
             )
         };
-        assert_ne!(created, 0, "{}", std::io::Error::last_os_error());
+        assert_ne!(created, 0, "{}", io::Error::last_os_error());
         unsafe {
             WaitForSingleObject(process.hProcess, INFINITE);
             CloseHandle(process.hThread);
             CloseHandle(process.hProcess);
         }
-        let values = std::fs::read_to_string(&output).unwrap();
-        let _ = std::fs::remove_file(output);
+        let values = fs::read_to_string(&output).unwrap();
+        let _ = fs::remove_file(output);
         assert_eq!(
             values.lines().collect::<Vec<_>>(),
             ["route-exact", "token-exact", "1"]

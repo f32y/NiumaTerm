@@ -1,6 +1,11 @@
+use std::time;
+
 use gpui::prelude::*;
-use gpui::{Context, DragMoveEvent, MouseButton, MouseDownEvent, div, px, relative};
+use gpui::{
+    Context, Div, DragMoveEvent, Empty, MouseButton, MouseDownEvent, Stateful, div, px, relative,
+};
 use gpui_component::ActiveTheme;
+use nmt_terminal::ghostty::ScrollbarInfo;
 
 use super::view::TerminalPane;
 
@@ -26,10 +31,10 @@ pub(super) fn scrollbar_offset_for_thumb(total: f64, len: f64, thumb_top: f32) -
 }
 
 pub(super) fn scrollbar_element(
-    sb: nmt_terminal::ghostty::ScrollbarInfo,
+    sb: ScrollbarInfo,
     opacity: f32,
     cx: &mut Context<TerminalPane>,
-) -> Option<gpui::Stateful<gpui::Div>> {
+) -> Option<Stateful<Div>> {
     let (thumb_top, thumb_height) =
         scrollbar_thumb_geometry(sb.total as f64, sb.offset as f64, sb.len as f64)?;
 
@@ -65,7 +70,7 @@ pub(super) fn scrollbar_element(
             )
             .on_drag(ScrollbarDrag, |_, _, _, cx| {
                 cx.stop_propagation();
-                cx.new(|_| gpui::Empty)
+                cx.new(|_| Empty)
             })
             .on_drag_move(
                 cx.listener(|this, event: &DragMoveEvent<ScrollbarDrag>, window, cx| {
@@ -88,13 +93,13 @@ pub(super) fn scrollbar_element(
 }
 
 /// How long the scrollbar stays visible after the last scroll action.
-pub(super) const SCROLLBAR_LINGER: std::time::Duration = std::time::Duration::from_millis(900);
+pub(super) const SCROLLBAR_LINGER: time::Duration = time::Duration::from_millis(900);
 /// How long the scrollbar takes to fade out after lingering.
-pub(super) const SCROLLBAR_FADE: std::time::Duration = std::time::Duration::from_millis(180);
+pub(super) const SCROLLBAR_FADE: time::Duration = time::Duration::from_millis(180);
 
 pub(super) fn scrollbar_opacity(
     dragging: bool,
-    elapsed_since_scroll: Option<std::time::Duration>,
+    elapsed_since_scroll: Option<time::Duration>,
 ) -> Option<f32> {
     if dragging {
         return Some(1.0);

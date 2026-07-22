@@ -1,13 +1,23 @@
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::{collections, mem, ops, sync, time};
 
+use gpui::RenderImage;
+use nmt_config::CursorShape;
+use nmt_config::colors::Colors;
 use nmt_config::local_state::TabState;
 use nmt_input::keyboard::ModifiersState;
+use nmt_input::{bracket_paste, encode_mouse_report};
+use nmt_terminal::block_store::BlockStore;
+use nmt_terminal::clipboard::{Clipboard, ClipboardType};
+use nmt_terminal::ghostty::{AcquiredBlock, BlockHandle, BlockRef, Palette, ScreenRowMeta};
 use nmt_terminal::render_buffer::RenderBuffer;
 use nmt_terminal::selection::{Selection, SelectionRange, SelectionType, WORD_DELIMITERS};
 use nmt_terminal::terminal::Mode;
 use nmt_terminal::terminal::pos::{Column, Line, Pos, Side};
 use parking_lot::Mutex;
+use tracing::{trace, warn};
 
+use crate::terminal;
 use crate::terminal::frame::TerminalFrame;
 use crate::terminal::metrics;
 use crate::terminal::session::{HostEvent, TerminalSession, TerminalSessionConfig};
@@ -94,16 +104,16 @@ impl TerminalSurface {
         self.session.engine.lock().title()
     }
 
-    pub(crate) fn set_theme_colors(&self, colors: &nmt_config::colors::Colors) {
+    pub(crate) fn set_theme_colors(&self, colors: &Colors) {
         self.session.engine.lock().set_theme_colors(colors);
     }
 
-    pub(crate) fn set_cursor_shape(&self, shape: nmt_config::CursorShape) -> bool {
+    pub(crate) fn set_cursor_shape(&self, shape: CursorShape) -> bool {
         let next = {
             let mut engine = self.session.engine.lock();
 
             if let Err(error) = engine.set_default_cursor_shape(shape) {
-                tracing::warn!("failed to update cursor shape: {error}");
+                warn!("failed to update cursor shape: {error}");
                 return false;
             }
 
@@ -113,7 +123,7 @@ impl TerminalSurface {
         let next = match next {
             Ok(next) => next,
             Err(error) => {
-                tracing::warn!("failed to refresh terminal after cursor shape change: {error}");
+                warn!("failed to refresh terminal after cursor shape change: {error}");
                 return false;
             }
         };
@@ -156,7 +166,7 @@ impl TerminalSurface {
         working_dir: Option<String>,
         starting_title: String,
         fixed_bottom_requested: bool,
-        cursor_shape: nmt_config::CursorShape,
+        cursor_shape: CursorShape,
         remote_session_enabled: bool,
         environment_overrides: Vec<(String, String)>,
     ) -> Result<Self, String> {
@@ -185,9 +195,7 @@ impl TerminalSurface {
     /// Number of processes beyond the shell itself in the shell's Job
     /// Object (requires the job-management setting; 0 otherwise).
     /// Shared frozen block-split history (renderer read side).
-    pub(crate) fn block_store(
-        &self,
-    ) -> std::sync::Arc<parking_lot::Mutex<nmt_terminal::block_store::BlockStore>> {
+    pub(crate) fn block_store(&self) -> sync::Arc<Mutex<BlockStore>> {
         self.session.block_store()
     }
 
@@ -207,10 +215,7 @@ impl TerminalSurface {
     /// Lock discipline: never call this while holding the block-store lock
     /// (the PTY thread nests engine → store; nesting store → engine here
     /// would deadlock).
-    pub(crate) fn acquire_block(
-        &self,
-        handle: nmt_terminal::ghostty::BlockHandle,
-    ) -> Option<nmt_terminal::ghostty::AcquiredBlock> {
+    pub(crate) fn acquire_block(&self, handle: BlockHandle) -> Option<AcquiredBlock> {
         self.session.engine.lock().acquire_block_snapshot(handle)
     }
 
@@ -239,11 +244,7 @@ impl TerminalSurface {
     }
 
     /// Read one row of a finished engine block for pointer URL hit-testing.
-    pub(crate) fn pointer_block_row(
-        &self,
-        handle: nmt_terminal::ghostty::BlockHandle,
-        row: usize,
-    ) -> Option<PointerRow> {
+    pub(crate) fn pointer_block_row(&self, handle: BlockHandle, row: usize) -> Option<PointerRow> {
         let engine = self.session.engine.lock();
         let palette = engine.color_palette();
         let cols = engine.block_cols(handle).unwrap_or_else(|| engine.cols()) as usize;
@@ -266,7 +267,7 @@ impl TerminalSurface {
         &self,
         block_id: u64,
         image_id: u32,
-    ) -> Option<std::sync::Arc<crate::terminal::graphics::ImageGeneration>> {
+    ) -> Option<sync::Arc<terminal::graphics::ImageGeneration>> {
         self.session
             .frozen_images()
             .lock()
@@ -278,7 +279,7 @@ impl TerminalSurface {
         &self,
         block_id: u64,
         image_id: u32,
-        generation: std::sync::Arc<crate::terminal::graphics::ImageGeneration>,
+        generation: sync::Arc<terminal::graphics::ImageGeneration>,
     ) {
         self.session
             .frozen_images()
@@ -292,9 +293,9 @@ impl TerminalSurface {
     /// per frozen image.
     pub(crate) fn frozen_image_generation(
         &self,
-        block: &nmt_terminal::ghostty::BlockRef,
+        block: &BlockRef,
         image_id: u32,
-    ) -> Option<std::sync::Arc<crate::terminal::graphics::ImageGeneration>> {
+    ) -> Option<sync::Arc<terminal::graphics::ImageGeneration>> {
         let release = self.session.generation_store().lock().release_queue();
 
         let data = {
@@ -302,7 +303,7 @@ impl TerminalSurface {
             engine.block_image_pixels(block, image_id)?
         };
 
-        crate::terminal::graphics::graphic_to_generation(data, &release)
+        terminal::graphics::graphic_to_generation(data, &release)
     }
 
     /// Engine-blocks mode: read active-grid scrollback rows (SCREEN
@@ -311,18 +312,18 @@ impl TerminalSurface {
     /// visible range; each row materializes as a display line.
     pub(crate) fn live_history_lines(
         &self,
-        rows: std::ops::Range<u64>,
-    ) -> Vec<(u64, crate::terminal::frame::TerminalLine)> {
+        rows: ops::Range<u64>,
+    ) -> Vec<(u64, terminal::frame::TerminalLine)> {
         if rows.is_empty() {
             return Vec::new();
         }
 
         let engine = self.session.engine.lock();
         let palette = engine.color_palette();
-        let default_fg = crate::terminal::frame::theme_default_foreground();
+        let default_fg = terminal::frame::theme_default_foreground();
 
         rows.filter_map(|row| {
-            let mut builder = crate::terminal::block_list::EngineRowBuilder::default();
+            let mut builder = terminal::block_list::EngineRowBuilder::default();
             engine
                 .read_screen_row_visit(row.min(u32::MAX as u64) as u32, &palette, |x, t, w, s| {
                     builder.push(x, t, w, &s, default_fg)
@@ -345,7 +346,7 @@ impl TerminalSurface {
     /// or lost their last frozen owner) so the caller can release their atlas tiles via
     /// `Window::drop_image`. Drains both live and frozen releases (one
     /// shared queue).
-    pub(crate) fn drain_released_images(&self) -> Vec<std::sync::Arc<gpui::RenderImage>> {
+    pub(crate) fn drain_released_images(&self) -> Vec<sync::Arc<RenderImage>> {
         self.session.generation_store().lock().drain_released()
     }
 
@@ -357,7 +358,7 @@ impl TerminalSurface {
         self.session.poll_events()
     }
 
-    pub(crate) fn in_flight_block(&self) -> Option<crate::terminal::session::InFlightBlock> {
+    pub(crate) fn in_flight_block(&self) -> Option<terminal::session::InFlightBlock> {
         self.session.in_flight_block()
     }
 
@@ -378,9 +379,9 @@ impl TerminalSurface {
             return;
         }
 
-        let mut clipboard = nmt_terminal::clipboard::Clipboard::default();
+        let mut clipboard = Clipboard::default();
 
-        clipboard.set(nmt_terminal::clipboard::ClipboardType::Clipboard, text);
+        clipboard.set(ClipboardType::Clipboard, text);
     }
 
     pub(crate) fn set_last_cwd(&self, cwd: String) {
@@ -508,7 +509,7 @@ impl TerminalSurface {
 
     pub(crate) fn frozen_selection_range(
         &self,
-        handle: nmt_terminal::ghostty::BlockHandle,
+        handle: BlockHandle,
         line: usize,
         col: u32,
         selection_type: SelectionType,
@@ -566,7 +567,7 @@ impl TerminalSurface {
 
         next.set_cursor_visible(buf.cursor_visible());
 
-        std::mem::swap(&mut *buf, &mut next);
+        mem::swap(&mut *buf, &mut next);
 
         changed
     }
@@ -603,7 +604,7 @@ impl TerminalSurface {
     }
 
     pub(crate) fn frame(&self, previous: Option<&TerminalFrame>) -> TerminalFrame {
-        let total_start = std::time::Instant::now();
+        let total_start = time::Instant::now();
         let selection = self.selection_range();
 
         // Resolve live image generations before taking the render-buffer lock so the
@@ -613,7 +614,7 @@ impl TerminalSurface {
         let generations = if self.session.has_live_images() {
             self.session.generation_store().lock().live_generations()
         } else {
-            std::collections::HashMap::new()
+            collections::HashMap::new()
         };
 
         let sel_us = total_start.elapsed().as_micros();
@@ -621,12 +622,12 @@ impl TerminalSurface {
         let frame = self.with_render_buffer(|buf| {
             // Time spent here is *after* the render_buffer lock is acquired, so
             // (total - sel - extract) is the lock-wait + selection lock cost.
-            let extract_start = std::time::Instant::now();
+            let extract_start = time::Instant::now();
             let frame =
                 TerminalFrame::from_render_buffer_reusing(buf, selection, &generations, previous);
             let extract_us = extract_start.elapsed().as_micros();
 
-            tracing::trace!(
+            trace!(
                 target: "perf",
                 rows = buf.rows(),
                 cols = buf.cols(),
@@ -637,7 +638,7 @@ impl TerminalSurface {
             frame
         });
 
-        tracing::trace!(
+        trace!(
             target: "perf",
             sel_us,
             total_us = total_start.elapsed().as_micros(),
@@ -809,9 +810,9 @@ impl TerminalSurface {
             return false;
         }
 
-        let mut clipboard = nmt_terminal::clipboard::Clipboard::default();
+        let mut clipboard = Clipboard::default();
 
-        clipboard.set(nmt_terminal::clipboard::ClipboardType::Clipboard, text);
+        clipboard.set(ClipboardType::Clipboard, text);
 
         self.clear_selection();
 
@@ -819,9 +820,9 @@ impl TerminalSurface {
     }
 
     fn paste(&self) -> bool {
-        let mut clipboard = nmt_terminal::clipboard::Clipboard::default();
+        let mut clipboard = Clipboard::default();
 
-        let text = clipboard.get(nmt_terminal::clipboard::ClipboardType::Clipboard);
+        let text = clipboard.get(ClipboardType::Clipboard);
 
         self.paste_text(&text)
     }
@@ -865,7 +866,7 @@ impl TerminalSurface {
         row: u16,
         modifiers: ModifiersState,
     ) -> bool {
-        let Some(msg) = nmt_input::encode_mouse_report(
+        let Some(msg) = encode_mouse_report(
             mode.contains(Mode::SGR_MOUSE),
             button,
             mouse_report_mods(modifiers),
@@ -896,8 +897,8 @@ fn selection_screen_range(
 }
 
 fn block_selection_range(
-    block: &nmt_terminal::ghostty::BlockRef,
-    palette: &nmt_terminal::ghostty::Palette,
+    block: &BlockRef,
+    palette: &Palette,
     line: usize,
     col: u32,
     selection_type: SelectionType,
@@ -1044,11 +1045,7 @@ fn push_pointer_cell(chars: &mut Vec<char>, x: u16, text: &str) {
     }
 }
 
-fn pointer_row(
-    mut chars: Vec<char>,
-    cols: usize,
-    meta: nmt_terminal::ghostty::ScreenRowMeta,
-) -> PointerRow {
+fn pointer_row(mut chars: Vec<char>, cols: usize, meta: ScreenRowMeta) -> PointerRow {
     // Pad to the full grid width so joined soft-wrapped rows keep every
     // segment exactly `cols` chars (column math stays trivial), and so a
     // blank tail reads as spaces that correctly terminate a URL token.
@@ -1074,7 +1071,7 @@ fn paste_payload(text: &str, bracketed: bool) -> Option<Vec<u8>> {
         body = body.replace("\x1b[201~", "");
     }
 
-    Some(nmt_input::bracket_paste(body.as_bytes(), bracketed))
+    Some(bracket_paste(body.as_bytes(), bracketed))
 }
 
 fn mouse_button_code(button: SurfaceMouseButton) -> Option<u8> {
@@ -1124,6 +1121,7 @@ fn should_scroll_to_bottom_before_input(offset: u64, total: u64, len: u64) -> bo
 
 #[cfg(test)]
 mod tests {
+    use nmt_config::local_state::TabState;
     use nmt_input::keyboard::ModifiersState;
     use nmt_terminal::ghostty::GhosttyTerminal;
     use nmt_terminal::render_buffer::RenderBuffer;
@@ -1206,7 +1204,7 @@ mod tests {
 
     #[test]
     fn tab_state_uses_last_reported_cwd() {
-        let launch = nmt_config::local_state::TabState {
+        let launch = TabState {
             name: None,
             user_named: false,
             shell: Some("pwsh.exe".into()),

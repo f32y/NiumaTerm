@@ -1,6 +1,7 @@
 use nmt_config::colors::hex_to_color_arr;
 use nmt_config::navigation::{Navigation, NavigationMode};
 use serde::Deserialize;
+use toml::from_str;
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 struct Root {
@@ -15,7 +16,7 @@ fn test_plain() {
         mode = 'Plain'
     "#;
 
-    let decoded = toml::from_str::<Root>(content).unwrap();
+    let decoded = from_str::<Root>(content).unwrap();
     assert_eq!(decoded.navigation.mode, NavigationMode::Plain);
     assert!(!decoded.navigation.clickable);
     assert!(decoded.navigation.color_automation.is_empty());
@@ -31,7 +32,7 @@ fn test_color_automation() {
         ]
     "#;
 
-    let decoded = toml::from_str::<Root>(content).unwrap();
+    let decoded = from_str::<Root>(content).unwrap();
     assert_eq!(decoded.navigation.mode, NavigationMode::Tab);
     assert!(!decoded.navigation.clickable);
     assert!(!decoded.navigation.color_automation.is_empty());

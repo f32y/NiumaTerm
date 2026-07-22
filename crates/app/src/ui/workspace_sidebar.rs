@@ -1,7 +1,7 @@
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, Context, DragMoveEvent, Entity, KeyDownEvent, MouseButton, ScrollHandle,
-    SharedString, StatefulInteractiveElement, Window, div, px, rgb,
+    AnyElement, ClipboardItem, Context, DragMoveEvent, ElementId, Entity, KeyDownEvent,
+    MouseButton, ScrollHandle, SharedString, StatefulInteractiveElement, Window, div, px, rgb,
 };
 use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants};
 use gpui_component::input::{Input, InputState};
@@ -35,7 +35,7 @@ impl IconNamed for IdleIcon {
 
 fn agent_status_indicator(
     status: AgentRuntimeStatus,
-    busy_id: impl Into<gpui::ElementId>,
+    busy_id: impl Into<ElementId>,
 ) -> (AnyElement, &'static str) {
     match status {
         AgentRuntimeStatus::Running => (
@@ -404,7 +404,7 @@ impl Sidebar {
                 }))
                 .item(
                     PopupMenuItem::new("Copy Workspace Path").on_click(move |_, _, cx| {
-                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(cwd.clone()));
+                        cx.write_to_clipboard(ClipboardItem::new_string(cwd.clone()));
                     }),
                 )
                 .item(PopupMenuItem::new("Close").disabled(!closeable).on_click(

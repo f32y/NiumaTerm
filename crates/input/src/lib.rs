@@ -11,6 +11,7 @@
 
 use std::borrow::Cow;
 
+use bitflags::bitflags;
 use smol_str::SmolStr;
 
 pub mod event;
@@ -19,7 +20,7 @@ pub mod keyboard;
 use crate::event::ElementState;
 use crate::keyboard::{Key, KeyLocation, ModifiersState, NamedKey};
 
-bitflags::bitflags! {
+bitflags! {
     /// Terminal modes that affect key encoding, lifted off `nmt_terminal::terminal::Mode`
     /// so this crate stays independent of rio-backend. Each frontend derives these
     /// from its own mode source (rioterm: `Mode`; NiumaTerm: the session `vt_modes` atomic).
@@ -692,7 +693,7 @@ impl SequenceTerminator {
     }
 }
 
-bitflags::bitflags! {
+bitflags! {
     /// The modifiers encoding for escape sequence.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     struct SequenceModifiers : u8 {

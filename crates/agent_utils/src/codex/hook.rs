@@ -5,14 +5,15 @@
 //! NiumaTerm-owned entries in `~/.codex/hooks.json`, preserves unrelated
 //! values, and never rewrites a file that fails to parse.
 
-use std::io;
 use std::path::{Path, PathBuf};
+use std::{env, io};
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value, from_str, json, to_string, to_string_pretty};
 
 use crate::hook_store::{self, event_commands, is_marked, uninstall_from};
 use crate::{
-    AgentEvent, AgentEventInput, AgentEventKind, HookInstallStatus, build_windows_hook_command,
+    AgentEvent, AgentEventInput, AgentEventKind, HookInstallStatus, agent_process,
+    build_windows_hook_command,
 };
 
 /// Every Codex event that contributes to the pane lifecycle.
@@ -81,14 +82,14 @@ pub(crate) fn normalize(
 
 /// `~/.codex/config.toml`, the user-scope Codex configuration.
 pub fn config_path() -> Option<PathBuf> {
-    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))?;
+    let home = env::var_os("USERPROFILE").or_else(|| env::var_os("HOME"))?;
 
     Some(PathBuf::from(home).join(".codex").join("config.toml"))
 }
 
 /// `~/.codex/hooks.json`, the user-scope Codex Hook configuration.
 pub fn hooks_path() -> Option<PathBuf> {
-    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))?;
+    let home = env::var_os("USERPROFILE").or_else(|| env::var_os("HOME"))?;
 
     Some(PathBuf::from(home).join(".codex").join("hooks.json"))
 }
@@ -141,7 +142,7 @@ pub fn hooks_status(hooks_path: &Path) -> HookInstallStatus {
 /// The exact command written to Codex and used when checking whether an
 /// existing registration still matches this NiumaTerm installation.
 pub fn hook_command() -> io::Result<String> {
-    let executable = crate::agent_process()
+    let executable = agent_process()
         .hook_executable()
         .ok_or_else(|| invalid("NiumaTerm Hook executable path is unavailable"))?;
 
@@ -176,12 +177,14 @@ fn invalid(message: &str) -> io::Error {
 
 #[cfg(test)]
 mod tests {
+    use std::{fs, process};
+
     use super::*;
     use crate::AGENT_HOOK_PROTOCOL_VERSION;
 
     fn fixture_events() -> Vec<Value> {
         let fixture: Value =
-            serde_json::from_str(include_str!("../../tests/fixtures/codex-0.144.1.json")).unwrap();
+            from_str(include_str!("../../tests/fixtures/codex-0.144.1.json")).unwrap();
         fixture["events"].as_array().unwrap().clone()
     }
 
@@ -210,15 +213,15 @@ mod tests {
 
     #[test]
     fn unknown_event_and_missing_turn_fail_open() {
-        let unknown = serde_json::json!({"hook_event_name":"Other","session_id":"s"});
-        let missing_turn = serde_json::json!({"hook_event_name":"Stop","session_id":"s"});
+        let unknown = json!({"hook_event_name":"Other","session_id":"s"});
+        let missing_turn = json!({"hook_event_name":"Stop","session_id":"s"});
         assert!(normalize(unknown, "route", "token", 1, "token").is_none());
         assert!(normalize(missing_turn, "route", "token", 1, "token").is_none());
     }
 
     #[test]
     fn unknown_fields_and_unicode_presentation_are_safe() {
-        let payload = serde_json::json!({
+        let payload = json!({
             "hook_event_name": "PermissionRequest",
             "session_id": "s",
             "turn_id": "t",
@@ -331,10 +334,10 @@ mod tests {
 
     #[test]
     fn file_round_trip_is_atomic_and_invalid_json_is_kept() {
-        let dir = std::env::temp_dir().join(format!("nmt-codex-hooks-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = env::temp_dir().join(format!("nmt-codex-hooks-{}", process::id()));
+        fs::create_dir_all(&dir).unwrap();
         let path = dir.join("hooks.json");
-        std::fs::write(&path, serde_json::to_string(&user_hooks()).unwrap()).unwrap();
+        fs::write(&path, to_string(&user_hooks()).unwrap()).unwrap();
 
         install_hooks_with_command(&path, CURRENT_COMMAND).unwrap();
         assert_eq!(
@@ -349,42 +352,38 @@ mod tests {
         assert_eq!(read_hooks(&path).unwrap(), user_hooks());
 
         let wrong_shape = r#"{"hooks":{"Stop":{}}}"#;
-        std::fs::write(&path, wrong_shape).unwrap();
+        fs::write(&path, wrong_shape).unwrap();
         assert!(install_hooks_with_command(&path, CURRENT_COMMAND).is_err());
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), wrong_shape);
+        assert_eq!(fs::read_to_string(&path).unwrap(), wrong_shape);
 
-        std::fs::write(&path, "{ not valid").unwrap();
+        fs::write(&path, "{ not valid").unwrap();
         assert!(install_hooks_with_command(&path, CURRENT_COMMAND).is_err());
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ not valid");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "{ not valid");
         assert!(!path.with_extension("json.niumaterm-tmp").exists());
-        std::fs::remove_dir_all(&dir).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn complete_registration_with_an_old_command_is_stale() {
-        let dir = std::env::temp_dir().join(format!("nmt-codex-hooks-json-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = env::temp_dir().join(format!("nmt-codex-hooks-json-{}", process::id()));
+        fs::create_dir_all(&dir).unwrap();
         let path = dir.join("hooks.json");
-        let mut hooks = serde_json::Map::new();
+        let mut hooks = Map::new();
         for event in HOOK_EVENTS {
             hooks.insert(
                 event.into(),
-                serde_json::json!([{
+                json!([{
                     "hooks": [{ "type": "command", "command": LEGACY_COMMAND, "timeout": 10 }]
                 }]),
             );
         }
-        std::fs::write(
-            &path,
-            serde_json::to_string_pretty(&serde_json::json!({ "hooks": hooks })).unwrap(),
-        )
-        .unwrap();
+        fs::write(&path, to_string_pretty(&json!({ "hooks": hooks })).unwrap()).unwrap();
 
         assert_eq!(
             status_of(&read_hooks(&path).unwrap(), CURRENT_COMMAND),
             HookInstallStatus::Stale
         );
 
-        std::fs::remove_dir_all(&dir).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

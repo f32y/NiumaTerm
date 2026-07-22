@@ -1,4 +1,6 @@
-use std::fmt;
+use std::{error, fmt, str};
+
+use simdutf::{ErrorCode, validate_utf8_with_errors};
 
 /// UTF-8 validation error with the same shape as `simdutf8`'s compat error
 /// type: a successful prefix length, plus an optional invalid-sequence
@@ -42,7 +44,7 @@ impl fmt::Display for Utf8Error {
     }
 }
 
-impl std::error::Error for Utf8Error {}
+impl error::Error for Utf8Error {}
 
 /// Validate `bytes` and return the corresponding `&str` on success.
 ///
@@ -51,10 +53,10 @@ impl std::error::Error for Utf8Error {}
 /// failure, replacing the `simdutf8` "basic + compat" two-call dance.
 #[inline]
 pub fn validate(bytes: &[u8]) -> Result<&str, Utf8Error> {
-    let result = simdutf::validate_utf8_with_errors(bytes);
-    if result.error == simdutf::ErrorCode::Success {
+    let result = validate_utf8_with_errors(bytes);
+    if result.error == ErrorCode::Success {
         // SAFETY: `simdutf` confirmed the entire byte slice is valid UTF-8.
-        return Ok(unsafe { std::str::from_utf8_unchecked(bytes) });
+        return Ok(unsafe { str::from_utf8_unchecked(bytes) });
     }
     let valid_up_to = result.count;
     let error_len = compute_error_len(bytes, valid_up_to);

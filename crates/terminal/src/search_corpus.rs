@@ -12,7 +12,7 @@
 use std::ops::RangeInclusive;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use regex::{Regex, RegexBuilder};
+use regex::{Regex, RegexBuilder, escape};
 
 use crate::terminal::grid::row::Row;
 use crate::terminal::pos::{Column, Direction, Line, Pos};
@@ -36,11 +36,7 @@ pub fn compile(pattern: &str) -> Option<Regex> {
 /// uppercase letter). `literal` escapes regex metacharacters first.
 pub fn compile_with(pattern: &str, literal: bool) -> Option<Regex> {
     let has_uppercase = pattern.chars().any(|c| c.is_uppercase());
-    let escaped = if literal {
-        Some(regex::escape(pattern))
-    } else {
-        None
-    };
+    let escaped = if literal { Some(escape(pattern)) } else { None };
     let pat = escaped.as_deref().unwrap_or(pattern);
     RegexBuilder::new(pat)
         .case_insensitive(!has_uppercase)

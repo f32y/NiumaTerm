@@ -1,17 +1,23 @@
+use tracing::trace;
+
 pub mod defaults;
 pub mod term;
 
+use std::fmt;
 use std::num::ParseIntError;
 use std::ops::Mul;
 
 use defaults::*;
 use regex::Regex;
+use serde::de::Error as DeError;
 use serde::{Deserialize, Serialize, de};
+
+use crate::render_types;
 
 // `ColorWGPU` is the legacy name; `crate::render_types::Color` is the actual
 // type now (mirrors `wgpu::Color`'s shape, but doesn't drag wgpu
 // into the dep tree on Linux/macOS native builds).
-pub type ColorWGPU = crate::render_types::Color;
+pub type ColorWGPU = render_types::Color;
 pub type ColorArray = [f32; 4];
 pub type ColorComposition = (ColorArray, ColorWGPU);
 
@@ -32,11 +38,9 @@ impl Mul<f32> for ColorRgb {
             b: (f32::from(self.b) * rhs).clamp(0.0, 255.0) as u8,
         };
 
-        tracing::trace!(
+        trace!(
             "Scaling ColorRgb by {} from {:?} to {:?}",
-            rhs,
-            self,
-            result
+            rhs, self, result
         );
         result
     }
@@ -571,8 +575,8 @@ impl ColorBuilder {
         }
     }
 
-    pub fn to_wgpu(&self) -> crate::render_types::Color {
-        crate::render_types::Color {
+    pub fn to_wgpu(&self) -> render_types::Color {
+        render_types::Color {
             r: self.red,
             g: self.green,
             b: self.blue,
@@ -595,12 +599,9 @@ impl ColorBuilder {
     }
 
     pub fn format_string(&self) -> String {
-        std::format!(
+        format!(
             "r: {:?}, g: {:?}, b: {:?}, a: {:?}",
-            self.red,
-            self.green,
-            self.blue,
-            self.alpha
+            self.red, self.green, self.blue, self.alpha
         )
     }
 }
@@ -624,9 +625,9 @@ impl Default for ColorBuilder {
     }
 }
 
-impl std::fmt::Display for ColorBuilder {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        std::fmt::Display::fmt(&self.format_string(), f)
+impl fmt::Display for ColorBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        fmt::Display::fmt(&self.format_string(), f)
     }
 }
 
@@ -637,7 +638,7 @@ where
     let s = String::deserialize(deserializer)?;
     match ColorBuilder::from_hex(s, Format::SRGB0_1) {
         Ok(color) => Ok(color.to_wgpu()),
-        Err(e) => Err(serde::de::Error::custom(e)),
+        Err(e) => Err(DeError::custom(e)),
     }
 }
 
@@ -648,7 +649,7 @@ where
     let s = String::deserialize(deserializer)?;
     match ColorBuilder::from_hex(s, Format::SRGB0_1) {
         Ok(color) => Ok((color.to_arr(), color.to_wgpu())),
-        Err(e) => Err(serde::de::Error::custom(e)),
+        Err(e) => Err(DeError::custom(e)),
     }
 }
 
@@ -659,7 +660,7 @@ where
     let s = String::deserialize(deserializer)?;
     match ColorBuilder::from_hex(s, Format::SRGB0_1) {
         Ok(color) => Ok(color.to_arr()),
-        Err(e) => Err(serde::de::Error::custom(e)),
+        Err(e) => Err(DeError::custom(e)),
     }
 }
 
@@ -670,6 +671,6 @@ where
     let s = String::deserialize(deserializer)?;
     match ColorBuilder::from_hex(s, Format::SRGB0_1) {
         Ok(color) => Ok(Some(color.to_arr())),
-        Err(e) => Err(serde::de::Error::custom(e)),
+        Err(e) => Err(DeError::custom(e)),
     }
 }

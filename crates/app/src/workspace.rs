@@ -3,6 +3,8 @@
 //! active, and the set is never empty — `close_workspace` refuses the last one, so
 //! `active` always points at a real workspace (mirrors `TabManager`'s invariant).
 //!
+use std::path;
+
 use nmt_agent_utils::AgentRuntimeStatus;
 
 use crate::tabs::{TabId, TabManager};
@@ -37,7 +39,7 @@ pub const DEFAULT_WORKSPACE_NAME: &str = "New Workspace";
 /// A path as comparable components: separators unified by `Path`, each
 /// component lowercased (Windows filesystems are case-insensitive). Literal
 /// comparison only — no symlink resolution, no filesystem access.
-fn cmp_components(path: &std::path::Path) -> Vec<String> {
+fn cmp_components(path: &path::Path) -> Vec<String> {
     path.components()
         .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
         .collect()
@@ -47,7 +49,7 @@ fn cmp_components(path: &std::path::Path) -> Vec<String> {
 /// by longest prefix in path components; ties go to the earlier workspace.
 /// Workspaces with an empty or `"."` cwd never match because they do not identify
 /// a concrete filesystem location.
-pub fn best_match(summaries: &[WorkspaceSummary], target: &std::path::Path) -> Option<WorkspaceId> {
+pub fn best_match(summaries: &[WorkspaceSummary], target: &path::Path) -> Option<WorkspaceId> {
     let target = cmp_components(target);
     let mut best: Option<(usize, WorkspaceId)> = None;
     for ws in summaries {
@@ -55,7 +57,7 @@ pub fn best_match(summaries: &[WorkspaceSummary], target: &std::path::Path) -> O
         if cwd.is_empty() || cwd == "." {
             continue;
         }
-        let comps = cmp_components(std::path::Path::new(cwd));
+        let comps = cmp_components(path::Path::new(cwd));
         if comps.is_empty() || comps.len() > target.len() {
             continue;
         }
@@ -318,7 +320,7 @@ mod tests {
     }
 
     fn matched(cwds: &[&str], target: &str) -> Option<WorkspaceId> {
-        best_match(&summaries(cwds), std::path::Path::new(target))
+        best_match(&summaries(cwds), path::Path::new(target))
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use serde::de::Error as DeError;
 use serde::{Deserialize, Deserializer, Serialize};
 
 // Panel configuration for split layouts
@@ -108,6 +109,6 @@ impl<'de> Deserialize<'de> for Margin {
         D: Deserializer<'de>,
     {
         let values: Vec<f32> = Vec::deserialize(deserializer)?;
-        Self::from_css_values(&values).map_err(serde::de::Error::custom)
+        Self::from_css_values(&values).map_err(DeError::custom)
     }
 }

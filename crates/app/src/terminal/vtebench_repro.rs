@@ -13,13 +13,16 @@
 #![cfg(windows)]
 
 use std::time::{Duration, Instant};
+use std::{path, thread};
+
+use nmt_terminal::ghostty::BlockHandle;
 
 use super::session::{HostEvent, TerminalSession, TerminalSessionConfig};
 
 fn integration_config() -> TerminalSessionConfig {
     // The test binary has no exe-relative assets dir; point at the repo script.
     // No canonicalize: its `\\?\` prefix breaks PowerShell dot-sourcing.
-    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    let script = path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..\\..\\assets\\windows\\pwsh-integration.ps1");
 
     assert!(script.exists(), "missing {}", script.display());
@@ -69,7 +72,7 @@ fn wait_for(
             return false;
         }
 
-        std::thread::sleep(Duration::from_millis(50));
+        thread::sleep(Duration::from_millis(50));
     }
 }
 
@@ -90,7 +93,7 @@ fn screen_text(session: &TerminalSession) -> String {
 fn block_texts(session: &TerminalSession) -> Vec<(Option<String>, String)> {
     // Two phases: snapshot under the store lock, then format each block
     // through the engine (the store and engine locks never nest).
-    let items: Vec<(Option<String>, Option<nmt_terminal::ghostty::BlockHandle>)> = {
+    let items: Vec<(Option<String>, Option<BlockHandle>)> = {
         let store = session.block_store();
         let store = store.lock();
 
@@ -143,7 +146,7 @@ fn run_command_within(
 
     session.write_input(cmd.as_bytes());
 
-    std::thread::sleep(Duration::from_millis(300));
+    thread::sleep(Duration::from_millis(300));
 
     session.write_input(b"\r");
 
@@ -204,7 +207,7 @@ fn ctrl_c_on_alt_screen_recovers_block_mode() {
     // Ctrl-C should cut the sleep short; the short sleep bounds the test even
     // if the interrupt is swallowed (the end state is identical either way).
     session.write_input(b"$e=[char]27; [Console]::Write(\"$e[?1049h\"); Start-Sleep 8");
-    std::thread::sleep(Duration::from_millis(300));
+    thread::sleep(Duration::from_millis(300));
     session.write_input(b"\r");
     assert!(
         wait_for(&session, &mut all, Duration::from_secs(10), |evs| {
@@ -255,7 +258,7 @@ fn ctrl_c_on_alt_screen_recovers_block_mode() {
 /// alt-screen `unicode` benchmark) and require its "Results:" table to survive.
 #[test]
 fn real_vtebench_results_are_visible() {
-    let exe = std::path::Path::new("C:\\Workspace\\vtebench\\target\\release\\vtebench.exe");
+    let exe = path::Path::new("C:\\Workspace\\vtebench\\target\\release\\vtebench.exe");
     if !exe.exists() {
         eprintln!("skipping: vtebench.exe not built");
         return;
@@ -275,7 +278,7 @@ fn real_vtebench_results_are_visible() {
         screen_text(&session)
     );
 
-    std::thread::sleep(Duration::from_millis(800));
+    thread::sleep(Duration::from_millis(800));
     pump(&session, &mut all);
     let blocks = block_texts(&session);
     let screen = screen_text(&session);
@@ -316,7 +319,7 @@ fn full_tail_survives_after_alt_screen_roundtrip() {
         run_command(&session, &mut all, cmd),
         "command never finished; events: {all:?}"
     );
-    std::thread::sleep(Duration::from_millis(500));
+    thread::sleep(Duration::from_millis(500));
     pump(&session, &mut all);
 
     let blocks = block_texts(&session);
@@ -340,7 +343,7 @@ fn full_tail_survives_after_alt_screen_roundtrip() {
 #[test]
 #[ignore = "slow full-suite repro; run explicitly"]
 fn real_vtebench_full_suite_results_are_visible() {
-    let exe = std::path::Path::new("C:\\Workspace\\vtebench\\target\\release\\vtebench.exe");
+    let exe = path::Path::new("C:\\Workspace\\vtebench\\target\\release\\vtebench.exe");
     if !exe.exists() {
         eprintln!("skipping: vtebench.exe not built");
         return;
@@ -360,7 +363,7 @@ fn real_vtebench_full_suite_results_are_visible() {
         screen_text(&session)
     );
 
-    std::thread::sleep(Duration::from_millis(800));
+    thread::sleep(Duration::from_millis(800));
     pump(&session, &mut all);
     let blocks = block_texts(&session);
     let screen = screen_text(&session);
@@ -421,7 +424,7 @@ fn engine_blocks_bridge_freezes_command_output() {
         run_command(&session, &mut all, cmd),
         "command never finished; events: {all:?}"
     );
-    std::thread::sleep(Duration::from_millis(500));
+    thread::sleep(Duration::from_millis(500));
     pump(&session, &mut all);
 
     let handle_items = {
@@ -469,7 +472,7 @@ fn output_after_ris_survives_into_the_block() {
     );
 
     // Give the block events a beat to land, then look for the results text.
-    std::thread::sleep(Duration::from_millis(500));
+    thread::sleep(Duration::from_millis(500));
     pump(&session, &mut all);
     let blocks = block_texts(&session);
     let screen = screen_text(&session);

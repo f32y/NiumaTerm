@@ -6,6 +6,7 @@
 //! Invariant: a `PaneTree` always has at least one leaf, and `focused` always
 //! names an existing leaf. `remove` refuses the last leaf.
 
+use std::mem;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use gpui::Axis;
@@ -250,7 +251,7 @@ impl<L, S: Clone> PaneTree<L, S> {
         match node {
             PaneNode::Leaf { id, .. } if *id == at => {
                 // Wrap the leaf in a fresh split on the requested axis.
-                let old = std::mem::replace(
+                let old = mem::replace(
                     node,
                     PaneNode::Split {
                         id: alloc_split_id(),

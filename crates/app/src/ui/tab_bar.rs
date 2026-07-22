@@ -1,3 +1,5 @@
+use std::collections;
+
 use gpui::prelude::*;
 use gpui::{
     AnyElement, Context, DragMoveEvent, Entity, KeyDownEvent, MouseButton, Render, ScrollHandle,
@@ -117,7 +119,7 @@ impl TabStrip {
     pub(super) fn render(
         &self,
         tabs: &TabManager<TerminalPaneTree>,
-        unread_tabs: &std::collections::HashSet<TabId>,
+        unread_tabs: &collections::HashSet<TabId>,
         rename: Option<&(TabId, Entity<InputState>)>,
         cx: &mut Context<Shell>,
     ) -> AnyElement {

@@ -1,8 +1,10 @@
+use dirs::home_dir;
 use gpui::{App, AppContext as _, Axis, Context, Entity};
 use gpui_component::resizable::ResizableState;
 use nmt_config::local_state::{
     PaneNodeState, PaneSplitAxis, SessionState, TabState, WorkspaceState,
 };
+use tracing::warn;
 
 use super::Shell;
 use super::settings::AppSettings;
@@ -124,7 +126,7 @@ impl Shell {
         let (cwd, spawn_cwd) = match initial_cwd {
             Some(dir) => (dir.clone(), Some(dir)),
             None => (
-                dirs::home_dir()
+                home_dir()
                     .map(|home| home.display().to_string())
                     .unwrap_or_else(|| ".".to_string()),
                 None,
@@ -260,7 +262,7 @@ impl Shell {
                         ))
                     }
                     Err(error) => {
-                        tracing::warn!("failed to restore tab {surface_id}: {error}");
+                        warn!("failed to restore tab {surface_id}: {error}");
                         None
                     }
                 }
@@ -325,7 +327,7 @@ impl Shell {
                         Some(PaneTree::restored_leaf(PaneId(surface_id), pane))
                     }
                     Err(error) => {
-                        tracing::warn!("failed to restore pane {surface_id}: {error}");
+                        warn!("failed to restore pane {surface_id}: {error}");
                         None
                     }
                 }
@@ -377,16 +379,14 @@ impl Shell {
 
         let spawned =
             TerminalPane::spawn(cx, surface_id, launch, default_profile.clone()).or_else(|error| {
-                tracing::warn!(
-                    "spawn with workspace cwd/profile failed, retrying default: {error}"
-                );
+                warn!("spawn with workspace cwd/profile failed, retrying default: {error}");
                 TerminalPane::spawn(cx, surface_id, None, default_profile.clone())
             });
 
         let pane = match spawned {
             Ok(pane) => pane,
             Err(error) => {
-                tracing::warn!("default profile failed, retrying built-in shell: {error}");
+                warn!("default profile failed, retrying built-in shell: {error}");
                 TerminalPane::spawn(cx, surface_id, None, (None, Vec::new()))
                     .expect("GPUI terminal surface")
             }

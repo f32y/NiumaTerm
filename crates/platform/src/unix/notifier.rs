@@ -70,13 +70,16 @@ mod platform {
 mod platform {
     use std::collections::HashMap;
 
+    use zbus::blocking::{Connection, Proxy};
+    use zbus::zvariant::Value;
+
     use super::NativeNotification;
 
     pub(crate) fn show(notification: &NativeNotification) -> Result<(), String> {
-        let Ok(connection) = zbus::blocking::Connection::session() else {
+        let Ok(connection) = Connection::session() else {
             return Ok(());
         };
-        let Ok(proxy) = zbus::blocking::Proxy::new(
+        let Ok(proxy) = Proxy::new(
             &connection,
             "org.freedesktop.Notifications",
             "/org/freedesktop/Notifications",
@@ -84,7 +87,7 @@ mod platform {
         ) else {
             return Ok(());
         };
-        let hints: HashMap<&str, zbus::zvariant::Value<'_>> = HashMap::new();
+        let hints: HashMap<&str, Value<'_>> = HashMap::new();
         let _: Result<u32, _> = proxy.call(
             "Notify",
             &(

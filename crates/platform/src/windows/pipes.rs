@@ -356,6 +356,8 @@ mod tests {
     use std::thread::sleep;
     use std::time::Duration;
 
+    use miow::pipe::anonymous;
+
     use super::*;
 
     /// Spin until `cond` holds, up to ~2s, so the worker thread has time to move
@@ -376,7 +378,7 @@ mod tests {
     /// only clears once the ring is fully drained.
     #[test]
     fn soft_ready_stays_set_until_ring_fully_drained() {
-        let (conout, mut pty_side) = miow::pipe::anonymous(0).expect("anonymous pipe");
+        let (conout, mut pty_side) = anonymous(0).expect("anonymous pipe");
         let mut reader = EventedAnonRead::new(conout);
 
         // Push more than a single small read will drain.

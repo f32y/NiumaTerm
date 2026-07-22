@@ -6,10 +6,11 @@
 // adding inline graphics.
 //
 // This implementation also supports `width` and `height` parameters to resize the image.
-
 use std::str;
 
+use image_rs::load_from_memory;
 use rustc_hash::FxHashMap;
+use tracing::warn;
 
 use crate::graphics::{GraphicData, GraphicId, ResizeCommand, ResizeParameter};
 use crate::{simd_base64, simd_utf8};
@@ -25,15 +26,15 @@ pub fn parse(params: &[&[u8]]) -> Option<GraphicData> {
     let buffer = match simd_base64::decode(contents) {
         Some(buffer) => buffer,
         None => {
-            tracing::warn!("Can't decode iTerm2 base64 image payload");
+            warn!("Can't decode iTerm2 base64 image payload");
             return None;
         }
     };
 
-    let image = match image_rs::load_from_memory(&buffer) {
+    let image = match load_from_memory(&buffer) {
         Ok(image) => image,
         Err(err) => {
-            tracing::warn!("Can't load image: {}", err);
+            warn!("Can't load image: {}", err);
             return None;
         }
     };

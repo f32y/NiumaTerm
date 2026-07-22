@@ -9,13 +9,19 @@ pub mod codex {
 }
 
 use std::collections::HashMap;
-use std::io;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
+use std::{env, io, process};
 
 use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
+use getrandom::fill;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use crate::claude_code::hook::normalize as normalize_claude;
+use crate::codex::hook::normalize as normalize_codex;
 
 pub const AGENT_HOOK_PROTOCOL_VERSION: u32 = 1;
 pub const COMPLETION_QUIET_WINDOW: Duration = Duration::from_millis(1_500);
@@ -47,11 +53,11 @@ impl AgentProcess {
         let mut nonce = [0u8; 16];
         let mut hook_token = [0u8; 32];
 
-        getrandom::fill(&mut nonce).expect("Windows cryptographic random source");
-        getrandom::fill(&mut hook_token).expect("Windows cryptographic random source");
+        fill(&mut nonce).expect("Windows cryptographic random source");
+        fill(&mut hook_token).expect("Windows cryptographic random source");
 
         Self {
-            nonce: format!("{:x}-{}", std::process::id(), hex(&nonce)),
+            nonce: format!("{:x}-{}", process::id(), hex(&nonce)),
             hook_token: hex(&hook_token),
             hook_executable: OnceLock::new(),
             testing: AtomicBool::new(false),
@@ -205,14 +211,14 @@ pub struct RawAgentHookEnvelope {
     pub version: u32,
     pub token: String,
     pub route: String,
-    pub payload: serde_json::Value,
+    pub payload: Value,
 }
 
 impl RawAgentHookEnvelope {
     pub fn into_event(self, expected_token: &str) -> Option<AgentEvent> {
         let normalize = match self.action.as_str() {
-            "codex_hook" => codex::hook::normalize,
-            "claude_hook" => claude_code::hook::normalize,
+            "codex_hook" => normalize_codex,
+            "claude_hook" => normalize_claude,
             _ => return None,
         };
 
@@ -240,7 +246,7 @@ pub enum HookInstallStatus {
 /// Build a Windows hook command that remains valid when an agent executes it
 /// through either cmd.exe or PowerShell.
 pub fn build_windows_hook_command(executable: &str, argument: &str) -> io::Result<String> {
-    let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+    let system_root = env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
 
     build_windows_hook_command_for(executable, argument, &system_root)
 }
@@ -282,7 +288,7 @@ fn build_windows_hook_command_for(
     let quoted = executable.replace('\'', "''");
     let script = format!("& '{quoted}' {argument}; exit $LASTEXITCODE");
 
-    let encoded = base64::engine::general_purpose::STANDARD.encode(
+    let encoded = STANDARD.encode(
         script
             .encode_utf16()
             .flat_map(u16::to_le_bytes)
@@ -315,9 +321,7 @@ fn decode_powershell_command(command: &str) -> Option<String> {
         }
     };
 
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(encoded)
-        .ok()?;
+    let bytes = STANDARD.decode(encoded).ok()?;
 
     let mut chunks = bytes.chunks_exact(2);
 
@@ -1083,6 +1087,8 @@ fn higher_status(left: AgentRuntimeStatus, right: AgentRuntimeStatus) -> AgentRu
 
 #[cfg(test)]
 mod tests {
+    use std::{fs, slice};
+
     use super::*;
 
     const TOKEN: &str = "hook-secret";
@@ -1152,9 +1158,7 @@ mod tests {
         assert!(hook_command_contains(&command, "NiumaTermHook.exe"));
 
         let encoded = command.rsplit_once(' ').unwrap().1;
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(encoded)
-            .unwrap();
+        let bytes = STANDARD.decode(encoded).unwrap();
         let units = bytes
             .chunks_exact(2)
             .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
@@ -1166,20 +1170,16 @@ mod tests {
 
         #[cfg(windows)]
         {
-            let dir =
-                std::env::temp_dir().join(format!("nmt hook path % ^ {}", std::process::id()));
-            std::fs::create_dir_all(&dir).unwrap();
+            let dir = env::temp_dir().join(format!("nmt hook path % ^ {}", process::id()));
+            fs::create_dir_all(&dir).unwrap();
             let script = dir.join("hook.cmd");
-            std::fs::write(&script, "@echo hook-ran\r\n@exit /b 0\r\n").unwrap();
+            fs::write(&script, "@echo hook-ran\r\n@exit /b 0\r\n").unwrap();
             let command = build_windows_hook_command(script.to_str().unwrap(), "codex").unwrap();
             for (shell, args) in [
                 ("powershell.exe", vec!["-NoProfile", "-Command", &command]),
                 ("cmd.exe", vec!["/d", "/c", &command]),
             ] {
-                let output = std::process::Command::new(shell)
-                    .args(args)
-                    .output()
-                    .unwrap();
+                let output = process::Command::new(shell).args(args).output().unwrap();
                 assert_eq!(
                     output.status.code(),
                     Some(0),
@@ -1189,7 +1189,7 @@ mod tests {
                 );
                 assert!(String::from_utf8_lossy(&output.stdout).contains("hook-ran"));
             }
-            std::fs::remove_dir_all(dir).unwrap();
+            fs::remove_dir_all(dir).unwrap();
         }
     }
 
@@ -1729,8 +1729,8 @@ mod tests {
         let window_two = route("window-2:route-1");
         assert_eq!(local_pane_id, 1); // Both windows may independently allocate pane 1.
 
-        let mut first = monitor(now, std::slice::from_ref(&window_one));
-        let mut second = monitor(now, std::slice::from_ref(&window_two));
+        let mut first = monitor(now, slice::from_ref(&window_one));
+        let mut second = monitor(now, slice::from_ref(&window_two));
         let second_event = event(
             &window_two,
             "session-2",
@@ -1768,8 +1768,8 @@ mod tests {
         let now = Instant::now();
         let foreground = route("window-1:route-1");
         let background = route("window-2:route-1");
-        let mut foreground_monitor = monitor(now, std::slice::from_ref(&foreground));
-        let mut background_monitor = monitor(now, std::slice::from_ref(&background));
+        let mut foreground_monitor = monitor(now, slice::from_ref(&foreground));
+        let mut background_monitor = monitor(now, slice::from_ref(&background));
 
         foreground_monitor.notify(&foreground, "foreground", "leave unread");
         background_monitor.notify(&background, "background", "activate me");

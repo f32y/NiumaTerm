@@ -2,9 +2,11 @@
 //! images). Relocated from the old `nmt_renderer` crate: these are pure data
 //! the terminal engine produces from the PTY, carrying no renderer/GPU state.
 
-use std::cmp;
+use std::{cmp, time};
 
-use image_rs::DynamicImage;
+use image_rs::imageops::FilterType;
+use image_rs::{DynamicImage, RgbImage, RgbaImage};
+use tracing::trace;
 
 pub const MAX_GRAPHIC_DIMENSIONS: [usize; 2] = [4096, 4096];
 
@@ -72,7 +74,7 @@ pub struct GraphicData {
 
     /// Generation counter for cache invalidation.
     /// Incremented when image data changes (re-transmission with same ID).
-    pub transmit_time: std::time::Instant,
+    pub transmit_time: time::Instant,
 }
 
 impl GraphicData {
@@ -155,7 +157,7 @@ impl GraphicData {
             resize: None,
             display_width: None,
             display_height: None,
-            transmit_time: std::time::Instant::now(),
+            transmit_time: time::Instant::now(),
         }
     }
 
@@ -265,25 +267,19 @@ impl GraphicData {
             .resize
             .expect("resize_target yields Target only when resize is set");
 
-        tracing::trace!("Resize new graphic to width={}, height={}", width, height,);
+        trace!("Resize new graphic to width={}, height={}", width, height,);
 
         // Create a new DynamicImage to resize the graphic.
         let dynimage = match self.color_type {
             ColorType::Rgb => {
-                let buffer = image_rs::RgbImage::from_raw(
-                    self.width as u32,
-                    self.height as u32,
-                    self.pixels,
-                )?;
+                let buffer =
+                    RgbImage::from_raw(self.width as u32, self.height as u32, self.pixels)?;
                 DynamicImage::ImageRgb8(buffer)
             }
 
             ColorType::Rgba => {
-                let buffer = image_rs::RgbaImage::from_raw(
-                    self.width as u32,
-                    self.height as u32,
-                    self.pixels,
-                )?;
+                let buffer =
+                    RgbaImage::from_raw(self.width as u32, self.height as u32, self.pixels)?;
                 DynamicImage::ImageRgba8(buffer)
             }
         };
@@ -292,7 +288,7 @@ impl GraphicData {
         let width = width as u32;
         let height = height as u32;
         // https://doc.servo.org/image/imageops/enum.FilterType.html
-        let filter = image_rs::imageops::FilterType::Triangle;
+        let filter = FilterType::Triangle;
 
         let new_image = if resize.preserve_aspect_ratio {
             dynimage.resize(width, height, filter)
@@ -352,7 +348,7 @@ fn check_opaque_region() {
         resize: None,
         display_width: None,
         display_height: None,
-        transmit_time: std::time::Instant::now(),
+        transmit_time: time::Instant::now(),
     };
 
     assert!(graphic.is_filled(1, 1, 3, 3));
@@ -378,7 +374,7 @@ fn check_opaque_region() {
         resize: None,
         display_width: None,
         display_height: None,
-        transmit_time: std::time::Instant::now(),
+        transmit_time: time::Instant::now(),
     };
 
     assert!(graphic.is_filled(0, 0, 3, 3));

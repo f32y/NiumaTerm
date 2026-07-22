@@ -8,6 +8,8 @@ pub mod style;
 
 // Cell-geometry re-exports the retained submodules (grid/, square) still reach via
 // the crosswords root (they did so through the deleted Crosswords-era `use`s).
+use std::ops;
+
 use bitflags::bitflags;
 pub use grid::row::Row;
 use nmt_config::colors;
@@ -107,4 +109,4 @@ impl From<KeyboardModes> for Mode {
 }
 
 /// An inclusive range of grid positions describing one search match.
-pub type Match = std::ops::RangeInclusive<Pos>;
+pub type Match = ops::RangeInclusive<Pos>;

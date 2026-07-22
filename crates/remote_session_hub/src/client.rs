@@ -1,5 +1,4 @@
 use std::collections::{HashMap, VecDeque};
-use std::fmt;
 use std::io::{self, Read, Write};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -7,12 +6,13 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, OnceLock, Weak};
-use std::thread::Thread;
+use std::thread::{self, Thread};
 use std::time::{Duration, Instant};
+use std::{env, error, fmt};
 
 use nmt_platform::{
     ChildEvent, EventedPty, Interest, Poll, ProcessReadWrite, SoftReady, Token, Waker,
-    WinsizeBuilder,
+    WinsizeBuilder, job_management_enabled,
 };
 use parking_lot::{Condvar, Mutex};
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
@@ -50,7 +50,7 @@ impl fmt::Display for HubClientError {
     }
 }
 
-impl std::error::Error for HubClientError {}
+impl error::Error for HubClientError {}
 
 /// One process-wide connection to `SessionHub.exe`. Construction is lazy, so
 /// merely linking this crate creates no child process, mapping, or worker thread.
@@ -118,7 +118,7 @@ impl HubClient {
         let exit = Arc::new(ProcessExit::default());
         let client_exit = Arc::clone(&exit);
 
-        let handle = std::thread::Builder::new()
+        let handle = thread::Builder::new()
             .name("session-hub-client".to_owned())
             .spawn(move || client_loop(&executable, command_rx, startup_tx, client_exit))
             .map_err(|error| HubClientError::new(format!("failed to start Hub client: {error}")))?;
@@ -231,7 +231,7 @@ pub fn shutdown_default() -> Result<(), HubClientError> {
 }
 
 fn default_hub_executable() -> Result<PathBuf, HubClientError> {
-    let current = std::env::current_exe().map_err(|error| {
+    let current = env::current_exe().map_err(|error| {
         HubClientError::new(format!("cannot locate NiumaTerm executable: {error}"))
     })?;
 
@@ -320,11 +320,11 @@ fn run_client_loop(
         })?;
 
     let (events_tx, events_rx) = mpsc::channel();
-    let pump = std::thread::current();
+    let pump = thread::current();
 
     spawn_response_reader(&os_id, events_tx.clone(), pump.clone())?;
 
-    std::thread::Builder::new()
+    thread::Builder::new()
         .name("session-hub-process-wait".to_owned())
         .spawn(move || {
             let _ = child.wait();
@@ -434,7 +434,7 @@ fn run_client_loop(
         }
 
         if !did_work {
-            std::thread::park();
+            thread::park();
         }
     }
 }
@@ -445,7 +445,7 @@ fn spawn_response_reader(
     pump: Thread,
 ) -> Result<(), HubClientError> {
     let os_id = os_id.to_owned();
-    std::thread::Builder::new()
+    thread::Builder::new()
         .name("session-hub-response-reader".to_owned())
         .spawn(move || {
             let result = (|| -> Result<(), IpcError> {
@@ -691,7 +691,7 @@ impl RemotePty {
     }
 
     pub fn spawn(mut options: SessionOptions) -> Result<Self, HubClientError> {
-        options.manage_process_tree = nmt_platform::job_management_enabled();
+        options.manage_process_tree = job_management_enabled();
 
         HubClient::connect_default()?.open(options)
     }

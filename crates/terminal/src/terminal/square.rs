@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use bitflags::bitflags;
 
+use crate::ansi;
 use crate::terminal::grid::GridSquare;
 use crate::terminal::style::{DEFAULT_STYLE_ID, StyleId};
 use crate::terminal::{Column, Row};
@@ -204,7 +205,7 @@ pub type ExtrasId = u16;
 pub struct Extras {
     pub zerowidth: Vec<char>,
     pub hyperlink: Option<Hyperlink>,
-    pub graphic: Option<crate::ansi::graphics::GraphicsCell>,
+    pub graphic: Option<ansi::graphics::GraphicsCell>,
 }
 
 impl Extras {
@@ -542,6 +543,7 @@ mod tests {
     use std::mem;
 
     use super::*;
+    use crate::terminal;
     use crate::terminal::grid::row::Row;
     use crate::terminal::pos::Column;
 
@@ -663,7 +665,7 @@ mod tests {
     fn bg_only_cells_are_not_empty() {
         let mut s = Square(0);
         s.set_bg_palette(7);
-        assert!(!<Square as crate::terminal::grid::GridSquare>::is_empty(&s));
+        assert!(!<Square as terminal::grid::GridSquare>::is_empty(&s));
     }
 
     #[test]

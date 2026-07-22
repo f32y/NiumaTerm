@@ -1,4 +1,5 @@
 use nmt_config::colors::*;
+use nmt_config::render_types::Color;
 
 #[test]
 fn test_conversion_from_hex_invalid_character() {
@@ -24,10 +25,9 @@ fn test_conversion_from_hex_invalid_size() {
 
 #[test]
 fn test_conversion_from_hex_sgb_255() {
-    let color: nmt_config::render_types::Color =
-        ColorBuilder::from_hex(String::from("#151515"), Format::SRGB0_1)
-            .unwrap()
-            .to_wgpu();
+    let color: Color = ColorBuilder::from_hex(String::from("#151515"), Format::SRGB0_1)
+        .unwrap()
+        .to_wgpu();
     assert_eq!(
         color,
         ColorWGPU {
@@ -52,10 +52,9 @@ fn test_conversion_from_hex_sgb_255() {
 
 #[test]
 fn test_conversion_from_hex_sgb_1() {
-    let color: nmt_config::render_types::Color =
-        ColorBuilder::from_hex(String::from("#151515"), Format::SRGB0_255)
-            .unwrap()
-            .to_wgpu();
+    let color: Color = ColorBuilder::from_hex(String::from("#151515"), Format::SRGB0_255)
+        .unwrap()
+        .to_wgpu();
     assert_eq!(
         color,
         ColorWGPU {

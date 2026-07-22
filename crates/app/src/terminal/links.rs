@@ -1,10 +1,12 @@
 use std::ops::Range;
 
-use gpui::{App, Bounds, Context, Pixels, Point, Window, point, px, size};
+use gpui::{
+    App, Bounds, Context, Modifiers, ModifiersChangedEvent, Pixels, Point, Window, point, px, size,
+};
+use nmt_terminal::ghostty::BlockHandle;
 
 use super::block_list::BlockListPoint;
 use super::view::{TerminalPane, terminal_cell_at_position};
-
 /// A link resolved under the pointer: the URL plus underline rects relative
 /// to the content origin (only the visible rows of a wrapped URL get rects).
 #[derive(Clone, Debug, PartialEq)]
@@ -85,7 +87,7 @@ impl TerminalPane {
     pub(super) fn update_hovered_link(
         &mut self,
         position: Point<Pixels>,
-        modifiers: gpui::Modifiers,
+        modifiers: Modifiers,
         cx: &mut Context<Self>,
     ) {
         let inside = self
@@ -104,7 +106,7 @@ impl TerminalPane {
 
     pub(super) fn on_modifiers_changed(
         &mut self,
-        event: &gpui::ModifiersChangedEvent,
+        event: &ModifiersChangedEvent,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -123,7 +125,7 @@ impl TerminalPane {
         enum RowSource {
             Screen(i64),
             Block {
-                handle: nmt_terminal::ghostty::BlockHandle,
+                handle: BlockHandle,
                 item: usize,
                 line: i64,
             },
@@ -306,10 +308,12 @@ impl TerminalPane {
 
 #[cfg(test)]
 mod tests {
+    use crate::terminal;
+
     #[test]
     fn url_at_col_finds_and_trims_urls() {
         fn url_at(text: &str, col: usize) -> Option<String> {
-            crate::terminal::links::url_at_col(text, col).map(|(url, _)| url)
+            terminal::links::url_at_col(text, col).map(|(url, _)| url)
         }
 
         let text = "see https://example.com/a?q=1 for details";
@@ -319,10 +323,7 @@ mod tests {
             Some("https://example.com/a?q=1")
         );
         // The char range covers exactly the URL.
-        assert_eq!(
-            crate::terminal::links::url_at_col(text, 10).unwrap().1,
-            4..29
-        );
+        assert_eq!(terminal::links::url_at_col(text, 10).unwrap().1, 4..29);
         // Click on surrounding text misses.
         assert_eq!(url_at(text, 1), None);
         assert_eq!(url_at(text, 33), None);

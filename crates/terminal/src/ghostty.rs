@@ -1,13 +1,73 @@
-use std::{fmt, ptr};
+use std::{array, error, fmt, mem, ops, os, path, ptr, result, slice, str, sync, time};
 
-use libghostty_vt_sys as vt;
+use image_rs::load_from_memory;
 /// Engine handle of a finished command block (per-block grid). Plain value
 /// type; lookup is by id, `generation` is the data version for cache keys.
 pub use libghostty_vt_sys::BlockHandle;
+#[cfg(test)]
+use libghostty_vt_sys::ghostty_row_get;
+use libghostty_vt_sys::{
+    Allocator as VtAllocator, BlockFormatOptions as VtBlockFormatOptions, BlockRef as VtBlockRef,
+    Cell as VtCell, CellContentTag as VtCellContentTag, CellData as VtCellData,
+    CellWide as VtCellWide, ClipboardLocation as VtClipboardLocation,
+    ClipboardWrite as VtClipboardWrite, ClipboardWriteResult as VtClipboardWriteResult,
+    ColorPaletteIndex as VtColorPaletteIndex, ColorRgb as VtColorRgb, Formatter as VtFormatter,
+    FormatterFormat as VtFormatterFormat, FormatterTerminalExtra as VtFormatterTerminalExtra,
+    FormatterTerminalOptions as VtFormatterTerminalOptions, GridRef as VtGridRef,
+    KITTY_KEY_DISAMBIGUATE, KITTY_KEY_REPORT_ALL, KITTY_KEY_REPORT_ALTERNATES,
+    KITTY_KEY_REPORT_ASSOCIATED, KITTY_KEY_REPORT_EVENTS, KittyGraphics as VtKittyGraphics,
+    KittyGraphicsData as VtKittyGraphicsData, KittyGraphicsImage as VtKittyGraphicsImage,
+    KittyGraphicsImageData as VtKittyGraphicsImageData,
+    KittyGraphicsPlacementData as VtKittyGraphicsPlacementData,
+    KittyGraphicsPlacementIterator as VtKittyGraphicsPlacementIterator,
+    KittyImageFormat as VtKittyImageFormat, Point as VtPoint, PointCoordinate as VtPointCoordinate,
+    PointTag as VtPointTag, PointValue as VtPointValue, RenderState as VtRenderState,
+    RenderStateCursorVisualStyle as VtRenderStateCursorVisualStyle,
+    RenderStateData as VtRenderStateData, RenderStateDirty as VtRenderStateDirty,
+    RenderStateOption as VtRenderStateOption, RenderStateRowData as VtRenderStateRowData,
+    RenderStateRowIterator as VtRenderStateRowIterator,
+    RenderStateRowOption as VtRenderStateRowOption, Result as VtResult, Row as VtRow,
+    RowData as VtRowData, RowSemanticPrompt as VtRowSemanticPrompt, Selection as VtSelection,
+    SgrUnderline as VtSgrUnderline, String as VtString, Style as VtStyle,
+    StyleColor as VtStyleColor, StyleColorTag as VtStyleColorTag, SysImage as VtSysImage,
+    SysOption as VtSysOption, Terminal as VtTerminal, TerminalCursorStyle as VtTerminalCursorStyle,
+    TerminalData as VtTerminalData, TerminalOption as VtTerminalOption,
+    TerminalOptions as VtTerminalOptions, TerminalScrollViewport as VtTerminalScrollViewport,
+    TerminalScrollViewportTag as VtTerminalScrollViewportTag,
+    TerminalScrollViewportValue as VtTerminalScrollViewportValue,
+    TerminalScrollbar as VtTerminalScrollbar, ghostty_alloc, ghostty_block_ref_bytes,
+    ghostty_block_ref_cols, ghostty_block_ref_format_alloc, ghostty_block_ref_grid_ref,
+    ghostty_block_ref_handle, ghostty_block_ref_kitty_graphics, ghostty_block_ref_placement_pos,
+    ghostty_block_ref_release, ghostty_block_ref_row_count, ghostty_cell_get,
+    ghostty_cell_get_multi, ghostty_color_rgb_get, ghostty_formatter_format_alloc,
+    ghostty_formatter_free, ghostty_formatter_terminal_new, ghostty_free, ghostty_grid_ref_cell,
+    ghostty_grid_ref_graphemes, ghostty_grid_ref_hyperlink_uri, ghostty_grid_ref_row,
+    ghostty_grid_ref_style, ghostty_kitty_graphics_get, ghostty_kitty_graphics_image,
+    ghostty_kitty_graphics_image_get, ghostty_kitty_graphics_placement_get,
+    ghostty_kitty_graphics_placement_grid_size, ghostty_kitty_graphics_placement_iterator_free,
+    ghostty_kitty_graphics_placement_iterator_new, ghostty_kitty_graphics_placement_next,
+    ghostty_kitty_graphics_placement_pixel_size, ghostty_kitty_graphics_placement_source_rect,
+    ghostty_kitty_graphics_placement_viewport_pos, ghostty_render_state_free,
+    ghostty_render_state_get, ghostty_render_state_new, ghostty_render_state_row_get,
+    ghostty_render_state_row_iterator_free, ghostty_render_state_row_iterator_new,
+    ghostty_render_state_row_iterator_next, ghostty_render_state_row_set, ghostty_render_state_set,
+    ghostty_render_state_update, ghostty_row_get_multi, ghostty_sys_set,
+    ghostty_terminal_block_acquire, ghostty_terminal_block_at, ghostty_terminal_block_bytes,
+    ghostty_terminal_block_cols, ghostty_terminal_block_count, ghostty_terminal_block_grid_ref,
+    ghostty_terminal_block_row_count, ghostty_terminal_blocks_bytes, ghostty_terminal_clear_blocks,
+    ghostty_terminal_finish_block, ghostty_terminal_free, ghostty_terminal_get,
+    ghostty_terminal_grid_ref, ghostty_terminal_mode_get, ghostty_terminal_new,
+    ghostty_terminal_point_from_grid_ref, ghostty_terminal_reflow_block,
+    ghostty_terminal_remove_block, ghostty_terminal_resize, ghostty_terminal_scroll_viewport,
+    ghostty_terminal_set, ghostty_terminal_vt_write, sized as vt_sized,
+};
+use nmt_config::colors::{ColorRgb, Colors};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::render_buffer::RenderBuffer;
+use crate::{ansi, clipboard, graphics, pty_pipe, terminal};
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
@@ -19,13 +79,13 @@ pub enum Error {
 }
 
 impl Error {
-    fn from_code(code: vt::Result::Type) -> Result<()> {
+    fn from_code(code: VtResult::Type) -> Result<()> {
         match code {
-            vt::Result::SUCCESS => Ok(()),
-            vt::Result::OUT_OF_MEMORY => Err(Self::OutOfMemory),
-            vt::Result::INVALID_VALUE => Err(Self::InvalidValue),
-            vt::Result::OUT_OF_SPACE => Err(Self::OutOfSpace),
-            vt::Result::NO_VALUE => Err(Self::NoValue),
+            VtResult::SUCCESS => Ok(()),
+            VtResult::OUT_OF_MEMORY => Err(Self::OutOfMemory),
+            VtResult::INVALID_VALUE => Err(Self::InvalidValue),
+            VtResult::OUT_OF_SPACE => Err(Self::OutOfSpace),
+            VtResult::NO_VALUE => Err(Self::NoValue),
             other => Err(Self::Unknown(other)),
         }
     }
@@ -45,23 +105,23 @@ impl fmt::Display for Error {
     }
 }
 
-impl std::error::Error for Error {}
+impl error::Error for Error {}
 
-/// Alias of the workspace-wide RGB type; `vt::ColorRgb` is the FFI handle,
+/// Alias of the workspace-wide RGB type; `VtColorRgb` is the FFI handle,
 /// this is the decoded byte triple.
-pub type Color = nmt_config::colors::ColorRgb;
+pub type Color = ColorRgb;
 
 /// Decode an FFI color handle into its byte triple. A free function because
-/// `Color` lives in `nmt_config` and `vt::ColorRgb` in the sys crate, so a
+/// `Color` lives in `nmt_config` and `VtColorRgb` in the sys crate, so a
 /// `From` impl would violate the orphan rule.
-fn color_from_vt(value: vt::ColorRgb) -> Color {
+fn color_from_vt(value: VtColorRgb) -> Color {
     let mut r = 0;
     let mut g = 0;
     let mut b = 0;
 
     unsafe {
         // ghostty 53bd14f: the accessor takes the color by const pointer.
-        vt::ghostty_color_rgb_get(&value, &mut r, &mut g, &mut b);
+        ghostty_color_rgb_get(&value, &mut r, &mut g, &mut b);
     }
 
     Color { r, g, b }
@@ -85,7 +145,7 @@ pub struct SnapshotStyle {
     pub underline_color: Option<Color>,
 }
 
-/// Underline style, mirroring `vt::SgrUnderline::*`.
+/// Underline style, mirroring `VtSgrUnderline::*`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Underline {
     #[default]
@@ -97,20 +157,20 @@ pub enum Underline {
     Dashed,
 }
 
-impl From<vt::SgrUnderline::Type> for Underline {
-    fn from(value: vt::SgrUnderline::Type) -> Self {
+impl From<VtSgrUnderline::Type> for Underline {
+    fn from(value: VtSgrUnderline::Type) -> Self {
         match value {
-            v if v == vt::SgrUnderline::SINGLE => Self::Single,
-            v if v == vt::SgrUnderline::DOUBLE => Self::Double,
-            v if v == vt::SgrUnderline::CURLY => Self::Curly,
-            v if v == vt::SgrUnderline::DOTTED => Self::Dotted,
-            v if v == vt::SgrUnderline::DASHED => Self::Dashed,
+            v if v == VtSgrUnderline::SINGLE => Self::Single,
+            v if v == VtSgrUnderline::DOUBLE => Self::Double,
+            v if v == VtSgrUnderline::CURLY => Self::Curly,
+            v if v == VtSgrUnderline::DOTTED => Self::Dotted,
+            v if v == VtSgrUnderline::DASHED => Self::Dashed,
             _ => Self::None,
         }
     }
 }
 
-/// Width classification of a cell, mirroring `vt::CellWide::*`.
+/// Width classification of a cell, mirroring `VtCellWide::*`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CellWide {
     #[default]
@@ -126,9 +186,9 @@ pub enum CellWide {
 impl From<i32> for CellWide {
     fn from(value: i32) -> Self {
         match value {
-            v if v == vt::CellWide::WIDE => Self::Wide,
-            v if v == vt::CellWide::SPACER_TAIL => Self::SpacerTail,
-            v if v == vt::CellWide::SPACER_HEAD => Self::SpacerHead,
+            v if v == VtCellWide::WIDE => Self::Wide,
+            v if v == VtCellWide::SPACER_TAIL => Self::SpacerTail,
+            v if v == VtCellWide::SPACER_HEAD => Self::SpacerHead,
             _ => Self::Narrow,
         }
     }
@@ -136,7 +196,7 @@ impl From<i32> for CellWide {
 
 /// The engine's resolved 256-color palette, fetched once per lock hold and
 /// threaded through batch row reads (see `read_screen_row_visit`).
-pub type Palette = [vt::ColorRgb; 256];
+pub type Palette = [VtColorRgb; 256];
 
 /// Cell text with inline storage for short content. Almost every cell is a
 /// single codepoint (≤4 UTF-8 bytes); heap-allocating a `String` per cell was
@@ -163,7 +223,7 @@ impl CellText {
         match &self.0 {
             // Invariant: constructors only store valid UTF-8 prefixes.
             CellTextRepr::Inline { len, buf } => unsafe {
-                std::str::from_utf8_unchecked(&buf[..*len as usize])
+                str::from_utf8_unchecked(&buf[..*len as usize])
             },
             CellTextRepr::Heap(s) => s,
         }
@@ -211,7 +271,7 @@ impl From<String> for CellText {
     }
 }
 
-impl std::ops::Deref for CellText {
+impl ops::Deref for CellText {
     type Target = str;
     fn deref(&self) -> &str {
         self.as_str()
@@ -268,7 +328,7 @@ pub struct SnapshotCursor {
     /// viewport (render-state `CURSOR_VISIBLE` ∧ `CURSOR_VIEWPORT_HAS_VALUE`).
     pub visible: bool,
     /// DECSCUSR shape from the render-state `CURSOR_VISUAL_STYLE`.
-    pub shape: crate::ansi::CursorShape,
+    pub shape: ansi::CursorShape,
     /// Modes-based blink from the render-state `CURSOR_BLINKING`.
     pub blinking: bool,
 }
@@ -278,14 +338,14 @@ pub struct SnapshotCursor {
 /// These become the `term_colors` OSC-override layer over the config palette.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SnapshotColors {
-    pub fg: nmt_config::colors::ColorRgb,
-    pub bg: nmt_config::colors::ColorRgb,
-    pub cursor: Option<nmt_config::colors::ColorRgb>,
+    pub fg: ColorRgb,
+    pub bg: ColorRgb,
+    pub cursor: Option<ColorRgb>,
     /// The **effective** window background (terminal-level `COLOR_BACKGROUND`): an
     /// OSC 11 override, or the config default pushed at init, or `None` when no bg
     /// is set at all. The renderer compares it to the config default to tell an OSC
     /// 11 override from a reset/default and keep config opacity/image.
-    pub bg_override: Option<nmt_config::colors::ColorRgb>,
+    pub bg_override: Option<ColorRgb>,
 }
 
 /// A kitty-graphics placement captured from the engine. Positions are
@@ -389,12 +449,12 @@ struct Callbacks {
     /// Number of BEL characters received since last drained.
     bell_count: u32,
     /// Owned text copied from clipboard requests before the FFI callback returns.
-    clipboard_writes: Vec<(crate::clipboard::ClipboardType, String)>,
+    clipboard_writes: Vec<(clipboard::ClipboardType, String)>,
 }
 
 unsafe extern "C" fn write_pty_cb(
-    _terminal: vt::Terminal,
-    userdata: *mut std::os::raw::c_void,
+    _terminal: VtTerminal,
+    userdata: *mut os::raw::c_void,
     data: *const u8,
     len: usize,
 ) {
@@ -405,10 +465,10 @@ unsafe extern "C" fn write_pty_cb(
     let cb = unsafe { &mut *(userdata as *mut Callbacks) };
 
     cb.pty_writes
-        .extend_from_slice(unsafe { std::slice::from_raw_parts(data, len) });
+        .extend_from_slice(unsafe { slice::from_raw_parts(data, len) });
 }
 
-unsafe extern "C" fn bell_cb(_terminal: vt::Terminal, userdata: *mut std::os::raw::c_void) {
+unsafe extern "C" fn bell_cb(_terminal: VtTerminal, userdata: *mut os::raw::c_void) {
     if userdata.is_null() {
         return;
     }
@@ -418,7 +478,7 @@ unsafe extern "C" fn bell_cb(_terminal: vt::Terminal, userdata: *mut std::os::ra
     cb.bell_count = cb.bell_count.saturating_add(1);
 }
 
-unsafe fn vt_string_bytes(value: &vt::String) -> Option<&[u8]> {
+unsafe fn vt_string_bytes(value: &VtString) -> Option<&[u8]> {
     if value.len == 0 {
         return Some(&[]);
     }
@@ -427,34 +487,32 @@ unsafe fn vt_string_bytes(value: &vt::String) -> Option<&[u8]> {
         return None;
     }
 
-    Some(unsafe { std::slice::from_raw_parts(value.ptr, value.len) })
+    Some(unsafe { slice::from_raw_parts(value.ptr, value.len) })
 }
 
 unsafe extern "C" fn clipboard_write_cb(
-    _terminal: vt::Terminal,
-    userdata: *mut std::os::raw::c_void,
-    write: *const vt::ClipboardWrite,
-) -> vt::ClipboardWriteResult::Type {
+    _terminal: VtTerminal,
+    userdata: *mut os::raw::c_void,
+    write: *const VtClipboardWrite,
+) -> VtClipboardWriteResult::Type {
     use crate::clipboard::ClipboardType;
 
     if userdata.is_null() || write.is_null() {
-        return vt::ClipboardWriteResult::INVALID_DATA;
+        return VtClipboardWriteResult::INVALID_DATA;
     }
 
     let size = unsafe { write.cast::<usize>().read() };
 
-    if size < std::mem::size_of::<vt::ClipboardWrite>() {
-        return vt::ClipboardWriteResult::INVALID_DATA;
+    if size < mem::size_of::<VtClipboardWrite>() {
+        return VtClipboardWriteResult::INVALID_DATA;
     }
 
     let write = unsafe { &*write };
 
     let ty = match write.location {
-        vt::ClipboardLocation::STANDARD => ClipboardType::Clipboard,
-        vt::ClipboardLocation::SELECTION | vt::ClipboardLocation::PRIMARY => {
-            ClipboardType::Selection
-        }
-        _ => return vt::ClipboardWriteResult::UNSUPPORTED,
+        VtClipboardLocation::STANDARD => ClipboardType::Clipboard,
+        VtClipboardLocation::SELECTION | VtClipboardLocation::PRIMARY => ClipboardType::Selection,
+        _ => return VtClipboardWriteResult::UNSUPPORTED,
     };
 
     let cb = unsafe { &mut *(userdata as *mut Callbacks) };
@@ -462,18 +520,18 @@ unsafe extern "C" fn clipboard_write_cb(
     if write.contents_len == 0 {
         cb.clipboard_writes.push((ty, String::new()));
 
-        return vt::ClipboardWriteResult::SUCCESS;
+        return VtClipboardWriteResult::SUCCESS;
     }
 
     if write.contents.is_null() {
-        return vt::ClipboardWriteResult::INVALID_DATA;
+        return VtClipboardWriteResult::INVALID_DATA;
     }
 
-    let contents = unsafe { std::slice::from_raw_parts(write.contents, write.contents_len) };
+    let contents = unsafe { slice::from_raw_parts(write.contents, write.contents_len) };
 
     for content in contents {
         let Some(mime) = (unsafe { vt_string_bytes(&content.mime) }) else {
-            return vt::ClipboardWriteResult::INVALID_DATA;
+            return VtClipboardWriteResult::INVALID_DATA;
         };
 
         if mime != b"text/plain" && !mime.starts_with(b"text/plain;") {
@@ -481,19 +539,19 @@ unsafe extern "C" fn clipboard_write_cb(
         }
 
         let Some(data) = (unsafe { vt_string_bytes(&content.data) }) else {
-            return vt::ClipboardWriteResult::INVALID_DATA;
+            return VtClipboardWriteResult::INVALID_DATA;
         };
 
-        let Ok(text) = std::str::from_utf8(data) else {
-            return vt::ClipboardWriteResult::INVALID_DATA;
+        let Ok(text) = str::from_utf8(data) else {
+            return VtClipboardWriteResult::INVALID_DATA;
         };
 
         cb.clipboard_writes.push((ty, text.to_owned()));
 
-        return vt::ClipboardWriteResult::SUCCESS;
+        return VtClipboardWriteResult::SUCCESS;
     }
 
-    vt::ClipboardWriteResult::UNSUPPORTED
+    VtClipboardWriteResult::UNSUPPORTED
 }
 
 /// PNG decode hook for the engine's kitty graphics protocol. The
@@ -501,19 +559,19 @@ unsafe extern "C" fn clipboard_write_cb(
 /// rejected. Decodes via `image_rs` to RGBA and returns the buffer allocated with
 /// the engine's own allocator (so the engine frees it).
 unsafe extern "C" fn decode_png_cb(
-    _userdata: *mut std::os::raw::c_void,
-    allocator: *const vt::Allocator,
+    _userdata: *mut os::raw::c_void,
+    allocator: *const VtAllocator,
     data: *const u8,
     data_len: usize,
-    out: *mut vt::SysImage,
+    out: *mut VtSysImage,
 ) -> bool {
     if data.is_null() || out.is_null() {
         return false;
     }
 
-    let bytes = unsafe { std::slice::from_raw_parts(data, data_len) };
+    let bytes = unsafe { slice::from_raw_parts(data, data_len) };
 
-    let img = match image_rs::load_from_memory(bytes) {
+    let img = match load_from_memory(bytes) {
         Ok(img) => img.to_rgba8(),
         Err(_) => return false,
     };
@@ -522,14 +580,14 @@ unsafe extern "C" fn decode_png_cb(
 
     let rgba = img.into_raw();
 
-    let buf = unsafe { vt::ghostty_alloc(allocator, rgba.len()) };
+    let buf = unsafe { ghostty_alloc(allocator, rgba.len()) };
 
     if buf.is_null() {
         return false;
     }
 
     unsafe {
-        std::ptr::copy_nonoverlapping(rgba.as_ptr(), buf, rgba.len());
+        ptr::copy_nonoverlapping(rgba.as_ptr(), buf, rgba.len());
         (*out).width = w;
         (*out).height = h;
         (*out).data = buf;
@@ -541,12 +599,12 @@ unsafe extern "C" fn decode_png_cb(
 
 /// Register the process-global PNG decode hook once.
 fn register_png_decoder() {
-    static ONCE: std::sync::Once = std::sync::Once::new();
+    static ONCE: sync::Once = sync::Once::new();
 
     ONCE.call_once(|| unsafe {
-        vt::ghostty_sys_set(
-            vt::SysOption::GHOSTTY_SYS_OPT_DECODE_PNG,
-            decode_png_cb as *const std::os::raw::c_void,
+        ghostty_sys_set(
+            VtSysOption::GHOSTTY_SYS_OPT_DECODE_PNG,
+            decode_png_cb as *const os::raw::c_void,
         );
     });
 }
@@ -557,13 +615,13 @@ fn register_png_decoder() {
 const KITTY_IMAGE_STORAGE_LIMIT_BYTES: u64 = 64 * 1024 * 1024;
 
 pub struct GhosttyTerminal {
-    terminal: vt::Terminal,
-    render_state: vt::RenderState,
-    row_iter: vt::RenderStateRowIterator,
+    terminal: VtTerminal,
+    render_state: VtRenderState,
+    row_iter: VtRenderStateRowIterator,
     /// Reused each `snapshot()` to walk kitty placements. Allocated once;
     /// `ghostty_kitty_graphics_get(PLACEMENT_ITERATOR)` re-points it at the live
     /// storage with no allocation, so a no-graphics batch costs ~3 FFI calls.
-    placement_iter: vt::KittyGraphicsPlacementIterator,
+    placement_iter: VtKittyGraphicsPlacementIterator,
     cols: u16,
     rows: u16,
     /// Last terminal-content revision for each visible row. Revisions persist
@@ -580,7 +638,7 @@ pub struct GhosttyTerminal {
     /// of every image already shipped to the frontend. Owned by the PTY reader
     /// thread (only `take_image_deltas` mutates it). A key change (re-transmit with
     /// new size/length) re-ships the pixels; a vanished id is removed.
-    shipped_images: rustc_hash::FxHashMap<u32, (u32, u32, usize)>,
+    shipped_images: FxHashMap<u32, (u32, u32, usize)>,
     scrollbar_override: Option<ScrollbarInfo>,
 }
 
@@ -598,41 +656,41 @@ impl GhosttyTerminal {
 
         let mut terminal = ptr::null_mut();
 
-        let options = vt::TerminalOptions {
+        let options = VtTerminalOptions {
             cols,
             rows,
             max_scrollback,
         };
 
-        Error::from_code(unsafe { vt::ghostty_terminal_new(ptr::null(), &mut terminal, options) })?;
+        Error::from_code(unsafe { ghostty_terminal_new(ptr::null(), &mut terminal, options) })?;
 
         let mut render_state = ptr::null_mut();
-        if let Err(err) = Error::from_code(unsafe {
-            vt::ghostty_render_state_new(ptr::null(), &mut render_state)
-        }) {
-            unsafe { vt::ghostty_terminal_free(terminal) };
+        if let Err(err) =
+            Error::from_code(unsafe { ghostty_render_state_new(ptr::null(), &mut render_state) })
+        {
+            unsafe { ghostty_terminal_free(terminal) };
             return Err(err);
         }
 
         let mut row_iter = ptr::null_mut();
         if let Err(err) = Error::from_code(unsafe {
-            vt::ghostty_render_state_row_iterator_new(ptr::null(), &mut row_iter)
+            ghostty_render_state_row_iterator_new(ptr::null(), &mut row_iter)
         }) {
             unsafe {
-                vt::ghostty_render_state_free(render_state);
-                vt::ghostty_terminal_free(terminal);
+                ghostty_render_state_free(render_state);
+                ghostty_terminal_free(terminal);
             }
             return Err(err);
         }
 
         let mut placement_iter = ptr::null_mut();
         if let Err(err) = Error::from_code(unsafe {
-            vt::ghostty_kitty_graphics_placement_iterator_new(ptr::null(), &mut placement_iter)
+            ghostty_kitty_graphics_placement_iterator_new(ptr::null(), &mut placement_iter)
         }) {
             unsafe {
-                vt::ghostty_render_state_row_iterator_free(row_iter);
-                vt::ghostty_render_state_free(render_state);
-                vt::ghostty_terminal_free(terminal);
+                ghostty_render_state_row_iterator_free(row_iter);
+                ghostty_render_state_free(render_state);
+                ghostty_terminal_free(terminal);
             }
             return Err(err);
         }
@@ -644,9 +702,9 @@ impl GhosttyTerminal {
         // default; a non-zero limit also enables the protocol.
         let limit = KITTY_IMAGE_STORAGE_LIMIT_BYTES;
         unsafe {
-            vt::ghostty_terminal_set(
+            ghostty_terminal_set(
                 terminal,
-                vt::TerminalOption::KITTY_IMAGE_STORAGE_LIMIT,
+                VtTerminalOption::KITTY_IMAGE_STORAGE_LIMIT,
                 (&limit as *const u64).cast(),
             );
         }
@@ -654,23 +712,23 @@ impl GhosttyTerminal {
         // Register synchronous callbacks. Userdata points at the boxed
         // `Callbacks`; its heap address is stable across moves of `Self`.
         let mut callbacks = Box::new(Callbacks::default());
-        let userdata = &mut *callbacks as *mut Callbacks as *mut std::os::raw::c_void;
+        let userdata = &mut *callbacks as *mut Callbacks as *mut os::raw::c_void;
         unsafe {
-            vt::ghostty_terminal_set(terminal, vt::TerminalOption::USERDATA, userdata);
-            vt::ghostty_terminal_set(
+            ghostty_terminal_set(terminal, VtTerminalOption::USERDATA, userdata);
+            ghostty_terminal_set(
                 terminal,
-                vt::TerminalOption::WRITE_PTY,
-                write_pty_cb as *const std::os::raw::c_void,
+                VtTerminalOption::WRITE_PTY,
+                write_pty_cb as *const os::raw::c_void,
             );
-            vt::ghostty_terminal_set(
+            ghostty_terminal_set(
                 terminal,
-                vt::TerminalOption::BELL,
-                bell_cb as *const std::os::raw::c_void,
+                VtTerminalOption::BELL,
+                bell_cb as *const os::raw::c_void,
             );
-            vt::ghostty_terminal_set(
+            ghostty_terminal_set(
                 terminal,
-                vt::TerminalOption::CLIPBOARD_WRITE,
-                clipboard_write_cb as *const std::os::raw::c_void,
+                VtTerminalOption::CLIPBOARD_WRITE,
+                clipboard_write_cb as *const os::raw::c_void,
             );
         }
 
@@ -683,7 +741,7 @@ impl GhosttyTerminal {
         #[cfg(windows)]
         unsafe {
             let seq = b"\x1b[?2027h";
-            vt::ghostty_terminal_vt_write(terminal, seq.as_ptr(), seq.len());
+            ghostty_terminal_vt_write(terminal, seq.as_ptr(), seq.len());
         }
 
         Ok(Self {
@@ -698,7 +756,7 @@ impl GhosttyTerminal {
             callbacks,
             last_title: String::new(),
             last_pwd: String::new(),
-            shipped_images: rustc_hash::FxHashMap::default(),
+            shipped_images: FxHashMap::default(),
             scrollbar_override: None,
         })
     }
@@ -706,23 +764,23 @@ impl GhosttyTerminal {
     /// Drain bytes the terminal wants written back to the PTY (query/DSR/DA
     /// responses). Returns empty when there is nothing to send.
     pub fn take_pty_writes(&mut self) -> Vec<u8> {
-        std::mem::take(&mut self.callbacks.pty_writes)
+        mem::take(&mut self.callbacks.pty_writes)
     }
 
     /// Drain and reset the bell counter (number of BELs since last call).
     pub fn take_bell(&mut self) -> u32 {
-        std::mem::replace(&mut self.callbacks.bell_count, 0)
+        mem::replace(&mut self.callbacks.bell_count, 0)
     }
 
     /// Drain clipboard writes decoded from OSC 52 or iTerm2 OSC 1337.
-    pub fn take_clipboard_writes(&mut self) -> Vec<(crate::clipboard::ClipboardType, String)> {
-        std::mem::take(&mut self.callbacks.clipboard_writes)
+    pub fn take_clipboard_writes(&mut self) -> Vec<(clipboard::ClipboardType, String)> {
+        mem::take(&mut self.callbacks.clipboard_writes)
     }
 
     /// Poll the terminal title; returns `Some(title)` only when it changed
     /// since the last poll.
     pub fn poll_title(&mut self) -> Option<String> {
-        let title = self.get_string(vt::TerminalData::TITLE);
+        let title = self.get_string(VtTerminalData::TITLE);
 
         if title != self.last_title {
             self.last_title = title.clone();
@@ -735,7 +793,7 @@ impl GhosttyTerminal {
     /// Poll the working directory (OSC 7); returns `Some(pwd)` only when it
     /// changed since the last poll.
     pub fn poll_pwd(&mut self) -> Option<String> {
-        let pwd = self.get_string(vt::TerminalData::PWD);
+        let pwd = self.get_string(VtTerminalData::PWD);
 
         if pwd != self.last_pwd {
             self.last_pwd = pwd.clone();
@@ -749,18 +807,18 @@ impl GhosttyTerminal {
     /// change-detection). `poll_title` is the producer's change-detecting variant;
     /// this is for on-demand frontend reads (title template), replacing the mirror.
     pub fn title(&self) -> String {
-        self.get_string(vt::TerminalData::TITLE)
+        self.get_string(VtTerminalData::TITLE)
     }
 
     /// The current OSC 7 working directory (peek) as a path, or `None` when unset.
     /// Replaces the mirror's `current_directory` for the title template.
-    pub fn current_directory(&self) -> Option<std::path::PathBuf> {
-        let pwd = self.get_string(vt::TerminalData::PWD);
+    pub fn current_directory(&self) -> Option<path::PathBuf> {
+        let pwd = self.get_string(VtTerminalData::PWD);
 
         if pwd.is_empty() {
             None
         } else {
-            Some(crate::pty_pipe::pwd_to_path(&pwd))
+            Some(pty_pipe::pwd_to_path(&pwd))
         }
     }
 
@@ -768,16 +826,16 @@ impl GhosttyTerminal {
     /// this direct setter is
     /// kept for tests and programmatic cwd updates.
     pub fn set_pwd(&mut self, pwd: &str) {
-        let s = vt::String {
+        let s = VtString {
             ptr: pwd.as_ptr(),
             len: pwd.len(),
         };
 
         unsafe {
-            vt::ghostty_terminal_set(
+            ghostty_terminal_set(
                 self.terminal,
-                vt::TerminalOption::PWD,
-                (&s as *const vt::String).cast(),
+                VtTerminalOption::PWD,
+                (&s as *const VtString).cast(),
             );
         }
     }
@@ -785,21 +843,20 @@ impl GhosttyTerminal {
     /// Read a `GhosttyString`-typed terminal datum as an owned `String`. The
     /// borrowed pointer is only valid until the next mutating call, so we copy
     /// immediately.
-    fn get_string(&self, data: vt::TerminalData::Type) -> String {
-        let mut s = vt::String {
+    fn get_string(&self, data: VtTerminalData::Type) -> String {
+        let mut s = VtString {
             ptr: ptr::null(),
             len: 0,
         };
 
-        let ok = unsafe {
-            vt::ghostty_terminal_get(self.terminal, data, (&mut s as *mut vt::String).cast())
-        };
+        let ok =
+            unsafe { ghostty_terminal_get(self.terminal, data, (&mut s as *mut VtString).cast()) };
 
-        if ok != vt::Result::SUCCESS || s.ptr.is_null() || s.len == 0 {
+        if ok != VtResult::SUCCESS || s.ptr.is_null() || s.len == 0 {
             return String::new();
         }
 
-        let bytes = unsafe { std::slice::from_raw_parts(s.ptr, s.len) };
+        let bytes = unsafe { slice::from_raw_parts(s.ptr, s.len) };
 
         String::from_utf8_lossy(bytes).into_owned()
     }
@@ -814,14 +871,14 @@ impl GhosttyTerminal {
         let mut out: u16 = 0;
 
         let ok = unsafe {
-            vt::ghostty_terminal_get(
+            ghostty_terminal_get(
                 self.terminal,
-                vt::TerminalData::CURSOR_Y,
+                VtTerminalData::CURSOR_Y,
                 (&mut out as *mut u16).cast(),
             )
         };
 
-        (ok == vt::Result::SUCCESS).then_some(out)
+        (ok == VtResult::SUCCESS).then_some(out)
     }
 
     pub fn cols(&self) -> u16 {
@@ -844,13 +901,13 @@ impl GhosttyTerminal {
     }
 
     fn raw_scrollbar(&self) -> ScrollbarInfo {
-        let mut sb = vt::TerminalScrollbar::default();
+        let mut sb = VtTerminalScrollbar::default();
 
         unsafe {
-            vt::ghostty_terminal_get(
+            ghostty_terminal_get(
                 self.terminal,
-                vt::TerminalData::SCROLLBAR,
-                (&mut sb as *mut vt::TerminalScrollbar).cast(),
+                VtTerminalData::SCROLLBAR,
+                (&mut sb as *mut VtTerminalScrollbar).cast(),
             );
         }
 
@@ -863,7 +920,7 @@ impl GhosttyTerminal {
 
     /// Feed raw VT bytes through the terminal's stream parser.
     pub fn write_vt(&mut self, data: &[u8]) {
-        unsafe { vt::ghostty_terminal_vt_write(self.terminal, data.as_ptr(), data.len()) };
+        unsafe { ghostty_terminal_vt_write(self.terminal, data.as_ptr(), data.len()) };
 
         if self.scrollbar_override.is_some() {
             self.update_scrollbar_override();
@@ -874,9 +931,9 @@ impl GhosttyTerminal {
     /// also enables the protocol; 0 disables it. Exposed for tests/eviction.
     pub fn set_kitty_storage_limit(&mut self, bytes: u64) {
         unsafe {
-            vt::ghostty_terminal_set(
+            ghostty_terminal_set(
                 self.terminal,
-                vt::TerminalOption::KITTY_IMAGE_STORAGE_LIMIT,
+                VtTerminalOption::KITTY_IMAGE_STORAGE_LIMIT,
                 (&bytes as *const u64).cast(),
             );
         }
@@ -885,18 +942,18 @@ impl GhosttyTerminal {
     /// Whether the engine currently holds a kitty image with this id —
     /// cheap id lookup, no pixel copy. Used to observe transmit/delete/eviction.
     pub fn kitty_image_exists(&self, image_id: u32) -> bool {
-        let mut graphics: vt::KittyGraphics = ptr::null_mut();
+        let mut graphics: VtKittyGraphics = ptr::null_mut();
 
         let have = unsafe {
-            vt::ghostty_terminal_get(
+            ghostty_terminal_get(
                 self.terminal,
-                vt::TerminalData::KITTY_GRAPHICS,
-                (&mut graphics as *mut vt::KittyGraphics).cast(),
+                VtTerminalData::KITTY_GRAPHICS,
+                (&mut graphics as *mut VtKittyGraphics).cast(),
             )
-        } == vt::Result::SUCCESS
+        } == VtResult::SUCCESS
             && !graphics.is_null();
 
-        have && !unsafe { vt::ghostty_kitty_graphics_image(graphics, image_id) }.is_null()
+        have && !unsafe { ghostty_kitty_graphics_image(graphics, image_id) }.is_null()
     }
 
     /// Read the current value of a VT mode (identifiers in [`mode`]). Returns
@@ -904,10 +961,9 @@ impl GhosttyTerminal {
     pub fn mode(&self, id: u16) -> bool {
         let mut value = false;
 
-        let ok =
-            unsafe { vt::ghostty_terminal_mode_get(self.terminal, id, &mut value as *mut bool) };
+        let ok = unsafe { ghostty_terminal_mode_get(self.terminal, id, &mut value as *mut bool) };
 
-        ok == vt::Result::SUCCESS && value
+        ok == VtResult::SUCCESS && value
     }
 
     /// The active kitty keyboard protocol flags, mapped to terminal `Mode` bits. These
@@ -915,19 +971,19 @@ impl GhosttyTerminal {
     /// `mode()` can't read them — the vt_modes facade folds these in separately so
     /// `session_key_flags` / the input path see kitty press+release encoding
     /// for key press and release encoding. Empty when the protocol is inactive.
-    pub fn kitty_keyboard_modes(&self) -> crate::terminal::Mode {
+    pub fn kitty_keyboard_modes(&self) -> terminal::Mode {
         use crate::terminal::Mode;
         let mut flags: u8 = 0;
 
         let ok = unsafe {
-            vt::ghostty_terminal_get(
+            ghostty_terminal_get(
                 self.terminal,
-                vt::TerminalData::KITTY_KEYBOARD_FLAGS,
+                VtTerminalData::KITTY_KEYBOARD_FLAGS,
                 (&mut flags as *mut u8).cast(),
             )
         };
 
-        if ok != vt::Result::SUCCESS {
+        if ok != VtResult::SUCCESS {
             return Mode::empty();
         }
 
@@ -935,27 +991,27 @@ impl GhosttyTerminal {
 
         m.set(
             Mode::DISAMBIGUATE_ESC_CODES,
-            flags & vt::KITTY_KEY_DISAMBIGUATE != 0,
+            flags & KITTY_KEY_DISAMBIGUATE != 0,
         );
 
         m.set(
             Mode::REPORT_EVENT_TYPES,
-            flags & vt::KITTY_KEY_REPORT_EVENTS != 0,
+            flags & KITTY_KEY_REPORT_EVENTS != 0,
         );
 
         m.set(
             Mode::REPORT_ALTERNATE_KEYS,
-            flags & vt::KITTY_KEY_REPORT_ALTERNATES != 0,
+            flags & KITTY_KEY_REPORT_ALTERNATES != 0,
         );
 
         m.set(
             Mode::REPORT_ALL_KEYS_AS_ESC,
-            flags & vt::KITTY_KEY_REPORT_ALL != 0,
+            flags & KITTY_KEY_REPORT_ALL != 0,
         );
 
         m.set(
             Mode::REPORT_ASSOCIATED_TEXT,
-            flags & vt::KITTY_KEY_REPORT_ASSOCIATED != 0,
+            flags & KITTY_KEY_REPORT_ASSOCIATED != 0,
         );
 
         m
@@ -988,7 +1044,7 @@ impl GhosttyTerminal {
         // entirely). Do NOT collapse this back into a single call.
         if cols != self.cols && rows != self.rows {
             Error::from_code(unsafe {
-                vt::ghostty_terminal_resize(
+                ghostty_terminal_resize(
                     self.terminal,
                     cols,
                     self.rows,
@@ -999,7 +1055,7 @@ impl GhosttyTerminal {
         }
 
         Error::from_code(unsafe {
-            vt::ghostty_terminal_resize(self.terminal, cols, rows, cell_width_px, cell_height_px)
+            ghostty_terminal_resize(self.terminal, cols, rows, cell_width_px, cell_height_px)
         })?;
 
         self.cols = cols;
@@ -1038,20 +1094,18 @@ impl GhosttyTerminal {
 
     /// Set the shape used until a program overrides it with DECSCUSR and again
     /// after that program resets the cursor style with `CSI 0 SP q`.
-    pub fn set_default_cursor_shape(&mut self, shape: crate::ansi::CursorShape) -> Result<()> {
-        let style: vt::TerminalCursorStyle::Type = match shape {
-            crate::ansi::CursorShape::Beam => vt::TerminalCursorStyle::BAR,
-            crate::ansi::CursorShape::Underline => vt::TerminalCursorStyle::UNDERLINE,
-            crate::ansi::CursorShape::Block | crate::ansi::CursorShape::Hidden => {
-                vt::TerminalCursorStyle::BLOCK
-            }
+    pub fn set_default_cursor_shape(&mut self, shape: ansi::CursorShape) -> Result<()> {
+        let style: VtTerminalCursorStyle::Type = match shape {
+            ansi::CursorShape::Beam => VtTerminalCursorStyle::BAR,
+            ansi::CursorShape::Underline => VtTerminalCursorStyle::UNDERLINE,
+            ansi::CursorShape::Block | ansi::CursorShape::Hidden => VtTerminalCursorStyle::BLOCK,
         };
 
         Error::from_code(unsafe {
-            vt::ghostty_terminal_set(
+            ghostty_terminal_set(
                 self.terminal,
-                vt::TerminalOption::DEFAULT_CURSOR_STYLE,
-                (&style as *const vt::TerminalCursorStyle::Type).cast(),
+                VtTerminalOption::DEFAULT_CURSOR_STYLE,
+                (&style as *const VtTerminalCursorStyle::Type).cast(),
             )
         })
     }
@@ -1066,7 +1120,7 @@ impl GhosttyTerminal {
         cursor: [u8; 3],
         palette: &[[u8; 3]; 256],
     ) {
-        let rgb = |c: [u8; 3]| vt::ColorRgb {
+        let rgb = |c: [u8; 3]| VtColorRgb {
             r: c[0],
             g: c[1],
             b: c[2],
@@ -1076,36 +1130,36 @@ impl GhosttyTerminal {
         let b = rgb(bg);
         let c = rgb(cursor);
 
-        let pal: [vt::ColorRgb; 256] = std::array::from_fn(|i| rgb(palette[i]));
+        let pal: [VtColorRgb; 256] = array::from_fn(|i| rgb(palette[i]));
 
         unsafe {
-            vt::ghostty_terminal_set(
+            ghostty_terminal_set(
                 self.terminal,
-                vt::TerminalOption::COLOR_FOREGROUND,
-                (&f as *const vt::ColorRgb).cast(),
+                VtTerminalOption::COLOR_FOREGROUND,
+                (&f as *const VtColorRgb).cast(),
             );
 
-            vt::ghostty_terminal_set(
+            ghostty_terminal_set(
                 self.terminal,
-                vt::TerminalOption::COLOR_BACKGROUND,
-                (&b as *const vt::ColorRgb).cast(),
+                VtTerminalOption::COLOR_BACKGROUND,
+                (&b as *const VtColorRgb).cast(),
             );
 
-            vt::ghostty_terminal_set(
+            ghostty_terminal_set(
                 self.terminal,
-                vt::TerminalOption::COLOR_CURSOR,
-                (&c as *const vt::ColorRgb).cast(),
+                VtTerminalOption::COLOR_CURSOR,
+                (&c as *const VtColorRgb).cast(),
             );
 
-            vt::ghostty_terminal_set(
+            ghostty_terminal_set(
                 self.terminal,
-                vt::TerminalOption::COLOR_PALETTE,
+                VtTerminalOption::COLOR_PALETTE,
                 pal.as_ptr().cast(),
             );
         }
     }
 
-    pub fn set_theme_colors(&mut self, colors: &nmt_config::colors::Colors) {
+    pub fn set_theme_colors(&mut self, colors: &Colors) {
         use nmt_config::colors::term::List;
         use nmt_config::colors::{ColorRgb, NamedColor};
 
@@ -1115,7 +1169,7 @@ impl GhosttyTerminal {
             [color.r, color.g, color.b]
         };
 
-        let palette = std::array::from_fn(|index| to_rgb(list[index]));
+        let palette = array::from_fn(|index| to_rgb(list[index]));
 
         self.set_colors(
             to_rgb(list[NamedColor::Foreground]),
@@ -1130,45 +1184,43 @@ impl GhosttyTerminal {
     #[cfg(test)]
     pub(crate) fn has_prompt_tagged_row(&mut self) -> bool {
         self.row_semantic_prompts()
-            .map(|tags| tags.iter().any(|&t| t == vt::RowSemanticPrompt::PROMPT))
+            .map(|tags| tags.iter().any(|&t| t == VtRowSemanticPrompt::PROMPT))
             .unwrap_or(false)
     }
 
     /// Probe the engine's `SEMANTIC_PROMPT` tag per visible row. This verifies that
     /// headless parsing preserves OSC 133 metadata used by command-block rendering.
     #[cfg(test)]
-    fn row_semantic_prompts(&mut self) -> Result<Vec<vt::RowSemanticPrompt::Type>> {
-        Error::from_code(unsafe {
-            vt::ghostty_render_state_update(self.render_state, self.terminal)
-        })?;
+    fn row_semantic_prompts(&mut self) -> Result<Vec<VtRowSemanticPrompt::Type>> {
+        Error::from_code(unsafe { ghostty_render_state_update(self.render_state, self.terminal) })?;
 
         Error::from_code(unsafe {
-            vt::ghostty_render_state_get(
+            ghostty_render_state_get(
                 self.render_state,
-                vt::RenderStateData::ROW_ITERATOR,
-                (&mut self.row_iter as *mut vt::RenderStateRowIterator).cast(),
+                VtRenderStateData::ROW_ITERATOR,
+                (&mut self.row_iter as *mut VtRenderStateRowIterator).cast(),
             )
         })?;
 
         let mut out = Vec::with_capacity(self.rows as usize);
 
-        while unsafe { vt::ghostty_render_state_row_iterator_next(self.row_iter) } {
-            let mut tag: vt::RowSemanticPrompt::Type = vt::RowSemanticPrompt::NONE;
-            let mut raw_row: vt::Row = 0;
+        while unsafe { ghostty_render_state_row_iterator_next(self.row_iter) } {
+            let mut tag: VtRowSemanticPrompt::Type = VtRowSemanticPrompt::NONE;
+            let mut raw_row: VtRow = 0;
 
             if unsafe {
-                vt::ghostty_render_state_row_get(
+                ghostty_render_state_row_get(
                     self.row_iter,
-                    vt::RenderStateRowData::RAW,
-                    (&mut raw_row as *mut vt::Row).cast(),
+                    VtRenderStateRowData::RAW,
+                    (&mut raw_row as *mut VtRow).cast(),
                 )
-            } == vt::Result::SUCCESS
+            } == VtResult::SUCCESS
             {
                 let _ = unsafe {
-                    vt::ghostty_row_get(
+                    ghostty_row_get(
                         raw_row,
-                        vt::RowData::SEMANTIC_PROMPT,
-                        (&mut tag as *mut vt::RowSemanticPrompt::Type).cast(),
+                        VtRowData::SEMANTIC_PROMPT,
+                        (&mut tag as *mut VtRowSemanticPrompt::Type).cast(),
                     )
                 };
             }
@@ -1181,9 +1233,7 @@ impl GhosttyTerminal {
 
     /// Populate a reusable render buffer from the full visible viewport.
     pub fn snapshot_into(&mut self, buffer: &mut RenderBuffer) -> Result<()> {
-        Error::from_code(unsafe {
-            vt::ghostty_render_state_update(self.render_state, self.terminal)
-        })?;
+        Error::from_code(unsafe { ghostty_render_state_update(self.render_state, self.terminal) })?;
 
         self.consume_render_damage()?;
 
@@ -1191,7 +1241,7 @@ impl GhosttyTerminal {
             x: 0,
             y: 0,
             visible: false,
-            shape: crate::ansi::CursorShape::Block,
+            shape: ansi::CursorShape::Block,
             blinking: false,
         });
 
@@ -1203,7 +1253,7 @@ impl GhosttyTerminal {
         // remaining viewport is safer than withholding an otherwise valid frame.
         for y in 0..self.rows {
             let meta = self
-                .grid_ref_at(vt::PointTag::VIEWPORT, 0, y as u32)
+                .grid_ref_at(VtPointTag::VIEWPORT, 0, y as u32)
                 .and_then(|grid_ref| {
                     Self::visit_row_cells(grid_ref, self.cols, &palette, |x, text, wide, style| {
                         buffer.write_cell(x as usize, y as usize, text.as_str(), wide, &style);
@@ -1227,20 +1277,20 @@ impl GhosttyTerminal {
     /// Both damage layers must be cleared after consumption; otherwise every
     /// later capture would repeat the first dirty update indefinitely.
     fn consume_render_damage(&mut self) -> Result<()> {
-        let mut dirty: vt::RenderStateDirty::Type = vt::RenderStateDirty::FALSE;
+        let mut dirty: VtRenderStateDirty::Type = VtRenderStateDirty::FALSE;
 
         Error::from_code(unsafe {
-            vt::ghostty_render_state_get(
+            ghostty_render_state_get(
                 self.render_state,
-                vt::RenderStateData::DIRTY,
-                (&mut dirty as *mut vt::RenderStateDirty::Type).cast(),
+                VtRenderStateData::DIRTY,
+                (&mut dirty as *mut VtRenderStateDirty::Type).cast(),
             )
         })?;
 
         let rows = self.rows as usize;
         let dimensions_changed = self.row_versions.len() != rows;
 
-        if dirty == vt::RenderStateDirty::FALSE && !dimensions_changed {
+        if dirty == VtRenderStateDirty::FALSE && !dimensions_changed {
             return Ok(());
         }
 
@@ -1250,29 +1300,29 @@ impl GhosttyTerminal {
 
         self.row_versions.resize(rows, revision);
 
-        let full = dimensions_changed || dirty != vt::RenderStateDirty::PARTIAL;
+        let full = dimensions_changed || dirty != VtRenderStateDirty::PARTIAL;
         if full {
             self.row_versions.fill(revision);
         }
 
         Error::from_code(unsafe {
-            vt::ghostty_render_state_get(
+            ghostty_render_state_get(
                 self.render_state,
-                vt::RenderStateData::ROW_ITERATOR,
-                (&mut self.row_iter as *mut vt::RenderStateRowIterator).cast(),
+                VtRenderStateData::ROW_ITERATOR,
+                (&mut self.row_iter as *mut VtRenderStateRowIterator).cast(),
             )
         })?;
 
         let clean = false;
         let mut row = 0usize;
 
-        while unsafe { vt::ghostty_render_state_row_iterator_next(self.row_iter) } {
+        while unsafe { ghostty_render_state_row_iterator_next(self.row_iter) } {
             let mut row_dirty = false;
 
             Error::from_code(unsafe {
-                vt::ghostty_render_state_row_get(
+                ghostty_render_state_row_get(
                     self.row_iter,
-                    vt::RenderStateRowData::DIRTY,
+                    VtRenderStateRowData::DIRTY,
                     (&mut row_dirty as *mut bool).cast(),
                 )
             })?;
@@ -1284,9 +1334,9 @@ impl GhosttyTerminal {
             }
 
             Error::from_code(unsafe {
-                vt::ghostty_render_state_row_set(
+                ghostty_render_state_row_set(
                     self.row_iter,
-                    vt::RenderStateRowOption::DIRTY,
+                    VtRenderStateRowOption::DIRTY,
                     (&clean as *const bool).cast(),
                 )
             })?;
@@ -1294,13 +1344,13 @@ impl GhosttyTerminal {
             row += 1;
         }
 
-        let clean = vt::RenderStateDirty::FALSE;
+        let clean = VtRenderStateDirty::FALSE;
 
         Error::from_code(unsafe {
-            vt::ghostty_render_state_set(
+            ghostty_render_state_set(
                 self.render_state,
-                vt::RenderStateOption::DIRTY,
-                (&clean as *const vt::RenderStateDirty::Type).cast(),
+                VtRenderStateOption::DIRTY,
+                (&clean as *const VtRenderStateDirty::Type).cast(),
             )
         })
     }
@@ -1324,15 +1374,15 @@ impl GhosttyTerminal {
 
         // Borrowed handle to the active screen's image storage; valid until the next
         // mutating terminal call (we only read here).
-        let mut graphics: vt::KittyGraphics = ptr::null_mut();
+        let mut graphics: VtKittyGraphics = ptr::null_mut();
 
         if unsafe {
-            vt::ghostty_terminal_get(
+            ghostty_terminal_get(
                 self.terminal,
-                vt::TerminalData::KITTY_GRAPHICS,
-                (&mut graphics as *mut vt::KittyGraphics).cast(),
+                VtTerminalData::KITTY_GRAPHICS,
+                (&mut graphics as *mut VtKittyGraphics).cast(),
             )
-        } != vt::Result::SUCCESS
+        } != VtResult::SUCCESS
             || graphics.is_null()
         {
             return out;
@@ -1340,28 +1390,28 @@ impl GhosttyTerminal {
 
         // Re-point the persistent iterator at the live placement set (no alloc).
         if unsafe {
-            vt::ghostty_kitty_graphics_get(
+            ghostty_kitty_graphics_get(
                 graphics,
-                vt::KittyGraphicsData::PLACEMENT_ITERATOR,
-                (&mut self.placement_iter as *mut vt::KittyGraphicsPlacementIterator).cast(),
+                VtKittyGraphicsData::PLACEMENT_ITERATOR,
+                (&mut self.placement_iter as *mut VtKittyGraphicsPlacementIterator).cast(),
             )
-        } != vt::Result::SUCCESS
+        } != VtResult::SUCCESS
         {
             return out;
         }
 
-        while unsafe { vt::ghostty_kitty_graphics_placement_next(self.placement_iter) } {
+        while unsafe { ghostty_kitty_graphics_placement_next(self.placement_iter) } {
             let iter = self.placement_iter;
-            let image_id = placement_scalar::<u32>(iter, vt::KittyGraphicsPlacementData::IMAGE_ID);
+            let image_id = placement_scalar::<u32>(iter, VtKittyGraphicsPlacementData::IMAGE_ID);
             let placement_id =
-                placement_scalar::<u32>(iter, vt::KittyGraphicsPlacementData::PLACEMENT_ID);
+                placement_scalar::<u32>(iter, VtKittyGraphicsPlacementData::PLACEMENT_ID);
 
             let mut is_virtual = false;
 
             unsafe {
-                vt::ghostty_kitty_graphics_placement_get(
+                ghostty_kitty_graphics_placement_get(
                     iter,
-                    vt::KittyGraphicsPlacementData::IS_VIRTUAL,
+                    VtKittyGraphicsPlacementData::IS_VIRTUAL,
                     (&mut is_virtual as *mut bool).cast(),
                 );
             }
@@ -1378,25 +1428,22 @@ impl GhosttyTerminal {
                     viewport_row: 0,
                     pixel_width: 0,
                     pixel_height: 0,
-                    grid_cols: placement_scalar::<u32>(
-                        iter,
-                        vt::KittyGraphicsPlacementData::COLUMNS,
-                    ),
-                    grid_rows: placement_scalar::<u32>(iter, vt::KittyGraphicsPlacementData::ROWS),
+                    grid_cols: placement_scalar::<u32>(iter, VtKittyGraphicsPlacementData::COLUMNS),
+                    grid_rows: placement_scalar::<u32>(iter, VtKittyGraphicsPlacementData::ROWS),
                     cell_x_offset: 0,
                     cell_y_offset: 0,
                     source_x: 0,
                     source_y: 0,
                     source_width: 0,
                     source_height: 0,
-                    z: placement_scalar::<i32>(iter, vt::KittyGraphicsPlacementData::Z),
+                    z: placement_scalar::<i32>(iter, VtKittyGraphicsPlacementData::Z),
                 });
 
                 continue;
             }
 
             // Geometry needs the image handle.
-            let image = unsafe { vt::ghostty_kitty_graphics_image(graphics, image_id) };
+            let image = unsafe { ghostty_kitty_graphics_image(graphics, image_id) };
 
             if image.is_null() {
                 continue;
@@ -1404,14 +1451,14 @@ impl GhosttyTerminal {
 
             let (mut vp_col, mut vp_row) = (0i32, 0i32);
             if unsafe {
-                vt::ghostty_kitty_graphics_placement_viewport_pos(
+                ghostty_kitty_graphics_placement_viewport_pos(
                     iter,
                     image,
                     self.terminal,
                     &mut vp_col,
                     &mut vp_row,
                 )
-            } != vt::Result::SUCCESS
+            } != VtResult::SUCCESS
             {
                 // Off-screen (NO_VALUE) — invisible this frame, nothing to paint.
                 continue;
@@ -1420,7 +1467,7 @@ impl GhosttyTerminal {
             let (mut px_w, mut px_h) = (0u32, 0u32);
 
             unsafe {
-                vt::ghostty_kitty_graphics_placement_pixel_size(
+                ghostty_kitty_graphics_placement_pixel_size(
                     iter,
                     image,
                     self.terminal,
@@ -1443,17 +1490,17 @@ impl GhosttyTerminal {
                 grid_rows: g_rows,
                 cell_x_offset: placement_scalar::<u32>(
                     iter,
-                    vt::KittyGraphicsPlacementData::X_OFFSET,
+                    VtKittyGraphicsPlacementData::X_OFFSET,
                 ),
                 cell_y_offset: placement_scalar::<u32>(
                     iter,
-                    vt::KittyGraphicsPlacementData::Y_OFFSET,
+                    VtKittyGraphicsPlacementData::Y_OFFSET,
                 ),
                 source_x: sx,
                 source_y: sy,
                 source_width: sw,
                 source_height: sh,
-                z: placement_scalar::<i32>(iter, vt::KittyGraphicsPlacementData::Z),
+                z: placement_scalar::<i32>(iter, VtKittyGraphicsPlacementData::Z),
             });
         }
 
@@ -1476,29 +1523,29 @@ impl GhosttyTerminal {
         };
 
         if unsafe {
-            vt::ghostty_kitty_graphics_get(
+            ghostty_kitty_graphics_get(
                 graphics,
-                vt::KittyGraphicsData::PLACEMENT_ITERATOR,
-                (&mut self.placement_iter as *mut vt::KittyGraphicsPlacementIterator).cast(),
+                VtKittyGraphicsData::PLACEMENT_ITERATOR,
+                (&mut self.placement_iter as *mut VtKittyGraphicsPlacementIterator).cast(),
             )
-        } != vt::Result::SUCCESS
+        } != VtResult::SUCCESS
         {
             return out;
         }
 
-        while unsafe { vt::ghostty_kitty_graphics_placement_next(self.placement_iter) } {
+        while unsafe { ghostty_kitty_graphics_placement_next(self.placement_iter) } {
             let iter = self.placement_iter;
             let (mut col, mut row) = (0u32, 0u32);
 
-            if unsafe { vt::ghostty_block_ref_placement_pos(block.raw, iter, &mut col, &mut row) }
-                != vt::Result::SUCCESS
+            if unsafe { ghostty_block_ref_placement_pos(block.raw, iter, &mut col, &mut row) }
+                != VtResult::SUCCESS
             {
                 // Virtual placement (unicode placeholder) — no pin to resolve.
                 continue;
             }
 
-            let image_id = placement_scalar::<u32>(iter, vt::KittyGraphicsPlacementData::IMAGE_ID);
-            let image = unsafe { vt::ghostty_kitty_graphics_image(graphics, image_id) };
+            let image_id = placement_scalar::<u32>(iter, VtKittyGraphicsPlacementData::IMAGE_ID);
+            let image = unsafe { ghostty_kitty_graphics_image(graphics, image_id) };
 
             if image.is_null() {
                 continue;
@@ -1509,7 +1556,7 @@ impl GhosttyTerminal {
                 image_id,
                 placement_id: placement_scalar::<u32>(
                     iter,
-                    vt::KittyGraphicsPlacementData::PLACEMENT_ID,
+                    VtKittyGraphicsPlacementData::PLACEMENT_ID,
                 ),
                 screen_col: col,
                 screen_row: row,
@@ -1519,7 +1566,7 @@ impl GhosttyTerminal {
                 source_y: sy,
                 source_width: sw,
                 source_height: sh,
-                z: placement_scalar::<i32>(iter, vt::KittyGraphicsPlacementData::Z),
+                z: placement_scalar::<i32>(iter, VtKittyGraphicsPlacementData::Z),
             });
         }
 
@@ -1534,31 +1581,31 @@ impl GhosttyTerminal {
         &self,
         block: &BlockRef,
         image_id: u32,
-    ) -> Option<crate::graphics::GraphicData> {
+    ) -> Option<graphics::GraphicData> {
         let graphics = block.kitty_graphics_raw()?;
-        let image = unsafe { vt::ghostty_kitty_graphics_image(graphics, image_id) };
+        let image = unsafe { ghostty_kitty_graphics_image(graphics, image_id) };
 
         if image.is_null() {
             return None;
         }
 
-        let read_u32 = |data: vt::KittyGraphicsImageData::Type| -> u32 {
+        let read_u32 = |data: VtKittyGraphicsImageData::Type| -> u32 {
             let mut v: u32 = 0;
             unsafe {
-                vt::ghostty_kitty_graphics_image_get(image, data, (&mut v as *mut u32).cast());
+                ghostty_kitty_graphics_image_get(image, data, (&mut v as *mut u32).cast());
             }
             v
         };
 
-        let width = read_u32(vt::KittyGraphicsImageData::WIDTH);
-        let height = read_u32(vt::KittyGraphicsImageData::HEIGHT);
+        let width = read_u32(VtKittyGraphicsImageData::WIDTH);
+        let height = read_u32(VtKittyGraphicsImageData::HEIGHT);
 
         let mut data_len: usize = 0;
 
         unsafe {
-            vt::ghostty_kitty_graphics_image_get(
+            ghostty_kitty_graphics_image_get(
                 image,
-                vt::KittyGraphicsImageData::DATA_LEN,
+                VtKittyGraphicsImageData::DATA_LEN,
                 (&mut data_len as *mut usize).cast(),
             );
         }
@@ -1575,19 +1622,19 @@ impl GhosttyTerminal {
     pub fn take_image_deltas(
         &mut self,
         placements: &[SnapshotPlacement],
-    ) -> (Vec<(u32, crate::graphics::GraphicData)>, Vec<u32>) {
+    ) -> (Vec<(u32, graphics::GraphicData)>, Vec<u32>) {
         let mut pending = Vec::new();
-        let mut live: rustc_hash::FxHashSet<u32> = rustc_hash::FxHashSet::default();
+        let mut live: FxHashSet<u32> = FxHashSet::default();
 
-        let mut graphics: vt::KittyGraphics = ptr::null_mut();
+        let mut graphics: VtKittyGraphics = ptr::null_mut();
 
         let have_graphics = unsafe {
-            vt::ghostty_terminal_get(
+            ghostty_terminal_get(
                 self.terminal,
-                vt::TerminalData::KITTY_GRAPHICS,
-                (&mut graphics as *mut vt::KittyGraphics).cast(),
+                VtTerminalData::KITTY_GRAPHICS,
+                (&mut graphics as *mut VtKittyGraphics).cast(),
             )
-        } == vt::Result::SUCCESS
+        } == VtResult::SUCCESS
             && !graphics.is_null();
 
         if have_graphics {
@@ -1596,33 +1643,29 @@ impl GhosttyTerminal {
                     continue;
                 }
 
-                let image = unsafe { vt::ghostty_kitty_graphics_image(graphics, p.image_id) };
+                let image = unsafe { ghostty_kitty_graphics_image(graphics, p.image_id) };
 
                 if image.is_null() {
                     continue;
                 }
 
-                let read_u32 = |data: vt::KittyGraphicsImageData::Type| -> u32 {
+                let read_u32 = |data: VtKittyGraphicsImageData::Type| -> u32 {
                     let mut v: u32 = 0;
                     unsafe {
-                        vt::ghostty_kitty_graphics_image_get(
-                            image,
-                            data,
-                            (&mut v as *mut u32).cast(),
-                        );
+                        ghostty_kitty_graphics_image_get(image, data, (&mut v as *mut u32).cast());
                     }
                     v
                 };
 
-                let width = read_u32(vt::KittyGraphicsImageData::WIDTH);
-                let height = read_u32(vt::KittyGraphicsImageData::HEIGHT);
+                let width = read_u32(VtKittyGraphicsImageData::WIDTH);
+                let height = read_u32(VtKittyGraphicsImageData::HEIGHT);
 
                 let mut data_len: usize = 0;
 
                 unsafe {
-                    vt::ghostty_kitty_graphics_image_get(
+                    ghostty_kitty_graphics_image_get(
                         image,
-                        vt::KittyGraphicsImageData::DATA_LEN,
+                        VtKittyGraphicsImageData::DATA_LEN,
                         (&mut data_len as *mut usize).cast(),
                     );
                 }
@@ -1655,8 +1698,7 @@ impl GhosttyTerminal {
             .keys()
             .copied()
             .filter(|id| {
-                !have_graphics
-                    || unsafe { vt::ghostty_kitty_graphics_image(graphics, *id) }.is_null()
+                !have_graphics || unsafe { ghostty_kitty_graphics_image(graphics, *id) }.is_null()
             })
             .collect();
 
@@ -1671,26 +1713,26 @@ impl GhosttyTerminal {
     /// `VIEWPORT`/`ACTIVE`; **O(scrollback) for `SCREEN`/`HISTORY`**. The ref is
     /// valid only until the next mutating call (`write_vt`/`resize`/
     /// `scroll_viewport`) — use it within one read pass, never cache it.
-    pub fn grid_ref_at(&self, tag: vt::PointTag::Type, x: u16, y: u32) -> Result<vt::GridRef> {
-        let point = vt::Point {
+    pub fn grid_ref_at(&self, tag: VtPointTag::Type, x: u16, y: u32) -> Result<VtGridRef> {
+        let point = VtPoint {
             tag,
-            value: vt::PointValue {
-                coordinate: vt::PointCoordinate { x, y },
+            value: VtPointValue {
+                coordinate: VtPointCoordinate { x, y },
             },
         };
 
-        let mut grid_ref = vt::GridRef::default();
+        let mut grid_ref = VtGridRef::default();
 
         Error::from_code(unsafe {
-            vt::ghostty_terminal_grid_ref(self.terminal, point, &mut grid_ref)
+            ghostty_terminal_grid_ref(self.terminal, point, &mut grid_ref)
         })?;
 
         Ok(grid_ref)
     }
 
     /// Resolve a viewport coordinate to a `GridRef` (fast).
-    pub fn viewport_grid_ref(&self, x: u16, y: u16) -> Result<vt::GridRef> {
-        self.grid_ref_at(vt::PointTag::VIEWPORT, x, y as u32)
+    pub fn viewport_grid_ref(&self, x: u16, y: u16) -> Result<VtGridRef> {
+        self.grid_ref_at(VtPointTag::VIEWPORT, x, y as u32)
     }
 
     /// The SCREEN row of the top visible row (`viewport_top`) — the constant that
@@ -1700,7 +1742,7 @@ impl GhosttyTerminal {
     pub fn viewport_top_screen(&self) -> Option<u32> {
         let r = self.viewport_grid_ref(0, 0).ok()?;
 
-        self.point_from_grid_ref(&r, vt::PointTag::SCREEN)
+        self.point_from_grid_ref(&r, VtPointTag::SCREEN)
             .ok()
             .flatten()
             .map(|(_, y)| y)
@@ -1748,10 +1790,10 @@ impl GhosttyTerminal {
     pub fn read_screen_row_visit(
         &self,
         row: u32,
-        palette: &[vt::ColorRgb; 256],
+        palette: &[VtColorRgb; 256],
         on_cell: impl FnMut(u16, CellText, CellWide, SnapshotStyle),
     ) -> Result<Option<ScreenRowMeta>> {
-        let grid_ref = match self.grid_ref_at(vt::PointTag::SCREEN, 0, row) {
+        let grid_ref = match self.grid_ref_at(VtPointTag::SCREEN, 0, row) {
             Ok(r) => r,
             Err(Error::InvalidValue) => return Ok(None),
             Err(e) => return Err(e),
@@ -1767,44 +1809,44 @@ impl GhosttyTerminal {
     /// ([`Self::read_block_row_visit`]) where the ref comes from the block
     /// resolver instead of the active screen.
     fn visit_row_cells(
-        mut grid_ref: vt::GridRef,
+        mut grid_ref: VtGridRef,
         cols: u16,
-        palette: &[vt::ColorRgb; 256],
+        palette: &[VtColorRgb; 256],
         mut on_cell: impl FnMut(u16, CellText, CellWide, SnapshotStyle),
     ) -> Result<ScreenRowMeta> {
         // Row flags from the raw row handle (same keys the snapshot path
         // reads), fetched in one multi-get FFI call.
-        let mut raw_row: vt::Row = 0;
+        let mut raw_row: VtRow = 0;
 
-        Error::from_code(unsafe { vt::ghostty_grid_ref_row(&grid_ref, &mut raw_row) })?;
+        Error::from_code(unsafe { ghostty_grid_ref_row(&grid_ref, &mut raw_row) })?;
 
         let mut wrapped = false;
-        let mut prompt_tag: vt::RowSemanticPrompt::Type = vt::RowSemanticPrompt::NONE;
+        let mut prompt_tag: VtRowSemanticPrompt::Type = VtRowSemanticPrompt::NONE;
         let mut has_link = false;
         let mut virtual_placeholder = false;
 
         {
-            const ROW_KEYS: [vt::RowData::Type; 4] = [
-                vt::RowData::WRAP,
-                vt::RowData::SEMANTIC_PROMPT,
-                vt::RowData::HYPERLINK,
-                vt::RowData::KITTY_VIRTUAL_PLACEHOLDER,
+            const ROW_KEYS: [VtRowData::Type; 4] = [
+                VtRowData::WRAP,
+                VtRowData::SEMANTIC_PROMPT,
+                VtRowData::HYPERLINK,
+                VtRowData::KITTY_VIRTUAL_PLACEHOLDER,
             ];
 
-            let mut values: [*mut std::os::raw::c_void; 4] = [
+            let mut values: [*mut os::raw::c_void; 4] = [
                 (&mut wrapped as *mut bool).cast(),
-                (&mut prompt_tag as *mut vt::RowSemanticPrompt::Type).cast(),
+                (&mut prompt_tag as *mut VtRowSemanticPrompt::Type).cast(),
                 (&mut has_link as *mut bool).cast(),
                 (&mut virtual_placeholder as *mut bool).cast(),
             ];
 
             unsafe {
-                let _ = vt::ghostty_row_get_multi(
+                let _ = ghostty_row_get_multi(
                     raw_row,
                     ROW_KEYS.len(),
                     ROW_KEYS.as_ptr(),
                     values.as_mut_ptr(),
-                    std::ptr::null_mut(),
+                    ptr::null_mut(),
                 );
             }
         }
@@ -1816,9 +1858,9 @@ impl GhosttyTerminal {
             // avoids re-resolving the O(scrollback) SCREEN pin per cell.
             grid_ref.x = x;
 
-            let mut raw: vt::Cell = 0;
+            let mut raw: VtCell = 0;
 
-            if unsafe { vt::ghostty_grid_ref_cell(&grid_ref, &mut raw) } != vt::Result::SUCCESS {
+            if unsafe { ghostty_grid_ref_cell(&grid_ref, &mut raw) } != VtResult::SUCCESS {
                 continue;
             }
 
@@ -1828,19 +1870,19 @@ impl GhosttyTerminal {
             // multi-get stops at the first error, and a bg-color-only cell that
             // rejected it would still have tag/wide/styling written while `cp`
             // keeps its correct 0 default.
-            let mut tag: vt::CellContentTag::Type = vt::CellContentTag::CODEPOINT;
-            let mut wide_raw: vt::CellWide::Type = vt::CellWide::NARROW;
+            let mut tag: VtCellContentTag::Type = VtCellContentTag::CODEPOINT;
+            let mut wide_raw: VtCellWide::Type = VtCellWide::NARROW;
             let mut has_styling = false;
             let mut cp: u32 = 0;
 
             {
-                const CELL_KEYS: [vt::CellData::Type; 4] = [
-                    vt::CellData::CONTENT_TAG,
-                    vt::CellData::WIDE,
-                    vt::CellData::HAS_STYLING,
-                    vt::CellData::CODEPOINT,
+                const CELL_KEYS: [VtCellData::Type; 4] = [
+                    VtCellData::CONTENT_TAG,
+                    VtCellData::WIDE,
+                    VtCellData::HAS_STYLING,
+                    VtCellData::CODEPOINT,
                 ];
-                let mut values: [*mut std::os::raw::c_void; 4] = [
+                let mut values: [*mut os::raw::c_void; 4] = [
                     (&mut tag as *mut i32).cast(),
                     (&mut wide_raw as *mut i32).cast(),
                     (&mut has_styling as *mut bool).cast(),
@@ -1848,12 +1890,12 @@ impl GhosttyTerminal {
                 ];
 
                 unsafe {
-                    let _ = vt::ghostty_cell_get_multi(
+                    let _ = ghostty_cell_get_multi(
                         raw,
                         CELL_KEYS.len(),
                         CELL_KEYS.as_ptr(),
                         values.as_mut_ptr(),
-                        std::ptr::null_mut(),
+                        ptr::null_mut(),
                     );
                 }
             }
@@ -1861,7 +1903,7 @@ impl GhosttyTerminal {
             let wide = CellWide::from(wide_raw);
 
             let text = match tag {
-                vt::CellContentTag::CODEPOINT => {
+                VtCellContentTag::CODEPOINT => {
                     if cp == 0 {
                         CellText::default()
                     } else {
@@ -1870,7 +1912,7 @@ impl GhosttyTerminal {
                         )
                     }
                 }
-                vt::CellContentTag::CODEPOINT_GRAPHEME => {
+                VtCellContentTag::CODEPOINT_GRAPHEME => {
                     CellText::from(grid_ref_graphemes(&grid_ref))
                 }
                 _ => CellText::default(), // BG_COLOR_*: no text
@@ -1882,10 +1924,9 @@ impl GhosttyTerminal {
             let mut style = SnapshotStyle::default();
 
             if has_styling {
-                let mut raw_style = vt::sized!(vt::Style);
+                let mut raw_style = vt_sized!(VtStyle);
 
-                if unsafe { vt::ghostty_grid_ref_style(&grid_ref, &mut raw_style) }
-                    == vt::Result::SUCCESS
+                if unsafe { ghostty_grid_ref_style(&grid_ref, &mut raw_style) } == VtResult::SUCCESS
                 {
                     style.fg = style_color_resolve(&raw_style.fg_color, palette);
                     style.bg = style_color_resolve(&raw_style.bg_color, palette);
@@ -1906,29 +1947,29 @@ impl GhosttyTerminal {
             // Erased-with-bg cells carry their color in the content tag, not the
             // style (mirrors the render-state BG_COLOR resolution).
             if style.bg.is_none() {
-                if tag == vt::CellContentTag::BG_COLOR_PALETTE {
-                    let mut idx: vt::ColorPaletteIndex = 0;
+                if tag == VtCellContentTag::BG_COLOR_PALETTE {
+                    let mut idx: VtColorPaletteIndex = 0;
 
                     if unsafe {
-                        vt::ghostty_cell_get(
+                        ghostty_cell_get(
                             raw,
-                            vt::CellData::COLOR_PALETTE,
-                            (&mut idx as *mut vt::ColorPaletteIndex).cast(),
+                            VtCellData::COLOR_PALETTE,
+                            (&mut idx as *mut VtColorPaletteIndex).cast(),
                         )
-                    } == vt::Result::SUCCESS
+                    } == VtResult::SUCCESS
                     {
                         style.bg = Some(color_from_vt(palette[idx as usize]));
                     }
-                } else if tag == vt::CellContentTag::BG_COLOR_RGB {
-                    let mut rgb = vt::ColorRgb::default();
+                } else if tag == VtCellContentTag::BG_COLOR_RGB {
+                    let mut rgb = VtColorRgb::default();
 
                     if unsafe {
-                        vt::ghostty_cell_get(
+                        ghostty_cell_get(
                             raw,
-                            vt::CellData::COLOR_RGB,
-                            (&mut rgb as *mut vt::ColorRgb).cast(),
+                            VtCellData::COLOR_RGB,
+                            (&mut rgb as *mut VtColorRgb).cast(),
                         )
-                    } == vt::Result::SUCCESS
+                    } == VtResult::SUCCESS
                     {
                         style.bg = Some(color_from_vt(rgb));
                     }
@@ -1953,7 +1994,7 @@ impl GhosttyTerminal {
 
         Ok(ScreenRowMeta {
             wrapped,
-            prompt_start: prompt_tag == vt::RowSemanticPrompt::PROMPT,
+            prompt_start: prompt_tag == VtRowSemanticPrompt::PROMPT,
             virtual_placeholder,
             hyperlinks,
         })
@@ -1965,12 +2006,12 @@ impl GhosttyTerminal {
     /// the active screen has no content (no block created). Errors with
     /// `InvalidValue` if the alternate screen is active — callers gate on
     /// the primary screen because alternate-screen content should not enter history.
-    pub fn finish_block(&mut self) -> Result<Option<vt::BlockHandle>> {
-        let mut handle = vt::BlockHandle::default();
+    pub fn finish_block(&mut self) -> Result<Option<BlockHandle>> {
+        let mut handle = BlockHandle::default();
 
-        match unsafe { vt::ghostty_terminal_finish_block(self.terminal, &mut handle) } {
-            vt::Result::SUCCESS => Ok(Some(handle)),
-            vt::Result::NO_VALUE => Ok(None),
+        match unsafe { ghostty_terminal_finish_block(self.terminal, &mut handle) } {
+            VtResult::SUCCESS => Ok(Some(handle)),
+            VtResult::NO_VALUE => Ok(None),
             other => {
                 Error::from_code(other)?;
                 Ok(None)
@@ -1980,63 +2021,63 @@ impl GhosttyTerminal {
 
     /// Remove and destroy all finished blocks (user clear; `;K` path).
     pub fn clear_blocks(&mut self) {
-        unsafe { vt::ghostty_terminal_clear_blocks(self.terminal) }
+        unsafe { ghostty_terminal_clear_blocks(self.terminal) }
     }
 
     /// Remove and destroy one finished block. Returns `false` for a stale
     /// handle (already removed/evicted).
-    pub fn remove_block(&mut self, handle: vt::BlockHandle) -> bool {
-        (unsafe { vt::ghostty_terminal_remove_block(self.terminal, handle) }) == vt::Result::SUCCESS
+    pub fn remove_block(&mut self, handle: BlockHandle) -> bool {
+        (unsafe { ghostty_terminal_remove_block(self.terminal, handle) }) == VtResult::SUCCESS
     }
 
     pub fn block_count(&self) -> usize {
-        unsafe { vt::ghostty_terminal_block_count(self.terminal) }
+        unsafe { ghostty_terminal_block_count(self.terminal) }
     }
 
     /// The handle of the finished block at `index`, oldest first.
-    pub fn block_at(&self, index: usize) -> Option<vt::BlockHandle> {
-        let mut handle = vt::BlockHandle::default();
+    pub fn block_at(&self, index: usize) -> Option<BlockHandle> {
+        let mut handle = BlockHandle::default();
 
-        (unsafe { vt::ghostty_terminal_block_at(self.terminal, index, &mut handle) }
-            == vt::Result::SUCCESS)
+        (unsafe { ghostty_terminal_block_at(self.terminal, index, &mut handle) }
+            == VtResult::SUCCESS)
             .then_some(handle)
     }
 
     /// Logical row count of a finished block (trailing blanks after the
     /// finish-time cursor truncated). `None` for a stale handle.
-    pub fn block_row_count(&self, handle: vt::BlockHandle) -> Option<usize> {
+    pub fn block_row_count(&self, handle: BlockHandle) -> Option<usize> {
         let mut rows: usize = 0;
 
-        (unsafe { vt::ghostty_terminal_block_row_count(self.terminal, handle, &mut rows) }
-            == vt::Result::SUCCESS)
+        (unsafe { ghostty_terminal_block_row_count(self.terminal, handle, &mut rows) }
+            == VtResult::SUCCESS)
             .then_some(rows)
     }
 
     /// The column count the block was frozen at (can differ from the live
     /// terminal width after a resize). `None` for a stale handle.
-    pub fn block_cols(&self, handle: vt::BlockHandle) -> Option<u16> {
+    pub fn block_cols(&self, handle: BlockHandle) -> Option<u16> {
         let mut cols: u16 = 0;
 
-        (unsafe { vt::ghostty_terminal_block_cols(self.terminal, handle, &mut cols) }
-            == vt::Result::SUCCESS)
+        (unsafe { ghostty_terminal_block_cols(self.terminal, handle, &mut cols) }
+            == VtResult::SUCCESS)
             .then_some(cols)
     }
 
     /// The memory retained by a block's page storage in bytes (the input
     /// for enforcing the finished-block byte budget. `None` for a stale
     /// handle.
-    pub fn block_bytes(&self, handle: vt::BlockHandle) -> Option<usize> {
+    pub fn block_bytes(&self, handle: BlockHandle) -> Option<usize> {
         let mut bytes: usize = 0;
 
-        (unsafe { vt::ghostty_terminal_block_bytes(self.terminal, handle, &mut bytes) }
-            == vt::Result::SUCCESS)
+        (unsafe { ghostty_terminal_block_bytes(self.terminal, handle, &mut bytes) }
+            == VtResult::SUCCESS)
             .then_some(bytes)
     }
 
     /// Total page-storage bytes of all finished blocks — the value the
     /// block byte budget is enforced against.
     pub fn blocks_bytes(&self) -> usize {
-        unsafe { vt::ghostty_terminal_blocks_bytes(self.terminal) }
+        unsafe { ghostty_terminal_blocks_bytes(self.terminal) }
     }
 
     /// Set the finished-block byte budget. Oldest blocks are evicted
@@ -2044,9 +2085,9 @@ impl GhosttyTerminal {
     /// newest block is never evicted. Zero means unlimited.
     pub fn set_block_budget_bytes(&mut self, bytes: usize) -> Result<()> {
         Error::from_code(unsafe {
-            vt::ghostty_terminal_set(
+            ghostty_terminal_set(
                 self.terminal,
-                vt::TerminalOption::BLOCK_BUDGET_BYTES,
+                VtTerminalOption::BLOCK_BUDGET_BYTES,
                 (&bytes as *const usize).cast(),
             )
         })
@@ -2056,10 +2097,10 @@ impl GhosttyTerminal {
     /// `resize` already reflows all blocks eagerly). Bumps the block's
     /// data generation — re-fetch via [`Self::block_at`]. Returns `false`
     /// for a stale handle.
-    pub fn reflow_block(&mut self, handle: vt::BlockHandle, cols: u16) -> Result<bool> {
-        match unsafe { vt::ghostty_terminal_reflow_block(self.terminal, handle, cols) } {
-            vt::Result::SUCCESS => Ok(true),
-            vt::Result::NO_VALUE => Ok(false),
+    pub fn reflow_block(&mut self, handle: BlockHandle, cols: u16) -> Result<bool> {
+        match unsafe { ghostty_terminal_reflow_block(self.terminal, handle, cols) } {
+            VtResult::SUCCESS => Ok(true),
+            VtResult::NO_VALUE => Ok(false),
             other => {
                 Error::from_code(other)?;
                 Ok(false)
@@ -2074,11 +2115,11 @@ impl GhosttyTerminal {
     /// is held, and reads through it take no engine lock. Keep it
     /// short-lived (one read pass) — a held reference blocks the writer's
     /// resize reflow.
-    pub fn block_acquire(&self, handle: vt::BlockHandle) -> Option<BlockRef> {
-        let mut raw: vt::BlockRef = ptr::null_mut();
+    pub fn block_acquire(&self, handle: BlockHandle) -> Option<BlockRef> {
+        let mut raw: VtBlockRef = ptr::null_mut();
 
-        if unsafe { vt::ghostty_terminal_block_acquire(self.terminal, handle, &mut raw) }
-            != vt::Result::SUCCESS
+        if unsafe { ghostty_terminal_block_acquire(self.terminal, handle, &mut raw) }
+            != VtResult::SUCCESS
             || raw.is_null()
         {
             return None;
@@ -2087,7 +2128,7 @@ impl GhosttyTerminal {
         let mut cols: u16 = 0;
 
         unsafe {
-            let _ = vt::ghostty_block_ref_cols(raw, &mut cols);
+            let _ = ghostty_block_ref_cols(raw, &mut cols);
         }
 
         Some(BlockRef { raw, cols })
@@ -2098,7 +2139,7 @@ impl GhosttyTerminal {
     /// against and the block's Kitty placements in block-relative
     /// coordinates. Every subsequent text read through the
     /// returned reference is lock-free.
-    pub fn acquire_block_snapshot(&mut self, handle: vt::BlockHandle) -> Option<AcquiredBlock> {
+    pub fn acquire_block_snapshot(&mut self, handle: BlockHandle) -> Option<AcquiredBlock> {
         let block = self.block_acquire(handle)?;
         let palette = self.color_palette();
         let placements = self.block_placements(&block);
@@ -2117,18 +2158,17 @@ impl GhosttyTerminal {
     /// removed, but this still reads within one call (same visitor shape).
     pub fn read_block_row_visit(
         &self,
-        handle: vt::BlockHandle,
+        handle: BlockHandle,
         row: usize,
-        palette: &[vt::ColorRgb; 256],
+        palette: &[VtColorRgb; 256],
         on_cell: impl FnMut(u16, CellText, CellWide, SnapshotStyle),
     ) -> Result<Option<ScreenRowMeta>> {
-        let mut grid_ref = vt::GridRef::default();
+        let mut grid_ref = VtGridRef::default();
 
-        match unsafe {
-            vt::ghostty_terminal_block_grid_ref(self.terminal, handle, row, &mut grid_ref)
-        } {
-            vt::Result::SUCCESS => {}
-            vt::Result::NO_VALUE | vt::Result::INVALID_VALUE => return Ok(None),
+        match unsafe { ghostty_terminal_block_grid_ref(self.terminal, handle, row, &mut grid_ref) }
+        {
+            VtResult::SUCCESS => {}
+            VtResult::NO_VALUE | VtResult::INVALID_VALUE => return Ok(None),
             other => {
                 Error::from_code(other)?;
                 return Ok(None);
@@ -2144,11 +2184,7 @@ impl GhosttyTerminal {
 
     /// Materializing convenience over [`Self::read_block_row_visit`] — test-only.
     #[cfg(test)]
-    pub fn read_block_row(
-        &self,
-        handle: vt::BlockHandle,
-        row: usize,
-    ) -> Result<Option<ScreenRowRead>> {
+    pub fn read_block_row(&self, handle: BlockHandle, row: usize) -> Result<Option<ScreenRowRead>> {
         let palette = self.color_palette();
         let cols = self.block_cols(handle).unwrap_or(self.cols) as usize;
         let mut cells = Vec::with_capacity(cols);
@@ -2174,13 +2210,13 @@ impl GhosttyTerminal {
     /// resolve palette-tagged style colors into concrete RGB at read time — by
     /// the harvester (once per batch) and by app-side `BlockRef` readers (once
     /// per acquire).
-    pub fn color_palette(&self) -> [vt::ColorRgb; 256] {
-        let mut palette = [vt::ColorRgb::default(); 256];
+    pub fn color_palette(&self) -> [VtColorRgb; 256] {
+        let mut palette = [VtColorRgb::default(); 256];
 
         unsafe {
-            let _ = vt::ghostty_terminal_get(
+            let _ = ghostty_terminal_get(
                 self.terminal,
-                vt::TerminalData::COLOR_PALETTE,
+                VtTerminalData::COLOR_PALETTE,
                 palette.as_mut_ptr().cast(),
             );
         }
@@ -2194,16 +2230,16 @@ impl GhosttyTerminal {
     /// `SCREEN` coordinate.
     pub fn point_from_grid_ref(
         &self,
-        grid_ref: &vt::GridRef,
-        tag: vt::PointTag::Type,
+        grid_ref: &VtGridRef,
+        tag: VtPointTag::Type,
     ) -> Result<Option<(u16, u32)>> {
-        let mut out = vt::PointCoordinate::default();
+        let mut out = VtPointCoordinate::default();
 
         match unsafe {
-            vt::ghostty_terminal_point_from_grid_ref(self.terminal, grid_ref, tag, &mut out)
+            ghostty_terminal_point_from_grid_ref(self.terminal, grid_ref, tag, &mut out)
         } {
-            vt::Result::SUCCESS => Ok(Some((out.x, out.y))),
-            vt::Result::NO_VALUE => Ok(None),
+            VtResult::SUCCESS => Ok(Some((out.x, out.y))),
+            VtResult::NO_VALUE => Ok(None),
             other => {
                 Error::from_code(other)?;
                 Ok(None)
@@ -2218,11 +2254,11 @@ impl GhosttyTerminal {
     /// corpus.
     pub fn format_text(
         &mut self,
-        selection: Option<&vt::Selection>,
+        selection: Option<&VtSelection>,
         unwrap: bool,
         trim: bool,
     ) -> Result<String> {
-        self.format_terminal(vt::FormatterFormat::PLAIN, selection, unwrap, trim)
+        self.format_terminal(VtFormatterFormat::PLAIN, selection, unwrap, trim)
             .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
     }
 
@@ -2230,53 +2266,53 @@ impl GhosttyTerminal {
     /// bytes reconstructs the current screen, styles, modes, palette, and cursor,
     /// which lets a newly attached client start from a consistent checkpoint.
     pub fn format_vt_state(&mut self) -> Result<Vec<u8>> {
-        self.format_terminal(vt::FormatterFormat::VT, None, false, false)
+        self.format_terminal(VtFormatterFormat::VT, None, false, false)
     }
 
     fn format_terminal(
         &mut self,
-        emit: vt::FormatterFormat::Type,
-        selection: Option<&vt::Selection>,
+        emit: VtFormatterFormat::Type,
+        selection: Option<&VtSelection>,
         unwrap: bool,
         trim: bool,
     ) -> Result<Vec<u8>> {
-        let mut opts = vt::sized!(vt::FormatterTerminalOptions);
+        let mut opts = vt_sized!(VtFormatterTerminalOptions);
 
         opts.emit = emit;
         opts.unwrap = unwrap;
         opts.trim = trim;
-        opts.extra = vt::sized!(vt::FormatterTerminalExtra);
+        opts.extra = vt_sized!(VtFormatterTerminalExtra);
         opts.selection = selection
-            .map(|s| s as *const vt::Selection)
+            .map(|s| s as *const VtSelection)
             .unwrap_or(ptr::null());
 
-        let mut formatter: vt::Formatter = ptr::null_mut();
+        let mut formatter: VtFormatter = ptr::null_mut();
 
         Error::from_code(unsafe {
-            vt::ghostty_formatter_terminal_new(ptr::null(), &mut formatter, self.terminal, opts)
+            ghostty_formatter_terminal_new(ptr::null(), &mut formatter, self.terminal, opts)
         })?;
 
         let mut out_ptr: *mut u8 = ptr::null_mut();
         let mut out_len: usize = 0;
 
         let res = Error::from_code(unsafe {
-            vt::ghostty_formatter_format_alloc(formatter, ptr::null(), &mut out_ptr, &mut out_len)
+            ghostty_formatter_format_alloc(formatter, ptr::null(), &mut out_ptr, &mut out_len)
         });
 
         let bytes = res.map(|_| {
             if out_ptr.is_null() || out_len == 0 {
                 Vec::new()
             } else {
-                let bytes = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+                let bytes = unsafe { slice::from_raw_parts(out_ptr, out_len) };
                 bytes.to_vec()
             }
         });
 
         if !out_ptr.is_null() {
-            unsafe { vt::ghostty_free(ptr::null(), out_ptr, out_len) };
+            unsafe { ghostty_free(ptr::null(), out_ptr, out_len) };
         }
 
-        unsafe { vt::ghostty_formatter_free(formatter) };
+        unsafe { ghostty_formatter_free(formatter) };
 
         bytes
     }
@@ -2293,10 +2329,10 @@ impl GhosttyTerminal {
         unwrap: bool,
         trim: bool,
     ) -> Result<String> {
-        let start_ref = self.grid_ref_at(vt::PointTag::SCREEN, start.0, start.1)?;
-        let end_ref = self.grid_ref_at(vt::PointTag::SCREEN, end.0, end.1)?;
+        let start_ref = self.grid_ref_at(VtPointTag::SCREEN, start.0, start.1)?;
+        let end_ref = self.grid_ref_at(VtPointTag::SCREEN, end.0, end.1)?;
 
-        let mut sel = vt::sized!(vt::Selection);
+        let mut sel = vt_sized!(VtSelection);
 
         sel.start = start_ref;
         sel.end = end_ref;
@@ -2316,12 +2352,12 @@ impl GhosttyTerminal {
     }
 
     fn scroll_viewport_delta_raw(&mut self, delta: isize) {
-        let behavior = vt::TerminalScrollViewport {
-            tag: vt::TerminalScrollViewportTag::DELTA,
-            value: vt::TerminalScrollViewportValue { delta },
+        let behavior = VtTerminalScrollViewport {
+            tag: VtTerminalScrollViewportTag::DELTA,
+            value: VtTerminalScrollViewportValue { delta },
         };
 
-        unsafe { vt::ghostty_terminal_scroll_viewport(self.terminal, behavior) };
+        unsafe { ghostty_terminal_scroll_viewport(self.terminal, behavior) };
     }
 
     /// Scroll the viewport to the bottom (active area).
@@ -2330,12 +2366,12 @@ impl GhosttyTerminal {
             return;
         }
 
-        let behavior = vt::TerminalScrollViewport {
-            tag: vt::TerminalScrollViewportTag::BOTTOM,
-            value: vt::TerminalScrollViewportValue { delta: 0 },
+        let behavior = VtTerminalScrollViewport {
+            tag: VtTerminalScrollViewportTag::BOTTOM,
+            value: VtTerminalScrollViewportValue { delta: 0 },
         };
 
-        unsafe { vt::ghostty_terminal_scroll_viewport(self.terminal, behavior) };
+        unsafe { ghostty_terminal_scroll_viewport(self.terminal, behavior) };
     }
 
     /// Scroll the viewport to the top of the scrollback.
@@ -2348,50 +2384,49 @@ impl GhosttyTerminal {
     }
 
     fn scroll_viewport_top_raw(&mut self) {
-        let behavior = vt::TerminalScrollViewport {
-            tag: vt::TerminalScrollViewportTag::TOP,
-            value: vt::TerminalScrollViewportValue { delta: 0 },
+        let behavior = VtTerminalScrollViewport {
+            tag: VtTerminalScrollViewportTag::TOP,
+            value: VtTerminalScrollViewportValue { delta: 0 },
         };
 
-        unsafe { vt::ghostty_terminal_scroll_viewport(self.terminal, behavior) };
+        unsafe { ghostty_terminal_scroll_viewport(self.terminal, behavior) };
     }
 
     fn cursor(&self) -> Result<SnapshotCursor> {
         let mut visible = false;
 
         Error::from_code(unsafe {
-            vt::ghostty_render_state_get(
+            ghostty_render_state_get(
                 self.render_state,
-                vt::RenderStateData::CURSOR_VISIBLE,
+                VtRenderStateData::CURSOR_VISIBLE,
                 (&mut visible as *mut bool).cast(),
             )
         })?;
 
         // DECSCUSR shape and modes-based blink come from the render state.
-        let mut style: vt::RenderStateCursorVisualStyle::Type =
-            vt::RenderStateCursorVisualStyle::BLOCK;
+        let mut style: VtRenderStateCursorVisualStyle::Type = VtRenderStateCursorVisualStyle::BLOCK;
 
         let _ = unsafe {
-            vt::ghostty_render_state_get(
+            ghostty_render_state_get(
                 self.render_state,
-                vt::RenderStateData::CURSOR_VISUAL_STYLE,
-                (&mut style as *mut vt::RenderStateCursorVisualStyle::Type).cast(),
+                VtRenderStateData::CURSOR_VISUAL_STYLE,
+                (&mut style as *mut VtRenderStateCursorVisualStyle::Type).cast(),
             )
         };
 
         let shape = match style {
-            vt::RenderStateCursorVisualStyle::BAR => crate::ansi::CursorShape::Beam,
-            vt::RenderStateCursorVisualStyle::UNDERLINE => crate::ansi::CursorShape::Underline,
+            VtRenderStateCursorVisualStyle::BAR => ansi::CursorShape::Beam,
+            VtRenderStateCursorVisualStyle::UNDERLINE => ansi::CursorShape::Underline,
             // BLOCK and BLOCK_HOLLOW → Block (terminal renders hollow from focus state).
-            _ => crate::ansi::CursorShape::Block,
+            _ => ansi::CursorShape::Block,
         };
 
         let mut blinking = false;
 
         let _ = unsafe {
-            vt::ghostty_render_state_get(
+            ghostty_render_state_get(
                 self.render_state,
-                vt::RenderStateData::CURSOR_BLINKING,
+                VtRenderStateData::CURSOR_BLINKING,
                 (&mut blinking as *mut bool).cast(),
             )
         };
@@ -2399,9 +2434,9 @@ impl GhosttyTerminal {
         let mut has_viewport = false;
 
         Error::from_code(unsafe {
-            vt::ghostty_render_state_get(
+            ghostty_render_state_get(
                 self.render_state,
-                vt::RenderStateData::CURSOR_VIEWPORT_HAS_VALUE,
+                VtRenderStateData::CURSOR_VIEWPORT_HAS_VALUE,
                 (&mut has_viewport as *mut bool).cast(),
             )
         })?;
@@ -2420,17 +2455,17 @@ impl GhosttyTerminal {
         let mut y = 0u16;
 
         Error::from_code(unsafe {
-            vt::ghostty_render_state_get(
+            ghostty_render_state_get(
                 self.render_state,
-                vt::RenderStateData::CURSOR_VIEWPORT_X,
+                VtRenderStateData::CURSOR_VIEWPORT_X,
                 (&mut x as *mut u16).cast(),
             )
         })?;
 
         Error::from_code(unsafe {
-            vt::ghostty_render_state_get(
+            ghostty_render_state_get(
                 self.render_state,
-                vt::RenderStateData::CURSOR_VIEWPORT_Y,
+                VtRenderStateData::CURSOR_VIEWPORT_Y,
                 (&mut y as *mut u16).cast(),
             )
         })?;
@@ -2448,17 +2483,17 @@ impl GhosttyTerminal {
     fn colors(&self) -> SnapshotColors {
         use nmt_config::colors::ColorRgb;
 
-        let read = |data: vt::RenderStateData::Type| -> Option<ColorRgb> {
-            let mut c = vt::ColorRgb::default();
+        let read = |data: VtRenderStateData::Type| -> Option<ColorRgb> {
+            let mut c = VtColorRgb::default();
 
             match unsafe {
-                vt::ghostty_render_state_get(
+                ghostty_render_state_get(
                     self.render_state,
                     data,
-                    (&mut c as *mut vt::ColorRgb).cast(),
+                    (&mut c as *mut VtColorRgb).cast(),
                 )
             } {
-                vt::Result::SUCCESS => Some(ColorRgb {
+                VtResult::SUCCESS => Some(ColorRgb {
                     r: c.r,
                     g: c.g,
                     b: c.b,
@@ -2467,21 +2502,21 @@ impl GhosttyTerminal {
             }
         };
 
-        let fg = read(vt::RenderStateData::COLOR_FOREGROUND).unwrap_or_default();
-        let bg = read(vt::RenderStateData::COLOR_BACKGROUND).unwrap_or_default();
+        let fg = read(VtRenderStateData::COLOR_FOREGROUND).unwrap_or_default();
+        let bg = read(VtRenderStateData::COLOR_BACKGROUND).unwrap_or_default();
 
         let mut has_cursor = false;
 
         let _ = unsafe {
-            vt::ghostty_render_state_get(
+            ghostty_render_state_get(
                 self.render_state,
-                vt::RenderStateData::COLOR_CURSOR_HAS_VALUE,
+                VtRenderStateData::COLOR_CURSOR_HAS_VALUE,
                 (&mut has_cursor as *mut bool).cast(),
             )
         };
 
         let cursor = if has_cursor {
-            read(vt::RenderStateData::COLOR_CURSOR)
+            read(VtRenderStateData::COLOR_CURSOR)
         } else {
             None
         };
@@ -2490,13 +2525,13 @@ impl GhosttyTerminal {
         // (override OR default) to the engine's *default* (ignoring OSC). Both come
         // from the engine, so there's no config↔u8 conversion mismatch. An override
         // is active iff they differ; `bg_override` is then `Some(effective)`.
-        let read_term = |data: vt::TerminalData::Type| -> Option<ColorRgb> {
-            let mut c = vt::ColorRgb::default();
+        let read_term = |data: VtTerminalData::Type| -> Option<ColorRgb> {
+            let mut c = VtColorRgb::default();
 
             match unsafe {
-                vt::ghostty_terminal_get(self.terminal, data, (&mut c as *mut vt::ColorRgb).cast())
+                ghostty_terminal_get(self.terminal, data, (&mut c as *mut VtColorRgb).cast())
             } {
-                vt::Result::SUCCESS => Some(ColorRgb {
+                VtResult::SUCCESS => Some(ColorRgb {
                     r: c.r,
                     g: c.g,
                     b: c.b,
@@ -2505,8 +2540,8 @@ impl GhosttyTerminal {
             }
         };
 
-        let bg_effective = read_term(vt::TerminalData::COLOR_BACKGROUND);
-        let bg_default = read_term(vt::TerminalData::COLOR_BACKGROUND_DEFAULT);
+        let bg_effective = read_term(VtTerminalData::COLOR_BACKGROUND);
+        let bg_default = read_term(VtTerminalData::COLOR_BACKGROUND_DEFAULT);
         let bg_override = if bg_effective != bg_default {
             bg_effective
         } else {
@@ -2525,13 +2560,13 @@ impl GhosttyTerminal {
 /// Read one datum of the placement the iterator is positioned on. `T` must be
 /// the 32-bit integer type the FFI writes for `data` (u32 or i32).
 fn placement_scalar<T: Default>(
-    iter: vt::KittyGraphicsPlacementIterator,
-    data: vt::KittyGraphicsPlacementData::Type,
+    iter: VtKittyGraphicsPlacementIterator,
+    data: VtKittyGraphicsPlacementData::Type,
 ) -> T {
     let mut v = T::default();
 
     unsafe {
-        vt::ghostty_kitty_graphics_placement_get(iter, data, (&mut v as *mut T).cast());
+        ghostty_kitty_graphics_placement_get(iter, data, (&mut v as *mut T).cast());
     }
     v
 }
@@ -2539,23 +2574,17 @@ fn placement_scalar<T: Default>(
 /// Grid size + resolved source rectangle of the current placement — the shared
 /// tail of every placement walk. Returns `(grid_cols, grid_rows, [sx, sy, sw, sh])`.
 fn placement_geometry(
-    iter: vt::KittyGraphicsPlacementIterator,
-    image: vt::KittyGraphicsImage,
-    terminal: vt::Terminal,
+    iter: VtKittyGraphicsPlacementIterator,
+    image: VtKittyGraphicsImage,
+    terminal: VtTerminal,
 ) -> (u32, u32, [u32; 4]) {
     let (mut g_cols, mut g_rows) = (0u32, 0u32);
     let (mut sx, mut sy, mut sw, mut sh) = (0u32, 0u32, 0u32, 0u32);
 
     unsafe {
-        vt::ghostty_kitty_graphics_placement_grid_size(
-            iter,
-            image,
-            terminal,
-            &mut g_cols,
-            &mut g_rows,
-        );
+        ghostty_kitty_graphics_placement_grid_size(iter, image, terminal, &mut g_cols, &mut g_rows);
 
-        vt::ghostty_kitty_graphics_placement_source_rect(
+        ghostty_kitty_graphics_placement_source_rect(
             iter, image, &mut sx, &mut sy, &mut sw, &mut sh,
         );
     }
@@ -2572,30 +2601,30 @@ fn placement_geometry(
 /// `image` must be a live image handle from the storage the caller currently
 /// pins (engine lock or an acquired block ref).
 unsafe fn kitty_image_graphic_data(
-    image: vt::KittyGraphicsImage,
+    image: VtKittyGraphicsImage,
     image_id: u32,
     width: u32,
     height: u32,
     data_len: usize,
-) -> Option<crate::graphics::GraphicData> {
+) -> Option<graphics::GraphicData> {
     use crate::graphics::{ColorType, GraphicData, GraphicId};
 
-    let mut format: vt::KittyImageFormat::Type = vt::KittyImageFormat::RGBA;
+    let mut format: VtKittyImageFormat::Type = VtKittyImageFormat::RGBA;
 
     unsafe {
-        vt::ghostty_kitty_graphics_image_get(
+        ghostty_kitty_graphics_image_get(
             image,
-            vt::KittyGraphicsImageData::FORMAT,
-            (&mut format as *mut vt::KittyImageFormat::Type).cast(),
+            VtKittyGraphicsImageData::FORMAT,
+            (&mut format as *mut VtKittyImageFormat::Type).cast(),
         );
     }
 
     let mut data_ptr: *const u8 = ptr::null();
 
     unsafe {
-        vt::ghostty_kitty_graphics_image_get(
+        ghostty_kitty_graphics_image_get(
             image,
-            vt::KittyGraphicsImageData::DATA_PTR,
+            VtKittyGraphicsImageData::DATA_PTR,
             (&mut data_ptr as *mut *const u8).cast(),
         );
     }
@@ -2604,12 +2633,12 @@ unsafe fn kitty_image_graphic_data(
         return None;
     }
 
-    let raw = unsafe { std::slice::from_raw_parts(data_ptr, data_len) };
+    let raw = unsafe { slice::from_raw_parts(data_ptr, data_len) };
 
     let (pixels, color_type) = match format {
-        vt::KittyImageFormat::RGB => (raw.to_vec(), ColorType::Rgb),
-        vt::KittyImageFormat::RGBA => (raw.to_vec(), ColorType::Rgba),
-        vt::KittyImageFormat::GRAY => {
+        VtKittyImageFormat::RGB => (raw.to_vec(), ColorType::Rgb),
+        VtKittyImageFormat::RGBA => (raw.to_vec(), ColorType::Rgba),
+        VtKittyImageFormat::GRAY => {
             let mut px = Vec::with_capacity(raw.len() * 4);
 
             for &g in raw {
@@ -2618,7 +2647,7 @@ unsafe fn kitty_image_graphic_data(
 
             (px, ColorType::Rgba)
         }
-        vt::KittyImageFormat::GRAY_ALPHA => {
+        VtKittyImageFormat::GRAY_ALPHA => {
             let mut px = Vec::with_capacity(raw.len() * 2);
 
             for ga in raw.chunks_exact(2) {
@@ -2642,17 +2671,17 @@ unsafe fn kitty_image_graphic_data(
         resize: None,
         display_width: None,
         display_height: None,
-        transmit_time: std::time::Instant::now(),
+        transmit_time: time::Instant::now(),
     })
 }
 
 impl Drop for GhosttyTerminal {
     fn drop(&mut self) {
         unsafe {
-            vt::ghostty_kitty_graphics_placement_iterator_free(self.placement_iter);
-            vt::ghostty_render_state_row_iterator_free(self.row_iter);
-            vt::ghostty_render_state_free(self.render_state);
-            vt::ghostty_terminal_free(self.terminal);
+            ghostty_kitty_graphics_placement_iterator_free(self.placement_iter);
+            ghostty_render_state_row_iterator_free(self.row_iter);
+            ghostty_render_state_free(self.render_state);
+            ghostty_terminal_free(self.terminal);
         }
     }
 }
@@ -2668,7 +2697,7 @@ impl Drop for GhosttyTerminal {
 /// Keep references short-lived (one read pass, e.g. a frame): a held
 /// reference blocks the engine's resize reflow of this block.
 pub struct BlockRef {
-    raw: vt::BlockRef,
+    raw: VtBlockRef,
     cols: u16,
 }
 
@@ -2681,11 +2710,11 @@ unsafe impl Sync for BlockRef {}
 impl BlockRef {
     /// The `(id, generation)` of the pinned snapshot — the stable cache
     /// key for shaped/rendered rows.
-    pub fn handle(&self) -> vt::BlockHandle {
-        let mut handle = vt::BlockHandle::default();
+    pub fn handle(&self) -> BlockHandle {
+        let mut handle = BlockHandle::default();
 
         unsafe {
-            let _ = vt::ghostty_block_ref_handle(self.raw, &mut handle);
+            let _ = ghostty_block_ref_handle(self.raw, &mut handle);
         }
 
         handle
@@ -2696,7 +2725,7 @@ impl BlockRef {
         let mut rows: usize = 0;
 
         unsafe {
-            let _ = vt::ghostty_block_ref_row_count(self.raw, &mut rows);
+            let _ = ghostty_block_ref_row_count(self.raw, &mut rows);
         }
 
         rows
@@ -2713,7 +2742,7 @@ impl BlockRef {
         let mut bytes: usize = 0;
 
         unsafe {
-            let _ = vt::ghostty_block_ref_bytes(self.raw, &mut bytes);
+            let _ = ghostty_block_ref_bytes(self.raw, &mut bytes);
         }
 
         bytes
@@ -2725,14 +2754,14 @@ impl BlockRef {
     pub fn read_row_visit(
         &self,
         row: usize,
-        palette: &[vt::ColorRgb; 256],
+        palette: &[VtColorRgb; 256],
         on_cell: impl FnMut(u16, CellText, CellWide, SnapshotStyle),
     ) -> Result<Option<ScreenRowMeta>> {
-        let mut grid_ref = vt::GridRef::default();
+        let mut grid_ref = VtGridRef::default();
 
-        match unsafe { vt::ghostty_block_ref_grid_ref(self.raw, row, &mut grid_ref) } {
-            vt::Result::SUCCESS => {}
-            vt::Result::INVALID_VALUE => return Ok(None),
+        match unsafe { ghostty_block_ref_grid_ref(self.raw, row, &mut grid_ref) } {
+            VtResult::SUCCESS => {}
+            VtResult::INVALID_VALUE => return Ok(None),
             other => {
                 Error::from_code(other)?;
                 return Ok(None);
@@ -2748,11 +2777,10 @@ impl BlockRef {
     /// iteration and lazy pixel upload of frozen images. Valid while this
     /// reference is held. `None` if kitty graphics are disabled at build
     /// time.
-    pub fn kitty_graphics_raw(&self) -> Option<vt::KittyGraphics> {
-        let mut graphics: vt::KittyGraphics = ptr::null_mut();
+    pub fn kitty_graphics_raw(&self) -> Option<VtKittyGraphics> {
+        let mut graphics: VtKittyGraphics = ptr::null_mut();
 
-        (unsafe { vt::ghostty_block_ref_kitty_graphics(self.raw, &mut graphics) }
-            == vt::Result::SUCCESS
+        (unsafe { ghostty_block_ref_kitty_graphics(self.raw, &mut graphics) } == VtResult::SUCCESS
             && !graphics.is_null())
         .then_some(graphics)
     }
@@ -2799,7 +2827,7 @@ impl BlockRef {
         unwrap: bool,
         trim: bool,
     ) -> Result<String> {
-        let mut opts = vt::sized!(vt::BlockFormatOptions);
+        let mut opts = vt_sized!(VtBlockFormatOptions);
 
         opts.tl_row = tl.0;
         opts.tl_col = tl.1;
@@ -2812,25 +2840,19 @@ impl BlockRef {
         let mut out_len: usize = 0;
 
         Error::from_code(unsafe {
-            vt::ghostty_block_ref_format_alloc(
-                self.raw,
-                ptr::null(),
-                opts,
-                &mut out_ptr,
-                &mut out_len,
-            )
+            ghostty_block_ref_format_alloc(self.raw, ptr::null(), opts, &mut out_ptr, &mut out_len)
         })?;
 
         let text = if out_ptr.is_null() || out_len == 0 {
             String::new()
         } else {
-            let bytes = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+            let bytes = unsafe { slice::from_raw_parts(out_ptr, out_len) };
 
             String::from_utf8_lossy(bytes).into_owned()
         };
 
         if !out_ptr.is_null() {
-            unsafe { vt::ghostty_free(ptr::null(), out_ptr, out_len) };
+            unsafe { ghostty_free(ptr::null(), out_ptr, out_len) };
         }
 
         Ok(text)
@@ -2839,7 +2861,7 @@ impl BlockRef {
 
 impl Drop for BlockRef {
     fn drop(&mut self) {
-        unsafe { vt::ghostty_block_ref_release(self.raw) }
+        unsafe { ghostty_block_ref_release(self.raw) }
     }
 }
 
@@ -2856,13 +2878,13 @@ pub struct AcquiredBlock {
 
 /// Resolve a tagged style color against the palette. `None` for the default
 /// (terminal-level) color, concrete RGB otherwise.
-fn style_color_resolve(c: &vt::StyleColor, palette: &[vt::ColorRgb; 256]) -> Option<Color> {
+fn style_color_resolve(c: &VtStyleColor, palette: &[VtColorRgb; 256]) -> Option<Color> {
     match c.tag {
-        vt::StyleColorTag::PALETTE => {
+        VtStyleColorTag::PALETTE => {
             let idx = unsafe { c.value.palette } as usize;
             palette.get(idx).map(|&rgb| color_from_vt(rgb))
         }
-        vt::StyleColorTag::RGB => Some(color_from_vt(unsafe { c.value.rgb })),
+        VtStyleColorTag::RGB => Some(color_from_vt(unsafe { c.value.rgb })),
         _ => None,
     }
 }
@@ -2870,7 +2892,7 @@ fn style_color_resolve(c: &vt::StyleColor, palette: &[vt::ColorRgb; 256]) -> Opt
 /// Read the full grapheme cluster of a `GridRef` cell as a `String`. Empty for
 /// blank cells. Stack buffer first; falls back to a heap read for oversized
 /// clusters (same two-call pattern as `grid_ref_hyperlink_uri`).
-fn grid_ref_graphemes(r: &vt::GridRef) -> String {
+fn grid_ref_graphemes(r: &VtGridRef) -> String {
     fn to_string(codepoints: &[u32]) -> String {
         codepoints
             .iter()
@@ -2881,15 +2903,13 @@ fn grid_ref_graphemes(r: &vt::GridRef) -> String {
     let mut buf = [0u32; 8];
     let mut len: usize = 0;
 
-    match unsafe { vt::ghostty_grid_ref_graphemes(r, buf.as_mut_ptr(), buf.len(), &mut len) } {
-        vt::Result::SUCCESS => to_string(&buf[..len]),
-        vt::Result::OUT_OF_SPACE => {
+    match unsafe { ghostty_grid_ref_graphemes(r, buf.as_mut_ptr(), buf.len(), &mut len) } {
+        VtResult::SUCCESS => to_string(&buf[..len]),
+        VtResult::OUT_OF_SPACE => {
             let mut big = vec![0u32; len];
 
-            match unsafe {
-                vt::ghostty_grid_ref_graphemes(r, big.as_mut_ptr(), big.len(), &mut len)
-            } {
-                vt::Result::SUCCESS => to_string(&big[..len]),
+            match unsafe { ghostty_grid_ref_graphemes(r, big.as_mut_ptr(), big.len(), &mut len) } {
+                VtResult::SUCCESS => to_string(&big[..len]),
                 _ => String::new(),
             }
         }
@@ -2900,11 +2920,11 @@ fn grid_ref_graphemes(r: &vt::GridRef) -> String {
 /// Read the OSC 8 hyperlink URI for a resolved `GridRef`, or `None` if the cell
 /// has none. Two-call pattern: a NULL probe yields the required length (`out_len`
 /// is 0 ⇒ no hyperlink), then a sized read.
-fn grid_ref_hyperlink_uri(r: &vt::GridRef) -> Option<String> {
+fn grid_ref_hyperlink_uri(r: &VtGridRef) -> Option<String> {
     let mut len: usize = 0;
 
     unsafe {
-        vt::ghostty_grid_ref_hyperlink_uri(r, ptr::null_mut(), 0, &mut len);
+        ghostty_grid_ref_hyperlink_uri(r, ptr::null_mut(), 0, &mut len);
     }
 
     if len == 0 {
@@ -2913,10 +2933,9 @@ fn grid_ref_hyperlink_uri(r: &vt::GridRef) -> Option<String> {
 
     let mut buf = vec![0u8; len];
 
-    let rc =
-        unsafe { vt::ghostty_grid_ref_hyperlink_uri(r, buf.as_mut_ptr(), buf.len(), &mut len) };
+    let rc = unsafe { ghostty_grid_ref_hyperlink_uri(r, buf.as_mut_ptr(), buf.len(), &mut len) };
 
-    if rc != vt::Result::SUCCESS {
+    if rc != VtResult::SUCCESS {
         return None;
     }
 
@@ -2927,6 +2946,13 @@ fn grid_ref_hyperlink_uri(r: &vt::GridRef) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::{collections, io, thread};
+
+    use base64::Engine as _;
+    use base64::engine::general_purpose::STANDARD;
+    use image_rs::{DynamicImage, ImageFormat, Rgba, RgbaImage};
+    use nmt_config::colors::AnsiColor;
+
     use super::*;
 
     fn line_text(snapshot: &RenderBuffer, row: usize) -> String {
@@ -2936,8 +2962,7 @@ mod tests {
             if cell.c() == '\0'
                 || matches!(
                     cell.wide(),
-                    crate::terminal::square::Wide::Spacer
-                        | crate::terminal::square::Wide::LeadingSpacer
+                    terminal::square::Wide::Spacer | terminal::square::Wide::LeadingSpacer
                 )
             {
                 continue;
@@ -3070,8 +3095,8 @@ mod tests {
         let mut t = GhosttyTerminal::new(20, 5, 10_000).unwrap();
         let palette = t.color_palette();
 
-        let (tx, rx) = std::sync::mpsc::channel::<BlockRef>();
-        let reader = std::thread::spawn(move || {
+        let (tx, rx) = sync::mpsc::channel::<BlockRef>();
+        let reader = thread::spawn(move || {
             let mut cells = 0usize;
             for r in rx {
                 let rows = r.row_count();
@@ -3242,15 +3267,12 @@ mod tests {
         t.resize(20, 5, 10, 20).unwrap();
 
         // A 1×1 opaque-red PNG, generated so the bytes are unquestionably valid.
-        let img = image_rs::RgbaImage::from_pixel(1, 1, image_rs::Rgba([255, 0, 0, 255]));
+        let img = RgbaImage::from_pixel(1, 1, Rgba([255, 0, 0, 255]));
         let mut png = Vec::new();
-        image_rs::DynamicImage::ImageRgba8(img)
-            .write_to(
-                &mut std::io::Cursor::new(&mut png),
-                image_rs::ImageFormat::Png,
-            )
+        DynamicImage::ImageRgba8(img)
+            .write_to(&mut io::Cursor::new(&mut png), ImageFormat::Png)
             .unwrap();
-        let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
+        let b64 = STANDARD.encode(&png);
 
         t.write_vt(format!("\x1b_Ga=T,f=100,i=2;{b64}\x1b\\").as_bytes());
 
@@ -3262,7 +3284,7 @@ mod tests {
             .map(|(_, d)| d)
             .expect("PNG image decoded + shipped");
         assert_eq!((img.width, img.height), (1, 1));
-        assert_eq!(img.color_type, crate::graphics::ColorType::Rgba);
+        assert_eq!(img.color_type, graphics::ColorType::Rgba);
         assert_eq!(img.pixels.len(), 4, "1×1 RGBA = 4 bytes");
     }
 
@@ -3528,8 +3550,7 @@ mod tests {
         t.set_kitty_storage_limit(24);
 
         // Two distinct 2×2 RGBA images (ids 1, 2). Base64 of 16 bytes = 24 chars.
-        use base64::Engine as _;
-        let px = base64::engine::general_purpose::STANDARD.encode([0u8; 16]);
+        let px = STANDARD.encode([0u8; 16]);
         t.write_vt(format!("\x1b_Ga=t,f=32,s=2,v=2,i=1;{px}\x1b\\").as_bytes());
         t.write_vt(format!("\x1b_Ga=t,f=32,s=2,v=2,i=2;{px}\x1b\\").as_bytes());
 
@@ -3602,7 +3623,7 @@ mod tests {
             t.write_vt(b"\x1b]11;#330000\x07");
             assert_eq!(
                 t.snapshot().unwrap().window_bg_override(),
-                Some(nmt_config::colors::ColorRgb { r: 51, g: 0, b: 0 }),
+                Some(ColorRgb { r: 51, g: 0, b: 0 }),
                 "OSC 11 sets the override"
             );
 
@@ -3643,7 +3664,7 @@ mod tests {
         // Anchor row "AAAA" (viewport row 0) to a SCREEN coordinate.
         let r = t.viewport_grid_ref(0, 0).unwrap();
         let (_, screen_y) = t
-            .point_from_grid_ref(&r, vt::PointTag::SCREEN)
+            .point_from_grid_ref(&r, VtPointTag::SCREEN)
             .unwrap()
             .expect("viewport cell has a screen coord");
 
@@ -3652,9 +3673,9 @@ mod tests {
         assert_eq!(line_text(&t.snapshot().unwrap(), 2), "FFFF");
 
         // The SAME screen coordinate still resolves to "AAAA".
-        let start = t.grid_ref_at(vt::PointTag::SCREEN, 0, screen_y).unwrap();
-        let end = t.grid_ref_at(vt::PointTag::SCREEN, 3, screen_y).unwrap();
-        let mut sel = vt::sized!(vt::Selection);
+        let start = t.grid_ref_at(VtPointTag::SCREEN, 0, screen_y).unwrap();
+        let end = t.grid_ref_at(VtPointTag::SCREEN, 3, screen_y).unwrap();
+        let mut sel = vt_sized!(VtSelection);
         sel.start = start;
         sel.end = end;
         let text = t.format_text(Some(&sel), false, true).unwrap();
@@ -3672,7 +3693,7 @@ mod tests {
 
         let screen_of = |t: &GhosttyTerminal, y: u16| -> u32 {
             let r = t.viewport_grid_ref(0, y).unwrap();
-            t.point_from_grid_ref(&r, vt::PointTag::SCREEN)
+            t.point_from_grid_ref(&r, VtPointTag::SCREEN)
                 .unwrap()
                 .unwrap()
                 .1
@@ -3765,7 +3786,7 @@ mod tests {
             };
             t.resize(cols, rows, 10, 20).unwrap();
             let snap = t.snapshot().unwrap();
-            let mut counts: std::collections::HashMap<String, usize> = Default::default();
+            let mut counts: collections::HashMap<String, usize> = Default::default();
             for y in 0..snap.rows() {
                 for tok in line_text(&snap, y).split_whitespace() {
                     if (tok.starts_with("ROW") || tok.starts_with("DIR")) && tok.len() >= 6 {
@@ -4070,7 +4091,7 @@ mod tests {
         // Ghostty's default palette red (SGR 31), flattened through the palette.
         assert_eq!(
             style.fg,
-            nmt_config::colors::AnsiColor::Spec(Color {
+            AnsiColor::Spec(Color {
                 r: 204,
                 g: 102,
                 b: 102
@@ -4139,7 +4160,7 @@ mod tests {
         let style = snapshot.style(snapshot.cell(0, 0).style_id());
         assert_eq!(
             style.fg,
-            nmt_config::colors::AnsiColor::Spec(Color {
+            AnsiColor::Spec(Color {
                 r: 10,
                 g: 20,
                 b: 30
@@ -4193,20 +4214,20 @@ mod tests {
         // Setter → getter roundtrip works (the getter itself is fine).
         let t = GhosttyTerminal::new(8, 1, 100).unwrap();
         let p = b"/tmp/set";
-        let s = vt::String {
+        let s = VtString {
             ptr: p.as_ptr(),
             len: p.len(),
         };
         let rc = unsafe {
-            vt::ghostty_terminal_set(
+            ghostty_terminal_set(
                 t.terminal,
-                vt::TerminalOption::PWD,
-                (&s as *const vt::String).cast(),
+                VtTerminalOption::PWD,
+                (&s as *const VtString).cast(),
             )
         };
-        assert_eq!(rc, vt::Result::SUCCESS);
+        assert_eq!(rc, VtResult::SUCCESS);
         assert_eq!(
-            t.get_string(vt::TerminalData::PWD),
+            t.get_string(VtTerminalData::PWD),
             "/tmp/set",
             "the PWD setter populates the getter"
         );
@@ -4215,7 +4236,7 @@ mod tests {
         let mut t = GhosttyTerminal::new(8, 1, 100).unwrap();
         t.write_vt(b"\x1b]7;file:///home/u\x07");
         assert_eq!(
-            t.get_string(vt::TerminalData::PWD),
+            t.get_string(VtTerminalData::PWD),
             "file:///home/u",
             "OSC 7 populates PWD"
         );
@@ -4234,12 +4255,12 @@ mod tests {
         let tags = t.row_semantic_prompts().unwrap();
         assert_eq!(
             tags[0],
-            vt::RowSemanticPrompt::PROMPT,
+            VtRowSemanticPrompt::PROMPT,
             "row 0 (prompt+command) must be tagged PROMPT; got {tags:?}"
         );
         assert_eq!(
             tags[1],
-            vt::RowSemanticPrompt::NONE,
+            VtRowSemanticPrompt::NONE,
             "row 1 (output) must be untagged; got {tags:?}"
         );
     }

@@ -1,3 +1,5 @@
+use std::fmt;
+
 use nmt_config::ConfigError;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -58,8 +60,8 @@ pub enum TerminalErrorType {
     IgnoredReport,
 }
 
-impl std::fmt::Display for TerminalErrorType {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl fmt::Display for TerminalErrorType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             TerminalErrorType::ConfigurationNotFound => {
                 write!(f, "Configuration file was not found")

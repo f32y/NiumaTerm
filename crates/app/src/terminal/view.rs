@@ -1,26 +1,31 @@
 use std::ops::Range;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{self, Duration};
 
 use futures::StreamExt;
 use gpui::prelude::*;
 use gpui::{
-    App, AppContext, Bounds, Context, Entity, EntityInputHandler, ExternalPaths, FocusHandle,
-    Focusable, IntoElement, KeyDownEvent, Keystroke, ListOffset, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollDelta, ScrollWheelEvent, UTF16Selection,
-    Window, actions, div, list, point, px, rgb, size,
+    App, AppContext, Bounds, Context, Entity, EntityInputHandler, EventEmitter, ExternalPaths,
+    FocusHandle, Focusable, IntoElement, KeyDownEvent, Keystroke, ListOffset, Modifiers,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollDelta,
+    ScrollWheelEvent, Size, UTF16Selection, Window, actions, div, list, point, px, rgb, size,
 };
 use gpui_component::notification::Notification;
 use gpui_component::{ActiveTheme, WindowExt as _};
 use nmt_agent_utils::{AgentRoute, agent_process};
 use nmt_config::local_state::TabState;
+use nmt_config::{CursorShape, active_colors, get};
+use nmt_terminal::block_store::BlockStore;
+use nmt_terminal::ghostty::{BlockHandle, ScrollbarInfo};
 use nmt_terminal::selection::SelectionType;
+use tracing::{info, warn};
 
 use super::frame::{
     TerminalFrame, TerminalFrameCache, theme_default_background, theme_default_foreground,
 };
 use super::surface::TerminalSurface;
 use super::{input, metrics, wake};
+use crate::terminal;
 use crate::terminal::block_list::{
     BlockListMeasureKey, BlockListPoint, BlockListState, FrozenPoint, block_list_active_top_px,
     block_list_alignment, block_list_render_metrics, block_pad_rows, offset_frozen_chrome,
@@ -86,7 +91,7 @@ pub(crate) struct TerminalPane {
     profile_name: String,
     agent_route: AgentRoute,
     pub(super) surface: TerminalSurface,
-    cursor_shape: nmt_config::CursorShape,
+    cursor_shape: CursorShape,
     frame_cache: TerminalFrameCache,
     pub(super) cell_metrics: Option<metrics::CellMetrics>,
     /// The terminal leaf's laid-out content rect (window coords, padding
@@ -98,7 +103,7 @@ pub(crate) struct TerminalPane {
     pub(super) scrollbar_dragging: bool,
     /// Last user scroll action; the scrollbar shows only while dragging or
     /// within [`SCROLLBAR_LINGER`] of this instant, then auto-hides.
-    pub(super) last_scroll_activity: Option<std::time::Instant>,
+    pub(super) last_scroll_activity: Option<time::Instant>,
     /// Bumped per scroll action so only the newest hide-timer repaints.
     scroll_activity_gen: u64,
     /// Pointer offset inside the thumb at drag start (track fraction), so
@@ -112,25 +117,25 @@ pub(crate) struct TerminalPane {
     open_prompt: bool,
     pub(super) block_list: BlockListState,
     /// Hit-test data recorded from the last native list prepaint.
-    pub(super) frozen_hit: crate::terminal::block_list::FrozenHitInfo,
+    pub(super) frozen_hit: terminal::block_list::FrozenHitInfo,
     /// Inputs that affect measured heights of the mutable tail of the native list.
     last_list_measure_key: Option<BlockListMeasureKey>,
     /// The gutter-selected frozen item (block-split): highlighted and
     /// targeted by the copy/re-run/jump actions in list mode.
     pub(super) selected_frozen_item: Option<usize>,
     /// Visible frozen item chrome recorded from native list item bounds.
-    pub(super) frozen_chrome: Vec<crate::terminal::block_list::FrozenItemChrome>,
+    pub(super) frozen_chrome: Vec<terminal::block_list::FrozenItemChrome>,
     /// Frozen-region selection: (anchor, head), both inclusive cell points.
     frozen_selection: Option<(
-        crate::terminal::block_list::FrozenPoint,
-        crate::terminal::block_list::FrozenPoint,
+        terminal::block_list::FrozenPoint,
+        terminal::block_list::FrozenPoint,
     )>,
     /// Visible separator y positions, painted outside GPUI List's content mask.
     pub(super) frozen_separators: Vec<f32>,
     /// Anchor of an in-progress frozen-region drag. The selection itself is
     /// only created on the first mouse-move, so a plain click selects nothing
     /// (matching the engine's empty-selection-dropped-on-up semantics).
-    frozen_select_anchor: Option<crate::terminal::block_list::FrozenPoint>,
+    frozen_select_anchor: Option<terminal::block_list::FrozenPoint>,
     /// Pixel origin of a text-selection gesture. Ignoring movement within a
     /// quarter-cell radius prevents normal hand jitter from selecting a glyph.
     selection_drag_origin: Option<Point<Pixels>>,
@@ -144,7 +149,7 @@ pub(crate) struct TerminalPane {
 
 pub(crate) struct AgentInterrupted;
 
-impl gpui::EventEmitter<AgentInterrupted> for TerminalPane {}
+impl EventEmitter<AgentInterrupted> for TerminalPane {}
 
 impl TerminalPane {
     pub(crate) fn spawn(
@@ -177,7 +182,7 @@ impl TerminalPane {
             )
         });
 
-        let remote_session_enabled = nmt_config::get().remote_session.enabled;
+        let remote_session_enabled = get().remote_session.enabled;
         let surface = terminal_surface_for_tab(
             &wake,
             surface_id,
@@ -213,7 +218,7 @@ impl TerminalPane {
         mut wake_rx: wake::WakeReceiver,
         surface: TerminalSurface,
         fixed_bottom_requested: bool,
-        cursor_shape: nmt_config::CursorShape,
+        cursor_shape: CursorShape,
     ) -> Self {
         // Apply terminal presentation settings to existing panes and invalidate
         // measurements that depend on font metrics.
@@ -226,7 +231,7 @@ impl TerminalPane {
                 .list
                 .set_alignment(block_list_alignment(fixed_bottom));
 
-            this.surface.set_theme_colors(&nmt_config::active_colors());
+            this.surface.set_theme_colors(&active_colors());
 
             if cursor_shape != this.cursor_shape && this.surface.set_cursor_shape(cursor_shape) {
                 this.cursor_shape = cursor_shape;
@@ -298,7 +303,7 @@ impl TerminalPane {
     /// Record a user scroll action and schedule the repaint that starts fading
     /// the scrollbar once [`SCROLLBAR_LINGER`] passes without further activity.
     pub(super) fn mark_scroll_activity(&mut self, cx: &mut Context<Self>) {
-        self.last_scroll_activity = Some(std::time::Instant::now());
+        self.last_scroll_activity = Some(time::Instant::now());
         self.scroll_activity_gen += 1;
 
         let generation = self.scroll_activity_gen;
@@ -435,7 +440,7 @@ impl TerminalPane {
     fn on_send_tab(&mut self, _: &SendTab, _: &mut Window, cx: &mut Context<Self>) {
         self.feed_terminal_key(
             &Keystroke {
-                modifiers: gpui::Modifiers::none(),
+                modifiers: Modifiers::none(),
                 key: "tab".into(),
                 key_char: None,
             },
@@ -446,7 +451,7 @@ impl TerminalPane {
     fn on_send_shift_tab(&mut self, _: &SendShiftTab, _: &mut Window, cx: &mut Context<Self>) {
         self.feed_terminal_key(
             &Keystroke {
-                modifiers: gpui::Modifiers::shift(),
+                modifiers: Modifiers::shift(),
                 key: "tab".into(),
                 key_char: None,
             },
@@ -481,7 +486,7 @@ impl TerminalPane {
             && !event.modifiers.shift
         {
             if let Some(link) = self.link_at_position(event.position, cx) {
-                tracing::info!(url = link.url, "ctrl+click open url");
+                info!(url = link.url, "ctrl+click open url");
                 cx.open_url(&link.url);
                 return;
             }
@@ -783,7 +788,7 @@ impl TerminalPane {
         position: Point<Pixels>,
         button: Option<MouseButton>,
         kind: SurfaceMouseEventKind,
-        modifiers: gpui::Modifiers,
+        modifiers: Modifiers,
         selection_type: SelectionType,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -873,7 +878,7 @@ impl TerminalPane {
     /// The pane's last laid-out content size (`None` before the first paint).
     /// Split creation uses it to check the focused pane can yield the minimum
     /// panel size.
-    pub(crate) fn content_size(&self) -> Option<gpui::Size<Pixels>> {
+    pub(crate) fn content_size(&self) -> Option<Size<Pixels>> {
         self.content_bounds.map(|bounds| bounds.size)
     }
 
@@ -898,13 +903,13 @@ impl TerminalPane {
             match event {
                 HostEvent::Exit => self.surface.mark_read_only(),
                 HostEvent::InteractiveState(on) => {
-                    tracing::info!(interactive = *on, "terminal interactive state changed");
+                    info!(interactive = *on, "terminal interactive state changed");
                 }
                 HostEvent::AltScreen(on) => {
                     self.surface.set_alt_screen(*on);
                 }
                 HostEvent::PromptBoundaryTrusted(on) => {
-                    tracing::info!(
+                    info!(
                         prompt_boundary_trusted = *on,
                         "terminal prompt boundary trust changed"
                     );
@@ -971,7 +976,7 @@ impl TerminalPane {
 
     fn block_list_total_px(
         &self,
-        store: &nmt_terminal::block_store::BlockStore,
+        store: &BlockStore,
         frame: &TerminalFrame,
         cols: u32,
         cell_h: f32,
@@ -980,7 +985,7 @@ impl TerminalPane {
         let frozen: f32 = store
             .items()
             .iter()
-            .map(|item| crate::terminal::block_list::item_px(item, cols, cell_h, pad_rows))
+            .map(|item| terminal::block_list::item_px(item, cols, cell_h, pad_rows))
             .sum();
 
         frozen
@@ -1003,7 +1008,7 @@ impl TerminalPane {
 
     fn list_offset_for_px(
         &self,
-        store: &nmt_terminal::block_store::BlockStore,
+        store: &BlockStore,
         frame: &TerminalFrame,
         cols: u32,
         cell_h: f32,
@@ -1013,7 +1018,7 @@ impl TerminalPane {
         let mut y = 0.0f32;
 
         for (ix, item) in store.items().iter().enumerate() {
-            let h = crate::terminal::block_list::item_px(item, cols, cell_h, pad_rows);
+            let h = terminal::block_list::item_px(item, cols, cell_h, pad_rows);
             if target < y + h {
                 return ListOffset {
                     item_ix: ix,
@@ -1054,7 +1059,7 @@ impl TerminalPane {
 
     pub(super) fn record_frozen_view(
         &mut self,
-        view: &crate::terminal::block_list::FrozenView,
+        view: &terminal::block_list::FrozenView,
         item_top: f32,
     ) {
         self.frozen_separators
@@ -1073,7 +1078,7 @@ impl TerminalPane {
 
     pub(super) fn record_frozen_chrome(
         &mut self,
-        chrome: crate::terminal::block_list::FrozenItemChrome,
+        chrome: terminal::block_list::FrozenItemChrome,
         item_top: f32,
     ) {
         self.frozen_chrome
@@ -1163,7 +1168,7 @@ impl TerminalPane {
         let target = {
             let store = store.lock();
 
-            crate::terminal::block_list::nav_item_top(
+            terminal::block_list::nav_item_top(
                 &store,
                 cols,
                 cell.height_px,
@@ -1207,7 +1212,7 @@ impl TerminalPane {
 
         cx.spawn(async move |this, cx| {
             cx.background_executor()
-                .timer(std::time::Duration::from_secs(1))
+                .timer(time::Duration::from_secs(1))
                 .await;
 
             let _ = this.update(cx, |this, cx| {
@@ -1302,14 +1307,14 @@ impl TerminalPane {
     /// `BlockRef`s after it is released so the store and engine locks are never nested.
     fn frozen_selection_to_text(
         &self,
-        a: crate::terminal::block_list::FrozenPoint,
-        b: crate::terminal::block_list::FrozenPoint,
+        a: terminal::block_list::FrozenPoint,
+        b: terminal::block_list::FrozenPoint,
     ) -> String {
         let pieces = {
             let store = self.surface.block_store();
             let store = store.lock();
 
-            crate::terminal::block_list::frozen_selection_pieces(&store, a, b)
+            terminal::block_list::frozen_selection_pieces(&store, a, b)
         };
 
         pieces
@@ -1324,7 +1329,7 @@ impl TerminalPane {
     /// and trailing blanks trim, matching the legacy line-item copy.
     fn format_block_range(
         &self,
-        handle: nmt_terminal::ghostty::BlockHandle,
+        handle: BlockHandle,
         start: Option<(usize, u32)>,
         end: Option<(usize, u32)>,
     ) -> Option<String> {
@@ -1403,7 +1408,7 @@ fn terminal_surface_for_tab(
     state: &TabState,
     profile_name: &str,
     fixed_bottom_requested: bool,
-    cursor_shape: nmt_config::CursorShape,
+    cursor_shape: CursorShape,
     remote_session_enabled: bool,
     environment_overrides: Vec<(String, String)>,
 ) -> Result<TerminalSurface, String> {
@@ -1422,7 +1427,7 @@ fn terminal_surface_for_tab(
         Ok(surface) => Ok(surface),
 
         Err(error) if state.cwd.is_some() => {
-            tracing::warn!("restored tab failed with saved cwd, retrying without cwd: {error}");
+            warn!("restored tab failed with saved cwd, retrying without cwd: {error}");
 
             TerminalSurface::for_gpui(
                 wake.clone(),
@@ -1759,7 +1764,7 @@ impl Render for TerminalPane {
         }
 
         let scrollbar_info = if block_list_element.is_some() {
-            nmt_terminal::ghostty::ScrollbarInfo {
+            ScrollbarInfo {
                 total: (self.block_list.scrollbar.1 + viewport_px).max(0.0) as u64,
                 offset: self.block_list.scrollbar.0.max(0.0) as u64,
                 len: viewport_px.max(0.0) as u64,

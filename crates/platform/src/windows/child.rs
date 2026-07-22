@@ -1,6 +1,7 @@
 use std::ffi::c_void;
 use std::io::Error;
 use std::num::NonZeroU32;
+use std::ptr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicPtr, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -52,7 +53,7 @@ impl ChildExitWatcher {
         let (event_tx, event_rx) = channel::<ChildEvent>();
         let soft = SoftReady::new();
 
-        let mut wait_handle: HANDLE = std::ptr::null_mut();
+        let mut wait_handle: HANDLE = ptr::null_mut();
         let ctx = Box::new(CallbackCtx {
             event_tx,
             soft: soft.clone(),

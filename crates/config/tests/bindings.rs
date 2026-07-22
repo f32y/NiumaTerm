@@ -1,5 +1,6 @@
 use nmt_config::bindings::Bindings;
 use serde::{Deserialize, Serialize};
+use toml::from_str;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 struct Root {
@@ -16,7 +17,7 @@ fn test_valid_key_action() {
         ]
     "#;
 
-    let decoded = toml::from_str::<Root>(content).unwrap();
+    let decoded = from_str::<Root>(content).unwrap();
     assert_eq!(decoded.bindings.keys[0].key, "Q");
     assert_eq!(decoded.bindings.keys[0].with.to_owned(), "super");
     assert_eq!(decoded.bindings.keys[0].action.to_owned(), "quit");
@@ -32,7 +33,7 @@ fn test_mode_key_input() {
         ]
     ";
 
-    let decoded = toml::from_str::<Root>(content).unwrap();
+    let decoded = from_str::<Root>(content).unwrap();
     assert_eq!(decoded.bindings.keys[0].key, "Home");
     assert_eq!(decoded.bindings.keys[0].with, "");
     assert_eq!(decoded.bindings.keys[0].mode, "appcursor");
@@ -50,7 +51,7 @@ fn test_escape_sequences() {
         ]
     "#;
 
-    let decoded = toml::from_str::<Root>(content).unwrap();
+    let decoded = from_str::<Root>(content).unwrap();
     assert_eq!(decoded.bindings.keys[0].esc, "\x1b[2J\x1b[H");
     assert_eq!(decoded.bindings.keys[0].esc.as_bytes(), b"\x1b[2J\x1b[H");
 }

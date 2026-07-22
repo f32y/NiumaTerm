@@ -1,16 +1,23 @@
 use std::collections::hash_map::DefaultHasher;
+use std::collections::{self};
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
+use std::iter;
+use std::sync::{self, Arc};
 
 use gpui::SharedString;
+use nmt_config::active_colors;
 use nmt_config::colors::term::{DIM_FACTOR, List, TermColors};
 use nmt_config::colors::{AnsiColor, ColorRgb, NamedColor};
 use nmt_terminal::ansi::CursorShape;
+use nmt_terminal::ansi::kitty_virtual::{self, IncompletePlacement, PLACEHOLDER, PlaceholderRun};
+use nmt_terminal::ghostty::{ScrollbarInfo, SnapshotPlacement};
 use nmt_terminal::grid_emit::{RowSelection, row_selection_for};
 use nmt_terminal::render_buffer::RenderBuffer;
 use nmt_terminal::selection::SelectionRange;
-use nmt_terminal::terminal::square::{ContentTag, Wide};
+use nmt_terminal::terminal::square::{ContentTag, Square, Wide};
 use nmt_terminal::terminal::style::{Style, StyleFlags};
+
+use crate::terminal;
 
 #[derive(Clone, Default)]
 pub(crate) struct TerminalFrame {
@@ -18,7 +25,7 @@ pub(crate) struct TerminalFrame {
     line_states: Arc<[TerminalLineState]>,
     cols: usize,
     cursor: Option<TerminalCursor>,
-    scrollbar: nmt_terminal::ghostty::ScrollbarInfo,
+    scrollbar: ScrollbarInfo,
     /// Paintable Kitty image placements resolved against the session image cache
     /// Empty in the common no-graphics case.
     images: Arc<[FrameImage]>,
@@ -87,8 +94,7 @@ pub(crate) struct TerminalFrameCache {
     full_invalidation: bool,
 }
 
-type GenerationMap =
-    std::collections::HashMap<u32, Arc<crate::terminal::graphics::ImageGeneration>>;
+type GenerationMap = collections::HashMap<u32, Arc<terminal::graphics::ImageGeneration>>;
 
 impl TerminalFrame {
     #[cfg(test)]
@@ -180,7 +186,7 @@ impl TerminalFrame {
         self.cursor
     }
 
-    pub(crate) fn scrollbar(&self) -> nmt_terminal::ghostty::ScrollbarInfo {
+    pub(crate) fn scrollbar(&self) -> ScrollbarInfo {
         self.scrollbar
     }
 }
@@ -322,7 +328,7 @@ impl LineBuilder {
 /// bounds. Ordinary and virtual placements normalize to this one descriptor.
 #[derive(Clone)]
 pub(crate) struct FrameImage {
-    pub(crate) generation: Arc<crate::terminal::graphics::ImageGeneration>,
+    pub(crate) generation: Arc<terminal::graphics::ImageGeneration>,
     pub(crate) z: i32,
     pub(crate) kind: FrameImageKind,
 }
@@ -344,7 +350,7 @@ pub(crate) enum FrameImageKind {
     /// `(image_id, placement_id)` metadata. Final geometry uses `compute_run_geometry`
     /// at paint (aspect-fit needs real cell metrics).
     Virtual {
-        run: nmt_terminal::ansi::kitty_virtual::PlaceholderRun,
+        run: PlaceholderRun,
         placement_cols: u32,
         placement_rows: u32,
         image_w: u32,
@@ -369,7 +375,7 @@ pub(crate) enum ZLayer {
 /// One shared empty `Arc<[FrameImage]>` for graphics-free frames — cloning it is a
 /// refcount bump, so the common case allocates nothing.
 fn empty_images() -> Arc<[FrameImage]> {
-    static EMPTY: std::sync::OnceLock<Arc<[FrameImage]>> = std::sync::OnceLock::new();
+    static EMPTY: sync::OnceLock<Arc<[FrameImage]>> = sync::OnceLock::new();
 
     EMPTY.get_or_init(|| Arc::from(Vec::new())).clone()
 }
@@ -432,7 +438,7 @@ impl FrameImage {
                 // Fold this row's displacement into the origin and paint the single
                 // row at screen line 0 of the adjusted origin.
                 let oy = origin_y + screen_line as f32 * cell_h + row_offset;
-                let g = nmt_terminal::ansi::kitty_virtual::compute_run_geometry(
+                let g = kitty_virtual::compute_run_geometry(
                     &run,
                     placement_cols,
                     placement_rows,
@@ -468,7 +474,7 @@ impl FrameImage {
 /// placement order, ordinary before virtual. Metrics-independent — no cell sizing here.
 pub(crate) fn extract_frame_images(
     buf: &RenderBuffer,
-    generations: &std::collections::HashMap<u32, Arc<crate::terminal::graphics::ImageGeneration>>,
+    generations: &collections::HashMap<u32, Arc<terminal::graphics::ImageGeneration>>,
 ) -> Vec<FrameImage> {
     // No-graphics fast path: with no placements there is nothing to extract, and a
     // row flagged virtual can only resolve against a virtual placement — so skip the
@@ -485,7 +491,7 @@ pub(crate) fn extract_frame_images(
     out
 }
 
-fn image_pixel_size(generation: &crate::terminal::graphics::ImageGeneration) -> Option<(u32, u32)> {
+fn image_pixel_size(generation: &terminal::graphics::ImageGeneration) -> Option<(u32, u32)> {
     let size = generation.image().size(0);
     let (w, h) = (size.width.0.max(0) as u32, size.height.0.max(0) as u32);
 
@@ -494,7 +500,7 @@ fn image_pixel_size(generation: &crate::terminal::graphics::ImageGeneration) -> 
 
 fn extract_ordinary_images(
     buf: &RenderBuffer,
-    generations: &std::collections::HashMap<u32, Arc<crate::terminal::graphics::ImageGeneration>>,
+    generations: &collections::HashMap<u32, Arc<terminal::graphics::ImageGeneration>>,
     out: &mut Vec<FrameImage>,
 ) {
     for placement in buf.placements().iter().filter(|p| !p.is_virtual) {
@@ -524,11 +530,7 @@ fn extract_ordinary_images(
 
 /// Normalize a placement's pixel source rectangle into `[u0, v0, u1, v1]`. A zero-size
 /// source (Ghostty reports no explicit crop) maps to the full image.
-fn normalized_source_rect(
-    placement: &nmt_terminal::ghostty::SnapshotPlacement,
-    image_w: f32,
-    image_h: f32,
-) -> [f32; 4] {
+fn normalized_source_rect(placement: &SnapshotPlacement, image_w: f32, image_h: f32) -> [f32; 4] {
     if placement.source_width == 0 || placement.source_height == 0 {
         return [0.0, 0.0, 1.0, 1.0];
     }
@@ -543,11 +545,9 @@ fn normalized_source_rect(
 
 fn extract_virtual_images(
     buf: &RenderBuffer,
-    generations: &std::collections::HashMap<u32, Arc<crate::terminal::graphics::ImageGeneration>>,
+    generations: &collections::HashMap<u32, Arc<terminal::graphics::ImageGeneration>>,
     out: &mut Vec<FrameImage>,
 ) {
-    use nmt_terminal::ansi::kitty_virtual::{IncompletePlacement, PLACEHOLDER};
-
     for row in 0..buf.rows() {
         // Fast path: rows without any placeholder cell are never scanned.
         if !buf.row_has_virtual_placeholder(row) {
@@ -600,8 +600,8 @@ fn extract_virtual_images(
 /// without drawing a marker if either the placement metadata or the image is missing.
 fn push_virtual_run(
     buf: &RenderBuffer,
-    generations: &std::collections::HashMap<u32, Arc<crate::terminal::graphics::ImageGeneration>>,
-    incomplete: nmt_terminal::ansi::kitty_virtual::IncompletePlacement,
+    generations: &collections::HashMap<u32, Arc<terminal::graphics::ImageGeneration>>,
+    incomplete: IncompletePlacement,
     start_col: usize,
     row: usize,
     out: &mut Vec<FrameImage>,
@@ -642,16 +642,16 @@ fn push_virtual_run(
 /// The theme's default foreground, for harvested cells with no explicit fg
 /// (block-split).
 pub(crate) fn theme_default_foreground() -> TerminalColor {
-    TerminalColor::from_color_arr(nmt_config::active_colors().foreground)
+    TerminalColor::from_color_arr(active_colors().foreground)
 }
 
 pub(crate) fn theme_default_background() -> TerminalColor {
-    TerminalColor::from_color_arr(nmt_config::active_colors().background.0)
+    TerminalColor::from_color_arr(active_colors().background.0)
 }
 
 /// The theme's selection background (block-split frozen selection).
 pub(crate) fn theme_selection_background() -> TerminalColor {
-    TerminalColor::from_color_arr(nmt_config::active_colors().selection_background)
+    TerminalColor::from_color_arr(active_colors().selection_background)
 }
 
 #[cfg(test)]
@@ -731,7 +731,7 @@ fn extract_row_with_colors(
         }
 
         builder.push_segment(
-            std::iter::once(display_char(source_ch)).chain(extras.iter().copied()),
+            iter::once(display_char(source_ch)).chain(extras.iter().copied()),
             style,
             wide == Wide::Wide,
         );
@@ -760,7 +760,7 @@ impl BackgroundColors {
     fn new(term_colors: TermColors) -> Self {
         // Active theme from config (loader resolves the theme/adaptive palette);
         // `term_colors` still overrides per-index via engine OSC 4 changes.
-        let colors = nmt_config::active_colors();
+        let colors = active_colors();
         Self {
             colors: List::from(&colors),
             term_colors,
@@ -768,11 +768,7 @@ impl BackgroundColors {
         }
     }
 
-    fn cell_background(
-        &self,
-        buf: &RenderBuffer,
-        cell: nmt_terminal::terminal::square::Square,
-    ) -> Option<TerminalColor> {
+    fn cell_background(&self, buf: &RenderBuffer, cell: Square) -> Option<TerminalColor> {
         match cell.content_tag() {
             ContentTag::BgRgb => {
                 let (r, g, b) = cell.bg_rgb();
@@ -884,8 +880,7 @@ fn display_char(ch: char) -> char {
     // Kitty virtual-placeholder cells (U+10EEEE) carry image slices, not glyphs;
     // render them as a blank so GPUI never draws a missing-glyph box while the cell
     // keeps its width for image geometry.
-    if ch == '\0' || ch == '\t' || ch == ' ' || ch == nmt_terminal::ansi::kitty_virtual::PLACEHOLDER
-    {
+    if ch == '\0' || ch == '\t' || ch == ' ' || ch == PLACEHOLDER {
         '\u{00a0}'
     } else {
         ch
@@ -952,21 +947,23 @@ mod tests {
     use nmt_config::colors::term::TermColors;
     use nmt_config::colors::{ColorArray, Colors, NamedColor};
     use nmt_terminal::ansi::CursorShape;
+    use nmt_terminal::ansi::kitty_virtual::DIACRITICS;
     use nmt_terminal::ghostty::GhosttyTerminal;
     use nmt_terminal::render_buffer::RenderBuffer;
     use nmt_terminal::selection::SelectionRange;
     use nmt_terminal::terminal::pos::{Column, Line, Pos};
     use nmt_terminal::terminal::square::Wide;
 
-    use super::{TerminalColor, TerminalFrame, TerminalFrameCache, cursor_for_row, extract_row};
+    use super::{
+        BackgroundColors, FrameImageKind, GenerationMap, TerminalColor, TerminalFrame,
+        TerminalFrameCache, ZLayer, cursor_for_row, extract_frame_images, extract_row,
+        extract_row_with_colors, frame_cursor, line_from_parts, theme_default_foreground,
+    };
+    use crate::terminal;
 
     fn frame_with_line(line: &str) -> TerminalFrame {
         TerminalFrame {
-            lines: Arc::from([super::line_from_parts(
-                line.to_owned(),
-                Vec::new(),
-                Vec::new(),
-            )]),
+            lines: Arc::from([line_from_parts(line.to_owned(), Vec::new(), Vec::new())]),
             line_states: Arc::from([Default::default()]),
             cols: line.len(),
             cursor: None,
@@ -985,7 +982,7 @@ mod tests {
         let mut term_colors = TermColors::default();
         term_colors[NamedColor::Cursor] = Some(expected);
 
-        let colors = super::BackgroundColors::new(term_colors);
+        let colors = BackgroundColors::new(term_colors);
 
         assert_eq!(
             colors.named(NamedColor::Cursor),
@@ -1008,9 +1005,9 @@ mod tests {
         term_colors[NamedColor::Foreground] = Some(gray(0x29));
         term_colors[NamedColor::Background] = Some(gray(0xe0));
         term_colors[NamedColor::Cursor] = Some(gray(0x38));
-        let colors = super::BackgroundColors::new(term_colors);
-        let cursor = super::frame_cursor(&buf, &colors).unwrap();
-        let row = super::extract_row_with_colors(&buf, 0, Some(cursor), &colors, None);
+        let colors = BackgroundColors::new(term_colors);
+        let cursor = frame_cursor(&buf, &colors).unwrap();
+        let row = extract_row_with_colors(&buf, 0, Some(cursor), &colors, None);
 
         assert_eq!(cursor.shape, CursorShape::Block);
         assert_eq!(row.runs()[0].fg, colors.named(NamedColor::Background));
@@ -1087,7 +1084,7 @@ mod tests {
         let mut buf = RenderBuffer::new(8, 3);
         engine.write_vt(b"\x1b[2;1H");
         engine.snapshot_into(&mut buf).unwrap();
-        let generations = super::GenerationMap::new();
+        let generations = GenerationMap::new();
         let first = TerminalFrame::from_render_buffer_reusing(&buf, None, &generations, None);
 
         engine.snapshot_into(&mut buf).unwrap();
@@ -1127,7 +1124,7 @@ mod tests {
         let mut buf = RenderBuffer::new(8, 2);
         engine.write_vt(b"AB");
         engine.snapshot_into(&mut buf).unwrap();
-        let generations = super::GenerationMap::new();
+        let generations = GenerationMap::new();
         let first = TerminalFrame::from_render_buffer_reusing(&buf, None, &generations, None);
         let versions = buf.row_versions().to_vec();
 
@@ -1147,7 +1144,7 @@ mod tests {
         let mut buf = RenderBuffer::new(8, 3);
         engine.write_vt(b"row0\r\nrow1\r\nrow2");
         engine.snapshot_into(&mut buf).unwrap();
-        let generations = super::GenerationMap::new();
+        let generations = GenerationMap::new();
         let plain = TerminalFrame::from_render_buffer_reusing(&buf, None, &generations, None);
         let row0 = SelectionRange::new(
             Pos::new(Line(0), Column(0)),
@@ -1255,7 +1252,7 @@ mod tests {
         let frame = TerminalFrame::from_render_buffer_with_selection(
             &buf,
             Some(selection),
-            &super::GenerationMap::new(),
+            &GenerationMap::new(),
         );
         let selected = TerminalColor::from_color_arr(Colors::default().selection_background);
         let cells = frame.lines()[0].cells();
@@ -1350,12 +1347,11 @@ mod tests {
 
         assert_eq!(frame.cursor().unwrap().shape, CursorShape::Beam);
         assert!(row.text().as_ref().starts_with("A\u{00a0}"));
-        assert_eq!(row.runs()[0].fg, super::theme_default_foreground());
+        assert_eq!(row.runs()[0].fg, theme_default_foreground());
     }
 
     // --- Kitty image frame extraction ---
 
-    use super::{FrameImageKind, GenerationMap, ZLayer, extract_frame_images};
     use crate::terminal::graphics::graphic_to_generation;
 
     /// Run `vt` through the engine, mirror it into a `RenderBuffer`, and build a live
@@ -1367,7 +1363,7 @@ mod tests {
         engine.write_vt(vt);
         let buf = engine.snapshot().unwrap();
 
-        let release: crate::terminal::graphics::ReleaseQueue = Default::default();
+        let release: terminal::graphics::ReleaseQueue = Default::default();
         let (pending, _) = engine.take_image_deltas(buf.placements());
         let mut generations = GenerationMap::new();
         for (id, data) in pending {
@@ -1451,7 +1447,7 @@ mod tests {
         // cells that inherit column from the first → one run of width 2.
         // Placement id 0 (no `p=`, no underline color) so the run's decoded
         // placement id (from underline) matches the placement metadata.
-        let d0 = nmt_terminal::ansi::kitty_virtual::DIACRITICS[0];
+        let d0 = DIACRITICS[0];
         let cell0 = format!("\x1b[38;2;0;0;7m{}{}", '\u{10EEEE}', d0); // row=0,col=0
         let cell1 = format!("{}", '\u{10EEEE}'); // inherit row/col
         let mut vt = Vec::new();
@@ -1483,7 +1479,7 @@ mod tests {
     fn unmatched_placeholder_is_skipped() {
         // Placeholder cells reference image id 9, but no image 9 was transmitted, so
         // there is no matching virtual placement and no cached image → skipped.
-        let d0 = nmt_terminal::ansi::kitty_virtual::DIACRITICS[0];
+        let d0 = DIACRITICS[0];
         let cell = format!("\x1b[38;2;0;0;9m{}{}{}", '\u{10EEEE}', d0, d0);
         let (buf, generations) = buf_and_generations(20, 5, cell.as_bytes());
         assert!(
@@ -1494,7 +1490,7 @@ mod tests {
 
     #[test]
     fn placeholder_codepoint_is_suppressed_from_text() {
-        let d0 = nmt_terminal::ansi::kitty_virtual::DIACRITICS[0];
+        let d0 = DIACRITICS[0];
         let mut vt = Vec::new();
         vt.extend_from_slice(b"\x1b_Ga=T,U=1,f=32,s=1,v=1,i=7,p=3,c=1,r=1;/wAA/w==\x1b\\");
         vt.extend_from_slice(format!("\x1b[38;2;0;0;7m{}{}{}", '\u{10EEEE}', d0, d0).as_bytes());
@@ -1545,11 +1541,14 @@ mod tests {
 #[cfg(test)]
 mod full_frame_profile {
     use std::time::{Duration, Instant};
+    use std::{fs, hint};
 
     use gpui::{FontRun, Platform, font, px};
     use gpui_windows::WindowsPlatform;
     use nmt_terminal::ghostty::GhosttyTerminal;
     use nmt_terminal::render_buffer::RenderBuffer;
+
+    use super::{GenerationMap, TerminalFrame};
 
     const COLS: u16 = 80;
     const ROWS: u16 = 24;
@@ -1591,7 +1590,7 @@ mod full_frame_profile {
 
         // 2 + 3. per-frame snapshot + extract of the live viewport (render thread).
         // A persistent RenderBuffer is reused across frames, as production does.
-        let gens = super::GenerationMap::new();
+        let gens = GenerationMap::new();
         let mut render_buf = RenderBuffer::new(COLS as usize, ROWS as usize);
         let mut capture_total = Duration::ZERO;
         let mut extract_total = Duration::ZERO;
@@ -1602,8 +1601,7 @@ mod full_frame_profile {
             capture_total += s.elapsed();
 
             let e = Instant::now();
-            let frame =
-                super::TerminalFrame::from_render_buffer_with_selection(&render_buf, None, &gens);
+            let frame = TerminalFrame::from_render_buffer_with_selection(&render_buf, None, &gens);
             extract_total += e.elapsed();
             sink += frame.lines().len();
         }
@@ -1613,13 +1611,13 @@ mod full_frame_profile {
         engine.write_vt(b"\x1b[1;1H");
         engine.snapshot_into(&mut render_buf).unwrap();
         let mut previous =
-            super::TerminalFrame::from_render_buffer_with_selection(&render_buf, None, &gens);
+            TerminalFrame::from_render_buffer_with_selection(&render_buf, None, &gens);
         let mut incremental_total = Duration::ZERO;
         for i in 0..FRAMES {
             engine.write_vt(if i % 2 == 0 { b"\rA" } else { b"\rB" });
             engine.snapshot_into(&mut render_buf).unwrap();
             let e = Instant::now();
-            let frame = super::TerminalFrame::from_render_buffer_reusing(
+            let frame = TerminalFrame::from_render_buffer_reusing(
                 &render_buf,
                 None,
                 &gens,
@@ -1643,7 +1641,7 @@ mod full_frame_profile {
                 font_id,
             }];
             let layout = pts.layout_line(text.as_str(), font_size, &runs);
-            std::hint::black_box(&layout);
+            hint::black_box(&layout);
         }
         let shape = t.elapsed();
 
@@ -1693,7 +1691,7 @@ mod full_frame_profile {
             "  => per streamed frame ({ROWS} novel rows): extract {per_frame_extract:?} + shape {per_frame_shape:?}"
         );
         eprint!("{report}");
-        let _ = std::fs::write(
+        let _ = fs::write(
             concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/../../target/frame_profile.txt"

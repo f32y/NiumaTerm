@@ -12,6 +12,8 @@
 use std::io::Write as _;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{self};
+use std::{env, fmt, fs, time};
 
 use crate::ghostty::GhosttyTerminal;
 use crate::render_buffer::RenderBuffer;
@@ -21,12 +23,12 @@ static SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// `true` when `RIO_VT_TRACE` is set in the environment (checked once).
 pub fn enabled() -> bool {
-    static EN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *EN.get_or_init(|| std::env::var_os("RIO_VT_TRACE").is_some())
+    static EN: sync::OnceLock<bool> = sync::OnceLock::new();
+    *EN.get_or_init(|| env::var_os("RIO_VT_TRACE").is_some())
 }
 
 fn log_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("RIO_VT_TRACE_DIR") {
+    if let Some(dir) = env::var_os("RIO_VT_TRACE_DIR") {
         PathBuf::from(dir)
     } else {
         PathBuf::from("target").join("logs")
@@ -35,8 +37,8 @@ fn log_dir() -> PathBuf {
 
 /// Milliseconds since the UNIX epoch, for ordering log lines across threads.
 fn now_ms() -> u128 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    time::SystemTime::now()
+        .duration_since(time::UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0)
 }
@@ -121,7 +123,7 @@ fn trailing_pad_report(s: &RenderBuffer) -> String {
                 }
             })
             .unwrap_or_default();
-        let _ = std::fmt::Write::write_fmt(
+        let _ = fmt::Write::write_fmt(
             &mut out,
             format_args!(
                 "y={y:3} content_end={content_end:3} trailing_cells={:3} styled={:3} max_x={max_x:3} first_pad_text={first_text} first_pad_bg={first_bg}\n",
@@ -135,11 +137,7 @@ fn trailing_pad_report(s: &RenderBuffer) -> String {
 
 fn append_master(dir: &PathBuf, line: &str) {
     let path = dir.join("rio-vt-trace.log");
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-    {
+    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(path) {
         let _ = f.write_all(line.as_bytes());
     }
 }
@@ -156,7 +154,7 @@ pub fn trace(label: &str, engine: &mut GhosttyTerminal, detail: &str) {
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
     let ts = now_ms();
     let dir = log_dir();
-    let _ = std::fs::create_dir_all(&dir);
+    let _ = fs::create_dir_all(&dir);
 
     let snapshot = engine.snapshot();
     let full = engine
@@ -199,8 +197,7 @@ pub fn trace(label: &str, engine: &mut GhosttyTerminal, detail: &str) {
     if let Ok(s) = &snapshot {
         body.push_str("---- viewport (snapshot rows, y|text) ----\n");
         for y in 0..s.rows() {
-            let _ =
-                std::fmt::Write::write_fmt(&mut body, format_args!("{y:3}|{}\n", row_text(s, y)));
+            let _ = fmt::Write::write_fmt(&mut body, format_args!("{y:3}|{}\n", row_text(s, y)));
         }
         body.push_str("---- trailing-pad style (per row with trailing cells) ----\n");
         body.push_str(&trailing_pad_report(s));
@@ -210,5 +207,5 @@ pub fn trace(label: &str, engine: &mut GhosttyTerminal, detail: &str) {
     if !full.ends_with('\n') {
         body.push('\n');
     }
-    let _ = std::fs::write(&path, body);
+    let _ = fs::write(&path, body);
 }

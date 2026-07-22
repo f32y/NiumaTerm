@@ -1,8 +1,10 @@
-use std::fs::File;
-use std::io::{Read, Write};
+use std::fs::{self, File};
+use std::io::{self, Read, Write};
 use std::os::windows::io::FromRawHandle;
 use std::time::{Duration, Instant};
+use std::{ptr, thread};
 
+use tracing::warn;
 use windows_sys::Win32::Foundation::{
     ERROR_ALREADY_EXISTS, ERROR_PIPE_CONNECTED, GetLastError, INVALID_HANDLE_VALUE,
 };
@@ -45,10 +47,10 @@ pub fn try_become_primary(testing: bool) -> bool {
     let name = wide(mutex_name(testing));
 
     unsafe {
-        let handle = CreateMutexW(std::ptr::null(), 1, name.as_ptr());
+        let handle = CreateMutexW(ptr::null(), 1, name.as_ptr());
 
         if handle.is_null() {
-            tracing::warn!(
+            warn!(
                 "CreateMutexW failed ({}); skipping single-instance",
                 GetLastError()
             );
@@ -61,16 +63,13 @@ pub fn try_become_primary(testing: bool) -> bool {
 }
 
 /// Send one UTF-8 line to the primary process, retrying until `timeout` elapses.
-pub fn send(message: &str, timeout: Duration, testing: bool) -> std::io::Result<()> {
+pub fn send(message: &str, timeout: Duration, testing: bool) -> io::Result<()> {
     let deadline = Instant::now() + timeout;
 
     loop {
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .open(pipe_name(testing))
-        {
+        match fs::OpenOptions::new().write(true).open(pipe_name(testing)) {
             Ok(mut pipe) => return writeln!(pipe, "{message}"),
-            Err(_) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(50)),
+            Err(_) if Instant::now() < deadline => thread::sleep(Duration::from_millis(50)),
             Err(error) => return Err(error),
         }
     }
@@ -79,7 +78,7 @@ pub fn send(message: &str, timeout: Duration, testing: bool) -> std::io::Result<
 /// Run the primary process pipe server. Returning `false` from the callback
 /// stops the server thread.
 pub fn spawn_server(testing: bool, mut on_message: impl FnMut(Vec<u8>) -> bool + Send + 'static) {
-    std::thread::Builder::new()
+    thread::Builder::new()
         .name("nmt-ipc".into())
         .spawn(move || {
             let name = wide(pipe_name(testing));
@@ -94,18 +93,18 @@ pub fn spawn_server(testing: bool, mut on_message: impl FnMut(Vec<u8>) -> bool +
                         512,
                         512,
                         0,
-                        std::ptr::null(),
+                        ptr::null(),
                     )
                 };
 
                 if handle == INVALID_HANDLE_VALUE {
-                    tracing::warn!("CreateNamedPipeW failed ({}); IPC disabled", unsafe {
+                    warn!("CreateNamedPipeW failed ({}); IPC disabled", unsafe {
                         GetLastError()
                     });
                     return;
                 }
 
-                let connected = unsafe { ConnectNamedPipe(handle, std::ptr::null_mut()) } != 0
+                let connected = unsafe { ConnectNamedPipe(handle, ptr::null_mut()) } != 0
                     || unsafe { GetLastError() } == ERROR_PIPE_CONNECTED;
 
                 let mut pipe = unsafe { File::from_raw_handle(handle as _) };

@@ -1,4 +1,5 @@
-use serde::{Deserialize, Serialize};
+use serde::de::Error as DeError;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::defaults::*;
 use crate::render_types::ImageProperties;
@@ -122,7 +123,7 @@ impl WindowBlur {
 }
 
 impl Serialize for WindowBlur {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         match self {
             // Round-trip the legacy / common path as a bool so existing
             // config files stay byte-identical after a save.
@@ -135,7 +136,7 @@ impl Serialize for WindowBlur {
 }
 
 impl<'de> Deserialize<'de> for WindowBlur {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         // `untagged` lets a single field accept either a TOML bool
         // (`blur = true`) or a TOML string (`blur = "macos-glass-clear"`)
         // without forcing the caller to wrap it in a tagged form.
@@ -152,7 +153,7 @@ impl<'de> Deserialize<'de> for WindowBlur {
             Raw::Str(s) => match s.as_str() {
                 "macos-glass-regular" => Ok(WindowBlur::MacosGlassRegular),
                 "macos-glass-clear" => Ok(WindowBlur::MacosGlassClear),
-                other => Err(serde::de::Error::custom(format!(
+                other => Err(DeError::custom(format!(
                     "unknown window.blur value `{other}`; expected a bool or one of \
                      \"macos-glass-regular\", \"macos-glass-clear\""
                 ))),

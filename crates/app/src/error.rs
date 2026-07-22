@@ -4,6 +4,8 @@
 //! renderer-owned shell. This module must not depend on UI code: the shell owns
 //! layout, presentation, and window integration.
 
+use std::{error, fmt};
+
 /// Stable error categories for the shell's in-window error panel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EngineErrorCode {
@@ -29,10 +31,10 @@ impl EngineError {
     }
 }
 
-impl std::fmt::Display for EngineError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for EngineError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.message)
     }
 }
 
-impl std::error::Error for EngineError {}
+impl error::Error for EngineError {}

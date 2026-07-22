@@ -4,7 +4,7 @@
 //! directory; `nmt://action/activate` (internal, sent by an argument-less
 //! second launch) only foregrounds the running instance.
 
-use std::path::{Path, PathBuf};
+use std::path::{self, Path, PathBuf};
 
 use nmt_agent_utils::AgentRoute;
 use percent_encoding::{NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
@@ -109,7 +109,7 @@ pub(crate) fn parse_nmt_url(url: &str) -> Result<CliAction, String> {
                 .decode_utf8()
                 .map_err(|err| format!("path in {url} is not UTF-8: {err}"))?;
 
-            let path = std::path::absolute(Path::new(decoded.as_ref()))
+            let path = path::absolute(Path::new(decoded.as_ref()))
                 .map_err(|err| format!("cannot resolve path in {url}: {err}"))?;
 
             Ok(if verb == "new_tab" {
@@ -124,6 +124,8 @@ pub(crate) fn parse_nmt_url(url: &str) -> Result<CliAction, String> {
 
 #[cfg(test)]
 mod tests {
+    use std::env;
+
     use super::*;
 
     #[test]
@@ -188,7 +190,7 @@ mod tests {
         let CliAction::NewTab { path } = action else {
             panic!("expected NewTab");
         };
-        assert_eq!(path, std::env::current_dir().unwrap().join("sub\\dir"));
+        assert_eq!(path, env::current_dir().unwrap().join("sub\\dir"));
     }
 
     #[test]

@@ -5,7 +5,7 @@
 use core::cmp::min;
 use std::cmp::max;
 use std::ops::{Index, IndexMut, Range, RangeFrom, RangeFull, RangeTo, RangeToInclusive};
-use std::{ptr, slice};
+use std::{mem, ptr, slice};
 
 use crate::terminal::Column;
 use crate::terminal::grid::GridSquare;
@@ -226,7 +226,7 @@ impl<T> Row<T> {
 
         let mut split = self.inner.split_off(at);
 
-        std::mem::swap(&mut split, &mut self.inner);
+        mem::swap(&mut split, &mut self.inner);
 
         split
     }

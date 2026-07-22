@@ -1,17 +1,13 @@
 #![cfg(unix)]
 
+use dirs::home_dir;
+use libc;
+use tracing::info;
+
 #[cfg(target_os = "macos")]
 mod macos;
 mod notifier;
 mod signals;
-
-#[cfg(target_os = "macos")]
-pub(crate) use notifier::request_authorization;
-pub(crate) use notifier::{
-    identity_registered, register_identity, remove, show, unregister_identity,
-};
-
-extern crate libc;
 
 use std::ffi::{CStr, CString};
 use std::fs::File;
@@ -23,11 +19,17 @@ use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
-use std::{io, ptr};
+use std::{env, io, ptr, str};
 
 #[cfg(target_os = "macos")]
 use macos::*;
 use mio::unix::SourceFd;
+use mio::{Interest, Poll, Token, Waker};
+#[cfg(target_os = "macos")]
+pub(crate) use notifier::request_authorization;
+pub(crate) use notifier::{
+    identity_registered, register_identity, remove, show, unregister_identity,
+};
 use signal_hook::consts as sigconsts;
 use signals::Signals;
 
@@ -80,18 +82,15 @@ fn default_shell_command(shell: &str) {
     let command_shell_string = CString::new(shell).unwrap();
     let command_pointer = command_shell_string.as_ptr();
     unsafe {
-        libc::execvp(
-            command_pointer,
-            vec![command_pointer, std::ptr::null()].as_ptr(),
-        );
+        libc::execvp(command_pointer, vec![command_pointer, ptr::null()].as_ptr());
     }
 }
 
 pub struct Pty {
     pub child: Child,
     file: File,
-    token: mio::Token,
-    signals_token: mio::Token,
+    token: Token,
+    signals_token: Token,
     signals: Signals,
 }
 
@@ -145,7 +144,7 @@ impl ProcessReadWrite for Pty {
     }
 
     #[inline]
-    fn read_token(&self) -> mio::Token {
+    fn read_token(&self) -> Token {
         self.token
     }
 
@@ -155,22 +154,22 @@ impl ProcessReadWrite for Pty {
     }
 
     #[inline]
-    fn write_token(&self) -> mio::Token {
+    fn write_token(&self) -> Token {
         self.token
     }
 
     #[inline]
-    fn set_winsize(&mut self, winsize: WinsizeBuilder) -> Result<(), std::io::Error> {
+    fn set_winsize(&mut self, winsize: WinsizeBuilder) -> Result<(), io::Error> {
         self.child.set_winsize(winsize)
     }
 
     #[inline]
     fn register(
         &mut self,
-        poll: &mio::Poll,
-        token: &mut dyn Iterator<Item = mio::Token>,
-        interest: mio::Interest,
-        _waker: &std::sync::Arc<mio::Waker>,
+        poll: &Poll,
+        token: &mut dyn Iterator<Item = Token>,
+        interest: Interest,
+        _waker: &sync::Arc<Waker>,
     ) -> io::Result<()> {
         // The pty fd is a real OS readiness source; no `Waker` needed on Unix.
         self.token = token.next().unwrap();
@@ -178,32 +177,26 @@ impl ProcessReadWrite for Pty {
             .register(&mut SourceFd(&self.file.as_raw_fd()), self.token, interest)?;
 
         self.signals_token = token.next().unwrap();
-        poll.registry().register(
-            &mut self.signals,
-            self.signals_token,
-            mio::Interest::READABLE,
-        )
+        poll.registry()
+            .register(&mut self.signals, self.signals_token, Interest::READABLE)
     }
 
-    fn reregister(&mut self, poll: &mio::Poll, interest: mio::Interest) -> io::Result<()> {
+    fn reregister(&mut self, poll: &Poll, interest: Interest) -> io::Result<()> {
         poll.registry()
             .reregister(&mut SourceFd(&self.file.as_raw_fd()), self.token, interest)?;
 
-        poll.registry().reregister(
-            &mut self.signals,
-            self.signals_token,
-            mio::Interest::READABLE,
-        )
+        poll.registry()
+            .reregister(&mut self.signals, self.signals_token, Interest::READABLE)
     }
 
-    fn deregister(&mut self, poll: &mio::Poll) -> io::Result<()> {
+    fn deregister(&mut self, poll: &Poll) -> io::Result<()> {
         poll.registry()
             .deregister(&mut SourceFd(&self.file.as_raw_fd()))?;
         poll.registry().deregister(&mut self.signals)
     }
 
     #[inline]
-    fn drain_ready(&self) -> Vec<mio::Token> {
+    fn drain_ready(&self) -> Vec<Token> {
         // Unix has real OS readiness; the soft-ready set is Windows-only.
         Vec::new()
     }
@@ -227,19 +220,19 @@ pub fn terminfo_exists(terminfo: &str) -> bool {
         };
     }
 
-    if let Some(dir) = std::env::var_os("TERMINFO") {
+    if let Some(dir) = env::var_os("TERMINFO") {
         check_path!(PathBuf::from(&dir));
-    } else if let Some(home) = dirs::home_dir() {
+    } else if let Some(home) = home_dir() {
         check_path!(home.join(".terminfo"));
     }
 
-    if let Ok(dirs) = std::env::var("TERMINFO_DIRS") {
+    if let Ok(dirs) = env::var("TERMINFO_DIRS") {
         for dir in dirs.split(':') {
             check_path!(PathBuf::from(dir));
         }
     }
 
-    if let Ok(prefix) = std::env::var("PREFIX") {
+    if let Ok(prefix) = env::var("PREFIX") {
         let path = PathBuf::from(prefix);
         check_path!(path.join("etc/terminfo"));
         check_path!(path.join("lib/terminfo"));
@@ -349,7 +342,7 @@ impl ShellUser {
         let mut buf = [0; 1024];
         let pw = get_pw_entry(&mut buf);
 
-        let user = match std::env::var("USER") {
+        let user = match env::var("USER") {
             Ok(user) => user,
             Err(_) => match pw {
                 Ok(ref pw) => pw.name.to_owned(),
@@ -357,7 +350,7 @@ impl ShellUser {
             },
         };
 
-        let home = match std::env::var("HOME") {
+        let home = match env::var("HOME") {
             Ok(home) => home,
             Err(_) => match pw {
                 Ok(ref pw) => pw.dir.to_owned(),
@@ -366,7 +359,7 @@ impl ShellUser {
         };
 
         #[allow(unused_mut)]
-        let mut shell = match std::env::var("SHELL") {
+        let mut shell = match env::var("SHELL") {
             Ok(env_shell) => env_shell,
             Err(_) => match pw {
                 Ok(ref pw) => pw.shell.to_owned(),
@@ -440,7 +433,7 @@ pub fn create_pty_with_spawn(
         shell_program = &user.shell;
     }
 
-    tracing::info!("spawn {:?} {:?}", shell_program, args);
+    info!("spawn {:?} {:?}", shell_program, args);
 
     let mut builder = {
         #[cfg(target_os = "macos")]
@@ -451,7 +444,7 @@ pub fn create_pty_with_spawn(
             let mut login_cmd = Command::new("/usr/bin/login");
 
             // Check for .hushlogin in home directory
-            let hushlogin_path = std::path::Path::new(&user.home).join(".hushlogin");
+            let hushlogin_path = path::Path::new(&user.home).join(".hushlogin");
             let flags = if hushlogin_path.exists() {
                 "-qflp"
             } else {
@@ -494,7 +487,7 @@ pub fn create_pty_with_spawn(
     {
         // If running inside a flatpak sandbox.
         // Must retrieve $SHELL from outside the sandbox, so ask the host.
-        if std::path::PathBuf::from("/.flatpak-info").exists() {
+        if path::PathBuf::from("/.flatpak-info").exists() {
             builder = Command::new("flatpak-spawn");
 
             let mut with_args = vec![
@@ -507,11 +500,11 @@ pub fn create_pty_with_spawn(
             if let Some(directory) = working_directory {
                 with_args.push(format!(
                     "--directory={}",
-                    std::path::Path::new(directory).display()
+                    path::Path::new(directory).display()
                 ));
             }
 
-            let output = std::process::Command::new("flatpak-spawn")
+            let output = process::Command::new("flatpak-spawn")
                 .args(["--host", "sh", "-c", "echo $SHELL"])
                 .output()?;
             let shell = String::from_utf8_lossy(&output.stdout);
@@ -590,9 +583,9 @@ pub fn create_pty_with_spawn(
             Ok(Pty {
                 child: child_unix,
                 file: unsafe { File::from_raw_fd(main) },
-                token: mio::Token(0),
+                token: Token(0),
                 signals,
-                signals_token: mio::Token(0),
+                signals_token: Token(0),
             })
         }
         Err(err) => Err(Error::new(
@@ -642,11 +635,11 @@ pub fn create_pty_with_fork(
     };
 
     if shell.is_empty() {
-        tracing::info!("shell configuration is empty, will retrieve from env");
+        info!("shell configuration is empty, will retrieve from env");
         shell_program = &user.shell;
     }
 
-    tracing::info!("fork {:?}", shell_program);
+    info!("fork {:?}", shell_program);
 
     match unsafe {
         forkpty(
@@ -684,8 +677,8 @@ pub fn create_pty_with_fork(
                 child,
                 signals,
                 file: unsafe { File::from_raw_fd(main) },
-                token: mio::Token(0),
-                signals_token: mio::Token(0),
+                token: Token(0),
+                signals_token: Token(0),
             })
         }
         _ => Err(Error::other(format!(
@@ -727,7 +720,7 @@ pub struct Child {
     #[allow(dead_code)]
     ptsname: String,
     #[allow(dead_code)]
-    process: Option<std::process::Child>,
+    process: Option<process::Child>,
 }
 
 impl Child {
@@ -805,7 +798,7 @@ pub fn command_per_pid(pid: libc::pid_t) -> String {
         .expect("failed to execute process")
         .stdout;
 
-    std::str::from_utf8(&current_process_name)
+    str::from_utf8(&current_process_name)
         .unwrap_or("")
         .to_string()
 }
@@ -830,7 +823,7 @@ impl EventedPty for Pty {
     }
 
     #[inline]
-    fn child_event_token(&self) -> mio::Token {
+    fn child_event_token(&self) -> Token {
         self.signals_token
     }
 }
@@ -915,7 +908,7 @@ pub fn foreground_process_name(main_fd: RawFd, shell_pid: u32) -> String {
     let comm_path = format!("/compat/linux/proc/{pid}/comm");
 
     #[cfg(not(target_os = "macos"))]
-    let name = match std::fs::read(comm_path) {
+    let name = match fs::read(comm_path) {
         Ok(comm_str) => String::from_utf8_lossy(&comm_str)
             .trim_end()
             .parse()
@@ -932,7 +925,7 @@ pub fn foreground_process_name(main_fd: RawFd, shell_pid: u32) -> String {
 pub fn foreground_process_path(
     main_fd: RawFd,
     shell_pid: u32,
-) -> Result<PathBuf, Box<dyn std::error::Error>> {
+) -> Result<PathBuf, Box<dyn error::Error>> {
     let mut pid = unsafe { libc::tcgetpgrp(main_fd) };
     if pid < 0 {
         pid = shell_pid as libc::pid_t;
@@ -944,7 +937,7 @@ pub fn foreground_process_path(
     let link_path = format!("/compat/linux/proc/{pid}/cwd");
 
     #[cfg(not(target_os = "macos"))]
-    let cwd = std::fs::read_link(link_path)?;
+    let cwd = fs::read_link(link_path)?;
 
     #[cfg(target_os = "macos")]
     let cwd = macos_cwd(pid)?;
@@ -956,7 +949,7 @@ pub fn foreground_process_path(
 pub fn spawn_daemon<I, S>(program: &str, args: I, main_fd: RawFd, shell_pid: u32) -> io::Result<()>
 where
     I: IntoIterator<Item = S> + Copy,
-    S: AsRef<std::ffi::OsStr>,
+    S: AsRef<ffi::OsStr>,
 {
     let mut command = Command::new(program);
     command

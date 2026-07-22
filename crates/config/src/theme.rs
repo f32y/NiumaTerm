@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use toml::Value;
 
 use crate::colors::Colors;
 
@@ -31,14 +32,14 @@ pub struct ThemeColors {
     #[serde(default = "Colors::default")]
     pub terminal: Colors,
     #[serde(default)]
-    pub ui: Option<toml::Value>,
+    pub ui: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UiTheme {
     pub name: String,
     pub mode: AppearanceTheme,
-    pub colors: toml::Value,
+    pub colors: Value,
 }
 
 impl Theme {

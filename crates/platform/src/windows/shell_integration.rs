@@ -1,6 +1,7 @@
+use std::env;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Error, Result};
 use windows_registry::CURRENT_USER;
 
 use super::notifier;
@@ -29,7 +30,7 @@ struct Verb {
 }
 
 pub fn register_shell_integration() -> Result<()> {
-    let exe_path = std::env::current_exe()?;
+    let exe_path = env::current_exe()?;
     let dll_path = shell_extension_path(&exe_path);
 
     register_shell_integration_paths(&exe_path, &dll_path)
@@ -57,7 +58,7 @@ pub fn shell_integration_dll_mismatched() -> bool {
         return false;
     }
 
-    let Ok(exe_path) = std::env::current_exe() else {
+    let Ok(exe_path) = env::current_exe() else {
         return true;
     };
 
@@ -76,7 +77,7 @@ pub fn shell_integration_dll_mismatched() -> bool {
 
 pub fn set_system_notification_enabled(enabled: bool) -> Result<()> {
     if enabled {
-        let exe_path = std::env::current_exe()?;
+        let exe_path = env::current_exe()?;
         let exe_path = path_string(&exe_path);
         let icon = format!("{exe_path},0");
         let protocol = CURRENT_USER.create(NMT_PROTOCOL_ROOT)?;
@@ -88,11 +89,11 @@ pub fn set_system_notification_enabled(enabled: bool) -> Result<()> {
             .create(r"shell\open\command")?
             .set_string("", protocol_command(&exe_path))?;
 
-        notifier::register_identity(Path::new(&exe_path)).map_err(anyhow::Error::msg)
+        notifier::register_identity(Path::new(&exe_path)).map_err(Error::msg)
     } else {
         let _ = CURRENT_USER.remove_tree(NMT_PROTOCOL_ROOT);
 
-        notifier::unregister_identity().map_err(anyhow::Error::msg)
+        notifier::unregister_identity().map_err(Error::msg)
     }
 }
 

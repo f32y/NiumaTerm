@@ -1,8 +1,10 @@
 use std::borrow::Cow;
 
 use gpui::{AssetSource, Result, SharedString};
+use gpui_component_assets::Assets;
+use rust_embed::RustEmbed;
 
-#[derive(rust_embed::RustEmbed)]
+#[derive(RustEmbed)]
 #[folder = "$CARGO_MANIFEST_DIR/../../assets"]
 #[include = "icons/**/*.svg"]
 struct ProjectAssets;
@@ -16,11 +18,11 @@ impl AssetSource for AppAssets {
         if let Some(file) = ProjectAssets::get(path) {
             return Ok(Some(file.data));
         }
-        gpui_component_assets::Assets.load(path)
+        Assets.load(path)
     }
 
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
-        let mut items = gpui_component_assets::Assets.list(path)?;
+        let mut items = Assets.list(path)?;
         items.extend(
             ProjectAssets::iter()
                 .filter(|p| p.starts_with(path))
