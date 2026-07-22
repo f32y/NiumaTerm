@@ -6,6 +6,7 @@ pub mod term;
 use std::fmt;
 use std::num::ParseIntError;
 use std::ops::Mul;
+use std::sync::OnceLock;
 
 use defaults::*;
 use regex::Regex;
@@ -514,11 +515,17 @@ impl ColorBuilder {
     }
 
     pub fn from_hex(mut hex: String, conversion_type: Format) -> Result<Self, String> {
+        // Compiled once: this runs for every color of every theme, and regex
+        // compilation dwarfs the match itself.
+        static NON_HEX_CHARS: OnceLock<Regex> = OnceLock::new();
+        static VALID_HEX_SIZE: OnceLock<Regex> = OnceLock::new();
+
         let mut alpha: f64 = 1.0;
-        let non_hex_chars = Regex::new(r"(?i)[^#a-f\d]").unwrap();
+        let non_hex_chars = NON_HEX_CHARS.get_or_init(|| Regex::new(r"(?i)[^#a-f\d]").unwrap());
 
         // match valid 6 or 8 hex characters
-        let valid_hex_size = Regex::new(r"(?i)^#?[a-f\d]{6}([a-f\d]{2})?$").unwrap();
+        let valid_hex_size =
+            VALID_HEX_SIZE.get_or_init(|| Regex::new(r"(?i)^#?[a-f\d]{6}([a-f\d]{2})?$").unwrap());
 
         if non_hex_chars.is_match(&hex) {
             return Err(String::from("Error: Character is not valid"));
