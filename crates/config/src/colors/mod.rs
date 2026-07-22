@@ -80,22 +80,8 @@ impl ColorRgb {
         ColorBuilder::from_rgb(*self, Format::SRGB0_1).to_arr()
     }
 
-    pub fn to_arr_with_dim(&self) -> ColorArray {
-        let r = (self.r as f32 * 0.66) as u8;
-        let g = (self.g as f32 * 0.66) as u8;
-        let b = (self.b as f32 * 0.66) as u8;
-        let temp_dim_self = Self { r, g, b };
-        ColorBuilder::from_rgb(temp_dim_self, Format::SRGB0_1).to_arr()
-    }
-
     pub fn to_wgpu(&self) -> ColorWGPU {
         ColorBuilder::from_rgb(*self, Format::SRGB0_1).to_wgpu()
-    }
-
-    pub fn to_composition(&self) -> ColorComposition {
-        let arr = self.to_arr();
-        let wgpu = self.to_wgpu();
-        (arr, wgpu)
     }
 }
 
@@ -390,12 +376,6 @@ pub fn hex_to_color_arr(s: &str) -> ColorArray {
         .to_arr()
 }
 
-pub fn hex_to_color_wgpu(s: &str) -> ColorWGPU {
-    ColorBuilder::from_hex(s.to_string(), Format::SRGB0_1)
-        .unwrap_or_default()
-        .to_wgpu()
-}
-
 #[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
 pub enum NamedColor {
     Black = 0,
@@ -489,20 +469,6 @@ pub struct ColorBuilder {
     pub alpha: f64,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone, Copy)]
-pub struct ColorBuilder8Bits {
-    pub red: u8,
-    pub green: u8,
-    pub blue: u8,
-    pub alpha: u8,
-}
-
-impl ColorBuilder8Bits {
-    pub fn transform_to_color_arr(red: u8, green: u8, blue: u8, alpha: u8) -> ColorArray {
-        [red as f32, green as f32, blue as f32, alpha as f32]
-    }
-}
-
 impl ColorBuilder {
     #[allow(dead_code)]
     fn new(red: f64, green: f64, blue: f64, alpha: f64) -> Self {
@@ -591,11 +557,6 @@ impl ColorBuilder {
         }
     }
 
-    pub fn sub_alpha(&mut self, alpha: f64) -> &mut Self {
-        self.alpha -= alpha;
-        self
-    }
-
     pub fn to_arr(&self) -> ColorArray {
         [
             self.red as f32,
@@ -635,17 +596,6 @@ impl Default for ColorBuilder {
 impl fmt::Display for ColorBuilder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         fmt::Display::fmt(&self.format_string(), f)
-    }
-}
-
-pub fn deserialize_to_wgpu<'de, D>(deserializer: D) -> Result<ColorWGPU, D::Error>
-where
-    D: de::Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-    match ColorBuilder::from_hex(s, Format::SRGB0_1) {
-        Ok(color) => Ok(color.to_wgpu()),
-        Err(e) => Err(DeError::custom(e)),
     }
 }
 
