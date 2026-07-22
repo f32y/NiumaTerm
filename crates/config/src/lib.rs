@@ -58,21 +58,6 @@ pub struct Shell {
     pub args: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-pub struct Scroll {
-    pub multiplier: f64,
-    pub divider: f64,
-}
-
-impl Default for Scroll {
-    fn default() -> Scroll {
-        Scroll {
-            multiplier: 3.0,
-            divider: 1.0,
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Developer {
     #[serde(default = "bool::default", rename = "enable-fps-counter")]
@@ -103,8 +88,6 @@ pub struct Config {
     pub window: Window,
     #[serde(default = "default_shell")]
     pub shell: Shell,
-    #[serde(default = "default_use_fork", rename = "use-fork")]
-    pub use_fork: bool,
     #[serde(default = "Keyboard::default")]
     pub keyboard: Keyboard,
     #[serde(default = "Title::default")]
@@ -113,8 +96,6 @@ pub struct Config {
     pub working_dir: Option<String>,
     #[serde(default = "default_theme")]
     pub theme: String,
-    #[serde(default = "Scroll::default")]
-    pub scroll: Scroll,
     #[serde(
         default = "Option::default",
         skip_serializing,
@@ -129,8 +110,6 @@ pub struct Config {
     pub panel: Panel,
     #[serde(default = "Vec::default", rename = "env-vars")]
     pub env_vars: Vec<String>,
-    #[serde(default = "default_option_as_alt", rename = "option-as-alt")]
-    pub option_as_alt: String,
     #[serde(skip)]
     pub colors: Colors,
     /// UI theme loaded from the selected file in `themes/`.
@@ -443,19 +422,16 @@ impl Default for Config {
             bindings: Bindings::default(),
             colors: Colors::default(),
             ui_theme: None,
-            scroll: Scroll::default(),
             keyboard: Keyboard::default(),
             title: Title::default(),
             developer: Developer::default(),
             env_vars: vec![],
             navigation: Navigation::default(),
-            option_as_alt: default_option_as_alt(),
             margin: default_margin(),
             panel: Panel::default(),
             renderer: Renderer::default(),
             shell: default_shell(),
             theme: default_theme(),
-            use_fork: default_use_fork(),
             window: Window::default(),
             working_dir: default_working_dir(),
             ignore_selection_fg_color: false,
@@ -916,7 +892,6 @@ mod tests {
         assert_eq!(result.cursor.shape, default_cursor());
         assert_eq!(result.shell, default_shell());
         assert!(!result.renderer.disable_unfocused_render);
-        assert_eq!(result.use_fork, default_use_fork());
 
         // Colors
         assert_eq!(result.colors, default_theme_colors());
@@ -1005,21 +980,6 @@ mod tests {
         "#,
         );
         assert_eq!(result.cursor.shape, CursorShape::Beam);
-    }
-
-    #[test]
-    fn test_change_option_as_alt() {
-        let result = create_temporary_config(
-            "change-option-as-alt",
-            r#"
-            option-as-alt = 'Both'
-        "#,
-        );
-
-        assert_eq!(result.option_as_alt, String::from("Both"));
-        assert_eq!(result.theme, default_theme());
-        // Colors
-        assert_eq!(result.colors, default_theme_colors());
     }
 
     #[test]
@@ -1201,12 +1161,10 @@ mod tests {
     }
 
     #[test]
-    fn test_use_fork() {
+    fn test_renderer_overrides() {
         let result = create_temporary_config(
-            "change-use-fork",
+            "change-renderer",
             r#"
-            use-fork = true
-
             [renderer]
             disable-unfocused-render = true
             performance = "Low"
@@ -1215,7 +1173,6 @@ mod tests {
 
         // Advanced
         assert!(result.renderer.disable_unfocused_render);
-        assert!(result.use_fork);
 
         // Colors
         assert_eq!(result.colors, default_theme_colors());

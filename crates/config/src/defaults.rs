@@ -54,19 +54,6 @@ pub fn default_shell() -> Shell {
 }
 
 #[inline]
-pub fn default_use_fork() -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        false
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        true
-    }
-}
-
-#[inline]
 pub fn default_working_dir() -> Option<String> {
     None
 }
@@ -74,11 +61,6 @@ pub fn default_working_dir() -> Option<String> {
 #[inline]
 pub fn default_opacity() -> f32 {
     1.0
-}
-
-#[inline]
-pub fn default_option_as_alt() -> String {
-    String::from("none")
 }
 
 #[inline]
