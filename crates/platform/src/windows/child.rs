@@ -7,9 +7,9 @@ use std::sync::atomic::{AtomicPtr, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use mio::Waker;
-use windows_sys::Win32::Foundation::HANDLE;
+use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::Threading::{
-    GetProcessId, INFINITE, RegisterWaitForSingleObject, UnregisterWait, WT_EXECUTEINWAITTHREAD,
+    GetProcessId, INFINITE, RegisterWaitForSingleObject, UnregisterWaitEx, WT_EXECUTEINWAITTHREAD,
     WT_EXECUTEONLYONCE,
 };
 
@@ -30,16 +30,23 @@ extern "system" fn child_exit_callback(ctx: *mut c_void, timed_out: bool) {
         return;
     }
 
-    let ctx: Box<CallbackCtx> = unsafe { Box::from_raw(ctx as *mut CallbackCtx) };
+    // Borrow only: the watcher owns the context and frees it in Drop, after a
+    // blocking UnregisterWaitEx has excluded any in-flight callback. Taking
+    // ownership here would leak the box whenever the child outlives the
+    // watcher (the callback never fires, nobody frees the allocation).
+    let ctx = unsafe { &*(ctx as *const CallbackCtx) };
     let _ = ctx.event_tx.send(ChildEvent::Exited);
     ctx.soft.set_ready();
 }
 
+/// Owns `child_handle`: the process handle is closed on drop, so callers must
+/// hand over a handle (or a duplicate) they will not close themselves.
 pub struct ChildExitWatcher {
     wait_handle: AtomicPtr<c_void>,
     event_rx: Receiver<ChildEvent>,
     soft: SoftReady,
     child_handle: HANDLE,
+    ctx: *mut CallbackCtx,
     pid: Option<NonZeroU32>,
 }
 
@@ -54,24 +61,33 @@ impl ChildExitWatcher {
         let soft = SoftReady::new();
 
         let mut wait_handle: HANDLE = ptr::null_mut();
-        let ctx = Box::new(CallbackCtx {
+        let ctx = Box::into_raw(Box::new(CallbackCtx {
             event_tx,
             soft: soft.clone(),
-        });
+        }));
 
         let success = unsafe {
             RegisterWaitForSingleObject(
                 &mut wait_handle,
                 child_handle,
                 Some(child_exit_callback),
-                Box::into_raw(ctx).cast(),
+                ctx.cast(),
                 INFINITE,
                 WT_EXECUTEINWAITTHREAD | WT_EXECUTEONLYONCE,
             )
         };
 
         if success == 0 {
-            Err(Error::last_os_error())
+            let err = Error::last_os_error();
+
+            // No wait was registered, so the context box and the process
+            // handle we own are reclaimed here or never.
+            unsafe {
+                drop(Box::from_raw(ctx));
+                CloseHandle(child_handle);
+            }
+
+            Err(err)
         } else {
             let pid = unsafe { NonZeroU32::new(GetProcessId(child_handle)) };
             Ok(ChildExitWatcher {
@@ -79,6 +95,7 @@ impl ChildExitWatcher {
                 event_rx,
                 soft,
                 child_handle,
+                ctx,
                 pid,
             })
         }
@@ -111,7 +128,16 @@ impl ChildExitWatcher {
 impl Drop for ChildExitWatcher {
     fn drop(&mut self) {
         unsafe {
-            UnregisterWait(self.wait_handle.load(Ordering::Relaxed) as HANDLE);
+            // Blocking unregister (INVALID_HANDLE_VALUE): waits for any
+            // in-flight callback to finish, which is what makes freeing the
+            // context box and closing the process handle below safe. Never
+            // runs on the wait-callback thread, so it cannot self-deadlock.
+            UnregisterWaitEx(
+                self.wait_handle.load(Ordering::Relaxed) as HANDLE,
+                INVALID_HANDLE_VALUE,
+            );
+            drop(Box::from_raw(self.ctx));
+            CloseHandle(self.child_handle);
         }
     }
 }
@@ -123,6 +149,8 @@ mod tests {
     use std::time::Duration;
 
     use mio::{Events, Poll, Token};
+    use windows_sys::Win32::Foundation::{DUPLICATE_SAME_ACCESS, DuplicateHandle};
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
     use super::*;
 
@@ -132,7 +160,24 @@ mod tests {
         const WAKER_TOKEN: Token = Token(0);
 
         let mut child = Command::new("cmd.exe").spawn().unwrap();
-        let child_exit_watcher = ChildExitWatcher::new(child.as_raw_handle() as HANDLE).unwrap();
+
+        // The watcher owns (and closes) the handle it is given, while
+        // std::process::Child closes its own on drop — hand over a duplicate
+        // so the handle is not closed twice.
+        let mut dup: HANDLE = ptr::null_mut();
+        let duplicated = unsafe {
+            DuplicateHandle(
+                GetCurrentProcess(),
+                child.as_raw_handle() as HANDLE,
+                GetCurrentProcess(),
+                &mut dup,
+                0,
+                0,
+                DUPLICATE_SAME_ACCESS,
+            )
+        };
+        assert_ne!(duplicated, 0);
+        let child_exit_watcher = ChildExitWatcher::new(dup).unwrap();
 
         // The child-exit channel is a plain `std::sync::mpsc`, so the loop is woken
         // through the `Waker` instead of a pollable channel.
