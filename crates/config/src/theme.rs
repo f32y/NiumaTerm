@@ -59,12 +59,3 @@ pub enum AppearanceTheme {
     Dark,
     Light,
 }
-
-impl AppearanceTheme {
-    pub fn toggled(self) -> Self {
-        match self {
-            AppearanceTheme::Dark => AppearanceTheme::Light,
-            AppearanceTheme::Light => AppearanceTheme::Dark,
-        }
-    }
-}
