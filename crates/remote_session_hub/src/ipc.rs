@@ -150,7 +150,7 @@ impl SharedMemoryEndpoint {
     }
 
     pub fn recv(&mut self, timeout: Duration) -> Result<Option<Vec<u8>>, IpcError> {
-        if !wait_event_optional(&*self.inbound.ready_event, timeout) {
+        if !wait_event_optional(&*self.inbound.ready_event, timeout)? {
             return Ok(None);
         }
 
@@ -360,13 +360,30 @@ fn ensure_state(mailbox: &Mailbox, expected: u32) -> Result<(), IpcError> {
 }
 
 fn wait_event(event: &dyn EventImpl, timeout: Duration) -> Result<(), IpcError> {
-    event
-        .wait(Timeout::Val(timeout))
-        .map_err(|_| IpcError::Timeout)
+    event.wait(Timeout::Val(timeout)).map_err(|error| {
+        // raw_sync reports every non-signaled WaitForSingleObject result as
+        // the string "Failed waiting for event : 0x<code>". 0x102 is
+        // WAIT_TIMEOUT; anything else (WAIT_FAILED, WAIT_ABANDONED) is a real
+        // synchronization fault that must not be presented as a retryable
+        // timeout.
+        let message = error.to_string();
+
+        if message.ends_with("0x102") {
+            IpcError::Timeout
+        } else {
+            IpcError::Sync(message)
+        }
+    })
 }
 
-fn wait_event_optional(event: &dyn EventImpl, timeout: Duration) -> bool {
-    event.wait(Timeout::Val(timeout)).is_ok()
+/// `Ok(false)` on timeout (no message yet); genuine event failures surface as
+/// errors instead of being read as "mailbox empty".
+fn wait_event_optional(event: &dyn EventImpl, timeout: Duration) -> Result<bool, IpcError> {
+    match wait_event(event, timeout) {
+        Ok(()) => Ok(true),
+        Err(IpcError::Timeout) => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 fn set_event(event: &dyn EventImpl, state: EventState) -> Result<(), IpcError> {
