@@ -1357,9 +1357,24 @@ where
         // Register the PTY sources, handing them the loop `Waker` (Windows soft-ready;
         // ignored on Unix). mio 1.2 is edge-triggered; the loop re-registers interest
         // each pass to pick up write readiness.
-        self.pty
-            .register(&self.poll, &mut tokens, Interest::READABLE, &self.waker)
-            .unwrap();
+        //
+        // A registration failure is fatal for this session but must not panic
+        // the reader thread (which would leave a frozen tab with no feedback);
+        // report the terminal as closed instead, like the child-exit path.
+        if let Err(err) =
+            self.pty
+                .register(&self.poll, &mut tokens, Interest::READABLE, &self.waker)
+        {
+            error!("Failed to register PTY event sources: {err}");
+
+            self.event_proxy
+                .send_event(TerminalEvent::CloseTerminal(self.route_id), self.window_id);
+
+            self.event_proxy
+                .send_event(TerminalEvent::Render, self.window_id);
+
+            return (self, state);
+        }
 
         let mut events = Events::with_capacity(1024);
 
@@ -1493,7 +1508,19 @@ where
                 interest |= Interest::WRITABLE;
             }
 
-            self.pty.reregister(&self.poll, interest).unwrap();
+            // Same as the registration above: fail the session visibly rather
+            // than panicking the reader thread.
+            if let Err(err) = self.pty.reregister(&self.poll, interest) {
+                error!("Failed to reregister PTY event sources: {err}");
+
+                self.event_proxy
+                    .send_event(TerminalEvent::CloseTerminal(self.route_id), self.window_id);
+
+                self.event_proxy
+                    .send_event(TerminalEvent::Render, self.window_id);
+
+                break 'event_loop;
+            }
         }
 
         // The PTY sources are not dropped here, so deregister them explicitly.
