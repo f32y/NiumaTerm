@@ -57,7 +57,11 @@ default-members = [
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(rust_analyzer)"] }
 
 [workspace.lints.clippy]
-all = { level = "allow", priority = -1 }
+# Style/pedantic noise stays off, but blanket-allowing `all` also silenced the
+# correctness and suspicious groups (deny/warn by default); restore those.
+all = { level = "allow", priority = -2 }
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
 disallowed_types = "deny"
 
 [workspace.dependencies]
