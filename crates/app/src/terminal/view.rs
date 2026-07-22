@@ -1164,25 +1164,20 @@ impl TerminalPane {
         let (resolved, max_scroll) = self.block_list.scrollbar;
         let store = self.surface.block_store();
 
-        let target = {
-            let store = store.lock();
+        // One lock hold for both reads: target resolution and offset
+        // conversion see the same block-list state.
+        let store = store.lock();
 
-            terminal::block_list::nav_item_top(
-                &store,
-                cols,
-                cell.height_px,
-                pad_rows,
-                resolved,
-                direction,
-            )
-        };
-
-        let Some(target) = target else {
+        let Some(target) = terminal::block_list::nav_item_top(
+            &store,
+            cols,
+            cell.height_px,
+            pad_rows,
+            resolved,
+            direction,
+        ) else {
             return;
         };
-
-        let store = self.surface.block_store();
-        let store = store.lock();
 
         if let Some(frame) = self.frame_cache.current() {
             self.block_list.list.scroll_to(self.list_offset_for_px(
@@ -1194,6 +1189,8 @@ impl TerminalPane {
                 target,
             ));
         }
+
+        drop(store);
 
         self.block_list.scrollbar.0 = target.min(max_scroll);
 
