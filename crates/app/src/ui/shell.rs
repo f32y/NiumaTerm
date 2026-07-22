@@ -1673,7 +1673,7 @@ impl Shell {
         let ws_cwd = cwd.unwrap_or_else(|| ".".to_string());
 
         self.workspaces
-            .new_workspace(tabs, WorkspaceId(ws_id), name, ws_cwd, false);
+            .new_workspace(tabs, WorkspaceId(ws_id), name, ws_cwd);
 
         self.focus_active(window, cx);
 
