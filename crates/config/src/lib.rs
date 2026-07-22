@@ -32,8 +32,7 @@ use nmt_themes::{THEMES as BUILTIN_THEMES, get as get_builtin_theme};
 use serde::{Deserialize, Serialize};
 use theme::{AdaptiveColors, AdaptiveTheme, AppearanceTheme, Theme, UiTheme};
 use toml::de::Error as TomlDeError;
-use toml::ser::Error as TomlSerError;
-use toml::{from_str as parse_toml, to_string as serialize_toml};
+use toml::from_str as parse_toml;
 use toml_edit::{DocumentMut, Item, Table, value};
 use tracing::warn;
 
@@ -53,13 +52,6 @@ use crate::renderer::Renderer;
 use crate::system::SystemConfig;
 use crate::title::Title;
 use crate::window::Window;
-
-#[derive(Clone, Debug)]
-pub enum ConfigError {
-    ErrLoadingConfig(String),
-    ErrLoadingTheme(String),
-    PathNotFound,
-}
 
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct Shell {
@@ -409,44 +401,6 @@ impl Config {
         themes
     }
 
-    pub fn to_string(&self) -> Result<String, TomlSerError> {
-        serialize_toml(self)
-    }
-
-    pub fn load() -> Self {
-        let config_path = config_dir_path();
-        let path = config_file_path();
-        if path.exists() {
-            let content = fs::read_to_string(path).unwrap();
-            match parse_toml::<Config>(&content) {
-                Ok(mut decoded) => {
-                    let theme = &decoded.theme;
-                    if theme.is_empty() {
-                        return decoded;
-                    }
-
-                    let path = theme_file_path(&config_path.join("themes"), theme);
-                    if let Ok(loaded_theme) = Config::load_theme(&path) {
-                        decoded.ui_theme = loaded_theme.ui_theme();
-                        decoded.colors = loaded_theme.colors.terminal;
-                    } else {
-                        warn!("failed to load theme: {}", theme);
-                    }
-
-                    decoded
-                }
-                Err(err_message) => {
-                    warn!(
-                        "failure to parse config file, falling back to default...\n{err_message:?}"
-                    );
-                    Config::default()
-                }
-            }
-        } else {
-            Config::default()
-        }
-    }
-
     pub fn load_for_startup() -> Result<Self, TomlDeError> {
         Config::load_for_startup_from(&config_file_path(), &config_dir_path())
     }
@@ -468,73 +422,6 @@ impl Config {
         }
 
         Ok(decoded)
-    }
-
-    pub fn try_load() -> Result<Self, ConfigError> {
-        let path = config_file_path();
-        if path.exists() {
-            match fs::read_to_string(path) {
-                Ok(content) => match parse_toml::<Config>(&content) {
-                    Ok(mut decoded) => {
-                        let theme = &decoded.theme;
-                        let theme_path = config_dir_path().join("themes");
-                        if !theme.is_empty() {
-                            let path = theme_file_path(&theme_path, theme);
-                            match Config::load_theme(&path) {
-                                Ok(loaded_theme) => {
-                                    decoded.ui_theme = loaded_theme.ui_theme();
-                                    decoded.colors = loaded_theme.colors.terminal;
-                                }
-                                Err(err_message) => {
-                                    return Err(ConfigError::ErrLoadingTheme(err_message));
-                                }
-                            }
-                        }
-
-                        if let Some(adaptive_theme) = &decoded.adaptive_theme {
-                            let mut adaptive_colors = AdaptiveColors {
-                                dark: None,
-                                light: None,
-                            };
-
-                            let light_theme = &adaptive_theme.light;
-                            let path = theme_file_path(&theme_path, light_theme);
-                            match Config::load_theme(&path) {
-                                Ok(light_loaded_theme) => {
-                                    adaptive_colors.light = Some(light_loaded_theme.colors.terminal)
-                                }
-                                Err(err_message) => {
-                                    warn!("failed to load light theme: {}", light_theme);
-                                    return Err(ConfigError::ErrLoadingTheme(err_message));
-                                }
-                            }
-
-                            let dark_theme = &adaptive_theme.dark;
-                            let path = theme_file_path(&theme_path, dark_theme);
-                            match Config::load_theme(&path) {
-                                Ok(dark_loaded_theme) => {
-                                    adaptive_colors.dark = Some(dark_loaded_theme.colors.terminal)
-                                }
-                                Err(err_message) => {
-                                    warn!("failed to load dark theme: {}", dark_theme);
-                                    return Err(ConfigError::ErrLoadingTheme(err_message));
-                                }
-                            }
-
-                            if adaptive_colors.light.is_some() && adaptive_colors.dark.is_some() {
-                                decoded.adaptive_colors = Some(adaptive_colors);
-                            }
-                        }
-
-                        Ok(decoded)
-                    }
-                    Err(err_message) => Err(ConfigError::ErrLoadingConfig(err_message.to_string())),
-                },
-                Err(err_message) => Err(ConfigError::ErrLoadingConfig(err_message.to_string())),
-            }
-        } else {
-            Err(ConfigError::PathNotFound)
-        }
     }
 
     pub fn overwrite_based_on_platform(&mut self) {
@@ -806,10 +693,6 @@ static ACTIVE_COLORS: OnceLock<RwLock<Colors>> = OnceLock::new();
 pub fn init(config: Config) {
     set_active_colors(config.colors);
     let _ = CONFIG.set(config);
-}
-
-pub fn init_from_file() -> &'static Config {
-    CONFIG.get_or_init(Config::load)
 }
 
 pub fn get() -> &'static Config {
