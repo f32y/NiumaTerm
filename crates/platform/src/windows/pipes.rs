@@ -135,8 +135,10 @@ impl io::Read for EventedAnonRead {
 
         match self.error_receiver.try_recv() {
             Ok(err) => {
-                // Other thread will be closing
-                self.thread.take().unwrap().join().unwrap();
+                // Other thread will be closing; the pipe error is already in
+                // hand, so a worker panic on top of it is not worth
+                // propagating into the caller.
+                let _ = self.thread.take().unwrap().join();
 
                 return Err(io::Error::new(io::ErrorKind::BrokenPipe, err));
             }
@@ -187,16 +189,18 @@ impl Drop for EventedAnonRead {
         drop(self.inner.wait_tag.lock());
         self.inner.sig_buffer_not_full.notify_one();
 
-        let thread = self.thread.take().unwrap();
+        // The thread may already have been taken and joined by the read()
+        // error path; nothing left to do then.
+        if let Some(thread) = self.thread.take() {
+            // Stop reader thread waiting for pipe contents
+            unsafe {
+                CancelSynchronousIo(thread.as_raw_handle());
+            }
 
-        // Stop reader thread waiting for pipe contents
-        unsafe {
-            CancelSynchronousIo(thread.as_raw_handle());
+            // A panicking worker must not turn Drop into a panic (which
+            // aborts when already unwinding); the thread is gone either way.
+            let _ = thread.join();
         }
-
-        thread
-            .join()
-            .expect("Could not close EventedAnonRead worker");
     }
 }
 
@@ -314,8 +318,10 @@ impl io::Write for EventedAnonWrite {
 
         match self.error_receiver.try_recv() {
             Ok(err) => {
-                // Other thread will be closing
-                self.thread.take().unwrap().join().unwrap();
+                // Other thread will be closing; the pipe error is already in
+                // hand, so a worker panic on top of it is not worth
+                // propagating into the caller.
+                let _ = self.thread.take().unwrap().join();
 
                 return Err(io::Error::new(io::ErrorKind::BrokenPipe, err));
             }
@@ -371,11 +377,11 @@ impl Drop for EventedAnonWrite {
         drop(self.inner.wait_tag.lock());
         self.inner.sig_buffer_not_empty.notify_one();
 
-        self.thread
-            .take()
-            .unwrap()
-            .join()
-            .expect("Could not close EventedAnonWrite worker");
+        // A panicking worker must not turn Drop into a panic (which aborts
+        // when already unwinding); the thread is gone either way.
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
     }
 }
 
