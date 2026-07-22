@@ -322,7 +322,12 @@ fn run_client_loop(
     let (events_tx, events_rx) = mpsc::channel();
     let pump = thread::current();
 
-    spawn_response_reader(&os_id, events_tx.clone(), pump.clone())?;
+    // Set + signalled via cancel_inbound_wait on every pump exit so the
+    // reader's infinite wait is reclaimed; a leaked reader thread also pins
+    // one shared-memory mapping for the life of the UI process.
+    let reader_cancel = Arc::new(AtomicBool::new(false));
+
+    spawn_response_reader(&os_id, events_tx.clone(), pump.clone(), &reader_cancel)?;
 
     thread::Builder::new()
         .name("session-hub-process-wait".to_owned())
@@ -342,17 +347,40 @@ fn run_client_loop(
     let mut pending = HashMap::<u64, PendingRequest>::new();
     let mut sessions = HashMap::<SessionId, Arc<SessionState>>::new();
 
+    let result = run_client_pump(
+        &mut endpoint,
+        &commands,
+        &events_rx,
+        &mut next_request_id,
+        &mut pending,
+        &mut sessions,
+    );
+
+    reader_cancel.store(true, Ordering::Release);
+    let _ = endpoint.cancel_inbound_wait();
+
+    result
+}
+
+fn run_client_pump(
+    endpoint: &mut SharedMemoryEndpoint,
+    commands: &Receiver<ClientCommand>,
+    events_rx: &Receiver<ReaderEvent>,
+    next_request_id: &mut u64,
+    pending: &mut HashMap<u64, PendingRequest>,
+    sessions: &mut HashMap<SessionId, Arc<SessionState>>,
+) -> Result<(), HubClientError> {
     loop {
         let mut did_work = false;
         while let Ok(command) = commands.try_recv() {
             did_work = true;
             match command {
                 ClientCommand::Open { options, reply } => {
-                    let request_id = take_request_id(&mut next_request_id);
+                    let request_id = take_request_id(next_request_id);
                     let state = Arc::new(SessionState::default());
 
                     send_request(
-                        &mut endpoint,
+                        endpoint,
                         HubRequest::Open {
                             request_id,
                             options,
@@ -362,14 +390,14 @@ fn run_client_loop(
                     pending.insert(request_id, PendingRequest::Open { state, reply });
                 }
                 ClientCommand::Input { session_id, data } => {
-                    send_request(&mut endpoint, HubRequest::Input { session_id, data })?
+                    send_request(endpoint, HubRequest::Input { session_id, data })?
                 }
                 ClientCommand::Resize {
                     session_id,
                     cols,
                     rows,
                 } => send_request(
-                    &mut endpoint,
+                    endpoint,
                     HubRequest::Resize {
                         session_id,
                         cols,
@@ -380,18 +408,18 @@ fn run_client_loop(
                     sessions.remove(&session_id);
 
                     send_request(
-                        &mut endpoint,
+                        endpoint,
                         HubRequest::Kill {
-                            request_id: take_request_id(&mut next_request_id),
+                            request_id: take_request_id(next_request_id),
                             session_id,
                         },
                     )?;
                 }
                 ClientCommand::ChildProcessCount { session_id, reply } => {
-                    let request_id = take_request_id(&mut next_request_id);
+                    let request_id = take_request_id(next_request_id);
 
                     send_request(
-                        &mut endpoint,
+                        endpoint,
                         HubRequest::ChildProcessCount {
                             request_id,
                             session_id,
@@ -401,7 +429,7 @@ fn run_client_loop(
                     pending.insert(request_id, PendingRequest::ChildProcessCount { reply });
                 }
                 ClientCommand::Shutdown => {
-                    let _ = send_request(&mut endpoint, HubRequest::Shutdown);
+                    let _ = send_request(endpoint, HubRequest::Shutdown);
 
                     return Ok(());
                 }
@@ -413,20 +441,20 @@ fn run_client_loop(
             match event {
                 ReaderEvent::Message(bytes) => handle_response(
                     HubResponse::decode(&bytes).map_err(client_ipc_error)?,
-                    &mut endpoint,
-                    &mut next_request_id,
-                    &mut pending,
-                    &mut sessions,
+                    endpoint,
+                    next_request_id,
+                    pending,
+                    sessions,
                 )?,
                 ReaderEvent::Failed(message) => {
-                    fail_all(&mut pending, &sessions, &message);
+                    fail_all(pending, sessions, &message);
 
                     return Err(HubClientError::new(message));
                 }
                 ReaderEvent::ChildExited => {
                     let message = "SessionHub exited unexpectedly";
 
-                    fail_all(&mut pending, &sessions, message);
+                    fail_all(pending, sessions, message);
 
                     return Err(HubClientError::new(message));
                 }
@@ -443,8 +471,10 @@ fn spawn_response_reader(
     os_id: &str,
     sender: mpsc::Sender<ReaderEvent>,
     pump: Thread,
+    cancel: &Arc<AtomicBool>,
 ) -> Result<(), HubClientError> {
     let os_id = os_id.to_owned();
+    let cancel = Arc::clone(cancel);
     thread::Builder::new()
         .name("session-hub-response-reader".to_owned())
         .spawn(move || {
@@ -452,7 +482,12 @@ fn spawn_response_reader(
                 let mut endpoint = SharedMemoryEndpoint::open_parent(&os_id)?;
 
                 loop {
-                    let message = endpoint.recv_blocking()?;
+                    let Some(message) = endpoint.recv_blocking_cancellable(&cancel)? else {
+                        // The pump exited and woke us via cancel_inbound_wait;
+                        // without this the thread (and its Shmem mapping)
+                        // outlived every Hub lifecycle in the UI process.
+                        return Ok(());
+                    };
 
                     if sender.send(ReaderEvent::Message(message)).is_err() {
                         return Ok(());
