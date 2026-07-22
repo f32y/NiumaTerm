@@ -124,26 +124,6 @@ impl ConptyApi {
                     .or_else(|| GetProcAddress(hmodule, s!("ClosePseudoConsole")))
             };
 
-            {
-                use std::io::Write as _;
-
-                let path = std::env::temp_dir().join("rio_conpty.log");
-
-                if let Ok(mut f) = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&path)
-                {
-                    let _ = writeln!(
-                        f,
-                        "[load] hmod={} create={} resize={} close={}",
-                        !hmodule.is_null(),
-                        create_fn.is_some(),
-                        resize_fn.is_some(),
-                        close_fn.is_some()
-                    );
-                }
-            }
             let create_fn = create_fn?;
             let resize_fn = resize_fn?;
             let close_fn = close_fn?;
