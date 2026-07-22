@@ -3940,6 +3940,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shared_memory",
+ "tracing",
  "windows-sys 0.61.2",
 ]
 
