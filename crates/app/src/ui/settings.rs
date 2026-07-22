@@ -373,12 +373,18 @@ impl AppSettings {
     }
 
     /// Rename the profile at `ix`, keeping the default reference in sync.
+    /// `ix` is captured by long-lived UI closures, so it can be stale after
+    /// a profile was removed; out-of-range renames are ignored.
     pub fn rename_profile(&mut self, ix: usize, name: String) {
-        if self.profiles[ix].name == self.default_profile {
+        let Some(profile) = self.profiles.get_mut(ix) else {
+            return;
+        };
+
+        if profile.name == self.default_profile {
             self.default_profile = name.clone();
         }
 
-        self.profiles[ix].name = name;
+        profile.name = name;
     }
 
     /// The default profile's launch command: shell plus whitespace-split
@@ -1678,7 +1684,16 @@ fn profiles_page(profiles: &[Profile]) -> SettingPage {
                     SettingItem::new(
                         "Name",
                         SettingField::input(
-                            move |cx| cx.global::<AppSettings>().profiles[ix].name.clone().into(),
+                            // get(ix): the closure outlives profile removal,
+                            // so a stale index must read as empty, not panic.
+                            move |cx| {
+                                cx.global::<AppSettings>()
+                                    .profiles
+                                    .get(ix)
+                                    .map(|profile| profile.name.clone())
+                                    .unwrap_or_default()
+                                    .into()
+                            },
                             move |value, cx| {
                                 cx.global_mut::<AppSettings>()
                                     .rename_profile(ix, value.to_string());
@@ -1692,11 +1707,17 @@ fn profiles_page(profiles: &[Profile]) -> SettingPage {
                         "Shell Path",
                         shell_path_field(ix).on_reset(
                             move |cx| {
-                                cx.global::<AppSettings>().profiles[ix].shell != DEFAULT_SHELL
+                                cx.global::<AppSettings>()
+                                    .profiles
+                                    .get(ix)
+                                    .is_some_and(|profile| profile.shell != DEFAULT_SHELL)
                             },
                             move |_, cx| {
-                                cx.global_mut::<AppSettings>().profiles[ix].shell =
-                                    DEFAULT_SHELL.to_string();
+                                if let Some(profile) =
+                                    cx.global_mut::<AppSettings>().profiles.get_mut(ix)
+                                {
+                                    profile.shell = DEFAULT_SHELL.to_string();
+                                }
                             },
                         ),
                     )
@@ -1706,10 +1727,20 @@ fn profiles_page(profiles: &[Profile]) -> SettingPage {
                     SettingItem::new(
                         "Arguments",
                         SettingField::input(
-                            move |cx| cx.global::<AppSettings>().profiles[ix].args.clone().into(),
+                            move |cx| {
+                                cx.global::<AppSettings>()
+                                    .profiles
+                                    .get(ix)
+                                    .map(|profile| profile.args.clone())
+                                    .unwrap_or_default()
+                                    .into()
+                            },
                             move |value, cx| {
-                                cx.global_mut::<AppSettings>().profiles[ix].args =
-                                    value.to_string();
+                                if let Some(profile) =
+                                    cx.global_mut::<AppSettings>().profiles.get_mut(ix)
+                                {
+                                    profile.args = value.to_string();
+                                }
                             },
                         )
                         .default_value(SharedString::from("")),
@@ -1742,7 +1773,13 @@ fn profiles_page(profiles: &[Profile]) -> SettingPage {
 
 fn shell_path_field(ix: usize) -> SettingField<SharedString> {
     SettingField::render(move |options, window, cx| {
-        let value = SharedString::from(cx.global::<AppSettings>().profiles[ix].shell.clone());
+        let value = SharedString::from(
+            cx.global::<AppSettings>()
+                .profiles
+                .get(ix)
+                .map(|profile| profile.shell.clone())
+                .unwrap_or_default(),
+        );
 
         let state =
             window.use_keyed_state(SharedString::from(format!("shell-path-state-{ix}")), cx, {
