@@ -199,7 +199,11 @@ impl IClassFactory_Impl for NiumaTermClassFactory_Impl {
         if flock.as_bool() {
             DLL_REF_COUNT.fetch_add(1, Ordering::Relaxed);
         } else {
-            DLL_REF_COUNT.fetch_sub(1, Ordering::Relaxed);
+            // Saturating decrement: one unbalanced unlock must not wrap the
+            // count to u32::MAX and pin the DLL in memory forever.
+            let _ = DLL_REF_COUNT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
+                count.checked_sub(1)
+            });
         }
 
         Ok(())
