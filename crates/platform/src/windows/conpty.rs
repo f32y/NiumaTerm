@@ -197,7 +197,11 @@ pub fn new(
         )
     };
 
-    assert_eq!(result, S_OK);
+    if result != S_OK {
+        return Err(Error::other(format!(
+            "CreatePseudoConsole failed: HRESULT {result:#010x}"
+        )));
+    }
 
     let mut success;
 
@@ -472,7 +476,12 @@ impl Conpty {
 
     pub fn on_resize(&mut self, window_size: Winsize) {
         let result = unsafe { (self.api.resize)(self.handle, window_size.into()) };
-        assert_eq!(result, S_OK);
+
+        // A failed resize leaves the console at its previous size; the session
+        // itself is still healthy, so this must not take down the process.
+        if result != S_OK {
+            warn!("ResizePseudoConsole failed: HRESULT {result:#010x}");
+        }
     }
 }
 
