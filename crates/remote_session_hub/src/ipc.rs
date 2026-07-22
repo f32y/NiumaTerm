@@ -819,14 +819,18 @@ pub fn run_hub_host(os_id: &str) -> Result<(), IpcError> {
                     request_id,
                     options,
                 } => match hub.open(options) {
-                    Ok(session_id) => send_response(
-                        &mut endpoint,
-                        HubResponse::Opened {
-                            request_id,
-                            session_id,
-                        },
-                    )?,
-                    Err(error) => send_error(&mut endpoint, request_id, error)?,
+                    Ok(session_id) => {
+                        send_response(
+                            &mut endpoint,
+                            HubResponse::Opened {
+                                request_id,
+                                session_id,
+                            },
+                        )?;
+                    }
+                    Err(error) => {
+                        send_error(&mut endpoint, request_id, error)?;
+                    }
                 },
                 HubRequest::Input { session_id, data } => {
                     if let Err(error) = hub.write_input(session_id, &data) {
@@ -851,7 +855,10 @@ pub fn run_hub_host(os_id: &str) -> Result<(), IpcError> {
 
                         let snapshot = subscription.snapshot();
 
-                        send_response(
+                        // Register the subscription only when the snapshot was
+                        // delivered — a client that never saw the checkpoint
+                        // cannot consume the event stream that follows it.
+                        if send_response(
                             &mut endpoint,
                             HubResponse::Snapshot {
                                 request_id,
@@ -861,11 +868,13 @@ pub fn run_hub_host(os_id: &str) -> Result<(), IpcError> {
                                 rows: snapshot.rows,
                                 vt: snapshot.vt.clone(),
                             },
-                        )?;
-
-                        subscriptions.insert(session_id, subscription);
+                        )? {
+                            subscriptions.insert(session_id, subscription);
+                        }
                     }
-                    Err(error) => send_error(&mut endpoint, request_id, error)?,
+                    Err(error) => {
+                        send_error(&mut endpoint, request_id, error)?;
+                    }
                 },
                 HubRequest::Detach { session_id } => {
                     subscriptions.remove(&session_id);
@@ -874,21 +883,29 @@ pub fn run_hub_host(os_id: &str) -> Result<(), IpcError> {
                     request_id,
                     session_id,
                 } => match hub.kill(session_id) {
-                    Ok(()) => send_response(&mut endpoint, HubResponse::Ack { request_id })?,
-                    Err(error) => send_error(&mut endpoint, request_id, error)?,
+                    Ok(()) => {
+                        send_response(&mut endpoint, HubResponse::Ack { request_id })?;
+                    }
+                    Err(error) => {
+                        send_error(&mut endpoint, request_id, error)?;
+                    }
                 },
                 HubRequest::ChildProcessCount {
                     request_id,
                     session_id,
                 } => match hub.child_process_count(session_id) {
-                    Ok(count) => send_response(
-                        &mut endpoint,
-                        HubResponse::ChildProcessCount {
-                            request_id,
-                            count: count as u64,
-                        },
-                    )?,
-                    Err(error) => send_error(&mut endpoint, request_id, error)?,
+                    Ok(count) => {
+                        send_response(
+                            &mut endpoint,
+                            HubResponse::ChildProcessCount {
+                                request_id,
+                                count: count as u64,
+                            },
+                        )?;
+                    }
+                    Err(error) => {
+                        send_error(&mut endpoint, request_id, error)?;
+                    }
                 },
                 HubRequest::Shutdown => return Ok(()),
             }
@@ -926,7 +943,14 @@ pub fn run_hub_host(os_id: &str) -> Result<(), IpcError> {
         did_work |= !events.is_empty();
 
         for event in events {
-            send_response(&mut endpoint, event)?;
+            if !send_response(&mut endpoint, event)? {
+                // The client is not draining its mailbox: drop every
+                // subscription so a wedged client costs one timeout, not one
+                // per queued event. Sessions stay alive; the client's
+                // sequence-gap detection makes it re-attach when it recovers.
+                subscriptions.clear();
+                break;
+            }
         }
 
         if !did_work {
@@ -939,7 +963,7 @@ fn send_error(
     endpoint: &mut SharedMemoryEndpoint,
     request_id: u64,
     error: impl fmt::Display,
-) -> Result<(), IpcError> {
+) -> Result<bool, IpcError> {
     send_response(
         endpoint,
         HubResponse::Error {
@@ -949,11 +973,27 @@ fn send_error(
     )
 }
 
+/// Send a response, treating a full client mailbox as message loss instead of
+/// a host failure. Returns `Ok(false)` when the client did not drain its
+/// mailbox within `HOST_SEND_TIMEOUT`: the hub's core promise is that
+/// sessions survive a detached (or wedged) client, so a stalled client must
+/// never propagate as an error that tears down `run_hub_host` and with it
+/// every ConPTY session. The client recovers on its own: a dropped Output
+/// creates a sequence gap, which forces it to re-attach from a fresh
+/// checkpoint. Non-timeout errors still surface — they mean the transport
+/// itself is broken.
 fn send_response(
     endpoint: &mut SharedMemoryEndpoint,
     response: HubResponse,
-) -> Result<(), IpcError> {
-    endpoint.send(&response.encode(), HOST_SEND_TIMEOUT)
+) -> Result<bool, IpcError> {
+    match endpoint.send(&response.encode(), HOST_SEND_TIMEOUT) {
+        Ok(()) => Ok(true),
+        Err(IpcError::Timeout) => {
+            eprintln!("SessionHub: client mailbox stalled; dropping a response");
+            Ok(false)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(test)]
