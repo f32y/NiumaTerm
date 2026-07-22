@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::mem::{self, align_of, size_of};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 use std::{error, fmt, ptr, str, sync, thread};
 
@@ -164,6 +164,35 @@ impl SharedMemoryEndpoint {
             .map_err(|error| IpcError::Sync(error.to_string()))?;
 
         self.read_inbound()
+    }
+
+    /// Like `recv_blocking`, but exits with `Ok(None)` when `cancelled` was
+    /// set before the wake. Pairs with [`Self::cancel_inbound_wait`] on
+    /// another endpoint of the same role, so a reader thread parked on an
+    /// infinite wait can be reclaimed at shutdown instead of leaking (each
+    /// leaked reader also pins one shared-memory mapping).
+    pub fn recv_blocking_cancellable(
+        &mut self,
+        cancelled: &AtomicBool,
+    ) -> Result<Option<Vec<u8>>, IpcError> {
+        self.inbound
+            .ready_event
+            .wait(Timeout::Infinite)
+            .map_err(|error| IpcError::Sync(error.to_string()))?;
+
+        if cancelled.load(Ordering::Acquire) {
+            return Ok(None);
+        }
+
+        self.read_inbound().map(Some)
+    }
+
+    /// Signal the inbound ready event without publishing a message, to wake a
+    /// thread blocked in [`Self::recv_blocking_cancellable`]. The cancelled
+    /// flag must be set before calling this, or the woken reader will try to
+    /// read a mailbox that holds nothing.
+    pub fn cancel_inbound_wait(&self) -> Result<(), IpcError> {
+        set_event(&*self.inbound.ready_event, EventState::Signaled)
     }
 
     fn read_inbound(&mut self) -> Result<Vec<u8>, IpcError> {
