@@ -1686,6 +1686,83 @@ pub(crate) fn shift_selected_item_for_eviction(
     }
 }
 
+/// How to bring the mirrored GPUI `ListState` in line with the store after
+/// front evictions and tail growth. Pure so the index arithmetic is testable
+/// away from `ListState`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ListReconcile {
+    /// Replace the mirror wholesale with the new item count.
+    Reset,
+    /// Drop `front_evict` items from the front, then replace the
+    /// `tail_splice` range with that many new items.
+    Patch {
+        front_evict: usize,
+        tail_splice: Option<(ops::Range<usize>, usize)>,
+    },
+}
+
+pub(crate) fn plan_list_reconcile(
+    mirrored_count: usize,
+    evicted_delta: usize,
+    item_count: usize,
+) -> ListReconcile {
+    let mut mirrored = mirrored_count;
+    let mut front_evict = 0;
+
+    if evicted_delta > 0 {
+        // Only frozen items (all but the live tail) can be evicted from the
+        // mirror; a delta beyond that means the mirror is too stale to patch.
+        let old_frozen = mirrored.saturating_sub(1);
+
+        if evicted_delta > old_frozen {
+            return ListReconcile::Reset;
+        }
+
+        front_evict = evicted_delta;
+        mirrored -= evicted_delta;
+    }
+
+    // A shrink beyond eviction (e.g. history cleared) invalidates the mirror.
+    if item_count < mirrored {
+        return ListReconcile::Reset;
+    }
+
+    let tail_splice = (item_count != mirrored).then(|| {
+        // Replace the old live tail; the new items are the freshly frozen
+        // blocks plus the new live tail.
+        let old_live = mirrored.saturating_sub(1);
+        (old_live..mirrored, item_count - old_live)
+    });
+
+    ListReconcile::Patch {
+        front_evict,
+        tail_splice,
+    }
+}
+
+/// What the mirrored list must remeasure after this frame's metrics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RemeasureScope {
+    /// Layout inputs (cols/cell/pad) changed: every item height is stale.
+    All,
+    /// Content changed: only the last frozen item and the live tail moved.
+    Tail,
+    None,
+}
+
+pub(crate) fn plan_remeasure(
+    prev: Option<BlockListMeasureKey>,
+    next: BlockListMeasureKey,
+) -> RemeasureScope {
+    if prev.is_some_and(|prev| prev.layout != next.layout) {
+        RemeasureScope::All
+    } else if prev != Some(next) {
+        RemeasureScope::Tail
+    } else {
+        RemeasureScope::None
+    }
+}
+
 #[cfg(test)]
 mod layout_tests {
     use gpui::{ListAlignment, ListOffset, px};
@@ -1785,6 +1862,86 @@ mod layout_tests {
             terminal::block_list::shift_selected_item_for_eviction(Some(11), 3, 7),
             None
         );
+    }
+
+    #[test]
+    fn list_reconcile_covers_eviction_growth_and_resets() {
+        use terminal::block_list::{ListReconcile, plan_list_reconcile};
+
+        // Unchanged mirror: nothing to do.
+        assert_eq!(
+            plan_list_reconcile(5, 0, 5),
+            ListReconcile::Patch {
+                front_evict: 0,
+                tail_splice: None
+            }
+        );
+        // Growth only: replace the old live tail with the new blocks + tail.
+        assert_eq!(
+            plan_list_reconcile(5, 0, 7),
+            ListReconcile::Patch {
+                front_evict: 0,
+                tail_splice: Some((4..5, 3))
+            }
+        );
+        // First render from an empty mirror.
+        assert_eq!(
+            plan_list_reconcile(0, 0, 3),
+            ListReconcile::Patch {
+                front_evict: 0,
+                tail_splice: Some((0..0, 3))
+            }
+        );
+        // Pure eviction: mirror shrinks from the front, counts line up.
+        assert_eq!(
+            plan_list_reconcile(5, 2, 3),
+            ListReconcile::Patch {
+                front_evict: 2,
+                tail_splice: None
+            }
+        );
+        // Eviction plus growth in the same frame.
+        assert_eq!(
+            plan_list_reconcile(5, 2, 6),
+            ListReconcile::Patch {
+                front_evict: 2,
+                tail_splice: Some((2..3, 4))
+            }
+        );
+        // Eviction beyond the mirrored frozen items: mirror too stale.
+        assert_eq!(plan_list_reconcile(3, 5, 4), ListReconcile::Reset);
+        // Shrink that eviction does not explain (history cleared).
+        assert_eq!(plan_list_reconcile(5, 0, 2), ListReconcile::Reset);
+        assert_eq!(plan_list_reconcile(5, 1, 2), ListReconcile::Reset);
+    }
+
+    #[test]
+    fn remeasure_scope_tracks_layout_vs_content_changes() {
+        use terminal::block_list::{BlockListMeasureKey, RemeasureScope, plan_remeasure};
+
+        let key = BlockListMeasureKey {
+            layout: (80, 16.0, 1.0),
+            store_len: 3,
+            evicted_items: 0,
+            last_item_px: 32.0,
+            tail_px: 0.0,
+            live_rows: 24,
+        };
+
+        assert_eq!(plan_remeasure(None, key), RemeasureScope::Tail);
+        assert_eq!(plan_remeasure(Some(key), key), RemeasureScope::None);
+
+        let grown = BlockListMeasureKey {
+            store_len: 4,
+            ..key
+        };
+        assert_eq!(plan_remeasure(Some(key), grown), RemeasureScope::Tail);
+
+        let relaid = BlockListMeasureKey {
+            layout: (100, 16.0, 1.0),
+            ..key
+        };
+        assert_eq!(plan_remeasure(Some(key), relaid), RemeasureScope::All);
     }
 
     #[test]
