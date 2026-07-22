@@ -52,19 +52,39 @@ impl Clipboard {
 }
 
 impl Default for Clipboard {
+    // Clipboard setup can fail at runtime (e.g. no display server, or the
+    // clipboard is held by another process); a terminal without clipboard
+    // access is degraded but usable, so fall back to the no-op provider
+    // instead of panicking.
     fn default() -> Self {
         #[cfg(any(target_os = "macos", windows))]
-        return Self {
-            clipboard: Box::new(ClipboardContext::new().unwrap()),
-            selection: None,
+        return match ClipboardContext::new() {
+            Ok(clipboard) => Self {
+                clipboard: Box::new(clipboard),
+                selection: None,
+            },
+            Err(err) => {
+                warn!("Unable to initialize clipboard, falling back to no-op: {err}");
+                Self::new_nop()
+            }
         };
 
         #[cfg(all(feature = "x11", not(any(target_os = "macos", windows))))]
-        return Self {
-            clipboard: Box::new(ClipboardContext::new().unwrap()),
-            selection: Some(Box::new(
-                X11ClipboardContext::<X11SelectionClipboard>::new().unwrap(),
-            )),
+        return match ClipboardContext::new() {
+            Ok(clipboard) => Self {
+                clipboard: Box::new(clipboard),
+                selection: match X11ClipboardContext::<X11SelectionClipboard>::new() {
+                    Ok(selection) => Some(Box::new(selection)),
+                    Err(err) => {
+                        warn!("Unable to initialize primary selection clipboard: {err}");
+                        None
+                    }
+                },
+            },
+            Err(err) => {
+                warn!("Unable to initialize clipboard, falling back to no-op: {err}");
+                Self::new_nop()
+            }
         };
 
         #[cfg(not(any(feature = "x11", target_os = "macos", windows)))]
