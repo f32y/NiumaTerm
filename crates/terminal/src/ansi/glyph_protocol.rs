@@ -577,7 +577,7 @@ impl<'a> Params<'a> {
 }
 
 /// Format the reply to `q;cp=<hex>`. Public because the frontend
-/// (`rioterm::application`) is the one that has access to both
+/// is the one that has access to both
 /// `FontLibrary` and the per-route registry needed to compute the
 /// status; it formats the reply itself and writes it back to the PTY.
 pub fn format_query_response(cp: u32, status: QueryStatus) -> String {
