@@ -2,7 +2,7 @@ use std::ffi::{self, OsString};
 use std::io::{Error, Result};
 use std::os::windows::ffi::OsStrExt as _;
 use std::os::windows::io::IntoRawHandle;
-use std::{env, fs, mem, ptr};
+use std::{env, mem, ptr};
 
 use libc::c_ushort;
 use miow::pipe::anonymous;
@@ -61,16 +61,6 @@ impl ConptyApi {
              to the executable (copied by pty's build.rs). The in-box system ConPTY \
              corrupts scrollback on resize and is not supported.",
         );
-
-        {
-            use std::io::Write as _;
-
-            let path = env::temp_dir().join("rio_conpty.log");
-
-            if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&path) {
-                let _ = writeln!(f, "[conpty] backend=conpty.dll");
-            }
-        }
 
         info!("Using bundled conpty.dll for pseudoconsole");
 
