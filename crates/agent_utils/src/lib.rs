@@ -621,17 +621,12 @@ pub struct AgentNotification {
 #[derive(Clone, Debug, Default)]
 pub struct MonitorMutation {
     pub visible_changed: bool,
-    pub created_notification: Option<AgentNotification>,
     pub removed_notifications: Vec<AgentNotification>,
 }
 
 impl MonitorMutation {
     fn merge(&mut self, mut other: Self) {
         self.visible_changed |= other.visible_changed;
-
-        if other.created_notification.is_some() {
-            self.created_notification = other.created_notification.take();
-        }
 
         self.removed_notifications
             .append(&mut other.removed_notifications);
@@ -1044,13 +1039,10 @@ impl AgentMonitor {
             native_after,
         };
 
-        let removed = self
-            .notifications
-            .insert(route.clone(), notification.clone());
+        let removed = self.notifications.insert(route.clone(), notification);
 
         MonitorMutation {
             visible_changed: true,
-            created_notification: Some(notification),
             removed_notifications: removed.into_iter().collect(),
         }
     }
