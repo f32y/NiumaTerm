@@ -784,11 +784,9 @@ impl Read for RemoteReader {
             };
         }
 
-        let count = buffer.len().min(output.len());
-
-        for byte in &mut buffer[..count] {
-            *byte = output.pop_front().expect("output length was checked");
-        }
+        // Bulk copy via the ring's contiguous halves; this sits on the
+        // terminal-output hot path, so no per-byte pop_front.
+        let count = Read::read(&mut *output, buffer)?;
 
         if output.is_empty() {
             self.0.read_ready.clear();
