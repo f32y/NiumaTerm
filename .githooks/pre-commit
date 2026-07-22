@@ -133,8 +133,52 @@ check_rustfmt_and_clippy() {
     echo "pre-commit: checking rustfmt"
     cargo fmt --all --check
 
-    echo "pre-commit: running clippy"
+    echo "pre-commit: running clippy with default rules"
     cargo clippy --workspace --all-targets --quiet
+
+    echo "pre-commit: running clippy with clippy::absolute_paths"
+
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "pre-commit: jq is required to select first-party workspace members" >&2
+        exit 1
+    fi
+
+    workspace_metadata=$(cargo metadata --no-deps --format-version 1) || {
+        echo "pre-commit: failed to read Cargo workspace metadata" >&2
+        exit 1
+    }
+
+    first_party_packages=$(
+        printf '%s\n' "$workspace_metadata" |
+            jq -r '
+                . as $workspace
+                | ($workspace.workspace_root | gsub("\\\\"; "/")) as $root
+                | $workspace.packages[]
+                | select(.id as $id | $workspace.workspace_members | index($id))
+                | select(
+                    (.manifest_path | gsub("\\\\"; "/"))
+                    | startswith($root + "/crates/")
+                  )
+                | .name
+            '
+    ) || {
+        echo "pre-commit: failed to select first-party workspace members" >&2
+        exit 1
+    }
+    first_party_packages=$(printf '%s\n' "$first_party_packages" | tr -d '\r')
+
+    set --
+    for package in $first_party_packages; do
+        set -- "$@" -p "$package"
+    done
+
+    if [ "$#" -eq 0 ]; then
+        echo "pre-commit: no first-party workspace members found under crates" >&2
+        exit 1
+    fi
+
+    echo "pre-commit: running clippy on first-party workspace members"
+    cargo clippy --all-targets --no-deps --quiet "$@" -- -D clippy::absolute_paths
 }
 
 branch=$(git symbolic-ref --quiet --short HEAD || true)
