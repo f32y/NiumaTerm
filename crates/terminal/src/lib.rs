@@ -16,3 +16,5 @@ pub mod simd_utf8;
 pub mod terminal;
 pub mod vi_motion;
 pub mod vt_trace;
+
+mod prompt_sniffer;
