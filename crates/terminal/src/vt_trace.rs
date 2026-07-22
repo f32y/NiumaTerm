@@ -1,13 +1,13 @@
 //! Temporary VT-state tracer for the Windows ConPTY drag-resize / scrollback bug
 //! (`.scratch/remove-crosswords/HANDOFF-resize-conpty.md`). Every resize / scroll /
 //! ConPTY-repaint seam calls [`trace`], which appends a one-line summary to
-//! `target/logs/rio-vt-trace.log` and writes the **entire** engine content
+//! `target/logs/nmt-vt-trace.log` and writes the **entire** engine content
 //! (viewport snapshot + full screen+scrollback via the formatter) to its own file
 //! `target/logs/<seq>-<label>.txt`.
 //!
-//! Gated on the `RIO_VT_TRACE` env var so normal runs pay nothing (the full-content
+//! Gated on the `NMT_VT_TRACE` env var so normal runs pay nothing (the full-content
 //! dump is O(scrollback) and must never run in production). Override the output dir
-//! with `RIO_VT_TRACE_DIR`. REMOVE this module once the resize bug is fixed.
+//! with `NMT_VT_TRACE_DIR`. REMOVE this module once the resize bug is fixed.
 
 use std::io::Write as _;
 use std::path::PathBuf;
@@ -21,14 +21,14 @@ use crate::terminal::style::Style;
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
-/// `true` when `RIO_VT_TRACE` is set in the environment (checked once).
+/// `true` when `NMT_VT_TRACE` is set in the environment (checked once).
 pub fn enabled() -> bool {
     static EN: sync::OnceLock<bool> = sync::OnceLock::new();
-    *EN.get_or_init(|| env::var_os("RIO_VT_TRACE").is_some())
+    *EN.get_or_init(|| env::var_os("NMT_VT_TRACE").is_some())
 }
 
 fn log_dir() -> PathBuf {
-    if let Some(dir) = env::var_os("RIO_VT_TRACE_DIR") {
+    if let Some(dir) = env::var_os("NMT_VT_TRACE_DIR") {
         PathBuf::from(dir)
     } else {
         PathBuf::from("target").join("logs")
@@ -136,7 +136,7 @@ fn trailing_pad_report(s: &RenderBuffer) -> String {
 }
 
 fn append_master(dir: &PathBuf, line: &str) {
-    let path = dir.join("rio-vt-trace.log");
+    let path = dir.join("nmt-vt-trace.log");
     if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(path) {
         let _ = f.write_all(line.as_bytes());
     }
@@ -145,7 +145,7 @@ fn append_master(dir: &PathBuf, line: &str) {
 /// Emit a trace point: one summary line to the master log + a full content dump to
 /// its own file. `label` names the seam (becomes part of the filename), `detail` is
 /// free-form context (request dims, intent, rewritten bytes, …). No-op unless
-/// `RIO_VT_TRACE` is set. Safe to call with the engine lock held — touches only the
+/// `NMT_VT_TRACE` is set. Safe to call with the engine lock held — touches only the
 /// engine (snapshot + formatter), never the render buffer or crosswords.
 pub fn trace(label: &str, engine: &mut GhosttyTerminal, detail: &str) {
     if !enabled() {
