@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use std::{collections, path, thread, time};
 
 use dirs::home_dir;
@@ -934,27 +935,22 @@ impl Shell {
             return;
         }
 
-        let shell = cx.entity();
+        let description = if count > 0 {
+            format!(
+                "{} in this pane. Closing the pane will terminate them.",
+                Self::processes_running(count)
+            )
+        } else {
+            "Closing the pane will terminate its shell.".to_string()
+        };
 
-        window.open_alert_dialog(cx, move |alert, _, _| {
-            let shell = shell.clone();
-
-            alert
-                .confirm()
-                .title("Close this pane?")
-                .description(if count > 0 {
-                    format!(
-                        "{} in this pane. Closing the pane will terminate them.",
-                        Self::processes_running(count)
-                    )
-                } else {
-                    "Closing the pane will terminate its shell.".to_string()
-                })
-                .on_ok(move |_, window, cx| {
-                    shell.update(cx, |this, cx| this.close_pane_now(id, window, cx));
-                    true
-                })
-        });
+        Self::open_close_confirm(
+            window,
+            cx,
+            "Close this pane?",
+            description,
+            move |this, window, cx| this.close_pane_now(id, window, cx),
+        );
     }
 
     fn close_pane_now(&mut self, id: PaneId, window: &mut Window, cx: &mut Context<Self>) {
@@ -990,6 +986,44 @@ impl Shell {
         } else {
             format!("{count} child processes are running")
         }
+    }
+
+    /// Child processes running across every pane of workspace `id`.
+    fn workspace_process_count(&self, id: WorkspaceId, cx: &App) -> usize {
+        self.workspaces.tabs_of(id).map_or(0, |tabs| {
+            tabs.tabs()
+                .iter()
+                .map(|tab| self.close_process_count(tab.surface(), cx))
+                .sum()
+        })
+    }
+
+    /// Shared scaffolding of every close-confirmation alert: title +
+    /// description, OK runs `on_confirm` against this shell.
+    fn open_close_confirm(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        title: &'static str,
+        description: String,
+        on_confirm: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+    ) {
+        let shell = cx.entity();
+        let on_confirm = Rc::new(on_confirm);
+
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let shell = shell.clone();
+            let on_confirm = Rc::clone(&on_confirm);
+
+            alert
+                .confirm()
+                .title(title)
+                .description(description.clone())
+                .on_ok(move |_, window, cx| {
+                    let on_confirm = Rc::clone(&on_confirm);
+                    shell.update(cx, |this, cx| on_confirm(this, window, cx));
+                    true
+                })
+        });
     }
 
     /// Child processes running across every pane of this tab, summed over
@@ -1045,19 +1079,13 @@ impl Shell {
                     .to_string()
             };
 
-            let shell = cx.entity();
-
-            window.open_alert_dialog(cx, move |alert, _, _| {
-                let shell = shell.clone();
-                alert
-                    .confirm()
-                    .title("Close the last tab?")
-                    .description(description.clone())
-                    .on_ok(move |_, window, cx| {
-                        shell.update(cx, |this, cx| this.close_workspace_now(ws_id, window, cx));
-                        true
-                    })
-            });
+            Self::open_close_confirm(
+                window,
+                cx,
+                "Close the last tab?",
+                description,
+                move |this, window, cx| this.close_workspace_now(ws_id, window, cx),
+            );
 
             return;
         }
@@ -1069,27 +1097,22 @@ impl Shell {
             return;
         }
 
-        let shell = cx.entity();
+        let description = if count > 0 {
+            format!(
+                "{} in this tab. Closing the tab will terminate them.",
+                Self::processes_running(count)
+            )
+        } else {
+            "Closing the tab will terminate its shell.".to_string()
+        };
 
-        window.open_alert_dialog(cx, move |alert, _, _| {
-            let shell = shell.clone();
-
-            alert
-                .confirm()
-                .title("Close this tab?")
-                .description(if count > 0 {
-                    format!(
-                        "{} in this tab. Closing the tab will terminate them.",
-                        Self::processes_running(count)
-                    )
-                } else {
-                    "Closing the tab will terminate its shell.".to_string()
-                })
-                .on_ok(move |_, window, cx| {
-                    shell.update(cx, |this, cx| this.close_tab_now(id, window, cx));
-                    true
-                })
-        });
+        Self::open_close_confirm(
+            window,
+            cx,
+            "Close this tab?",
+            description,
+            move |this, window, cx| this.close_tab_now(id, window, cx),
+        );
     }
 
     fn close_tab_now(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {
@@ -1263,12 +1286,7 @@ impl Shell {
 
         let confirm = cx.global::<AppSettings>().confirm_before_closing_workspace;
 
-        let count: usize = self.workspaces.tabs_of(id).map_or(0, |tabs| {
-            tabs.tabs()
-                .iter()
-                .map(|tab| self.close_process_count(tab.surface(), cx))
-                .sum()
-        });
+        let count = self.workspace_process_count(id, cx);
 
         let warn = cx.global::<AppSettings>().warn_before_terminating_shell;
 
@@ -1286,19 +1304,13 @@ impl Shell {
             "All tabs in this workspace will be closed and their shells terminated.".to_string()
         };
 
-        let shell = cx.entity();
-
-        window.open_alert_dialog(cx, move |alert, _, _| {
-            let shell = shell.clone();
-            alert
-                .confirm()
-                .title("Close this workspace?")
-                .description(description.clone())
-                .on_ok(move |_, window, cx| {
-                    shell.update(cx, |this, cx| this.close_workspace_now(id, window, cx));
-                    true
-                })
-        });
+        Self::open_close_confirm(
+            window,
+            cx,
+            "Close this workspace?",
+            description,
+            move |this, window, cx| this.close_workspace_now(id, window, cx),
+        );
     }
 
     /// Closing the last workspace is a three-way choice: quit the app (the
@@ -1311,12 +1323,7 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let count: usize = self.workspaces.tabs_of(id).map_or(0, |tabs| {
-            tabs.tabs()
-                .iter()
-                .map(|tab| self.close_process_count(tab.surface(), cx))
-                .sum()
-        });
+        let count = self.workspace_process_count(id, cx);
 
         let message = if count > 0 {
             format!(
@@ -1421,25 +1428,24 @@ impl Shell {
             return true;
         }
 
-        window.open_alert_dialog(cx, move |alert, _, _| {
-            alert
-                .confirm()
-                .title("Close this window?")
-                .description(if count > 0 {
-                    format!(
-                        "{} in this window. Closing the window will terminate them.",
-                        Self::processes_running(count)
-                    )
-                } else {
-                    "Closing the window will terminate its shells.".to_string()
-                })
-                .on_ok(move |_, window, _| {
-                    // `remove_window` tears the window down directly (no
-                    // WM_CLOSE round-trip), so this dialog won't re-trigger.
-                    window.remove_window();
-                    true
-                })
-        });
+        let description = if count > 0 {
+            format!(
+                "{} in this window. Closing the window will terminate them.",
+                Self::processes_running(count)
+            )
+        } else {
+            "Closing the window will terminate its shells.".to_string()
+        };
+
+        // `remove_window` tears the window down directly (no WM_CLOSE
+        // round-trip), so this dialog won't re-trigger.
+        Self::open_close_confirm(
+            window,
+            cx,
+            "Close this window?",
+            description,
+            |_, window, _| window.remove_window(),
+        );
         false
     }
 
