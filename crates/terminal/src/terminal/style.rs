@@ -160,6 +160,15 @@ impl StyleSet {
         id
     }
 
+    /// Reset to the initial state (default style at id 0), keeping the
+    /// allocations. Interned ids become dangling; only call this when no
+    /// stored ids survive (e.g. right after the grid was cleared).
+    pub fn clear(&mut self) {
+        self.styles.truncate(1);
+        self.lookup.clear();
+        self.lookup.insert(self.styles[0], DEFAULT_STYLE_ID);
+    }
+
     #[inline]
     pub fn styles(&self) -> &[Style] {
         &self.styles
