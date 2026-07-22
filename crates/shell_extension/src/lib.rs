@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
 use std::{ffi, iter, mem, process, ptr};
 
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
@@ -23,7 +23,10 @@ use windows_core::{BOOL, Interface, Ref};
 
 const CLSID_NIUMATERM_NEW_TAB: GUID = GUID::from_u128(0xF1D94FEB_1AA5_4B27_9440_C3BC16247C61);
 
-static mut DLL_INSTANCE: HINSTANCE = HINSTANCE(ptr::null_mut());
+// AtomicPtr instead of `static mut`: written from DllMain, read from COM
+// calls on arbitrary threads; the atomic removes the unsynchronized
+// shared-mutable-static access without changing behavior.
+static DLL_INSTANCE: AtomicPtr<ffi::c_void> = AtomicPtr::new(ptr::null_mut());
 /// Combined LockServer count + live COM object count (the classic ATL
 /// module count). DllCanUnloadNow must stay S_FALSE while any command or
 /// factory object is alive, or Explorer can unload the DLL under an object
@@ -41,7 +44,7 @@ fn dll_release() {
 #[unsafe(no_mangle)]
 extern "system" fn DllMain(instance: HINSTANCE, reason: u32, _reserved: *mut ffi::c_void) -> bool {
     if reason == DLL_PROCESS_ATTACH {
-        unsafe { DLL_INSTANCE = instance };
+        DLL_INSTANCE.store(instance.0, Ordering::Relaxed);
     }
     true
 }
@@ -56,7 +59,9 @@ fn get_exe_path() -> String {
 fn dll_path() -> Option<PathBuf> {
     let mut buf = [0u16; 32768];
 
-    let len = unsafe { GetModuleFileNameW(Some(DLL_INSTANCE.into()), &mut buf) };
+    let instance = HINSTANCE(DLL_INSTANCE.load(Ordering::Relaxed));
+
+    let len = unsafe { GetModuleFileNameW(Some(instance.into()), &mut buf) };
 
     (len > 0).then(|| PathBuf::from(String::from_utf16_lossy(&buf[..len as usize])))
 }
