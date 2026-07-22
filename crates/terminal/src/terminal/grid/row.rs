@@ -5,7 +5,7 @@
 use core::cmp::min;
 use std::cmp::max;
 use std::ops::{Index, IndexMut, Range, RangeFrom, RangeFull, RangeTo, RangeToInclusive};
-use std::{mem, ptr, slice};
+use std::{mem, slice};
 
 use crate::terminal::Column;
 use crate::terminal::grid::GridSquare;
@@ -60,24 +60,11 @@ impl<T: Clone + Default> Row<T> {
     ///
     /// Ideally the `template` should be `Copy` in all performance sensitive scenarios.
     pub fn new(columns: usize) -> Row<T> {
-        debug_assert!(columns >= 1);
-
+        // The previous hand-rolled pointer initialization was UB for
+        // `columns == 0` (it wrote one element past a zero-capacity Vec) and
+        // compiles to the same fill loop as the safe version below.
         let mut inner: Vec<T> = Vec::with_capacity(columns);
-
-        // This is a slightly optimized version of `std::vec::Vec::resize`.
-        unsafe {
-            let mut ptr = inner.as_mut_ptr();
-
-            for _ in 1..columns {
-                ptr::write(ptr, T::default());
-
-                ptr = ptr.offset(1);
-            }
-
-            ptr::write(ptr, T::default());
-
-            inner.set_len(columns);
-        }
+        inner.resize_with(columns, T::default);
 
         Row {
             inner,
