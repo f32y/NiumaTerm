@@ -1,3 +1,5 @@
+use std::process;
+
 use dirs::home_dir;
 use gpui::{App, AppContext as _, Axis, Context, Entity};
 use gpui_component::resizable::ResizableState;
@@ -387,8 +389,19 @@ impl Shell {
             Ok(pane) => pane,
             Err(error) => {
                 warn!("default profile failed, retrying built-in shell: {error}");
-                TerminalPane::spawn(cx, surface_id, None, (None, Vec::new()))
-                    .expect("GPUI terminal surface")
+                match TerminalPane::spawn(cx, surface_id, None, (None, Vec::new())) {
+                    Ok(pane) => pane,
+                    Err(error) => {
+                        // Even the built-in shell cannot spawn (e.g. ConPTY
+                        // unavailable) — no terminal can ever open, so tell
+                        // the user why before exiting instead of dying with
+                        // an invisible panic.
+                        crate::show_startup_error_dialog(&format!(
+                            "NiumaTerm could not start a terminal session:\n\n{error}"
+                        ));
+                        process::exit(1);
+                    }
+                }
             }
         };
 

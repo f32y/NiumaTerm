@@ -399,7 +399,7 @@ fn startup_error_and_exit(file: &str, error: &str) -> ! {
     process::exit(1);
 }
 
-fn show_startup_error_dialog(message: &str) {
+pub(crate) fn show_startup_error_dialog(message: &str) {
     let title: Vec<u16> = "NiumaTerm configuration error"
         .encode_utf16()
         .chain(Some(0))
