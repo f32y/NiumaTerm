@@ -15,21 +15,9 @@ use tracing::{error, warn};
 
 use crate::event::{self, EventListener, Msg, MsgSender, TerminalEvent, WindowId};
 use crate::ghostty::{self, GhosttyTerminal, mode};
-use crate::prompt_sniffer::PromptSniffer;
+use crate::prompt_sniffer::{PromptSniffer, SnifferMark};
 use crate::render_buffer::RenderBuffer;
 use crate::{ansi, terminal, vt_trace};
-
-pub fn spawn_named<F, T, S>(name: S, f: F) -> JoinHandle<T>
-where
-    F: FnOnce() -> T + Send + 'static,
-    T: Send + 'static,
-    S: Into<String>,
-{
-    Builder::new()
-        .name(name.into())
-        .spawn(f)
-        .expect("thread spawn works")
-}
 
 /// Reserved `Poll` token for the loop's `Waker`. PTY source tokens start above it.
 const WAKER_TOKEN: Token = Token(0);
@@ -55,6 +43,116 @@ fn engine_blocks_live_list(engine: &GhosttyTerminal) -> Vec<(ghostty::BlockHandl
     }
 
     live
+}
+
+/// Apply a recognized OSC 133 mark before any later PTY bytes reach the engine.
+/// Launch cwd, block finalization, and clear handling depend on engine state at
+/// this exact stream position.
+fn apply_sniffer_mark(
+    engine_cell: &cell::RefCell<&mut GhosttyTerminal>,
+    launch_cwd: &mut Option<Option<path::PathBuf>>,
+    mark_seq: &mut u64,
+    event_proxy: &impl EventListener,
+    window_id: WindowId,
+    engine_blocks: bool,
+    mut mark: SnifferMark<'_>,
+) {
+    engine_cell.borrow_mut().write_vt(mark.bytes);
+
+    if mark.prompt_started && mark.trusted {
+        // The block IS the segment: only the sequence
+        // number is registered here, for metadata
+        // marriage at the eventual finish.
+        *mark_seq += 1;
+        event_proxy.send_event(TerminalEvent::PromptStarted, window_id);
+    }
+
+    if let Some(mut start) = mark.command_started.take() {
+        // ;C — latch the launch cwd while the engine still
+        // holds THIS prompt's OSC 7, and surface the in-flight block.
+        let cwd = engine_cell.borrow().current_directory();
+
+        start.seq = *mark_seq;
+        start.cwd = cwd.clone();
+
+        *launch_cwd = Some(cwd);
+
+        event_proxy.send_event(TerminalEvent::CommandStarted(start), window_id);
+    }
+
+    if let Some(mut cmd) = mark.command_finished.take() {
+        // ;D — attach the launch metadata.
+        let cwd = launch_cwd.take().unwrap_or(None);
+
+        cmd.seq = *mark_seq;
+        cmd.cwd = cwd;
+
+        let in_alt_screen = engine_cell.borrow().mode(mode::ALT_SCREEN);
+
+        if mark.trusted && !in_alt_screen && engine_blocks {
+            // Engine-blocks mode freezes
+            // the command into a finished engine block
+            // (O(1)) and hands the HANDLE to the store —
+            // rendering reads the block via `BlockRef`;
+            // nothing is materialized. Budget eviction may
+            // fire inside finish_block, so the same batch
+            // carries the live list for the store to prune
+            // against. Clearing the boundary gives ConPTY's
+            // cursor model a fresh grid for the next command.
+            let mut engine = engine_cell.borrow_mut();
+
+            let events = match engine.finish_block() {
+                Ok(Some(handle)) => {
+                    let rows = engine.block_row_count(handle).unwrap_or(0);
+
+                    vec![
+                        event::BlockEvent::EngineBlock {
+                            seq: *mark_seq,
+                            handle,
+                            rows,
+                        },
+                        event::BlockEvent::EngineBlocksSync(engine_blocks_live_list(&engine)),
+                    ]
+                }
+                // Empty command: no block, no segment.
+                Ok(None) => Vec::new(),
+                Err(err) => {
+                    warn!("finish_block failed: {err:?}");
+                    Vec::new()
+                }
+            };
+
+            if !events.is_empty() {
+                event_proxy.send_event(TerminalEvent::BlockBatch(events), window_id);
+            }
+
+            engine.write_vt(BLOCK_BOUNDARY_CLEAR);
+        }
+
+        // Classic mode keeps one continuous grid:
+        // no finish, no boundary clear — plain single
+        // grid; only the metadata event fires.
+        event_proxy.send_event(TerminalEvent::CommandFinished(cmd), window_id);
+    }
+
+    if mark.history_cleared && mark.trusted && engine_blocks {
+        // ;K — the Clear-Host wrapper announces a user
+        // A trusted clear drops every finished engine
+        // block and wipe the active grid (the shell's
+        // own clear follows through ConPTY).
+        let in_alt_screen = engine_cell.borrow().mode(mode::ALT_SCREEN);
+
+        if !in_alt_screen {
+            engine_cell.borrow_mut().write_vt(BLOCK_BOUNDARY_CLEAR);
+
+            engine_cell.borrow_mut().clear_blocks();
+
+            event_proxy.send_event(
+                TerminalEvent::BlockBatch(vec![event::BlockEvent::HistoryCleared]),
+                window_id,
+            );
+        }
+    }
 }
 
 /// Min interval between full-viewport `snapshot()` + render-buffer readbacks
@@ -692,317 +790,7 @@ where
                 },
             }
 
-            // Feed the bytes into Ghostty's VT engine (under the engine lock).
-            // The render buffer is on a separate lock, so this never blocks a
-            // render frame while the same engine snapshot is locked.
-            let output_sink = self.output_sink.clone();
-            {
-                let mut engine = self.ghostty.lock();
-
-                let echo_pending_at_entry = cfg!(windows) && self.conpty_resize_echo_pending;
-
-                let mut rewritten = None;
-                let mut synthetic_prefix = None;
-
-                // Some(R_conpty) means SU realignment ran during this read.
-                let mut su_realigned_to: Option<u16> = None;
-
-                let repaint_window =
-                    cfg!(windows) && self.conpty_resize_repaint_reads_remaining > 0;
-
-                if repaint_window {
-                    self.conpty_resize_repaint_reads_remaining =
-                        self.conpty_resize_repaint_reads_remaining.saturating_sub(1);
-                }
-
-                // SU realignment runs before and instead of the legacy CUP rewrite.
-                // On the first repaint of a resize, push ghostty's active-top history rows
-                // into scrollback so its prompt rises to ConPTY's row; then ConPTY's own
-                // CUP in the ORIGINAL repaint lands on the prompt (no 0005 rewrite). The
-                // `su_realign_count` pre-check (latched size correspondence + N>0) and the
-                // post-write assertion below guard against a mis-latched resize.
-                if cfg!(windows) && self.su_realign_armed && repaint_window {
-                    self.su_realign_armed = false;
-
-                    if !engine.mode(mode::ALT_SCREEN) {
-                        if let Some((n, r_conpty)) = su_realign_count(
-                            &buf[..unprocessed],
-                            self.conpty_resize_prompt_row,
-                            self.conpty_resize_cols,
-                            self.conpty_resize_rows,
-                            engine.cols(),
-                            engine.rows(),
-                        ) {
-                            let realign = format!("\x1b[{n}S").into_bytes();
-
-                            engine.write_vt(&realign);
-
-                            synthetic_prefix = Some(realign);
-
-                            su_realigned_to = Some(r_conpty);
-
-                            self.conpty_resize_echo_pending = false;
-                        }
-                    }
-                }
-                if cfg!(windows)
-                    && su_realigned_to.is_none()
-                    && (self.conpty_resize_echo_pending || repaint_window)
-                {
-                    if engine.mode(mode::ALT_SCREEN) {
-                        self.conpty_resize_echo_pending = false;
-                        self.conpty_resize_repaint_reads_remaining = 0;
-                    } else if let Some(active_row) = engine.active_cursor_row() {
-                        // Realign ConPTY's resize echo/repaint to the engine's ACTIVE
-                        // cursor row. `active_cursor_row()` reads the active-screen
-                        // cursor (the frame CUP addresses) straight from the engine, so
-                        // it stays correct regardless of viewport scroll or blank rows
-                        // below the prompt — unlike the render-state
-                        // `snapshot.cursor.y`, which is viewport-relative and reads as
-                        // row 0 when scrolled (forcing the echo+erase onto a visible
-                        // history row). With a reliable target there's no need for the
-                        // old at-bottom gate or the PTY-thread snap-to-bottom; the echo
-                        // always routes to the true prompt row (the frontend still
-                        // snaps the *view* to the bottom on keypress for UX).
-                        let target_row = active_row.saturating_add(1);
-
-                        let repaint_pending = repaint_window
-                            && is_conpty_resize_repaint(&buf[..unprocessed], target_row);
-
-                        if self.conpty_resize_echo_pending || repaint_pending {
-                            rewritten = rewrite_conpty_resize_echo_cup_rows(
-                                &buf[..unprocessed],
-                                target_row,
-                            );
-                        }
-
-                        if rewritten.is_some() || repaint_pending {
-                            self.conpty_resize_echo_pending = false;
-
-                            if repaint_pending {
-                                self.conpty_resize_repaint_reads_remaining = 0;
-                            }
-                        }
-                    }
-                }
-
-                let bytes = rewritten.as_deref().unwrap_or(&buf[..unprocessed]);
-
-                let observed_output = output_sink.as_ref().map(|_| match synthetic_prefix {
-                    Some(mut prefix) => {
-                        prefix.extend_from_slice(bytes);
-
-                        Arc::from(prefix)
-                    }
-                    None => Arc::from(bytes),
-                });
-
-                let was_rewritten = rewritten.is_some();
-
-                // Capture the pre-rewrite ConPTY bytes + cursor visibility for the
-                // trace so we can compare original vs rewritten CUP rows.
-                let (orig_escaped, cursor_vis_at_decision) = if vt_trace::enabled()
-                    && (repaint_window || was_rewritten || echo_pending_at_entry)
-                {
-                    let orig = &buf[..unprocessed];
-                    (
-                        escape_bytes(&orig[..orig.len().min(240)]),
-                        engine.snapshot().ok().map(|s| s.cursor_visible()),
-                    )
-                } else {
-                    (String::new(), None)
-                };
-
-                // Always run the sniffer: it classifies/captures OSC 133 lifecycle state
-                // while every byte, including marks, still reaches the engine.
-                {
-                    {
-                        // Both feed closures need the engine (segment/mark forwarding
-                        // writes; cwd latch reads) and never run at the same time, so a
-                        // RefCell shares the one borrow.
-                        let engine_cell = cell::RefCell::new(&mut *engine);
-                        let launch_cwd = &mut self.launch_cwd;
-                        let mark_seq = &mut self.mark_seq;
-                        let event_proxy = &self.event_proxy;
-                        let window_id = self.window_id;
-                        let engine_blocks = self.engine_blocks;
-
-                        self.sniffer.feed_hooked(
-                            bytes,
-                            |_, _, seg| {
-                                engine_cell.borrow_mut().write_vt(seg);
-                            },
-                            |mut mark| {
-                                engine_cell.borrow_mut().write_vt(mark.bytes);
-
-                                if mark.prompt_started && mark.trusted {
-                                    // The block IS the segment: only the sequence
-                                    // number is registered here, for metadata
-                                    // marriage at the eventual finish.
-                                    *mark_seq += 1;
-                                    event_proxy.send_event(TerminalEvent::PromptStarted, window_id);
-                                }
-
-                                if let Some(mut start) = mark.command_started.take() {
-                                    // ;C — latch the launch cwd while the engine still
-                                    // holds THIS prompt's OSC 7, and surface the in-flight block.
-                                    let cwd = engine_cell.borrow().current_directory();
-
-                                    start.seq = *mark_seq;
-                                    start.cwd = cwd.clone();
-
-                                    *launch_cwd = Some(cwd);
-
-                                    event_proxy.send_event(
-                                        TerminalEvent::CommandStarted(start),
-                                        window_id,
-                                    );
-                                }
-
-                                if let Some(mut cmd) = mark.command_finished.take() {
-                                    // ;D — attach the launch metadata.
-                                    let cwd = launch_cwd.take().unwrap_or(None);
-
-                                    cmd.seq = *mark_seq;
-                                    cmd.cwd = cwd;
-
-                                    let in_alt_screen = engine_cell.borrow().mode(mode::ALT_SCREEN);
-
-                                    if mark.trusted && !in_alt_screen && engine_blocks {
-                                        // Engine-blocks mode freezes
-                                        // the command into a finished engine block
-                                        // (O(1)) and hands the HANDLE to the store —
-                                        // rendering reads the block via `BlockRef`;
-                                        // nothing is materialized. Budget eviction may
-                                        // fire inside finish_block, so the same batch
-                                        // carries the live list for the store to prune
-                                        // against. Clearing the boundary gives ConPTY's
-                                        // cursor model a fresh grid for the next command.
-                                        let mut engine = engine_cell.borrow_mut();
-
-                                        let events = match engine.finish_block() {
-                                            Ok(Some(handle)) => {
-                                                let rows =
-                                                    engine.block_row_count(handle).unwrap_or(0);
-
-                                                vec![
-                                                    event::BlockEvent::EngineBlock {
-                                                        seq: *mark_seq,
-                                                        handle,
-                                                        rows,
-                                                    },
-                                                    event::BlockEvent::EngineBlocksSync(
-                                                        engine_blocks_live_list(&engine),
-                                                    ),
-                                                ]
-                                            }
-                                            // Empty command: no block, no segment.
-                                            Ok(None) => Vec::new(),
-                                            Err(err) => {
-                                                warn!("finish_block failed: {err:?}");
-                                                Vec::new()
-                                            }
-                                        };
-
-                                        if !events.is_empty() {
-                                            event_proxy.send_event(
-                                                TerminalEvent::BlockBatch(events),
-                                                window_id,
-                                            );
-                                        }
-
-                                        engine.write_vt(BLOCK_BOUNDARY_CLEAR);
-                                    }
-
-                                    // Classic mode keeps one continuous grid:
-                                    // no finish, no boundary clear — plain single
-                                    // grid; only the metadata event fires.
-                                    event_proxy
-                                        .send_event(TerminalEvent::CommandFinished(cmd), window_id);
-                                }
-
-                                if mark.history_cleared && mark.trusted && engine_blocks {
-                                    // ;K — the Clear-Host wrapper announces a user
-                                    // A trusted clear drops every finished engine
-                                    // block and wipe the active grid (the shell's
-                                    // own clear follows through ConPTY).
-                                    let in_alt_screen = engine_cell.borrow().mode(mode::ALT_SCREEN);
-
-                                    if !in_alt_screen {
-                                        engine_cell.borrow_mut().write_vt(BLOCK_BOUNDARY_CLEAR);
-
-                                        engine_cell.borrow_mut().clear_blocks();
-
-                                        event_proxy.send_event(
-                                            TerminalEvent::BlockBatch(vec![
-                                                event::BlockEvent::HistoryCleared,
-                                            ]),
-                                            window_id,
-                                        );
-                                    }
-                                }
-                            },
-                        );
-                    }
-
-                    if let Some(trusted) = self.sniffer.take_boundary_trust_changed() {
-                        self.event_proxy.send_event(
-                            TerminalEvent::PromptBoundaryTrusted(trusted),
-                            self.window_id,
-                        );
-                    }
-
-                    // No steady-state work per read: the whole command is
-                    // frozen once at its `;D` finish (the per-line harvest
-                    // this replaced was the throughput cost the per-block
-                    // grid exists to delete).
-                }
-
-                // After SU realignment and the original repaint, ConPTY's own
-                // absolute CUP must have pulled the active cursor onto the realigned
-                // prompt row. A mismatch means the realign assumption broke (mis-latched
-                // resize, divergent wrap) — trace + debug_assert, never a prod panic.
-                if let Some(expected) = su_realigned_to {
-                    let got = engine.active_cursor_row();
-
-                    if got != Some(expected) && vt_trace::enabled() {
-                        vt_trace::trace(
-                            "su_realign_assert",
-                            &mut engine,
-                            &format!("expected R_conpty={expected} got={got:?}"),
-                        );
-                    }
-
-                    debug_assert_eq!(
-                        got,
-                        Some(expected),
-                        "SU realign: active cursor should land on R_conpty"
-                    );
-                }
-
-                // Dump the full VT only for resize-related reads (the ConPTY repaint
-                // window or a realigned echo) — a per-keystroke full dump would be
-                // O(scrollback) on every read.
-                if vt_trace::enabled() && (repaint_window || was_rewritten || echo_pending_at_entry)
-                {
-                    vt_trace::trace(
-                        "pty_resize_read",
-                        &mut engine,
-                        &format!(
-                            "read_bytes={unprocessed} rewritten={was_rewritten} \
-                             repaint_window={repaint_window} echo_pending={echo_pending_at_entry} \
-                             cursor_vis_pre={cursor_vis_at_decision:?} \
-                             orig={orig_escaped} \
-                             bytes={}",
-                            escape_bytes(&bytes[..bytes.len().min(240)])
-                        ),
-                    );
-                }
-
-                if let (Some(sink), Some(output)) = (&output_sink, observed_output) {
-                    sink(output);
-                }
-            }
+            self.process_pty_chunk(&buf[..unprocessed]);
 
             // Content changed, so invalidate the cached deep-search corpus.
             self.content_version
@@ -1021,6 +809,221 @@ where
             return Ok(());
         }
 
+        self.flush_engine_state(caught_up)
+    }
+
+    #[inline]
+    fn process_pty_chunk(&mut self, input: &[u8]) {
+        let input_len = input.len();
+
+        // Feed the bytes into Ghostty's VT engine (under the engine lock).
+        // The render buffer is on a separate lock, so this never blocks a
+        // render frame while the same engine snapshot is locked.
+        let output_sink = self.output_sink.clone();
+
+        let mut engine = self.ghostty.lock();
+
+        let echo_pending_at_entry = cfg!(windows) && self.conpty_resize_echo_pending;
+
+        let mut rewritten = None;
+        let mut synthetic_prefix = None;
+
+        // Some(R_conpty) means SU realignment ran during this read.
+        let mut su_realigned_to: Option<u16> = None;
+
+        let repaint_window = cfg!(windows) && self.conpty_resize_repaint_reads_remaining > 0;
+
+        if repaint_window {
+            self.conpty_resize_repaint_reads_remaining =
+                self.conpty_resize_repaint_reads_remaining.saturating_sub(1);
+        }
+
+        // SU realignment runs before and instead of the legacy CUP rewrite.
+        // On the first repaint of a resize, push ghostty's active-top history rows
+        // into scrollback so its prompt rises to ConPTY's row; then ConPTY's own
+        // CUP in the ORIGINAL repaint lands on the prompt (no 0005 rewrite). The
+        // `su_realign_count` pre-check (latched size correspondence + N>0) and the
+        // post-write assertion below guard against a mis-latched resize.
+        if cfg!(windows) && self.su_realign_armed && repaint_window {
+            self.su_realign_armed = false;
+
+            if !engine.mode(mode::ALT_SCREEN) {
+                if let Some((n, r_conpty)) = su_realign_count(
+                    input,
+                    self.conpty_resize_prompt_row,
+                    self.conpty_resize_cols,
+                    self.conpty_resize_rows,
+                    engine.cols(),
+                    engine.rows(),
+                ) {
+                    let realign = format!("\x1b[{n}S").into_bytes();
+
+                    engine.write_vt(&realign);
+
+                    synthetic_prefix = Some(realign);
+
+                    su_realigned_to = Some(r_conpty);
+
+                    self.conpty_resize_echo_pending = false;
+                }
+            }
+        }
+
+        if cfg!(windows)
+            && su_realigned_to.is_none()
+            && (self.conpty_resize_echo_pending || repaint_window)
+        {
+            if engine.mode(mode::ALT_SCREEN) {
+                self.conpty_resize_echo_pending = false;
+                self.conpty_resize_repaint_reads_remaining = 0;
+            } else if let Some(active_row) = engine.active_cursor_row() {
+                // Realign ConPTY's resize echo/repaint to the engine's ACTIVE
+                // cursor row. `active_cursor_row()` reads the active-screen
+                // cursor (the frame CUP addresses) straight from the engine, so
+                // it stays correct regardless of viewport scroll or blank rows
+                // below the prompt — unlike the render-state
+                // `snapshot.cursor.y`, which is viewport-relative and reads as
+                // row 0 when scrolled (forcing the echo+erase onto a visible
+                // history row). With a reliable target there's no need for the
+                // old at-bottom gate or the PTY-thread snap-to-bottom; the echo
+                // always routes to the true prompt row (the frontend still
+                // snaps the *view* to the bottom on keypress for UX).
+                let target_row = active_row.saturating_add(1);
+
+                let repaint_pending = repaint_window && is_conpty_resize_repaint(input, target_row);
+
+                if self.conpty_resize_echo_pending || repaint_pending {
+                    rewritten = rewrite_conpty_resize_echo_cup_rows(input, target_row);
+                }
+
+                if rewritten.is_some() || repaint_pending {
+                    self.conpty_resize_echo_pending = false;
+
+                    if repaint_pending {
+                        self.conpty_resize_repaint_reads_remaining = 0;
+                    }
+                }
+            }
+        }
+
+        let bytes = rewritten.as_deref().unwrap_or(input);
+
+        let observed_output = output_sink.as_ref().map(|_| match synthetic_prefix {
+            Some(mut prefix) => {
+                prefix.extend_from_slice(bytes);
+
+                Arc::from(prefix)
+            }
+            None => Arc::from(bytes),
+        });
+
+        let was_rewritten = rewritten.is_some();
+
+        // Capture the pre-rewrite ConPTY bytes + cursor visibility for the
+        // trace so we can compare original vs rewritten CUP rows.
+        let (orig_escaped, cursor_vis_at_decision) =
+            if vt_trace::enabled() && (repaint_window || was_rewritten || echo_pending_at_entry) {
+                let orig = input;
+                (
+                    escape_bytes(&orig[..orig.len().min(240)]),
+                    engine.snapshot().ok().map(|s| s.cursor_visible()),
+                )
+            } else {
+                (String::new(), None)
+            };
+
+        // Always run the sniffer: it classifies/captures OSC 133 lifecycle state
+        // while every byte, including marks, still reaches the engine.
+
+        // Both feed closures need the engine (segment/mark forwarding
+        // writes; cwd latch reads) and never run at the same time, so a
+        // RefCell shares the one borrow.
+        let engine_cell = cell::RefCell::new(&mut *engine);
+        let launch_cwd = &mut self.launch_cwd;
+        let mark_seq = &mut self.mark_seq;
+        let event_proxy = &self.event_proxy;
+        let window_id = self.window_id;
+        let engine_blocks = self.engine_blocks;
+
+        self.sniffer.feed_hooked(
+            bytes,
+            |_, _, seg| {
+                engine_cell.borrow_mut().write_vt(seg);
+            },
+            |mark| {
+                apply_sniffer_mark(
+                    &engine_cell,
+                    launch_cwd,
+                    mark_seq,
+                    event_proxy,
+                    window_id,
+                    engine_blocks,
+                    mark,
+                );
+            },
+        );
+
+        drop(engine_cell);
+
+        if let Some(trusted) = self.sniffer.take_boundary_trust_changed() {
+            self.event_proxy.send_event(
+                TerminalEvent::PromptBoundaryTrusted(trusted),
+                self.window_id,
+            );
+        }
+
+        // No steady-state work per read: the whole command is
+        // frozen once at its `;D` finish (the per-line harvest
+        // this replaced was the throughput cost the per-block
+        // grid exists to delete).
+
+        // After SU realignment and the original repaint, ConPTY's own
+        // absolute CUP must have pulled the active cursor onto the realigned
+        // prompt row. A mismatch means the realign assumption broke (mis-latched
+        // resize, divergent wrap) — trace + debug_assert, never a prod panic.
+        if let Some(expected) = su_realigned_to {
+            let got = engine.active_cursor_row();
+
+            if got != Some(expected) && vt_trace::enabled() {
+                vt_trace::trace(
+                    "su_realign_assert",
+                    &mut engine,
+                    &format!("expected R_conpty={expected} got={got:?}"),
+                );
+            }
+
+            debug_assert_eq!(
+                got,
+                Some(expected),
+                "SU realign: active cursor should land on R_conpty"
+            );
+        }
+
+        // Dump the full VT only for resize-related reads (the ConPTY repaint
+        // window or a realigned echo) — a per-keystroke full dump would be
+        // O(scrollback) on every read.
+        if vt_trace::enabled() && (repaint_window || was_rewritten || echo_pending_at_entry) {
+            vt_trace::trace(
+                "pty_resize_read",
+                &mut engine,
+                &format!(
+                    "read_bytes={input_len} rewritten={was_rewritten} \
+                         repaint_window={repaint_window} echo_pending={echo_pending_at_entry} \
+                         cursor_vis_pre={cursor_vis_at_decision:?} \
+                         orig={orig_escaped} \
+                         bytes={}",
+                    escape_bytes(&bytes[..bytes.len().min(240)])
+                ),
+            );
+        }
+
+        if let (Some(sink), Some(output)) = (&output_sink, observed_output) {
+            sink(output);
+        }
+    }
+
+    #[inline]
+    fn flush_engine_state(&mut self, caught_up: bool) -> io::Result<()> {
         // Coalesce the full-viewport readback: a caught-up read always
         // snapshots (interactive echo and the stream's final state land with no
         // added latency); a saturated read rate-limits it to
@@ -1130,6 +1133,7 @@ where
 
         // Interactive-state detection: full-screen TUIs set alt-screen.
         self.prev_alt_screen = vt_modes.contains(terminal::Mode::ALT_SCREEN);
+
         self.emit_interactive_state();
 
         // Readback skipped under saturation: self-wake so another `pty_read`
@@ -1139,12 +1143,14 @@ where
         // or reads 0 bytes, lands caught-up, and flushes this pending snapshot.
         let Some(capture) = capture else {
             self.snapshot_pending = true;
+
             // A synchronized frame needs more PTY bytes (normally DEC reset 2026)
             // before it is safe to publish. Waking immediately would spin while the
             // pipe is empty; the next readable event will commit the complete frame.
             if !sync_output {
                 let _ = self.waker.wake();
             }
+
             return Ok(());
         };
 
@@ -1341,160 +1347,166 @@ where
         self.sender.clone()
     }
 
-    pub fn spawn(mut self) -> JoinHandle<(Self, PtyState)> {
-        spawn_named("PTY reader", move || {
-            let mut state = PtyState::default();
-            let mut buf = [0u8; READ_BUFFER_SIZE];
+    fn run_event_loop(mut self) -> (Self, PtyState) {
+        let mut state = PtyState::default();
+        let mut buf = [0u8; READ_BUFFER_SIZE];
 
-            // Token 0 is the reserved `Waker`; PTY source tokens start at 1.
-            let mut tokens = (1_usize..).map(Token);
+        // Token 0 is the reserved `Waker`; PTY source tokens start at 1.
+        let mut tokens = (1_usize..).map(Token);
 
-            // Register the PTY sources, handing them the loop `Waker` (Windows soft-ready;
-            // ignored on Unix). mio 1.2 is edge-triggered; the loop re-registers interest
-            // each pass to pick up write readiness.
-            self.pty
-                .register(&self.poll, &mut tokens, Interest::READABLE, &self.waker)
-                .unwrap();
+        // Register the PTY sources, handing them the loop `Waker` (Windows soft-ready;
+        // ignored on Unix). mio 1.2 is edge-triggered; the loop re-registers interest
+        // each pass to pick up write readiness.
+        self.pty
+            .register(&self.poll, &mut tokens, Interest::READABLE, &self.waker)
+            .unwrap();
 
-            let mut events = Events::with_capacity(1024);
+        let mut events = Events::with_capacity(1024);
 
-            'event_loop: loop {
-                // Windows soft-ready is level-like but lives outside the OS poll set,
-                // and its worker only wakes on the clear→set edge. A `pty_read` capped
-                // by MAX_LOCKED_READ can return with data still in the ring (flag left
-                // set), so blocking with `None` would sleep forever on already-signalled
-                // data. When a source is still ready, poll with a zero timeout to spin
-                // back to `drain_ready` instead of sleeping. Unix returns `false` here
-                // and keeps blocking (real OS readiness, re-armed by EPOLL_CTL_MOD).
-                events.clear();
-                let timeout = if self.pty.has_ready() {
-                    Some(time::Duration::ZERO)
-                } else {
-                    self.sync_output_started_at
-                        .map(|started| SYNC_OUTPUT_TIMEOUT.saturating_sub(started.elapsed()))
-                };
+        'event_loop: loop {
+            // Windows soft-ready is level-like but lives outside the OS poll set,
+            // and its worker only wakes on the clear→set edge. A `pty_read` capped
+            // by MAX_LOCKED_READ can return with data still in the ring (flag left
+            // set), so blocking with `None` would sleep forever on already-signalled
+            // data. When a source is still ready, poll with a zero timeout to spin
+            // back to `drain_ready` instead of sleeping. Unix returns `false` here
+            // and keeps blocking (real OS readiness, re-armed by EPOLL_CTL_MOD).
+            events.clear();
 
-                if let Err(err) = self.poll.poll(&mut events, timeout) {
-                    match err.kind() {
-                        ErrorKind::Interrupted => continue,
-                        _ => {
-                            error!("Event loop polling error: {err}");
-                            break 'event_loop;
-                        }
+            let timeout = if self.pty.has_ready() {
+                Some(time::Duration::ZERO)
+            } else {
+                self.sync_output_started_at
+                    .map(|started| SYNC_OUTPUT_TIMEOUT.saturating_sub(started.elapsed()))
+            };
+
+            if let Err(err) = self.poll.poll(&mut events, timeout) {
+                match err.kind() {
+                    ErrorKind::Interrupted => continue,
+                    _ => {
+                        error!("Event loop polling error: {err}");
+                        break 'event_loop;
                     }
                 }
+            }
 
-                // Drain the `Msg` channel (resize/input/shutdown). It is a plain
-                // `std::sync::mpsc` woken via the `Waker` (mio 1.2 has no pollable
-                // channel), so it is drained on every wakeup rather than via a token.
-                if !self.drain_recv_channel(&mut state) {
-                    break;
+            // Drain the `Msg` channel (resize/input/shutdown). It is a plain
+            // `std::sync::mpsc` woken via the `Waker` (mio 1.2 has no pollable
+            // channel), so it is drained on every wakeup rather than via a token.
+            if !self.drain_recv_channel(&mut state) {
+                break;
+            }
+
+            // Collect readiness from both sources: the Windows soft-ready set
+            // (`drain_ready`) and real `Poll` events (Unix fds; on Windows `poll`
+            // only ever yields the waker token). Both feed the same handling below.
+            let mut do_read = false;
+            let mut do_write = false;
+            let mut child_exited = false;
+
+            #[cfg(unix)]
+            let mut hup = false;
+
+            for token in self.pty.drain_ready() {
+                if token == self.pty.read_token() {
+                    do_read = true;
+                } else if token == self.pty.write_token() {
+                    do_write = true;
+                } else if token == self.pty.child_event_token() {
+                    child_exited = true;
                 }
+            }
 
-                // Collect readiness from both sources: the Windows soft-ready set
-                // (`drain_ready`) and real `Poll` events (Unix fds; on Windows `poll`
-                // only ever yields the waker token). Both feed the same handling below.
-                let mut do_read = false;
-                let mut do_write = false;
-                let mut child_exited = false;
+            for event in events.iter() {
+                let token = event.token();
 
-                #[cfg(unix)]
-                let mut hup = false;
+                if token == self.pty.child_event_token() {
+                    child_exited = true;
+                } else if token == self.pty.read_token() || token == self.pty.write_token() {
+                    #[cfg(unix)]
+                    if event.is_read_closed() {
+                        hup = true;
+                    }
 
-                for token in self.pty.drain_ready() {
-                    if token == self.pty.read_token() {
+                    if event.is_readable() {
                         do_read = true;
-                    } else if token == self.pty.write_token() {
+                    }
+
+                    if event.is_writable() {
                         do_write = true;
-                    } else if token == self.pty.child_event_token() {
-                        child_exited = true;
                     }
                 }
+                // The waker token (and any stray token) needs no handling.
+            }
 
-                for event in events.iter() {
-                    let token = event.token();
+            if child_exited {
+                if let Some(ChildEvent::Exited) = self.pty.next_child_event() {
+                    // Emit `CloseTerminal` directly; PtyPipe owns the event proxy and route id.
+                    self.event_proxy
+                        .send_event(TerminalEvent::CloseTerminal(self.route_id), self.window_id);
 
-                    if token == self.pty.child_event_token() {
-                        child_exited = true;
-                    } else if token == self.pty.read_token() || token == self.pty.write_token() {
-                        #[cfg(unix)]
-                        if event.is_read_closed() {
-                            hup = true;
-                        }
-                        if event.is_readable() {
-                            do_read = true;
-                        }
-                        if event.is_writable() {
-                            do_write = true;
-                        }
-                    }
-                    // The waker token (and any stray token) needs no handling.
+                    self.event_proxy
+                        .send_event(TerminalEvent::Render, self.window_id);
+
+                    break 'event_loop;
                 }
+            }
 
-                if child_exited {
-                    if let Some(ChildEvent::Exited) = self.pty.next_child_event() {
-                        // Emit `CloseTerminal` directly; PtyPipe owns the event proxy and route id.
-                        self.event_proxy.send_event(
-                            TerminalEvent::CloseTerminal(self.route_id),
-                            self.window_id,
-                        );
+            // Don't do I/O on a dead PTY (Unix HUP / `is_read_closed`).
+            #[cfg(unix)]
+            let skip_io = hup;
+            #[cfg(not(unix))]
+            let skip_io = false;
 
-                        self.event_proxy
-                            .send_event(TerminalEvent::Render, self.window_id);
+            if !skip_io {
+                // A saturated batch self-wakes, while synchronized output uses the
+                // poll deadline. Either path runs `pty_read` without new PTY bytes
+                // so the pending snapshot can flush (it reads WouldBlock at worst).
+                if do_read || self.snapshot_pending {
+                    if let Err(err) = self.pty_read(&mut state, &mut buf) {
+                        // On Linux, a `read` on the master side of a PTY can fail
+                        // with `EIO` if the client side hangs up. In that case, just
+                        // loop back round for the inevitable `Exited` event.
+                        #[cfg(target_os = "linux")]
+                        if err.raw_os_error() == Some(EIO) {
+                            continue;
+                        }
 
+                        error!("Error reading from PTY in event loop: {}", err);
                         break 'event_loop;
                     }
                 }
 
-                // Don't do I/O on a dead PTY (Unix HUP / `is_read_closed`).
-                #[cfg(unix)]
-                let skip_io = hup;
-                #[cfg(not(unix))]
-                let skip_io = false;
-
-                if !skip_io {
-                    // A saturated batch self-wakes, while synchronized output uses the
-                    // poll deadline. Either path runs `pty_read` without new PTY bytes
-                    // so the pending snapshot can flush (it reads WouldBlock at worst).
-                    if do_read || self.snapshot_pending {
-                        if let Err(err) = self.pty_read(&mut state, &mut buf) {
-                            // On Linux, a `read` on the master side of a PTY can fail
-                            // with `EIO` if the client side hangs up. In that case, just
-                            // loop back round for the inevitable `Exited` event.
-                            #[cfg(target_os = "linux")]
-                            if err.raw_os_error() == Some(EIO) {
-                                continue;
-                            }
-
-                            error!("Error reading from PTY in event loop: {}", err);
-                            break 'event_loop;
-                        }
-                    }
-
-                    if do_write {
-                        if let Err(err) = self.pty_write(&mut state) {
-                            error!("Error writing to PTY in event loop: {}", err);
-                            break 'event_loop;
-                        }
+                if do_write {
+                    if let Err(err) = self.pty_write(&mut state) {
+                        error!("Error writing to PTY in event loop: {}", err);
+                        break 'event_loop;
                     }
                 }
-
-                // Re-register interest if a write is pending (real effect on Unix; the
-                // Windows soft-ready path is a no-op).
-                let mut interest = Interest::READABLE;
-
-                if state.needs_write() {
-                    interest |= Interest::WRITABLE;
-                }
-
-                self.pty.reregister(&self.poll, interest).unwrap();
             }
 
-            // The PTY sources are not dropped here, so deregister them explicitly.
-            let _ = self.pty.deregister(&self.poll);
+            // Re-register interest if a write is pending (real effect on Unix; the
+            // Windows soft-ready path is a no-op).
+            let mut interest = Interest::READABLE;
 
-            (self, state)
-        })
+            if state.needs_write() {
+                interest |= Interest::WRITABLE;
+            }
+
+            self.pty.reregister(&self.poll, interest).unwrap();
+        }
+
+        // The PTY sources are not dropped here, so deregister them explicitly.
+        let _ = self.pty.deregister(&self.poll);
+
+        (self, state)
+    }
+
+    pub fn spawn(self) -> JoinHandle<(Self, PtyState)> {
+        Builder::new()
+            .name("PTY reader".into())
+            .spawn(move || self.run_event_loop())
+            .expect("thread spawn works")
     }
 }
 
