@@ -86,10 +86,7 @@ fn param_values<'a>(params: &[&'a [u8]]) -> Option<(FxHashMap<&'a str, &'a str>,
                 }
             }
 
-            if let (Ok(key), Ok(value)) = (
-                simd_utf8::from_utf8_fast(key),
-                simd_utf8::from_utf8_fast(value),
-            ) {
+            if let (Ok(key), Ok(value)) = (simd_utf8::validate(key), simd_utf8::validate(value)) {
                 map.insert(key, value);
             }
         }

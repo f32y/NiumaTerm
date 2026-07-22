@@ -113,23 +113,6 @@ fn compute_error_len(bytes: &[u8], valid_up_to: usize) -> Option<usize> {
     Some(expected_len)
 }
 
-/// Compatibility shim — same as [`validate`].
-#[inline]
-pub fn from_utf8_fast(bytes: &[u8]) -> Result<&str, Utf8Error> {
-    validate(bytes)
-}
-
-/// Compatibility shim — same as [`validate`].
-#[inline]
-pub fn from_utf8_compat(bytes: &[u8]) -> Result<&str, Utf8Error> {
-    validate(bytes)
-}
-
-#[inline]
-pub fn from_utf8_to_string(bytes: &[u8]) -> Result<String, Utf8Error> {
-    validate(bytes).map(|s| s.to_string())
-}
-
 /// Validate; on failure fall back to `String::from_utf8_lossy`.
 #[inline]
 pub fn from_utf8_lossy_fast(bytes: &[u8]) -> String {
