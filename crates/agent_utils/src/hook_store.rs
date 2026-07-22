@@ -6,8 +6,8 @@
 //! the NiumaTerm hook binary are ever touched, and a file that fails to parse
 //! is never rewritten.
 
-use std::path::Path;
-use std::{fs, io};
+use std::path::{Path, PathBuf};
+use std::{env, fs, io};
 
 use serde_json::{Value, from_str, json, to_string_pretty};
 
@@ -16,6 +16,15 @@ use crate::{AGENT_HOOK_EXE_ENV, HookInstallStatus, hook_command_contains};
 /// Markers that identify hook entries owned by NiumaTerm: the current
 /// env-var command and legacy installs that baked in an absolute path.
 const HOOK_MARKERS: [&str; 2] = [AGENT_HOOK_EXE_ENV, "NiumaTermHook.exe"];
+
+/// The user's home directory — `USERPROFILE` on Windows with a `HOME`
+/// fallback so the same code works in POSIX-flavored shells. Shared root for
+/// every per-agent config path.
+pub(crate) fn home_dir() -> Option<PathBuf> {
+    env::var_os("USERPROFILE")
+        .or_else(|| env::var_os("HOME"))
+        .map(PathBuf::from)
+}
 
 /// Re-registering is idempotent: prior NiumaTerm entries (including legacy
 /// absolute-path installs) are removed before `entry(command)` is appended

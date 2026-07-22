@@ -5,8 +5,8 @@
 //! NiumaTerm-owned entries in `~/.codex/hooks.json`, preserves unrelated
 //! values, and never rewrites a file that fails to parse.
 
+use std::io;
 use std::path::{Path, PathBuf};
-use std::{env, io};
 
 use serde_json::{Value, json};
 
@@ -82,16 +82,12 @@ pub(crate) fn normalize(
 
 /// `~/.codex/config.toml`, the user-scope Codex configuration.
 pub fn config_path() -> Option<PathBuf> {
-    let home = env::var_os("USERPROFILE").or_else(|| env::var_os("HOME"))?;
-
-    Some(PathBuf::from(home).join(".codex").join("config.toml"))
+    Some(hook_store::home_dir()?.join(".codex").join("config.toml"))
 }
 
 /// `~/.codex/hooks.json`, the user-scope Codex Hook configuration.
 pub fn hooks_path() -> Option<PathBuf> {
-    let home = env::var_os("USERPROFILE").or_else(|| env::var_os("HOME"))?;
-
-    Some(PathBuf::from(home).join(".codex").join("hooks.json"))
+    Some(hook_store::home_dir()?.join(".codex").join("hooks.json"))
 }
 
 pub fn install_hooks(hooks_path: &Path) -> io::Result<()> {
@@ -177,7 +173,7 @@ fn invalid(message: &str) -> io::Error {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, process};
+    use std::{env, fs, process};
 
     use serde_json::{Map, from_str, to_string, to_string_pretty};
 
