@@ -3,7 +3,7 @@
 use std::cell::UnsafeCell;
 use std::io::{self, Read, Write};
 use std::mem;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct SpscBuffer {
@@ -39,7 +39,7 @@ impl SpscBuffer {
 /// Consumer of the ringbuffer.
 pub struct SpscBufferReader {
     start: usize,
-    buffer: Rc<SpscBuffer>,
+    buffer: Arc<SpscBuffer>,
 }
 
 impl SpscBufferReader {
@@ -102,7 +102,7 @@ unsafe impl Send for SpscBufferReader {}
 /// Producer for the ringbuffer
 pub struct SpscBufferWriter {
     end: usize,
-    buffer: Rc<SpscBuffer>,
+    buffer: Arc<SpscBuffer>,
 }
 
 impl SpscBufferWriter {
@@ -177,7 +177,9 @@ impl Write for SpscBufferWriter {
 ///
 /// See the mio-anonymous-pipes crate for example usage.
 pub fn spsc_buffer(size: usize) -> (SpscBufferWriter, SpscBufferReader) {
-    let buffer = Rc::new(SpscBuffer::new(size));
+    // Arc, not Rc: reader and writer live on different threads, so the final
+    // two drops can race; a non-atomic refcount would be a data race (UB).
+    let buffer = Arc::new(SpscBuffer::new(size));
 
     let producer = SpscBufferWriter {
         end: 0,
