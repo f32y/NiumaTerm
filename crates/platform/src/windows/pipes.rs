@@ -91,11 +91,17 @@ impl EventedAnonRead {
                     let mut written = 0usize;
 
                     while written < nbytes {
-                        // Wait for buffer to clear if need be.
+                        // Wait for buffer to clear if need be. The predicate is
+                        // re-checked under the lock and notifiers acquire this
+                        // lock after changing buffer state, so a drain+notify
+                        // cannot slip between the check and the wait (a lost
+                        // wakeup here strands bytes until the next notify).
                         if producer.is_full() {
                             let mut wait_tag = inner.wait_tag.lock();
 
-                            inner.sig_buffer_not_full.wait(&mut wait_tag);
+                            while producer.is_full() && !inner.done.load(Ordering::SeqCst) {
+                                inner.sig_buffer_not_full.wait(&mut wait_tag);
+                            }
 
                             if inner.done.load(Ordering::SeqCst) {
                                 return;
@@ -154,6 +160,11 @@ impl io::Read for EventedAnonRead {
             }
         }
 
+        // Pairs with the worker's under-lock predicate check: taking (and
+        // releasing) the wait lock after draining guarantees the worker is
+        // either before its check (and will see the space) or already parked
+        // (and will get this notify).
+        drop(self.inner.wait_tag.lock());
         self.inner.sig_buffer_not_full.notify_one();
         Ok(nbytes)
     }
@@ -171,6 +182,9 @@ impl Drop for EventedAnonRead {
     fn drop(&mut self) {
         self.inner.done.store(true, Ordering::SeqCst);
 
+        // Lock/unlock before notifying so the done flag cannot be missed by a
+        // worker between its predicate check and its wait.
+        drop(self.inner.wait_tag.lock());
         self.inner.sig_buffer_not_full.notify_one();
 
         let thread = self.thread.take().unwrap();
@@ -245,11 +259,18 @@ impl EventedAnonWrite {
 
                     // Read into temp buffer while holding the lock
                     let nbytes = {
-                        // Wait for buffer to have contents
+                        // Wait for buffer to have contents. The predicate is
+                        // re-checked under the lock and notifiers acquire this
+                        // lock after changing buffer state, so a write+notify
+                        // from the app thread cannot slip between the check and
+                        // the wait — a lost wakeup here would leave the written
+                        // bytes sitting in the ring until the next write call.
                         if consumer.is_empty() {
                             let mut wait_tag = inner.wait_tag.lock();
 
-                            inner.sig_buffer_not_empty.wait(&mut wait_tag);
+                            while consumer.is_empty() && !inner.done.load(Ordering::SeqCst) {
+                                inner.sig_buffer_not_empty.wait(&mut wait_tag);
+                            }
 
                             if inner.done.load(Ordering::SeqCst) {
                                 return;
@@ -317,6 +338,11 @@ impl io::Write for EventedAnonWrite {
             }
         }
 
+        // Pairs with the worker's under-lock predicate check: taking (and
+        // releasing) the wait lock after publishing the bytes guarantees the
+        // worker is either before its check (and will see the data) or already
+        // parked (and will get this notify).
+        drop(self.inner.wait_tag.lock());
         self.inner.sig_buffer_not_empty.notify_one();
 
         Ok(nbytes)
@@ -339,7 +365,10 @@ impl Drop for EventedAnonWrite {
     fn drop(&mut self) {
         self.inner.done.store(true, Ordering::SeqCst);
 
-        // Stop the writer thread waiting for contents
+        // Stop the writer thread waiting for contents. Lock/unlock before
+        // notifying so the done flag cannot be missed by a worker between its
+        // predicate check and its wait.
+        drop(self.inner.wait_tag.lock());
         self.inner.sig_buffer_not_empty.notify_one();
 
         self.thread
