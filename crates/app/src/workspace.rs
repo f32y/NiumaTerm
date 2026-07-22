@@ -1,5 +1,5 @@
 //! A `WorkspaceManager` owns one or more workspaces; each workspace owns its own
-//! [`TabManager`] plus display metadata (name, cwd, busy). Exactly one workspace is
+//! [`TabManager`] plus display metadata (name, cwd). Exactly one workspace is
 //! active, and the set is never empty — `close_workspace` refuses the last one, so
 //! `active` always points at a real workspace (mirrors `TabManager`'s invariant).
 //!
@@ -18,7 +18,6 @@ pub struct Workspace {
     id: WorkspaceId,
     name: String,
     cwd: String,
-    busy: bool,
     pinned: bool,
     tabs: TabManager<TerminalPaneTree>,
 }
@@ -76,8 +75,6 @@ pub struct WorkspaceSummary {
     pub name: String,
     pub cwd: String,
     pub active: bool,
-    #[allow(dead_code)] // retained for compatibility while Agent status replaces its UI projection
-    pub busy: bool,
     pub agent_status: AgentRuntimeStatus,
     pub unread_count: usize,
     pub latest_unread_text: Option<String>,
@@ -92,14 +89,12 @@ impl WorkspaceManager {
         id: WorkspaceId,
         name: String,
         cwd: String,
-        busy: bool,
     ) -> Self {
         Self {
             workspaces: ActiveList::new(Workspace {
                 id,
                 name,
                 cwd,
-                busy,
                 pinned: false,
                 tabs,
             }),
@@ -113,13 +108,11 @@ impl WorkspaceManager {
         id: WorkspaceId,
         name: String,
         cwd: String,
-        busy: bool,
     ) -> WorkspaceId {
         self.workspaces.push_active(Workspace {
             id,
             name,
             cwd,
-            busy,
             pinned: false,
             tabs,
         });
@@ -133,10 +126,9 @@ impl WorkspaceManager {
         id: WorkspaceId,
         name: String,
         cwd: String,
-        busy: bool,
         pinned: bool,
     ) -> WorkspaceId {
-        let id = self.new_workspace(tabs, id, name, cwd, busy);
+        let id = self.new_workspace(tabs, id, name, cwd);
         self.set_pinned(id, pinned);
         id
     }
@@ -262,7 +254,7 @@ impl WorkspaceManager {
         self.workspaces.len()
     }
 
-    /// Lightweight per-workspace summary for chrome (name/active/busy), in order.
+    /// Lightweight per-workspace summary for chrome (name/active), in order.
     /// A presentation-agnostic view of the workspaces for the shell chrome.
     pub fn summaries(&self) -> Vec<WorkspaceSummary> {
         let closeable = self.workspaces.len() > 1;
@@ -275,7 +267,6 @@ impl WorkspaceManager {
                 name: ws.name.clone(),
                 cwd: ws.cwd.clone(),
                 active: index == self.workspaces.active_index(),
-                busy: ws.busy,
                 agent_status: AgentRuntimeStatus::Idle,
                 unread_count: 0,
                 latest_unread_text: None,
@@ -309,7 +300,6 @@ mod tests {
                 name: format!("Workspace {}", i + 1),
                 cwd: cwd.to_string(),
                 active: i == 0,
-                busy: false,
                 agent_status: AgentRuntimeStatus::Idle,
                 unread_count: 0,
                 latest_unread_text: None,

@@ -150,7 +150,6 @@ impl Shell {
             WorkspaceId(workspace_id),
             DEFAULT_WORKSPACE_NAME.into(),
             cwd,
-            false,
         )
     }
 
@@ -194,22 +193,9 @@ impl Shell {
                 .unwrap_or_else(|| ".".to_string());
 
             if let Some(manager) = &mut workspaces {
-                manager.new_workspace_with_pinned(
-                    tab_manager,
-                    workspace_id,
-                    name,
-                    cwd,
-                    false,
-                    pinned,
-                );
+                manager.new_workspace_with_pinned(tab_manager, workspace_id, name, cwd, pinned);
             } else {
-                workspaces = Some(WorkspaceManager::new(
-                    tab_manager,
-                    workspace_id,
-                    name,
-                    cwd,
-                    false,
-                ));
+                workspaces = Some(WorkspaceManager::new(tab_manager, workspace_id, name, cwd));
                 workspaces
                     .as_mut()
                     .expect("workspace manager was just created")
