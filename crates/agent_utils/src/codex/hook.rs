@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::{env, io};
 
-use serde_json::{Map, Value, from_str, json, to_string, to_string_pretty};
+use serde_json::{Value, json};
 
 use crate::hook_store::{self, event_commands, is_marked, uninstall_from};
 use crate::{
@@ -178,6 +178,8 @@ fn invalid(message: &str) -> io::Error {
 #[cfg(test)]
 mod tests {
     use std::{fs, process};
+
+    use serde_json::{Map, from_str, to_string, to_string_pretty};
 
     use super::*;
     use crate::AGENT_HOOK_PROTOCOL_VERSION;
