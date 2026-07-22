@@ -3,14 +3,14 @@ use nmt_terminal::simd_utf8::*;
 #[test]
 fn test_valid_utf8() {
     let bytes = b"Hello, \xE2\x9D\xA4\xEF\xB8\x8F UTF-8!";
-    let result = from_utf8_fast(bytes).unwrap();
+    let result = validate(bytes).unwrap();
     assert_eq!(result, "Hello, ❤️ UTF-8!");
 }
 
 #[test]
 fn test_invalid_utf8() {
     let bytes = b"Hello, \xFF invalid UTF-8!";
-    assert!(from_utf8_fast(bytes).is_err());
+    assert!(validate(bytes).is_err());
 
     let result = from_utf8_lossy_fast(bytes);
     assert!(result.contains("Hello"));
@@ -20,7 +20,7 @@ fn test_invalid_utf8() {
 #[test]
 fn test_compat_error_info() {
     let bytes = b"Valid\xFF\xFEInvalid";
-    let err = from_utf8_compat(bytes).unwrap_err();
+    let err = validate(bytes).unwrap_err();
     assert!(err.to_string().contains("invalid utf-8"));
     assert_eq!(err.valid_up_to(), 5);
     assert_eq!(err.error_len(), Some(1));
