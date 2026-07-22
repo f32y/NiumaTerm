@@ -24,7 +24,19 @@ use windows_core::{BOOL, Interface, Ref};
 const CLSID_NIUMATERM_NEW_TAB: GUID = GUID::from_u128(0xF1D94FEB_1AA5_4B27_9440_C3BC16247C61);
 
 static mut DLL_INSTANCE: HINSTANCE = HINSTANCE(ptr::null_mut());
+/// Combined LockServer count + live COM object count (the classic ATL
+/// module count). DllCanUnloadNow must stay S_FALSE while any command or
+/// factory object is alive, or Explorer can unload the DLL under an object
+/// whose vtable still points into it.
 static DLL_REF_COUNT: AtomicU32 = AtomicU32::new(0);
+
+fn dll_add_ref() {
+    DLL_REF_COUNT.fetch_add(1, Ordering::Relaxed);
+}
+
+fn dll_release() {
+    DLL_REF_COUNT.fetch_sub(1, Ordering::Relaxed);
+}
 
 #[unsafe(no_mangle)]
 extern "system" fn DllMain(instance: HINSTANCE, reason: u32, _reserved: *mut ffi::c_void) -> bool {
@@ -83,6 +95,19 @@ fn get_folder_path(items: Option<&IShellItemArray>) -> Option<String> {
 #[implement(IExplorerCommand)]
 struct NiumaTermNewTabCommand;
 
+impl NiumaTermNewTabCommand {
+    fn new() -> Self {
+        dll_add_ref();
+        Self
+    }
+}
+
+impl Drop for NiumaTermNewTabCommand {
+    fn drop(&mut self) {
+        dll_release();
+    }
+}
+
 impl IExplorerCommand_Impl for NiumaTermNewTabCommand_Impl {
     fn GetTitle(&self, _items: Ref<'_, IShellItemArray>) -> Result<PWSTR> {
         Ok(alloc_co_task_str("Open in NiumaTerm"))
@@ -132,6 +157,19 @@ impl IExplorerCommand_Impl for NiumaTermNewTabCommand_Impl {
 #[implement(IClassFactory)]
 struct NiumaTermClassFactory;
 
+impl NiumaTermClassFactory {
+    fn new() -> Self {
+        dll_add_ref();
+        Self
+    }
+}
+
+impl Drop for NiumaTermClassFactory {
+    fn drop(&mut self) {
+        dll_release();
+    }
+}
+
 impl IClassFactory_Impl for NiumaTermClassFactory_Impl {
     fn CreateInstance(
         &self,
@@ -150,7 +188,7 @@ impl IClassFactory_Impl for NiumaTermClassFactory_Impl {
         unsafe {
             *ppvobject = ptr::null_mut();
 
-            let cmd: IExplorerCommand = NiumaTermNewTabCommand.into();
+            let cmd: IExplorerCommand = NiumaTermNewTabCommand::new().into();
             let obj: IUnknown = cmd.cast()?;
 
             obj.query(&*riid, ppvobject).ok()
@@ -186,8 +224,7 @@ unsafe extern "system" fn DllGetClassObject(
             return CLASS_E_CLASSNOTAVAILABLE;
         }
 
-        let factory = NiumaTermClassFactory;
-        let factory: IClassFactory = factory.into();
+        let factory: IClassFactory = NiumaTermClassFactory::new().into();
 
         factory.query(&*riid, ppv)
     }
