@@ -566,7 +566,6 @@ pub struct PendingCompletion {
 
 #[derive(Clone, Debug)]
 pub struct AgentPaneState {
-    pub candidate: Option<(String, String)>,
     pub current_owner: Option<AgentOwner>,
     pub turn_generation: u64,
     pub status: AgentRuntimeStatus,
@@ -580,7 +579,6 @@ pub struct AgentPaneState {
 impl AgentPaneState {
     fn new(now: Instant) -> Self {
         Self {
-            candidate: None,
             current_owner: None,
             turn_generation: 0,
             status: AgentRuntimeStatus::Idle,
@@ -726,8 +724,9 @@ impl AgentMonitor {
             AgentEventKind::SessionStarted => {
                 let state = self.panes.get_mut(&route).expect("live route");
 
+                // Session start alone is not evidence of a running turn; it
+                // only refreshes pane liveness.
                 if state.current_owner.is_none() || state.status == AgentRuntimeStatus::Idle {
-                    state.candidate = Some((event.agent, event.session_id));
                     state.updated_at = now;
                 }
 
@@ -743,7 +742,6 @@ impl AgentMonitor {
                 }
 
                 state.current_owner = Some(owner);
-                state.candidate = None;
                 state.has_work_evidence = true;
                 state.pending_completion = None;
 
@@ -917,7 +915,6 @@ impl AgentMonitor {
             return MonitorMutation::default();
         }
 
-        state.candidate = None;
         state.current_owner = None;
         state.has_work_evidence = false;
         state.pending_completion = None;
@@ -1260,7 +1257,7 @@ mod tests {
         monitor.apply(event(&r, "s1", None, AgentEventKind::SessionStarted), now);
         let state = monitor.pane(&r).unwrap();
         assert_eq!(state.status, AgentRuntimeStatus::Idle);
-        assert_eq!(state.candidate, Some(("codex".into(), "s1".into())));
+        assert_eq!(state.current_owner, None);
     }
 
     #[test]
