@@ -106,7 +106,8 @@ pub fn vi_motion(g: &VisibleGrid, escape_chars: &str, mut pos: Pos, motion: ViMo
             pos = Pos::new(Line(line), col);
         }
         ViMotion::Middle => {
-            let line = g.rows_len() / 2 - 1;
+            // saturating_sub: a one-row viewport would otherwise underflow.
+            let line = (g.rows_len() / 2).saturating_sub(1);
             let col = first_occupied_in_line(g, line).unwrap_or_default().col;
             pos = Pos::new(Line(line), col);
         }
