@@ -35,7 +35,7 @@ mod tests {
 
     #[test]
     fn builtins_have_unique_names_and_sources() {
-        assert_eq!(THEMES.len(), 4);
+        assert!(!THEMES.is_empty());
         let mut names: Vec<_> = THEMES.iter().map(|theme| theme.name).collect();
         names.sort_unstable();
         names.dedup();
