@@ -35,10 +35,9 @@ use crate::ui::{
 };
 use crate::window::{AppWindow, LastActiveWindow, ShellRegistry, WindowRegistry};
 
-enum StartupArgs {
-    Run { url: Option<String>, testing: bool },
-    RegisterShellExtension,
-    UnregisterShellExtension,
+struct StartupArgs {
+    url: Option<String>,
+    testing: bool,
 }
 
 struct StartupFiles {
@@ -52,24 +51,8 @@ pub(crate) struct PlatformHandle(pub(crate) Rc<gpui_windows::WindowsPlatform>);
 impl gpui::Global for PlatformHandle {}
 
 fn main() {
-    let startup_args = parse_startup_args();
-    match startup_args {
-        StartupArgs::RegisterShellExtension => {
-            if let Err(err) = nmt_platform::register_shell_integration() {
-                eprintln!("failed to register shell extension: {err:#}");
-                std::process::exit(1);
-            }
-            return;
-        }
-        StartupArgs::UnregisterShellExtension => {
-            if let Err(err) = nmt_platform::unregister_shell_integration() {
-                eprintln!("failed to unregister shell extension: {err:#}");
-                std::process::exit(1);
-            }
-            return;
-        }
-        StartupArgs::Run { url, testing } => run_app(url, testing),
-    }
+    let StartupArgs { url, testing } = parse_startup_args();
+    run_app(url, testing);
 }
 
 fn parse_startup_args() -> StartupArgs {
@@ -81,80 +64,53 @@ where
     I: IntoIterator<Item = T>,
     T: Into<OsString>,
 {
-    let args = args.into_iter().map(|arg| {
-        let arg = arg.into();
-        match arg.to_str() {
-            Some("-registerShellExtension") => OsString::from("--registerShellExtension"),
-            Some("-unregisterShellExtension") => OsString::from("--unregisterShellExtension"),
-            _ => arg,
-        }
-    });
+    let args = args.into_iter().map(Into::<OsString>::into);
 
     let matches = ClapCommand::new("NiumaTerm")
         .disable_help_flag(true)
         .arg(
-            Arg::new("register")
-                .long("registerShellExtension")
-                .action(ArgAction::SetTrue)
-                .conflicts_with_all(["unregister", "new-tab", "new-window", "url"]),
-        )
-        .arg(
-            Arg::new("unregister")
-                .long("unregisterShellExtension")
-                .action(ArgAction::SetTrue)
-                .conflicts_with_all(["register", "new-tab", "new-window", "url"]),
-        )
-        .arg(
             Arg::new("testing")
                 .long("testing")
-                .action(ArgAction::SetTrue)
-                .conflicts_with_all(["register", "unregister"]),
+                .action(ArgAction::SetTrue),
         )
         .arg(
             Arg::new("new-tab")
                 .long("new-tab")
                 .value_name("PATH")
-                .conflicts_with_all(["register", "unregister", "new-window", "url"]),
+                .conflicts_with_all(["new-window", "url"]),
         )
         .arg(
             Arg::new("new-window")
                 .long("new-window")
                 .value_name("PATH")
-                .conflicts_with_all(["register", "unregister", "new-tab", "url"]),
+                .conflicts_with_all(["new-tab", "url"]),
         )
-        .arg(Arg::new("url").index(1).conflicts_with_all([
-            "register",
-            "unregister",
-            "new-tab",
-            "new-window",
-        ]))
+        .arg(
+            Arg::new("url")
+                .index(1)
+                .conflicts_with_all(["new-tab", "new-window"]),
+        )
         .try_get_matches_from(args)
         .unwrap_or_else(|err| {
             eprintln!("{err}");
             std::process::exit(2);
         });
 
-    if matches.get_flag("register") {
-        StartupArgs::RegisterShellExtension
-    } else if matches.get_flag("unregister") {
-        StartupArgs::UnregisterShellExtension
-    } else {
-        StartupArgs::Run {
-            testing: matches.get_flag("testing"),
-            url: matches
-                .get_one::<String>("url")
-                .cloned()
-                .or_else(|| {
-                    matches
-                        .get_one::<String>("new-tab")
-                        .map(|path| cli::path_action_url("new_tab", path))
-                })
-                .or_else(|| {
-                    matches
-                        .get_one::<String>("new-window")
-                        .map(|path| cli::path_action_url("new_window", path))
-                }),
-        }
+    StartupArgs {
+        testing: matches.get_flag("testing"),
+        url: matches
+            .get_one::<String>("url")
+            .cloned()
+            .or_else(|| {
+                matches
+                    .get_one::<String>("new-tab")
+                    .map(|path| cli::path_action_url("new_tab", path))
+            })
+            .or_else(|| {
+                matches
+                    .get_one::<String>("new-window")
+                    .map(|path| cli::path_action_url("new_window", path))
+            }),
     }
 }
 
@@ -423,24 +379,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_shell_extension_flags() {
-        assert!(matches!(
-            parse_startup_args_from(["NiumaTerm", "-registerShellExtension"]),
-            StartupArgs::RegisterShellExtension
-        ));
-        assert!(matches!(
-            parse_startup_args_from(["NiumaTerm", "-unregisterShellExtension"]),
-            StartupArgs::UnregisterShellExtension
-        ));
-    }
-
-    #[test]
     fn keeps_url_argument_for_normal_launch() {
-        let StartupArgs::Run { url, .. } =
-            parse_startup_args_from(["NiumaTerm", "nmt://action/new_tab?path=C%3A%2FWorkspace"])
-        else {
-            panic!("expected normal launch");
-        };
+        let StartupArgs { url, .. } =
+            parse_startup_args_from(["NiumaTerm", "nmt://action/new_tab?path=C%3A%2FWorkspace"]);
         assert_eq!(
             url.as_deref(),
             Some("nmt://action/new_tab?path=C%3A%2FWorkspace")
@@ -449,21 +390,15 @@ mod tests {
 
     #[test]
     fn parses_shell_extension_path_flags() {
-        let StartupArgs::Run { url, .. } =
-            parse_startup_args_from(["NiumaTerm", "--new-tab", r"C:\A Dir"])
-        else {
-            panic!("expected normal launch");
-        };
+        let StartupArgs { url, .. } =
+            parse_startup_args_from(["NiumaTerm", "--new-tab", r"C:\A Dir"]);
         assert_eq!(
             url.as_deref(),
             Some("nmt://action/new_tab?path=C%3A%5CA%20Dir")
         );
 
-        let StartupArgs::Run { url, .. } =
-            parse_startup_args_from(["NiumaTerm", "--new-window", r"C:\A&B"])
-        else {
-            panic!("expected normal launch");
-        };
+        let StartupArgs { url, .. } =
+            parse_startup_args_from(["NiumaTerm", "--new-window", r"C:\A&B"]);
         assert_eq!(
             url.as_deref(),
             Some("nmt://action/new_window?path=C%3A%5CA%26B")
@@ -472,16 +407,11 @@ mod tests {
 
     #[test]
     fn parses_testing_mode() {
-        let StartupArgs::Run { url, testing } = parse_startup_args_from(["NiumaTerm", "--testing"])
-        else {
-            panic!("expected testing launch");
-        };
+        let StartupArgs { url, testing } = parse_startup_args_from(["NiumaTerm", "--testing"]);
         assert!(testing);
         assert!(url.is_none());
 
-        let StartupArgs::Run { testing, .. } = parse_startup_args_from(["NiumaTerm"]) else {
-            panic!("expected normal launch");
-        };
+        let StartupArgs { testing, .. } = parse_startup_args_from(["NiumaTerm"]);
         assert!(!testing);
     }
 }
