@@ -1,7 +1,5 @@
 use std::fmt;
 
-use nmt_config::ConfigError;
-
 #[derive(Clone, Copy, PartialEq)]
 pub enum TerminalErrorLevel {
     Warning,
@@ -19,25 +17,6 @@ impl TerminalError {
         TerminalError {
             level: TerminalErrorLevel::Warning,
             report: TerminalErrorType::ConfigurationNotFound,
-        }
-    }
-}
-
-impl From<ConfigError> for TerminalError {
-    fn from(error: ConfigError) -> Self {
-        match error {
-            ConfigError::ErrLoadingConfig(message) => TerminalError {
-                report: TerminalErrorType::InvalidConfigurationFormat(message),
-                level: TerminalErrorLevel::Warning,
-            },
-            ConfigError::ErrLoadingTheme(message) => TerminalError {
-                report: TerminalErrorType::InvalidConfigurationTheme(message),
-                level: TerminalErrorLevel::Warning,
-            },
-            ConfigError::PathNotFound => TerminalError {
-                report: TerminalErrorType::ConfigurationNotFound,
-                level: TerminalErrorLevel::Warning,
-            },
         }
     }
 }
