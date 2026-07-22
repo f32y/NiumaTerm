@@ -36,7 +36,9 @@ use nmt_config::defaults::default_theme;
 use nmt_config::remote_session::RemoteSession;
 use nmt_config::system::{SystemConfig, WarnBeforeTerminatingShell};
 use nmt_config::theme::{AppearanceTheme, Theme, UiTheme};
-use nmt_config::{Config, CursorShape, config_dir_path, get, save_settings, set_active_colors};
+use nmt_config::{
+    Config, CursorShape, SettingsPatch, config_dir_path, get, save_settings, set_active_colors,
+};
 use nmt_platform::{
     is_shell_integration_registered, register_shell_integration, set_system_notification_enabled,
     shell_integration_dll_mismatched, system_notification_enabled, unregister_shell_integration,
@@ -457,16 +459,16 @@ impl AppSettings {
 
         let profiles = self.profiles.clone();
 
-        if let Err(err) = save_settings(
-            &self.theme,
-            &appearance,
-            self.cursor_shape,
-            &agent,
-            &system,
-            &remote_session,
-            &profiles,
-            &self.default_profile,
-        ) {
+        if let Err(err) = save_settings(&SettingsPatch {
+            theme: &self.theme,
+            appearance: &appearance,
+            cursor_shape: self.cursor_shape,
+            agent: &agent,
+            system: &system,
+            remote_session: &remote_session,
+            profiles: &profiles,
+            default_profile: &self.default_profile,
+        }) {
             warn!("failed to save settings to config.toml: {err}");
         }
     }
