@@ -62,19 +62,6 @@ impl NavigationMode {
     }
 }
 
-#[inline]
-pub fn modes_as_vec_string() -> Vec<String> {
-    [
-        NavigationMode::Plain,
-        NavigationMode::Tab,
-        #[cfg(target_os = "macos")]
-        NavigationMode::NativeTab,
-    ]
-    .iter()
-    .map(|navigation_mode| navigation_mode.to_string())
-    .collect()
-}
-
 impl fmt::Display for NavigationMode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.as_str())
