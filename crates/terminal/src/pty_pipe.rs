@@ -963,8 +963,6 @@ where
             },
         );
 
-        drop(engine_cell);
-
         if let Some(trusted) = self.sniffer.take_boundary_trust_changed() {
             self.event_proxy.send_event(
                 TerminalEvent::PromptBoundaryTrusted(trusted),
