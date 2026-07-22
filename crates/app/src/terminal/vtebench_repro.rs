@@ -1,14 +1,16 @@
-//! Repro harness for the two vtebench-reported block-mode bugs (real ConPTY +
-//! real PowerShell + the bundled OSC 133 integration script):
+//! Regression tests for the two vtebench-reported block-mode bugs (real
+//! ConPTY + real PowerShell + the bundled OSC 133 integration script):
 //!
 //! 1. A command interrupted (or exiting) while the engine is on the alternate
-//!    screen leaves `AltScreen(true)` latched forever — block mode never
-//!    re-engages at the next prompt.
+//!    screen left `AltScreen(true)` latched forever — block mode never
+//!    re-engaged at the next prompt.
 //! 2. A command that ends its output with a RIS (`ESC c`, what vtebench writes
-//!    between samples and before printing results) loses the post-RIS output:
-//!    the results text shows up neither in the frozen block nor on screen.
+//!    between samples and before printing results) lost the post-RIS output:
+//!    the results text showed up neither in the frozen block nor on screen.
 //!
-//! Both tests assert the DESIRED behavior, so they fail while the bug exists.
+//! Both bugs are fixed; these tests pin the recovered behavior. Environments
+//! where the real shell session cannot start (no ConPTY, missing PowerShell)
+//! skip via the `trusted_session()` guard rather than failing.
 
 #![cfg(windows)]
 
