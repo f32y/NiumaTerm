@@ -14,8 +14,8 @@ pub struct Renderer {
         rename = "disable-occluded-render"
     )]
     pub disable_occluded_render: bool,
-    #[serde(default = "RendererStategy::default")]
-    pub strategy: RendererStategy,
+    #[serde(default = "RendererStrategy::default")]
+    pub strategy: RendererStrategy,
     /// Use the CPU rasterizer (tiny-skia) instead of the GPU pipeline.
     /// Experimental. v1 supports solid quads + glyphs only; image
     /// overlays, advanced underline styles, and corner radii
@@ -33,7 +33,7 @@ fn default_disable_occluded_render() -> bool {
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub enum RendererStategy {
+pub enum RendererStrategy {
     #[default]
     #[serde(alias = "events")]
     Events,
@@ -41,15 +41,15 @@ pub enum RendererStategy {
     Game,
 }
 
-impl RendererStategy {
+impl RendererStrategy {
     #[inline]
     pub fn is_game(&self) -> bool {
-        self == &RendererStategy::Game
+        self == &RendererStrategy::Game
     }
 
     #[inline]
     pub fn is_event_based(&self) -> bool {
-        self == &RendererStategy::Events
+        self == &RendererStrategy::Events
     }
 }
 
@@ -60,7 +60,7 @@ impl Default for Renderer {
             backend: Backend::default(),
             disable_unfocused_render: false,
             disable_occluded_render: default_disable_occluded_render(),
-            strategy: RendererStategy::Events,
+            strategy: RendererStrategy::Events,
             use_cpu: default_use_cpu(),
         }
     }
