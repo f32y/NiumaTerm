@@ -84,11 +84,13 @@ fn get_folder_path(items: Option<&IShellItemArray>) -> Option<String> {
 
         let name = item.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
 
-        let path = name.to_string().ok()?;
+        // Convert before freeing, free before the ?-return: bailing out on a
+        // failed UTF-16 conversion must not leak the CoTaskMem string.
+        let path = name.to_string();
 
         CoTaskMemFree(Some(name.0 as *const _));
 
-        Some(path)
+        path.ok()
     }
 }
 
