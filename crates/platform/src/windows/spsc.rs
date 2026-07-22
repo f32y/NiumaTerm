@@ -16,6 +16,13 @@ struct SpscBuffer {
     len: AtomicUsize,
 }
 
+// Safety: all cross-thread data access goes through the reader/writer halves,
+// whose disjoint [start, len) / [end, capacity-len) regions are synchronized
+// by the atomic `len` (release on publish, acquire on consume via SeqCst).
+// The UnsafeCell contents are never touched through `&SpscBuffer` directly.
+unsafe impl Send for SpscBuffer {}
+unsafe impl Sync for SpscBuffer {}
+
 impl SpscBuffer {
     fn new(size: usize) -> Self {
         Self {
@@ -111,9 +118,6 @@ impl Read for SpscBufferReader {
     }
 }
 
-unsafe impl Sync for SpscBufferReader {}
-unsafe impl Send for SpscBufferReader {}
-
 /// Producer for the ringbuffer
 pub struct SpscBufferWriter {
     end: usize,
@@ -172,9 +176,6 @@ impl SpscBufferWriter {
         write_size
     }
 }
-
-unsafe impl Sync for SpscBufferWriter {}
-unsafe impl Send for SpscBufferWriter {}
 
 impl Write for SpscBufferWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
