@@ -545,40 +545,23 @@ pub fn set_active_colors(colors: Colors) {
         .expect("active theme colors lock poisoned") = colors;
 }
 
-pub fn save_settings(
-    theme: &str,
-    appearance: &AppearanceConfig,
-    cursor_shape: CursorShape,
-    agent: &AgentConfig,
-    system: &SystemConfig,
-    remote_session: &RemoteSession,
-    profiles: &[Profile],
-    default_profile: &str,
-) -> io::Result<()> {
-    save_settings_to(
-        &config_file_path(),
-        theme,
-        appearance,
-        cursor_shape,
-        agent,
-        system,
-        remote_session,
-        profiles,
-        default_profile,
-    )
+/// The settings-dialog values written back to config.toml in one patch.
+pub struct SettingsPatch<'a> {
+    pub theme: &'a str,
+    pub appearance: &'a AppearanceConfig,
+    pub cursor_shape: CursorShape,
+    pub agent: &'a AgentConfig,
+    pub system: &'a SystemConfig,
+    pub remote_session: &'a RemoteSession,
+    pub profiles: &'a [Profile],
+    pub default_profile: &'a str,
 }
 
-fn save_settings_to(
-    path: &Path,
-    theme: &str,
-    appearance: &AppearanceConfig,
-    cursor_shape: CursorShape,
-    agent: &AgentConfig,
-    system: &SystemConfig,
-    remote_session: &RemoteSession,
-    profiles: &[Profile],
-    default_profile: &str,
-) -> io::Result<()> {
+pub fn save_settings(patch: &SettingsPatch<'_>) -> io::Result<()> {
+    save_settings_to(&config_file_path(), patch)
+}
+
+fn save_settings_to(path: &Path, patch: &SettingsPatch<'_>) -> io::Result<()> {
     let mut doc = match fs::read_to_string(path) {
         Ok(content) => content.parse::<DocumentMut>().map_err(|err| {
             io::Error::new(
@@ -590,17 +573,7 @@ fn save_settings_to(
         Err(_) => DocumentMut::new(),
     };
 
-    patch_settings_document(
-        &mut doc,
-        theme,
-        appearance,
-        cursor_shape,
-        agent,
-        system,
-        remote_session,
-        profiles,
-        default_profile,
-    );
+    patch_settings_document(&mut doc, patch);
 
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
@@ -611,18 +584,18 @@ fn save_settings_to(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-fn patch_settings_document(
-    doc: &mut DocumentMut,
-    theme: &str,
-    appearance: &AppearanceConfig,
-    cursor_shape: CursorShape,
-    agent: &AgentConfig,
-    system: &SystemConfig,
-    remote_session: &RemoteSession,
-    profiles: &[Profile],
-    default_profile: &str,
-) {
+fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) {
+    let &SettingsPatch {
+        theme,
+        appearance,
+        cursor_shape,
+        agent,
+        system,
+        remote_session,
+        profiles,
+        default_profile,
+    } = patch;
+
     doc["theme"] = value(theme);
     ensure_explicit_table(doc, "appearance");
     doc["appearance"]["input-style"] = value(appearance.input_style.as_str());
@@ -735,14 +708,16 @@ mod tests {
     fn patch_settings(doc: &mut DocumentMut) {
         patch_settings_document(
             doc,
-            "test-theme",
-            &sample_appearance(),
-            CursorShape::Beam,
-            &sample_agent(),
-            &sample_system(),
-            &sample_remote_session(),
-            &sample_profiles(),
-            "PowerShell",
+            &SettingsPatch {
+                theme: "test-theme",
+                appearance: &sample_appearance(),
+                cursor_shape: CursorShape::Beam,
+                agent: &sample_agent(),
+                system: &sample_system(),
+                remote_session: &sample_remote_session(),
+                profiles: &sample_profiles(),
+                default_profile: "PowerShell",
+            },
         );
     }
 
@@ -790,14 +765,16 @@ mod tests {
         let save = || {
             save_settings_to(
                 &path,
-                "test-theme",
-                &sample_appearance(),
-                CursorShape::Beam,
-                &sample_agent(),
-                &sample_system(),
-                &sample_remote_session(),
-                &sample_profiles(),
-                "PowerShell",
+                &SettingsPatch {
+                    theme: "test-theme",
+                    appearance: &sample_appearance(),
+                    cursor_shape: CursorShape::Beam,
+                    agent: &sample_agent(),
+                    system: &sample_system(),
+                    remote_session: &sample_remote_session(),
+                    profiles: &sample_profiles(),
+                    default_profile: "PowerShell",
+                },
             )
         };
 
