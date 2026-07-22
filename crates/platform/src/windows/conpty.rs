@@ -317,13 +317,18 @@ pub fn new(
         // setup succeeded (failure degrades to unmanaged, it must not hang).
         unsafe {
             ResumeThread(proc_info.hThread);
-            CloseHandle(proc_info.hThread);
         }
 
         job
     } else {
         None
     };
+
+    // The primary-thread handle has no further use in either path; leaving it
+    // open would leak one thread handle per spawned PTY.
+    unsafe {
+        CloseHandle(proc_info.hThread);
+    }
 
     let conin = EventedAnonWrite::new(conin);
     let conout = EventedAnonRead::new(conout);
