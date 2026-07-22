@@ -165,7 +165,6 @@ impl TerminalSurface {
         args: Vec<String>,
         working_dir: Option<String>,
         starting_title: String,
-        fixed_bottom_requested: bool,
         cursor_shape: CursorShape,
         remote_session_enabled: bool,
         environment_overrides: Vec<(String, String)>,
@@ -186,8 +185,6 @@ impl TerminalSurface {
             environment_overrides,
             ..TerminalSessionConfig::default()
         };
-
-        let _ = fixed_bottom_requested;
 
         Self::new(config, surface_id, Some(wake_sender))
     }
