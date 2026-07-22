@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::os::windows::process::CommandExt as _;
 use std::time::Duration;
-use std::{fs, path, process};
+use std::{fs, io, path, process};
 
 use gpui::prelude::*;
 use gpui::{Context, Entity, SharedString, Window, div};
@@ -132,24 +132,41 @@ pub(crate) fn fetch_snapshot(root: &str) -> Result<GitSnapshot, String> {
 }
 
 /// Line count of an untracked file (its "all added" count); 0 for binary
-/// (NUL-containing) or unreadable files.
+/// (NUL-containing) or unreadable files. Streams in fixed chunks — untracked
+/// files can be huge (build artifacts, datasets) and this runs every refresh
+/// tick, so the whole file must never be pulled into memory at once.
 fn count_file_lines(root: &str, path: &str) -> u64 {
-    let Ok(bytes) = fs::read(path::Path::new(root).join(path)) else {
+    use std::io::Read as _;
+
+    let Ok(file) = fs::File::open(path::Path::new(root).join(path)) else {
         return 0;
     };
 
-    count_lines(&bytes)
-}
+    let mut reader = io::BufReader::new(file);
+    let mut buf = [0u8; 64 * 1024];
+    let mut newlines = 0u64;
+    let mut last = b'\n';
 
-fn count_lines(bytes: &[u8]) -> u64 {
-    if bytes.is_empty() || bytes.contains(&0) {
-        return 0;
+    loop {
+        match reader.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                let chunk = &buf[..n];
+
+                if chunk.contains(&0) {
+                    return 0;
+                }
+
+                newlines += chunk.iter().filter(|b| **b == b'\n').count() as u64;
+                last = chunk[n - 1];
+            }
+            Err(_) => return 0,
+        }
     }
 
-    let newlines = bytes.iter().filter(|b| **b == b'\n').count() as u64;
-
-    // A trailing fragment without a newline is still a line (matches numstat).
-    newlines + u64::from(*bytes.last().unwrap() != b'\n')
+    // A trailing fragment without a newline is still a line (matches numstat);
+    // `last` starts as '\n' so an empty file counts zero.
+    newlines + u64::from(last != b'\n')
 }
 
 /// Fetch and classify the unified diff of one file. Untracked files render
@@ -515,6 +532,8 @@ impl Render for GitStatusView {
 
 #[cfg(test)]
 mod tests {
+    use std::env;
+
     use super::*;
 
     #[test]
@@ -585,9 +604,21 @@ mod tests {
 
     #[test]
     fn count_lines_handles_trailing_newline_and_binary() {
-        assert_eq!(count_lines(b""), 0);
-        assert_eq!(count_lines(b"one\ntwo\n"), 2);
-        assert_eq!(count_lines(b"one\ntwo"), 2);
-        assert_eq!(count_lines(b"bin\0ary"), 0);
+        let dir = env::temp_dir().join(format!("nmt-count-lines-{}", process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let root = dir.to_string_lossy().to_string();
+
+        let check = |name: &str, bytes: &[u8], expected: u64| {
+            fs::write(dir.join(name), bytes).unwrap();
+            assert_eq!(count_file_lines(&root, name), expected, "{name}");
+        };
+
+        check("empty", b"", 0);
+        check("trailing", b"one\ntwo\n", 2);
+        check("no-trailing", b"one\ntwo", 2);
+        check("binary", b"bin\0ary", 0);
+        assert_eq!(count_file_lines(&root, "missing"), 0);
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }
