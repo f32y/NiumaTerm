@@ -554,7 +554,7 @@ mod tests {
 
     #[test]
     fn numstat_z_parses_counts_binary_and_rename() {
-        let raw = b"3\t1\tsrc/lib.rs\0-\t-\tassets/logo.png\05\t0\t\0old.rs\0new.rs\0";
+        let raw = b"3\t1\tsrc/lib.rs\0-\t-\tassets/logo.png\x005\t0\t\0old.rs\0new.rs\0";
         let entries = parse_numstat_z(raw);
         assert_eq!(
             entries,
