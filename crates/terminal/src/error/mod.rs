@@ -46,9 +46,9 @@ impl From<ConfigError> for TerminalError {
 pub enum TerminalErrorType {
     InitializationError(String),
 
-    // configurlation file was not found
+    // configuration file was not found
     ConfigurationNotFound,
-    // configuration file have an invalid format
+    // configuration file has an invalid format
     InvalidConfigurationFormat(String),
     // configuration invalid theme
     InvalidConfigurationTheme(String),

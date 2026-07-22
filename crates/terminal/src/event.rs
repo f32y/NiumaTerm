@@ -388,8 +388,8 @@ impl Debug for TerminalEvent {
                 write!(f, "BlockBatch({} events)", events.len())
             }
             TerminalEvent::Minimize(cond) => write!(f, "Minimize({cond})"),
-            TerminalEvent::Hide => write!(f, "Hide)"),
-            TerminalEvent::HideOtherApplications => write!(f, "HideOtherApplications)"),
+            TerminalEvent::Hide => write!(f, "Hide"),
+            TerminalEvent::HideOtherApplications => write!(f, "HideOtherApplications"),
             TerminalEvent::CursorBlinkingChange => write!(f, "CursorBlinkingChange"),
             TerminalEvent::CursorBlinkingChangeOnRoute(route_id) => {
                 write!(f, "CursorBlinkingChangeOnRoute {route_id}")
