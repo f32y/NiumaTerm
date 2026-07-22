@@ -37,3 +37,7 @@ Setup git hooks before committing anything:
 ```
 git config core.hooksPath .githooks
 ```
+
+## Code Style
+
+- Insert reasonable blank lines between logic.
