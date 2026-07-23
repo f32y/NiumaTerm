@@ -707,6 +707,9 @@ mod tests {
     use gpui::{Boundary, FontFeatures, FontStyle, FontWeight, px};
 
     #[test]
+    // An expected `wrapped_lines` value really is one empty range ([0..0]),
+    // so the single-range lint is a false positive here.
+    #[allow(clippy::single_range_in_vec_init)]
     fn test_update() {
         let font = gpui::Font {
             family: "Arial".into(),
@@ -934,6 +937,9 @@ mod tests {
 
     /// Editing the last line and deleting everything must keep the tree consistent.
     #[test]
+    // The expected `wrapped_lines` value really is one empty range ([0..0]),
+    // so the single-range lint is a false positive here.
+    #[allow(clippy::single_range_in_vec_init)]
     fn test_edit_last_line_and_full_delete() {
         let mut wrapper = TextWrapper::new(test_font(), px(14.), None);
         let mut text = Rope::from("one\ntwo\nthree");

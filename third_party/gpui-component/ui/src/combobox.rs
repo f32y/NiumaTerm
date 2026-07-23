@@ -1069,10 +1069,10 @@ mod tests {
 
             state.update(cx, |s, cx| {
                 s.state.list.update(cx, |list, cx| {
-                    let _ = list
-                        .delegate_mut()
+                    list.delegate_mut()
                         .delegate
-                        .perform_search("Rust", window, cx);
+                        .perform_search("Rust", window, cx)
+                        .detach();
                 });
             });
 
@@ -1163,10 +1163,10 @@ mod tests {
 
             state.update(cx, |s, cx| {
                 s.state.list.update(cx, |list, cx| {
-                    let _ = list
-                        .delegate_mut()
+                    list.delegate_mut()
                         .delegate
-                        .perform_search("Vue", window, cx);
+                        .perform_search("Vue", window, cx)
+                        .detach();
                 });
             });
 
@@ -1203,10 +1203,10 @@ mod tests {
 
             state.update(cx, |s, cx| {
                 s.state.list.update(cx, |list, cx| {
-                    let _ = list
-                        .delegate_mut()
+                    list.delegate_mut()
                         .delegate
-                        .perform_search("React", window, cx);
+                        .perform_search("React", window, cx)
+                        .detach();
                 });
             });
 
@@ -1225,7 +1225,7 @@ mod tests {
             let mut delegate = SearchableVec::new(vec!["React", "Vue", "Angular"]);
             let mut selection = vec![(IndexPath::new(1), "Vue")];
 
-            let _ = delegate.perform_search("Vue", window, cx);
+            delegate.perform_search("Vue", window, cx).detach();
             delegate.on_will_change(
                 &mut selection,
                 &[SearchableListChange::Deselect {
