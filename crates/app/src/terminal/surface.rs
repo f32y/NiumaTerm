@@ -166,7 +166,6 @@ impl TerminalSurface {
         working_dir: Option<String>,
         starting_title: String,
         cursor_shape: CursorShape,
-        remote_session_enabled: bool,
         environment_overrides: Vec<(String, String)>,
     ) -> Result<Self, String> {
         let wake_sender = WakeSender::from_fn(move |kind: Wake| {
@@ -181,7 +180,6 @@ impl TerminalSurface {
             cols: metrics::COLS,
             rows: metrics::ROWS,
             cursor_shape,
-            remote_session_enabled,
             environment_overrides,
             ..TerminalSessionConfig::default()
         };

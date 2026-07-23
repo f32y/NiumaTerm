@@ -11,7 +11,6 @@ use base64::engine::general_purpose::STANDARD;
 use nmt_config::local_state::TabState;
 use nmt_config::{CursorShape, active_colors};
 use nmt_platform::{EventedPty, WinsizeBuilder, create_pty_with_env, job_other_process_count};
-use nmt_remote_session_hub::{RemotePty, RemoteSessionControl, SessionOptions};
 use nmt_terminal::block_store::{BlockStore, SegmentMeta};
 use nmt_terminal::clipboard::Clipboard;
 use nmt_terminal::event::{BlockEvent, EventListener, Msg, MsgSender, TerminalEvent, WindowId};
@@ -19,7 +18,7 @@ use nmt_terminal::ghostty::GhosttyTerminal;
 use nmt_terminal::pty_pipe::PtyPipe;
 use nmt_terminal::render_buffer::RenderBuffer;
 use parking_lot::{FairMutex, Mutex};
-use tracing::{debug, error, warn};
+use tracing::{debug, error};
 
 use crate::error::{EngineError, EngineErrorCode};
 use crate::terminal;
@@ -103,8 +102,6 @@ pub struct TerminalSession {
     /// Raw Job Object handle managing the shell tree (when job management was
     /// on at spawn). Owned by the PTY; only queried while the session lives.
     job_handle: Option<isize>,
-    /// Parent-side control used to query the Job Object owned by SessionHub.
-    remote_control: Option<RemoteSessionControl>,
     /// Engine-blocks mode is active: frozen history lives in
     /// finished engine blocks, rendered through `BlockRef` handles. Mirrors the
     /// flag the PTY pipe runs with.
@@ -164,72 +161,35 @@ impl TerminalSession {
             wake,
         };
 
-        let (job_handle, remote_control, engine, messenger) = if config.remote_session_enabled {
-            let pty = RemotePty::spawn(SessionOptions {
-                shell: shell.clone(),
-                args: config.args.clone(),
-                working_directory: config.working_dir.clone(),
-                environment_overrides: config.environment_overrides.clone(),
-                starting_title: config.starting_title.clone(),
-                cols,
-                rows,
-                scrollback_lines: config.scrollback_lines,
-                manage_process_tree: false,
-            })
-            .map_err(|error| {
-                EngineError::new(
-                    EngineErrorCode::PtySpawn,
-                    format!("failed to start shell '{shell}' through SessionHub: {error}"),
-                )
-            })?;
-
-            let remote_control = pty.control();
-
-            let (engine, messenger) = start_pipe(
-                Arc::clone(&render_buffer),
-                Arc::clone(&vt_modes),
-                pty,
-                proxy,
-                id,
-                config.scrollback_lines,
-                config.cursor_shape,
-                engine_blocks,
-            )?;
-
-            (None, Some(remote_control), engine, messenger)
-        } else {
-            let pty = create_pty_with_env(
-                &shell,
-                config.args.clone(),
-                &config.working_dir,
-                cols,
-                rows,
-                &config.environment_overrides,
-                config.starting_title.as_deref(),
+        let pty = create_pty_with_env(
+            &shell,
+            config.args.clone(),
+            &config.working_dir,
+            cols,
+            rows,
+            &config.environment_overrides,
+            config.starting_title.as_deref(),
+        )
+        .map_err(|error| {
+            error!("session create_pty failed: {error:?}");
+            EngineError::new(
+                EngineErrorCode::PtySpawn,
+                format!("failed to start shell '{shell}' via ConPTY: {error}"),
             )
-            .map_err(|error| {
-                error!("session create_pty failed: {error:?}");
-                EngineError::new(
-                    EngineErrorCode::PtySpawn,
-                    format!("failed to start shell '{shell}' via ConPTY: {error}"),
-                )
-            })?;
+        })?;
 
-            let job_handle = pty.job_handle().map(|handle| handle as isize);
+        let job_handle = pty.job_handle().map(|handle| handle as isize);
 
-            let (engine, messenger) = start_pipe(
-                Arc::clone(&render_buffer),
-                Arc::clone(&vt_modes),
-                pty,
-                proxy,
-                id,
-                config.scrollback_lines,
-                config.cursor_shape,
-                engine_blocks,
-            )?;
-
-            (job_handle, None, engine, messenger)
-        };
+        let (engine, messenger) = start_pipe(
+            Arc::clone(&render_buffer),
+            Arc::clone(&vt_modes),
+            pty,
+            proxy,
+            id,
+            config.scrollback_lines,
+            config.cursor_shape,
+            engine_blocks,
+        )?;
 
         Ok(TerminalSession {
             engine,
@@ -244,7 +204,6 @@ impl TerminalSession {
             open_prompt,
             frozen_images,
             job_handle,
-            remote_control,
             engine_blocks,
         })
     }
@@ -278,15 +237,6 @@ impl TerminalSession {
     /// Number of processes beyond the shell itself in the shell's Job
     /// Object (requires job management; 0 otherwise).
     pub fn child_process_count(&self) -> usize {
-        if let Some(control) = &self.remote_control {
-            return control.child_process_count().unwrap_or_else(|error| {
-                // An unavailable count must not silently bypass the destructive
-                // close confirmation while the remote shell may still be alive.
-                warn!("failed to query SessionHub child processes: {error}");
-                1
-            });
-        }
-
         self.job_handle.map_or(0, job_other_process_count)
     }
 
@@ -372,8 +322,6 @@ fn start_pipe<T>(
 where
     T: EventedPty + Send + 'static,
 {
-    // The same parser/render pipeline consumes local ConPTY and SessionHub byte
-    // streams, keeping terminal semantics independent of process placement.
     let pipe = PtyPipe::new(
         render_buffer,
         vt_modes,
@@ -629,8 +577,6 @@ pub struct TerminalSessionConfig {
     /// fallback: no freezing, no boundary clears, no block events, intact
     /// scrollback. The GPUI app keeps this enabled and toggles block chrome only.
     pub engine_blocks: bool,
-    /// Route this new terminal through SessionHub instead of creating ConPTY locally.
-    pub remote_session_enabled: bool,
     /// Child-only values merged into the shell's inherited Windows environment.
     /// Runtime metadata is deliberately excluded from persisted tab state.
     pub environment_overrides: Vec<(String, String)>,
@@ -688,7 +634,6 @@ impl Default for TerminalSessionConfig {
             cursor_shape: CursorShape::Block,
             scrollback_lines: 10_000,
             engine_blocks: true,
-            remote_session_enabled: false,
             environment_overrides: Vec::new(),
         }
     }

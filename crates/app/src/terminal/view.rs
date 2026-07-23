@@ -14,7 +14,7 @@ use gpui_component::notification::Notification;
 use gpui_component::{ActiveTheme, WindowExt as _};
 use nmt_agent_utils::{AgentRoute, agent_process};
 use nmt_config::local_state::TabState;
-use nmt_config::{CursorShape, active_colors, get};
+use nmt_config::{CursorShape, active_colors};
 use nmt_terminal::block_store::BlockStore;
 use nmt_terminal::ghostty::{BlockHandle, ScrollbarInfo};
 use nmt_terminal::selection::SelectionType;
@@ -183,14 +183,12 @@ impl TerminalPane {
             )
         });
 
-        let remote_session_enabled = get().remote_session.enabled;
         let surface = terminal_surface_for_tab(
             &wake,
             surface_id,
             &tab_state,
             &profile_name,
             cursor_shape,
-            remote_session_enabled,
             environment,
         )?;
 
@@ -1405,7 +1403,6 @@ fn terminal_surface_for_tab(
     state: &TabState,
     profile_name: &str,
     cursor_shape: CursorShape,
-    remote_session_enabled: bool,
     environment_overrides: Vec<(String, String)>,
 ) -> Result<TerminalSurface, String> {
     match TerminalSurface::for_gpui(
@@ -1416,7 +1413,6 @@ fn terminal_surface_for_tab(
         state.cwd.clone(),
         profile_name.to_string(),
         cursor_shape,
-        remote_session_enabled,
         environment_overrides.clone(),
     ) {
         Ok(surface) => Ok(surface),
@@ -1432,7 +1428,6 @@ fn terminal_surface_for_tab(
                 None,
                 profile_name.to_string(),
                 cursor_shape,
-                remote_session_enabled,
                 environment_overrides,
             )
         }

@@ -11,7 +11,6 @@ pub mod layout;
 pub mod local_state;
 pub mod navigation;
 pub mod profile;
-pub mod remote_session;
 pub mod render_types;
 pub mod renderer;
 pub mod system;
@@ -45,7 +44,6 @@ use crate::keyboard::Keyboard;
 use crate::layout::{Margin, Panel};
 use crate::navigation::Navigation;
 use crate::profile::Profile;
-use crate::remote_session::RemoteSession;
 use crate::renderer::Renderer;
 use crate::system::SystemConfig;
 use crate::title::Title;
@@ -167,9 +165,6 @@ pub struct Config {
     /// System-behavior settings (settings dialog, System page).
     #[serde(default = "system::SystemConfig::default")]
     pub system: system::SystemConfig,
-    /// Out-of-process terminal-session settings (settings dialog, Remote Session page).
-    #[serde(default, rename = "remote-session")]
-    pub remote_session: remote_session::RemoteSession,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -454,7 +449,6 @@ impl Default for Config {
             profiles: profile::ProfilesConfig::default(),
             agent: agent::AgentConfig::default(),
             system: system::SystemConfig::default(),
-            remote_session: remote_session::RemoteSession::default(),
         }
     }
 }
@@ -552,7 +546,6 @@ pub struct SettingsPatch<'a> {
     pub cursor_shape: CursorShape,
     pub agent: &'a AgentConfig,
     pub system: &'a SystemConfig,
-    pub remote_session: &'a RemoteSession,
     pub profiles: &'a [Profile],
     pub default_profile: &'a str,
 }
@@ -591,7 +584,6 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) {
         cursor_shape,
         agent,
         system,
-        remote_session,
         profiles,
         default_profile,
     } = patch;
@@ -628,9 +620,6 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) {
 
     ensure_explicit_table(doc, "system");
     system::patch_document(doc, system);
-
-    ensure_explicit_table(doc, "remote-session");
-    remote_session::patch_document(doc, remote_session);
 
     ensure_explicit_table(doc, "agent");
     agent::patch_document(doc, agent);
@@ -686,10 +675,6 @@ mod tests {
         }
     }
 
-    fn sample_remote_session() -> RemoteSession {
-        RemoteSession { enabled: true }
-    }
-
     fn sample_agent() -> AgentConfig {
         AgentConfig {
             enable_agent_hooks: false,
@@ -714,7 +699,6 @@ mod tests {
                 cursor_shape: CursorShape::Beam,
                 agent: &sample_agent(),
                 system: &sample_system(),
-                remote_session: &sample_remote_session(),
                 profiles: &sample_profiles(),
                 default_profile: "PowerShell",
             },
@@ -736,7 +720,6 @@ mod tests {
         assert_eq!(config.appearance, sample_appearance());
         assert_eq!(config.agent, sample_agent());
         assert_eq!(config.system, sample_system());
-        assert_eq!(config.remote_session, sample_remote_session());
         assert_eq!(config.profiles.list, sample_profiles());
         assert_eq!(config.profiles.default, "PowerShell");
         assert_eq!(config.cursor.shape, CursorShape::Beam);
@@ -771,7 +754,6 @@ mod tests {
                     cursor_shape: CursorShape::Beam,
                     agent: &sample_agent(),
                     system: &sample_system(),
-                    remote_session: &sample_remote_session(),
                     profiles: &sample_profiles(),
                     default_profile: "PowerShell",
                 },

@@ -8,12 +8,4 @@
 mod windows;
 
 #[cfg(windows)]
-pub mod ipc;
-
-#[cfg(windows)]
-mod client;
-
-#[cfg(windows)]
-pub use client::*;
-#[cfg(windows)]
 pub use windows::*;

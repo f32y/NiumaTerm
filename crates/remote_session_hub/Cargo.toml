@@ -8,18 +8,9 @@ authors.workspace = true
 [lints]
 workspace = true
 
-[[bin]]
-name = "SessionHub"
-path = "src/bin/session_hub.rs"
-
 [target.'cfg(windows)'.dependencies]
 nmt_config.workspace = true
 nmt_platform.workspace = true
 nmt_terminal.workspace = true
 parking_lot.workspace = true
-raw_sync.workspace = true
 serde.workspace = true
-tracing.workspace = true
-serde_json.workspace = true
-shared_memory.workspace = true
-windows-sys.workspace = true
