@@ -399,11 +399,7 @@ impl Shell {
         let visible_route = self
             .window_active
             .then(|| self.active_pane().read(cx).agent_route().clone());
-
-        for notification in self
-            .agent_monitor
-            .pending_native_notifications(time::Instant::now())
-        {
+        for notification in self.agent_monitor.pending_native_notifications() {
             if !request_native_delivery(visible_route.as_ref(), &notification.route) {
                 self.acknowledge_notification(&notification.route, &notification.id, cx);
 
