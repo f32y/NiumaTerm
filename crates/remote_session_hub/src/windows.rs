@@ -14,7 +14,6 @@ use nmt_terminal::ghostty::GhosttyTerminal;
 use nmt_terminal::pty_pipe::PtyPipe;
 use nmt_terminal::render_buffer::RenderBuffer;
 use parking_lot::{FairMutex, Mutex};
-use serde::{Deserialize, Serialize};
 
 const SUBSCRIBER_QUEUE_CAPACITY: usize = 128;
 
@@ -27,7 +26,7 @@ impl fmt::Display for SessionId {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug)]
 pub struct SessionOptions {
     pub shell: String,
     pub args: Vec<String>,
@@ -37,7 +36,6 @@ pub struct SessionOptions {
     pub cols: u16,
     pub rows: u16,
     pub scrollback_lines: usize,
-    #[serde(default)]
     pub manage_process_tree: bool,
 }
 
@@ -97,7 +95,9 @@ impl SessionSubscription {
         &self.receiver
     }
 
-    pub(crate) fn set_wake_thread(&self, thread: thread::Thread) {
+    /// Register the thread to unpark when new events are published, so a host
+    /// event loop can block on `thread::park` instead of polling `events()`.
+    pub fn set_wake_thread(&self, thread: thread::Thread) {
         if let Some(subscriber) = self.stream.lock().subscribers.get_mut(&self.subscriber_id) {
             subscriber.wake_thread = Some(thread);
         }

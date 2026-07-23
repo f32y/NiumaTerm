@@ -43,7 +43,6 @@ gpui-component-assets.workspace = true
 rust-embed.workspace = true
 gpui_windows.workspace = true
 nmt_input.workspace = true
-nmt_remote_session_hub.workspace = true
 # Kitty graphics: construct GPUI `RenderImage` frames from decoded pixels. Same
 # crate/version GPUI links, so `image_rs::Frame` unifies with `gpui`'s `Frame`.
 image_rs.workspace = true

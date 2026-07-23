@@ -16,7 +16,6 @@ use nmt_config::local_state::{self, LocalState};
 use nmt_config::{Config, enable_testing_mode, get, init};
 use nmt_platform::set_job_management;
 use nmt_platform::windows::ipc as platform_ipc;
-use nmt_remote_session_hub::shutdown_default;
 use tracing::warn;
 use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 
@@ -348,13 +347,6 @@ fn run_app(argv_url: Option<String>, testing: bool) {
                     && let Err(err) = local_state::save(&state)
                 {
                     warn!("failed to save local_state.toml: {err}");
-                }
-
-                // Quit confirmation has already completed before this hook runs.
-                // Waiting here prevents the out-of-process terminal owner from
-                // surviving after the application process has fully exited.
-                if let Err(err) = shutdown_default() {
-                    warn!("failed to stop SessionHub during app quit: {err}");
                 }
 
                 async {}

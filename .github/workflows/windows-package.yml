@@ -40,7 +40,6 @@ jobs:
 
           Copy-Item @(
             "target/release/NiumaTerm.exe",
-            "target/release/SessionHub.exe",
             "target/release/NiumaTermHook.exe",
             "target/release/shell_extension.dll",
             "target/release/conpty.dll",
