@@ -7,7 +7,7 @@ pub(crate) use self::settings::{
 pub(crate) use self::shell::{
     CloseTab, NewTab, NewWindow, NewWorkspace, NextTab, NextWorkspace, PrevTab, PrevWorkspace,
     ResizePaneDown, ResizePaneLeft, ResizePaneRight, ResizePaneUp, Shell, ShowSettings, SplitDown,
-    SplitLeft, SplitRight, SplitUp, TerminalPaneTree, ToggleSidebar,
+    SplitLeft, SplitRight, SplitUp, TabSurface, ToggleSidebar,
 };
 
 mod active_list;

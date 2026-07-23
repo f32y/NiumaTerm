@@ -8,7 +8,7 @@ use std::path;
 use nmt_agent_utils::AgentRuntimeStatus;
 
 use crate::tabs::{TabId, TabManager};
-use crate::ui::{ActiveList, HasId, TerminalPaneTree};
+use crate::ui::{ActiveList, HasId, TabSurface};
 
 /// Stable per-workspace identity. Survives close (index changes, id does not).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -19,7 +19,7 @@ pub struct Workspace {
     name: String,
     cwd: String,
     pinned: bool,
-    tabs: TabManager<TerminalPaneTree>,
+    tabs: TabManager<TabSurface>,
 }
 
 impl HasId for Workspace {
@@ -84,12 +84,7 @@ pub struct WorkspaceSummary {
 
 impl WorkspaceManager {
     /// Start with a single active workspace. There is no empty state.
-    pub fn new(
-        tabs: TabManager<TerminalPaneTree>,
-        id: WorkspaceId,
-        name: String,
-        cwd: String,
-    ) -> Self {
+    pub fn new(tabs: TabManager<TabSurface>, id: WorkspaceId, name: String, cwd: String) -> Self {
         Self {
             workspaces: ActiveList::new(Workspace {
                 id,
@@ -104,7 +99,7 @@ impl WorkspaceManager {
     /// Append a workspace (already seeded with its tab set) and make it active.
     pub fn new_workspace(
         &mut self,
-        tabs: TabManager<TerminalPaneTree>,
+        tabs: TabManager<TabSurface>,
         id: WorkspaceId,
         name: String,
         cwd: String,
@@ -122,7 +117,7 @@ impl WorkspaceManager {
     /// Add a restored workspace with its saved pin state.
     pub fn new_workspace_with_pinned(
         &mut self,
-        tabs: TabManager<TerminalPaneTree>,
+        tabs: TabManager<TabSurface>,
         id: WorkspaceId,
         name: String,
         cwd: String,
@@ -180,7 +175,7 @@ impl WorkspaceManager {
         self.workspaces.activate(index);
     }
 
-    pub fn active_tabs(&self) -> &TabManager<TerminalPaneTree> {
+    pub fn active_tabs(&self) -> &TabManager<TabSurface> {
         &self.workspaces.active().tabs
     }
 
@@ -199,17 +194,17 @@ impl WorkspaceManager {
         }
     }
 
-    pub fn active_tabs_mut(&mut self) -> &mut TabManager<TerminalPaneTree> {
+    pub fn active_tabs_mut(&mut self) -> &mut TabManager<TabSurface> {
         &mut self.workspaces.active_mut().tabs
     }
 
     /// The tab set of the workspace with `id`.
-    pub fn tabs_of(&self, id: WorkspaceId) -> Option<&TabManager<TerminalPaneTree>> {
+    pub fn tabs_of(&self, id: WorkspaceId) -> Option<&TabManager<TabSurface>> {
         self.workspaces.find(id).map(|ws| &ws.tabs)
     }
 
     /// Tab sets of every workspace (the window-close process sweep).
-    pub fn all_tabs(&self) -> impl Iterator<Item = &TabManager<TerminalPaneTree>> {
+    pub fn all_tabs(&self) -> impl Iterator<Item = &TabManager<TabSurface>> {
         self.workspaces.items().iter().map(|ws| &ws.tabs)
     }
 
@@ -219,7 +214,7 @@ impl WorkspaceManager {
 
     /// The tab set that contains `tab_id`, searched across all workspaces (a
     /// background workspace's surface still polls host events).
-    pub fn tab_manager_for(&self, tab_id: TabId) -> Option<&TabManager<TerminalPaneTree>> {
+    pub fn tab_manager_for(&self, tab_id: TabId) -> Option<&TabManager<TabSurface>> {
         self.workspaces
             .items()
             .iter()
@@ -229,7 +224,7 @@ impl WorkspaceManager {
 
     /// Id of the tab whose surface matches `pred`, searched across all
     /// workspaces (host events arrive from background workspaces too).
-    pub fn find_tab_id(&self, pred: impl Fn(&TerminalPaneTree) -> bool) -> Option<TabId> {
+    pub fn find_tab_id(&self, pred: impl Fn(&TabSurface) -> bool) -> Option<TabId> {
         self.workspaces
             .items()
             .iter()
@@ -238,10 +233,7 @@ impl WorkspaceManager {
             .map(|tab| tab.id())
     }
 
-    pub fn tab_manager_for_mut(
-        &mut self,
-        tab_id: TabId,
-    ) -> Option<&mut TabManager<TerminalPaneTree>> {
+    pub fn tab_manager_for_mut(&mut self, tab_id: TabId) -> Option<&mut TabManager<TabSurface>> {
         self.workspaces
             .items_mut()
             .iter_mut()

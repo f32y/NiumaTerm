@@ -10,7 +10,7 @@ use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
 use gpui_component::tab::{Tab, TabBar, TabVariant};
 use gpui_component::{ActiveTheme, Sizable};
 
-use super::shell::TerminalPaneTree;
+use super::shell::TabSurface;
 use super::{NewTab, Shell};
 use crate::tabs::{TabId, TabManager};
 use crate::ui::AppSettings;
@@ -118,7 +118,7 @@ impl TabStrip {
 
     pub(super) fn render(
         &self,
-        tabs: &TabManager<TerminalPaneTree>,
+        tabs: &TabManager<TabSurface>,
         unread_tabs: &collections::HashSet<TabId>,
         rename: Option<&(TabId, Entity<InputState>)>,
         cx: &mut Context<Shell>,
