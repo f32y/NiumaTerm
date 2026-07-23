@@ -10,7 +10,7 @@ use tracing::warn;
 
 use super::Shell;
 use super::settings::AppSettings;
-use super::shell::TerminalPaneTree;
+use super::shell::TabSurface;
 use crate::pane_tree::{PaneId, PaneNode, PaneTree};
 use crate::tabs::{TabId, TabManager};
 use crate::terminal::view::TerminalPane;
@@ -139,7 +139,7 @@ impl Shell {
         let pane = Self::spawn_default_pane(cx, surface_id, default_profile, spawn_cwd);
         let title = pane.read(cx).profile_name().to_string();
         let tabs = TabManager::new(
-            PaneTree::new_leaf(PaneId(surface_id), pane),
+            TabSurface::Live(PaneTree::new_leaf(PaneId(surface_id), pane)),
             TabId(surface_id),
             title,
         );
@@ -155,7 +155,6 @@ impl Shell {
 
     pub(super) fn restore_session(
         session: Option<SessionState>,
-        default_profile: (Option<String>, Vec<String>),
         next_id: &mut u64,
         cx: &mut Context<Self>,
     ) -> Option<WorkspaceManager> {
@@ -174,9 +173,7 @@ impl Shell {
                 tabs,
             } = workspace;
 
-            let Some(tab_manager) =
-                Self::restore_tabs(tabs, active_tab, default_profile.clone(), next_id, cx)
-            else {
+            let Some(tab_manager) = Self::restore_tabs(tabs, active_tab, next_id, cx) else {
                 continue;
             };
 
@@ -207,16 +204,68 @@ impl Shell {
 
         workspaces.activate(saved_active.min(workspaces.len() - 1));
 
+        // The initially visible tab spawns right away; everything else stays
+        // pending, so this window's other `active_pane` readers (activation
+        // observers, notification pumps) never see a pending active tab.
+        Self::materialize_active_tab(&mut workspaces, next_id, cx);
+
         Some(workspaces)
     }
 
+    /// Spawn the shells of a still-pending active tab and swap its surface to
+    /// `Live`. Returns whether a materialization happened. A saved pane layout
+    /// rebuilds the split tree (one fresh shell per leaf); an unusable layout
+    /// or failed spawn degrades to a single default-profile pane so the tab
+    /// the user just activated never vanishes.
+    pub(super) fn materialize_active_tab(
+        workspaces: &mut WorkspaceManager,
+        next_id: &mut u64,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let state = match workspaces.active_tabs().active() {
+            TabSurface::Pending(state) => (**state).clone(),
+            TabSurface::Live(_) => return false,
+        };
+
+        let tree = state
+            .panes
+            .as_ref()
+            .and_then(|panes| Self::restore_pane_node(panes, next_id, cx))
+            .map(PaneTree::from_root)
+            .unwrap_or_else(|| {
+                let surface_id = Self::alloc_id(next_id);
+                let default_profile = cx.global::<AppSettings>().default_profile_command();
+
+                let pane =
+                    match TerminalPane::spawn(cx, surface_id, Some(state), default_profile.clone())
+                    {
+                        Ok(pane) => {
+                            Self::watch_pane(&pane, cx);
+                            pane
+                        }
+                        Err(error) => {
+                            warn!("failed to restore tab {surface_id} lazily: {error}");
+                            Self::spawn_default_pane(cx, surface_id, default_profile, None)
+                        }
+                    };
+
+                PaneTree::new_leaf(PaneId(surface_id), pane)
+            });
+
+        *workspaces.active_tabs_mut().active_mut() = TabSurface::Live(tree);
+
+        true
+    }
+
+    /// Rebuild a workspace's tabs as pending surfaces: the saved snapshot is
+    /// kept per tab and no shell spawns here — `materialize_active_tab` turns
+    /// a tab live the first time it is activated.
     fn restore_tabs(
         tabs: Vec<TabState>,
         active_tab: usize,
-        default_profile: (Option<String>, Vec<String>),
         next_id: &mut u64,
         cx: &mut Context<Self>,
-    ) -> Option<TabManager<TerminalPaneTree>> {
+    ) -> Option<TabManager<TabSurface>> {
         let mut restored = Vec::new();
 
         for mut tab_state in tabs {
@@ -228,38 +277,18 @@ impl Shell {
                 .filter(|n| !n.trim().is_empty())
                 .filter(|n| tab_state.user_named || !legacy_generated_tab_title(n));
 
-            // A saved pane layout rebuilds the split tree (one fresh shell per
-            // leaf); an unusable layout degrades to the flat single-pane path.
-            let tree = tab_state
-                .panes
-                .as_ref()
-                .and_then(|panes| Self::restore_pane_node(panes, next_id, cx))
-                .map(PaneTree::from_root);
+            // The profile-derived title a live pane would report, so pending
+            // tabs label identically to spawned ones.
+            let default_title = cx
+                .global::<AppSettings>()
+                .profile_name_for_command(tab_state.shell.as_deref(), &tab_state.args);
 
-            let entry = if let Some(tree) = tree {
-                Some((tree, TabId(Self::alloc_id(next_id))))
-            } else {
-                let surface_id = Self::alloc_id(next_id);
-                match TerminalPane::spawn(cx, surface_id, Some(tab_state), default_profile.clone())
-                {
-                    Ok(pane) => {
-                        Self::watch_pane(&pane, cx);
-                        Some((
-                            PaneTree::new_leaf(PaneId(surface_id), pane),
-                            TabId(surface_id),
-                        ))
-                    }
-                    Err(error) => {
-                        warn!("failed to restore tab {surface_id}: {error}");
-                        None
-                    }
-                }
-            };
-
-            if let Some((tree, tab_id)) = entry {
-                let default_title = tree.focused_pane().read(cx).profile_name().to_string();
-                restored.push((tree, tab_id, name, default_title));
-            }
+            restored.push((
+                TabSurface::Pending(Box::new(tab_state)),
+                TabId(Self::alloc_id(next_id)),
+                name,
+                default_title,
+            ));
         }
 
         let mut restored = restored.into_iter();
@@ -427,17 +456,25 @@ impl Shell {
                     .tabs()
                     .iter()
                     .map(|tab| {
-                        // Flat fields always mirror the focused pane, so a
-                        // snapshot without splits stays in the old format and
-                        // an old build restores something sensible from a
-                        // split one.
-                        let tree = tab.surface();
-                        let mut state = tree.focused_pane().read(cx).tab_state();
+                        let mut state = match tab.surface() {
+                            // A tab that never went live re-saves its restored
+                            // snapshot unchanged — its shells never ran, so the
+                            // saved launch state is still the truth.
+                            TabSurface::Pending(state) => (**state).clone(),
+                            // Flat fields always mirror the focused pane, so a
+                            // snapshot without splits stays in the old format
+                            // and an old build restores something sensible
+                            // from a split one.
+                            TabSurface::Live(tree) => {
+                                let mut state = tree.focused_pane().read(cx).tab_state();
+                                state.panes = (!tree.is_single_leaf())
+                                    .then(|| pane_node_state(tree.root(), &default_profile, cx));
+                                state
+                            }
+                        };
                         normalize_saved_launch(&mut state, &default_profile);
                         state.name = tab.user_title().map(str::to_owned);
                         state.user_named = state.name.is_some();
-                        state.panes = (!tree.is_single_leaf())
-                            .then(|| pane_node_state(tree.root(), &default_profile, cx));
                         state
                     })
                     .collect(),

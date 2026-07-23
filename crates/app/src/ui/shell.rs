@@ -20,7 +20,7 @@ use nmt_agent_utils::{
     request_native_delivery,
 };
 use nmt_config::get;
-use nmt_config::local_state::WindowState;
+use nmt_config::local_state::{TabState, WindowState};
 use nmt_config::system::WarnBeforeTerminatingShell;
 use nmt_platform::{
     NativeNotification, remove_notification, show_notification, system_notification_enabled,
@@ -79,6 +79,49 @@ actions!(
 );
 
 pub(crate) type TerminalPaneTree = PaneTree<Entity<TerminalPane>, Entity<ResizableState>>;
+
+/// A tab's surface. Restored tabs start `Pending` — the saved snapshot with no
+/// shell process behind it — and become `Live` (spawning their shells) the
+/// first time they are activated, so startup only pays for the visible tab.
+pub(crate) enum TabSurface {
+    Pending(Box<TabState>),
+    Live(TerminalPaneTree),
+}
+
+impl TabSurface {
+    /// The live pane tree. Every activation path materializes the newly active
+    /// tab before touching its surface, so active-tab code may assume `Live`.
+    pub(crate) fn live(&self) -> &TerminalPaneTree {
+        match self {
+            TabSurface::Live(tree) => tree,
+            TabSurface::Pending(_) => unreachable!("active tab surface is always live"),
+        }
+    }
+
+    pub(crate) fn live_mut(&mut self) -> &mut TerminalPaneTree {
+        match self {
+            TabSurface::Live(tree) => tree,
+            TabSurface::Pending(_) => unreachable!("active tab surface is always live"),
+        }
+    }
+
+    pub(crate) fn tree(&self) -> Option<&TerminalPaneTree> {
+        match self {
+            TabSurface::Live(tree) => Some(tree),
+            TabSurface::Pending(_) => None,
+        }
+    }
+
+    /// Live leaves. A pending tab has none — it owns no panes and no
+    /// processes, which is exactly what route/process sweeps should see.
+    pub(crate) fn leaves(&self) -> Vec<(PaneId, &Entity<TerminalPane>)> {
+        self.tree().map(|tree| tree.leaves()).unwrap_or_default()
+    }
+
+    pub(crate) fn contains(&self, id: PaneId) -> bool {
+        self.tree().is_some_and(|tree| tree.contains(id))
+    }
+}
 
 struct AgentRouteLocation {
     workspace_id: WorkspaceId,
@@ -222,12 +265,7 @@ impl Shell {
 
         let mut restore_next_id = 1;
 
-        let restored = Self::restore_session(
-            remembered_session,
-            default_profile.clone(),
-            &mut restore_next_id,
-            cx,
-        );
+        let restored = Self::restore_session(remembered_session, &mut restore_next_id, cx);
 
         let (workspaces, next_id) = if let Some(workspaces) = restored {
             (workspaces, restore_next_id)
@@ -438,7 +476,7 @@ impl Shell {
         }
     }
 
-    fn agent_routes_in_tree(tree: &TerminalPaneTree, cx: &App) -> Vec<AgentRoute> {
+    fn agent_routes_in_tree(tree: &TabSurface, cx: &App) -> Vec<AgentRoute> {
         tree.leaves()
             .into_iter()
             .map(|(_, pane)| pane.read(cx).agent_route().clone())
@@ -510,6 +548,7 @@ impl Shell {
         self.workspaces
             .active_tabs_mut()
             .active_mut()
+            .live_mut()
             .set_focused(location.pane_id);
 
         window.activate_window();
@@ -609,8 +648,33 @@ impl Shell {
         self.workspaces
             .active_tabs()
             .active()
+            .live()
             .focused_pane()
             .clone()
+    }
+
+    /// Spawn a still-pending (lazily-restored) active tab, then register its
+    /// panes' agent routes — the startup registration sweep only saw tabs that
+    /// were live at window creation.
+    fn ensure_active_tab_live(&mut self, cx: &mut Context<Self>) {
+        if !Self::materialize_active_tab(&mut self.workspaces, &mut self.next_id, cx) {
+            return;
+        }
+
+        let routes: Vec<AgentRoute> = self
+            .workspaces
+            .active_tabs()
+            .active()
+            .leaves()
+            .into_iter()
+            .map(|(_, pane)| pane.read(cx).agent_route().clone())
+            .collect();
+
+        let now = time::Instant::now();
+
+        for route in routes {
+            self.agent_monitor.register_route(route, now);
+        }
     }
 
     fn sync_active_terminal_title(&mut self, cx: &App) {
@@ -622,6 +686,8 @@ impl Shell {
     }
 
     pub(crate) fn focus_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.ensure_active_tab_live(cx);
+
         self.sync_active_terminal_title(cx);
 
         let handle = self.active_pane().read(cx).focus.clone();
@@ -743,7 +809,9 @@ impl Shell {
                             .workspaces
                             .tab_manager_for(tab_id)
                             .and_then(|tabs| tabs.find(tab_id))
-                            .is_some_and(|tab| tab.surface().focused() == pane_id)
+                            .is_some_and(|tab| {
+                                tab.surface().tree().is_some_and(|t| t.focused() == pane_id)
+                            })
                         && let Some(tabs) = self.workspaces.tab_manager_for_mut(tab_id)
                     {
                         chrome_changed |= tabs.set_title(tab_id, title.clone());
@@ -760,9 +828,9 @@ impl Shell {
 
                         if let Some(tabs) = self.workspaces.tab_manager_for_mut(tab_id) {
                             if let Some(tab) = tabs.find_mut(tab_id)
-                                && !tab.surface().is_single_leaf()
+                                && tab.surface().tree().is_some_and(|t| !t.is_single_leaf())
                             {
-                                removed = tab.surface_mut().remove(pane_id);
+                                removed = tab.surface_mut().live_mut().remove(pane_id);
                             }
                             if removed.is_none() {
                                 tabs.mark_exited(tab_id);
@@ -842,7 +910,7 @@ impl Shell {
         let title = pane.read(cx).profile_name().to_string();
 
         self.workspaces.active_tabs_mut().new_tab(
-            PaneTree::new_leaf(PaneId(id), pane),
+            TabSurface::Live(PaneTree::new_leaf(PaneId(id), pane)),
             TabId(id),
             title,
         );
@@ -888,7 +956,7 @@ impl Shell {
         let title = pane.read(cx).profile_name().to_string();
 
         self.workspaces.active_tabs_mut().new_tab(
-            PaneTree::new_leaf(PaneId(id), pane),
+            TabSurface::Live(PaneTree::new_leaf(PaneId(id), pane)),
             TabId(id),
             title,
         );
@@ -902,7 +970,13 @@ impl Shell {
     fn on_close_tab(&mut self, _: &CloseTab, window: &mut Window, cx: &mut Context<Self>) {
         // With the tab split, the close shortcut closes the focused pane; the
         // last remaining pane falls through to the tab-close cascade.
-        if !self.workspaces.active_tabs().active().is_single_leaf() {
+        if !self
+            .workspaces
+            .active_tabs()
+            .active()
+            .live()
+            .is_single_leaf()
+        {
             self.request_close_pane(window, cx);
             return;
         }
@@ -915,7 +989,7 @@ impl Shell {
     /// Close the focused pane of the active (multi-pane) tab, with a confirm
     /// dialog first when its shell has running child processes.
     fn request_close_pane(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let id = self.workspaces.active_tabs().active().focused();
+        let id = self.workspaces.active_tabs().active().live().focused();
         let pane = self.active_pane();
         let settings = cx.global::<AppSettings>();
         let count = if settings.manage_subprocess_job
@@ -950,7 +1024,7 @@ impl Shell {
     }
 
     fn close_pane_now(&mut self, id: PaneId, window: &mut Window, cx: &mut Context<Self>) {
-        let tree = self.workspaces.active_tabs_mut().active_mut();
+        let tree = self.workspaces.active_tabs_mut().active_mut().live_mut();
 
         let Some((pane, outcome)) = tree.remove(id) else {
             return;
@@ -1025,7 +1099,7 @@ impl Shell {
     /// Child processes running across every pane of this tab, summed over
     /// each shell's Job Object. The count enriches warnings but is not needed
     /// by the `Always` mode.
-    fn close_process_count(&self, tree: &TerminalPaneTree, cx: &App) -> usize {
+    fn close_process_count(&self, tree: &TabSurface, cx: &App) -> usize {
         let settings = cx.global::<AppSettings>();
 
         if !settings.manage_subprocess_job
@@ -1666,7 +1740,7 @@ impl Shell {
         let title = pane.read(cx).profile_name().to_string();
 
         let tabs = TabManager::new(
-            PaneTree::new_leaf(PaneId(surface_id), pane),
+            TabSurface::Live(PaneTree::new_leaf(PaneId(surface_id), pane)),
             TabId(surface_id),
             title,
         );
@@ -1770,7 +1844,7 @@ impl Shell {
 
         self.register_agent_pane(&pane, cx);
 
-        let tree = self.workspaces.active_tabs_mut().active_mut();
+        let tree = self.workspaces.active_tabs_mut().active_mut().live_mut();
 
         match tree.split(PaneId(id), pane, direction, || {
             cx.new(|_| ResizableState::default())
@@ -1836,7 +1910,7 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let tree = self.workspaces.active_tabs().active();
+        let tree = self.workspaces.active_tabs().active().live();
 
         let Some((state, index, count)) = tree.resize_split(direction.axis()) else {
             return;
@@ -1865,7 +1939,7 @@ impl Shell {
 
     /// Focus the pane `id` in the active tab (mouse click).
     pub(crate) fn focus_pane(&mut self, id: PaneId, window: &mut Window, cx: &mut Context<Self>) {
-        let tree = self.workspaces.active_tabs_mut().active_mut();
+        let tree = self.workspaces.active_tabs_mut().active_mut().live_mut();
 
         if tree.focused() == id || !tree.set_focused(id) {
             return;
@@ -1881,7 +1955,7 @@ impl Shell {
     /// Apply saved split ratios once their groups have real bounds (the first
     /// visible frames after a session restore); cleared after applying.
     fn apply_pending_ratios(&mut self, cx: &mut Context<Self>) {
-        let tree = self.workspaces.active_tabs_mut().active_mut();
+        let tree = self.workspaces.active_tabs_mut().active_mut().live_mut();
 
         tree.for_each_split_mut(&mut |state, pending| {
             if let Some(ratios) = pending.take_if(|_| state.read(cx).has_bounds()) {
@@ -1893,7 +1967,7 @@ impl Shell {
     /// The active tab's pane tree as nested resizable groups; a single-leaf
     /// tab renders its pane bare (no split chrome).
     fn render_active_tree(&self, cx: &mut Context<Self>) -> AnyElement {
-        let tree = self.workspaces.active_tabs().active();
+        let tree = self.workspaces.active_tabs().active().live();
 
         let multi = !tree.is_single_leaf();
 
@@ -2039,6 +2113,11 @@ impl IconNamed for GitIcon {
 
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Safety net for any activation path that reaches a render without
+        // passing `focus_active`: the visible tab must be live before anything
+        // below reads the active pane.
+        self.ensure_active_tab_live(cx);
+
         self.window_active = Self::exact_window_active(window);
 
         self.acknowledge_visible(window, false, cx);
