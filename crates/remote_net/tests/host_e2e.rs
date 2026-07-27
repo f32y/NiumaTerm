@@ -226,6 +226,98 @@ async fn client_runtime_byte_stream() {
     fs::remove_dir_all(&data_dir).ok();
 }
 
+/// Proves the client runtime survives losing its transport: the relay is
+/// restarted mid-session, and the same `RemoteSession` handle keeps working
+/// because the runtime re-attaches to the shell the host kept running.
+///
+/// Fault injection is manual — restart `wrangler dev` during the pause the
+/// test prints — so it only runs when asked for by name and environment,
+/// keeping its 45-second window out of the normal `--ignored` sweep:
+///
+/// ```text
+/// NMT_RELAY_BOUNCE=1 cargo test -p nmt_remote_net --test host_e2e resumes_after -- --ignored --nocapture
+/// ```
+#[tokio::test]
+#[ignore = "manual: restart `wrangler dev` while the test pauses"]
+async fn client_runtime_resumes_after_transport_loss() {
+    if env::var("NMT_RELAY_BOUNCE").is_err() {
+        println!("skipped: set NMT_RELAY_BOUNCE=1 and bounce the relay during the pause");
+        return;
+    }
+    let data_dir = env::temp_dir().join(format!("nmt-host-e2e-resume-{}", process::id()));
+    let host = HostHandle::start(HostConfig {
+        relay_url: RELAY.to_owned(),
+        access_token: TOKEN.to_owned(),
+        data_dir: data_dir.clone(),
+    })
+    .expect("host service starts");
+    let host_public: Vec<u8> = host.public_key().to_vec();
+    let host_id = host.host_id().to_owned();
+
+    let device = generate_keypair().unwrap();
+    let code = host.begin_pairing();
+    for attempt in 0..40 {
+        match client_connect_pair(&code, &device, "resume-device").await {
+            Ok(_) => break,
+            Err(e) if attempt == 39 => panic!("pairing never succeeded: {e}"),
+            Err(_) => time::sleep(Duration::from_millis(500)).await,
+        }
+    }
+
+    let dev = StaticKeypair {
+        private: device.private.clone(),
+        public: device.public.clone(),
+    };
+    let (relay, hid, hpub) = (RELAY.to_owned(), host_id.clone(), host_public.clone());
+    let session = task::spawn_blocking(move || {
+        open_remote_session(
+            relay,
+            hid,
+            hpub,
+            dev,
+            AttachTarget::Open(WireSessionOptions {
+                shell: Some("cmd.exe".into()),
+                working_directory: None,
+                cols: 100,
+                rows: 30,
+            }),
+        )
+    })
+    .await
+    .unwrap()
+    .expect("client runtime attaches");
+
+    println!("--- restart `wrangler dev` now; resuming in 45s ---");
+    time::sleep(Duration::from_secs(45)).await;
+
+    // Input after the restart can only arrive if the runtime re-attached.
+    session.send_input(format!("echo {MARKER}\r").into_bytes());
+    let seen = task::spawn_blocking(move || {
+        let mut buf = Vec::new();
+        loop {
+            match session.output().recv_timeout(Duration::from_secs(60)) {
+                Ok(SessionByteEvent::Output(data)) => {
+                    buf.extend_from_slice(&data);
+                    if String::from_utf8_lossy(&buf).matches(MARKER).count() >= 2 {
+                        return buf;
+                    }
+                }
+                Ok(SessionByteEvent::Exited) => panic!("session died instead of resuming"),
+                Err(_) => return buf,
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        String::from_utf8_lossy(&seen).matches(MARKER).count() >= 2,
+        "the resumed session must carry command output"
+    );
+
+    host.shutdown();
+    fs::remove_dir_all(&data_dir).ok();
+}
+
 #[tokio::test]
 #[ignore = "requires `wrangler dev` running in relay/ (npm run dev)"]
 async fn unpaired_device_rejected() {

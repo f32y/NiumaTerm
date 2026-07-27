@@ -59,7 +59,10 @@ struct PendingPairing {
 }
 
 struct ActiveConnection {
-    device_public_key: Vec<u8>,
+    /// Known only once the handshake identifies the peer; entries are
+    /// registered before that so relay bookkeeping can't spawn a second
+    /// connection for the same client mid-handshake.
+    device_public_key: Option<Vec<u8>>,
     cancel: watch::Sender<bool>,
 }
 
@@ -157,7 +160,11 @@ impl HostHandle {
         if removed {
             let active = self.shared.active.lock();
             for conn in active.values() {
-                if hex_encode(&conn.device_public_key) == public_key_hex {
+                if conn
+                    .device_public_key
+                    .as_deref()
+                    .is_some_and(|key| hex_encode(key) == public_key_hex)
+                {
                     let _ = conn.cancel.send(true);
                 }
             }
@@ -256,16 +263,39 @@ async fn run_control(shared: &Arc<Shared>, mut ws: WsStream) {
 }
 
 fn spawn_connection(shared: &Arc<Shared>, cid: String) {
+    // Claim the connection id before any awaiting: a `sync` arriving while the
+    // handshake is still running would otherwise see the id as unserved and
+    // dial a second data socket for the same client.
+    let cancel_rx = {
+        let mut active = shared.active.lock();
+        if active.contains_key(&cid) {
+            return;
+        }
+        let (cancel_tx, cancel_rx) = watch::channel(false);
+        active.insert(
+            cid.clone(),
+            ActiveConnection {
+                device_public_key: None,
+                cancel: cancel_tx,
+            },
+        );
+        cancel_rx
+    };
+
     let shared = Arc::clone(shared);
     tokio::spawn(async move {
-        if let Err(e) = serve_connection(&shared, &cid).await {
+        if let Err(e) = serve_connection(&shared, &cid, cancel_rx).await {
             info!("connection {cid} ended: {e}");
         }
         shared.active.lock().remove(&cid);
     });
 }
 
-async fn serve_connection(shared: &Arc<Shared>, cid: &str) -> Result<(), NetError> {
+async fn serve_connection(
+    shared: &Arc<Shared>,
+    cid: &str,
+    cancel_rx: watch::Receiver<bool>,
+) -> Result<(), NetError> {
     let url = relay_ws_url(&shared.config.relay_url, &shared.host_id, "host", Some(cid));
     let mut ws = ws_connect(&url, Some(&shared.config.access_token)).await?;
 
@@ -345,14 +375,10 @@ async fn serve_connection(shared: &Arc<Shared>, cid: &str) -> Result<(), NetErro
         }
     };
 
-    let (cancel_tx, cancel_rx) = watch::channel(false);
-    shared.active.lock().insert(
-        cid.to_owned(),
-        ActiveConnection {
-            device_public_key,
-            cancel: cancel_tx,
-        },
-    );
+    // The peer is now identified, so revocation can target this connection.
+    if let Some(conn) = shared.active.lock().get_mut(cid) {
+        conn.device_public_key = Some(device_public_key);
+    }
     serve_session(shared, ws, chan, cancel_rx).await
 }
 
@@ -574,9 +600,18 @@ fn redeem_pairing_token(shared: &Arc<Shared>, token: [u8; 16]) -> bool {
         // One-shot by construction: `take()` consumes the pending entry, so a
         // second redeem — even with the right token — fails until the user
         // issues a new code.
-        Some(p) if p.token == token && Instant::now() < p.expires => true,
+        Some(p) if constant_time_eq(&p.token, &token) && Instant::now() < p.expires => true,
         _ => false,
     }
+}
+
+/// Compare without an early exit, so the time taken carries no information
+/// about how many leading bytes a guess got right.
+fn constant_time_eq(a: &[u8; 16], b: &[u8; 16]) -> bool {
+    a.iter()
+        .zip(b.iter())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+        == 0
 }
 
 fn to_hub_options(wire: WireSessionOptions) -> SessionOptions {

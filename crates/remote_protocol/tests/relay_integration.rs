@@ -163,6 +163,34 @@ async fn client_rejected_when_host_offline() {
     assert!(err.contains("404"), "expected HTTP 404, got: {err}");
 }
 
+/// Client sockets carry no token, so the per-host ceiling is what stops anyone
+/// who learns a host_id from making the host handshake on demand.
+#[tokio::test]
+#[ignore = "requires `wrangler dev` running in relay/ (npm run dev)"]
+async fn client_socket_cap_enforced() {
+    let host_keys = generate_keypair().unwrap();
+    let host_id = nmt_remote_protocol::derive_host_id(&host_keys.public);
+
+    let mut control = connect(&format!("host_id={host_id}&role=host"), Some(TOKEN))
+        .await
+        .expect("host registration must succeed");
+    let _sync = next_json(&mut control).await;
+
+    // Hold the sockets open: dropping them would free slots as we go.
+    let mut clients = Vec::new();
+    for i in 0..16 {
+        clients.push(
+            connect(&format!("host_id={host_id}&role=client"), None)
+                .await
+                .unwrap_or_else(|e| panic!("client {i} must fit under the cap: {e}")),
+        );
+    }
+    let err = connect(&format!("host_id={host_id}&role=client"), None)
+        .await
+        .expect_err("the socket past the cap must be refused");
+    assert!(err.contains("429"), "expected HTTP 429, got: {err}");
+}
+
 #[tokio::test]
 #[ignore = "requires `wrangler dev` running in relay/ (npm run dev)"]
 async fn buffer_overflow_closes_client() {
@@ -175,13 +203,13 @@ async fn buffer_overflow_closes_client() {
     let _sync = next_json(&mut control).await;
 
     // Client floods frames while the host never opens a data socket: the
-    // relay's 200-frame buffer cap must close the client, not grow unbounded.
+    // relay's 1 MiB buffer cap must close the client, not grow unbounded.
     let mut client_sock = connect(&format!("host_id={host_id}&role=client"), None)
         .await
         .expect("client connect must succeed");
-    for _ in 0..201 {
+    for _ in 0..40 {
         client_sock
-            .send(Message::Binary(vec![0u8; 64].into()))
+            .send(Message::Binary(vec![0u8; 32 * 1024].into()))
             .await
             .expect("send while relay still accepts");
     }

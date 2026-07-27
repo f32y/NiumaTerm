@@ -24,10 +24,17 @@ const CLOSE_HOST_OFFLINE = 4404;
 const CLOSE_BUFFER_OVERFLOW = 4429;
 const CLOSE_RETRY = 1012;
 
-// Frames a client may send before the host's data socket attaches. The window
-// is one control-message round trip, so a small cap suffices; overflow closes
-// the client, whose reconnect restarts cleanly.
-const MAX_BUFFERED_FRAMES = 200;
+// Bytes a client may send before the host's data socket attaches. The window is
+// one control-message round trip, so a small cap suffices; counting bytes
+// rather than frames is what keeps the bound meaningful, since a single frame
+// can carry 32 KiB. Overflow closes the client, whose reconnect restarts
+// cleanly.
+const MAX_BUFFERED_BYTES = 1024 * 1024;
+
+// Client sockets are unauthenticated by design (Noise is their gate), so
+// without a ceiling anyone who learns a host_id could make the host dial back
+// and run a handshake per socket. A user's own devices need only a handful.
+const MAX_CLIENT_SOCKETS = 16;
 
 type Attachment =
   | { kind: "control" }
@@ -76,7 +83,10 @@ export class RelayDurableObject implements DurableObject {
   // Client frames awaiting a host data socket, keyed by connection_id.
   // Deliberately in-memory only: hibernation may drop it, and the client-side
   // reconnect covers that rare loss (see design.md open questions).
-  private buffers = new Map<string, (ArrayBuffer | string)[]>();
+  private buffers = new Map<
+    string,
+    { frames: (ArrayBuffer | string)[]; bytes: number }
+  >();
 
   constructor(ctx: DurableObjectState) {
     this.ctx = ctx;
@@ -116,6 +126,14 @@ export class RelayDurableObject implements DurableObject {
     return this.ctx.getWebSockets(`hostData:${cid}`)[0];
   }
 
+  private clientCount(): number {
+    return this.ctx
+      .getWebSockets()
+      .filter(
+        (s) => (s.deserializeAttachment() as Attachment).kind === "client"
+      ).length;
+  }
+
   private accept(ws: WebSocket, attachment: Attachment, tags: string[]) {
     // Hibernation API: the runtime keeps sockets alive while the instance
     // sleeps; tags + serialized attachments are how routing state survives.
@@ -150,6 +168,9 @@ export class RelayDurableObject implements DurableObject {
     if (this.clientSocket(cid)) {
       return { http: 409, reason: "connection_id already in use" };
     }
+    if (this.clientCount() >= MAX_CLIENT_SOCKETS) {
+      return { http: 429, reason: "too many client connections" };
+    }
     this.accept(ws, { kind: "client", cid }, [`client:${cid}`]);
     control.send(JSON.stringify({ type: "connected", connectionId: cid }));
     return null;
@@ -166,7 +187,7 @@ export class RelayDurableObject implements DurableObject {
     this.accept(ws, { kind: "hostData", cid }, [`hostData:${cid}`]);
     const buffered = this.buffers.get(cid);
     if (buffered) {
-      for (const frame of buffered) ws.send(frame);
+      for (const frame of buffered.frames) ws.send(frame);
       this.buffers.delete(cid);
     }
   }
@@ -185,9 +206,11 @@ export class RelayDurableObject implements DurableObject {
           hostData.send(message);
           return;
         }
-        const buffer = this.buffers.get(attachment.cid) ?? [];
-        buffer.push(message);
-        if (buffer.length > MAX_BUFFERED_FRAMES) {
+        const buffer = this.buffers.get(attachment.cid) ?? { frames: [], bytes: 0 };
+        buffer.frames.push(message);
+        buffer.bytes +=
+          typeof message === "string" ? message.length : message.byteLength;
+        if (buffer.bytes > MAX_BUFFERED_BYTES) {
           this.buffers.delete(attachment.cid);
           ws.close(CLOSE_BUFFER_OVERFLOW, "buffer overflow before host attach");
           return;

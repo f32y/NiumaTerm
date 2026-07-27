@@ -12,8 +12,8 @@ use std::{env, fs};
 
 use nmt_config::remote_session::RemoteSessionConfig;
 use nmt_remote_net::{
-    AttachTarget, HostConfig, HostHandle, RemoteSession, hex_encode, load_or_create_keypair,
-    open_remote_session,
+    AttachTarget, HostConfig, HostHandle, RemoteSession, hex_decode, hex_encode,
+    load_or_create_keypair, open_remote_session,
 };
 use nmt_remote_protocol::{PairingCode, WireSessionOptions};
 use parking_lot::Mutex;
@@ -127,7 +127,12 @@ fn known_hosts_path() -> PathBuf {
 
 pub fn known_hosts() -> Vec<KnownHost> {
     match fs::read(known_hosts_path()) {
-        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+            // Losing the pinned host keys silently would look like the pairing
+            // never happened, so make the file corruption visible.
+            warn!("known_hosts.json is unreadable, treating as empty: {e}");
+            Vec::new()
+        }),
         Err(_) => Vec::new(),
     }
 }
@@ -172,7 +177,8 @@ pub fn pair_with_code(code_text: &str, name: &str) -> Result<KnownHost, String> 
 /// Open (and attach to) a fresh session on a known host. Blocking.
 pub fn connect_new_session(host: &KnownHost) -> Result<RemoteSession, String> {
     let device = load_or_create_keypair(&device_key_path()).map_err(|e| e.to_string())?;
-    let host_public_key = decode_hex(&host.host_public_key)?;
+    let host_public_key =
+        hex_decode(&host.host_public_key).ok_or("stored host public key is not valid hex")?;
     open_remote_session(
         host.relay_url.clone(),
         host.host_id.clone(),
@@ -190,14 +196,4 @@ pub fn connect_new_session(host: &KnownHost) -> Result<RemoteSession, String> {
 
 fn hostname() -> String {
     env::var("COMPUTERNAME").unwrap_or_else(|_| "NiumaTerm client".to_owned())
-}
-
-fn decode_hex(hex: &str) -> Result<Vec<u8>, String> {
-    if hex.len() % 2 != 0 {
-        return Err("public key hex has odd length".into());
-    }
-    (0..hex.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).map_err(|e| e.to_string()))
-        .collect()
 }
