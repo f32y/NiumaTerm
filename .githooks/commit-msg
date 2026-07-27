@@ -2,6 +2,22 @@
 set -eu
 
 msg_file=${1:?commit message file required}
+
+# Commit messages are English-only, so every byte must be printable ASCII.
+# The C locale makes grep treat UTF-8 continuation bytes as non-printable,
+# which catches CJK text as well as smart quotes and dashes.
+body=$(sed -e '/^# ------------------------ >8/,$d' -e '/^#/d' "$msg_file")
+if printf '%s\n' "$body" | LC_ALL=C grep -nq '[^[:print:][:space:]]'; then
+    offending=$(printf '%s\n' "$body" | LC_ALL=C grep -n '[^[:print:][:space:]]')
+    cat >&2 <<EOF
+commit-msg: commit messages must be written in English (ASCII only)
+
+Offending lines:
+$offending
+EOF
+    exit 1
+fi
+
 subject=$(sed -n '/^#/!{/./{p;q;}}' "$msg_file")
 pattern='^(feat|fix|refactor|docs|perf|test|chore|build|ci|style|revert|lint)(\([a-z0-9_.-]+\))?: [a-z0-9].*$'
 
