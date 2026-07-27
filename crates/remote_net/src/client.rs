@@ -11,8 +11,9 @@ use tokio::runtime::Builder as RuntimeBuilder;
 use tokio::sync::mpsc;
 use tokio::time;
 use tokio_tungstenite::tungstenite::protocol::Message;
+use tracing::{info, warn};
 
-use crate::{FrameChannel, NetError, client_connect_ik};
+use crate::{FrameChannel, NET_TIMEOUT, NetError, client_connect_ik, with_timeout};
 
 /// One remote session's byte stream as the terminal engine wants to consume
 /// it: opaque output bytes plus a terminal exit. Mirrors the hub's
@@ -139,7 +140,11 @@ pub fn open_remote_session(
         })
         .map_err(|e| NetError::Protocol(e.to_string()))?;
 
-    let snapshot = ready_rx.recv().map_err(|_| NetError::Closed)??;
+    // The thread bounds its own waits, so this only has to outlast them; a
+    // hard bound here is what keeps a wedged connect from parking the caller.
+    let snapshot = ready_rx
+        .recv_timeout(NET_TIMEOUT * 2)
+        .map_err(|_| NetError::Timeout)??;
     Ok(RemoteSession {
         session_id: snapshot.session_id,
         snapshot,
@@ -153,6 +158,12 @@ pub enum AttachTarget {
     Existing(u64),
 }
 
+/// How many times a dropped connection is re-established before the tab is
+/// declared dead. The host keeps the shell running across disconnects, so
+/// retrying is what makes a flaky link survivable rather than session-ending.
+const RECONNECT_ATTEMPTS: u32 = 5;
+const RECONNECT_BACKOFF: Duration = Duration::from_secs(2);
+
 #[allow(clippy::too_many_arguments)]
 async fn session_thread(
     relay_url: String,
@@ -162,122 +173,194 @@ async fn session_thread(
     target: AttachTarget,
     ready: std_mpsc::Sender<Result<WireSessionSnapshot, NetError>>,
     output: std_mpsc::Sender<SessionByteEvent>,
-    commands: mpsc::UnboundedReceiver<Frame>,
+    mut commands: mpsc::UnboundedReceiver<Frame>,
 ) {
-    let mut channel = match client_connect_ik(&relay_url, &host_id, &host_public_key, &device).await
-    {
-        Ok(c) => c,
-        Err(e) => {
-            let _ = ready.send(Err(e));
-            return;
-        }
-    };
-
-    let session_id = match target {
-        AttachTarget::Existing(id) => id,
-        AttachTarget::Open(options) => {
-            if let Err(e) = channel.send_control(&HostBound::Open(options)).await {
+    let (mut channel, snapshot) =
+        match connect_and_attach(&relay_url, &host_id, &host_public_key, &device, target).await {
+            Ok(attached) => attached,
+            Err(e) => {
                 let _ = ready.send(Err(e));
                 return;
             }
-            match channel.recv_control::<ClientBound>().await {
-                Ok(ClientBound::Opened { session_id }) => session_id,
-                Ok(ClientBound::Error { message, .. }) => {
-                    let _ = ready.send(Err(NetError::Protocol(message)));
-                    return;
-                }
-                Ok(other) => {
-                    let _ = ready.send(Err(NetError::Protocol(format!(
-                        "expected Opened, got {other:?}"
-                    ))));
-                    return;
-                }
-                Err(e) => {
-                    let _ = ready.send(Err(e));
-                    return;
-                }
-            }
-        }
-    };
+        };
 
-    if let Err(e) = channel
-        .send_control(&HostBound::Attach { session_id })
-        .await
-    {
-        let _ = ready.send(Err(e));
-        return;
-    }
-    let snapshot = match channel.recv_control::<ClientBound>().await {
-        Ok(ClientBound::Attached(snapshot)) => snapshot,
-        Ok(ClientBound::Error { message, .. }) => {
-            let _ = ready.send(Err(NetError::Protocol(message)));
-            return;
-        }
-        Ok(other) => {
-            let _ = ready.send(Err(NetError::Protocol(format!(
-                "expected Attached, got {other:?}"
-            ))));
-            return;
-        }
-        Err(e) => {
-            let _ = ready.send(Err(e));
-            return;
-        }
-    };
+    let session_id = snapshot.session_id;
+    // Everything up to and including `base_seq` is already in the snapshot the
+    // caller renders, so the pump only forwards events past it. After a resume
+    // this is what suppresses the replay the fresh checkpoint already covers.
+    let mut resume_after = snapshot.base_seq;
     if ready.send(Ok(snapshot)).is_err() {
         return; // Caller gave up before we finished attaching.
     }
 
-    pump(channel, output, commands).await;
+    loop {
+        match pump(channel, &output, &mut commands, resume_after).await {
+            PumpExit::Local => return,
+            PumpExit::SessionEnded => {
+                let _ = output.send(SessionByteEvent::Exited);
+                return;
+            }
+            PumpExit::Disconnected => {}
+        }
+
+        let Some((resumed, snapshot)) = reconnect(
+            &relay_url,
+            &host_id,
+            &host_public_key,
+            &device,
+            session_id,
+            &commands,
+        )
+        .await
+        else {
+            let _ = output.send(SessionByteEvent::Exited);
+            return;
+        };
+
+        // The checkpoint replaces whatever the screen held: feeding it as
+        // output lets the engine resync without any reconnect-aware code in
+        // the terminal layer.
+        if output.send(SessionByteEvent::Output(snapshot.vt)).is_err() {
+            return;
+        }
+        resume_after = snapshot.base_seq;
+        channel = resumed;
+    }
+}
+
+/// Open a relay connection and attach, yielding the channel plus the snapshot
+/// the caller starts rendering from.
+async fn connect_and_attach(
+    relay_url: &str,
+    host_id: &str,
+    host_public_key: &[u8],
+    device: &StaticKeypair,
+    target: AttachTarget,
+) -> Result<(FrameChannel, WireSessionSnapshot), NetError> {
+    let mut channel = client_connect_ik(relay_url, host_id, host_public_key, device).await?;
+
+    let session_id = match target {
+        AttachTarget::Existing(id) => id,
+        AttachTarget::Open(options) => {
+            with_timeout(channel.send_control(&HostBound::Open(options))).await?;
+            match with_timeout(channel.recv_control::<ClientBound>()).await? {
+                ClientBound::Opened { session_id } => session_id,
+                ClientBound::Error { message, .. } => return Err(NetError::Protocol(message)),
+                other => {
+                    return Err(NetError::Protocol(format!(
+                        "expected Opened, got {other:?}"
+                    )));
+                }
+            }
+        }
+    };
+
+    with_timeout(channel.send_control(&HostBound::Attach { session_id })).await?;
+    match with_timeout(channel.recv_control::<ClientBound>()).await? {
+        ClientBound::Attached(snapshot) => Ok((channel, snapshot)),
+        ClientBound::Error { message, .. } => Err(NetError::Protocol(message)),
+        other => Err(NetError::Protocol(format!(
+            "expected Attached, got {other:?}"
+        ))),
+    }
+}
+
+/// Re-attach to a session whose connection dropped. `None` means the retries
+/// ran out or the local side went away, both of which end the tab.
+async fn reconnect(
+    relay_url: &str,
+    host_id: &str,
+    host_public_key: &[u8],
+    device: &StaticKeypair,
+    session_id: u64,
+    commands: &mpsc::UnboundedReceiver<Frame>,
+) -> Option<(FrameChannel, WireSessionSnapshot)> {
+    for attempt in 1..=RECONNECT_ATTEMPTS {
+        if commands.is_closed() {
+            return None; // Tab closed while we were retrying.
+        }
+        time::sleep(RECONNECT_BACKOFF * attempt).await;
+        match connect_and_attach(
+            relay_url,
+            host_id,
+            host_public_key,
+            device,
+            AttachTarget::Existing(session_id),
+        )
+        .await
+        {
+            Ok(attached) => {
+                info!(session_id, attempt, "resumed remote session");
+                return Some(attached);
+            }
+            // A host that answers with an error (session killed, device
+            // revoked) will keep answering the same way, so stop early.
+            Err(NetError::Protocol(message)) => {
+                warn!(session_id, "remote session cannot be resumed: {message}");
+                return None;
+            }
+            Err(e) => warn!(session_id, attempt, "remote resume failed: {e}"),
+        }
+    }
+    None
+}
+
+/// Why [`pump`] returned: the difference decides whether the session can be
+/// resumed or the tab is finished.
+enum PumpExit {
+    /// The local side hung up (tab closed) or stopped consuming output.
+    Local,
+    /// The remote shell exited, or the host rejected the stream.
+    SessionEnded,
+    /// The transport died; the session itself may still be alive on the host.
+    Disconnected,
 }
 
 /// Full-duplex loop: relay Output/Exited frames to the terminal engine, and
-/// Input/Resize commands to the host. Exits when either side closes.
+/// Input/Resize commands to the host. `resume_after` drops output the caller
+/// already has from the attach snapshot.
 async fn pump(
     channel: FrameChannel,
-    output: std_mpsc::Sender<SessionByteEvent>,
-    mut commands: mpsc::UnboundedReceiver<Frame>,
-) {
+    output: &std_mpsc::Sender<SessionByteEvent>,
+    commands: &mut mpsc::UnboundedReceiver<Frame>,
+    resume_after: u64,
+) -> PumpExit {
     let FrameChannel { ws, mut chan } = channel;
     let (mut sink, mut stream) = ws.split();
     loop {
         tokio::select! {
             command = commands.recv() => {
-                let Some(frame) = command else { return };
+                let Some(frame) = command else { return PumpExit::Local };
                 let Ok(bytes) = frame.encode() else { continue };
-                let Ok(ciphertext) = chan.seal(&bytes) else { return };
+                let Ok(ciphertext) = chan.seal(&bytes) else { return PumpExit::Disconnected };
                 if sink.send(Message::Binary(ciphertext.into())).await.is_err() {
-                    return;
+                    return PumpExit::Disconnected;
                 }
             }
             msg = stream.next() => {
                 let data = match msg {
                     Some(Ok(Message::Binary(data))) => data,
-                    Some(Ok(Message::Close(_))) | None => {
-                        let _ = output.send(SessionByteEvent::Exited);
-                        return;
-                    }
+                    Some(Ok(Message::Close(_))) | None => return PumpExit::Disconnected,
                     Some(Ok(_)) => continue,
-                    Some(Err(_)) => {
-                        let _ = output.send(SessionByteEvent::Exited);
-                        return;
-                    }
+                    Some(Err(_)) => return PumpExit::Disconnected,
                 };
-                let Ok(plaintext) = chan.open(&data) else { return };
+                // A decrypt failure means the stream is desynchronized or
+                // tampered with: the Noise channel is unusable from here on.
+                let Ok(plaintext) = chan.open(&data) else { return PumpExit::Disconnected };
                 match Frame::decode(&plaintext) {
-                    Ok(Frame::Output { data, .. }) => {
+                    Ok(Frame::Output { seq, data, .. }) => {
+                        if seq <= resume_after {
+                            continue;
+                        }
                         if output.send(SessionByteEvent::Output(data)).is_err() {
-                            return;
+                            return PumpExit::Local;
                         }
                     }
-                    Ok(Frame::Exited { .. }) => {
-                        let _ = output.send(SessionByteEvent::Exited);
-                        return;
-                    }
+                    Ok(Frame::Exited { .. }) => return PumpExit::SessionEnded,
                     // Control replies to mid-session requests are not used by
                     // the byte-stream consumer; ignore rather than error.
                     Ok(_) => continue,
-                    Err(_) => return,
+                    Err(_) => return PumpExit::Disconnected,
                 }
             }
         }

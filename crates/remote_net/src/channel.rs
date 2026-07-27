@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use futures::{SinkExt, StreamExt};
 use nmt_remote_protocol::{
     ClientBound, Frame, FrameError, Handshake, HostBound, NoiseError, PairingCode, SecureChannel,
@@ -6,6 +8,7 @@ use nmt_remote_protocol::{
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use tokio::net::TcpStream;
+use tokio::time;
 use tokio_tungstenite::tungstenite::Error as WsError;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::protocol::Message;
@@ -44,6 +47,24 @@ pub enum NetError {
     Closed,
     #[error("protocol violation: {0}")]
     Protocol(String),
+    #[error("timed out waiting for the remote peer")]
+    Timeout,
+}
+
+/// Every client-side network wait is bounded by this: a relay that accepts the
+/// socket but never answers, or a host that is registered but wedged, would
+/// otherwise park the caller forever — and the pairing path is driven straight
+/// from a UI action.
+pub const NET_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Fail with [`NetError::Timeout`] instead of awaiting indefinitely.
+pub async fn with_timeout<T>(
+    future: impl Future<Output = Result<T, NetError>>,
+) -> Result<T, NetError> {
+    match time::timeout(NET_TIMEOUT, future).await {
+        Ok(result) => result,
+        Err(_) => Err(NetError::Timeout),
+    }
 }
 
 pub fn relay_ws_url(relay_url: &str, host_id: &str, role: &str, cid: Option<&str>) -> String {
@@ -127,6 +148,15 @@ pub async fn client_connect_ik(
     host_public_key: &[u8],
     device: &StaticKeypair,
 ) -> Result<FrameChannel, NetError> {
+    with_timeout(connect_ik(relay_url, host_id, host_public_key, device)).await
+}
+
+async fn connect_ik(
+    relay_url: &str,
+    host_id: &str,
+    host_public_key: &[u8],
+    device: &StaticKeypair,
+) -> Result<FrameChannel, NetError> {
     let url = relay_ws_url(relay_url, host_id, "client", None);
     let mut ws = ws_connect(&url, None).await?;
 
@@ -146,6 +176,14 @@ pub async fn client_connect_ik(
 /// in-channel. Verifies the host's static key against the pairing code so a
 /// malicious relay cannot substitute its own responder.
 pub async fn client_connect_pair(
+    code: &PairingCode,
+    device: &StaticKeypair,
+    device_name: &str,
+) -> Result<FrameChannel, NetError> {
+    with_timeout(connect_pair(code, device, device_name)).await
+}
+
+async fn connect_pair(
     code: &PairingCode,
     device: &StaticKeypair,
     device_name: &str,

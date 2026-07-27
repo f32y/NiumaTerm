@@ -1378,15 +1378,28 @@ fn remote_client_status(cx: &mut App) -> Div {
                                 Some("Enter a pairing code first.".to_owned());
                             return;
                         }
-                        let message = match remote::pair_with_code(&code, "remote host") {
-                            Ok(host) => {
-                                cx.global_mut::<AppSettings>().remote_pairing_input =
-                                    SharedString::default();
-                                format!("Paired with {} ({}).", host.name, host.host_id)
-                            }
-                            Err(e) => format!("Pairing failed: {e}"),
-                        };
-                        cx.global_mut::<AppSettings>().remote_client_status = Some(message);
+                        cx.global_mut::<AppSettings>().remote_client_status =
+                            Some("Pairing…".to_owned());
+                        // Pairing is a network round trip: running it inline
+                        // would freeze the window until the relay answers or
+                        // the attempt times out.
+                        cx.spawn(async move |cx| {
+                            let paired = cx
+                                .background_executor()
+                                .spawn(async move { remote::pair_with_code(&code, "remote host") })
+                                .await;
+                            cx.update_global(|settings: &mut AppSettings, _| {
+                                let message = match paired {
+                                    Ok(host) => {
+                                        settings.remote_pairing_input = SharedString::default();
+                                        format!("Paired with {} ({}).", host.name, host.host_id)
+                                    }
+                                    Err(e) => format!("Pairing failed: {e}"),
+                                };
+                                settings.remote_client_status = Some(message);
+                            })
+                        })
+                        .detach();
                     },
                 )),
         )

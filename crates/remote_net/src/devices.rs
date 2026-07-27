@@ -22,6 +22,18 @@ pub fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// Inverse of [`hex_encode`], for keys that round-tripped through a config or
+/// device-list file.
+pub fn hex_decode(hex: &str) -> Option<Vec<u8>> {
+    if hex.len() % 2 != 0 {
+        return None;
+    }
+    (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).ok())
+        .collect()
+}
+
 impl AuthorizedDevices {
     /// Load from `path`; a missing file is an empty list (first run).
     pub fn load(path: PathBuf) -> io::Result<Self> {
@@ -102,5 +114,14 @@ mod tests {
         let reloaded = AuthorizedDevices::load(path).unwrap();
         assert!(!reloaded.contains(&key));
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn hex_roundtrip_and_rejects_garbage() {
+        let key = [0u8, 15, 16, 255];
+        assert_eq!(hex_encode(&key), "000f10ff");
+        assert_eq!(hex_decode(&hex_encode(&key)), Some(key.to_vec()));
+        assert_eq!(hex_decode("abc"), None, "odd length");
+        assert_eq!(hex_decode("zz"), None, "non-hex digits");
     }
 }

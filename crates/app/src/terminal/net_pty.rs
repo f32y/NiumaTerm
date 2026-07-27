@@ -24,6 +24,15 @@ use nmt_platform::{
 };
 use nmt_remote_net::{RemoteInput, RemoteSession, SessionByteEvent};
 use parking_lot::Mutex;
+use tracing::warn;
+
+/// Cap on unread network bytes. A local ConPTY throttles its child when the
+/// reader falls behind; the network stream has no such brake, so a remote
+/// command dumping megabytes at a stalled engine would grow this queue without
+/// bound. Overflow drops the oldest bytes — the newest output is what the
+/// screen shows, and a client this far behind has already lost the exact
+/// scrollback.
+const MAX_BUFFERED_BYTES: usize = 8 * 1024 * 1024;
 
 pub struct NetPty {
     reader: NetReader,
@@ -60,10 +69,18 @@ impl NetPty {
         thread::Builder::new()
             .name("net-pty-drain".into())
             .spawn(move || {
+                let mut overflowed = false;
                 while let Ok(event) = output.recv() {
                     match event {
                         SessionByteEvent::Output(bytes) => {
-                            drain_buffer.lock().extend(bytes);
+                            let dropped = push_bounded(&mut drain_buffer.lock(), bytes);
+                            if dropped && !overflowed {
+                                overflowed = true;
+                                warn!(
+                                    "remote output outran the terminal engine; \
+                                     dropping the oldest buffered bytes"
+                                );
+                            }
                             drain_read_ready.set_ready();
                         }
                         SessionByteEvent::Exited => break,
@@ -92,6 +109,17 @@ impl NetPty {
             child_token: Token(0),
         }
     }
+}
+
+/// Append `bytes`, discarding the oldest data once the queue exceeds
+/// [`MAX_BUFFERED_BYTES`]. Reports whether anything had to be discarded.
+fn push_bounded(queue: &mut VecDeque<u8>, bytes: Vec<u8>) -> bool {
+    queue.extend(bytes);
+    let Some(excess) = queue.len().checked_sub(MAX_BUFFERED_BYTES) else {
+        return false;
+    };
+    queue.drain(..excess);
+    excess > 0
 }
 
 pub struct NetReader {
@@ -256,6 +284,17 @@ mod tests {
         // Empty read reports caught-up (Ok(0)) and keeps ready clear.
         assert_eq!(reader.read(&mut buf).unwrap(), 0);
         assert!(!ready.is_ready());
+    }
+
+    #[test]
+    fn buffer_overflow_keeps_the_newest_bytes() {
+        let mut queue = VecDeque::from(vec![b'x'; MAX_BUFFERED_BYTES]);
+        assert!(!push_bounded(&mut queue, Vec::new()), "at the cap is fine");
+
+        assert!(push_bounded(&mut queue, b"tail".to_vec()));
+        assert_eq!(queue.len(), MAX_BUFFERED_BYTES);
+        let kept: Vec<u8> = queue.iter().rev().take(4).rev().copied().collect();
+        assert_eq!(kept, b"tail");
     }
 
     #[test]
