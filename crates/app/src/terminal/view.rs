@@ -207,6 +207,41 @@ impl TerminalPane {
         }))
     }
 
+    /// Spawn a pane backed by an already-attached remote session. Mirrors
+    /// [`Self::spawn`] but skips local-only concerns (shell profile, working
+    /// dir); the remote host owns the process.
+    #[cfg(windows)]
+    pub(crate) fn spawn_remote(
+        cx: &mut impl AppContext,
+        surface_id: u64,
+        remote: nmt_remote_net::RemoteSession,
+    ) -> Result<Entity<Self>, String> {
+        let (wake, wake_rx) = wake::wake_channel();
+        let agent_route = agent_process().allocate_route();
+        let (fixed_bottom_requested, cursor_shape) = cx.read_global(|settings: &AppSettings, _| {
+            (
+                settings.input_style.is_fixed_bottom(),
+                settings.cursor_shape,
+            )
+        });
+
+        let surface = TerminalSurface::for_gpui_remote(wake.clone(), surface_id, remote)?;
+
+        Ok(cx.new(|cx| {
+            Self::from_surface(
+                cx,
+                surface_id,
+                "Remote".to_string(),
+                agent_route,
+                wake,
+                wake_rx,
+                surface,
+                fixed_bottom_requested,
+                cursor_shape,
+            )
+        }))
+    }
+
     fn from_surface(
         cx: &mut Context<Self>,
         surface_id: u64,

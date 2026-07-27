@@ -5,9 +5,9 @@ pub(crate) use self::settings::{
     surface_background_opacity, watch_themes, window_background_appearance,
 };
 pub(crate) use self::shell::{
-    CloseTab, NewTab, NewWindow, NewWorkspace, NextTab, NextWorkspace, PrevTab, PrevWorkspace,
-    ResizePaneDown, ResizePaneLeft, ResizePaneRight, ResizePaneUp, Shell, ShowSettings, SplitDown,
-    SplitLeft, SplitRight, SplitUp, TabSurface, ToggleSidebar,
+    CloseTab, NewRemoteTab, NewTab, NewWindow, NewWorkspace, NextTab, NextWorkspace, PrevTab,
+    PrevWorkspace, ResizePaneDown, ResizePaneLeft, ResizePaneRight, ResizePaneUp, Shell,
+    ShowSettings, SplitDown, SplitLeft, SplitRight, SplitUp, TabSurface, ToggleSidebar,
 };
 
 mod active_list;

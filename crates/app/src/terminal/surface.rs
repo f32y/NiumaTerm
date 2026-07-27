@@ -187,6 +187,33 @@ impl TerminalSurface {
         Self::new(config, surface_id, Some(wake_sender))
     }
 
+    /// Build a GPUI surface backed by a remote session. The attach snapshot
+    /// sizes the initial grid; live output/input/resize flow over the network.
+    #[cfg(windows)]
+    pub(crate) fn for_gpui_remote(
+        wake: WakeSignal,
+        surface_id: u64,
+        remote: nmt_remote_net::RemoteSession,
+    ) -> Result<Self, String> {
+        let wake_sender = WakeSender::from_fn(move |kind: Wake| {
+            wake.signal(kind);
+        });
+
+        let grid_size = (remote.snapshot().cols, remote.snapshot().rows);
+        let session = TerminalSession::new_remote(remote, surface_id, Some(wake_sender))
+            .map_err(|error| format!("{:?}: {}", error.code, error))?;
+
+        Ok(Self {
+            session,
+            launch_state: TabState::default(),
+            last_cwd: Mutex::new(None),
+            selection: Mutex::new(None),
+            read_only: AtomicBool::new(false),
+            alt_screen: AtomicBool::new(false),
+            grid_size,
+        })
+    }
+
     /// Number of processes beyond the shell itself in the shell's Job
     /// Object (requires the job-management setting; 0 otherwise).
     /// Shared frozen block-split history (renderer read side).

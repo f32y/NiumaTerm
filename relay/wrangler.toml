@@ -1,0 +1,13 @@
+name = "niumaterm-relay"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+# One Durable Object instance per host_id (idFromName), so every socket for a
+# given host lands on the same instance regardless of which edge accepted it.
+[[durable_objects.bindings]]
+name = "RELAY"
+class_name = "RelayDurableObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RelayDurableObject"]

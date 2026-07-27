@@ -24,6 +24,8 @@ mod error;
 mod ipc;
 mod logging;
 mod pane_tree;
+#[cfg(windows)]
+mod remote;
 mod tabs;
 mod terminal;
 mod ui;
@@ -36,9 +38,9 @@ use crate::terminal::view::{
     CopyBlockCommand, CopyBlockOutput, NextBlock, PreviousBlock, RerunBlock, SendShiftTab, SendTab,
 };
 use crate::ui::{
-    AppAssets, AppSettings, CloseTab, NewTab, NewWindow, NewWorkspace, NextTab, NextWorkspace,
-    PrevTab, PrevWorkspace, ResizePaneDown, ResizePaneLeft, ResizePaneRight, ResizePaneUp,
-    ShowSettings, SplitDown, SplitLeft, SplitRight, SplitUp, ToggleSidebar,
+    AppAssets, AppSettings, CloseTab, NewRemoteTab, NewTab, NewWindow, NewWorkspace, NextTab,
+    NextWorkspace, PrevTab, PrevWorkspace, ResizePaneDown, ResizePaneLeft, ResizePaneRight,
+    ResizePaneUp, ShowSettings, SplitDown, SplitLeft, SplitRight, SplitUp, ToggleSidebar,
 };
 use crate::window::{AppWindow, LastActiveWindow, ShellRegistry, WindowRegistry};
 
@@ -192,6 +194,11 @@ fn run_app(argv_url: Option<String>, testing: bool) {
 
             cx.set_global(AppSettings::load());
 
+            // Bring up the remote host service if it was left enabled. Runs on
+            // its own runtime thread; failures only log.
+            #[cfg(windows)]
+            remote::reconcile(&nmt_config::get().remote_session);
+
             ui::apply_window_translucency(cx);
 
             set_job_management(cx.global::<AppSettings>().manage_subprocess_job);
@@ -245,6 +252,7 @@ fn run_app(argv_url: Option<String>, testing: bool) {
                 KeyBinding::new("ctrl-pageup", PrevWorkspace, Some("Shell")),
                 KeyBinding::new("ctrl-shift-b", ToggleSidebar, Some("Shell")),
                 KeyBinding::new("ctrl-,", ShowSettings, Some("Shell")),
+                KeyBinding::new("ctrl-shift-r", NewRemoteTab, Some("Shell")),
                 // Split-pane creation and keyboard resize. These consume the
                 // xterm `\x1b[1;7A..D` / `\x1b[1;4A..D` arrow sequences before
                 // the terminal encodes them (accepted conflict, see the
