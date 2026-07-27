@@ -121,6 +121,82 @@ impl TerminalSession {
         Self::new_internal(config, id, wake)
     }
 
+    /// Create a terminal session backed by a remote session instead of a local
+    /// ConPTY. The attach snapshot primes the screen; live output, input, and
+    /// resize flow over the network through `NetPty`. Every other layer (engine,
+    /// proxy, render buffer, wake) is identical to a local session.
+    #[cfg(windows)]
+    pub fn new_remote(
+        remote: nmt_remote_net::RemoteSession,
+        id: u64,
+        wake: Option<WakeSender>,
+    ) -> Result<TerminalSession, EngineError> {
+        use FairMutex;
+        use nmt_terminal::render_buffer::RenderBuffer;
+
+        use crate::terminal::net_pty::NetPty;
+
+        let snapshot = remote.snapshot();
+        let cols = snapshot.cols.max(1);
+        let rows = snapshot.rows.max(1);
+        let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(
+            cols as usize,
+            rows as usize,
+        )));
+
+        let vt_modes = Arc::new(AtomicU32::new(0));
+        let events: HostEventQueue = Arc::new(Mutex::new(collections::VecDeque::new()));
+        let block_store: Arc<Mutex<BlockStore>> = Arc::new(Mutex::new(BlockStore::default()));
+        let generation_store: SessionGraphics = Arc::new(Mutex::new(GenerationStore::new()));
+        let live_image_count = Arc::new(AtomicUsize::new(0));
+        let in_flight: Arc<Mutex<Option<InFlightBlock>>> = Arc::new(Mutex::new(None));
+        let open_prompt: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
+        let frozen_images: terminal::graphics::FrozenImageCache = Default::default();
+
+        let engine_blocks = false;
+        let proxy = TerminalEventProxy {
+            events: Arc::clone(&events),
+            block_store: Arc::clone(&block_store),
+            generation_store: Arc::clone(&generation_store),
+            live_image_count: Arc::clone(&live_image_count),
+            staged_blocks: Arc::new(Mutex::new(Vec::new())),
+            in_flight: Arc::clone(&in_flight),
+            open_prompt: Arc::clone(&open_prompt),
+            frozen_images: Arc::clone(&frozen_images),
+            id,
+            wake,
+        };
+
+        let pty = NetPty::new(remote);
+
+        let (engine, messenger) = start_pipe(
+            Arc::clone(&render_buffer),
+            Arc::clone(&vt_modes),
+            pty,
+            proxy,
+            id,
+            10_000,
+            CursorShape::Block,
+            engine_blocks,
+        )?;
+
+        Ok(TerminalSession {
+            engine,
+            render_buffer,
+            vt_modes,
+            messenger,
+            events,
+            block_store,
+            generation_store,
+            live_image_count,
+            in_flight,
+            open_prompt,
+            frozen_images,
+            job_handle: None,
+            engine_blocks,
+        })
+    }
+
     fn new_internal(
         config: &TerminalSessionConfig,
         id: u64,
@@ -642,12 +718,13 @@ impl Default for TerminalSessionConfig {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use std::{collections, sync, time};
+    use std::{collections, env, fs, process, sync, thread, time};
 
     use base64::engine::general_purpose::STANDARD;
     use nmt_terminal::block_store::BlockStore;
     use nmt_terminal::event::{BlockEvent, TerminalEvent};
     use parking_lot::Mutex;
+    use tokio::runtime::{Builder as RuntimeBuilder, Runtime};
 
     use crate::error::EngineErrorCode;
     use crate::terminal;
@@ -657,6 +734,102 @@ mod tests {
     };
     use crate::terminal::wake::Wake;
     use crate::utils::POWERSHELL_INTEGRATION;
+
+    /// End-to-end proof that a remote session renders through `NetPty`: start a
+    /// host, pair, attach, type a command, and confirm its output reaches the
+    /// engine's screen state. Requires `wrangler dev` on 127.0.0.1:8787
+    /// (`npm run dev` in relay/), so it is ignored by default:
+    ///
+    /// ```text
+    /// cargo test -p app remote_session_renders_through_net_pty -- --ignored
+    /// ```
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "requires `wrangler dev` running in relay/ (npm run dev)"]
+    fn remote_session_renders_through_net_pty() {
+        use nmt_remote_net::{
+            AttachTarget, HostConfig, HostHandle, client_connect_pair, open_remote_session,
+        };
+        use nmt_remote_protocol::{StaticKeypair, WireSessionOptions, generate_keypair};
+
+        const RELAY: &str = "ws://127.0.0.1:8787/ws";
+        const TOKEN: &str = "test-token";
+        const MARKER: &str = "netpty-render-marker";
+
+        let data_dir = env::temp_dir().join(format!("nmt-netpty-{}", process::id()));
+        let host = HostHandle::start(HostConfig {
+            relay_url: RELAY.to_owned(),
+            access_token: TOKEN.to_owned(),
+            data_dir: data_dir.clone(),
+        })
+        .expect("host starts");
+        let host_public = host.public_key().to_vec();
+        let host_id = host.host_id().to_owned();
+
+        // Pair a device (retry while the host finishes registering with relay).
+        let device = generate_keypair().unwrap();
+        let code = host.begin_pairing();
+        let rt = tokio_runtime();
+        let mut paired = false;
+        for _ in 0..40 {
+            let dev = StaticKeypair {
+                private: device.private.clone(),
+                public: device.public.clone(),
+            };
+            if rt
+                .block_on(client_connect_pair(&code, &dev, "netpty-test"))
+                .is_ok()
+            {
+                paired = true;
+                break;
+            }
+            thread::sleep(time::Duration::from_millis(500));
+        }
+        assert!(paired, "pairing must succeed");
+
+        let remote = open_remote_session(
+            RELAY.to_owned(),
+            host_id,
+            host_public,
+            device,
+            AttachTarget::Open(WireSessionOptions {
+                shell: Some("cmd.exe".into()),
+                working_directory: None,
+                cols: 100,
+                rows: 30,
+            }),
+        )
+        .expect("attach");
+
+        let session = TerminalSession::new_remote(remote, 1, None).expect("remote session");
+        session.write_input(format!("echo {MARKER}\r").as_bytes());
+
+        let deadline = time::Instant::now() + time::Duration::from_secs(30);
+        let mut rendered = false;
+        while time::Instant::now() < deadline {
+            let vt = session.engine.lock().format_vt_state().unwrap_or_default();
+            if String::from_utf8_lossy(&vt).contains(MARKER) {
+                rendered = true;
+                break;
+            }
+            thread::sleep(time::Duration::from_millis(200));
+        }
+        assert!(
+            rendered,
+            "command output must render through NetPty into the engine"
+        );
+
+        host.shutdown();
+        fs::remove_dir_all(&data_dir).ok();
+    }
+
+    #[cfg(test)]
+    fn tokio_runtime() -> Runtime {
+        RuntimeBuilder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+    }
 
     #[test]
     fn trusted_prompt_integration_requires_injected_powershell_startup() {

@@ -15,6 +15,8 @@ members = [
     "crates/config",
     "crates/input",
     "crates/platform",
+    "crates/remote_net",
+    "crates/remote_protocol",
     "crates/remote_session_hub",
     "crates/shell_extension",
     "crates/terminal",
@@ -70,8 +72,19 @@ nmt_config = { path = "crates/config" }
 nmt_input = { path = "crates/input" }
 libghostty-vt-sys = { path = "third_party/libghostty-vt-sys" }
 nmt_platform = { path = "crates/platform" }
+nmt_remote_net = { path = "crates/remote_net" }
+nmt_remote_protocol = { path = "crates/remote_protocol" }
+nmt_remote_session_hub = { path = "crates/remote_session_hub" }
 nmt_terminal = { path = "crates/terminal" }
 nmt_themes = { path = "crates/themes" }
+
+# Remote session wire protocol
+base32 = "0.5"
+postcard = { version = "1", features = ["use-std"] }
+sha2 = "0.10"
+snow = "0.10"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "io-util"] }
+tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
 
 # GPUI fork
 collections = { path = "third_party/gpui/collections" }
@@ -512,6 +525,7 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_Devices_HumanInterfaceDevice",
     "Win32_Foundation",
     "Win32_Globalization",
+    "Win32_Security_Cryptography",
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
     "Win32_Media",

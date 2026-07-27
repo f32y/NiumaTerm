@@ -36,3 +36,7 @@ crates/renderer/src/**/*.spv
 .idea/
 _ReSharper.Caches/
 *.DotSettings.user
+node_modules
+
+# wrangler local dev state
+.wrangler/

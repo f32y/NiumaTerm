@@ -33,7 +33,6 @@ use crate::pane_tree::{PaneId, PaneNode, PaneTree, RemoveOutcome, SplitDirection
 use crate::tabs::{TabId, TabManager};
 use crate::terminal::session::HostEvent;
 use crate::terminal::view::{AgentInterrupted, TerminalPane};
-use crate::ui;
 use crate::ui::codex_usage::CodexUsageView;
 use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::git_status::{GitStatusModel, GitStatusView};
@@ -43,6 +42,7 @@ use crate::ui::token_usage::TokenUsageView;
 use crate::ui::workspace_sidebar::{self, Sidebar};
 use crate::window::{AppWindow, LastActiveWindow, ShellEntry, ShellRegistry, WindowRegistry};
 use crate::workspace::{self, DEFAULT_WORKSPACE_NAME, WorkspaceId, WorkspaceManager, best_match};
+use crate::{remote, ui};
 
 /// A workspace cwd as a shell working directory: `None` for empty or the
 /// legacy `"."` placeholder (shells then start in their default directory).
@@ -75,6 +75,7 @@ actions!(
         ToggleSidebar,
         ToggleGitSidebar,
         ShowSettings,
+        NewRemoteTab,
     ]
 );
 
@@ -920,6 +921,58 @@ impl Shell {
         self.sync_session_memory(cx);
 
         cx.notify();
+    }
+
+    /// Open a remote-session tab: connect to a paired host in the background,
+    /// then add a tab whose terminal is fed over the network by `NetPty`.
+    #[cfg(windows)]
+    pub(crate) fn on_new_remote_tab(
+        &mut self,
+        _: &NewRemoteTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let hosts = remote::known_hosts();
+        let Some(host) = hosts.into_iter().next() else {
+            window.push_notification(
+                "No paired remote hosts. Pair one in Settings → Remote Session.",
+                cx,
+            );
+            return;
+        };
+        // Connects to the first paired host; a host picker is only meaningful
+        // once a user keeps several hosts paired at the same time.
+        let id = Self::alloc_id(&mut self.next_id);
+
+        cx.spawn_in(window, async move |this, cx| {
+            let connected = cx
+                .background_executor()
+                .spawn(async move { remote::connect_new_session(&host) })
+                .await;
+
+            let _ = this.update_in(cx, |this, window, cx| match connected {
+                Ok(remote) => match TerminalPane::spawn_remote(cx, id, remote) {
+                    Ok(pane) => {
+                        this.register_agent_pane(&pane, cx);
+                        this.workspaces.active_tabs_mut().new_tab(
+                            TabSurface::Live(PaneTree::new_leaf(PaneId(id), pane)),
+                            TabId(id),
+                            "Remote".to_string(),
+                        );
+                        this.focus_active(window, cx);
+                        cx.notify();
+                    }
+                    Err(e) => {
+                        window
+                            .push_notification(format!("Remote session failed: {e}").as_str(), cx);
+                    }
+                },
+                Err(e) => {
+                    window.push_notification(format!("Connect failed: {e}").as_str(), cx);
+                }
+            });
+        })
+        .detach();
     }
 
     /// CLI `new_tab`: open `path` in the deepest workspace whose cwd contains
@@ -2070,6 +2123,8 @@ impl Shell {
                 .keyboard(false)
                 .on_close(move |_, window, cx| {
                     cx.global::<AppSettings>().save();
+                    // Pick up relay URL / token edits made in the dialog.
+                    ui::settings::reconcile_remote_host(cx);
 
                     shell.update(cx, |this, cx| {
                         this.theme_watcher = None;
@@ -2226,6 +2281,7 @@ impl Render for Shell {
             .on_action(cx.listener(Self::on_toggle_sidebar))
             .on_action(cx.listener(Self::on_toggle_git_sidebar))
             .on_action(cx.listener(Self::on_show_settings))
+            .on_action(cx.listener(Self::on_new_remote_tab))
             .children(background_image)
             // Interactive chrome lives in the titlebar but is wrapped in
             // `occlude()`: that blocks the drag hitbox beneath it, so Windows

@@ -10,9 +10,9 @@ use futures::StreamExt as _;
 use futures::channel::mpsc::unbounded;
 use gpui::prelude::{FluentBuilder as _, InteractiveElement as _, StatefulInteractiveElement as _};
 use gpui::{
-    App, AppContext as _, BorrowAppContext as _, Div, Entity, FileDialogFilter, Global, Hsla,
-    ParentElement as _, PathPromptOptions, SharedString, StyleRefinement, Styled as _,
-    Subscription, Task, WindowBackgroundAppearance, div, px, relative, rgba,
+    App, AppContext as _, BorrowAppContext as _, ClipboardItem, Div, Entity, FileDialogFilter,
+    Global, Hsla, ParentElement as _, PathPromptOptions, SharedString, StyleRefinement,
+    Styled as _, Subscription, Task, WindowBackgroundAppearance, div, px, relative, rgba,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::group_box::GroupBoxVariant;
@@ -33,6 +33,7 @@ use nmt_config::agent::AgentConfig;
 use nmt_config::appearance::AppearanceConfig;
 use nmt_config::colors::{ColorArray, Colors};
 use nmt_config::defaults::default_theme;
+use nmt_config::remote_session::RemoteSessionConfig;
 use nmt_config::system::{SystemConfig, WarnBeforeTerminatingShell};
 use nmt_config::theme::{AppearanceTheme, Theme, UiTheme};
 use nmt_config::{
@@ -48,7 +49,7 @@ use notify::{
 use toml::{Table as TomlTable, Value as TomlValue};
 use tracing::warn;
 
-use crate::{PlatformHandle, ui};
+use crate::{PlatformHandle, remote, ui};
 
 pub const DEFAULT_SHELL: &str = r"C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe";
 
@@ -159,6 +160,20 @@ pub struct AppSettings {
     pub confirm_before_closing_workspace: bool,
     /// Raise the main (UI) and render thread priority to AboveNormal.
     pub prioritize_ui_threads: bool,
+    /// Host this machine's local sessions for remote clients via the relay.
+    pub remote_host_enabled: bool,
+    /// Relay endpoint both host and clients dial.
+    pub remote_relay_url: SharedString,
+    /// Shared token the relay requires from hosts on registration.
+    pub remote_access_token: SharedString,
+    /// Most recently generated pairing code, shown until the dialog closes.
+    /// Ephemeral: never persisted.
+    pub remote_pairing_code: Option<String>,
+    /// Client-side: pairing code being entered to pair with a remote host.
+    /// Ephemeral.
+    pub remote_pairing_input: SharedString,
+    /// Client-side: last pairing attempt result message. Ephemeral.
+    pub remote_client_status: Option<String>,
 }
 
 impl Default for AppSettings {
@@ -192,6 +207,12 @@ impl Default for AppSettings {
             warn_before_terminating_shell: WarnBeforeTerminatingShell::default(),
             confirm_before_closing_workspace: true,
             prioritize_ui_threads: false,
+            remote_host_enabled: false,
+            remote_relay_url: SharedString::default(),
+            remote_access_token: SharedString::default(),
+            remote_pairing_code: None,
+            remote_pairing_input: SharedString::default(),
+            remote_client_status: None,
         }
     }
 }
@@ -332,6 +353,12 @@ impl AppSettings {
             warn_before_terminating_shell: config.system.warn_before_terminating_shell,
             confirm_before_closing_workspace: config.system.confirm_before_closing_workspace,
             prioritize_ui_threads: config.system.prioritize_ui_threads,
+            remote_host_enabled: config.remote_session.host_enabled,
+            remote_relay_url: config.remote_session.relay_url.clone().into(),
+            remote_access_token: config.remote_session.access_token.clone().into(),
+            remote_pairing_code: None,
+            remote_pairing_input: SharedString::default(),
+            remote_client_status: None,
         }
     }
 
@@ -454,6 +481,12 @@ impl AppSettings {
             prioritize_ui_threads: self.prioritize_ui_threads,
         };
 
+        let remote_session = RemoteSessionConfig {
+            host_enabled: self.remote_host_enabled,
+            relay_url: self.remote_relay_url.to_string(),
+            access_token: self.remote_access_token.to_string(),
+        };
+
         let profiles = self.profiles.clone();
 
         if let Err(err) = save_settings(&SettingsPatch {
@@ -462,6 +495,7 @@ impl AppSettings {
             cursor_shape: self.cursor_shape,
             agent: &agent,
             system: &system,
+            remote_session: &remote_session,
             profiles: &profiles,
             default_profile: &self.default_profile,
         }) {
@@ -1118,6 +1152,284 @@ fn agent_page() -> SettingPage {
         )
 }
 
+fn remote_session_page() -> SettingPage {
+    SettingPage::new("Remote Session")
+        .default_open(true)
+        .description(
+            "Reach this machine's terminal sessions from other computers through a relay. \
+             Traffic is end-to-end encrypted; the relay only ever sees ciphertext.",
+        )
+        .group(
+            SettingGroup::new()
+                .title("Host Service")
+                .item(
+                    SettingItem::new(
+                        "Enable Host Service",
+                        SettingField::switch(
+                            |cx| cx.global::<AppSettings>().remote_host_enabled,
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().remote_host_enabled = value;
+                                reconcile_remote_host(cx);
+                            },
+                        ),
+                    )
+                    .description(
+                        "Register with the relay so paired devices can attach to sessions on \
+                         this machine. Sessions keep running while no client is connected.",
+                    ),
+                )
+                .item(
+                    SettingItem::new(
+                        "Relay URL",
+                        SettingField::input(
+                            |cx| cx.global::<AppSettings>().remote_relay_url.clone(),
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().remote_relay_url = value;
+                            },
+                        ),
+                    )
+                    .description(
+                        "WebSocket endpoint, e.g. wss://relay.example.com/ws. Applied when you \
+                         toggle the service or close settings.",
+                    ),
+                )
+                .item(
+                    SettingItem::new(
+                        "Access Token",
+                        SettingField::input(
+                            |cx| cx.global::<AppSettings>().remote_access_token.clone(),
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().remote_access_token = value;
+                            },
+                        ),
+                    )
+                    .description("Shared secret the relay requires to register this host."),
+                ),
+        )
+        .group(
+            SettingGroup::new()
+                .title("Pairing & Devices")
+                .item(SettingItem::render(|_, _, cx| remote_host_status(cx))),
+        )
+        .group(
+            SettingGroup::new()
+                .title("Connect to a Host")
+                .description(
+                    "Pair with another machine's host service using the code it shows, then \
+                     open remote tabs with Ctrl+Shift+R.",
+                )
+                .item(
+                    SettingItem::new(
+                        "Pairing Code",
+                        SettingField::input(
+                            |cx| cx.global::<AppSettings>().remote_pairing_input.clone(),
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().remote_pairing_input = value;
+                            },
+                        ),
+                    )
+                    .description("Paste the code from the host machine, then click Pair."),
+                )
+                .item(SettingItem::render(|_, _, cx| remote_client_status(cx))),
+        )
+}
+
+/// Start/stop/restart the background host service to match the live settings.
+/// Called on discrete events (enable toggle, dialog close), never per keystroke.
+#[cfg(windows)]
+pub(crate) fn reconcile_remote_host(cx: &App) {
+    let settings = cx.global::<AppSettings>();
+    remote::reconcile(&RemoteSessionConfig {
+        host_enabled: settings.remote_host_enabled,
+        relay_url: settings.remote_relay_url.to_string(),
+        access_token: settings.remote_access_token.to_string(),
+    });
+}
+
+#[cfg(not(windows))]
+pub(crate) fn reconcile_remote_host(_cx: &App) {}
+
+#[cfg(windows)]
+fn remote_host_status(cx: &mut App) -> Div {
+    use crate::remote;
+
+    let muted = cx.theme().muted_foreground;
+    let border = cx.theme().border;
+    let surface = cx.theme().tokens.secondary;
+
+    if !remote::is_running() {
+        return v_flex().child(
+            div()
+                .py_2()
+                .text_color(muted)
+                .child("Enable the host service (with a relay URL and token) to pair devices."),
+        );
+    }
+
+    let host_id = remote::host_id().unwrap_or_default();
+    let pairing = cx.global::<AppSettings>().remote_pairing_code.clone();
+    let devices = remote::list_devices();
+
+    v_flex()
+        .w_full()
+        .gap_3()
+        .child(
+            h_flex().gap_2().child("Host ID").child(
+                div()
+                    .font_family("monospace")
+                    .text_color(muted)
+                    .child(host_id),
+            ),
+        )
+        .child(
+            h_flex().justify_between().child("Pair a new device").child(
+                Button::new("remote-generate-pairing")
+                    .outline()
+                    .label("Generate Pairing Code")
+                    .on_click(|_, _, cx: &mut App| {
+                        if let Some(code) = remote::begin_pairing() {
+                            cx.global_mut::<AppSettings>().remote_pairing_code =
+                                Some(code.encode());
+                        }
+                    }),
+            ),
+        )
+        .when_some(pairing, |this, code| {
+            this.child(
+                v_flex()
+                    .gap_2()
+                    .p_3()
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(border)
+                    .bg(surface)
+                    .child(
+                        div()
+                            .text_color(muted)
+                            .child("Enter this code on the other computer within 5 minutes:"),
+                    )
+                    .child(div().font_family("monospace").child(code.clone()))
+                    .child(
+                        Button::new("remote-copy-pairing")
+                            .outline()
+                            .label("Copy")
+                            .on_click(move |_, _, cx: &mut App| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(code.clone()));
+                            }),
+                    ),
+            )
+        })
+        .child(div().mt_2().text_color(muted).child("Authorized Devices"))
+        .when(devices.is_empty(), |this| {
+            this.child(
+                div()
+                    .py_2()
+                    .text_color(muted)
+                    .child("No devices paired yet."),
+            )
+        })
+        .children(devices.into_iter().enumerate().map(|(index, device)| {
+            let key = device.public_key.clone();
+            h_flex()
+                .w_full()
+                .py_2()
+                .justify_between()
+                .border_b_1()
+                .border_color(border)
+                .child(device.name)
+                .child(
+                    Button::new(("remote-revoke", index))
+                        .outline()
+                        .label("Revoke")
+                        .on_click(move |_, _, cx: &mut App| {
+                            remote::revoke_device(&key);
+                            cx.refresh_windows();
+                        }),
+                )
+        }))
+}
+
+#[cfg(not(windows))]
+fn remote_host_status(_cx: &mut App) -> Div {
+    v_flex().child(div().child("Remote sessions are only available on Windows."))
+}
+
+#[cfg(windows)]
+fn remote_client_status(cx: &mut App) -> Div {
+    use crate::remote;
+
+    let muted = cx.theme().muted_foreground;
+    let border = cx.theme().border;
+    let status = cx.global::<AppSettings>().remote_client_status.clone();
+    let hosts = remote::known_hosts();
+
+    v_flex()
+        .w_full()
+        .gap_3()
+        .child(
+            h_flex()
+                .justify_between()
+                .child("Pair with this code")
+                .child(Button::new("remote-pair").outline().label("Pair").on_click(
+                    |_, _, cx: &mut App| {
+                        let code = cx.global::<AppSettings>().remote_pairing_input.to_string();
+                        if code.trim().is_empty() {
+                            cx.global_mut::<AppSettings>().remote_client_status =
+                                Some("Enter a pairing code first.".to_owned());
+                            return;
+                        }
+                        let message = match remote::pair_with_code(&code, "remote host") {
+                            Ok(host) => {
+                                cx.global_mut::<AppSettings>().remote_pairing_input =
+                                    SharedString::default();
+                                format!("Paired with {} ({}).", host.name, host.host_id)
+                            }
+                            Err(e) => format!("Pairing failed: {e}"),
+                        };
+                        cx.global_mut::<AppSettings>().remote_client_status = Some(message);
+                    },
+                )),
+        )
+        .when_some(status, |this, message| {
+            this.child(div().text_color(muted).child(message))
+        })
+        .child(div().mt_2().text_color(muted).child("Paired Hosts"))
+        .when(hosts.is_empty(), |this| {
+            this.child(div().py_2().text_color(muted).child("No hosts paired yet."))
+        })
+        .children(hosts.into_iter().enumerate().map(|(index, host)| {
+            let host_id = host.host_id.clone();
+            h_flex()
+                .w_full()
+                .py_2()
+                .justify_between()
+                .border_b_1()
+                .border_color(border)
+                .child(
+                    v_flex().child(host.name.clone()).child(
+                        div()
+                            .font_family("monospace")
+                            .text_color(muted)
+                            .child(host.host_id.clone()),
+                    ),
+                )
+                .child(
+                    Button::new(("remote-forget", index))
+                        .outline()
+                        .label("Forget")
+                        .on_click(move |_, _, cx: &mut App| {
+                            remote::forget_host(&host_id);
+                            cx.refresh_windows();
+                        }),
+                )
+        }))
+}
+
+#[cfg(not(windows))]
+fn remote_client_status(_cx: &mut App) -> Div {
+    v_flex()
+}
+
 pub fn settings_view(cx: &App) -> Settings {
     let profiles = cx.global::<AppSettings>().profiles.clone();
     let transparency_enabled = cx.global::<AppSettings>().window_transparency_enabled;
@@ -1585,6 +1897,7 @@ pub fn settings_view(cx: &App) -> Settings {
                     ),
                 ),
         )
+        .page(remote_session_page())
 }
 
 fn profiles_page(profiles: &[Profile]) -> SettingPage {

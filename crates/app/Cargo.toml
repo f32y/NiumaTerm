@@ -28,8 +28,11 @@ tracing-appender.workspace = true
 winres.workspace = true
 
 [target.'cfg(windows)'.dependencies]
+nmt_remote_net.workspace = true
+nmt_remote_protocol.workspace = true
 anyhow.workspace = true
 base64.workspace = true
+serde.workspace = true
 chrono.workspace = true
 clap.workspace = true
 futures.workspace = true
@@ -50,3 +53,6 @@ image_rs.workspace = true
 windows-sys.workspace = true
 percent-encoding.workspace = true
 raw-window-handle.workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+tokio.workspace = true

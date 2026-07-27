@@ -11,6 +11,7 @@ pub mod layout;
 pub mod local_state;
 pub mod navigation;
 pub mod profile;
+pub mod remote_session;
 pub mod render_types;
 pub mod renderer;
 pub mod system;
@@ -165,6 +166,9 @@ pub struct Config {
     /// System-behavior settings (settings dialog, System page).
     #[serde(default = "system::SystemConfig::default")]
     pub system: system::SystemConfig,
+    /// Remote-session connection settings (settings dialog, Remote Session page).
+    #[serde(default, rename = "remote-session")]
+    pub remote_session: remote_session::RemoteSessionConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -449,6 +453,7 @@ impl Default for Config {
             profiles: profile::ProfilesConfig::default(),
             agent: agent::AgentConfig::default(),
             system: system::SystemConfig::default(),
+            remote_session: remote_session::RemoteSessionConfig::default(),
         }
     }
 }
@@ -546,6 +551,7 @@ pub struct SettingsPatch<'a> {
     pub cursor_shape: CursorShape,
     pub agent: &'a AgentConfig,
     pub system: &'a SystemConfig,
+    pub remote_session: &'a remote_session::RemoteSessionConfig,
     pub profiles: &'a [Profile],
     pub default_profile: &'a str,
 }
@@ -585,6 +591,7 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) {
         agent,
         system,
         profiles,
+        remote_session,
         default_profile,
     } = patch;
 
@@ -623,6 +630,9 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) {
 
     ensure_explicit_table(doc, "agent");
     agent::patch_document(doc, agent);
+
+    ensure_explicit_table(doc, "remote-session");
+    remote_session::patch_document(doc, remote_session);
 
     profile::patch_document(doc, profiles, default_profile);
 }
@@ -699,6 +709,7 @@ mod tests {
                 cursor_shape: CursorShape::Beam,
                 agent: &sample_agent(),
                 system: &sample_system(),
+                remote_session: &remote_session::RemoteSessionConfig::default(),
                 profiles: &sample_profiles(),
                 default_profile: "PowerShell",
             },
@@ -754,6 +765,7 @@ mod tests {
                     cursor_shape: CursorShape::Beam,
                     agent: &sample_agent(),
                     system: &sample_system(),
+                    remote_session: &remote_session::RemoteSessionConfig::default(),
                     profiles: &sample_profiles(),
                     default_profile: "PowerShell",
                 },
