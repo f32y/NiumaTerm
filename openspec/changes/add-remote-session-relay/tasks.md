@@ -35,6 +35,8 @@
 - [x] 4.3 UI：`NetPty: EventedPty`（SoftReady 就绪信号，reader 先喂 snapshot.vt 再喂 Output / writer→send_input / set_winsize→send_resize / 通道关闭→Exited）接入 PtyPipe 泛型 seam；TerminalSession::new_remote + surface/pane spawn_remote 复用现有渲染/wake/pump 链路；NetReader 单测 + 经真实 relay 的 render e2e（remote_session_renders_through_net_pty）
 - [~] 4.4 UI：`NewRemoteTab`（Ctrl+Shift+R）连接首个已配对主机开远程标签页。会话列表选择页（list_remote_sessions + AttachTarget::Existing 多主机picker）留待后续：先连首个主机，用户真需要多主机再加 picker
 
+- [x] 4.5 引擎：断线自动重连——退避重试 5 次后重新 IK 握手并 Attach 原 session_id，用新 snapshot 重建屏幕，按 base_seq 丢弃 snapshot 已覆盖的 Output；所有客户端网络等待加 15s 超时；relay 重启故障注入的手动 e2e（NMT_RELAY_BOUNCE=1）
+
 ## 5. 配对管理与收尾
 
 - [ ] 5.1 Host 授权设备管理 UI：列表、移除（断开现有连接 + 后续握手拒绝）、新设备接入通知

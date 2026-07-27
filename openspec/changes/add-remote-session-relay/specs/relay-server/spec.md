@@ -42,15 +42,22 @@ DO SHALL 为 Client socket（`role=client`）分配 `conn_<uuid>` 形式的 conn
 - **THEN** DO 关闭该 Client 连接并返回明确关闭码
 
 ### Requirement: 数据 socket 就绪前的帧缓冲
-Host 数据 socket 尚未接入时，DO SHALL 缓冲该 connection_id 的 Client 帧（上限 200 帧），数据 socket 接入后按序冲刷；超过上限 SHALL 关闭该 Client 连接迫使其重连。
+Host 数据 socket 尚未接入时，DO SHALL 缓冲该 connection_id 的 Client 帧（上限 1 MiB，按字节计），数据 socket 接入后按序冲刷；超过上限 SHALL 关闭该 Client 连接迫使其重连。
 
 #### Scenario: 缓冲后冲刷
 - **WHEN** Client 在 Host 数据 socket 就绪前发送了若干帧（未超上限）
 - **THEN** 数据 socket 接入后按原顺序收到全部缓冲帧
 
 #### Scenario: 缓冲溢出
-- **WHEN** 缓冲帧数超过 200
+- **WHEN** 缓冲字节数超过 1 MiB
 - **THEN** DO 关闭该 Client 连接，丢弃缓冲
+
+### Requirement: Client socket 数量上限
+Client socket 不携带 token，DO SHALL 限制每个 host_id 同时在线的 Client socket 数量（上限 16），超出的连接 SHALL 以 HTTP 429 拒绝，避免知道 host_id 的第三方迫使 Host 无限回拨数据 socket 并执行握手。
+
+#### Scenario: 超出连接上限
+- **WHEN** 某 host_id 已有 16 条 Client socket 在线，第 17 条发起连接
+- **THEN** DO 以 429 拒绝，既有连接不受影响
 
 ### Requirement: 断开级联
 Host 控制 socket 断开时 DO SHALL 关闭该 host_id 下全部 Client socket 与数据 socket（触发 Client 重连）；单个 Client 断开 SHALL 关闭其配对的数据 socket 并向控制 socket 推送 `disconnected`，不影响其他 Client。

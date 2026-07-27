@@ -70,7 +70,7 @@ Host 与 Client 各自出站 WSS 连到 relay，relay 按 `host_id` 配对后双
 - TypeScript Worker + DO，仓库 `relay/` 目录，wrangler 部署。每个 `host_id` 一个 DO 实例（`idFromName`），WebSocket hibernation 降低空闲成本。
 - 选它的理由：零运维（无 VPS、无 systemd、无证书——CF 边缘自动 TLS）、免费额度覆盖个人场景、全球边缘就近接入；paseo 已在生产验证该形态，`packages/relay/src/cloudflare-adapter.ts` 可直接对照移植。
 - 连接模型照抄 paseo v2：Host 一条**控制 socket**（注册 + 接收 `connected`/`disconnected`/`sync` 通知）+ 每个 Client 连接一条 **Host 数据 socket**，Client socket 与数据 socket 按 connection_id 配对。这样 DO 对内层帧保持字节级不透明——单连接多路复用则要求 relay 解析外层信封，放弃。
-- 数据 socket 就绪前 DO 缓冲 Client 帧（上限 200，溢出断连迫使重连）。
+- 数据 socket 就绪前 DO 缓冲 Client 帧（上限 1 MiB，溢出断连迫使重连）；同一 host_id 的 Client socket 并发上限 16，超出以 429 拒绝。
 - 注册需 access token（Worker secret），防公网滥用/host_id 占坑。占坑者在 E2EE 下只能造成拒绝服务，签名挑战留作升级路径。
 - 备选自托管 Rust bin（tokio + tungstenite + DashMap 路由表）：语言栈统一、无厂商绑定，留作升级路径——relay 协议是哑字节转发，两种实现可互换，Host/Client 侧代码零改动。
 
