@@ -38,6 +38,7 @@ impl TabVariant {
             },
             Size::Large => match self {
                 TabVariant::Underline => px(44.),
+                TabVariant::Modern => px(30.),
                 _ => px(36.),
             },
             _ => match self {
@@ -64,9 +65,11 @@ impl TabVariant {
                 TabVariant::Underline => px(22.),
             },
             Size::Large => match self {
-                TabVariant::Tab | TabVariant::Outline | TabVariant::Pill | TabVariant::Modern => {
-                    px(36.)
-                }
+                // Modern's pill sits 3px shorter than its row, the same inset
+                // Small uses (22 in 24), so it reads as a floating pill rather
+                // than a full-height block.
+                TabVariant::Modern => px(27.),
+                TabVariant::Tab | TabVariant::Outline | TabVariant::Pill => px(36.),
                 TabVariant::Segmented => px(28.),
                 TabVariant::Underline => px(32.),
             },
@@ -775,9 +778,13 @@ impl RenderOnce for Tab {
             .h(height)
             .overflow_hidden()
             .text_color(tab_style.fg)
-            .map(|this| match self.size {
-                Size::XSmall => this.text_xs(),
-                Size::Large => this.text_base(),
+            .map(|this| match (self.size, self.variant) {
+                (Size::XSmall, _) => this.text_xs(),
+                // Modern at Large is a 30px row, short enough that text_base
+                // would leave almost no breathing room above and below the
+                // label.
+                (Size::Large, TabVariant::Modern) => this.text_sm(),
+                (Size::Large, _) => this.text_base(),
                 _ => this.text_sm(),
             })
             .bg(outer_bg)
