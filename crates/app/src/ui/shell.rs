@@ -691,6 +691,12 @@ impl Shell {
 
         self.sync_active_terminal_title(cx);
 
+        // Every activation path funnels through here, so this is the one place
+        // that acknowledges the tab's bell.
+        if self.workspaces.active_tabs_mut().clear_active_bell() {
+            cx.notify();
+        }
+
         let handle = self.active_pane().read(cx).focus.clone();
 
         window.focus(&handle, cx);
@@ -836,6 +842,10 @@ impl Shell {
                             if removed.is_none() {
                                 tabs.mark_exited(tab_id);
                             }
+
+                            // A dead command sends no state-0 report, so its
+                            // bar would otherwise sit at whatever it reached.
+                            tabs.clear_progress(tab_id);
                         }
 
                         if let Some((pane, outcome)) = removed {
@@ -853,6 +863,27 @@ impl Shell {
 
                             self.sync_session_memory(cx);
                         }
+                        chrome_changed = true;
+                    }
+                }
+                HostEvent::Bell => {
+                    // Only background tabs get the indicator: a bell on the tab
+                    // in front of you is already conveyed by the sound and the
+                    // output itself, and flagging it would need a timer to
+                    // expire the flag again.
+                    if let Some(tab_id) = self.tab_for_pane(pane_id)
+                        && self.workspaces.active_tabs().active_id() != tab_id
+                        && let Some(tabs) = self.workspaces.tab_manager_for_mut(tab_id)
+                    {
+                        tabs.ring_bell(tab_id);
+                        chrome_changed = true;
+                    }
+                }
+                HostEvent::Progress(report) => {
+                    if let Some(tab_id) = self.tab_for_pane(pane_id)
+                        && let Some(tabs) = self.workspaces.tab_manager_for_mut(tab_id)
+                    {
+                        tabs.set_progress(tab_id, *report);
                         chrome_changed = true;
                     }
                 }

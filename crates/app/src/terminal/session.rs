@@ -13,7 +13,9 @@ use nmt_config::{CursorShape, active_colors};
 use nmt_platform::{EventedPty, WinsizeBuilder, create_pty_with_env, job_other_process_count};
 use nmt_terminal::block_store::{BlockStore, SegmentMeta};
 use nmt_terminal::clipboard::Clipboard;
-use nmt_terminal::event::{BlockEvent, EventListener, Msg, MsgSender, TerminalEvent, WindowId};
+use nmt_terminal::event::{
+    BlockEvent, EventListener, Msg, MsgSender, ProgressReport, TerminalEvent, WindowId,
+};
 use nmt_terminal::ghostty::GhosttyTerminal;
 use nmt_terminal::pty_pipe::PtyPipe;
 use nmt_terminal::render_buffer::RenderBuffer;
@@ -43,6 +45,8 @@ pub enum HostEvent {
     Title(String),
     /// Bell (BEL).
     Bell,
+    /// Progress report (OSC 9;4) from a long-running command.
+    Progress(ProgressReport),
     /// The shell process exited.
     Exit,
     /// Working directory changed (OSC 7).
@@ -536,6 +540,7 @@ impl EventListener for TerminalEventProxy {
             TerminalEvent::Title(t) | TerminalEvent::TitleWithSubtitle(t, _) => HostEvent::Title(t),
             TerminalEvent::ResetTitle => HostEvent::Title(String::new()),
             TerminalEvent::Bell => HostEvent::Bell,
+            TerminalEvent::ProgressReport(report) => HostEvent::Progress(report),
             TerminalEvent::ClipboardStore(ty, text) => {
                 let mut clipboard = Clipboard::default();
 

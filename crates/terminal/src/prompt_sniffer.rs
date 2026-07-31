@@ -4,7 +4,7 @@ use std::{env, mem, str, sync, time};
 
 use memchr::memchr;
 
-use crate::event::{CommandCapture, CommandStart};
+use crate::event::{CommandCapture, CommandStart, ProgressReport, ProgressState};
 
 // ---- OSC 133 shell-integration prompt sniffer ----
 //
@@ -64,7 +64,7 @@ enum SniffedOsc {
     },
     Progress {
         len: usize,
-        active: bool,
+        report: ProgressReport,
     },
     /// Looks like the start of a 133 mark but the slice ends before the terminator — carry.
     Incomplete,
@@ -102,9 +102,12 @@ fn parse_sniffed_osc(s: &[u8]) -> SniffedOsc {
             return SniffedOsc::Incomplete;
         }
 
-        let active = match s[OSC_PROGRESS_PREFIX.len()] {
-            b'0' => false,
-            b'1'..=b'4' => true,
+        let state = match s[OSC_PROGRESS_PREFIX.len()] {
+            b'0' => ProgressState::Remove,
+            b'1' => ProgressState::Set,
+            b'2' => ProgressState::Error,
+            b'3' => ProgressState::Indeterminate,
+            b'4' => ProgressState::Pause,
             _ => return SniffedOsc::ProgressMalformed,
         };
 
@@ -113,13 +116,38 @@ fn parse_sniffed_osc(s: &[u8]) -> SniffedOsc {
         }
 
         let end = s.len().min(OSC133_MAX);
-        let mut i = OSC_PROGRESS_PREFIX.len() + 2;
+        let arg_start = OSC_PROGRESS_PREFIX.len() + 2;
+        let mut i = arg_start;
+
+        // The percentage argument. Values above 100 are clamped rather than
+        // rejected, so a miscounting emitter still gets a full bar.
+        let percent = |term: usize| {
+            str::from_utf8(&s[arg_start..term])
+                .ok()?
+                .parse::<u32>()
+                .ok()
+                .map(|value| value.min(100) as u8)
+        };
 
         while i < end {
             match s[i] {
-                0x07 => return SniffedOsc::Progress { len: i + 1, active },
+                0x07 => {
+                    return SniffedOsc::Progress {
+                        len: i + 1,
+                        report: ProgressReport {
+                            state,
+                            progress: percent(i),
+                        },
+                    };
+                }
                 0x1b if i + 1 < s.len() && s[i + 1] == b'\\' => {
-                    return SniffedOsc::Progress { len: i + 2, active };
+                    return SniffedOsc::Progress {
+                        len: i + 2,
+                        report: ProgressReport {
+                            state,
+                            progress: percent(i),
+                        },
+                    };
                 }
                 0x1b if i + 1 == s.len() => return SniffedOsc::Incomplete,
                 0x1b => return SniffedOsc::ProgressMalformed,
@@ -333,6 +361,8 @@ pub(crate) struct PromptSniffer {
     prompt_start_edge: bool,
     command_started_edge: bool,
     command_finished: Option<CommandCapture>,
+    /// The OSC 9;4 report just parsed, surfaced so the tab strip can draw it.
+    progress_edge: Option<ProgressReport>,
     /// `;K` — our private "history cleared" mark, emitted by the integration
     /// script's Clear-Host wrapper (the boundary protocol keeps the engine's
     /// scrollback empty, so a user `clear` is invisible to the
@@ -355,6 +385,8 @@ pub(crate) struct SnifferMark<'a> {
     /// A trusted command completed (`;D`): the capture missing `cwd`, which the caller
     /// fills from its latch.
     pub command_finished: Option<CommandCapture>,
+    /// An OSC 9;4 progress report (`ESC ] 9 ; 4 ; <state> ; <percent>`).
+    pub progress: Option<ProgressReport>,
     /// The user cleared the terminal (`;K` from the Clear-Host wrapper): the
     /// frozen history must drop with the screen.
     pub history_cleared: bool,
@@ -412,8 +444,8 @@ impl PromptSniffer {
 
                     pos = len - cl; // skip the input portion of the mark
                 }
-                SniffedOsc::Progress { len, active } => {
-                    self.progress_active = active;
+                SniffedOsc::Progress { len, report } => {
+                    self.note_progress(report);
 
                     let mark = self.drain_mark(&tmp[..len]);
 
@@ -502,7 +534,7 @@ impl PromptSniffer {
 
                             seg_start = pos;
                         }
-                        SniffedOsc::Progress { len, active } => {
+                        SniffedOsc::Progress { len, report } => {
                             if esc > seg_start {
                                 self.pre_forward(&input[seg_start..esc]);
 
@@ -513,7 +545,7 @@ impl PromptSniffer {
                                 );
                             }
 
-                            self.progress_active = active;
+                            self.note_progress(report);
 
                             let mark = self.drain_mark(&input[esc..esc + len]);
 
@@ -589,8 +621,17 @@ impl PromptSniffer {
                     .unwrap_or_else(time::SystemTime::now),
             }),
             command_finished: self.command_finished.take(),
+            progress: self.progress_edge.take(),
             history_cleared: mem::take(&mut self.history_cleared_edge),
         }
+    }
+
+    /// Latch an OSC 9;4 report for the mark being drained. `progress_active`
+    /// gates cursor publication; the report itself rides out to the tab strip.
+    fn note_progress(&mut self, report: ProgressReport) {
+        self.progress_active = report.state != ProgressState::Remove;
+
+        self.progress_edge = Some(report);
     }
 
     /// Region-tagged bookkeeping done just before a segment is forwarded.
@@ -755,7 +796,9 @@ fn prompt_trace_enabled() -> bool {
 mod prompt_sniffer_tests {
     use std::cell;
 
-    use super::{PromptRegion, PromptSniffer};
+    use super::{
+        ProgressReport, ProgressState, PromptRegion, PromptSniffer, SniffedOsc, parse_sniffed_osc,
+    };
 
     /// Collect every forwarded (region, bytes) segment from feeding `chunks` in order,
     /// reusing one sniffer across chunks (so carry-over across reads is exercised).
@@ -1303,6 +1346,51 @@ mod prompt_sniffer_tests {
             b"\x1b]133;D;0\x07\x1b]133;A\x07> \x1b]133;B\x07\r\n\x1b]133;C\x07",
         );
         assert_eq!(starts.borrow().len(), 1);
+    }
+
+    /// The parsed state/percentage is what the tab strip draws, so a report
+    /// that only resolves to "active" is not enough.
+    #[test]
+    fn osc_progress_carries_state_and_percentage() {
+        let report = |stream: &[u8]| match parse_sniffed_osc(stream) {
+            SniffedOsc::Progress { report, .. } => report,
+            _ => panic!("expected a progress report"),
+        };
+
+        assert_eq!(
+            report(b"\x1b]9;4;1;40\x07"),
+            ProgressReport {
+                state: ProgressState::Set,
+                progress: Some(40),
+            }
+        );
+        // ST-terminated, and a percentage past 100 clamps.
+        assert_eq!(
+            report(b"\x1b]9;4;2;250\x1b\\"),
+            ProgressReport {
+                state: ProgressState::Error,
+                progress: Some(100),
+            }
+        );
+        // Indeterminate carries no meaningful percentage.
+        assert_eq!(
+            report(b"\x1b]9;4;3;0\x07"),
+            ProgressReport {
+                state: ProgressState::Indeterminate,
+                progress: Some(0),
+            }
+        );
+        assert_eq!(
+            report(b"\x1b]9;4;0;\x07"),
+            ProgressReport {
+                state: ProgressState::Remove,
+                progress: None,
+            }
+        );
+        assert!(matches!(
+            parse_sniffed_osc(b"\x1b]9;4;7;10\x07"),
+            SniffedOsc::ProgressMalformed
+        ));
     }
 
     #[test]
