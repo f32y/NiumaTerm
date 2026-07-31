@@ -2,13 +2,14 @@ use std::collections;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, Context, DragMoveEvent, Entity, KeyDownEvent, MouseButton, Render, ScrollHandle,
-    SharedString, Window, div, px,
+    AnyElement, App, Context, DragMoveEvent, Entity, KeyDownEvent, MouseButton, Render,
+    ScrollHandle, SharedString, Window, div, px, relative,
 };
 use gpui_component::input::{Input, InputState};
 use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
 use gpui_component::tab::{Tab, TabBar, TabVariant};
 use gpui_component::{ActiveTheme, Sizable};
+use nmt_terminal::event::{ProgressReport, ProgressState};
 
 use super::shell::TabSurface;
 use super::{NewTab, Shell};
@@ -36,7 +37,7 @@ impl Render for TabDragPreview {
             .child(
                 div()
                     .w(px(self.width))
-                    .h(px(24.0))
+                    .h(px(30.0))
                     .px_2()
                     .flex()
                     .items_center()
@@ -71,6 +72,48 @@ pub(super) struct TabStrip {
 
 /// How far a tab slides to open the insertion gap while a drag hovers it.
 const TAB_MAKE_WAY_PX: f32 = 32.0;
+
+/// One tab's render inputs, snapshotted out of the manager before the closure
+/// borrows the shell.
+struct TabItem {
+    id: u64,
+    label: String,
+    unread: bool,
+    bell: bool,
+    /// Restored but not yet spawned.
+    pending: bool,
+    exited: bool,
+    progress: Option<ProgressReport>,
+}
+
+/// Progress bar along the bottom edge of a tab, driven by OSC 9;4. Sits inside
+/// the tab's padding box, so it spans the label rather than the full pill.
+fn progress_bar(report: ProgressReport, cx: &App) -> AnyElement {
+    let percent = |default: u8| report.progress.unwrap_or(default) as f32 / 100.0;
+
+    let (color, fraction) = match report.state {
+        ProgressState::Set => (cx.theme().primary, percent(0)),
+        ProgressState::Error => (cx.theme().danger, percent(100)),
+        ProgressState::Pause => (cx.theme().warning, percent(100)),
+        // Indeterminate reports carry no percentage: a full-width muted bar
+        // reads as "running, no ETA" and stays distinguishable from a finished
+        // determinate bar, which is full-width in the accent color. No pulse
+        // animation — the strip would then repaint every frame for as long as
+        // any background command runs.
+        ProgressState::Indeterminate => (cx.theme().muted_foreground, 1.0),
+        ProgressState::Remove => (cx.theme().primary, 0.0),
+    };
+
+    div()
+        .absolute()
+        .bottom_0()
+        .left_0()
+        .h(px(2.0))
+        .w(relative(fraction))
+        .rounded_full()
+        .bg(color)
+        .into_any_element()
+}
 
 impl TabStrip {
     pub(super) fn new() -> Self {
@@ -125,23 +168,21 @@ impl TabStrip {
     ) -> AnyElement {
         let active_idx = tabs.active_index();
 
-        let items: Vec<(u64, String, bool)> = tabs
+        let items: Vec<TabItem> = tabs
             .tabs()
             .iter()
-            .map(|tab| {
-                let mut label = if tab.title().is_empty() {
+            .map(|tab| TabItem {
+                id: tab.id().0,
+                label: if tab.title().is_empty() {
                     "PowerShell".to_string()
                 } else {
                     tab.title().to_string()
-                };
-
-                if tab.exited() {
-                    label.push_str(" [exited]");
-                }
-
-                let unread = unread_tabs.contains(&tab.id());
-
-                (tab.id().0, label, unread)
+                },
+                unread: unread_tabs.contains(&tab.id()),
+                bell: tab.bell(),
+                pending: matches!(tab.surface(), TabSurface::Pending(_)),
+                exited: tab.exited(),
+                progress: tab.progress(),
             })
             .collect();
 
@@ -165,9 +206,11 @@ impl TabStrip {
 
         let bar = TabBar::new("shell-tabs")
             // Soft-rounded pills floating on the chrome (VS Code Modern UI
-            // look); Small keeps the strip compact above the terminal card.
+            // look); Large gives a 30px strip, taller than the compact 24px one
+            // for an easier click/drag target while leaving the terminal below
+            // its room.
             .with_variant(TabVariant::Modern)
-            .small()
+            .large()
             .w_full()
             .min_w_0()
             .selected_index(active_idx)
@@ -175,155 +218,180 @@ impl TabStrip {
             // scroll the active tab into view on switches.
             .track_scroll(&self.scroll)
             .inline_suffix(new_tab)
-            .children(
-                items
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, (id, label, unread))| {
-                        // `×` suffix closes this tab; `stop_propagation` keeps the click
-                        // from also activating the tab (the TabBar's on_click). Shown
-                        // only while the tab is hovered (visibility keeps its width, so
-                        // the tab doesn't reflow).
-                        let close = div()
-                            .id(("tab-close", id as usize))
-                            .px_1()
-                            .invisible()
-                            .group_hover("shell-tab", |this| this.visible())
-                            .child("×")
-                            .on_click(cx.listener(move |this, _, window, cx| {
+            .children(items.into_iter().enumerate().map(|(index, item)| {
+                let TabItem {
+                    id,
+                    label,
+                    unread,
+                    bell,
+                    pending,
+                    exited,
+                    progress,
+                } = item;
+                // `×` suffix closes this tab; `stop_propagation` keeps the click
+                // from also activating the tab (the TabBar's on_click). Shown
+                // only while the tab is hovered (visibility keeps its width, so
+                // the tab doesn't reflow).
+                let close = div()
+                    .id(("tab-close", id as usize))
+                    .px_1()
+                    .invisible()
+                    .group_hover("shell-tab", |this| this.visible())
+                    .child("×")
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.request_close_tab(TabId(id), window, cx);
+                    }));
+
+                // Inline rename: the label swaps for an input. The mouse-down
+                // stopper keeps clicks in the input from activating the tab
+                // (and blurring the input); Escape cancels before the input
+                // sees it. Otherwise the label carries the right-click menu.
+                let renaming = rename
+                    .filter(|(rid, _)| *rid == TabId(id))
+                    .map(|(_, input)| input.clone());
+
+                let content: AnyElement = if let Some(input) = renaming {
+                    div()
+                        .flex_1()
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .capture_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| {
+                            if e.keystroke.key == "escape" {
                                 cx.stop_propagation();
-                                this.request_close_tab(TabId(id), window, cx);
-                            }));
+                                this.finish_tab_rename(false, window, cx);
+                            }
+                        }))
+                        .child(
+                            Input::new(&input)
+                                .small()
+                                .p_0()
+                                .text_center()
+                                .appearance(false),
+                        )
+                        .into_any_element()
+                } else {
+                    // Right-click menu; Close reuses the confirm-gated path of
+                    // the hover `×` and is disabled for the last tab, which
+                    // the manager would refuse to close anyway.
+                    let menu_shell = shell.clone();
+                    div()
+                        .id(("tab-menu", id as usize))
+                        // Fill the tab body so the whole tab is right-clickable,
+                        // keeping the label centered and clipped with ellipsis.
+                        .flex_1()
+                        .h_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .overflow_hidden()
+                        .context_menu(move |menu, _, _| {
+                            let rename_shell = menu_shell.clone();
+                            let close_shell = menu_shell.clone();
 
-                        // Inline rename: the label swaps for an input. The mouse-down
-                        // stopper keeps clicks in the input from activating the tab
-                        // (and blurring the input); Escape cancels before the input
-                        // sees it. Otherwise the label carries the right-click menu.
-                        let renaming = rename
-                            .filter(|(rid, _)| *rid == TabId(id))
-                            .map(|(_, input)| input.clone());
-
-                        let content: AnyElement = if let Some(input) = renaming {
-                            div()
-                                .flex_1()
-                                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                                .capture_key_down(cx.listener(
-                                    |this, e: &KeyDownEvent, window, cx| {
-                                        if e.keystroke.key == "escape" {
-                                            cx.stop_propagation();
-                                            this.finish_tab_rename(false, window, cx);
-                                        }
-                                    },
-                                ))
-                                .child(
-                                    Input::new(&input)
-                                        .small()
-                                        .p_0()
-                                        .text_center()
-                                        .appearance(false),
-                                )
-                                .into_any_element()
-                        } else {
-                            // Right-click menu; Close reuses the confirm-gated path of
-                            // the hover `×` and is disabled for the last tab, which
-                            // the manager would refuse to close anyway.
-                            let menu_shell = shell.clone();
-                            div()
-                                .id(("tab-menu", id as usize))
-                                // Fill the tab body so the whole tab is right-clickable,
-                                // keeping the label centered and clipped with ellipsis.
-                                .flex_1()
-                                .h_full()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .overflow_hidden()
-                                .context_menu(move |menu, _, _| {
-                                    let rename_shell = menu_shell.clone();
-                                    let close_shell = menu_shell.clone();
-
-                                    menu.item(PopupMenuItem::new("Rename").on_click(
-                                        move |_, window, cx| {
-                                            rename_shell.update(cx, |this, cx| {
-                                                this.start_tab_rename(TabId(id), window, cx)
-                                            });
-                                        },
-                                    ))
-                                    .item(
-                                        PopupMenuItem::new("Close").disabled(!closeable).on_click(
-                                            move |_, window, cx| {
-                                                close_shell.update(cx, |this, cx| {
-                                                    this.request_close_tab(TabId(id), window, cx)
-                                                });
-                                            },
-                                        ),
-                                    )
-                                })
-                                .gap_1()
-                                .child(div().truncate().child(label.clone()))
-                                // Unread-notification dot: a filled accent
-                                // circle instead of a text bullet, so it stays
-                                // visible against the muted inactive-tab text.
-                                .children(unread.then(|| {
-                                    div()
-                                        .flex_none()
-                                        .size(px(6.0))
-                                        .rounded_full()
-                                        .bg(cx.theme().primary)
-                                }))
-                                .into_any_element()
-                        };
-                        let drag_label: SharedString = label.into();
-                        Tab::new()
-                            .w(px(tab_width))
-                            // Make way for the dragged tab: the hovered tab
-                            // slides right, opening an insertion gap at the
-                            // pointer.
-                            .when(self.drag_over == Some(index), |this| {
-                                this.ml(px(TAB_MAKE_WAY_PX))
-                            })
-                            .child(content)
-                            .suffix(close)
-                            .group("shell-tab")
-                            // Drag a tab to reorder it; drop maps the source position
-                            // (`from`) onto this tab's position.
-                            .on_drag(TabDrag { from: index }, move |_, _, _, cx| {
-                                cx.new(|_| TabDragPreview {
-                                    label: drag_label.clone(),
-                                    width: tab_width,
-                                })
-                            })
-                            .on_drag_move(cx.listener(
-                                move |this, e: &DragMoveEvent<TabDrag>, _, cx| {
-                                    if !e.bounds.contains(&e.event.position) {
-                                        return;
-                                    }
-
-                                    // No gap over the drag's own tab: dropping
-                                    // there is a no-op.
-                                    let target = (e.drag(cx).from != index).then_some(index);
-
-                                    if this.tab_strip.drag_over != target {
-                                        this.tab_strip.drag_over = target;
-                                        cx.notify();
-                                    }
+                            menu.item(PopupMenuItem::new("Rename").on_click(
+                                move |_, window, cx| {
+                                    rename_shell.update(cx, |this, cx| {
+                                        this.start_tab_rename(TabId(id), window, cx)
+                                    });
                                 },
                             ))
-                            .on_drop(cx.listener(move |this, drag: &TabDrag, window, cx| {
-                                // The strip-level fallback handler must not
-                                // also reorder this drop.
-                                cx.stop_propagation();
+                            .item(
+                                PopupMenuItem::new("Close").disabled(!closeable).on_click(
+                                    move |_, window, cx| {
+                                        close_shell.update(cx, |this, cx| {
+                                            this.request_close_tab(TabId(id), window, cx)
+                                        });
+                                    },
+                                ),
+                            )
+                        })
+                        .gap_1()
+                        // Anchors the progress bar to this tab's bottom
+                        // edge.
+                        .relative()
+                        // Restored-but-not-yet-spawned tabs render
+                        // faded, the same "sleeping tab" cue browsers
+                        // use for discarded tabs. Fading costs no width,
+                        // which matters because the tab width is fixed
+                        // and any badge would eat into the title.
+                        .when(pending, |this| this.opacity(0.6))
+                        // A dead shell recolors the title instead of
+                        // appending "[exited]", which spent six
+                        // characters of a fixed-width tab on state that
+                        // a color carries for free.
+                        .when(exited, |this| this.text_color(cx.theme().danger))
+                        .child(div().truncate().child(label.clone()))
+                        // Unread-notification dot: a filled accent
+                        // circle instead of a text bullet, so it stays
+                        // visible against the muted inactive-tab text.
+                        .children(unread.then(|| {
+                            div()
+                                .flex_none()
+                                .size(px(6.0))
+                                .rounded_full()
+                                .bg(cx.theme().primary)
+                        }))
+                        // Bell dot, in the warning color so it reads
+                        // apart from the unread dot when a tab has
+                        // both.
+                        .children(bell.then(|| {
+                            div()
+                                .flex_none()
+                                .size(px(6.0))
+                                .rounded_full()
+                                .bg(cx.theme().warning)
+                        }))
+                        .children(progress.map(|report| progress_bar(report, cx)))
+                        .into_any_element()
+                };
+                let drag_label: SharedString = label.into();
+                Tab::new()
+                    .w(px(tab_width))
+                    // Make way for the dragged tab: the hovered tab
+                    // slides right, opening an insertion gap at the
+                    // pointer.
+                    .when(self.drag_over == Some(index), |this| {
+                        this.ml(px(TAB_MAKE_WAY_PX))
+                    })
+                    .child(content)
+                    .suffix(close)
+                    .group("shell-tab")
+                    // Drag a tab to reorder it; drop maps the source position
+                    // (`from`) onto this tab's position.
+                    .on_drag(TabDrag { from: index }, move |_, _, _, cx| {
+                        cx.new(|_| TabDragPreview {
+                            label: drag_label.clone(),
+                            width: tab_width,
+                        })
+                    })
+                    .on_drag_move(cx.listener(move |this, e: &DragMoveEvent<TabDrag>, _, cx| {
+                        if !e.bounds.contains(&e.event.position) {
+                            return;
+                        }
 
-                                this.tab_strip.drag_over = None;
-                                this.workspaces.active_tabs_mut().reorder(drag.from, index);
+                        // No gap over the drag's own tab: dropping
+                        // there is a no-op.
+                        let target = (e.drag(cx).from != index).then_some(index);
 
-                                this.focus_active(window, cx);
-                                this.sync_session_memory(cx);
+                        if this.tab_strip.drag_over != target {
+                            this.tab_strip.drag_over = target;
+                            cx.notify();
+                        }
+                    }))
+                    .on_drop(cx.listener(move |this, drag: &TabDrag, window, cx| {
+                        // The strip-level fallback handler must not
+                        // also reorder this drop.
+                        cx.stop_propagation();
 
-                                cx.notify();
-                            }))
-                    }),
-            )
+                        this.tab_strip.drag_over = None;
+                        this.workspaces.active_tabs_mut().reorder(drag.from, index);
+
+                        this.focus_active(window, cx);
+                        this.sync_session_memory(cx);
+
+                        cx.notify();
+                    }))
+            }))
             .on_click(cx.listener(|this, ix: &usize, window, cx| {
                 this.workspaces.active_tabs_mut().activate(*ix);
 

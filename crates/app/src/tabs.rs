@@ -3,6 +3,8 @@
 //! live in [`ActiveList`]; this module adds the tab-specific parts (titles,
 //! exit flags, surface access).
 
+use nmt_terminal::event::{ProgressReport, ProgressState};
+
 use crate::ui::{ActiveList, HasId};
 
 /// Stable per-tab identity. Survives close/reorder (index changes, id does not);
@@ -18,6 +20,13 @@ pub struct Tab<S> {
     user_title: Option<String>,
     terminal_title: Option<String>,
     exited: bool,
+    /// A background tab rang the bell. Cleared when the tab is focused, which
+    /// is the acknowledgement — a bell on the tab you are already looking at
+    /// never sets this, so no timer is needed to expire it.
+    bell: bool,
+    /// Latest OSC 9;4 report from any pane in the tab; `None` once the command
+    /// clears it (state 0).
+    progress: Option<ProgressReport>,
 }
 
 impl<S> HasId for Tab<S> {
@@ -40,6 +49,8 @@ impl<S> Tab<S> {
             user_title: None,
             terminal_title: None,
             exited: false,
+            bell: false,
+            progress: None,
         }
     }
 
@@ -56,6 +67,14 @@ impl<S> Tab<S> {
 
     pub fn exited(&self) -> bool {
         self.exited
+    }
+
+    pub fn bell(&self) -> bool {
+        self.bell
+    }
+
+    pub fn progress(&self) -> Option<ProgressReport> {
+        self.progress
     }
 
     pub fn surface(&self) -> &S {
@@ -138,6 +157,41 @@ impl<S> TabManager<S> {
     pub fn mark_exited(&mut self, id: TabId) {
         if let Some(tab) = self.tabs.find_mut(id) {
             tab.exited = true;
+        }
+    }
+
+    /// Flag a bell on a background tab.
+    pub fn ring_bell(&mut self, id: TabId) {
+        if let Some(tab) = self.tabs.find_mut(id) {
+            tab.bell = true;
+        }
+    }
+
+    /// Clear the active tab's bell; returns whether anything changed, so the
+    /// caller can skip a repaint. Focusing a tab is the acknowledgement.
+    pub fn clear_active_bell(&mut self) -> bool {
+        let tab = self.tabs.active_mut();
+        let rang = tab.bell;
+
+        tab.bell = false;
+
+        rang
+    }
+
+    /// Record an OSC 9;4 report. Panes in one tab share a single bar, so the
+    /// most recent report wins — a split running two progress-reporting
+    /// commands shows whichever spoke last.
+    pub fn set_progress(&mut self, id: TabId, report: ProgressReport) {
+        if let Some(tab) = self.tabs.find_mut(id) {
+            tab.progress = (report.state != ProgressState::Remove).then_some(report);
+        }
+    }
+
+    /// Drop a tab's progress bar (its command is gone, so no state-0 report is
+    /// coming to clear it).
+    pub fn clear_progress(&mut self, id: TabId) {
+        if let Some(tab) = self.tabs.find_mut(id) {
+            tab.progress = None;
         }
     }
 
@@ -295,6 +349,51 @@ mod tests {
         mgr.mark_exited(TabId(1));
         assert!(mgr.tabs()[0].exited());
         assert_eq!(mgr.len(), 2);
+    }
+
+    #[test]
+    fn bell_flags_a_tab_until_it_is_activated() {
+        let mut mgr = manager(2); // tab 2 is active
+        mgr.ring_bell(TabId(1));
+
+        assert!(mgr.tabs()[0].bell());
+        // Clearing acts on the active tab, so the ringing one keeps its flag.
+        assert!(!mgr.clear_active_bell());
+        assert!(mgr.tabs()[0].bell());
+
+        mgr.activate(0);
+
+        assert!(mgr.clear_active_bell());
+        assert!(!mgr.tabs()[0].bell());
+        assert!(!mgr.clear_active_bell());
+    }
+
+    #[test]
+    fn progress_state_zero_clears_the_bar() {
+        let mut mgr = manager(1);
+        let set = ProgressReport {
+            state: ProgressState::Set,
+            progress: Some(42),
+        };
+
+        mgr.set_progress(TabId(1), set);
+
+        assert_eq!(mgr.tabs()[0].progress(), Some(set));
+
+        mgr.set_progress(
+            TabId(1),
+            ProgressReport {
+                state: ProgressState::Remove,
+                progress: None,
+            },
+        );
+
+        assert_eq!(mgr.tabs()[0].progress(), None);
+
+        mgr.set_progress(TabId(1), set);
+        mgr.clear_progress(TabId(1));
+
+        assert_eq!(mgr.tabs()[0].progress(), None);
     }
 
     #[test]

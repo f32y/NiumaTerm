@@ -950,6 +950,7 @@ impl TerminalPane {
                 HostEvent::Cwd(cwd) => self.surface.set_last_cwd(cwd.clone()),
                 HostEvent::Title(_)
                 | HostEvent::Bell
+                | HostEvent::Progress(_)
                 | HostEvent::Notification { .. }
                 | HostEvent::Diagnostic(_) => {}
                 HostEvent::CommandFinished => {

@@ -571,7 +571,7 @@ pub enum ProgressState {
 }
 
 /// Progress report from OSC 9;4 sequence
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProgressReport {
     /// The progress bar state
     pub state: ProgressState,
