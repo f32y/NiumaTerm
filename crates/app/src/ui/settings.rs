@@ -1156,8 +1156,8 @@ fn agent_page() -> SettingPage {
                         ),
                     )
                     .description(
-                        "In agent tabs, show consecutive tool calls of the same kind as a \
-                         one-line summary; click the summary to expand the details.",
+                        "In agent tabs, show only the newest of consecutive tool calls; older \
+                         ones sit behind a \"+N previous tool calls\" toggle.",
                     ),
                 ),
         )

@@ -11,13 +11,13 @@ use futures::StreamExt as _;
 use futures::channel::mpsc;
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, ClipboardItem, Context, Entity, FocusHandle, ScrollHandle, Window, div, px,
-    relative,
+    AnyElement, ClipboardItem, Context, Div, Entity, FocusHandle, FontWeight, ScrollHandle, Window,
+    div, px, relative,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputEvent, InputState};
-use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
-use gpui_component::{ActiveTheme as _, Sizable as _, h_flex, text, v_flex};
+use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
+use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, text, v_flex};
 use nmt_agent_utils::codex::app_server::{
     self, Event as CodexEvent, Item as CodexItem, ModelInfo, SendOutcome, Session, ThreadSettings,
 };
@@ -26,10 +26,12 @@ use tracing::warn;
 
 use crate::ui::AppSettings;
 
-/// A transcript entry plus the local wall-clock time it first appeared, shown
-/// beside its bubble. Streamed items keep their start time.
+/// A transcript entry plus the local wall-clock time it first appeared
+/// (shown on hover) and the turn it belongs to (drives turn folding).
+/// Streamed items keep their start time.
 struct Entry {
     at: String,
+    turn: u64,
     item: ChatItem,
 }
 
@@ -68,9 +70,9 @@ enum ChatItem {
         title: String,
         status: String,
     },
-    /// Per-turn duration record, appended after the turn's last output:
-    /// "Worked for x seconds". The live ticking line is a render-only row
-    /// pinned to the transcript end (see `working_started`).
+    /// Per-turn duration record; marks the turn as settled and renders as its
+    /// "Worked for Ns" fold header. The live ticking line is a render-only
+    /// row pinned to the transcript end (see `working_started`).
     Working {
         started: Instant,
         done_seconds: Option<u64>,
@@ -95,7 +97,6 @@ pub(crate) struct AgentPane {
     input: Entity<InputState>,
     session: Option<Session>,
     status: Status,
-    status_detail: Option<String>,
     /// Description of the approval request blocking the turn, shown as the
     /// card above the input; the request id lives in the session.
     pending_approval: Option<String>,
@@ -106,12 +107,21 @@ pub(crate) struct AgentPane {
     /// Model catalog; service tiers are per model, so the tier dropdown lists
     /// the selected model's tiers.
     models: Vec<ModelInfo>,
-    /// Collapsed tool-call groups the user has expanded, keyed by the index
-    /// of the group's first transcript entry (stable — the list only appends).
+    /// Collapsed work-log runs the user has expanded, keyed by the index of
+    /// the run's first transcript entry (stable — the list only appends).
     expanded_groups: HashSet<usize>,
+    /// Completed turns the user has unfolded (completed turns fold their
+    /// intermediate work rows behind a "Worked for Ns" header by default).
+    expanded_turns: HashSet<u64>,
+    /// Work-log rows whose detail (command output, reasoning text) is
+    /// expanded, keyed by transcript index.
+    expanded_rows: HashSet<usize>,
+    /// Monotonic turn counter; entries are tagged with the turn they arrived
+    /// in so a settled turn can fold as one unit.
+    turn_seq: u64,
     /// Start time of the running turn. While set, a ticking
-    /// "Working in progress ..." row renders at the transcript end; cleared
-    /// into a permanent "Worked for x seconds" entry when the turn completes.
+    /// "Working for Ns" row renders at the transcript end; cleared into a
+    /// permanent "Worked for Ns" fold header when the turn completes.
     working_started: Option<Instant>,
 }
 
@@ -134,11 +144,13 @@ impl AgentPane {
             input,
             session: None,
             status: Status::Starting,
-            status_detail: None,
             pending_approval: None,
             settings: ThreadSettings::default(),
             models: Vec::new(),
             expanded_groups: HashSet::new(),
+            expanded_turns: HashSet::new(),
+            expanded_rows: HashSet::new(),
+            turn_seq: 0,
             working_started: None,
         };
 
@@ -193,6 +205,7 @@ impl AgentPane {
                 this.status = Status::Exited;
                 this.items.push(Entry {
                     at: Local::now().format("%H:%M").to_string(),
+                    turn: 0,
                     item: ChatItem::Error {
                         text: format!("Failed to start Codex: {err}"),
                     },
@@ -210,6 +223,7 @@ impl AgentPane {
     fn push(&mut self, item: ChatItem, cx: &mut Context<Self>) {
         self.items.push(Entry {
             at: Local::now().format("%H:%M").to_string(),
+            turn: self.turn_seq,
             item,
         });
         self.scroll.scroll_to_bottom();
@@ -240,11 +254,16 @@ impl AgentPane {
             return;
         }
 
+        // A steer joins the running turn (and its progress line); a fresh
+        // turn advances the counter first so its entries fold as one unit.
+        if outcome == SendOutcome::StartedTurn {
+            self.turn_seq += 1;
+        }
+
         self.input
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.push(ChatItem::User { text }, cx);
 
-        // A steer joins the running turn, which already has its progress line.
         if outcome == SendOutcome::StartedTurn {
             self.start_working(cx);
         }
@@ -376,10 +395,9 @@ impl AgentPane {
                 }
                 self.push(ChatItem::Error { text: message }, cx);
             }
-            CodexEvent::StatusDetail(detail) => {
-                self.status_detail = detail;
-                cx.notify();
-            }
+            // No status line in the UI anymore; the live working row and the
+            // Stop button carry the running state.
+            CodexEvent::StatusDetail(_) => {}
         }
     }
 
@@ -529,18 +547,6 @@ impl AgentPane {
             }
         }
     }
-
-    fn status_label(&self) -> String {
-        match self.status {
-            Status::Starting => "starting…".to_string(),
-            Status::Running => self
-                .status_detail
-                .clone()
-                .unwrap_or_else(|| "working…".to_string()),
-            Status::Idle => "ready".to_string(),
-            Status::Exited => "exited".to_string(),
-        }
-    }
 }
 
 /// Item ids key streaming deltas to their transcript entry.
@@ -555,32 +561,31 @@ fn chat_item_id(item: &ChatItem) -> Option<&str> {
     }
 }
 
-/// The transcript line for a `Working` entry, shared by render and Copy.
+/// The turn-duration line, live ("Working for 12s") and settled
+/// ("Worked for 12s") forms.
 fn working_label(started: Instant, done_seconds: Option<u64>) -> String {
     match done_seconds {
-        Some(seconds) => format!("Worked for {seconds} seconds"),
-        None => format!(
-            "Working in progress ... ({} seconds)",
-            started.elapsed().as_secs()
-        ),
+        Some(seconds) => format!("Worked for {seconds}s"),
+        None => format!("Working for {}s", started.elapsed().as_secs()),
     }
 }
 
-/// The grouping key for collapsed tool-call rows: consecutive entries with the
-/// same key fold into one summary line. Conversation text never groups.
-fn tool_kind(item: &ChatItem) -> Option<&str> {
-    match item {
-        ChatItem::Command { .. } => Some("command"),
-        ChatItem::FileChange { .. } => Some("fileChange"),
-        ChatItem::Tool { kind, .. } => Some(kind),
-        _ => None,
-    }
+/// Work-log rows: the single-line tool/thinking entries that participate in
+/// "+N previous tool calls" run-collapsing. Conversation text never does.
+fn is_work_row(item: &ChatItem) -> bool {
+    matches!(
+        item,
+        ChatItem::Command { .. }
+            | ChatItem::FileChange { .. }
+            | ChatItem::Tool { .. }
+            | ChatItem::Reasoning { .. }
+    )
 }
 
 /// Entries with nothing to show (yet): an agent bubble before its first delta,
 /// or a reasoning item that never streamed a summary. They render no row and
-/// are transparent to tool-call grouping, so an invisible entry can't split a
-/// run of same-kind tool calls into two summary lines.
+/// are transparent to work-run grouping, so an invisible entry can't split a
+/// run of tool calls into two summary lines.
 fn hidden(item: &ChatItem) -> bool {
     match item {
         ChatItem::Agent { text, .. } | ChatItem::Reasoning { text, .. } => text.trim().is_empty(),
@@ -588,13 +593,47 @@ fn hidden(item: &ChatItem) -> bool {
     }
 }
 
-fn group_label(kind: &str, count: usize) -> String {
-    let plural = if count == 1 { "" } else { "s" };
+/// First non-empty line, truncated, for a work row's one-line preview.
+fn preview_line(text: &str) -> String {
+    let line = text
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("")
+        .trim();
 
-    match kind {
-        "command" => format!("Ran {count} command{plural}"),
-        "fileChange" => format!("Edited {count} file{plural}"),
-        _ => format!("Ran {count} {kind} call{plural}"),
+    if line.chars().count() > 84 {
+        let mut preview: String = line.chars().take(84).collect();
+        preview.push('…');
+        preview
+    } else {
+        line.to_string()
+    }
+}
+
+/// Full text of an entry for the right-click Copy action — the whole message,
+/// independent of any partial selection or truncated preview.
+fn entry_copy_text(item: &ChatItem) -> String {
+    match item {
+        ChatItem::User { text }
+        | ChatItem::Error { text }
+        | ChatItem::Agent { text, .. }
+        | ChatItem::Reasoning { text, .. } => text.clone(),
+        ChatItem::Command {
+            command, output, ..
+        } => format!("$ {command}\n{output}"),
+        ChatItem::FileChange {
+            summary, status, ..
+        } => format!("Edit {summary} — {status}"),
+        ChatItem::Tool {
+            kind,
+            title,
+            status,
+            ..
+        } => format!("{kind} {title} — {status}"),
+        ChatItem::Working {
+            started,
+            done_seconds,
+        } => working_label(*started, *done_seconds),
     }
 }
 
@@ -618,334 +657,90 @@ impl gpui::Focusable for AgentPane {
 
 impl Render for AgentPane {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let bubbles: Vec<Option<AnyElement>> = self
-            .items
-            .iter()
-            .enumerate()
-            .map(|(index, entry)| {
-                // An empty element would still eat a list gap and show as a
-                // blank band, so hidden entries produce no row at all.
-                if hidden(&entry.item) {
-                    return None;
-                }
-
-                // Timestamp beside every bubble, aligned to its bottom edge on the
-                // inner side (left of user bubbles, right of agent output).
-                let stamp = div()
-                    .flex_none()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(entry.at.clone());
-
-                // Full text of the entry for the right-click Copy action — the
-                // whole message, independent of any partial selection.
-                let copy_text = match &entry.item {
-                    ChatItem::User { text }
-                    | ChatItem::Error { text }
-                    | ChatItem::Agent { text, .. }
-                    | ChatItem::Reasoning { text, .. } => text.clone(),
-                    ChatItem::Command {
-                        command, output, ..
-                    } => format!("$ {command}\n{output}"),
-                    ChatItem::FileChange {
-                        summary, status, ..
-                    } => format!("Edit {summary} — {status}"),
-                    ChatItem::Tool {
-                        kind,
-                        title,
-                        status,
-                        ..
-                    } => format!("{kind} {title} — {status}"),
-                    ChatItem::Working {
-                        started,
-                        done_seconds,
-                    } => working_label(*started, *done_seconds),
-                };
-
-                let row = h_flex()
-                    .id(("agent-bubble", index))
-                    .w_full()
-                    .items_end()
-                    .gap_2()
-                    .context_menu(move |menu, _, _| {
-                        let copy_text = copy_text.clone();
-                        menu.item(PopupMenuItem::new("Copy").on_click(move |_, _, cx| {
-                            cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
-                        }))
-                    });
-
-                Some(match &entry.item {
-                    ChatItem::User { text } => row
-                        .justify_end()
-                        .child(stamp)
-                        .child(
-                            div()
-                                .max_w(relative(0.75))
-                                .px_3()
-                                .py_2()
-                                .rounded(cx.theme().radius_lg)
-                                .bg(cx.theme().primary)
-                                .text_color(cx.theme().primary_foreground)
-                                .child(text.clone()),
-                        )
-                        .into_any_element(),
-                    ChatItem::Agent { text, .. } => row
-                        .justify_start()
-                        .child(
-                            div()
-                                .max_w(relative(0.75))
-                                .px_3()
-                                .py_2()
-                                .rounded(cx.theme().radius_lg)
-                                .bg(cx.theme().secondary)
-                                .text_color(cx.theme().secondary_foreground)
-                                .child(
-                                    text::TextView::markdown(("agent-md", index), text.clone())
-                                        .selectable(true),
-                                ),
-                        )
-                        .child(stamp)
-                        .into_any_element(),
-                    // Reasoning is a transient thinking line, not a message; no
-                    // timestamp, to keep it visually subordinate.
-                    ChatItem::Reasoning { text, .. } => row
-                        .justify_start()
-                        .child(
-                            div()
-                                .max_w(relative(0.75))
-                                .px_3()
-                                .py_1()
-                                .text_sm()
-                                .italic()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(text.clone()),
-                        )
-                        .into_any_element(),
-                    ChatItem::Command {
-                        command,
-                        output,
-                        status,
-                        exit_code,
-                        ..
-                    } => {
-                        let status_color = match status.as_str() {
-                            "completed" => cx.theme().success,
-                            "failed" | "declined" => cx.theme().danger,
-                            _ => cx.theme().muted_foreground,
-                        };
-                        let status_line = match exit_code {
-                            Some(code) => format!("{status} (exit {code})"),
-                            None => status.clone(),
-                        };
-                        // Live output can grow unboundedly; the card shows the tail.
-                        let tail: String = tail_lines(output, 12);
-
-                        row.justify_start()
-                            .child(
-                                v_flex()
-                                    .max_w(relative(0.9))
-                                    .px_3()
-                                    .py_2()
-                                    .gap_1()
-                                    .rounded(cx.theme().radius_lg)
-                                    .border_1()
-                                    .border_color(cx.theme().border)
-                                    .text_sm()
-                                    .child(
-                                        h_flex()
-                                            .gap_2()
-                                            .child(div().child(format!("$ {command}")))
-                                            .child(
-                                                div().text_color(status_color).child(status_line),
-                                            ),
-                                    )
-                                    .children((!tail.is_empty()).then(|| {
-                                        div().text_color(cx.theme().muted_foreground).child(tail)
-                                    })),
-                            )
-                            .child(stamp)
-                            .into_any_element()
-                    }
-                    ChatItem::FileChange {
-                        summary, status, ..
-                    } => row
-                        .justify_start()
-                        .child(
-                            div()
-                                .max_w(relative(0.9))
-                                .px_3()
-                                .py_2()
-                                .rounded(cx.theme().radius_lg)
-                                .border_1()
-                                .border_color(cx.theme().border)
-                                .text_sm()
-                                .child(format!("Edit {summary} — {status}")),
-                        )
-                        .child(stamp)
-                        .into_any_element(),
-                    ChatItem::Tool {
-                        kind,
-                        title,
-                        status,
-                        ..
-                    } => {
-                        let status_color = match status.as_str() {
-                            "completed" => cx.theme().success,
-                            "failed" | "declined" => cx.theme().danger,
-                            _ => cx.theme().muted_foreground,
-                        };
-                        let label = if title.is_empty() {
-                            kind.clone()
-                        } else {
-                            format!("{kind}: {title}")
-                        };
-
-                        row.justify_start()
-                            .child(
-                                h_flex()
-                                    .max_w(relative(0.9))
-                                    .px_3()
-                                    .py_2()
-                                    .gap_2()
-                                    .rounded(cx.theme().radius_lg)
-                                    .border_1()
-                                    .border_color(cx.theme().border)
-                                    .text_sm()
-                                    .child(div().child(label))
-                                    .child(div().text_color(status_color).child(status.clone())),
-                            )
-                            .child(stamp)
-                            .into_any_element()
-                    }
-                    // Progress line, visually subordinate like the reasoning
-                    // row; no timestamp (its content is itself a duration).
-                    ChatItem::Working {
-                        started,
-                        done_seconds,
-                    } => row
-                        .justify_start()
-                        .child(
-                            div()
-                                .px_3()
-                                .py_1()
-                                .text_sm()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(working_label(*started, *done_seconds)),
-                        )
-                        .into_any_element(),
-                    ChatItem::Error { text } => row
-                        .justify_start()
-                        .child(
-                            div()
-                                .max_w(relative(0.9))
-                                .px_3()
-                                .py_2()
-                                .rounded(cx.theme().radius_lg)
-                                .bg(cx.theme().danger.opacity(0.15))
-                                .text_color(cx.theme().danger)
-                                .text_sm()
-                                .child(text.clone()),
-                        )
-                        .child(stamp)
-                        .into_any_element(),
-                })
-            })
-            .collect();
-
-        // With the collapse setting on, runs of consecutive same-kind tool
-        // calls render as one clickable summary line; the prebuilt bubbles of
-        // a collapsed run are simply dropped. Groups are keyed by the index of
-        // their first entry, which is stable because the transcript only
-        // appends.
         let collapse = cx.global::<AppSettings>().collapse_tool_calls;
+
+        // Transcript rows, one folded/expanded section per turn (entries are
+        // tagged with a monotonic turn id, so turns are contiguous slices).
         let mut rows: Vec<AnyElement> = Vec::new();
-        let mut elems = bubbles.into_iter();
-        let mut cursor = 0;
+        let mut start = 0;
 
-        while cursor < self.items.len() {
-            let kind = tool_kind(&self.items[cursor].item).map(str::to_owned);
+        while start < self.items.len() {
+            let turn = self.items[start].turn;
+            let mut end = start + 1;
 
-            match kind {
-                Some(kind) if collapse => {
-                    let start = cursor;
-                    let mut end = cursor + 1;
-
-                    // Hidden entries inside the run are swallowed by the
-                    // group; every visible entry in range is then a same-kind
-                    // tool call, so the count excludes the hidden ones.
-                    while end < self.items.len()
-                        && (hidden(&self.items[end].item)
-                            || tool_kind(&self.items[end].item) == Some(kind.as_str()))
-                    {
-                        end += 1;
-                    }
-
-                    let count = self.items[start..end]
-                        .iter()
-                        .filter(|entry| !hidden(&entry.item))
-                        .count();
-
-                    let expanded = self.expanded_groups.contains(&start);
-
-                    rows.push(self.render_group_header(start, &kind, count, expanded, cx));
-
-                    for _ in start..end {
-                        let elem = elems.next().flatten();
-
-                        if expanded && let Some(elem) = elem {
-                            rows.push(elem);
-                        }
-                    }
-
-                    cursor = end;
-                }
-                _ => {
-                    if let Some(elem) = elems.next().flatten() {
-                        rows.push(elem);
-                    }
-                    cursor += 1;
-                }
+            while end < self.items.len() && self.items[end].turn == turn {
+                end += 1;
             }
+
+            self.render_turn(turn, start, end, collapse, &mut rows, cx);
+            start = end;
         }
 
-        // Live progress row, pinned below everything the turn has produced so
-        // far; replaced by the permanent "Worked for x seconds" entry on
-        // completion.
+        // Live progress row, pinned below everything the running turn has
+        // produced; replaced by the turn's fold header on completion.
         if let Some(started) = self.working_started {
             rows.push(
                 h_flex()
                     .w_full()
-                    .justify_start()
+                    .gap_2()
+                    .items_center()
+                    .px_1()
+                    .child(h_flex().gap_1().children((0..3).map(|i| {
+                        div()
+                            .size(px(4.))
+                            .rounded_full()
+                            .bg(cx.theme().muted_foreground.opacity(0.85 - 0.28 * i as f32))
+                    })))
                     .child(
                         div()
-                            .px_3()
-                            .py_1()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground.opacity(0.7))
                             .child(working_label(started, None)),
                     )
                     .into_any_element(),
             );
         }
 
+        // A pending approval transforms the composer: the panel slots into
+        // the shell's top (the shell's rounded frame clips it), and the
+        // decision buttons escalate left to right.
         let approval = self.pending_approval.as_ref().map(|approval| {
             v_flex()
                 .w_full()
-                .p_3()
+                .px_4()
+                .py_3()
                 .gap_2()
-                .rounded(cx.theme().radius_lg)
-                .border_1()
-                .border_color(cx.theme().warning)
-                .child(div().text_sm().child(approval.clone()))
+                .border_b_1()
+                .border_color(cx.theme().border.opacity(0.65))
+                .bg(cx.theme().muted.opacity(0.2))
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(cx.theme().muted_foreground)
+                        .child("PENDING APPROVAL"),
+                )
+                .child(
+                    div()
+                        .px_3()
+                        .py_2()
+                        .rounded(cx.theme().radius)
+                        .border_1()
+                        .border_color(cx.theme().border)
+                        .bg(cx.theme().background.opacity(0.7))
+                        .text_sm()
+                        .child(approval.clone()),
+                )
                 .child(
                     h_flex()
+                        .justify_end()
                         .gap_2()
                         .child(
-                            Button::new("approval-accept")
-                                .primary()
-                                .label("Allow")
+                            Button::new("approval-cancel")
+                                .ghost()
+                                .label("Cancel turn")
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    this.respond_approval("accept", cx)
+                                    this.respond_approval("cancel", cx)
                                 })),
                         )
                         .child(
@@ -954,6 +749,22 @@ impl Render for AgentPane {
                                 .label("Decline")
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.respond_approval("decline", cx)
+                                })),
+                        )
+                        .child(
+                            Button::new("approval-session")
+                                .outline()
+                                .label("Always allow this session")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.respond_approval("acceptForSession", cx)
+                                })),
+                        )
+                        .child(
+                            Button::new("approval-accept")
+                                .primary()
+                                .label("Approve once")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.respond_approval("accept", cx)
                                 })),
                         ),
                 )
@@ -970,27 +781,6 @@ impl Render for AgentPane {
             .font_family(cx.global::<AppSettings>().agent_font_family.clone())
             .text_size(px(cx.global::<AppSettings>().agent_font_size as f32))
             .child(
-                h_flex()
-                    .w_full()
-                    .px_3()
-                    .py_1()
-                    .gap_2()
-                    .items_center()
-                    .child(div().text_sm().child("Codex"))
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(self.status_label()),
-                    )
-                    .children(running.then(|| {
-                        Button::new("agent-stop")
-                            .ghost()
-                            .label("Stop")
-                            .on_click(cx.listener(|this, _, _, cx| this.interrupt(cx)))
-                    })),
-            )
-            .child(
                 div()
                     .id("agent-transcript")
                     .flex_1()
@@ -1000,63 +790,528 @@ impl Render for AgentPane {
                     .child(v_flex().w_full().p_3().gap_2().children(rows)),
             )
             .child(
-                v_flex()
-                    .w_full()
-                    .p_2()
-                    .gap_2()
-                    .children(approval)
-                    .child(
-                        h_flex()
-                            .w_full()
-                            .gap_2()
-                            .child(div().flex_1().child(Input::new(&self.input)))
-                            .child(Button::new("agent-send").primary().label("Send").on_click(
-                                cx.listener(|this, _, window, cx| {
-                                    this.send_user_message(window, cx)
+                // Composer: one rounded shell (bordered elevated surface with
+                // a soft shadow) stacking the approval slot, the borderless
+                // editor, and a footer with the setting pills and send/stop.
+                div().w_full().px_3().pb_3().pt_1().child(
+                    v_flex()
+                        .w_full()
+                        .rounded(px(16.))
+                        .overflow_hidden()
+                        .border_1()
+                        .border_color(cx.theme().border)
+                        .bg(cx.theme().popover)
+                        .shadow_md()
+                        .children(approval)
+                        .child(
+                            div()
+                                .px_3()
+                                .pt_3()
+                                .pb_1()
+                                .child(Input::new(&self.input).appearance(false)),
+                        )
+                        .child(
+                            h_flex()
+                                .w_full()
+                                .px_2()
+                                .pb_2()
+                                .pt_1()
+                                .items_center()
+                                .justify_between()
+                                .gap_2()
+                                .child(div().flex_1().min_w_0().child(self.render_settings_row(cx)))
+                                // Stop replaces Send in place while a turn runs.
+                                .child(if running {
+                                    Button::new("agent-send")
+                                        .danger()
+                                        .rounded(px(999.))
+                                        .child(div().size(px(10.)).rounded_sm().bg(gpui::white()))
+                                        .on_click(cx.listener(|this, _, _, cx| this.interrupt(cx)))
+                                } else {
+                                    Button::new("agent-send")
+                                        .primary()
+                                        .rounded(px(999.))
+                                        .icon(IconName::ArrowUp)
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.send_user_message(window, cx)
+                                        }))
                                 }),
-                            )),
-                    )
-                    .child(self.render_settings_row(cx)),
+                        ),
+                ),
             )
     }
 }
 
 impl AgentPane {
-    /// The one-line summary of a collapsed run of same-kind tool calls;
-    /// clicking toggles the detail rows.
-    fn render_group_header(
+    /// Render one turn: user rows, then (for settled turns) a clickable
+    /// "Worked for Ns" fold header hiding the intermediate work rows by
+    /// default, then the final reply. Running turns render chronologically.
+    fn render_turn(
+        &self,
+        turn: u64,
+        start: usize,
+        end: usize,
+        collapse: bool,
+        rows: &mut Vec<AnyElement>,
+        cx: &mut Context<Self>,
+    ) {
+        let fold_seconds = (start..end).find_map(|i| match &self.items[i].item {
+            ChatItem::Working {
+                done_seconds: Some(seconds),
+                ..
+            } => Some(*seconds),
+            _ => None,
+        });
+
+        let Some(seconds) = fold_seconds else {
+            // Running (or pre-thread) turn: plain chronological stream.
+            self.render_stream(start, end, &|_| false, collapse, rows, cx);
+            return;
+        };
+
+        let folded = !self.expanded_turns.contains(&turn);
+
+        // The final reply stays visible when the turn folds; everything
+        // between the prompt and the answer is what the fold hides.
+        let final_agent = (start..end).rev().find(|&i| {
+            matches!(&self.items[i].item, ChatItem::Agent { .. }) && !hidden(&self.items[i].item)
+        });
+
+        for i in start..end {
+            if matches!(&self.items[i].item, ChatItem::User { .. }) {
+                rows.push(self.render_entry_row(i, cx));
+            }
+        }
+
+        rows.push(self.render_fold_header(turn, seconds, folded, cx));
+
+        if folded {
+            // Errors stay visible even inside a folded turn.
+            for i in start..end {
+                if matches!(&self.items[i].item, ChatItem::Error { .. }) {
+                    rows.push(self.render_entry_row(i, cx));
+                }
+            }
+        } else {
+            let skip = |i: usize| {
+                Some(i) == final_agent || matches!(&self.items[i].item, ChatItem::User { .. })
+            };
+            self.render_stream(start, end, &skip, collapse, rows, cx);
+        }
+
+        if let Some(i) = final_agent {
+            rows.push(self.render_entry_row(i, cx));
+        }
+    }
+
+    /// Chronological rows for a slice of the transcript, collapsing runs of
+    /// consecutive work-log rows to the newest one plus a "+N previous tool
+    /// calls" toggle (when the collapse setting is on). Hidden entries are
+    /// transparent: they neither render nor split a run.
+    fn render_stream(
         &self,
         start: usize,
-        kind: &str,
-        count: usize,
-        expanded: bool,
+        end: usize,
+        skip: &dyn Fn(usize) -> bool,
+        collapse: bool,
+        rows: &mut Vec<AnyElement>,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let arrow = if expanded { "▾" } else { "▸" };
-        let label = format!("{arrow} {}", group_label(kind, count));
-        let hover_bg = cx.theme().secondary;
+    ) {
+        let mut i = start;
 
+        while i < end {
+            let item = &self.items[i].item;
+
+            if skip(i) || hidden(item) || matches!(item, ChatItem::Working { .. }) {
+                i += 1;
+                continue;
+            }
+
+            if !is_work_row(item) {
+                rows.push(self.render_entry_row(i, cx));
+                i += 1;
+                continue;
+            }
+
+            // Extend the run across consecutive (possibly hidden) work rows.
+            let run_start = i;
+            let mut visible: Vec<usize> = Vec::new();
+            let mut j = i;
+
+            while j < end
+                && !skip(j)
+                && (hidden(&self.items[j].item) || is_work_row(&self.items[j].item))
+            {
+                if !hidden(&self.items[j].item) {
+                    visible.push(j);
+                }
+                j += 1;
+            }
+
+            if collapse && visible.len() > 1 {
+                let expanded = self.expanded_groups.contains(&run_start);
+
+                rows.push(self.render_run_toggle(run_start, visible.len() - 1, expanded, cx));
+
+                if expanded {
+                    for &k in &visible {
+                        rows.push(self.render_work_row(k, cx));
+                    }
+                } else if let Some(&last) = visible.last() {
+                    rows.push(self.render_work_row(last, cx));
+                }
+            } else {
+                for &k in &visible {
+                    rows.push(self.render_work_row(k, cx));
+                }
+            }
+
+            i = j;
+        }
+    }
+
+    fn render_entry_row(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
+        let entry = &self.items[index];
+
+        match &entry.item {
+            ChatItem::User { text } => self.render_user_row(index, text.clone(), cx),
+            ChatItem::Agent { text, .. } => self.render_agent_row(index, text.clone(), cx),
+            ChatItem::Error { text } => self.render_error_row(index, text.clone(), cx),
+            item if is_work_row(item) => self.render_work_row(index, cx),
+            // Working entries render as the turn's fold header, never here.
+            _ => div().into_any_element(),
+        }
+    }
+
+    /// Hover-revealed timestamp; the row declares `.group("entry")`.
+    fn hover_stamp(&self, index: usize, cx: &mut Context<Self>) -> Div {
+        div()
+            .flex_none()
+            .text_xs()
+            .text_color(cx.theme().muted_foreground)
+            .invisible()
+            .group_hover("entry", |this| this.visible())
+            .child(self.items[index].at.clone())
+    }
+
+    fn copy_menu(
+        index: usize,
+        item: &ChatItem,
+    ) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
+        let _ = index;
+        let copy_text = entry_copy_text(item);
+
+        move |menu, _, _| {
+            let copy_text = copy_text.clone();
+            menu.item(PopupMenuItem::new("Copy").on_click(move |_, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
+            }))
+        }
+    }
+
+    /// User prompt: right-aligned quiet bubble (muted surface, no border).
+    fn render_user_row(&self, index: usize, text: String, cx: &mut Context<Self>) -> AnyElement {
         h_flex()
+            .id(("entry", index))
+            .group("entry")
             .w_full()
-            .justify_start()
+            .justify_end()
+            .items_end()
+            .gap_2()
+            .context_menu(Self::copy_menu(index, &self.items[index].item))
+            .child(self.hover_stamp(index, cx))
             .child(
                 div()
-                    .id(("agent-toolgroup", start))
+                    .max_w(relative(0.8))
                     .px_3()
-                    .py_1()
+                    .py_2()
                     .rounded(cx.theme().radius_lg)
+                    .bg(cx.theme().muted)
+                    .child(text),
+            )
+            .into_any_element()
+    }
+
+    /// Assistant reply: full-width bare markdown — no bubble, no border;
+    /// alignment and surface carry the distinction.
+    fn render_agent_row(&self, index: usize, text: String, cx: &mut Context<Self>) -> AnyElement {
+        h_flex()
+            .id(("entry", index))
+            .group("entry")
+            .w_full()
+            .items_end()
+            .gap_2()
+            .context_menu(Self::copy_menu(index, &self.items[index].item))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .px_1()
+                    .child(text::TextView::markdown(("agent-md", index), text).selectable(true)),
+            )
+            .child(self.hover_stamp(index, cx))
+            .into_any_element()
+    }
+
+    fn render_error_row(&self, index: usize, text: String, cx: &mut Context<Self>) -> AnyElement {
+        h_flex()
+            .id(("entry", index))
+            .w_full()
+            .context_menu(Self::copy_menu(index, &self.items[index].item))
+            .child(
+                div()
+                    .max_w(relative(0.9))
+                    .px_3()
+                    .py_2()
+                    .rounded(cx.theme().radius_lg)
+                    .bg(cx.theme().danger.opacity(0.15))
+                    .text_color(cx.theme().danger)
                     .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .cursor_pointer()
+                    .child(text),
+            )
+            .into_any_element()
+    }
+
+    /// One work-log line: icon · heading · dimmed preview · chevron · status.
+    /// Rows with detail (command output, reasoning text) expand on click into
+    /// an indented block behind a left hairline rail.
+    fn render_work_row(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
+        let (icon, heading, preview, status, detail) = match &self.items[index].item {
+            ChatItem::Command {
+                command,
+                output,
+                status,
+                exit_code,
+                ..
+            } => {
+                // Belt and braces: a non-zero exit code is a failure even if
+                // the provider reported the execution as completed.
+                let failed = matches!(status.as_str(), "failed" | "declined")
+                    || exit_code.is_some_and(|code| code != 0);
+                let state = if failed { "failed" } else { status.as_str() };
+
+                (
+                    IconName::SquareTerminal,
+                    command.clone(),
+                    preview_line(output),
+                    Some(state.to_string()),
+                    (!output.trim().is_empty()).then(|| output.clone()),
+                )
+            }
+            ChatItem::FileChange {
+                summary, status, ..
+            } => (
+                IconName::File,
+                "Edit".to_string(),
+                summary.clone(),
+                Some(status.clone()),
+                None,
+            ),
+            ChatItem::Tool {
+                kind,
+                title,
+                status,
+                ..
+            } => (
+                if kind == "webSearch" {
+                    IconName::Globe
+                } else {
+                    IconName::Settings2
+                },
+                kind.clone(),
+                title.clone(),
+                Some(status.clone()),
+                None,
+            ),
+            ChatItem::Reasoning { text, .. } => (
+                IconName::Bot,
+                "Thinking".to_string(),
+                preview_line(text),
+                None,
+                Some(text.clone()),
+            ),
+            _ => return div().into_any_element(),
+        };
+
+        let expandable = detail.is_some();
+        let expanded = expandable && self.expanded_rows.contains(&index);
+        let hover_bg = cx.theme().muted.opacity(0.4);
+
+        let status_glyph = status.map(|state| {
+            let (name, color) = match state.as_str() {
+                "failed" | "declined" => (IconName::CircleX, cx.theme().danger),
+                "completed" => (IconName::Check, cx.theme().muted_foreground),
+                _ => (IconName::Minus, cx.theme().muted_foreground.opacity(0.6)),
+            };
+
+            Icon::new(name).size_3().text_color(color)
+        });
+
+        let header = h_flex()
+            .id(("wl-head", index))
+            .w_full()
+            .gap_2()
+            .items_center()
+            .px_1()
+            .py_0p5()
+            .rounded(cx.theme().radius)
+            .when(expandable, |this| {
+                this.cursor_pointer()
                     .hover(move |style| style.bg(hover_bg))
-                    .child(label)
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        if !this.expanded_groups.insert(start) {
-                            this.expanded_groups.remove(&start);
+                        if !this.expanded_rows.insert(index) {
+                            this.expanded_rows.remove(&index);
+                        }
+                        cx.notify();
+                    }))
+            })
+            .child(
+                Icon::new(icon)
+                    .size_3p5()
+                    .text_color(cx.theme().muted_foreground.opacity(0.8)),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .max_w(relative(0.6))
+                    .truncate()
+                    .text_sm()
+                    .text_color(cx.theme().foreground.opacity(0.82))
+                    .child(heading),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground.opacity(0.55))
+                    .child(preview),
+            )
+            .children(expandable.then(|| {
+                Icon::new(if expanded {
+                    IconName::ChevronDown
+                } else {
+                    IconName::ChevronRight
+                })
+                .size_3()
+                .text_color(cx.theme().muted_foreground.opacity(0.7))
+            }))
+            .children(status_glyph);
+
+        v_flex()
+            .id(("entry", index))
+            .w_full()
+            .context_menu(Self::copy_menu(index, &self.items[index].item))
+            .child(header)
+            .children(detail.filter(|_| expanded).map(|detail| {
+                div()
+                    .ml(px(28.))
+                    .mt_1()
+                    .border_l_1()
+                    .border_color(cx.theme().border.opacity(0.45))
+                    .pl_3()
+                    .child(
+                        div()
+                            .id(("wl-out", index))
+                            .max_h(px(256.))
+                            .overflow_y_scroll()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(detail),
+                    )
+            }))
+            .into_any_element()
+    }
+
+    /// The settled turn's "Worked for Ns" disclosure line, doubling as a
+    /// section divider (bottom hairline).
+    fn render_fold_header(
+        &self,
+        turn: u64,
+        seconds: u64,
+        folded: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let foreground = cx.theme().foreground;
+        let chevron = if folded {
+            IconName::ChevronRight
+        } else {
+            IconName::ChevronDown
+        };
+
+        v_flex()
+            .w_full()
+            .gap_1()
+            .child(
+                h_flex()
+                    .id(("turn-fold", turn as usize))
+                    .gap_1()
+                    .items_center()
+                    .px_1()
+                    .cursor_pointer()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .hover(move |style| style.text_color(foreground))
+                    .child(format!("Worked for {seconds}s"))
+                    .child(Icon::new(chevron).size_3p5())
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if !this.expanded_turns.insert(turn) {
+                            this.expanded_turns.remove(&turn);
                         }
                         cx.notify();
                     })),
             )
+            .child(div().w_full().h(px(1.)).bg(cx.theme().border.opacity(0.6)))
+            .into_any_element()
+    }
+
+    /// The "+N previous tool calls" / "Show fewer tool calls" toggle above the
+    /// newest row of a collapsed work run.
+    fn render_run_toggle(
+        &self,
+        run_start: usize,
+        hidden_count: usize,
+        expanded: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let hover_bg = cx.theme().muted.opacity(0.4);
+        let label = if expanded {
+            "Show fewer tool calls".to_string()
+        } else {
+            format!(
+                "+{hidden_count} previous tool call{}",
+                if hidden_count == 1 { "" } else { "s" }
+            )
+        };
+
+        h_flex()
+            .id(("wl-run", run_start))
+            .gap_1()
+            .items_center()
+            .px_1()
+            .py_0p5()
+            .rounded(cx.theme().radius)
+            .cursor_pointer()
+            .hover(move |style| style.bg(hover_bg))
+            .text_sm()
+            .text_color(cx.theme().foreground.opacity(0.82))
+            .child(
+                Icon::new(if expanded {
+                    IconName::ChevronDown
+                } else {
+                    IconName::ChevronRight
+                })
+                .size_3()
+                .text_color(cx.theme().muted_foreground.opacity(0.7)),
+            )
+            .child(label)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if !this.expanded_groups.insert(run_start) {
+                    this.expanded_groups.remove(&run_start);
+                }
+                cx.notify();
+            }))
             .into_any_element()
     }
 
@@ -1208,11 +1463,4 @@ impl AgentPane {
                 menu
             })
     }
-}
-
-/// Last `n` lines of a live output stream, for the command card.
-fn tail_lines(output: &str, n: usize) -> String {
-    let lines: Vec<&str> = output.lines().collect();
-    let start = lines.len().saturating_sub(n);
-    lines[start..].join("\n")
 }
