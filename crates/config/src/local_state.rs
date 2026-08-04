@@ -104,6 +104,12 @@ pub struct TabState {
     pub args: Vec<String>,
     #[serde(default)]
     pub cwd: Option<String>,
+    /// The agent kind ("codex") when this tab hosts an agent conversation
+    /// instead of a terminal. Conversations are not persisted; restore
+    /// reopens a fresh agent tab of the same kind, and an unknown kind
+    /// degrades to a plain terminal tab.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
     /// Split-pane layout for a multi-pane tab. Absent for single-pane tabs,
     /// which keep the flat fields above as their whole format (so snapshots
     /// without splits stay readable by older builds). Declared last: TOML
@@ -223,6 +229,7 @@ mod tests {
                                 shell: Some("pwsh.exe".into()),
                                 args: vec!["-NoLogo".into()],
                                 cwd: Some("C:/Projects/example/repo".into()),
+                                agent: None,
                                 panes: None,
                             }],
                         }],
@@ -295,6 +302,7 @@ mod tests {
             shell: Some("pwsh.exe".into()),
             args: vec![],
             cwd: Some("C:/a".into()),
+            agent: None,
             panes: Some(PaneNodeState::Split {
                 axis: PaneSplitAxis::Horizontal,
                 ratios: vec![0.6, 0.4],

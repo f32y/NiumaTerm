@@ -1232,6 +1232,7 @@ mod tests {
             shell: Some("pwsh.exe".into()),
             args: vec!["-NoLogo".into()],
             cwd: Some("C:/old".into()),
+            agent: None,
             panes: None,
         };
 

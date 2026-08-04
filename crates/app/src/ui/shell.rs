@@ -47,7 +47,7 @@ use crate::{remote, ui};
 
 /// A workspace cwd as a shell working directory: `None` for empty or the
 /// legacy `"."` placeholder (shells then start in their default directory).
-fn explicit_cwd(cwd: &str) -> Option<String> {
+pub(super) fn explicit_cwd(cwd: &str) -> Option<String> {
     let cwd = cwd.trim();
     (!cwd.is_empty() && cwd != ".").then(|| cwd.to_string())
 }
@@ -285,7 +285,7 @@ impl Shell {
 
         let mut restore_next_id = 1;
 
-        let restored = Self::restore_session(remembered_session, &mut restore_next_id, cx);
+        let restored = Self::restore_session(remembered_session, &mut restore_next_id, window, cx);
 
         let (workspaces, next_id) = if let Some(workspaces) = restored {
             (workspaces, restore_next_id)
@@ -694,8 +694,8 @@ impl Shell {
     /// Spawn a still-pending (lazily-restored) active tab, then register its
     /// panes' agent routes — the startup registration sweep only saw tabs that
     /// were live at window creation.
-    fn ensure_active_tab_live(&mut self, cx: &mut Context<Self>) {
-        if !Self::materialize_active_tab(&mut self.workspaces, &mut self.next_id, cx) {
+    fn ensure_active_tab_live(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !Self::materialize_active_tab(&mut self.workspaces, &mut self.next_id, window, cx) {
             return;
         }
 
@@ -727,7 +727,7 @@ impl Shell {
     }
 
     pub(crate) fn focus_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.ensure_active_tab_live(cx);
+        self.ensure_active_tab_live(window, cx);
 
         self.sync_active_terminal_title(cx);
 
@@ -1087,6 +1087,7 @@ impl Shell {
         );
 
         self.focus_active(window, cx);
+        self.sync_session_memory(cx);
 
         cx.notify();
     }
@@ -2311,7 +2312,7 @@ impl Render for Shell {
         // Safety net for any activation path that reaches a render without
         // passing `focus_active`: the visible tab must be live before anything
         // below reads the active pane.
-        self.ensure_active_tab_live(cx);
+        self.ensure_active_tab_live(window, cx);
 
         self.window_active = Self::exact_window_active(window);
 
