@@ -47,6 +47,14 @@ fn default_terminal_line_height() -> f64 {
     1.0
 }
 
+fn default_agent_font_family() -> String {
+    default_terminal_font_family()
+}
+
+fn default_agent_font_size() -> f64 {
+    default_terminal_font_size()
+}
+
 fn default_background_opacity() -> f64 {
     1.0
 }
@@ -101,6 +109,12 @@ pub struct AppearanceConfig {
         rename = "terminal-line-height"
     )]
     pub terminal_line_height: f64,
+    /// Font family used by agent (chat) tabs.
+    #[serde(default = "default_agent_font_family", rename = "agent-font-family")]
+    pub agent_font_family: String,
+    /// Font size in pixels used by agent (chat) tabs.
+    #[serde(default = "default_agent_font_size", rename = "agent-font-size")]
+    pub agent_font_size: f64,
     /// Whether terminal font pickers only show monospace fonts.
     #[serde(default = "default_monospace_only", rename = "monospace-only")]
     pub monospace_only: bool,
@@ -150,6 +164,8 @@ impl Default for AppearanceConfig {
             terminal_font_family: default_terminal_font_family(),
             terminal_font_size: default_terminal_font_size(),
             terminal_line_height: default_terminal_line_height(),
+            agent_font_family: default_agent_font_family(),
+            agent_font_size: default_agent_font_size(),
             monospace_only: true,
             window_transparency_enabled: default_window_transparency_enabled(),
             background_opacity: default_background_opacity(),

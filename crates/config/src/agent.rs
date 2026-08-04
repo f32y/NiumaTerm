@@ -13,6 +13,10 @@ pub struct AgentConfig {
     /// Show Agent account usage in the workspace sidebar.
     #[serde(default = "default_bool_true", rename = "show-agent-usage")]
     pub show_agent_usage: bool,
+    /// Collapse consecutive tool-call rows in agent tabs into a one-line
+    /// summary by default.
+    #[serde(default, rename = "collapse-tool-calls")]
+    pub collapse_tool_calls: bool,
 }
 
 impl Default for AgentConfig {
@@ -20,6 +24,7 @@ impl Default for AgentConfig {
         Self {
             enable_agent_hooks: true,
             show_agent_usage: true,
+            collapse_tool_calls: false,
         }
     }
 }
@@ -27,4 +32,5 @@ impl Default for AgentConfig {
 pub(crate) fn patch_document(doc: &mut DocumentMut, agent: &AgentConfig) {
     doc["agent"]["enable-agent-hooks"] = value(agent.enable_agent_hooks);
     doc["agent"]["show-agent-usage"] = value(agent.show_agent_usage);
+    doc["agent"]["collapse-tool-calls"] = value(agent.collapse_tool_calls);
 }

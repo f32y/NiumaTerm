@@ -38,9 +38,10 @@ use crate::terminal::view::{
     CopyBlockCommand, CopyBlockOutput, NextBlock, PreviousBlock, RerunBlock, SendShiftTab, SendTab,
 };
 use crate::ui::{
-    AppAssets, AppSettings, CloseTab, NewRemoteTab, NewTab, NewWindow, NewWorkspace, NextTab,
-    NextWorkspace, PrevTab, PrevWorkspace, ResizePaneDown, ResizePaneLeft, ResizePaneRight,
-    ResizePaneUp, ShowSettings, SplitDown, SplitLeft, SplitRight, SplitUp, ToggleSidebar,
+    AppAssets, AppSettings, CloseTab, NewAgentTab, NewRemoteTab, NewTab, NewWindow, NewWorkspace,
+    NextTab, NextWorkspace, PrevTab, PrevWorkspace, ResizePaneDown, ResizePaneLeft,
+    ResizePaneRight, ResizePaneUp, ShowSettings, SplitDown, SplitLeft, SplitRight, SplitUp,
+    ToggleSidebar,
 };
 use crate::window::{AppWindow, LastActiveWindow, ShellRegistry, WindowRegistry};
 
@@ -253,6 +254,7 @@ fn run_app(argv_url: Option<String>, testing: bool) {
                 KeyBinding::new("ctrl-shift-b", ToggleSidebar, Some("Shell")),
                 KeyBinding::new("ctrl-,", ShowSettings, Some("Shell")),
                 KeyBinding::new("ctrl-shift-r", NewRemoteTab, Some("Shell")),
+                KeyBinding::new("ctrl-shift-a", NewAgentTab, Some("Shell")),
                 // Split-pane creation and keyboard resize. These consume the
                 // xterm `\x1b[1;7A..D` / `\x1b[1;4A..D` arrow sequences before
                 // the terminal encodes them (accepted conflict, see the

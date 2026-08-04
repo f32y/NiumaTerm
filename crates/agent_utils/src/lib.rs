@@ -3,6 +3,8 @@ pub mod claude_code {
 }
 mod hook_store;
 pub mod codex {
+    #[cfg(target_os = "windows")]
+    pub mod app_server;
     pub mod hook;
     #[cfg(target_os = "windows")]
     pub mod usage_fetcher;

@@ -5,14 +5,15 @@ use gpui::{
     AnyElement, App, Context, DragMoveEvent, Entity, KeyDownEvent, MouseButton, Render,
     ScrollHandle, SharedString, Window, div, px, relative,
 };
+use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputState};
-use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
+use gpui_component::menu::{ContextMenuExt, DropdownMenu as _, PopupMenuItem};
 use gpui_component::tab::{Tab, TabBar, TabVariant};
 use gpui_component::{ActiveTheme, Sizable};
 use nmt_terminal::event::{ProgressReport, ProgressState};
 
 use super::shell::TabSurface;
-use super::{NewTab, Shell};
+use super::{NewAgentTab, Shell};
 use crate::tabs::{TabId, TabManager};
 use crate::ui::AppSettings;
 
@@ -186,16 +187,51 @@ impl TabStrip {
             })
             .collect();
 
-        // `+` right after the last tab opens a new tab, same path as
-        // Ctrl+Shift+T.
-        let new_tab = div()
-            .id("tab-new")
+        // `+` right after the last tab opens the new-tab menu: one entry per
+        // configured terminal profile, plus the Codex agent tab. Ctrl+Shift+T
+        // still opens the default profile directly.
+        let menu_shell = cx.entity();
+        let new_tab = Button::new("tab-new")
+            .ghost()
             .px_2()
-            .cursor_pointer()
             .child("+")
-            .on_click(cx.listener(|this, _, window, cx| {
-                this.on_new_tab(&NewTab, window, cx);
-            }));
+            .dropdown_menu(move |menu, _, cx| {
+                let mut menu = menu;
+
+                for profile in cx.global::<AppSettings>().profiles.clone() {
+                    let shell_cmd = profile.shell.trim().to_string();
+
+                    // A profile without a command cannot spawn; offering it
+                    // would silently fall back to the built-in shell.
+                    if shell_cmd.is_empty() {
+                        continue;
+                    }
+
+                    let args: Vec<String> = profile
+                        .args
+                        .split_whitespace()
+                        .map(str::to_string)
+                        .collect();
+                    let item_shell = menu_shell.clone();
+
+                    menu = menu.item(PopupMenuItem::new(profile.name.clone()).on_click(
+                        move |_, window, cx| {
+                            let launch = (Some(shell_cmd.clone()), args.clone());
+                            item_shell
+                                .update(cx, |this, cx| this.open_profile_tab(launch, window, cx));
+                        },
+                    ));
+                }
+
+                let agent_shell = menu_shell.clone();
+
+                menu.separator()
+                    .item(PopupMenuItem::new("Codex").on_click(move |_, window, cx| {
+                        agent_shell.update(cx, |this, cx| {
+                            this.on_new_agent_tab(&NewAgentTab, window, cx)
+                        });
+                    }))
+            });
 
         let closeable = items.len() > 1;
         let shell = cx.entity();

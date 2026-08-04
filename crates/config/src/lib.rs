@@ -609,6 +609,8 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) {
     doc["appearance"]["terminal-font-family"] = value(&appearance.terminal_font_family);
     doc["appearance"]["terminal-font-size"] = value(appearance.terminal_font_size);
     doc["appearance"]["terminal-line-height"] = value(appearance.terminal_line_height);
+    doc["appearance"]["agent-font-family"] = value(&appearance.agent_font_family);
+    doc["appearance"]["agent-font-size"] = value(appearance.agent_font_size);
     doc["appearance"]["monospace-only"] = value(appearance.monospace_only);
     doc["appearance"]["enable-window-transparency"] = value(appearance.window_transparency_enabled);
     doc["appearance"]["background-opacity"] = value(appearance.background_opacity);
@@ -667,6 +669,8 @@ mod tests {
             terminal_font_family: "Cascadia Code".to_string(),
             terminal_font_size: 16.0,
             terminal_line_height: 1.2,
+            agent_font_family: "Cascadia Code".to_string(),
+            agent_font_size: 15.0,
             monospace_only: false,
             window_transparency_enabled: true,
             background_opacity: 0.85,
@@ -689,6 +693,7 @@ mod tests {
         AgentConfig {
             enable_agent_hooks: false,
             show_agent_usage: false,
+            collapse_tool_calls: true,
         }
     }
 

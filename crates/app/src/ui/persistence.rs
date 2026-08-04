@@ -224,7 +224,7 @@ impl Shell {
     ) -> bool {
         let state = match workspaces.active_tabs().active() {
             TabSurface::Pending(state) => (**state).clone(),
-            TabSurface::Live(_) => return false,
+            TabSurface::Live(_) | TabSurface::Agent(_) => return false,
         };
 
         let tree = state
@@ -471,6 +471,11 @@ impl Shell {
                                     .then(|| pane_node_state(tree.root(), &default_profile, cx));
                                 state
                             }
+                            // Agent conversations are not persisted (the
+                            // Codex process and its thread die with the app),
+                            // so an agent tab restores as a plain
+                            // default-profile terminal tab.
+                            TabSurface::Agent(_) => TabState::default(),
                         };
                         normalize_saved_launch(&mut state, &default_profile);
                         state.name = tab.user_title().map(str::to_owned);
