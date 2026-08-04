@@ -811,6 +811,15 @@ impl Element for TextSelectionController {
             if !phase.bubble() {
                 return;
             }
+            // A move without the left button held while a drag is marked
+            // active means the matching mouse-up never reached the window —
+            // e.g. a titlebar drag hands the press to the Windows modal move
+            // loop, which swallows the release. End the drag instead of
+            // extending a selection with no button down.
+            if event.pressed_button != Some(MouseButton::Left) {
+                Root::update(window, cx, |root, _, cx| root.end_text_selection(cx));
+                return;
+            }
             Root::update(window, cx, |root, window, cx| {
                 root.update_text_selection(event.position, window, cx);
             });
@@ -1098,6 +1107,30 @@ mod tests {
 
         let after = window_selected_text(cx);
         assert_eq!(before, after, "selection drifted after layout shift");
+    }
+
+    #[gpui::test]
+    fn move_without_button_ends_lost_drag(cx: &mut TestAppContext) {
+        let (_, cx) = setup(true, cx);
+
+        // Press without a matching release: a titlebar drag hands the press to
+        // the OS modal move loop, which swallows the mouse-up, leaving the
+        // drag state machine armed.
+        cx.simulate_mouse_down(
+            point(px(5.), px(15.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+
+        // Hovering afterwards (no button held) must end the stale drag, not
+        // extend a selection across the views.
+        cx.simulate_mouse_move(point(px(300.), px(70.)), None, Modifiers::default());
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+
+        let text = window_selected_text(cx);
+        assert!(text.is_empty(), "expected no selection, got: {text:?}");
     }
 
     #[gpui::test]
