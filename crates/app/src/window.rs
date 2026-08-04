@@ -167,6 +167,7 @@ mod tests {
                     shell: Some("pwsh.exe".into()),
                     args: vec!["-NoLogo".into()],
                     cwd: Some("C:/Projects/example/repo".into()),
+                    agent: None,
                     panes: None,
                 }],
             }],

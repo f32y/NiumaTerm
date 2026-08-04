@@ -1,7 +1,7 @@
 use std::process;
 
 use dirs::home_dir;
-use gpui::{App, AppContext as _, Axis, Context, Entity};
+use gpui::{App, AppContext as _, Axis, Context, Entity, Window};
 use gpui_component::resizable::ResizableState;
 use nmt_config::local_state::{
     PaneNodeState, PaneSplitAxis, SessionState, TabState, WorkspaceState,
@@ -9,8 +9,9 @@ use nmt_config::local_state::{
 use tracing::warn;
 
 use super::Shell;
+use super::agent_pane::AgentPane;
 use super::settings::AppSettings;
-use super::shell::TabSurface;
+use super::shell::{TabSurface, explicit_cwd};
 use crate::pane_tree::{PaneId, PaneNode, PaneTree};
 use crate::tabs::{TabId, TabManager};
 use crate::terminal::view::TerminalPane;
@@ -156,6 +157,7 @@ impl Shell {
     pub(super) fn restore_session(
         session: Option<SessionState>,
         next_id: &mut u64,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<WorkspaceManager> {
         let session = session?;
@@ -207,7 +209,7 @@ impl Shell {
         // The initially visible tab spawns right away; everything else stays
         // pending, so this window's other `active_pane` readers (activation
         // observers, notification pumps) never see a pending active tab.
-        Self::materialize_active_tab(&mut workspaces, next_id, cx);
+        Self::materialize_active_tab(&mut workspaces, next_id, window, cx);
 
         Some(workspaces)
     }
@@ -216,16 +218,30 @@ impl Shell {
     /// `Live`. Returns whether a materialization happened. A saved pane layout
     /// rebuilds the split tree (one fresh shell per leaf); an unusable layout
     /// or failed spawn degrades to a single default-profile pane so the tab
-    /// the user just activated never vanishes.
+    /// the user just activated never vanishes. A tab saved with an agent kind
+    /// reopens as a fresh agent conversation instead (nothing to restore —
+    /// the Codex process died with the previous app instance).
     pub(super) fn materialize_active_tab(
         workspaces: &mut WorkspaceManager,
         next_id: &mut u64,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         let state = match workspaces.active_tabs().active() {
             TabSurface::Pending(state) => (**state).clone(),
             TabSurface::Live(_) | TabSurface::Agent(_) => return false,
         };
+
+        // An unknown agent kind (a newer snapshot) degrades to the terminal
+        // path below rather than losing the tab.
+        if state.agent.as_deref() == Some("codex") {
+            let cwd = explicit_cwd(workspaces.active_cwd());
+            let pane = cx.new(|cx| AgentPane::new(cwd, window, cx));
+
+            *workspaces.active_tabs_mut().active_mut() = TabSurface::Agent(pane);
+
+            return true;
+        }
 
         let tree = state
             .panes
@@ -269,7 +285,11 @@ impl Shell {
         let mut restored = Vec::new();
 
         for mut tab_state in tabs {
-            resolve_restored_launch(&mut tab_state, cx.global::<AppSettings>());
+            // Agent tabs carry no launch command; profile resolution only
+            // applies to terminal tabs.
+            if tab_state.agent.is_none() {
+                resolve_restored_launch(&mut tab_state, cx.global::<AppSettings>());
+            }
 
             let name = tab_state
                 .name
@@ -279,9 +299,12 @@ impl Shell {
 
             // The profile-derived title a live pane would report, so pending
             // tabs label identically to spawned ones.
-            let default_title = cx
-                .global::<AppSettings>()
-                .profile_name_for_command(tab_state.shell.as_deref(), &tab_state.args);
+            let default_title = if tab_state.agent.is_some() {
+                "Codex".to_string()
+            } else {
+                cx.global::<AppSettings>()
+                    .profile_name_for_command(tab_state.shell.as_deref(), &tab_state.args)
+            };
 
             restored.push((
                 TabSurface::Pending(Box::new(tab_state)),
@@ -332,6 +355,7 @@ impl Shell {
                     shell: shell.clone(),
                     args: args.clone(),
                     cwd: cwd.clone(),
+                    agent: None,
                     panes: None,
                 };
 
@@ -391,6 +415,7 @@ impl Shell {
             shell: default_profile.0.clone(),
             args: default_profile.1.clone(),
             cwd: Some(cwd),
+            agent: None,
             ..TabState::default()
         });
 
@@ -472,10 +497,12 @@ impl Shell {
                                 state
                             }
                             // Agent conversations are not persisted (the
-                            // Codex process and its thread die with the app),
-                            // so an agent tab restores as a plain
-                            // default-profile terminal tab.
-                            TabSurface::Agent(_) => TabState::default(),
+                            // Codex process and its thread die with the app);
+                            // the saved kind reopens a fresh agent tab.
+                            TabSurface::Agent(_) => TabState {
+                                agent: Some("codex".to_string()),
+                                ..TabState::default()
+                            },
                         };
                         normalize_saved_launch(&mut state, &default_profile);
                         state.name = tab.user_title().map(str::to_owned);
@@ -532,6 +559,7 @@ mod launch_resolution_tests {
             shell: shell.map(str::to_string),
             args: args.iter().map(|a| a.to_string()).collect(),
             cwd: None,
+            agent: None,
             panes: None,
         }
     }
