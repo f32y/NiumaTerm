@@ -5,12 +5,13 @@ pub(crate) use self::settings::{
     surface_background_opacity, watch_themes, window_background_appearance,
 };
 pub(crate) use self::shell::{
-    CloseTab, NewRemoteTab, NewTab, NewWindow, NewWorkspace, NextTab, NextWorkspace, PrevTab,
-    PrevWorkspace, ResizePaneDown, ResizePaneLeft, ResizePaneRight, ResizePaneUp, Shell,
+    CloseTab, NewAgentTab, NewRemoteTab, NewTab, NewWindow, NewWorkspace, NextTab, NextWorkspace,
+    PrevTab, PrevWorkspace, ResizePaneDown, ResizePaneLeft, ResizePaneRight, ResizePaneUp, Shell,
     ShowSettings, SplitDown, SplitLeft, SplitRight, SplitUp, TabSurface, ToggleSidebar,
 };
 
 mod active_list;
+mod agent_pane;
 mod assets;
 mod auto_refresh;
 mod codex_usage;

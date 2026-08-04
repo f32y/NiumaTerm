@@ -33,6 +33,7 @@ use crate::pane_tree::{PaneId, PaneNode, PaneTree, RemoveOutcome, SplitDirection
 use crate::tabs::{TabId, TabManager};
 use crate::terminal::session::HostEvent;
 use crate::terminal::view::{AgentInterrupted, TerminalPane};
+use crate::ui::agent_pane::AgentPane;
 use crate::ui::codex_usage::CodexUsageView;
 use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::git_status::{GitStatusModel, GitStatusView};
@@ -76,6 +77,7 @@ actions!(
         ToggleGitSidebar,
         ShowSettings,
         NewRemoteTab,
+        NewAgentTab,
     ]
 );
 
@@ -87,6 +89,9 @@ pub(crate) type TerminalPaneTree = PaneTree<Entity<TerminalPane>, Entity<Resizab
 pub(crate) enum TabSurface {
     Pending(Box<TabState>),
     Live(TerminalPaneTree),
+    /// A Codex conversation rendered as chat bubbles instead of a terminal
+    /// grid; owns no panes, so pane/route/process sweeps skip it via `tree()`.
+    Agent(Entity<AgentPane>),
 }
 
 impl TabSurface {
@@ -95,21 +100,35 @@ impl TabSurface {
     pub(crate) fn live(&self) -> &TerminalPaneTree {
         match self {
             TabSurface::Live(tree) => tree,
-            TabSurface::Pending(_) => unreachable!("active tab surface is always live"),
+            _ => unreachable!("active tab surface is always live"),
         }
     }
 
     pub(crate) fn live_mut(&mut self) -> &mut TerminalPaneTree {
         match self {
             TabSurface::Live(tree) => tree,
-            TabSurface::Pending(_) => unreachable!("active tab surface is always live"),
+            _ => unreachable!("active tab surface is always live"),
         }
     }
 
     pub(crate) fn tree(&self) -> Option<&TerminalPaneTree> {
         match self {
             TabSurface::Live(tree) => Some(tree),
-            TabSurface::Pending(_) => None,
+            _ => None,
+        }
+    }
+
+    fn tree_mut(&mut self) -> Option<&mut TerminalPaneTree> {
+        match self {
+            TabSurface::Live(tree) => Some(tree),
+            _ => None,
+        }
+    }
+
+    fn agent(&self) -> Option<&Entity<AgentPane>> {
+        match self {
+            TabSurface::Agent(pane) => Some(pane),
+            _ => None,
         }
     }
 
@@ -324,11 +343,11 @@ impl Shell {
     /// hand it to the git model, which no-ops when unchanged. Called on
     /// every render and on `HostEvent::Cwd`, so no switch path is missed.
     fn sync_git_target(&self, cx: &mut Context<Self>) {
+        // Agent tabs have no OSC7-tracking pane; the configured working dir
+        // keeps the git indicator on something sensible.
         let cwd = self
-            .active_pane()
-            .read(cx)
-            .tab_state()
-            .cwd
+            .try_active_pane()
+            .and_then(|pane| pane.read(cx).tab_state().cwd)
             .or_else(|| get().working_dir.clone());
 
         self.git_model
@@ -437,7 +456,9 @@ impl Shell {
 
         let visible_route = self
             .window_active
-            .then(|| self.active_pane().read(cx).agent_route().clone());
+            .then(|| self.try_active_pane())
+            .flatten()
+            .map(|pane| pane.read(cx).agent_route().clone());
         for notification in self.agent_monitor.pending_native_notifications() {
             if !request_native_delivery(visible_route.as_ref(), &notification.route) {
                 self.acknowledge_notification(&notification.route, &notification.id, cx);
@@ -654,6 +675,22 @@ impl Shell {
             .clone()
     }
 
+    /// The focused terminal pane, or `None` when the active tab has no
+    /// terminal (an agent tab). Terminal-only funnels that also run while an
+    /// agent tab is active must go through this instead of `active_pane`.
+    fn try_active_pane(&self) -> Option<Entity<TerminalPane>> {
+        self.workspaces
+            .active_tabs()
+            .active()
+            .tree()
+            .map(|tree| tree.focused_pane().clone())
+    }
+
+    /// The active tab's agent view, when it is an agent tab.
+    fn active_agent(&self) -> Option<Entity<AgentPane>> {
+        self.workspaces.active_tabs().active().agent().cloned()
+    }
+
     /// Spawn a still-pending (lazily-restored) active tab, then register its
     /// panes' agent routes — the startup registration sweep only saw tabs that
     /// were live at window creation.
@@ -679,7 +716,10 @@ impl Shell {
     }
 
     fn sync_active_terminal_title(&mut self, cx: &App) {
-        let title = self.active_pane().read(cx).terminal_title();
+        let Some(pane) = self.try_active_pane() else {
+            return;
+        };
+        let title = pane.read(cx).terminal_title();
         let tabs = self.workspaces.active_tabs_mut();
         let tab_id = tabs.active_id();
 
@@ -695,6 +735,13 @@ impl Shell {
         // that acknowledges the tab's bell.
         if self.workspaces.active_tabs_mut().clear_active_bell() {
             cx.notify();
+        }
+
+        // An agent tab focuses its message input; it has no terminal pane or
+        // agent-route notifications to acknowledge.
+        if let Some(agent) = self.active_agent() {
+            agent.update(cx, |pane, cx| pane.focus(window, cx));
+            return;
         }
 
         let handle = self.active_pane().read(cx).focus.clone();
@@ -714,7 +761,10 @@ impl Shell {
             return;
         }
 
-        let route = self.active_pane().read(cx).agent_route().clone();
+        let Some(pane) = self.try_active_pane() else {
+            return;
+        };
+        let route = pane.read(cx).agent_route().clone();
 
         let Some(id) = self
             .agent_monitor
@@ -931,11 +981,23 @@ impl Shell {
     }
 
     pub(crate) fn on_new_tab(&mut self, _: &NewTab, window: &mut Window, cx: &mut Context<Self>) {
+        let default_profile = Self::default_profile(cx);
+
+        self.open_profile_tab(default_profile, window, cx);
+    }
+
+    /// Open a terminal tab running the given launch command (a profile picked
+    /// from the new-tab menu, or the default profile).
+    pub(crate) fn open_profile_tab(
+        &mut self,
+        profile: (Option<String>, Vec<String>),
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let id = Self::alloc_id(&mut self.next_id);
 
-        let default_profile = Self::default_profile(cx);
         let cwd = explicit_cwd(self.workspaces.active_cwd());
-        let pane = Self::spawn_default_pane(cx, id, default_profile, cwd);
+        let pane = Self::spawn_default_pane(cx, id, profile, cwd);
 
         self.register_agent_pane(&pane, cx);
 
@@ -1006,6 +1068,29 @@ impl Shell {
         .detach();
     }
 
+    /// Open an agent tab: a Codex chat conversation in place of a terminal.
+    /// The conversation's Codex process starts in the workspace cwd.
+    pub(crate) fn on_new_agent_tab(
+        &mut self,
+        _: &NewAgentTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let id = Self::alloc_id(&mut self.next_id);
+        let cwd = explicit_cwd(self.workspaces.active_cwd());
+        let pane = cx.new(|cx| AgentPane::new(cwd, window, cx));
+
+        self.workspaces.active_tabs_mut().new_tab(
+            TabSurface::Agent(pane),
+            TabId(id),
+            "Codex".to_string(),
+        );
+
+        self.focus_active(window, cx);
+
+        cx.notify();
+    }
+
     /// CLI `new_tab`: open `path` in the deepest workspace whose cwd contains
     /// it (new tab, shell starts in `path`), or in a fresh workspace when
     /// nothing matches, preserving the user's target.
@@ -1052,15 +1137,17 @@ impl Shell {
     }
 
     fn on_close_tab(&mut self, _: &CloseTab, window: &mut Window, cx: &mut Context<Self>) {
+        // A tab without panes (agent tab) has no pane-close cascade; it goes
+        // straight to the tab-close path.
+        let Some(tree) = self.workspaces.active_tabs().active().tree() else {
+            let id = self.workspaces.active_tabs().active_id();
+            self.request_close_tab(id, window, cx);
+            return;
+        };
+
         // With the tab split, the close shortcut closes the focused pane; the
         // last remaining pane falls through to the tab-close cascade.
-        if !self
-            .workspaces
-            .active_tabs()
-            .active()
-            .live()
-            .is_single_leaf()
-        {
+        if !tree.is_single_leaf() {
             self.request_close_pane(window, cx);
             return;
         }
@@ -1904,7 +1991,10 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let focused = self.active_pane();
+        // Agent tabs have no pane tree to split.
+        let Some(focused) = self.try_active_pane() else {
+            return;
+        };
 
         // Guard before mutating: the tree insert and the resizable-state
         // insert must both happen or neither (they are index-aligned).
@@ -1994,7 +2084,9 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let tree = self.workspaces.active_tabs().active().live();
+        let Some(tree) = self.workspaces.active_tabs().active().tree() else {
+            return;
+        };
 
         let Some((state, index, count)) = tree.resize_split(direction.axis()) else {
             return;
@@ -2023,7 +2115,9 @@ impl Shell {
 
     /// Focus the pane `id` in the active tab (mouse click).
     pub(crate) fn focus_pane(&mut self, id: PaneId, window: &mut Window, cx: &mut Context<Self>) {
-        let tree = self.workspaces.active_tabs_mut().active_mut().live_mut();
+        let Some(tree) = self.workspaces.active_tabs_mut().active_mut().tree_mut() else {
+            return;
+        };
 
         if tree.focused() == id || !tree.set_focused(id) {
             return;
@@ -2039,7 +2133,9 @@ impl Shell {
     /// Apply saved split ratios once their groups have real bounds (the first
     /// visible frames after a session restore); cleared after applying.
     fn apply_pending_ratios(&mut self, cx: &mut Context<Self>) {
-        let tree = self.workspaces.active_tabs_mut().active_mut().live_mut();
+        let Some(tree) = self.workspaces.active_tabs_mut().active_mut().tree_mut() else {
+            return;
+        };
 
         tree.for_each_split_mut(&mut |state, pending| {
             if let Some(ratios) = pending.take_if(|_| state.read(cx).has_bounds()) {
@@ -2051,6 +2147,19 @@ impl Shell {
     /// The active tab's pane tree as nested resizable groups; a single-leaf
     /// tab renders its pane bare (no split chrome).
     fn render_active_tree(&self, cx: &mut Context<Self>) -> AnyElement {
+        // An agent tab renders its chat view in the same rounded card frame a
+        // single terminal pane gets, so tab switching keeps a stable layout.
+        if let Some(agent) = self.active_agent() {
+            return div()
+                .size_full()
+                .border_1()
+                .rounded(cx.theme().radius_lg)
+                .border_color(cx.theme().border)
+                .overflow_hidden()
+                .child(agent)
+                .into_any_element();
+        }
+
         let tree = self.workspaces.active_tabs().active().live();
 
         let multi = !tree.is_single_leaf();
@@ -2313,6 +2422,7 @@ impl Render for Shell {
             .on_action(cx.listener(Self::on_toggle_git_sidebar))
             .on_action(cx.listener(Self::on_show_settings))
             .on_action(cx.listener(Self::on_new_remote_tab))
+            .on_action(cx.listener(Self::on_new_agent_tab))
             .children(background_image)
             // Interactive chrome lives in the titlebar but is wrapped in
             // `occlude()`: that blocks the drag hitbox beneath it, so Windows

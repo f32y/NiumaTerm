@@ -52,6 +52,7 @@ type FontSelectState = SelectState<SearchableVec<FontItem>>;
 pub enum FontTarget {
     Terminal,
     Ui,
+    Agent,
 }
 
 struct FontPicker {
@@ -67,6 +68,7 @@ struct FontPicker {
 struct FontPickerGlobal {
     terminal: Option<FontPicker>,
     ui: Option<FontPicker>,
+    agent: Option<FontPicker>,
 }
 
 impl Global for FontPickerGlobal {}
@@ -77,6 +79,7 @@ fn current_family(target: FontTarget, cx: &App) -> SharedString {
     match target {
         FontTarget::Terminal => settings.terminal_font_family.clone(),
         FontTarget::Ui => settings.ui_font_family.clone(),
+        FontTarget::Agent => settings.agent_font_family.clone(),
     }
 }
 
@@ -90,6 +93,7 @@ fn slot(target: FontTarget, cx: &App) -> &Option<FontPicker> {
     match target {
         FontTarget::Terminal => &global.terminal,
         FontTarget::Ui => &global.ui,
+        FontTarget::Agent => &global.agent,
     }
 }
 
@@ -99,6 +103,7 @@ fn slot_mut(target: FontTarget, cx: &mut App) -> &mut Option<FontPicker> {
     match target {
         FontTarget::Terminal => &mut global.terminal,
         FontTarget::Ui => &mut global.ui,
+        FontTarget::Agent => &mut global.agent,
     }
 }
 
@@ -137,6 +142,7 @@ fn ensure_picker(target: FontTarget, window: &mut Window, cx: &mut App) -> Entit
                 match target {
                     FontTarget::Terminal => settings.terminal_font_family = name.clone(),
                     FontTarget::Ui => settings.ui_font_family = name.clone(),
+                    FontTarget::Agent => settings.agent_font_family = name.clone(),
                 }
             }
         });

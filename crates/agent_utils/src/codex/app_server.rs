@@ -1,0 +1,693 @@
+//! Codex `app-server` chat session: process lifecycle, JSON-RPC handshake,
+//! and translation of the wire protocol into typed events for a chat UI.
+//!
+//! The app-server protocol is Codex's supported integration surface for
+//! third-party UIs (it powers the VS Code extension). One `Session` owns one
+//! `codex app-server` process and one conversation thread on it.
+
+use std::io::{BufRead as _, BufReader, Write as _};
+use std::os::windows::process::CommandExt as _;
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::thread;
+
+use serde_json::{Value, json};
+use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
+
+/// JSON-RPC ids for the fixed handshake requests; turn requests count up from
+/// `FIRST_TURN_RPC_ID` so response routing can tell the phases apart.
+const INIT_RPC_ID: u64 = 1;
+const THREAD_START_RPC_ID: u64 = 2;
+const MODEL_LIST_RPC_ID: u64 = 3;
+const FIRST_TURN_RPC_ID: u64 = 100;
+
+/// Wire values for approval-policy selection (`AskForApproval` serializes
+/// kebab-case).
+pub const APPROVAL_OPTIONS: [&str; 3] = ["untrusted", "on-request", "never"];
+/// `(wire value, display label)` for sandbox selection (`SandboxPolicy` uses a
+/// camelCase `type` tag).
+pub const SANDBOX_OPTIONS: [(&str, &str); 3] = [
+    ("readOnly", "read-only"),
+    ("workspaceWrite", "workspace-write"),
+    ("dangerFullAccess", "full-access"),
+];
+/// Wire values for reasoning effort (`ReasoningEffort` serializes lowercase).
+pub const EFFORT_OPTIONS: [&str; 8] = [
+    "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
+];
+
+/// Thread settings a chat UI lets the user pick; sent as overrides on every
+/// `turn/start` (they apply to that turn and all subsequent turns).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ThreadSettings {
+    pub model: Option<String>,
+    pub approval: Option<String>,
+    pub sandbox: Option<String>,
+    pub effort: Option<String>,
+    /// `None` is the normal tier: the model catalog only lists additional
+    /// tiers, so normal is expressed as an explicit `serviceTier: null`
+    /// (double-optional on the wire — null resets, absent keeps).
+    pub tier: Option<String>,
+}
+
+/// One entry of the model catalog from `model/list`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModelInfo {
+    pub model: String,
+    pub display: String,
+    /// `(tier id, tier name)` of the model's additional service tiers.
+    pub tiers: Vec<(String, String)>,
+    pub default_tier: Option<String>,
+}
+
+/// A typed view of a `ThreadItem`, used for both `item/started` and
+/// `item/completed`. `Option` fields mean "absent in this payload — keep what
+/// streaming already produced".
+#[derive(Clone, Debug, PartialEq)]
+pub enum Item {
+    /// Echo of our own turn input; a UI that renders the user message locally
+    /// skips these.
+    UserMessage,
+    AgentMessage {
+        id: String,
+        text: Option<String>,
+    },
+    Reasoning {
+        id: String,
+        summary: Option<String>,
+    },
+    CommandExecution {
+        id: String,
+        command: String,
+        aggregated_output: Option<String>,
+        status: Option<String>,
+        exit_code: Option<i64>,
+    },
+    FileChange {
+        id: String,
+        paths: String,
+        status: Option<String>,
+    },
+    /// Every other tool-call kind (mcpToolCall, webSearch, dynamicToolCall,
+    /// …): kind + best-effort title, so no activity is invisible.
+    Other {
+        id: String,
+        kind: String,
+        title: String,
+        status: Option<String>,
+    },
+}
+
+/// What a chat UI needs to react to, in transcript order.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Event {
+    /// Handshake finished; carries the thread's effective settings so the UI
+    /// can seed its pickers with real values.
+    Ready(ThreadSettings),
+    Models(Vec<ModelInfo>),
+    TurnStarted,
+    TurnCompleted {
+        error: Option<String>,
+    },
+    ItemStarted(Item),
+    ItemCompleted(Item),
+    AgentMessageDelta {
+        item_id: String,
+        delta: String,
+    },
+    ReasoningSummaryDelta {
+        item_id: String,
+        delta: String,
+    },
+    CommandOutputDelta {
+        item_id: String,
+        delta: String,
+    },
+    /// A server→client approval request is blocking the turn; answer with
+    /// [`Session::respond_approval`].
+    ApprovalRequested {
+        description: String,
+    },
+    /// The pending approval was answered or cleared by turn lifecycle.
+    ApprovalResolved,
+    StatusDetail(Option<String>),
+    Error {
+        message: String,
+        /// The handshake itself failed; the session will not become usable.
+        fatal: bool,
+    },
+}
+
+/// Outcome of [`Session::send_user_message`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SendOutcome {
+    /// A new turn was started.
+    StartedTurn,
+    /// The message was steered into the already-running turn.
+    Steered,
+    /// The handshake has not produced a thread yet.
+    NotReady,
+}
+
+pub struct Session {
+    child: Child,
+    stdin: Option<ChildStdin>,
+    next_rpc_id: u64,
+    thread_id: Option<String>,
+    current_turn: Option<String>,
+    /// JSON-RPC id of the server→client approval request awaiting an answer.
+    pending_approval: Option<u64>,
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        // The npm `codex.cmd` shim starts a descendant process; killing only
+        // cmd.exe would strand it. Closing stdin delivers EOF, which
+        // app-server treats as shutdown, and the reader thread exits with the
+        // pipe. The kill is a belt-and-braces cleanup for the shim itself.
+        drop(self.stdin.take());
+        let _ = self.child.kill();
+    }
+}
+
+impl Session {
+    /// Spawn `codex app-server` with piped stdio and send the `initialize`
+    /// request. Every parsed stdout line is handed to `deliver` (from a
+    /// reader thread — hop threads before calling [`Session::process`]);
+    /// stderr lines go to `on_stderr`. Dropping `deliver` signals EOF: the
+    /// closure is owned by the reader thread and dropped when the pipe closes.
+    pub fn spawn(
+        cwd: Option<String>,
+        deliver: impl Fn(Value) + Send + 'static,
+        on_stderr: impl Fn(String) + Send + 'static,
+    ) -> Result<Self, String> {
+        let mut command = Command::new("cmd.exe");
+
+        command
+            .args(["/D", "/C", "codex", "app-server"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .creation_flags(CREATE_NO_WINDOW);
+
+        if let Some(cwd) = cwd {
+            command.current_dir(cwd);
+        }
+
+        let mut child = command
+            .spawn()
+            .map_err(|err| format!("could not run `codex app-server`: {err}"))?;
+
+        let stdin = child.stdin.take().ok_or("Codex stdin unavailable")?;
+        let stdout = child.stdout.take().ok_or("Codex stdout unavailable")?;
+        let stderr = child.stderr.take().ok_or("Codex stderr unavailable")?;
+
+        thread::spawn(move || {
+            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                if let Ok(message) = serde_json::from_str::<Value>(&line) {
+                    deliver(message);
+                }
+            }
+        });
+
+        thread::spawn(move || {
+            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                on_stderr(line);
+            }
+        });
+
+        let mut session = Self {
+            child,
+            stdin: Some(stdin),
+            next_rpc_id: FIRST_TURN_RPC_ID,
+            thread_id: None,
+            current_turn: None,
+            pending_approval: None,
+        };
+
+        session.send(json!({
+            "jsonrpc": "2.0",
+            "id": INIT_RPC_ID,
+            "method": "initialize",
+            "params": {"clientInfo": {"name": "NiumaTerm", "version": "0.1.0"}},
+        }));
+
+        Ok(session)
+    }
+
+    /// Handle one message from the server: advances the handshake, answers
+    /// protocol-level requests, and returns the events a chat UI reacts to.
+    pub fn process(&mut self, message: Value) -> Vec<Event> {
+        let id = message["id"].as_u64();
+        let method = message["method"].as_str().map(str::to_owned);
+
+        match (id, method.as_deref()) {
+            (Some(rpc_id), Some(method)) => self.process_server_request(rpc_id, method, &message),
+            (Some(rpc_id), None) => self.process_response(rpc_id, &message),
+            (None, Some(method)) => self.process_notification(method, &message["params"]),
+            (None, None) => Vec::new(),
+        }
+    }
+
+    /// A message typed while a turn is running becomes a steer (mid-turn
+    /// interjection); otherwise it starts the next turn carrying the settings
+    /// as overrides.
+    pub fn send_user_message(&mut self, text: &str, settings: &ThreadSettings) -> SendOutcome {
+        let Some(thread_id) = self.thread_id.clone() else {
+            return SendOutcome::NotReady;
+        };
+
+        let rpc_id = self.alloc_rpc_id();
+
+        if let Some(turn_id) = self.current_turn.clone() {
+            self.send(json!({
+                "jsonrpc": "2.0",
+                "id": rpc_id,
+                "method": "turn/steer",
+                "params": {
+                    "threadId": thread_id,
+                    "expectedTurnId": turn_id,
+                    "input": [{"type": "text", "text": text}],
+                },
+            }));
+
+            return SendOutcome::Steered;
+        }
+
+        let mut params = json!({
+            "threadId": thread_id,
+            "input": [{"type": "text", "text": text}],
+        });
+
+        if let Some(model) = &settings.model {
+            params["model"] = json!(model);
+        }
+        if let Some(approval) = &settings.approval {
+            params["approvalPolicy"] = json!(approval);
+        }
+        if let Some(sandbox) = &settings.sandbox {
+            params["sandboxPolicy"] = json!({"type": sandbox});
+        }
+        if let Some(effort) = &settings.effort {
+            params["effort"] = json!(effort);
+        }
+        // Always sent: an explicit null resets to the normal tier.
+        params["serviceTier"] = json!(settings.tier);
+
+        self.send(json!({
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "method": "turn/start",
+            "params": params,
+        }));
+
+        SendOutcome::StartedTurn
+    }
+
+    /// Interrupt the running turn (the Esc/Ctrl-C equivalent).
+    pub fn interrupt(&mut self) {
+        let (Some(thread_id), Some(turn_id)) = (self.thread_id.clone(), self.current_turn.clone())
+        else {
+            return;
+        };
+
+        let rpc_id = self.alloc_rpc_id();
+
+        self.send(json!({
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "method": "turn/interrupt",
+            "params": {"threadId": thread_id, "turnId": turn_id},
+        }));
+    }
+
+    /// Answer the pending approval request (`"accept"` / `"decline"`); a no-op
+    /// when none is pending.
+    pub fn respond_approval(&mut self, decision: &str) {
+        let Some(rpc_id) = self.pending_approval.take() else {
+            return;
+        };
+
+        self.send(json!({
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "result": {"decision": decision},
+        }));
+    }
+
+    fn alloc_rpc_id(&mut self) -> u64 {
+        let id = self.next_rpc_id;
+
+        self.next_rpc_id += 1;
+
+        id
+    }
+
+    /// Write one request line. Failures are not surfaced here: a dead process
+    /// also closes its stdout, so the reader-side EOF is the single
+    /// exit-detection path.
+    fn send(&mut self, message: Value) {
+        if let Some(stdin) = self.stdin.as_mut() {
+            let _ = writeln!(stdin, "{message}").and_then(|_| stdin.flush());
+        }
+    }
+
+    fn process_server_request(&mut self, rpc_id: u64, method: &str, message: &Value) -> Vec<Event> {
+        match method {
+            "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" => {
+                let params = &message["params"];
+                let description = if method == "item/commandExecution/requestApproval" {
+                    format!("Run command: `{}`", stringify_command(&params["command"]))
+                } else {
+                    format!(
+                        "Apply file changes: {}",
+                        file_change_paths(&params["changes"])
+                    )
+                };
+
+                self.pending_approval = Some(rpc_id);
+
+                vec![Event::ApprovalRequested { description }]
+            }
+            // Any other server→client request is unsupported by this client;
+            // an error reply keeps the turn from hanging (the same strategy
+            // `codex exec` uses for approvals).
+            _ => {
+                self.send(json!({
+                    "jsonrpc": "2.0",
+                    "id": rpc_id,
+                    "error": {"code": -32601, "message": "not supported by NiumaTerm agent tab"},
+                }));
+
+                Vec::new()
+            }
+        }
+    }
+
+    fn process_response(&mut self, rpc_id: u64, message: &Value) -> Vec<Event> {
+        if let Some(error) = message["error"]["message"].as_str() {
+            return vec![Event::Error {
+                message: error.to_string(),
+                fatal: rpc_id <= THREAD_START_RPC_ID,
+            }];
+        }
+
+        match rpc_id {
+            INIT_RPC_ID => {
+                self.send(json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}));
+                self.send(json!({
+                    "jsonrpc": "2.0",
+                    "id": THREAD_START_RPC_ID,
+                    "method": "thread/start",
+                    "params": {},
+                }));
+
+                Vec::new()
+            }
+            THREAD_START_RPC_ID => {
+                let result = &message["result"];
+
+                self.thread_id = result["thread"]["id"].as_str().map(str::to_owned);
+
+                self.send(json!({
+                    "jsonrpc": "2.0",
+                    "id": MODEL_LIST_RPC_ID,
+                    "method": "model/list",
+                    "params": {"limit": 100},
+                }));
+
+                vec![Event::Ready(parse_thread_settings(result))]
+            }
+            MODEL_LIST_RPC_ID => vec![Event::Models(parse_models(&message["result"]))],
+            _ => Vec::new(),
+        }
+    }
+
+    fn process_notification(&mut self, method: &str, params: &Value) -> Vec<Event> {
+        match method {
+            "turn/started" => {
+                self.current_turn = params["turn"]["id"].as_str().map(str::to_owned);
+
+                vec![Event::TurnStarted]
+            }
+            "turn/completed" => {
+                self.current_turn = None;
+
+                let error = (params["turn"]["status"].as_str() == Some("failed"))
+                    .then(|| params["turn"]["error"]["message"].as_str())
+                    .flatten()
+                    .map(str::to_owned);
+
+                vec![Event::TurnCompleted { error }]
+            }
+            "item/started" => parse_item(&params["item"])
+                .map(Event::ItemStarted)
+                .into_iter()
+                .collect(),
+            "item/completed" => parse_item(&params["item"])
+                .map(Event::ItemCompleted)
+                .into_iter()
+                .collect(),
+            "item/agentMessage/delta" => delta_event(params, |item_id, delta| {
+                Event::AgentMessageDelta { item_id, delta }
+            }),
+            "item/reasoning/summaryTextDelta" => delta_event(params, |item_id, delta| {
+                Event::ReasoningSummaryDelta { item_id, delta }
+            }),
+            "item/commandExecution/outputDelta" => delta_event(params, |item_id, delta| {
+                Event::CommandOutputDelta { item_id, delta }
+            }),
+            "serverRequest/resolved" => {
+                // Fires when a pending approval is answered or cleared by
+                // turn lifecycle — tear down the approval UI either way.
+                if self.pending_approval.is_some()
+                    && self.pending_approval == params["requestId"].as_u64()
+                {
+                    self.pending_approval = None;
+
+                    return vec![Event::ApprovalResolved];
+                }
+
+                Vec::new()
+            }
+            "error" => {
+                let message = params["error"]["message"]
+                    .as_str()
+                    .or_else(|| params["message"].as_str())
+                    .unwrap_or("unknown Codex error")
+                    .to_string();
+
+                vec![Event::Error {
+                    message,
+                    fatal: false,
+                }]
+            }
+            "thread/status/changed" => vec![Event::StatusDetail(
+                params["status"]["type"].as_str().map(str::to_owned),
+            )],
+            _ => Vec::new(),
+        }
+    }
+}
+
+fn delta_event(params: &Value, make: fn(String, String) -> Event) -> Vec<Event> {
+    match (params["itemId"].as_str(), params["delta"].as_str()) {
+        (Some(item_id), Some(delta)) => vec![make(item_id.to_string(), delta.to_string())],
+        _ => Vec::new(),
+    }
+}
+
+fn parse_thread_settings(result: &Value) -> ThreadSettings {
+    ThreadSettings {
+        model: result["model"].as_str().map(str::to_owned),
+        approval: result["approvalPolicy"].as_str().map(str::to_owned),
+        sandbox: result["sandbox"]["type"].as_str().map(str::to_owned),
+        effort: result["reasoningEffort"].as_str().map(str::to_owned),
+        tier: result["serviceTier"].as_str().map(str::to_owned),
+    }
+}
+
+fn parse_models(result: &Value) -> Vec<ModelInfo> {
+    result["data"]
+        .as_array()
+        .map(|data| {
+            data.iter()
+                .filter(|m| !m["hidden"].as_bool().unwrap_or(false))
+                .filter_map(|m| {
+                    let model = m["model"].as_str()?.to_string();
+                    let display = m["displayName"]
+                        .as_str()
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or(&model)
+                        .to_string();
+                    let tiers = m["serviceTiers"]
+                        .as_array()
+                        .map(|tiers| {
+                            tiers
+                                .iter()
+                                .filter_map(|tier| {
+                                    let id = tier["id"].as_str()?.to_string();
+                                    let name = tier["name"]
+                                        .as_str()
+                                        .filter(|s| !s.is_empty())
+                                        .unwrap_or(&id)
+                                        .to_string();
+                                    Some((id, name))
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let default_tier = m["defaultServiceTier"].as_str().map(str::to_owned);
+
+                    Some(ModelInfo {
+                        model,
+                        display,
+                        tiers,
+                        default_tier,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_item(item: &Value) -> Option<Item> {
+    let id = item["id"].as_str().unwrap_or_default().to_string();
+    let status = item["status"].as_str().map(str::to_owned);
+
+    let parsed = match item["type"].as_str()? {
+        "userMessage" => Item::UserMessage,
+        "agentMessage" => Item::AgentMessage {
+            id,
+            text: item["text"].as_str().map(str::to_owned),
+        },
+        "reasoning" => Item::Reasoning {
+            id,
+            summary: item["summary"].as_array().map(|summary| {
+                summary
+                    .iter()
+                    .filter_map(|part| part.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }),
+        },
+        "commandExecution" => Item::CommandExecution {
+            id,
+            command: stringify_command(&item["command"]),
+            aggregated_output: item["aggregatedOutput"].as_str().map(str::to_owned),
+            status,
+            exit_code: item["exitCode"].as_i64(),
+        },
+        "fileChange" => Item::FileChange {
+            id,
+            paths: file_change_paths(&item["changes"]),
+            status,
+        },
+        kind => Item::Other {
+            id,
+            kind: kind.to_string(),
+            title: tool_title(item),
+            status,
+        },
+    };
+
+    Some(parsed)
+}
+
+/// The protocol sends commands as either a shell string or an argv array.
+fn stringify_command(command: &Value) -> String {
+    match command {
+        Value::String(s) => s.clone(),
+        Value::Array(parts) => parts
+            .iter()
+            .map(|p| p.as_str().unwrap_or_default())
+            .collect::<Vec<_>>()
+            .join(" "),
+        other => other.to_string(),
+    }
+}
+
+fn file_change_paths(changes: &Value) -> String {
+    let paths: Vec<&str> = changes
+        .as_array()
+        .map(|list| {
+            list.iter()
+                .filter_map(|change| change["path"].as_str())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if paths.is_empty() {
+        "(unknown files)".to_string()
+    } else {
+        paths.join(", ")
+    }
+}
+
+/// Best-effort one-line label for an arbitrary tool item: MCP calls have
+/// `server` + `tool`, dynamic tools `tool`, web searches `query`.
+fn tool_title(item: &Value) -> String {
+    let tool = item["tool"].as_str();
+
+    match (item["server"].as_str(), tool) {
+        (Some(server), Some(tool)) => format!("{server}/{tool}"),
+        (None, Some(tool)) => tool.to_string(),
+        _ => item["query"].as_str().unwrap_or_default().to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn commands_render_as_string_or_joined_argv() {
+        assert_eq!(stringify_command(&json!("pytest -q")), "pytest -q");
+        assert_eq!(
+            stringify_command(&json!(["cargo", "check", "-p", "app"])),
+            "cargo check -p app"
+        );
+    }
+
+    #[test]
+    fn model_catalog_keeps_visible_models_and_their_tiers() {
+        let result = json!({
+            "data": [
+                {
+                    "model": "gpt-a",
+                    "displayName": "GPT A",
+                    "hidden": false,
+                    "serviceTiers": [{"id": "priority", "name": "Fast"}],
+                    "defaultServiceTier": null
+                },
+                {"model": "gpt-b", "displayName": "GPT B", "hidden": true}
+            ]
+        });
+
+        let models = parse_models(&result);
+
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].model, "gpt-a");
+        assert_eq!(models[0].tiers, vec![("priority".into(), "Fast".into())]);
+    }
+
+    #[test]
+    fn unknown_items_become_titled_tool_cards() {
+        let item = json!({
+            "id": "call1",
+            "type": "mcpToolCall",
+            "server": "github",
+            "tool": "search_issues",
+            "status": "inProgress"
+        });
+
+        assert_eq!(
+            parse_item(&item),
+            Some(Item::Other {
+                id: "call1".into(),
+                kind: "mcpToolCall".into(),
+                title: "github/search_issues".into(),
+                status: Some("inProgress".into()),
+            })
+        );
+    }
+}

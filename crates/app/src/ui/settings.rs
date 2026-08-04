@@ -133,6 +133,10 @@ pub struct AppSettings {
     pub terminal_font_size: f64,
     /// Line height as a multiplier on font size.
     pub terminal_line_height: f64,
+    /// Font family used by agent (chat) tabs.
+    pub agent_font_family: SharedString,
+    /// Font size (px) used by agent (chat) tabs.
+    pub agent_font_size: f64,
     /// Fixed tab width in pixels (DEFAULT_TAB_WIDTH..=MAX_TAB_WIDTH).
     pub tab_width: f64,
     /// Filter the settings font picker to monospace fonts.
@@ -149,6 +153,9 @@ pub struct AppSettings {
     pub enable_agent_hooks: bool,
     /// Show Agent account usage in the workspace sidebar.
     pub show_agent_usage: bool,
+    /// Collapse consecutive tool-call rows in agent tabs into a one-line
+    /// summary by default.
+    pub collapse_tool_calls: bool,
     /// Restore the last saved workspace/tab session on startup.
     pub restore_last_session_when_opening: bool,
     /// Manage each tab's shell with a Windows Job Object: closing the tab
@@ -194,6 +201,8 @@ impl Default for AppSettings {
             terminal_font_family: initial_font_family(),
             terminal_font_size: DEFAULT_FONT_SIZE,
             terminal_line_height: DEFAULT_LINE_HEIGHT,
+            agent_font_family: initial_font_family(),
+            agent_font_size: DEFAULT_FONT_SIZE,
             tab_width: DEFAULT_TAB_WIDTH,
             monospace_only: true,
             window_transparency_enabled: true,
@@ -202,6 +211,7 @@ impl Default for AppSettings {
             background_image_opacity: DEFAULT_BACKGROUND_IMAGE_OPACITY,
             enable_agent_hooks: true,
             show_agent_usage: true,
+            collapse_tool_calls: false,
             restore_last_session_when_opening: true,
             manage_subprocess_job: false,
             warn_before_terminating_shell: WarnBeforeTerminatingShell::default(),
@@ -335,6 +345,8 @@ impl AppSettings {
             terminal_font_family: terminal_font_or_default(&appearance.terminal_font_family),
             terminal_font_size: clamp_terminal_font_size(appearance.terminal_font_size),
             terminal_line_height: clamp_terminal_line_height(appearance.terminal_line_height),
+            agent_font_family: terminal_font_or_default(&appearance.agent_font_family),
+            agent_font_size: clamp_terminal_font_size(appearance.agent_font_size),
             tab_width: clamp_tab_width(appearance.tab_width),
             monospace_only: appearance.monospace_only,
             window_transparency_enabled: appearance.window_transparency_enabled,
@@ -348,6 +360,7 @@ impl AppSettings {
             ),
             enable_agent_hooks: config.agent.enable_agent_hooks,
             show_agent_usage: config.agent.show_agent_usage,
+            collapse_tool_calls: config.agent.collapse_tool_calls,
             restore_last_session_when_opening: config.system.restore_last_session_when_opening,
             manage_subprocess_job: config.system.manage_subprocess_job,
             warn_before_terminating_shell: config.system.warn_before_terminating_shell,
@@ -461,6 +474,8 @@ impl AppSettings {
             terminal_font_family: self.terminal_font_family.to_string(),
             terminal_font_size: self.terminal_font_size,
             terminal_line_height: self.terminal_line_height,
+            agent_font_family: self.agent_font_family.to_string(),
+            agent_font_size: self.agent_font_size,
             monospace_only: self.monospace_only,
             window_transparency_enabled: self.window_transparency_enabled,
             background_opacity: self.background_opacity,
@@ -471,6 +486,7 @@ impl AppSettings {
         let agent = AgentConfig {
             enable_agent_hooks: self.enable_agent_hooks,
             show_agent_usage: self.show_agent_usage,
+            collapse_tool_calls: self.collapse_tool_calls,
         };
 
         let system = SystemConfig {
@@ -1128,6 +1144,21 @@ fn agent_page() -> SettingPage {
                         ),
                     )
                     .description("Show Agent account usage in the workspace sidebar."),
+                )
+                .item(
+                    SettingItem::new(
+                        "Collapse Tool Call details by default",
+                        SettingField::switch(
+                            |cx| cx.global::<AppSettings>().collapse_tool_calls,
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().collapse_tool_calls = value;
+                            },
+                        ),
+                    )
+                    .description(
+                        "In agent tabs, show consecutive tool calls of the same kind as a \
+                         one-line summary; click the summary to expand the details.",
+                    ),
                 ),
         )
         .group(
@@ -1664,6 +1695,36 @@ pub fn settings_view(cx: &App) -> Settings {
                                 ),
                             )
                             .description("Filter the font list to fixed-width fonts."),
+                        ),
+                )
+                .group(
+                    SettingGroup::new()
+                        .title("Agent Font")
+                        .item(
+                            SettingItem::new(
+                                "Font Family",
+                                ui::font_picker::font_family_field(
+                                    ui::font_picker::FontTarget::Agent,
+                                ),
+                            )
+                            .description("Font used by agent (chat) tabs."),
+                        )
+                        .item(
+                            SettingItem::new(
+                                "Font Size",
+                                SettingField::number_input(
+                                    NumberFieldOptions {
+                                        min: 6.0,
+                                        max: 72.0,
+                                        step: 0.1,
+                                    },
+                                    |cx| cx.global::<AppSettings>().agent_font_size,
+                                    |value, cx| {
+                                        cx.global_mut::<AppSettings>().agent_font_size = value;
+                                    },
+                                ),
+                            )
+                            .description("Font size in pixels."),
                         ),
                 )
                 .group(
