@@ -33,7 +33,7 @@ use crate::pane_tree::{PaneId, PaneNode, PaneTree, RemoveOutcome, SplitDirection
 use crate::tabs::{TabId, TabManager};
 use crate::terminal::session::HostEvent;
 use crate::terminal::view::{AgentInterrupted, TerminalPane};
-use crate::ui::agent_pane::AgentPane;
+use crate::ui::agent_pane::{AgentKind, AgentPane};
 use crate::ui::codex_usage::CodexUsageView;
 use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::git_status::{GitStatusModel, GitStatusView};
@@ -1068,28 +1068,37 @@ impl Shell {
         .detach();
     }
 
-    /// Open an agent tab: a Codex chat conversation in place of a terminal.
-    /// The conversation's Codex process starts in the workspace cwd.
-    pub(crate) fn on_new_agent_tab(
+    /// Open an agent tab: an agent chat conversation in place of a terminal.
+    /// The conversation's agent process starts in the workspace cwd.
+    pub(crate) fn open_agent_tab(
         &mut self,
-        _: &NewAgentTab,
+        kind: AgentKind,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let id = Self::alloc_id(&mut self.next_id);
         let cwd = explicit_cwd(self.workspaces.active_cwd());
-        let pane = cx.new(|cx| AgentPane::new(cwd, window, cx));
+        let pane = cx.new(|cx| AgentPane::new(kind, cwd, window, cx));
 
         self.workspaces.active_tabs_mut().new_tab(
             TabSurface::Agent(pane),
             TabId(id),
-            "Codex".to_string(),
+            kind.display().to_string(),
         );
 
         self.focus_active(window, cx);
         self.sync_session_memory(cx);
 
         cx.notify();
+    }
+
+    pub(crate) fn on_new_agent_tab(
+        &mut self,
+        _: &NewAgentTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_agent_tab(AgentKind::Codex, window, cx);
     }
 
     /// CLI `new_tab`: open `path` in the deepest workspace whose cwd contains
