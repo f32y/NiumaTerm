@@ -333,6 +333,16 @@ impl AgentPane {
             return;
         }
 
+        if self.send_text(text, cx) {
+            self.input
+                .update(cx, |input, cx| input.set_value("", window, cx));
+        }
+    }
+
+    /// Send one user message through the session with full turn bookkeeping;
+    /// also used for UI-generated messages such as the `/effort` command.
+    /// Returns false when the session isn't ready yet.
+    fn send_text(&mut self, text: String, cx: &mut Context<Self>) -> bool {
         let settings = self.settings.clone();
         let outcome = match self.session.as_mut() {
             Some(session) => session.send_user_message(&text, &settings),
@@ -349,7 +359,7 @@ impl AgentPane {
                 },
                 cx,
             );
-            return;
+            return false;
         }
 
         // A steer joins the running turn (and its progress line); a fresh
@@ -358,13 +368,13 @@ impl AgentPane {
             self.turn_seq += 1;
         }
 
-        self.input
-            .update(cx, |input, cx| input.set_value("", window, cx));
         self.push(ChatItem::User { text }, cx);
 
         if outcome == SendOutcome::StartedTurn {
             self.start_working(cx);
         }
+
+        true
     }
 
     /// Start the turn clock and drive the once-a-second repaint of the live
@@ -1441,10 +1451,14 @@ impl AgentPane {
         }
     }
 
-    /// Claude settings: model and permission mode. The model catalog comes
-    /// from the initialize handshake; changes apply via control requests
-    /// before the next message. Reasoning effort is a spawn-time CLI flag, so
-    /// it has no picker here.
+    /// Claude settings: model, permission mode, and reasoning effort. The
+    /// model catalog comes from the initialize handshake; model and
+    /// permission changes apply via control requests before the next message.
+    /// Effort has no control request — it's applied by sending the `/effort`
+    /// slash command as a user message, which the CLI handles locally
+    /// (instant, no model call), so the picker sends it immediately as its
+    /// own mini-turn. The effort levels are per model; models without effort
+    /// support (e.g. Haiku) get no picker.
     fn render_claude_settings_row(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let model_options: Vec<(String, String)> = self
             .models
@@ -1455,8 +1469,14 @@ impl AgentPane {
             .iter()
             .map(|v| (v.to_string(), v.to_string()))
             .collect();
+        let effort_options: Vec<(String, String)> = self
+            .models
+            .iter()
+            .find(|m| Some(&m.model) == self.settings.model.as_ref())
+            .map(|m| m.efforts.iter().map(|v| (v.clone(), v.clone())).collect())
+            .unwrap_or_default();
 
-        h_flex()
+        let mut row = h_flex()
             .w_full()
             .gap_1()
             .flex_wrap()
@@ -1468,7 +1488,7 @@ impl AgentPane {
                 IconName::Cpu,
                 self.settings.model.clone(),
                 model_options,
-                |this, value| this.settings.model = Some(value),
+                |this, value, _| this.settings.model = Some(value),
             ))
             .child(Self::setting_picker(
                 cx,
@@ -1477,8 +1497,25 @@ impl AgentPane {
                 permission_icon(self.settings.approval.as_deref()),
                 self.settings.approval.clone(),
                 permission_options,
-                |this, value| this.settings.approval = Some(value),
-            ))
+                |this, value, _| this.settings.approval = Some(value),
+            ));
+
+        if !effort_options.is_empty() {
+            row = row.child(Self::setting_picker(
+                cx,
+                "agent-effort",
+                "effort",
+                IconName::Gauge,
+                self.settings.effort.clone(),
+                effort_options,
+                |this, value, cx| {
+                    this.settings.effort = Some(value.clone());
+                    this.send_text(format!("/effort {value}"), cx);
+                },
+            ));
+        }
+
+        row
     }
 
     /// Codex settings: model, approval policy, sandbox, reasoning effort, and
@@ -1528,7 +1565,7 @@ impl AgentPane {
                 IconName::Cpu,
                 self.settings.model.clone(),
                 model_options,
-                |this, value| {
+                |this, value, _| {
                     // A tier the new model doesn't offer falls back to that
                     // model's default tier instead of erroring the next turn.
                     if let Some(info) = this.models.iter().find(|m| m.model == value)
@@ -1550,7 +1587,7 @@ impl AgentPane {
                 permission_icon(self.settings.approval.as_deref()),
                 self.settings.approval.clone(),
                 approval_options,
-                |this, value| this.settings.approval = Some(value),
+                |this, value, _| this.settings.approval = Some(value),
             ))
             .child(Self::setting_picker(
                 cx,
@@ -1559,7 +1596,7 @@ impl AgentPane {
                 IconName::Shield,
                 self.settings.sandbox.clone(),
                 sandbox_options,
-                |this, value| this.settings.sandbox = Some(value),
+                |this, value, _| this.settings.sandbox = Some(value),
             ))
             .child(Self::setting_picker(
                 cx,
@@ -1568,7 +1605,7 @@ impl AgentPane {
                 IconName::Gauge,
                 self.settings.effort.clone(),
                 effort_options,
-                |this, value| this.settings.effort = Some(value),
+                |this, value, _| this.settings.effort = Some(value),
             ))
             .child(Self::setting_picker(
                 cx,
@@ -1577,7 +1614,7 @@ impl AgentPane {
                 IconName::Zap,
                 Some(self.settings.tier.clone().unwrap_or_default()),
                 tier_options,
-                |this, value| {
+                |this, value, _| {
                     this.settings.tier = (!value.is_empty()).then_some(value);
                 },
             ))
@@ -1594,7 +1631,7 @@ impl AgentPane {
         icon: IconName,
         current: Option<String>,
         options: Vec<(String, String)>,
-        set: fn(&mut Self, String),
+        set: fn(&mut Self, String, &mut Context<Self>),
     ) -> impl IntoElement + use<> {
         let pane = cx.entity();
 
@@ -1643,7 +1680,7 @@ impl AgentPane {
                     let pane = pane.clone();
                     menu = menu.item(PopupMenuItem::new(label).on_click(move |_, _, cx| {
                         pane.update(cx, |this, cx| {
-                            set(this, value.clone());
+                            set(this, value.clone(), cx);
                             cx.notify();
                         });
                     }));

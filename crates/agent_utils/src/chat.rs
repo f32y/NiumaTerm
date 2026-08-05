@@ -27,6 +27,9 @@ pub struct ModelInfo {
     /// `(tier id, tier name)` of the model's additional service tiers.
     pub tiers: Vec<(String, String)>,
     pub default_tier: Option<String>,
+    /// Reasoning-effort levels the model supports; empty when the model has
+    /// no effort control (or the backend keeps a global effort list instead).
+    pub efforts: Vec<String>,
 }
 
 /// A typed view of one transcript item, used for both started and completed

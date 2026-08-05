@@ -718,7 +718,9 @@ fn approval_description(tool_name: &str, input: &Value) -> String {
 
 /// The model catalog from the initialize response: `value` is the wire name
 /// (`"default"`, `"opus[1m]"`, …), `displayName` the menu label. Claude has
-/// no per-model service tiers.
+/// no per-model service tiers, but each entry lists its reasoning-effort
+/// levels in `supportedEffortLevels` (absent on models without effort, e.g.
+/// Haiku).
 fn parse_models(models: &Value) -> Vec<ModelInfo> {
     models
         .as_array()
@@ -731,12 +733,22 @@ fn parse_models(models: &Value) -> Vec<ModelInfo> {
                         .filter(|s| !s.is_empty())
                         .unwrap_or(&model)
                         .to_string();
+                    let efforts = entry["supportedEffortLevels"]
+                        .as_array()
+                        .map(|levels| {
+                            levels
+                                .iter()
+                                .filter_map(|v| v.as_str().map(str::to_owned))
+                                .collect()
+                        })
+                        .unwrap_or_default();
 
                     Some(ModelInfo {
                         model,
                         display,
                         tiers: Vec::new(),
                         default_tier: None,
+                        efforts,
                     })
                 })
                 .collect()
@@ -808,7 +820,8 @@ mod tests {
     #[test]
     fn initialize_model_catalog_maps_value_and_display_name() {
         let models = json!([
-            {"value": "default", "displayName": "Default (recommended)", "description": "…"},
+            {"value": "default", "displayName": "Default (recommended)", "description": "…",
+             "supportedEffortLevels": ["low", "high"]},
             {"value": "opus[1m]", "displayName": "Opus with 1M context"},
             {"displayName": "no value — skipped"}
         ]);
@@ -818,7 +831,9 @@ mod tests {
         assert_eq!(parsed.len(), 2);
         assert_eq!(parsed[0].model, "default");
         assert_eq!(parsed[0].display, "Default (recommended)");
+        assert_eq!(parsed[0].efforts, vec!["low", "high"]);
         assert_eq!(parsed[1].model, "opus[1m]");
+        assert!(parsed[1].efforts.is_empty());
     }
 
     #[test]
