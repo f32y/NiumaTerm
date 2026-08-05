@@ -12,8 +12,9 @@ use gpui_component::tab::{Tab, TabBar, TabVariant};
 use gpui_component::{ActiveTheme, Sizable};
 use nmt_terminal::event::{ProgressReport, ProgressState};
 
+use super::Shell;
+use super::agent_pane::AgentKind;
 use super::shell::TabSurface;
-use super::{NewAgentTab, Shell};
 use crate::tabs::{TabId, TabManager};
 use crate::ui::AppSettings;
 
@@ -223,12 +224,18 @@ impl TabStrip {
                     ));
                 }
 
-                let agent_shell = menu_shell.clone();
+                let codex_shell = menu_shell.clone();
+                let claude_shell = menu_shell.clone();
 
                 menu.separator()
                     .item(PopupMenuItem::new("Codex").on_click(move |_, window, cx| {
-                        agent_shell.update(cx, |this, cx| {
-                            this.on_new_agent_tab(&NewAgentTab, window, cx)
+                        codex_shell.update(cx, |this, cx| {
+                            this.open_agent_tab(AgentKind::Codex, window, cx)
+                        });
+                    }))
+                    .item(PopupMenuItem::new("Claude").on_click(move |_, window, cx| {
+                        claude_shell.update(cx, |this, cx| {
+                            this.open_agent_tab(AgentKind::Claude, window, cx)
                         });
                     }))
             });

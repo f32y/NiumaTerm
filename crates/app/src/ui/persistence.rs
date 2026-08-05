@@ -9,7 +9,7 @@ use nmt_config::local_state::{
 use tracing::warn;
 
 use super::Shell;
-use super::agent_pane::AgentPane;
+use super::agent_pane::{AgentKind, AgentPane};
 use super::settings::AppSettings;
 use super::shell::{TabSurface, explicit_cwd};
 use crate::pane_tree::{PaneId, PaneNode, PaneTree};
@@ -234,9 +234,9 @@ impl Shell {
 
         // An unknown agent kind (a newer snapshot) degrades to the terminal
         // path below rather than losing the tab.
-        if state.agent.as_deref() == Some("codex") {
+        if let Some(kind) = state.agent.as_deref().and_then(AgentKind::from_wire) {
             let cwd = explicit_cwd(workspaces.active_cwd());
-            let pane = cx.new(|cx| AgentPane::new(cwd, window, cx));
+            let pane = cx.new(|cx| AgentPane::new(kind, cwd, window, cx));
 
             *workspaces.active_tabs_mut().active_mut() = TabSurface::Agent(pane);
 
@@ -298,12 +298,13 @@ impl Shell {
                 .filter(|n| tab_state.user_named || !legacy_generated_tab_title(n));
 
             // The profile-derived title a live pane would report, so pending
-            // tabs label identically to spawned ones.
-            let default_title = if tab_state.agent.is_some() {
-                "Codex".to_string()
-            } else {
-                cx.global::<AppSettings>()
-                    .profile_name_for_command(tab_state.shell.as_deref(), &tab_state.args)
+            // tabs label identically to spawned ones. Unknown agent kinds
+            // materialize as terminals, so they take the profile title too.
+            let default_title = match tab_state.agent.as_deref().and_then(AgentKind::from_wire) {
+                Some(kind) => kind.display().to_string(),
+                None => cx
+                    .global::<AppSettings>()
+                    .profile_name_for_command(tab_state.shell.as_deref(), &tab_state.args),
             };
 
             restored.push((
@@ -497,10 +498,10 @@ impl Shell {
                                 state
                             }
                             // Agent conversations are not persisted (the
-                            // Codex process and its thread die with the app);
+                            // agent process and its thread die with the app);
                             // the saved kind reopens a fresh agent tab.
-                            TabSurface::Agent(_) => TabState {
-                                agent: Some("codex".to_string()),
+                            TabSurface::Agent(pane) => TabState {
+                                agent: Some(pane.read(cx).kind().wire().to_string()),
                                 ..TabState::default()
                             },
                         };

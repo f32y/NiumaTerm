@@ -1,7 +1,8 @@
-//! Agent tab: renders a Codex conversation as chat bubbles instead of a
-//! terminal grid. All Codex process and protocol handling lives in
-//! [`nmt_agent_utils::codex::app_server`]; this module only maps its typed
-//! events onto the transcript UI.
+//! Agent tab: renders an agent conversation (Codex or Claude Code) as chat
+//! bubbles instead of a terminal grid. All process and protocol handling
+//! lives in [`nmt_agent_utils::codex::app_server`] and
+//! [`nmt_agent_utils::claude_code::stream_json`]; this module only maps their
+//! shared typed events onto the transcript UI.
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
@@ -18,9 +19,11 @@ use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, text, v_flex};
-use nmt_agent_utils::codex::app_server::{
-    self, Event as CodexEvent, Item as CodexItem, ModelInfo, SendOutcome, Session, ThreadSettings,
+use nmt_agent_utils::chat::{
+    Event as SessionEvent, Item as SessionItem, ModelInfo, SendOutcome, ThreadSettings,
 };
+use nmt_agent_utils::claude_code::stream_json;
+use nmt_agent_utils::codex::app_server;
 use serde_json::Value;
 use tracing::warn;
 
@@ -90,12 +93,85 @@ enum Status {
     Exited,
 }
 
+/// Which agent backs this pane; the persisted tab snapshot stores the wire
+/// name so future kinds can slot in without a schema change.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AgentKind {
+    Codex,
+    Claude,
+}
+
+impl AgentKind {
+    pub(crate) fn wire(self) -> &'static str {
+        match self {
+            AgentKind::Codex => "codex",
+            AgentKind::Claude => "claude",
+        }
+    }
+
+    pub(crate) fn display(self) -> &'static str {
+        match self {
+            AgentKind::Codex => "Codex",
+            AgentKind::Claude => "Claude",
+        }
+    }
+
+    /// `None` for unknown kinds (a newer snapshot), which degrade to a plain
+    /// terminal tab instead of losing the tab.
+    pub(crate) fn from_wire(wire: &str) -> Option<Self> {
+        match wire {
+            "codex" => Some(AgentKind::Codex),
+            "claude" => Some(AgentKind::Claude),
+            _ => None,
+        }
+    }
+}
+
+/// The pane's protocol session, one variant per agent kind. Both backends
+/// share the [`nmt_agent_utils::chat`] event vocabulary and method surface,
+/// so the pane dispatches here and stays protocol-agnostic.
+enum Backend {
+    Codex(app_server::Session),
+    Claude(stream_json::Session),
+}
+
+impl Backend {
+    fn process(&mut self, message: Value) -> Vec<SessionEvent> {
+        match self {
+            Backend::Codex(session) => session.process(message),
+            Backend::Claude(session) => session.process(message),
+        }
+    }
+
+    fn send_user_message(&mut self, text: &str, settings: &ThreadSettings) -> SendOutcome {
+        match self {
+            Backend::Codex(session) => session.send_user_message(text, settings),
+            Backend::Claude(session) => session.send_user_message(text, settings),
+        }
+    }
+
+    fn interrupt(&mut self) {
+        match self {
+            Backend::Codex(session) => session.interrupt(),
+            Backend::Claude(session) => session.interrupt(),
+        }
+    }
+
+    fn respond_approval(&mut self, decision: &str) {
+        match self {
+            Backend::Codex(session) => session.respond_approval(decision),
+            Backend::Claude(session) => session.respond_approval(decision),
+        }
+    }
+}
+
 pub(crate) struct AgentPane {
     pub(crate) focus: FocusHandle,
+    kind: AgentKind,
     items: Vec<Entry>,
     scroll: ScrollHandle,
     input: Entity<InputState>,
-    session: Option<Session>,
+    session: Option<Backend>,
     status: Status,
     /// Description of the approval request blocking the turn, shown as the
     /// card above the input; the request id lives in the session.
@@ -126,9 +202,16 @@ pub(crate) struct AgentPane {
 }
 
 impl AgentPane {
-    pub(crate) fn new(cwd: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Message Codex — Enter to send"));
+    pub(crate) fn new(
+        kind: AgentKind,
+        cwd: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let name = kind.display();
+        let input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(format!("Message {name} — Enter to send"))
+        });
 
         cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| {
             if matches!(event, InputEvent::PressEnter { .. }) {
@@ -139,6 +222,7 @@ impl AgentPane {
 
         let mut this = Self {
             focus: cx.focus_handle(),
+            kind,
             items: Vec::new(),
             scroll: ScrollHandle::new(),
             input,
@@ -159,14 +243,21 @@ impl AgentPane {
         // `Session::process` turns them into typed events. Channel closure is
         // the EOF signal (the sender is owned by the reader thread).
         let (tx, mut rx) = mpsc::unbounded::<Value>();
+        let deliver = move |message| {
+            let _ = tx.unbounded_send(message);
+        };
+        let spawned = match kind {
+            AgentKind::Codex => {
+                app_server::Session::spawn(cwd, deliver, |line| warn!("codex app-server: {line}"))
+                    .map(Backend::Codex)
+            }
+            AgentKind::Claude => {
+                stream_json::Session::spawn(cwd, deliver, |line| warn!("claude: {line}"))
+                    .map(Backend::Claude)
+            }
+        };
 
-        match Session::spawn(
-            cwd,
-            move |message| {
-                let _ = tx.unbounded_send(message);
-            },
-            |line| warn!("codex app-server: {line}"),
-        ) {
+        match spawned {
             Ok(session) => {
                 this.session = Some(session);
 
@@ -193,7 +284,7 @@ impl AgentPane {
                         this.finish_working(cx);
                         this.push(
                             ChatItem::Error {
-                                text: "Codex exited.".to_string(),
+                                text: format!("{name} exited."),
                             },
                             cx,
                         );
@@ -207,7 +298,7 @@ impl AgentPane {
                     at: Local::now().format("%H:%M").to_string(),
                     turn: 0,
                     item: ChatItem::Error {
-                        text: format!("Failed to start Codex: {err}"),
+                        text: format!("Failed to start {name}: {err}"),
                     },
                 });
             }
@@ -218,6 +309,10 @@ impl AgentPane {
 
     pub(crate) fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
         self.input.update(cx, |input, cx| input.focus(window, cx));
+    }
+
+    pub(crate) fn kind(&self) -> AgentKind {
+        self.kind
     }
 
     fn push(&mut self, item: ChatItem, cx: &mut Context<Self>) {
@@ -247,7 +342,10 @@ impl AgentPane {
         if outcome == SendOutcome::NotReady {
             self.push(
                 ChatItem::Error {
-                    text: "Codex is still starting; try again in a moment.".to_string(),
+                    text: format!(
+                        "{} is still starting; try again in a moment.",
+                        self.kind.display()
+                    ),
                 },
                 cx,
             );
@@ -330,24 +428,24 @@ impl AgentPane {
     }
 
     /// Apply one typed session event to the transcript and status line.
-    fn apply_event(&mut self, event: CodexEvent, cx: &mut Context<Self>) {
+    fn apply_event(&mut self, event: SessionEvent, cx: &mut Context<Self>) {
         match event {
-            CodexEvent::Ready(settings) => {
+            SessionEvent::Ready(settings) => {
                 // Seed the settings dropdowns with the thread's effective
                 // configuration so they show real values before any change.
                 self.settings = settings;
                 self.status = Status::Idle;
                 cx.notify();
             }
-            CodexEvent::Models(models) => {
+            SessionEvent::Models(models) => {
                 self.models = models;
                 cx.notify();
             }
-            CodexEvent::TurnStarted => {
+            SessionEvent::TurnStarted => {
                 self.status = Status::Running;
                 cx.notify();
             }
-            CodexEvent::TurnCompleted { error } => {
+            SessionEvent::TurnCompleted { error } => {
                 self.finish_working(cx);
                 if self.status == Status::Running {
                     self.status = Status::Idle;
@@ -357,39 +455,39 @@ impl AgentPane {
                 }
                 cx.notify();
             }
-            CodexEvent::ItemStarted(item) => self.start_item(item, cx),
-            CodexEvent::ItemCompleted(item) => self.complete_item(item, cx),
-            CodexEvent::AgentMessageDelta { item_id, delta } => {
+            SessionEvent::ItemStarted(item) => self.start_item(item, cx),
+            SessionEvent::ItemCompleted(item) => self.complete_item(item, cx),
+            SessionEvent::AgentMessageDelta { item_id, delta } => {
                 self.append_delta(&item_id, &delta, |item| match item {
                     ChatItem::Agent { text, .. } => Some(text),
                     _ => None,
                 });
                 cx.notify();
             }
-            CodexEvent::ReasoningSummaryDelta { item_id, delta } => {
+            SessionEvent::ReasoningSummaryDelta { item_id, delta } => {
                 self.append_delta(&item_id, &delta, |item| match item {
                     ChatItem::Reasoning { text, .. } => Some(text),
                     _ => None,
                 });
                 cx.notify();
             }
-            CodexEvent::CommandOutputDelta { item_id, delta } => {
+            SessionEvent::CommandOutputDelta { item_id, delta } => {
                 self.append_delta(&item_id, &delta, |item| match item {
                     ChatItem::Command { output, .. } => Some(output),
                     _ => None,
                 });
                 cx.notify();
             }
-            CodexEvent::ApprovalRequested { description } => {
+            SessionEvent::ApprovalRequested { description } => {
                 self.pending_approval = Some(description);
                 self.scroll.scroll_to_bottom();
                 cx.notify();
             }
-            CodexEvent::ApprovalResolved => {
+            SessionEvent::ApprovalResolved => {
                 self.pending_approval = None;
                 cx.notify();
             }
-            CodexEvent::Error { message, fatal } => {
+            SessionEvent::Error { message, fatal } => {
                 if fatal {
                     self.status = Status::Exited;
                 }
@@ -397,23 +495,23 @@ impl AgentPane {
             }
             // No status line in the UI anymore; the live working row and the
             // Stop button carry the running state.
-            CodexEvent::StatusDetail(_) => {}
+            SessionEvent::StatusDetail(_) => {}
         }
     }
 
-    fn start_item(&mut self, item: CodexItem, cx: &mut Context<Self>) {
+    fn start_item(&mut self, item: SessionItem, cx: &mut Context<Self>) {
         let chat_item = match item {
             // Echoes of our own turn input, already rendered locally on send.
-            CodexItem::UserMessage => return,
-            CodexItem::AgentMessage { id, text } => ChatItem::Agent {
+            SessionItem::UserMessage => return,
+            SessionItem::AgentMessage { id, text } => ChatItem::Agent {
                 item_id: id,
                 text: text.unwrap_or_default(),
             },
-            CodexItem::Reasoning { id, summary } => ChatItem::Reasoning {
+            SessionItem::Reasoning { id, summary } => ChatItem::Reasoning {
                 item_id: id,
                 text: summary.unwrap_or_default(),
             },
-            CodexItem::CommandExecution {
+            SessionItem::CommandExecution {
                 id,
                 command,
                 aggregated_output,
@@ -426,12 +524,12 @@ impl AgentPane {
                 status: status.unwrap_or_else(|| "inProgress".to_string()),
                 exit_code,
             },
-            CodexItem::FileChange { id, paths, status } => ChatItem::FileChange {
+            SessionItem::FileChange { id, paths, status } => ChatItem::FileChange {
                 item_id: id,
                 summary: paths,
                 status: status.unwrap_or_else(|| "inProgress".to_string()),
             },
-            CodexItem::Other {
+            SessionItem::Other {
                 id,
                 kind,
                 title,
@@ -447,8 +545,8 @@ impl AgentPane {
         self.push(chat_item, cx);
     }
 
-    fn complete_item(&mut self, item: CodexItem, cx: &mut Context<Self>) {
-        let Some(id) = codex_item_id(&item).map(str::to_owned) else {
+    fn complete_item(&mut self, item: SessionItem, cx: &mut Context<Self>) {
+        let Some(id) = session_item_id(&item).map(str::to_owned) else {
             return;
         };
 
@@ -469,7 +567,7 @@ impl AgentPane {
             }
 
             match (&mut entry.item, &item) {
-                (ChatItem::Agent { text, .. }, CodexItem::AgentMessage { text: full, .. }) => {
+                (ChatItem::Agent { text, .. }, SessionItem::AgentMessage { text: full, .. }) => {
                     if let Some(full) = full {
                         *text = full.clone();
                     }
@@ -481,7 +579,7 @@ impl AgentPane {
                         exit_code,
                         ..
                     },
-                    CodexItem::CommandExecution {
+                    SessionItem::CommandExecution {
                         aggregated_output,
                         status: new_status,
                         exit_code: new_exit,
@@ -498,13 +596,13 @@ impl AgentPane {
                 }
                 (
                     ChatItem::FileChange { status, .. },
-                    CodexItem::FileChange {
+                    SessionItem::FileChange {
                         status: new_status, ..
                     },
                 )
                 | (
                     ChatItem::Tool { status, .. },
-                    CodexItem::Other {
+                    SessionItem::Other {
                         status: new_status, ..
                     },
                 ) => {
@@ -512,7 +610,7 @@ impl AgentPane {
                         *status = state.clone();
                     }
                 }
-                (ChatItem::Reasoning { text, .. }, CodexItem::Reasoning { summary, .. }) => {
+                (ChatItem::Reasoning { text, .. }, SessionItem::Reasoning { summary, .. }) => {
                     // Some reasoning items never stream summary deltas; the
                     // completed payload's summary is the fallback. Items that
                     // stay empty are hidden by the renderer.
@@ -638,14 +736,14 @@ fn entry_copy_text(item: &ChatItem) -> String {
 }
 
 /// The protocol item id, used to match a completed item to its entry.
-fn codex_item_id(item: &CodexItem) -> Option<&str> {
+fn session_item_id(item: &SessionItem) -> Option<&str> {
     match item {
-        CodexItem::UserMessage => None,
-        CodexItem::AgentMessage { id, .. }
-        | CodexItem::Reasoning { id, .. }
-        | CodexItem::CommandExecution { id, .. }
-        | CodexItem::FileChange { id, .. }
-        | CodexItem::Other { id, .. } => Some(id),
+        SessionItem::UserMessage => None,
+        SessionItem::AgentMessage { id, .. }
+        | SessionItem::Reasoning { id, .. }
+        | SessionItem::CommandExecution { id, .. }
+        | SessionItem::FileChange { id, .. }
+        | SessionItem::Other { id, .. } => Some(id),
     }
 }
 
@@ -1315,10 +1413,56 @@ impl AgentPane {
             .into_any_element()
     }
 
-    /// The dropdown row under the input: model, approval policy, sandbox,
-    /// reasoning effort, and service tier. Values are thread settings sent as
-    /// overrides on the next `turn/start`.
-    fn render_settings_row(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    /// The dropdown row under the input, per agent kind.
+    fn render_settings_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        match self.kind {
+            AgentKind::Codex => self.render_codex_settings_row(cx).into_any_element(),
+            AgentKind::Claude => self.render_claude_settings_row(cx).into_any_element(),
+        }
+    }
+
+    /// Claude settings: model and permission mode. The model catalog comes
+    /// from the initialize handshake; changes apply via control requests
+    /// before the next message. Reasoning effort is a spawn-time CLI flag, so
+    /// it has no picker here.
+    fn render_claude_settings_row(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let model_options: Vec<(String, String)> = self
+            .models
+            .iter()
+            .map(|m| (m.model.clone(), m.display.clone()))
+            .collect();
+        let permission_options: Vec<(String, String)> = stream_json::PERMISSION_OPTIONS
+            .iter()
+            .map(|v| (v.to_string(), v.to_string()))
+            .collect();
+
+        h_flex()
+            .w_full()
+            .gap_1()
+            .flex_wrap()
+            .text_color(cx.theme().muted_foreground)
+            .child(Self::setting_picker(
+                cx,
+                "agent-model",
+                "model",
+                self.settings.model.clone(),
+                model_options,
+                |this, value| this.settings.model = Some(value),
+            ))
+            .child(Self::setting_picker(
+                cx,
+                "agent-permission",
+                "permissions",
+                self.settings.approval.clone(),
+                permission_options,
+                |this, value| this.settings.approval = Some(value),
+            ))
+    }
+
+    /// Codex settings: model, approval policy, sandbox, reasoning effort, and
+    /// service tier. Values are thread settings sent as overrides on the next
+    /// `turn/start`.
+    fn render_codex_settings_row(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let model_options: Vec<(String, String)> = self
             .models
             .iter()

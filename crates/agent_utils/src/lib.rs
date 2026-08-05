@@ -1,5 +1,8 @@
+pub mod chat;
 pub mod claude_code {
     pub mod hook;
+    #[cfg(target_os = "windows")]
+    pub mod stream_json;
 }
 mod hook_store;
 pub mod codex {
