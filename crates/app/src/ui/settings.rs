@@ -1631,22 +1631,22 @@ pub fn settings_view(cx: &App) -> Settings {
                         ),
                 )
                 .group(
-                    SettingGroup::new().title("Interface").item(
-                        SettingItem::new(
-                            "UI Font",
-                            ui::font_picker::font_family_field(
-                                ui::font_picker::FontTarget::Ui,
-                            ),
-                        )
-                        .description("Font for the app chrome (titlebar, sidebar, tabs, dialogs)."),
-                    ),
-                )
-                .group(
                     SettingGroup::new()
-                        .title("Terminal Font")
+                        .title("Font")
                         .item(
                             SettingItem::new(
-                                "Font Family",
+                                "UI Font",
+                                ui::font_picker::font_family_field(
+                                    ui::font_picker::FontTarget::Ui,
+                                ),
+                            )
+                            .description(
+                                "Font for the app chrome (titlebar, sidebar, tabs, dialogs).",
+                            ),
+                        )
+                        .item(
+                            SettingItem::new(
+                                "Terminal Font",
                                 ui::font_picker::font_family_field(
                                     ui::font_picker::FontTarget::Terminal,
                                 ),
@@ -1655,7 +1655,7 @@ pub fn settings_view(cx: &App) -> Settings {
                         )
                         .item(
                             SettingItem::new(
-                                "Font Size",
+                                "Terminal Font Size",
                                 SettingField::number_input(
                                     NumberFieldOptions {
                                         min: 6.0,
@@ -1672,7 +1672,7 @@ pub fn settings_view(cx: &App) -> Settings {
                         )
                         .item(
                             SettingItem::new(
-                                "Line Height",
+                                "Terminal Line Height",
                                 SettingField::number_input(
                                     NumberFieldOptions {
                                         min: 0.8,
@@ -1689,23 +1689,7 @@ pub fn settings_view(cx: &App) -> Settings {
                         )
                         .item(
                             SettingItem::new(
-                                "Show monospace fonts only",
-                                SettingField::switch(
-                                    |cx| cx.global::<AppSettings>().monospace_only,
-                                    |value, cx| {
-                                        cx.global_mut::<AppSettings>().monospace_only = value;
-                                    },
-                                ),
-                            )
-                            .description("Filter the font list to fixed-width fonts."),
-                        ),
-                )
-                .group(
-                    SettingGroup::new()
-                        .title("Agent Font")
-                        .item(
-                            SettingItem::new(
-                                "Font Family",
+                                "Agent Font",
                                 ui::font_picker::font_family_field(
                                     ui::font_picker::FontTarget::Agent,
                                 ),
@@ -1714,7 +1698,7 @@ pub fn settings_view(cx: &App) -> Settings {
                         )
                         .item(
                             SettingItem::new(
-                                "Font Size",
+                                "Agent Font Size",
                                 SettingField::number_input(
                                     NumberFieldOptions {
                                         min: 6.0,
@@ -1728,6 +1712,18 @@ pub fn settings_view(cx: &App) -> Settings {
                                 ),
                             )
                             .description("Font size in pixels."),
+                        )
+                        .item(
+                            SettingItem::new(
+                                "Show monospace fonts only",
+                                SettingField::switch(
+                                    |cx| cx.global::<AppSettings>().monospace_only,
+                                    |value, cx| {
+                                        cx.global_mut::<AppSettings>().monospace_only = value;
+                                    },
+                                ),
+                            )
+                            .description("Filter the font list to fixed-width fonts."),
                         ),
                 )
                 .group(
