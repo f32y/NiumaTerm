@@ -42,6 +42,9 @@ pub struct Session {
     stdin: Option<ChildStdin>,
     next_request_id: u64,
     ready: bool,
+    /// The CLI's session id from the `init` message; the handle a future tab
+    /// needs to `--resume` this conversation.
+    session_id: Option<String>,
     turn_active: bool,
     /// The turn was started locally but no output has arrived yet; the first
     /// message after a send emits `TurnStarted` (the protocol has no explicit
@@ -83,8 +86,15 @@ impl Session {
     /// `initialize` control request. Every parsed stdout line is handed to
     /// `deliver` (from a reader thread — hop threads before calling
     /// [`Session::process`]); stderr lines go to `on_stderr`.
+    ///
+    /// With `resume`, the CLI reloads that persisted session and appends to
+    /// it (same session id, same transcript file). Resume lookup is scoped to
+    /// the project directory derived from `cwd`, so the id must come from a
+    /// listing for the same directory. Nothing is replayed on the wire — the
+    /// UI pre-fills its transcript from the session file instead.
     pub fn spawn(
         cwd: Option<String>,
+        resume: Option<String>,
         deliver: impl Fn(Value) + Send + 'static,
         on_stderr: impl Fn(String) + Send + 'static,
     ) -> Result<Self, String> {
@@ -110,6 +120,10 @@ impl Session {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .creation_flags(CREATE_NO_WINDOW);
+
+        if let Some(session_id) = &resume {
+            command.args(["--resume", session_id]);
+        }
 
         if let Some(cwd) = cwd {
             command.current_dir(cwd);
@@ -142,6 +156,7 @@ impl Session {
             stdin: Some(stdin),
             next_request_id: 1,
             ready: false,
+            session_id: None,
             turn_active: false,
             turn_reported: false,
             pending_approval: None,
@@ -239,6 +254,12 @@ impl Session {
         self.send_control(json!({"subtype": "interrupt"}));
     }
 
+    /// The CLI's session id, once the `init` message delivered it. This is
+    /// what `spawn`'s `resume` takes to reopen the conversation later.
+    pub fn session_id(&self) -> Option<&str> {
+        self.session_id.as_deref()
+    }
+
     /// Answer the pending `can_use_tool` request. The UI decision vocabulary
     /// maps onto the CLI's allow/deny responses: `accept` allows once,
     /// `acceptForSession` allows and applies the CLI's own permission
@@ -306,11 +327,23 @@ impl Session {
 
     fn process_system(&mut self, message: &Value) -> Vec<Event> {
         // Every subtype but `init` (status, hook_*, thinking_tokens, …) is
-        // telemetry the UI ignores. The initialize handshake normally seeds
-        // the pickers before the first turn; `init` — emitted when the first
-        // turn opens — is the fallback for a CLI that didn't answer it, and
-        // is otherwise skipped so it can't clobber the user's picks.
-        if message["subtype"].as_str() != Some("init") || self.ready {
+        // telemetry the UI ignores.
+        if message["subtype"].as_str() != Some("init") {
+            return Vec::new();
+        }
+
+        // The session id makes this conversation resumable by a future tab
+        // (`--resume`); captured on every `init` since a resumed session
+        // keeps the id of the transcript it reloaded.
+        if let Some(session_id) = message["session_id"].as_str() {
+            self.session_id = Some(session_id.to_string());
+        }
+
+        // The initialize handshake normally seeds the pickers before the
+        // first turn; `init` — emitted when the first turn opens — is the
+        // fallback for a CLI that didn't answer it, and is otherwise skipped
+        // so it can't clobber the user's picks.
+        if self.ready {
             return Vec::new();
         }
         self.ready = true;
@@ -526,10 +559,13 @@ impl Session {
         let error = if message["is_error"].as_bool().unwrap_or(false)
             || message["subtype"].as_str() != Some("success")
         {
+            // Startup failures (e.g. a `--resume` id whose transcript is
+            // gone) put their reason in `errors`, not `result`.
             Some(
                 message["result"]
                     .as_str()
                     .filter(|s| !s.is_empty())
+                    .or_else(|| message["errors"][0].as_str().filter(|s| !s.is_empty()))
                     .unwrap_or_else(|| message["subtype"].as_str().unwrap_or("turn failed"))
                     .to_string(),
             )

@@ -1,6 +1,7 @@
 pub mod chat;
 pub mod claude_code {
     pub mod hook;
+    pub mod sessions;
     #[cfg(target_os = "windows")]
     pub mod stream_json;
 }
