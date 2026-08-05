@@ -1137,13 +1137,34 @@ impl Render for AgentPane {
             .font_family(cx.global::<AppSettings>().agent_font_family.clone())
             .text_size(px(cx.global::<AppSettings>().agent_font_size as f32))
             .child(
+                // The scrollbar must sit OUTSIDE the scrolling element (a
+                // child would scroll away with the content), so a relative
+                // wrapper hosts the scroll area and the overlay bar.
                 div()
-                    .id("agent-transcript")
+                    .relative()
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
-                    .child(v_flex().w_full().p_3().gap_2().children(rows)),
+                    .child(
+                        div()
+                            .id("agent-transcript")
+                            .size_full()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.scroll)
+                            .child(v_flex().w_full().p_3().gap_2().children(rows)),
+                    )
+                    // The bare Scrollbar element carries no inset of its own,
+                    // so it lands at its static flow position (below the
+                    // full-height sibling); the pinned strip gives it a
+                    // deterministic containing block at the right edge.
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .right_0()
+                            .bottom_0()
+                            .w(px(16.))
+                            .child(Scrollbar::vertical(&self.scroll)),
+                    ),
             )
             .child({
                 let layered = history.is_some();
@@ -1753,7 +1774,15 @@ impl AgentPane {
                     .track_scroll(&self.history_scroll)
                     .with_sizing_behavior(ListSizingBehavior::Infer),
                 )
-                .child(Scrollbar::vertical(&self.history_scroll))
+                .child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .right_0()
+                        .bottom_0()
+                        .w(px(16.))
+                        .child(Scrollbar::vertical(&self.history_scroll)),
+                )
                 .into_any_element()
         };
 
