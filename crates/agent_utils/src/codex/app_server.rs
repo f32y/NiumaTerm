@@ -9,18 +9,27 @@ use std::io::{BufRead as _, BufReader, Write as _};
 use std::os::windows::process::CommandExt as _;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::thread;
+use std::time::{Duration, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
-pub use crate::chat::{Event, Item, ModelInfo, SendOutcome, ThreadSettings};
+pub use crate::chat::{
+    Event, Item, ModelInfo, ReplayItem, SendOutcome, SessionSummary, ThreadSettings,
+};
 
 /// JSON-RPC ids for the fixed handshake requests; turn requests count up from
 /// `FIRST_TURN_RPC_ID` so response routing can tell the phases apart.
 const INIT_RPC_ID: u64 = 1;
 const THREAD_START_RPC_ID: u64 = 2;
 const MODEL_LIST_RPC_ID: u64 = 3;
+const THREAD_LIST_RPC_ID: u64 = 4;
+const THREAD_RESUME_RPC_ID: u64 = 5;
 const FIRST_TURN_RPC_ID: u64 = 100;
+
+/// First page size for the history list; enough to fill the visible list
+/// several times over. `nextCursor` remains available for deeper paging.
+const THREAD_LIST_LIMIT: u64 = 50;
 
 /// Wire values for approval-policy selection (`AskForApproval` serializes
 /// kebab-case).
@@ -45,6 +54,8 @@ pub struct Session {
     current_turn: Option<String>,
     /// JSON-RPC id of the server→client approval request awaiting an answer.
     pending_approval: Option<u64>,
+    /// Cursor for the next history page; `None` once the final page arrived.
+    history_cursor: Option<String>,
 }
 
 impl Drop for Session {
@@ -111,6 +122,7 @@ impl Session {
             thread_id: None,
             current_turn: None,
             pending_approval: None,
+            history_cursor: None,
         };
 
         session.send(json!({
@@ -209,6 +221,39 @@ impl Session {
         }));
     }
 
+    /// Switch this session onto a persisted thread. The response carries the
+    /// reconstructed turn history (emitted as [`Event::Replay`]) and the
+    /// thread's persisted settings (emitted as [`Event::Ready`]); subsequent
+    /// `turn/start` calls append to the resumed thread. On failure the
+    /// session keeps the thread it started with, so the tab stays usable.
+    pub fn resume_thread(&mut self, thread_id: &str) {
+        self.send(json!({
+            "jsonrpc": "2.0",
+            "id": THREAD_RESUME_RPC_ID,
+            "method": "thread/resume",
+            "params": {"threadId": thread_id},
+        }));
+    }
+
+    /// Request the next history page; a no-op when the final page arrived.
+    pub fn request_more_history(&mut self) {
+        let Some(cursor) = self.history_cursor.take() else {
+            return;
+        };
+
+        self.send(json!({
+            "jsonrpc": "2.0",
+            "id": THREAD_LIST_RPC_ID,
+            "method": "thread/list",
+            "params": {
+                "cwd": ".",
+                "sortKey": "recency_at",
+                "limit": THREAD_LIST_LIMIT,
+                "cursor": cursor,
+            },
+        }));
+    }
+
     /// Answer the pending approval request (`"accept"` / `"decline"`); a no-op
     /// when none is pending.
     pub fn respond_approval(&mut self, decision: &str) {
@@ -274,8 +319,17 @@ impl Session {
 
     fn process_response(&mut self, rpc_id: u64, message: &Value) -> Vec<Event> {
         if let Some(error) = message["error"]["message"].as_str() {
+            // A failed resume (deleted/corrupt thread) is not fatal: the
+            // session still has the thread it started with, so the composer
+            // keeps working for a fresh conversation.
+            let message = if rpc_id == THREAD_RESUME_RPC_ID {
+                format!("Could not resume session: {error}")
+            } else {
+                error.to_string()
+            };
+
             return vec![Event::Error {
-                message: error.to_string(),
+                message,
                 fatal: rpc_id <= THREAD_START_RPC_ID,
             }];
         }
@@ -303,10 +357,50 @@ impl Session {
                     "method": "model/list",
                     "params": {"limit": 100},
                 }));
+                // History for the empty-tab session list. `"."` resolves
+                // against the app-server process cwd — the same directory
+                // the started thread runs in — and the exact-match filter
+                // keeps other projects' threads out.
+                self.send(json!({
+                    "jsonrpc": "2.0",
+                    "id": THREAD_LIST_RPC_ID,
+                    "method": "thread/list",
+                    "params": {
+                        "cwd": ".",
+                        "sortKey": "recency_at",
+                        "limit": THREAD_LIST_LIMIT,
+                    },
+                }));
 
                 vec![Event::Ready(parse_thread_settings(result))]
             }
             MODEL_LIST_RPC_ID => vec![Event::Models(parse_models(&message["result"]))],
+            THREAD_LIST_RPC_ID => {
+                let result = &message["result"];
+
+                self.history_cursor = result["nextCursor"].as_str().map(str::to_owned);
+
+                // The thread this session just started is part of the wire
+                // listing but is the tab's own live (empty) thread, and a
+                // history row for it would resume a conversation the user is
+                // already in.
+                vec![Event::History(parse_thread_summaries(
+                    result,
+                    self.thread_id.as_deref(),
+                ))]
+            }
+            THREAD_RESUME_RPC_ID => {
+                let result = &message["result"];
+
+                self.thread_id = result["thread"]["id"].as_str().map(str::to_owned);
+
+                vec![
+                    Event::Replay(parse_replay(&result["thread"]["turns"])),
+                    // Resume restores the thread's persisted model/effort;
+                    // Ready re-seeds the pickers with those values.
+                    Event::Ready(parse_thread_settings(result)),
+                ]
+            }
             _ => Vec::new(),
         }
     }
@@ -440,6 +534,114 @@ fn parse_models(result: &Value) -> Vec<ModelInfo> {
         .unwrap_or_default()
 }
 
+/// One `thread/list` page as backend-neutral summaries, skipping
+/// `own_thread` (the listing includes the thread this session just started).
+fn parse_thread_summaries(result: &Value, own_thread: Option<&str>) -> Vec<SessionSummary> {
+    result["data"]
+        .as_array()
+        .map(|data| {
+            data.iter()
+                .filter_map(|thread| {
+                    let id = thread["id"].as_str()?.to_string();
+
+                    if Some(id.as_str()) == own_thread {
+                        return None;
+                    }
+
+                    let title = thread["name"]
+                        .as_str()
+                        .or_else(|| thread["preview"].as_str())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| id.chars().take(8).collect());
+                    // Wire timestamps are unix seconds; `recencyAt` advances
+                    // when a turn starts, which matches "last active" better
+                    // than `updatedAt` (background mutations move that).
+                    let seconds = thread["recencyAt"]
+                        .as_u64()
+                        .or_else(|| thread["updatedAt"].as_u64())
+                        .unwrap_or_default();
+                    let branch = thread["gitInfo"]["branch"]
+                        .as_str()
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_owned);
+
+                    Some(SessionSummary {
+                        id,
+                        title,
+                        branch,
+                        last_active: UNIX_EPOCH + Duration::from_secs(seconds),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Flatten a resumed thread's `turns[].items` into replay entries:
+/// conversation text stays, everything else (commands, file changes, tool
+/// calls) collapses into counts.
+fn parse_replay(turns: &Value) -> Vec<ReplayItem> {
+    let mut items: Vec<ReplayItem> = Vec::new();
+    let mut tools = 0usize;
+    let flush = |items: &mut Vec<ReplayItem>, tools: &mut usize| {
+        if *tools > 0 {
+            items.push(ReplayItem::Tools { count: *tools });
+            *tools = 0;
+        }
+    };
+
+    for item in turns
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|turn| turn["items"].as_array())
+        .flatten()
+    {
+        match item["type"].as_str() {
+            Some("userMessage") => {
+                let text = user_input_text(&item["content"]);
+
+                if !text.is_empty() {
+                    flush(&mut items, &mut tools);
+                    items.push(ReplayItem::User { text });
+                }
+            }
+            Some("agentMessage") => {
+                let text = item["text"].as_str().unwrap_or_default().trim();
+
+                if !text.is_empty() {
+                    flush(&mut items, &mut tools);
+                    items.push(ReplayItem::Agent {
+                        text: text.to_string(),
+                    });
+                }
+            }
+            // Reasoning and hook records are working noise, not conversation.
+            Some("reasoning") | Some("hookPrompt") | None => {}
+            Some(_) => tools += 1,
+        }
+    }
+
+    flush(&mut items, &mut tools);
+
+    items
+}
+
+/// A user message item's `content` is an array of typed `UserInput` blocks.
+fn user_input_text(content: &Value) -> String {
+    let parts: Vec<&str> = content
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|block| block["type"].as_str() == Some("text"))
+        .filter_map(|block| block["text"].as_str())
+        .collect();
+
+    parts.join("\n").trim().to_string()
+}
+
 fn parse_item(item: &Value) -> Option<Item> {
     let id = item["id"].as_str().unwrap_or_default().to_string();
     let status = item["status"].as_str().map(str::to_owned);
@@ -558,6 +760,65 @@ mod tests {
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].model, "gpt-a");
         assert_eq!(models[0].tiers, vec![("priority".into(), "Fast".into())]);
+    }
+
+    #[test]
+    fn thread_summaries_skip_own_thread_and_fall_back_to_id_titles() {
+        let result = json!({
+            "data": [
+                {"id": "thr_live", "preview": "current"},
+                {"id": "thr_a", "name": "Fix tests", "recencyAt": 1730831111,
+                 "gitInfo": {"branch": "dev"}},
+                {"id": "thr_b", "preview": "", "updatedAt": 1730750000}
+            ],
+            "nextCursor": null
+        });
+
+        let summaries = parse_thread_summaries(&result, Some("thr_live"));
+
+        assert_eq!(summaries.len(), 2);
+        assert_eq!(summaries[0].id, "thr_a");
+        assert_eq!(summaries[0].title, "Fix tests");
+        assert_eq!(summaries[0].branch.as_deref(), Some("dev"));
+        assert_eq!(
+            summaries[0].last_active,
+            UNIX_EPOCH + Duration::from_secs(1730831111)
+        );
+        // Empty preview falls back to an id-prefix title.
+        assert_eq!(summaries[1].title, "thr_b");
+    }
+
+    #[test]
+    fn resumed_turns_replay_dialogue_and_collapse_tools() {
+        let turns = json!([
+            {"id": "turn1", "items": [
+                {"id": "i1", "type": "userMessage",
+                 "content": [{"type": "text", "text": "question"}]},
+                {"id": "i2", "type": "commandExecution", "command": "ls"},
+                {"id": "i3", "type": "reasoning", "summary": []},
+                {"id": "i4", "type": "mcpToolCall", "server": "s", "tool": "t"},
+                {"id": "i5", "type": "agentMessage", "text": "answer"}
+            ]},
+            {"id": "turn2", "items": [
+                {"id": "i6", "type": "agentMessage", "text": "follow-up"}
+            ]}
+        ]);
+
+        assert_eq!(
+            parse_replay(&turns),
+            vec![
+                ReplayItem::User {
+                    text: "question".into()
+                },
+                ReplayItem::Tools { count: 2 },
+                ReplayItem::Agent {
+                    text: "answer".into()
+                },
+                ReplayItem::Agent {
+                    text: "follow-up".into()
+                },
+            ]
+        );
     }
 
     #[test]

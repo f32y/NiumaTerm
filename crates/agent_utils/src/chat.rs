@@ -3,6 +3,8 @@
 //! protocol into these types, so the chat UI renders one transcript model
 //! and never touches protocol strings.
 
+use std::time::SystemTime;
+
 /// Thread settings a chat UI lets the user pick. Field meanings are
 /// per-backend: Codex sends them as overrides on every `turn/start`;
 /// Claude stores its permission mode in `approval` and applies changes via
@@ -70,6 +72,28 @@ pub enum Item {
     },
 }
 
+/// One resumable persisted session, for the history list an empty chat tab
+/// shows above its composer. Ordered newest-first by `last_active`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SessionSummary {
+    pub id: String,
+    /// First user prompt of the session (or an id prefix when none exists).
+    pub title: String,
+    pub branch: Option<String>,
+    pub last_active: SystemTime,
+}
+
+/// One transcript entry reconstructed from a persisted session when resuming.
+/// Only conversation text is replayed; runs of tool/command activity collapse
+/// into a count, so replay cost tracks dialogue length rather than tool
+/// volume.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ReplayItem {
+    User { text: String },
+    Agent { text: String },
+    Tools { count: usize },
+}
+
 /// What a chat UI needs to react to, in transcript order.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
@@ -102,6 +126,10 @@ pub enum Event {
     },
     /// The pending approval was answered or cleared by turn lifecycle.
     ApprovalResolved,
+    /// Resumable sessions for the tab's working directory, newest first.
+    History(Vec<SessionSummary>),
+    /// Reconstructed transcript of a resumed session, to pre-fill the UI.
+    Replay(Vec<ReplayItem>),
     StatusDetail(Option<String>),
     Error {
         message: String,

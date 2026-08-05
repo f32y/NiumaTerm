@@ -5,24 +5,31 @@
 //! shared typed events onto the transcript UI.
 
 use std::collections::HashSet;
-use std::time::{Duration, Instant};
+use std::rc::Rc;
+use std::time::{Duration, Instant, SystemTime};
 
 use chrono::Local;
 use futures::StreamExt as _;
 use futures::channel::mpsc;
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, ClipboardItem, Context, Div, Entity, FocusHandle, FontWeight, ScrollHandle, Window,
-    div, px, relative,
+    AnyElement, ClipboardItem, Context, Div, Entity, FocusHandle, FontWeight, ListSizingBehavior,
+    ScrollHandle, Window, div, px, relative, size,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
-use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, text, v_flex};
-use nmt_agent_utils::chat::{
-    Event as SessionEvent, Item as SessionItem, ModelInfo, SendOutcome, ThreadSettings,
+use gpui_component::scroll::Scrollbar;
+use gpui_component::skeleton::Skeleton;
+use gpui_component::{
+    ActiveTheme as _, Icon, IconName, Sizable as _, VirtualListScrollHandle, h_flex, text, v_flex,
+    v_virtual_list,
 };
-use nmt_agent_utils::claude_code::stream_json;
+use nmt_agent_utils::chat::{
+    Event as SessionEvent, Item as SessionItem, ModelInfo, ReplayItem, SendOutcome, SessionSummary,
+    ThreadSettings,
+};
+use nmt_agent_utils::claude_code::{sessions, stream_json};
 use nmt_agent_utils::codex::app_server;
 use serde_json::Value;
 use tracing::warn;
@@ -168,11 +175,31 @@ impl Backend {
 pub(crate) struct AgentPane {
     pub(crate) focus: FocusHandle,
     kind: AgentKind,
+    /// The tab's working directory; the session process runs here and the
+    /// session history is scoped to it (resume ids only resolve against the
+    /// same directory).
+    cwd: Option<String>,
     items: Vec<Entry>,
     scroll: ScrollHandle,
     input: Entity<InputState>,
     session: Option<Backend>,
+    /// Bumped on every (re)spawn; the message pump and EOF handler of an
+    /// older session compare against it and stand down, so deliberately
+    /// replacing the session (resume) doesn't route stale messages into the
+    /// new one or report a bogus exit.
+    session_epoch: u64,
     status: Status,
+    /// Resumable sessions for this cwd, newest first; shown above the
+    /// composer while the transcript is empty.
+    history: Vec<SessionSummary>,
+    /// Set between the cheap count pass and the title-parsing pass: the list
+    /// reserves its final height with this many placeholder rows, so the
+    /// composer doesn't jump when real rows land.
+    history_pending: Option<usize>,
+    /// The list is one-shot per tab: picking a session or sending the first
+    /// message hides it for the rest of the tab's life.
+    history_dismissed: bool,
+    history_scroll: VirtualListScrollHandle,
     /// Description of the approval request blocking the turn, shown as the
     /// card above the input; the request id lives in the session.
     pending_approval: Option<String>,
@@ -231,11 +258,17 @@ impl AgentPane {
         let mut this = Self {
             focus: cx.focus_handle(),
             kind,
+            cwd,
             items: Vec::new(),
             scroll: ScrollHandle::new(),
             input,
             session: None,
+            session_epoch: 0,
             status: Status::Starting,
+            history: Vec::new(),
+            history_pending: None,
+            history_dismissed: false,
+            history_scroll: VirtualListScrollHandle::new(),
             pending_approval: None,
             settings: ThreadSettings::default(),
             models: Vec::new(),
@@ -246,10 +279,74 @@ impl AgentPane {
             working_started: None,
         };
 
-        // The session's reader thread feeds parsed messages into this
-        // channel; the async pump below hops them onto the UI thread, where
-        // `Session::process` turns them into typed events. Channel closure is
-        // the EOF signal (the sender is owned by the reader thread).
+        this.start_session(None, cx);
+
+        // Claude's history comes from scanning the CLI's transcript
+        // directory (Codex delivers its history over the protocol instead,
+        // via `Event::History`). Two passes, both off-thread: a cheap count
+        // first, so the list can reserve its final height with placeholder
+        // rows, then title parsing, which swaps in the real rows.
+        if kind == AgentKind::Claude {
+            let cwd = this.cwd.clone();
+
+            cx.spawn(async move |this, cx| {
+                let count_cwd = cwd.clone();
+                let count = cx
+                    .background_executor()
+                    .spawn(async move { sessions::count_sessions(count_cwd.as_deref()) })
+                    .await;
+
+                let proceed = this
+                    .update(cx, |this, cx| {
+                        this.history_pending = Some(count);
+                        cx.notify();
+
+                        count > 0
+                    })
+                    .unwrap_or(false);
+
+                if !proceed {
+                    return;
+                }
+
+                // Title parsing races a short hold: on a warm SSD it
+                // finishes within a frame, so without the hold the skeleton
+                // rows would never be visible and the swap would read as a
+                // flicker.
+                let load = cx
+                    .background_executor()
+                    .spawn(async move { sessions::list_sessions(cwd.as_deref()) });
+
+                cx.background_executor()
+                    .timer(Duration::from_millis(250))
+                    .await;
+
+                let sessions = load.await;
+
+                let _ = this.update(cx, |this, cx| {
+                    this.history = sessions;
+                    this.history_pending = None;
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
+
+        this
+    }
+
+    /// Spawn the backend process (optionally resuming a persisted Claude
+    /// session) and pump its messages onto the UI thread. Channel closure is
+    /// the EOF signal (the sender is owned by the reader thread). Does not
+    /// notify — callers decide whether a repaint is due.
+    fn start_session(&mut self, resume: Option<String>, cx: &mut Context<Self>) {
+        let kind = self.kind;
+        let name = kind.display();
+        let cwd = self.cwd.clone();
+
+        self.session_epoch += 1;
+        let epoch = self.session_epoch;
+
         let (tx, mut rx) = mpsc::unbounded::<Value>();
         let deliver = move |message| {
             let _ = tx.unbounded_send(message);
@@ -260,18 +357,25 @@ impl AgentPane {
                     .map(Backend::Codex)
             }
             AgentKind::Claude => {
-                stream_json::Session::spawn(cwd, deliver, |line| warn!("claude: {line}"))
+                stream_json::Session::spawn(cwd, resume, deliver, |line| warn!("claude: {line}"))
                     .map(Backend::Claude)
             }
         };
 
         match spawned {
             Ok(session) => {
-                this.session = Some(session);
+                self.session = Some(session);
+                self.status = Status::Starting;
 
                 cx.spawn(async move |this, cx| {
                     while let Some(message) = rx.next().await {
                         let updated = this.update(cx, |this, cx| {
+                            // A newer session owns the pane now; this pump's
+                            // messages belong to the replaced process.
+                            if this.session_epoch != epoch {
+                                return false;
+                            }
+
                             let events = match this.session.as_mut() {
                                 Some(session) => session.process(message),
                                 None => Vec::new(),
@@ -280,14 +384,21 @@ impl AgentPane {
                             for event in events {
                                 this.apply_event(event, cx);
                             }
+
+                            true
                         });
 
-                        if updated.is_err() {
+                        if !updated.unwrap_or(false) {
                             return;
                         }
                     }
 
                     let _ = this.update(cx, |this, cx| {
+                        // A deliberately replaced session exits by design;
+                        // only the live session's death is worth a line.
+                        if this.session_epoch != epoch {
+                            return;
+                        }
                         this.status = Status::Exited;
                         this.finish_working(cx);
                         this.push(
@@ -301,18 +412,16 @@ impl AgentPane {
                 .detach();
             }
             Err(err) => {
-                this.status = Status::Exited;
-                this.items.push(Entry {
+                self.status = Status::Exited;
+                self.items.push(Entry {
                     at: Local::now().format("%H:%M").to_string(),
-                    turn: 0,
+                    turn: self.turn_seq,
                     item: ChatItem::Error {
                         text: format!("Failed to start {name}: {err}"),
                     },
                 });
             }
         }
-
-        this
     }
 
     pub(crate) fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -369,6 +478,10 @@ impl AgentPane {
             );
             return false;
         }
+
+        // The first message commits this tab to its conversation; the
+        // history list is no longer offered.
+        self.history_dismissed = true;
 
         // A steer joins the running turn (and its progress line); a fresh
         // turn advances the counter first so its entries fold as one unit.
@@ -511,10 +624,88 @@ impl AgentPane {
                 }
                 self.push(ChatItem::Error { text: message }, cx);
             }
+            SessionEvent::History(sessions) => {
+                // Pages accumulate: the first page lands in an empty list,
+                // later cursor pages extend it.
+                self.history.extend(sessions);
+                cx.notify();
+            }
+            SessionEvent::Replay(items) => self.apply_replay(items, cx),
             // No status line in the UI anymore; the live working row and the
             // Stop button carry the running state.
             SessionEvent::StatusDetail(_) => {}
         }
+    }
+
+    /// Pre-fill the transcript with a resumed session's reconstructed
+    /// conversation. Replay entries share one turn and carry no fold header,
+    /// so they render as a plain chronological stream above the new turns.
+    fn apply_replay(&mut self, replay: Vec<ReplayItem>, cx: &mut Context<Self>) {
+        for (i, item) in replay.into_iter().enumerate() {
+            let item = match item {
+                ReplayItem::User { text } => ChatItem::User { text },
+                ReplayItem::Agent { text } => ChatItem::Agent {
+                    item_id: format!("replay-{i}"),
+                    text,
+                },
+                ReplayItem::Tools { count } => ChatItem::Tool {
+                    item_id: format!("replay-{i}"),
+                    kind: format!("{count} tool call{}", if count == 1 { "" } else { "s" }),
+                    title: String::new(),
+                    status: "completed".to_string(),
+                },
+            };
+
+            // Replayed entries predate this pane; they get no wall-clock
+            // hover stamp.
+            self.items.push(Entry {
+                at: String::new(),
+                turn: self.turn_seq,
+                item,
+            });
+        }
+
+        self.scroll.scroll_to_bottom();
+        cx.notify();
+    }
+
+    /// Resume the picked history entry. Codex switches its live session onto
+    /// the stored thread (the response replays the transcript); Claude
+    /// replaces the untouched fresh process with one reloading the session,
+    /// and replays the transcript from the session file in parallel.
+    fn resume_session(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(summary) = self.history.get(index) else {
+            return;
+        };
+        let id = summary.id.clone();
+
+        self.history_dismissed = true;
+
+        match self.kind {
+            AgentKind::Codex => {
+                if let Some(Backend::Codex(session)) = self.session.as_mut() {
+                    session.resume_thread(&id);
+                }
+            }
+            AgentKind::Claude => {
+                let cwd = self.cwd.clone();
+                let replay_id = id.clone();
+
+                cx.spawn(async move |this, cx| {
+                    let replay = cx
+                        .background_executor()
+                        .spawn(async move { sessions::load_replay(cwd.as_deref(), &replay_id) })
+                        .await;
+
+                    let _ = this.update(cx, |this, cx| this.apply_replay(replay, cx));
+                })
+                .detach();
+
+                self.start_session(Some(id), cx);
+            }
+        }
+
+        cx.notify();
     }
 
     fn start_item(&mut self, item: SessionItem, cx: &mut Context<Self>) {
@@ -765,6 +956,18 @@ fn session_item_id(item: &SessionItem) -> Option<&str> {
     }
 }
 
+/// Compact "how long ago" label for a history row ("now", "5m", "3h", "2d").
+fn relative_time(at: SystemTime) -> String {
+    let seconds = at.elapsed().map(|d| d.as_secs()).unwrap_or(0);
+
+    match seconds {
+        0..60 => "now".to_string(),
+        60..3600 => format!("{}m", seconds / 60),
+        3600..86400 => format!("{}h", seconds / 3600),
+        _ => format!("{}d", seconds / 86400),
+    }
+}
+
 /// Icon mirroring the current permission/approval choice (t3code's runtime
 /// mode iconography): closed lock = prompts on, pen = edits auto-approved,
 /// pencil-ruler = plan mode, open lock = no prompts. Covers both Claude's
@@ -901,6 +1104,13 @@ impl Render for AgentPane {
 
         let running = self.status == Status::Running;
 
+        // The history list only makes sense while the tab is a blank slate:
+        // no transcript yet and no conversation committed to. It shows as
+        // placeholders once the count pass promises rows, then as real rows.
+        let history_rows = self.history_pending.unwrap_or(self.history.len());
+        let history = (self.items.is_empty() && history_rows > 0 && !self.history_dismissed)
+            .then(|| self.render_history(cx));
+
         v_flex()
             .size_full()
             .track_focus(&self.focus)
@@ -918,13 +1128,19 @@ impl Render for AgentPane {
                     .track_scroll(&self.scroll)
                     .child(v_flex().w_full().p_3().gap_2().children(rows)),
             )
-            .child(
-                // Composer: one rounded shell (bordered elevated surface with
-                // a soft shadow) stacking the approval slot, the borderless
-                // editor, and a footer with the setting pills and send/stop.
-                div().w_full().px_3().pb_3().pt_1().child(
+            .child({
+                let layered = history.is_some();
+
+                // Composer area: the history strip sits OUTSIDE the shell,
+                // on the pane background; the shell (bordered, shadowed
+                // card) then overlaps the strip's lower edge with a negative
+                // margin. Front card over back strip is carried by the
+                // border/shadow/surface contrast, exactly like t3code's
+                // context strip (mirrored to the top edge).
+                div().w_full().px_3().pb_3().pt_1().children(history).child(
                     v_flex()
                         .w_full()
+                        .when(layered, |this| this.mt(px(-14.)))
                         .rounded(px(16.))
                         .overflow_hidden()
                         .border_1()
@@ -938,8 +1154,8 @@ impl Render for AgentPane {
                                 .pt_3()
                                 .pb_2()
                                 // The prompt editor reads larger than the
-                                // chrome around it (t3code uses 16px over a
-                                // 14px UI); +2 keeps that ratio at any
+                                // chrome around it (t3code uses 16px over
+                                // a 14px UI); +2 keeps that ratio at any
                                 // configured agent font size.
                                 .text_size(px(
                                     cx.global::<AppSettings>().agent_font_size as f32 + 2.0
@@ -956,7 +1172,8 @@ impl Render for AgentPane {
                                 .justify_between()
                                 .gap_2()
                                 .child(div().flex_1().min_w_0().child(self.render_settings_row(cx)))
-                                // Stop replaces Send in place while a turn runs.
+                                // Stop replaces Send in place while a
+                                // turn runs.
                                 .child(if running {
                                     Button::new("agent-send")
                                         .danger()
@@ -973,8 +1190,8 @@ impl Render for AgentPane {
                                         }))
                                 }),
                         ),
-                ),
-            )
+                )
+            })
     }
 }
 
@@ -1448,6 +1665,165 @@ impl AgentPane {
                 }
                 cx.notify();
             }))
+            .into_any_element()
+    }
+
+    /// Height of one history row; all rows are uniform, which is what lets
+    /// the virtual list precompute its scroll geometry.
+    const HISTORY_ROW_HEIGHT: f32 = 28.0;
+    /// Ten rows visible by default; more scroll within the fixed viewport.
+    const HISTORY_MAX_HEIGHT: f32 = Self::HISTORY_ROW_HEIGHT * 10.0;
+
+    /// The resumable-sessions block slotted into the composer shell above the
+    /// input: a strip at 90% of the composer width on a slightly deeper
+    /// surface, reading as a layer tucked behind the input card (t3code's
+    /// context-strip look). While only the count pass has finished it shows
+    /// skeleton rows at the final height, so the composer doesn't jump when
+    /// the real rows land; rows render through a virtual list, so hundreds
+    /// of persisted sessions cost only the visible ten.
+    fn render_history(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let rows = self.history_pending.unwrap_or(self.history.len());
+
+        let body: AnyElement = if self.history_pending.is_some() {
+            // Height reserved from the count; content still loading.
+            v_flex()
+                .w_full()
+                .px_2()
+                .gap_0()
+                .children((0..rows.min(10)).map(|i| {
+                    h_flex()
+                        .h(px(Self::HISTORY_ROW_HEIGHT))
+                        .w_full()
+                        .px_2()
+                        .items_center()
+                        .child(
+                            Skeleton::new()
+                                .h(px(14.))
+                                .w(relative(if i % 2 == 0 { 0.72 } else { 0.55 }))
+                                .rounded(px(4.)),
+                        )
+                }))
+                .into_any_element()
+        } else {
+            let row_sizes = Rc::new(vec![size(px(0.), px(Self::HISTORY_ROW_HEIGHT)); rows]);
+
+            div()
+                .relative()
+                .w_full()
+                .max_h(px(Self::HISTORY_MAX_HEIGHT))
+                .overflow_hidden()
+                .px_2()
+                .child(
+                    v_virtual_list(
+                        cx.entity(),
+                        "agent-history",
+                        row_sizes,
+                        move |this, visible_range, _, cx| {
+                            // The final page in view is the cue to fetch
+                            // the next one (no-op without a cursor, and
+                            // only Codex pages over the wire).
+                            if visible_range.end >= this.history.len()
+                                && let Some(Backend::Codex(session)) = this.session.as_mut()
+                            {
+                                session.request_more_history();
+                            }
+
+                            visible_range
+                                .map(|index| this.render_history_row(index, cx))
+                                .collect()
+                        },
+                    )
+                    .track_scroll(&self.history_scroll)
+                    .with_sizing_behavior(ListSizingBehavior::Infer),
+                )
+                .child(Scrollbar::vertical(&self.history_scroll))
+                .into_any_element()
+        };
+
+        // Centered at 90% of the composer width, on the pane background
+        // behind the shell: an outlined strip on a deeper tint, rounded only
+        // at the top. The shell overlaps its lower edge (negative margin on
+        // the shell), so the strip reads as a layer sliding out from behind
+        // the front card. The extra bottom padding is clearance for that
+        // overlap — without it the card would cover the last row.
+        div().w_full().flex().justify_center().child(
+            v_flex()
+                .w(relative(0.95))
+                .rounded_t(px(12.))
+                .border_1()
+                .border_b_0()
+                .border_color(cx.theme().border.opacity(0.6))
+                .bg(cx.theme().muted.opacity(0.55))
+                .pb(px(20.))
+                .child(
+                    div()
+                        .px_4()
+                        .pt_2()
+                        .pb_1()
+                        .text_xs()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(cx.theme().muted_foreground)
+                        .child("RECENT SESSIONS"),
+                )
+                .child(body),
+        )
+    }
+
+    /// One history row: title, branch, and relative time, in the settings
+    /// row's ghost-control idiom (small, muted, hover lifts the foreground).
+    fn render_history_row(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
+        let Some(session) = self.history.get(index) else {
+            return div().into_any_element();
+        };
+        let hover_bg = cx.theme().muted.opacity(0.4);
+
+        h_flex()
+            .id(("history-row", index))
+            .h(px(Self::HISTORY_ROW_HEIGHT))
+            .w_full()
+            .px_2()
+            .gap_2()
+            .items_center()
+            .rounded(cx.theme().radius)
+            .cursor_pointer()
+            .hover(move |style| style.bg(hover_bg))
+            .on_click(cx.listener(move |this, _, _, cx| this.resume_session(index, cx)))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_sm()
+                    .text_color(cx.theme().foreground.opacity(0.82))
+                    .child(session.title.clone()),
+            )
+            .children(session.branch.clone().map(|branch| {
+                h_flex()
+                    .flex_none()
+                    .gap_1()
+                    .items_center()
+                    .max_w(px(180.))
+                    .child(
+                        Icon::new(IconName::GitBranch)
+                            .size_3()
+                            .text_color(cx.theme().muted_foreground.opacity(0.7)),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground.opacity(0.7))
+                            .child(branch),
+                    )
+            }))
+            .child(
+                div()
+                    .flex_none()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground.opacity(0.55))
+                    .child(relative_time(session.last_active)),
+            )
             .into_any_element()
     }
 
