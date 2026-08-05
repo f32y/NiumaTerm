@@ -5,6 +5,7 @@
 //! third-party UIs (it powers the VS Code extension). One `Session` owns one
 //! `codex app-server` process and one conversation thread on it.
 
+use std::collections::HashMap;
 use std::io::{BufRead as _, BufReader, Write as _};
 use std::os::windows::process::CommandExt as _;
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -15,7 +16,9 @@ use serde_json::{Value, json};
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 pub use crate::chat::{
-    Event, Item, ModelInfo, ReplayItem, SendOutcome, SessionSummary, ThreadSettings,
+    Event, Item, ModelInfo, ReplayItem, SendOutcome, SessionSummary, SlashCommandArguments,
+    SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
+    ThreadSettings,
 };
 
 /// JSON-RPC ids for the fixed handshake requests; turn requests count up from
@@ -56,6 +59,9 @@ pub struct Session {
     pending_approval: Option<u64>,
     /// Cursor for the next history page; `None` once the final page arrived.
     history_cursor: Option<String>,
+    /// Command RPC responses are independent of turn ids. Tracking their
+    /// request ids keeps command failures non-fatal to the live thread.
+    pending_commands: HashMap<u64, String>,
 }
 
 impl Drop for Session {
@@ -70,6 +76,27 @@ impl Drop for Session {
 }
 
 impl Session {
+    pub fn adapter_commands() -> Vec<SlashCommandInfo> {
+        vec![
+            SlashCommandInfo {
+                name: "compact".to_string(),
+                description: "Compact the current conversation context".to_string(),
+                argument_hint: None,
+                source: SlashCommandSource::Adapter,
+                arguments: SlashCommandArguments::None,
+                run_policy: SlashCommandRunPolicy::QueueUntilIdle,
+            },
+            SlashCommandInfo {
+                name: "review".to_string(),
+                description: "Review uncommitted changes".to_string(),
+                argument_hint: None,
+                source: SlashCommandSource::Adapter,
+                arguments: SlashCommandArguments::None,
+                run_policy: SlashCommandRunPolicy::QueueUntilIdle,
+            },
+        ]
+    }
+
     /// Spawn `codex app-server` with piped stdio and send the `initialize`
     /// request. Every parsed stdout line is handed to `deliver` (from a
     /// reader thread — hop threads before calling [`Session::process`]);
@@ -123,6 +150,7 @@ impl Session {
             current_turn: None,
             pending_approval: None,
             history_cursor: None,
+            pending_commands: HashMap::new(),
         };
 
         session.send(json!({
@@ -202,6 +230,37 @@ impl Session {
         }));
 
         SendOutcome::StartedTurn
+    }
+
+    /// Execute the two Codex operations NiumaTerm can represent faithfully.
+    /// Other Codex CLI surface areas (skills, plugins, configuration) are not
+    /// advertised as chat commands until they have dedicated UI semantics.
+    pub fn execute_slash_command(&mut self, name: &str, arguments: &str) -> SlashCommandOutcome {
+        let Some(thread_id) = self.thread_id.clone() else {
+            return SlashCommandOutcome::NotReady;
+        };
+        if self.current_turn.is_some() {
+            return SlashCommandOutcome::Rejected {
+                message: "Codex is already running a turn.".to_string(),
+            };
+        }
+        if !arguments.trim().is_empty() {
+            return SlashCommandOutcome::Rejected {
+                message: format!("/{name} does not accept arguments."),
+            };
+        }
+
+        let rpc_id = self.alloc_rpc_id();
+        let Some(request) = codex_command_request(rpc_id, &thread_id, name) else {
+            return SlashCommandOutcome::Rejected {
+                message: format!("Unsupported Codex command: /{name}"),
+            };
+        };
+
+        self.pending_commands.insert(rpc_id, name.to_string());
+        self.send(request);
+
+        SlashCommandOutcome::Accepted
     }
 
     /// Interrupt the running turn (the Esc/Ctrl-C equivalent).
@@ -318,7 +377,17 @@ impl Session {
     }
 
     fn process_response(&mut self, rpc_id: u64, message: &Value) -> Vec<Event> {
+        let pending_command = self.pending_commands.remove(&rpc_id);
+        let is_command = pending_command.is_some();
+
         if let Some(error) = message["error"]["message"].as_str() {
+            if let Some(command) = pending_command.as_deref() {
+                return vec![Event::SlashCommandResult {
+                    name: command.to_string(),
+                    outcome: codex_command_response(command, Some(error)),
+                }];
+            }
+
             // A failed resume (deleted/corrupt thread) is not fatal: the
             // session still has the thread it started with, so the composer
             // keeps working for a fresh conversation.
@@ -330,7 +399,14 @@ impl Session {
 
             return vec![Event::Error {
                 message,
-                fatal: rpc_id <= THREAD_START_RPC_ID,
+                fatal: !is_command && rpc_id <= THREAD_START_RPC_ID,
+            }];
+        }
+
+        if let Some(command) = pending_command {
+            return vec![Event::SlashCommandResult {
+                outcome: codex_command_response(&command, None),
+                name: command,
             }];
         }
 
@@ -469,6 +545,46 @@ impl Session {
             )],
             _ => Vec::new(),
         }
+    }
+}
+
+fn codex_command_request(rpc_id: u64, thread_id: &str, name: &str) -> Option<Value> {
+    match name {
+        "compact" => Some(json!({
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "method": "thread/compact/start",
+            "params": {"threadId": thread_id},
+        })),
+        "review" => Some(json!({
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "method": "review/start",
+            "params": {
+                "threadId": thread_id,
+                "delivery": "inline",
+                "target": {"type": "uncommittedChanges"},
+            },
+        })),
+        _ => None,
+    }
+}
+
+fn codex_command_response(name: &str, error: Option<&str>) -> SlashCommandOutcome {
+    if let Some(error) = error {
+        return SlashCommandOutcome::Rejected {
+            message: format!("/{name} failed: {error}"),
+        };
+    }
+
+    if name == "compact" {
+        SlashCommandOutcome::Completed {
+            message: Some("Conversation context compacted.".to_string()),
+        }
+    } else {
+        // review/start acknowledges creation before its inline review turn
+        // reports the ordinary turn lifecycle.
+        SlashCommandOutcome::Accepted
     }
 }
 
@@ -718,6 +834,13 @@ fn file_change_paths(changes: &Value) -> String {
 /// Best-effort one-line label for an arbitrary tool item: MCP calls have
 /// `server` + `tool`, dynamic tools `tool`, web searches `query`.
 fn tool_title(item: &Value) -> String {
+    match item["type"].as_str() {
+        Some("contextCompaction") => return "Compacting conversation context".to_string(),
+        Some("enteredReviewMode") => return "Entered review mode".to_string(),
+        Some("exitedReviewMode") => return "Exited review mode".to_string(),
+        _ => {}
+    }
+
     let tool = item["tool"].as_str();
 
     match (item["server"].as_str(), tool) {
@@ -840,5 +963,67 @@ mod tests {
                 status: Some("inProgress".into()),
             })
         );
+    }
+
+    #[test]
+    fn command_requests_use_dedicated_compact_and_inline_review_methods() {
+        assert_eq!(
+            codex_command_request(100, "thr_1", "compact"),
+            Some(json!({
+                "jsonrpc": "2.0",
+                "id": 100,
+                "method": "thread/compact/start",
+                "params": {"threadId": "thr_1"},
+            }))
+        );
+        assert_eq!(
+            codex_command_request(101, "thr_1", "review"),
+            Some(json!({
+                "jsonrpc": "2.0",
+                "id": 101,
+                "method": "review/start",
+                "params": {
+                    "threadId": "thr_1",
+                    "delivery": "inline",
+                    "target": {"type": "uncommittedChanges"},
+                },
+            }))
+        );
+        assert_eq!(codex_command_request(102, "thr_1", "unknown"), None);
+        assert_eq!(
+            codex_command_response("compact", None),
+            SlashCommandOutcome::Completed {
+                message: Some("Conversation context compacted.".into())
+            }
+        );
+        assert_eq!(
+            codex_command_response("review", None),
+            SlashCommandOutcome::Accepted
+        );
+        assert_eq!(
+            codex_command_response("review", Some("unsupported target")),
+            SlashCommandOutcome::Rejected {
+                message: "/review failed: unsupported target".into()
+            }
+        );
+    }
+
+    #[test]
+    fn compaction_and_review_lifecycle_items_remain_visible() {
+        for (kind, title) in [
+            ("contextCompaction", "Compacting conversation context"),
+            ("enteredReviewMode", "Entered review mode"),
+            ("exitedReviewMode", "Exited review mode"),
+        ] {
+            assert_eq!(
+                parse_item(&json!({"id": "item", "type": kind, "status": "completed"})),
+                Some(Item::Other {
+                    id: "item".into(),
+                    kind: kind.into(),
+                    title: title.into(),
+                    status: Some("completed".into()),
+                })
+            );
+        }
     }
 }
