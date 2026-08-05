@@ -17,7 +17,7 @@ use gpui::{
     ScrollHandle, Window, div, px, relative, size,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::input::{Escape, Input, InputEvent, InputState};
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_component::scroll::Scrollbar;
 use gpui_component::skeleton::Skeleton;
@@ -1114,6 +1114,17 @@ impl Render for AgentPane {
         v_flex()
             .size_full()
             .track_focus(&self.focus)
+            // Escape in the composer force-stops the agent: the input's own
+            // Escape action propagates here whenever the editor didn't
+            // consume it (inline completion, IME). A pending approval is
+            // cancelled (deny + interrupt), a running turn interrupted.
+            .on_action(cx.listener(|this, _: &Escape, _, cx| {
+                if this.pending_approval.is_some() {
+                    this.respond_approval("cancel", cx);
+                } else if this.status == Status::Running {
+                    this.interrupt(cx);
+                }
+            }))
             // The agent tab is a terminal surface stand-in, so it overrides the
             // chrome's UI font with its own configured font (Settings → Agent
             // Font), same as the terminal pane does with the terminal font.
