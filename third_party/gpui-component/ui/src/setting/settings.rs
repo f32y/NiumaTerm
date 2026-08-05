@@ -40,6 +40,7 @@ pub struct Settings {
     sidebar_style: StyleRefinement,
     default_selected_index: SelectIndex,
     header_style: StyleRefinement,
+    single_group_pages: bool,
 }
 
 impl Settings {
@@ -55,7 +56,19 @@ impl Settings {
             sidebar_style: StyleRefinement::default(),
             default_selected_index: SelectIndex::default(),
             header_style: StyleRefinement::default(),
+            single_group_pages: false,
         }
+    }
+
+    /// Display one group at a time per page instead of scrolling through all
+    /// groups. Selecting a group in the sidebar swaps the page content to
+    /// that group alone (entering a multi-group page lands on its first
+    /// group); a search query still lists every matching group. Default is
+    /// false: the classic layout scrolls the whole page and sidebar group
+    /// clicks jump to the group's position.
+    pub fn single_group_pages(mut self, single: bool) -> Self {
+        self.single_group_pages = single;
+        self
     }
 
     /// Set the width of the sidebar, default is `250px`.
@@ -154,7 +167,7 @@ impl Settings {
         for (ix, page) in pages.into_iter().enumerate() {
             if selected_index.page_ix == ix {
                 return page
-                    .render(ix, state, &options, window, cx)
+                    .render(ix, self.single_group_pages, state, &options, window, cx)
                     .into_any_element();
             }
         }
@@ -188,6 +201,14 @@ impl Settings {
                 SidebarMenu::new().children(pages.iter().enumerate().map(|(page_ix, page)| {
                     let is_page_active =
                         selected_index.page_ix == page_ix && selected_index.group_ix.is_none();
+                    // In single-group layout, pages render one group at a
+                    // time, so entering a multi-group page selects its first
+                    // group explicitly — the sidebar highlight then matches
+                    // what is displayed.
+                    let entry_group_ix =
+                        (self.single_group_pages && page.groups.len() > 1).then_some(0);
+                    let single_group_pages = self.single_group_pages;
+
                     SidebarMenuItem::new(page.title.clone())
                         .click_to_open(true)
                         .when_some(page.icon.clone(), |this, icon| this.icon(icon))
@@ -199,7 +220,7 @@ impl Settings {
                                 state.update(cx, |state, cx| {
                                     state.selected_index = SelectIndex {
                                         page_ix,
-                                        ..Default::default()
+                                        group_ix: entry_group_ix,
                                     };
                                     cx.notify();
                                 })
@@ -207,10 +228,13 @@ impl Settings {
                         })
                         .when(page.groups.len() > 1, |this| {
                             this.children(
+                                // Enumerate BEFORE filtering untitled groups
+                                // so the stored index addresses `page.groups`
+                                // (the page renders by that index).
                                 page.groups
                                     .iter()
-                                    .filter(|g| g.title.is_some())
                                     .enumerate()
+                                    .filter(|(_, group)| group.title.is_some())
                                     .map(|(group_ix, group)| {
                                         let is_active = selected_index.page_ix == page_ix
                                             && selected_index.group_ix == Some(group_ix);
@@ -224,7 +248,14 @@ impl Settings {
                                                         page_ix,
                                                         group_ix: Some(group_ix),
                                                     };
-                                                    state.deferred_scroll_group_ix = Some(group_ix);
+                                                    // Classic layout keeps
+                                                    // every group on the page
+                                                    // and jumps to the picked
+                                                    // one.
+                                                    if !single_group_pages {
+                                                        state.deferred_scroll_group_ix =
+                                                            Some(group_ix);
+                                                    }
                                                     cx.notify();
                                                 })
                                             }
@@ -246,7 +277,8 @@ impl Sizable for Settings {
 
 pub(super) struct SettingsState {
     pub(super) selected_index: SelectIndex,
-    /// If set, defer scrolling to this group index after rendering.
+    /// If set, defer scrolling to this group index after rendering (classic
+    /// scroll-through layout only).
     pub(super) deferred_scroll_group_ix: Option<usize>,
     pub(super) search_input: Entity<InputState>,
 }

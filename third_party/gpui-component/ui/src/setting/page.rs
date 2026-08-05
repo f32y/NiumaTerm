@@ -108,19 +108,10 @@ impl SettingPage {
         self
     }
 
-    fn is_resettable(&self, cx: &App) -> bool {
-        self.resettable && self.groups.iter().any(|group| group.is_resettable(cx))
-    }
-
-    fn reset_all(&self, window: &mut Window, cx: &mut App) {
-        for group in &self.groups {
-            group.reset(window, cx);
-        }
-    }
-
     pub(super) fn render(
         &self,
         ix: usize,
+        single_group: bool,
         state: &Entity<SettingsState>,
         options: &RenderOptions,
         window: &mut Window,
@@ -128,20 +119,69 @@ impl SettingPage {
     ) -> impl IntoElement {
         let search_input = state.read(cx).search_input.clone();
         let query = search_input.read(cx).value();
-        let groups = self
-            .groups
-            .iter()
-            .filter(|group| group.is_match(&query, cx))
-            .cloned()
-            .collect::<Vec<_>>();
+
+        // Single-group layout, outside search: the page shows exactly ONE
+        // group — each subcategory acts as its own page, picked by the
+        // sidebar selection (first group by default) — instead of one long
+        // scroll through every group. A search query (and the classic
+        // layout) lists every matching group, so hits are never hidden
+        // behind the selection.
+        let groups: Vec<(usize, SettingGroup)> = if single_group && query.is_empty() {
+            let selected = state.read(cx).selected_index;
+            let group_ix = (selected.page_ix == ix)
+                .then_some(selected.group_ix)
+                .flatten()
+                .unwrap_or(0)
+                .min(self.groups.len().saturating_sub(1));
+
+            self.groups
+                .get(group_ix)
+                .map(|group| (group_ix, group.clone()))
+                .into_iter()
+                .collect()
+        } else {
+            self.groups
+                .iter()
+                .enumerate()
+                .filter(|(_, group)| group.is_match(&query, cx))
+                .map(|(group_ix, group)| (group_ix, group.clone()))
+                .collect()
+        };
         let groups_count = groups.len();
 
-        let list_state = window
-            .use_keyed_state(
-                SharedString::from(format!("list-state:{}", ix)),
-                cx,
-                |_, _| ListState::new(groups_count, ListAlignment::Top, px(100.)),
+        // Header and reset operate on what is on screen — in single-group
+        // display, resetting groups the user cannot see would be surprising.
+        // In the classic layout every group is on screen, so this matches
+        // the old reset-all behavior.
+        let displayed: Vec<SettingGroup> = groups.iter().map(|(_, group)| group.clone()).collect();
+        let title: SharedString = match displayed
+            .first()
+            .filter(|_| single_group && query.is_empty())
+            .and_then(|group| group.title.clone())
+        {
+            Some(group_title) if group_title != self.title => {
+                format!("{} › {}", self.title, group_title).into()
+            }
+            _ => self.title.clone(),
+        };
+        let resettable = self.resettable && displayed.iter().any(|group| group.is_resettable(cx));
+
+        // In single-group layout the list is keyed per displayed group, so
+        // switching subcategories starts at the top instead of inheriting
+        // the previous group's scroll offset.
+        let list_key = if single_group && query.is_empty() {
+            format!(
+                "list-state:{}:{}",
+                ix,
+                groups.first().map(|(group_ix, _)| *group_ix).unwrap_or(0)
             )
+        } else {
+            format!("list-state:{}", ix)
+        };
+        let list_state = window
+            .use_keyed_state(SharedString::from(list_key), cx, |_, _| {
+                ListState::new(groups_count, ListAlignment::Top, px(100.))
+            })
             .read(cx)
             .clone();
 
@@ -149,12 +189,16 @@ impl SettingPage {
             list_state.reset(groups_count);
         }
 
+        // Classic layout: a sidebar group click scrolls the full page to
+        // that group.
         let deferred_scroll_group_ix = state.read(cx).deferred_scroll_group_ix;
-        if let Some(ix) = deferred_scroll_group_ix {
+        if let Some(scroll_ix) = deferred_scroll_group_ix {
             state.update(cx, |state, _| {
                 state.deferred_scroll_group_ix = None;
             });
-            list_state.scroll_to_reveal_item(ix);
+            if !single_group {
+                list_state.scroll_to_reveal_item(scroll_ix);
+            }
         }
 
         v_flex()
@@ -173,12 +217,12 @@ impl SettingPage {
                             .child(
                                 h_flex()
                                     .gap_1()
-                                    .child(self.title.clone())
+                                    .child(title)
                                     .when_some(self.title_suffix.clone(), |this, suffix| {
                                         this.child(suffix(window, cx))
                                     }),
                             )
-                            .when(self.is_resettable(cx), |this| {
+                            .when(resettable, |this| {
                                 this.child(
                                     Button::new("reset")
                                         .icon(IconName::Undo2)
@@ -186,9 +230,11 @@ impl SettingPage {
                                         .small()
                                         .tooltip(t!("Settings.Reset All"))
                                         .on_click({
-                                            let page = self.clone();
+                                            let displayed = displayed.clone();
                                             move |_, window, cx| {
-                                                page.reset_all(window, cx);
+                                                for group in &displayed {
+                                                    group.reset(window, cx);
+                                                }
                                             }
                                         }),
                                 )
@@ -212,8 +258,8 @@ impl SettingPage {
                         list(list_state.clone(), {
                             let query = query.clone();
                             let options = *options;
-                            move |group_ix, window, cx| {
-                                let group = groups[group_ix].clone();
+                            move |list_ix, window, cx| {
+                                let (group_ix, group) = groups[list_ix].clone();
                                 group
                                     .py_4()
                                     .render(
