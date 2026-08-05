@@ -11,7 +11,7 @@
 //! `--allow-dangerously-skip-permissions` present — that flag only unlocks
 //! switching into `bypassPermissions` mode).
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{BufRead as _, BufReader, Write as _};
 use std::os::windows::process::CommandExt as _;
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -20,7 +20,10 @@ use std::{fs, thread};
 use serde_json::{Value, json};
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
-use crate::chat::{Event, Item, ModelInfo, SendOutcome, ThreadSettings};
+use crate::chat::{
+    Event, Item, ModelInfo, SendOutcome, SlashCommandArguments, SlashCommandInfo,
+    SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
+};
 use crate::hook_store::home_dir;
 
 /// Wire values for `--permission-mode` / the `set_permission_mode` control
@@ -76,6 +79,7 @@ pub struct Session {
     /// completes them with output and status.
     pending_tools: HashMap<String, Item>,
     item_seq: u64,
+    active_slash_command: Option<String>,
 }
 
 impl Drop for Session {
@@ -90,6 +94,19 @@ impl Drop for Session {
 }
 
 impl Session {
+    /// Commands implemented by the Claude CLI but not necessarily included
+    /// in every version's dynamic discovery payload.
+    pub fn adapter_commands() -> Vec<SlashCommandInfo> {
+        vec![SlashCommandInfo {
+            name: "compact".to_string(),
+            description: "Compact the current conversation context".to_string(),
+            argument_hint: None,
+            source: SlashCommandSource::Adapter,
+            arguments: SlashCommandArguments::None,
+            run_policy: SlashCommandRunPolicy::QueueUntilIdle,
+        }]
+    }
+
     /// Spawn `claude` in bidirectional stream-json mode and send the SDK-style
     /// `initialize` control request. Every parsed stdout line is handed to
     /// `deliver` (from a reader thread — hop threads before calling
@@ -175,6 +192,7 @@ impl Session {
             open_thinkings: VecDeque::new(),
             pending_tools: HashMap::new(),
             item_seq: 0,
+            active_slash_command: None,
         };
 
         session.send(json!({
@@ -255,6 +273,32 @@ impl Session {
 
             SendOutcome::StartedTurn
         }
+    }
+
+    /// Send a provider command through Claude's stream-json command path.
+    /// This intentionally bypasses `send_user_message`: the UI must not add
+    /// a user bubble or steer a running model turn for slash commands.
+    pub fn execute_slash_command(&mut self, name: &str, arguments: &str) -> SlashCommandOutcome {
+        if !self.ready || self.stdin.is_none() {
+            return SlashCommandOutcome::NotReady;
+        }
+        if self.turn_active {
+            return SlashCommandOutcome::Rejected {
+                message: "Claude is already running a turn.".to_string(),
+            };
+        }
+
+        let text = slash_command_text(name, arguments);
+
+        self.send(json!({
+            "type": "user",
+            "message": {"role": "user", "content": [{"type": "text", "text": text}]},
+        }));
+        self.turn_active = true;
+        self.turn_reported = false;
+        self.active_slash_command = Some(name.to_string());
+
+        SlashCommandOutcome::Accepted
     }
 
     /// Interrupt the running turn (the Esc/Ctrl-C equivalent).
@@ -367,11 +411,20 @@ impl Session {
         self.applied_model = model.clone();
         self.applied_permission = permission.clone();
 
-        vec![Event::Ready(ThreadSettings {
+        let mut events = vec![Event::Ready(ThreadSettings {
             model,
             approval: permission,
             ..ThreadSettings::default()
-        })]
+        })];
+
+        // `system/init` is the authoritative snapshot. Older Claude versions
+        // omit the field; publishing an empty replacement ends the loading
+        // state without fabricating commands or opening a warm-up turn.
+        events.push(Event::Commands(parse_slash_commands(
+            &message["slash_commands"],
+        )));
+
+        events
     }
 
     fn process_stream_event(&mut self, message: &Value) -> Vec<Event> {
@@ -569,22 +622,19 @@ impl Session {
             events.push(Event::ApprovalResolved);
         }
 
-        let error = if message["is_error"].as_bool().unwrap_or(false)
-            || message["subtype"].as_str() != Some("success")
-        {
-            // Startup failures (e.g. a `--resume` id whose transcript is
-            // gone) put their reason in `errors`, not `result`.
-            Some(
-                message["result"]
-                    .as_str()
-                    .filter(|s| !s.is_empty())
-                    .or_else(|| message["errors"][0].as_str().filter(|s| !s.is_empty()))
-                    .unwrap_or_else(|| message["subtype"].as_str().unwrap_or("turn failed"))
-                    .to_string(),
-            )
-        } else {
-            None
-        };
+        let error = claude_result_error(message);
+
+        if let Some(name) = self.active_slash_command.take() {
+            events.push(Event::SlashCommandResult {
+                name,
+                outcome: match error.as_ref() {
+                    Some(message) => SlashCommandOutcome::Rejected {
+                        message: message.clone(),
+                    },
+                    None => SlashCommandOutcome::Completed { message: None },
+                },
+            });
+        }
 
         events.push(Event::TurnCompleted { error });
 
@@ -678,7 +728,7 @@ impl Session {
             self.applied_model = Some("default".to_string());
             self.applied_permission = permission.clone();
 
-            return vec![
+            let mut events = vec![
                 Event::Ready(ThreadSettings {
                     model: Some("default".to_string()),
                     approval: permission,
@@ -686,10 +736,98 @@ impl Session {
                 }),
                 Event::Models(parse_models(&response["response"]["models"])),
             ];
+
+            if !response["response"]["slash_commands"].is_null() {
+                events.push(Event::Commands(parse_slash_commands(
+                    &response["response"]["slash_commands"],
+                )));
+            }
+
+            return events;
         }
 
         Vec::new()
     }
+}
+
+fn slash_command_text(name: &str, arguments: &str) -> String {
+    let name = name.trim().trim_start_matches('/');
+    let arguments = arguments.trim();
+
+    if arguments.is_empty() {
+        format!("/{name}")
+    } else {
+        format!("/{name} {arguments}")
+    }
+}
+
+fn claude_result_error(message: &Value) -> Option<String> {
+    if !message["is_error"].as_bool().unwrap_or(false)
+        && message["subtype"].as_str() == Some("success")
+    {
+        return None;
+    }
+
+    // Startup failures (e.g. a `--resume` id whose transcript is gone) put
+    // their reason in `errors`, not `result`.
+    Some(
+        message["result"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .or_else(|| message["errors"][0].as_str().filter(|s| !s.is_empty()))
+            .unwrap_or_else(|| message["subtype"].as_str().unwrap_or("turn failed"))
+            .to_string(),
+    )
+}
+
+/// Claude versions have emitted both string entries and richer objects. The
+/// parser accepts both while enforcing the single-token name the composer
+/// can address. A new event is a complete replacement snapshot.
+fn parse_slash_commands(commands: &Value) -> Vec<SlashCommandInfo> {
+    let mut seen = HashSet::new();
+
+    commands
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let raw_name = entry
+                .as_str()
+                .or_else(|| entry["name"].as_str())
+                .or_else(|| entry["command"].as_str())?;
+            let name = raw_name.trim().trim_start_matches('/').to_ascii_lowercase();
+
+            if name.is_empty()
+                || name.chars().any(char::is_whitespace)
+                || !seen.insert(name.clone())
+            {
+                return None;
+            }
+
+            let argument_hint = entry["argumentHint"]
+                .as_str()
+                .or_else(|| entry["argument_hint"].as_str())
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned);
+
+            Some(SlashCommandInfo {
+                name: name.clone(),
+                description: entry["description"]
+                    .as_str()
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| format!("Run Claude's /{name} command")),
+                arguments: if argument_hint.is_some() {
+                    SlashCommandArguments::Freeform
+                } else {
+                    SlashCommandArguments::None
+                },
+                argument_hint,
+                source: SlashCommandSource::Provider,
+                run_policy: SlashCommandRunPolicy::QueueUntilIdle,
+            })
+        })
+        .collect()
 }
 
 /// The permission mode the CLI will start in, from `~/.claude/settings.json`
@@ -919,6 +1057,46 @@ mod tests {
         assert_eq!(
             approval_description("mcp__github__search", &json!({"query": "is:open"})),
             "mcp__github__search: is:open"
+        );
+    }
+
+    #[test]
+    fn dynamic_commands_accept_both_wire_shapes_and_drop_invalid_duplicates() {
+        let parsed = parse_slash_commands(&json!([
+            "/Review",
+            {"name": "compact", "description": "Compact it", "argumentHint": "[focus]"},
+            {"command": "/review"},
+            "",
+            "not valid"
+        ]));
+
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].name, "review");
+        assert_eq!(parsed[1].name, "compact");
+        assert_eq!(parsed[1].argument_hint.as_deref(), Some("[focus]"));
+        assert_eq!(parsed[1].arguments, SlashCommandArguments::Freeform);
+        assert!(parse_slash_commands(&Value::Null).is_empty());
+    }
+
+    #[test]
+    fn provider_command_text_is_not_an_ordinary_prompt_shape() {
+        assert_eq!(slash_command_text("/compact", ""), "/compact");
+        assert_eq!(
+            slash_command_text("review", "  focus here  "),
+            "/review focus here"
+        );
+        assert_eq!(
+            claude_result_error(&json!({
+                "type": "result",
+                "subtype": "error_during_execution",
+                "is_error": true,
+                "result": "provider rejected command"
+            })),
+            Some("provider rejected command".into())
+        );
+        assert_eq!(
+            claude_result_error(&json!({"subtype": "success", "is_error": false})),
+            None
         );
     }
 }

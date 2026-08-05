@@ -4,7 +4,7 @@
 //! [`nmt_agent_utils::claude_code::stream_json`]; this module only maps their
 //! shared typed events onto the transcript UI.
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -17,7 +17,9 @@ use gpui::{
     ScrollHandle, Window, div, px, relative, size,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::input::{Escape, Input, InputEvent, InputState};
+use gpui_component::input::{
+    Enter, Escape, IndentInline, Input, InputEvent, InputState, MoveDown, MoveUp,
+};
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_component::scroll::Scrollbar;
 use gpui_component::skeleton::Skeleton;
@@ -27,7 +29,8 @@ use gpui_component::{
 };
 use nmt_agent_utils::chat::{
     Event as SessionEvent, Item as SessionItem, ModelInfo, ReplayItem, SendOutcome, SessionSummary,
-    ThreadSettings,
+    SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy,
+    SlashCommandSource, ThreadSettings,
 };
 use nmt_agent_utils::claude_code::{sessions, stream_json};
 use nmt_agent_utils::codex::app_server;
@@ -35,6 +38,59 @@ use serde_json::Value;
 use tracing::warn;
 
 use crate::ui::AppSettings;
+use crate::ui::agent_commands::{
+    PaletteDirection, claim_command_turn_start, filter_catalog, local_commands, merge_catalog,
+    move_palette_selection, next_session_epoch, parse_slash_command, reset_command_runtime,
+    resolve_choice,
+};
+
+#[derive(Clone)]
+struct PendingSlashCommand {
+    name: String,
+    arguments: String,
+}
+
+#[derive(Clone)]
+enum CommandFeedbackKind {
+    Notice,
+    Error,
+    Queued,
+}
+
+#[derive(Clone)]
+struct CommandFeedback {
+    kind: CommandFeedbackKind,
+    message: String,
+}
+
+#[derive(Clone)]
+enum PaletteAction {
+    Command(SlashCommandInfo),
+    Choice { command: String, value: String },
+}
+
+#[derive(Clone)]
+struct PaletteRow {
+    label: String,
+    description: String,
+    hint: Option<String>,
+    disabled_reason: Option<String>,
+    action: PaletteAction,
+}
+
+struct PaletteModel {
+    rows: Vec<PaletteRow>,
+    note: Option<String>,
+}
+
+#[derive(Clone, Copy)]
+enum PaletteControl {
+    Previous,
+    Next,
+    Activate,
+    Complete,
+    Dismiss,
+}
 
 /// A transcript entry plus the local wall-clock time it first appeared
 /// (shown on hover) and the turn it belongs to (drives turn folding).
@@ -157,6 +213,20 @@ impl Backend {
         }
     }
 
+    fn adapter_commands(&self) -> Vec<SlashCommandInfo> {
+        match self {
+            Backend::Codex(_) => app_server::Session::adapter_commands(),
+            Backend::Claude(_) => stream_json::Session::adapter_commands(),
+        }
+    }
+
+    fn execute_slash_command(&mut self, name: &str, arguments: &str) -> SlashCommandOutcome {
+        match self {
+            Backend::Codex(session) => session.execute_slash_command(name, arguments),
+            Backend::Claude(session) => session.execute_slash_command(name, arguments),
+        }
+    }
+
     fn interrupt(&mut self) {
         match self {
             Backend::Codex(session) => session.interrupt(),
@@ -226,6 +296,18 @@ pub(crate) struct AgentPane {
     /// "Working for Ns" row renders at the transcript end; cleared into a
     /// permanent "Worked for Ns" fold header when the turn completes.
     working_started: Option<Instant>,
+    /// Provider discovery is a replacement snapshot; adapter/local entries
+    /// remain available independently of whether discovery has arrived.
+    provider_commands: Vec<SlashCommandInfo>,
+    provider_commands_ready: bool,
+    palette_selected: usize,
+    palette_dismissed: bool,
+    palette_scroll: ScrollHandle,
+    command_feedback: Option<CommandFeedback>,
+    command_queue: VecDeque<PendingSlashCommand>,
+    /// An accepted backend command starts the progress clock only after the
+    /// protocol reports a real turn, not when the request is written.
+    awaiting_command_turn: bool,
 }
 
 impl AgentPane {
@@ -251,6 +333,18 @@ impl AgentPane {
             // only a plain Enter sends.
             if matches!(event, InputEvent::PressEnter { shift: false, .. }) {
                 this.send_user_message(window, cx);
+            } else if matches!(event, InputEvent::Change) {
+                this.palette_selected = 0;
+                this.palette_dismissed = false;
+                if !matches!(
+                    this.command_feedback
+                        .as_ref()
+                        .map(|feedback| &feedback.kind),
+                    Some(CommandFeedbackKind::Queued)
+                ) {
+                    this.command_feedback = None;
+                }
+                cx.notify();
             }
         })
         .detach();
@@ -277,6 +371,14 @@ impl AgentPane {
             expanded_rows: HashSet::new(),
             turn_seq: 0,
             working_started: None,
+            provider_commands: Vec::new(),
+            provider_commands_ready: kind == AgentKind::Codex,
+            palette_selected: 0,
+            palette_dismissed: false,
+            palette_scroll: ScrollHandle::new(),
+            command_feedback: None,
+            command_queue: VecDeque::new(),
+            awaiting_command_turn: false,
         };
 
         this.start_session(None, cx);
@@ -344,7 +446,7 @@ impl AgentPane {
         let name = kind.display();
         let cwd = self.cwd.clone();
 
-        self.session_epoch += 1;
+        self.session_epoch = next_session_epoch(self.session_epoch);
         let epoch = self.session_epoch;
 
         let (tx, mut rx) = mpsc::unbounded::<Value>();
@@ -400,6 +502,15 @@ impl AgentPane {
                             return;
                         }
                         this.status = Status::Exited;
+                        this.awaiting_command_turn = false;
+                        if !this.command_queue.is_empty() {
+                            this.command_queue.clear();
+                            this.set_command_feedback(
+                                CommandFeedbackKind::Error,
+                                format!("Queued commands were cancelled because {name} exited."),
+                                cx,
+                            );
+                        }
                         this.finish_working(cx);
                         this.push(
                             ChatItem::Error {
@@ -413,6 +524,8 @@ impl AgentPane {
             }
             Err(err) => {
                 self.status = Status::Exited;
+                self.awaiting_command_turn = false;
+                self.command_queue.clear();
                 self.items.push(Entry {
                     at: Local::now().format("%H:%M").to_string(),
                     turn: self.turn_seq,
@@ -444,6 +557,12 @@ impl AgentPane {
 
     fn send_user_message(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.input.read(cx).text().to_string();
+
+        if parse_slash_command(&text).is_some() {
+            self.submit_current_slash(window, cx);
+            return;
+        }
+
         let text = text.trim().to_string();
 
         if text.is_empty() {
@@ -460,6 +579,15 @@ impl AgentPane {
     /// also used for UI-generated messages such as the `/effort` command.
     /// Returns false when the session isn't ready yet.
     fn send_text(&mut self, text: String, cx: &mut Context<Self>) -> bool {
+        if self.awaiting_command_turn {
+            self.set_command_feedback(
+                CommandFeedbackKind::Error,
+                "A command is starting; wait for its turn to begin.".to_string(),
+                cx,
+            );
+            return false;
+        }
+
         let settings = self.settings.clone();
         let outcome = match self.session.as_mut() {
             Some(session) => session.send_user_message(&text, &settings),
@@ -496,6 +624,517 @@ impl AgentPane {
         }
 
         true
+    }
+
+    fn submit_current_slash(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let input = self.input.read(cx).text().to_string();
+
+        if self.submit_slash_input(&input, cx) {
+            self.input
+                .update(cx, |input, cx| input.set_value("", window, cx));
+            self.palette_dismissed = false;
+            self.palette_selected = 0;
+        }
+    }
+
+    /// Route a leading slash before ordinary message handling. Every failure
+    /// returns false so the user's input stays available for correction.
+    fn submit_slash_input(&mut self, input: &str, cx: &mut Context<Self>) -> bool {
+        let Some(parsed) = parse_slash_command(input) else {
+            return false;
+        };
+        if parsed.name.is_empty() {
+            self.set_command_feedback(
+                CommandFeedbackKind::Error,
+                "Choose a slash command from the list.".to_string(),
+                cx,
+            );
+            return false;
+        }
+
+        let Some(command) = self
+            .command_catalog()
+            .into_iter()
+            .find(|command| command.name == parsed.name)
+        else {
+            self.set_command_feedback(
+                CommandFeedbackKind::Error,
+                format!("Unknown command: /{}", parsed.name),
+                cx,
+            );
+            return false;
+        };
+
+        if command.arguments == SlashCommandArguments::None && !parsed.arguments.trim().is_empty() {
+            self.set_command_feedback(
+                CommandFeedbackKind::Error,
+                format!("/{} does not accept arguments.", command.name),
+                cx,
+            );
+            return false;
+        }
+
+        if command.arguments == SlashCommandArguments::Choices {
+            if parsed.arguments.trim().is_empty() {
+                self.set_command_feedback(
+                    CommandFeedbackKind::Error,
+                    format!("Choose a value for /{}.", command.name),
+                    cx,
+                );
+                return false;
+            }
+
+            let choices = self.command_choices(&command.name);
+            match resolve_choice(&parsed.arguments, &choices) {
+                Ok(value) if command.name == "model" => {
+                    self.settings.model = Some(value.clone());
+                    self.set_command_feedback(
+                        CommandFeedbackKind::Notice,
+                        format!("Model set to {value}."),
+                        cx,
+                    );
+                    return true;
+                }
+                Ok(value) if command.name == "permissions" => {
+                    self.settings.approval = Some(value.clone());
+                    self.set_command_feedback(
+                        CommandFeedbackKind::Notice,
+                        format!("Permissions set to {value}."),
+                        cx,
+                    );
+                    return true;
+                }
+                Ok(_) => {}
+                Err(message) => {
+                    self.set_command_feedback(CommandFeedbackKind::Error, message, cx);
+                    return false;
+                }
+            }
+        }
+
+        match command.name.as_str() {
+            "new" | "clear" => {
+                if self.is_command_busy() {
+                    self.set_command_feedback(
+                        CommandFeedbackKind::Error,
+                        format!(
+                            "/{} is available only while the agent is idle.",
+                            command.name
+                        ),
+                        cx,
+                    );
+                    false
+                } else {
+                    self.reset_conversation(cx);
+                    true
+                }
+            }
+            "status" => {
+                self.show_status(cx);
+                true
+            }
+            "model" | "permissions" => false,
+            _ => self.route_backend_command(
+                PendingSlashCommand {
+                    name: command.name,
+                    arguments: parsed.arguments,
+                },
+                command.run_policy,
+                cx,
+            ),
+        }
+    }
+
+    fn route_backend_command(
+        &mut self,
+        command: PendingSlashCommand,
+        policy: SlashCommandRunPolicy,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.is_command_busy() {
+            return match policy {
+                SlashCommandRunPolicy::QueueUntilIdle => {
+                    let name = command.name.clone();
+                    self.command_queue.push_back(command);
+                    self.set_command_feedback(
+                        CommandFeedbackKind::Queued,
+                        format!(
+                            "Queued /{name} ({} command{} waiting).",
+                            self.command_queue.len(),
+                            if self.command_queue.len() == 1 {
+                                ""
+                            } else {
+                                "s"
+                            }
+                        ),
+                        cx,
+                    );
+                    true
+                }
+                SlashCommandRunPolicy::IdleOnly => {
+                    self.set_command_feedback(
+                        CommandFeedbackKind::Error,
+                        format!(
+                            "/{} is available only while the agent is idle.",
+                            command.name
+                        ),
+                        cx,
+                    );
+                    false
+                }
+                SlashCommandRunPolicy::Immediate => self.execute_backend_command(command, cx),
+            };
+        }
+
+        self.execute_backend_command(command, cx)
+    }
+
+    fn execute_backend_command(
+        &mut self,
+        command: PendingSlashCommand,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let outcome = match self.session.as_mut() {
+            Some(session) => session.execute_slash_command(&command.name, &command.arguments),
+            None => SlashCommandOutcome::NotReady,
+        };
+
+        match outcome {
+            SlashCommandOutcome::Accepted => {
+                self.history_dismissed = true;
+                self.awaiting_command_turn = true;
+                self.set_command_feedback(
+                    CommandFeedbackKind::Notice,
+                    format!("Starting /{}…", command.name),
+                    cx,
+                );
+                true
+            }
+            SlashCommandOutcome::Completed { message } => {
+                self.set_command_feedback(
+                    CommandFeedbackKind::Notice,
+                    message.unwrap_or_else(|| format!("/{} completed.", command.name)),
+                    cx,
+                );
+                true
+            }
+            SlashCommandOutcome::Rejected { message } => {
+                self.set_command_feedback(CommandFeedbackKind::Error, message, cx);
+                false
+            }
+            SlashCommandOutcome::NotReady => {
+                self.set_command_feedback(
+                    CommandFeedbackKind::Error,
+                    format!(
+                        "{} is still starting; try again in a moment.",
+                        self.kind.display()
+                    ),
+                    cx,
+                );
+                false
+            }
+        }
+    }
+
+    fn run_next_queued_command(&mut self, cx: &mut Context<Self>) {
+        if self.is_command_busy() {
+            return;
+        }
+        let Some(command) = self.command_queue.pop_front() else {
+            return;
+        };
+
+        if !self.execute_backend_command(command, cx) {
+            self.command_queue.clear();
+        }
+    }
+
+    fn reset_conversation(&mut self, cx: &mut Context<Self>) {
+        self.session = None;
+        self.items.clear();
+        self.settings = ThreadSettings::default();
+        self.models.clear();
+        self.expanded_groups.clear();
+        self.expanded_turns.clear();
+        self.expanded_rows.clear();
+        self.turn_seq = 0;
+        self.working_started = None;
+        reset_command_runtime(
+            self.kind == AgentKind::Codex,
+            &mut self.pending_approval,
+            &mut self.provider_commands,
+            &mut self.provider_commands_ready,
+            &mut self.command_queue,
+            &mut self.awaiting_command_turn,
+            &mut self.palette_selected,
+            &mut self.palette_dismissed,
+        );
+        self.command_feedback = None;
+
+        // History records belong to the provider and remain intact; only the
+        // live backend and this tab's conversation presentation are reset.
+        self.start_session(None, cx);
+    }
+
+    fn show_status(&mut self, cx: &mut Context<Self>) {
+        let status = match self.status {
+            Status::Starting => "starting",
+            Status::Idle => "idle",
+            Status::Running => "running",
+            Status::Exited => "exited",
+        };
+        let mut fields = vec![
+            format!("backend={}", self.kind.display()),
+            format!("status={status}"),
+        ];
+
+        for (name, value) in [
+            ("model", self.settings.model.as_deref()),
+            ("permissions", self.settings.approval.as_deref()),
+            ("sandbox", self.settings.sandbox.as_deref()),
+            ("effort", self.settings.effort.as_deref()),
+            ("tier", self.settings.tier.as_deref()),
+        ] {
+            if let Some(value) = value {
+                fields.push(format!("{name}={value}"));
+            }
+        }
+        if !self.command_queue.is_empty() {
+            fields.push(format!("queued={}", self.command_queue.len()));
+        }
+
+        self.set_command_feedback(CommandFeedbackKind::Notice, fields.join(" · "), cx);
+    }
+
+    fn set_command_feedback(
+        &mut self,
+        kind: CommandFeedbackKind,
+        message: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.command_feedback = Some(CommandFeedback { kind, message });
+        cx.notify();
+    }
+
+    fn is_command_busy(&self) -> bool {
+        self.status == Status::Running || self.awaiting_command_turn
+    }
+
+    fn command_catalog(&self) -> Vec<SlashCommandInfo> {
+        let adapter = self
+            .session
+            .as_ref()
+            .map(Backend::adapter_commands)
+            .unwrap_or_else(|| match self.kind {
+                AgentKind::Codex => app_server::Session::adapter_commands(),
+                AgentKind::Claude => stream_json::Session::adapter_commands(),
+            });
+
+        merge_catalog(local_commands(), adapter, self.provider_commands.clone())
+    }
+
+    fn command_choices(&self, command: &str) -> Vec<(String, String)> {
+        match command {
+            "model" => self
+                .models
+                .iter()
+                .map(|model| (model.model.clone(), model.display.clone()))
+                .collect(),
+            "permissions" => match self.kind {
+                AgentKind::Codex => app_server::APPROVAL_OPTIONS
+                    .iter()
+                    .map(|value| (value.to_string(), value.to_string()))
+                    .collect(),
+                AgentKind::Claude => stream_json::PERMISSION_OPTIONS
+                    .iter()
+                    .map(|value| (value.to_string(), value.to_string()))
+                    .collect(),
+            },
+            _ => Vec::new(),
+        }
+    }
+
+    fn palette_model(&self, cx: &Context<Self>) -> Option<PaletteModel> {
+        if self.palette_dismissed {
+            return None;
+        }
+
+        let input = self.input.read(cx);
+        let text = input.text().to_string();
+        let parsed = parse_slash_command(&text)?;
+        let cursor = input.cursor();
+        let catalog = self.command_catalog();
+
+        if parsed.has_argument_separator {
+            let command = catalog.iter().find(|command| command.name == parsed.name)?;
+
+            if command.arguments != SlashCommandArguments::Choices {
+                return None;
+            }
+
+            let query = parsed.arguments.to_ascii_lowercase();
+            let rows = self
+                .command_choices(&command.name)
+                .into_iter()
+                .filter(|(value, label)| {
+                    query.is_empty()
+                        || value.to_ascii_lowercase().contains(&query)
+                        || label.to_ascii_lowercase().contains(&query)
+                })
+                .map(|(value, label)| PaletteRow {
+                    description: value.clone(),
+                    label,
+                    hint: None,
+                    disabled_reason: None,
+                    action: PaletteAction::Choice {
+                        command: command.name.clone(),
+                        value,
+                    },
+                })
+                .collect::<Vec<_>>();
+
+            return Some(PaletteModel {
+                note: rows.is_empty().then(|| "No matching values".to_string()),
+                rows,
+            });
+        }
+
+        // Moving the caret into later prose must not turn an ordinary edit
+        // into palette navigation; only the first slash token owns the keys.
+        if cursor > 1 + parsed.name.len() {
+            return None;
+        }
+
+        let rows = filter_catalog(&catalog, &parsed.name)
+            .into_iter()
+            .map(|command| {
+                let disabled_reason = if command.run_policy == SlashCommandRunPolicy::IdleOnly
+                    && self.is_command_busy()
+                {
+                    Some("Available when the agent is idle".to_string())
+                } else if command.source != SlashCommandSource::Local
+                    && matches!(self.status, Status::Starting | Status::Exited)
+                {
+                    Some(match self.status {
+                        Status::Starting => "Agent is still starting".to_string(),
+                        Status::Exited => "Agent has exited".to_string(),
+                        _ => unreachable!(),
+                    })
+                } else {
+                    None
+                };
+
+                PaletteRow {
+                    label: format!("/{}", command.name),
+                    description: command.description.clone(),
+                    hint: command.argument_hint.clone(),
+                    disabled_reason,
+                    action: PaletteAction::Command(command),
+                }
+            })
+            .collect::<Vec<_>>();
+        let note = if rows.is_empty() {
+            Some("No matching commands".to_string())
+        } else if self.kind == AgentKind::Claude && !self.provider_commands_ready {
+            Some("Claude command discovery is still loading".to_string())
+        } else {
+            None
+        };
+
+        Some(PaletteModel { rows, note })
+    }
+
+    fn handle_palette_control(
+        &mut self,
+        control: PaletteControl,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(model) = self.palette_model(cx) else {
+            cx.propagate();
+            return;
+        };
+
+        cx.stop_propagation();
+
+        match control {
+            PaletteControl::Previous | PaletteControl::Next => {
+                let direction = match control {
+                    PaletteControl::Previous => PaletteDirection::Previous,
+                    PaletteControl::Next => PaletteDirection::Next,
+                    _ => unreachable!(),
+                };
+
+                if let Some(selected) =
+                    move_palette_selection(self.palette_selected, model.rows.len(), direction)
+                {
+                    self.palette_selected = selected;
+                    self.palette_scroll.scroll_to_item(self.palette_selected);
+                    cx.notify();
+                }
+            }
+            PaletteControl::Activate => {
+                if model.rows.is_empty() {
+                    self.submit_current_slash(window, cx);
+                } else {
+                    self.activate_palette_index(self.palette_selected, true, window, cx);
+                }
+            }
+            PaletteControl::Complete => {
+                self.activate_palette_index(self.palette_selected, false, window, cx);
+            }
+            PaletteControl::Dismiss => {
+                self.palette_dismissed = true;
+                cx.notify();
+            }
+        }
+    }
+
+    fn activate_palette_index(
+        &mut self,
+        index: usize,
+        execute: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(row) = self
+            .palette_model(cx)
+            .and_then(|model| model.rows.get(index).cloned())
+        else {
+            return;
+        };
+
+        if let Some(reason) = row.disabled_reason {
+            self.set_command_feedback(CommandFeedbackKind::Error, reason, cx);
+            return;
+        }
+
+        let (text, can_execute) = match row.action {
+            PaletteAction::Command(command) => {
+                let needs_arguments = command.arguments != SlashCommandArguments::None;
+                (
+                    format!(
+                        "/{}{}",
+                        command.name,
+                        if needs_arguments { " " } else { "" }
+                    ),
+                    !needs_arguments,
+                )
+            }
+            PaletteAction::Choice { command, value } => (format!("/{command} {value}"), true),
+        };
+
+        self.input.update(cx, |input, cx| {
+            input.set_value(text.clone(), window, cx);
+            input.set_selected_range(text.len()..text.len(), cx);
+        });
+        self.palette_selected = 0;
+
+        if execute && can_execute {
+            self.submit_current_slash(window, cx);
+        } else {
+            cx.notify();
+        }
     }
 
     /// Start the turn clock and drive the once-a-second repaint of the live
@@ -571,18 +1210,68 @@ impl AgentPane {
                 let effort = settings.effort.clone().or(self.settings.effort.take());
 
                 self.settings = ThreadSettings { effort, ..settings };
-                self.status = Status::Idle;
+                // Claude's first-turn init confirms settings after its
+                // synthetic TurnStarted event; that confirmation must not
+                // make an active turn look idle and admit overlapping work.
+                if self.status != Status::Running {
+                    self.status = Status::Idle;
+                }
                 cx.notify();
             }
             SessionEvent::Models(models) => {
                 self.models = models;
                 cx.notify();
             }
+            SessionEvent::Commands(commands) => {
+                self.provider_commands = commands;
+                self.provider_commands_ready = true;
+                self.palette_selected = 0;
+                cx.notify();
+            }
+            SessionEvent::SlashCommandResult { name, outcome } => match outcome {
+                SlashCommandOutcome::Accepted => {
+                    self.set_command_feedback(
+                        CommandFeedbackKind::Notice,
+                        format!("/{name} accepted."),
+                        cx,
+                    );
+                }
+                SlashCommandOutcome::Completed { message } => {
+                    self.set_command_feedback(
+                        CommandFeedbackKind::Notice,
+                        message.unwrap_or_else(|| format!("/{name} completed.")),
+                        cx,
+                    );
+                    if self.awaiting_command_turn && self.status != Status::Running {
+                        self.awaiting_command_turn = false;
+                        self.run_next_queued_command(cx);
+                    }
+                }
+                SlashCommandOutcome::Rejected { message } => {
+                    self.awaiting_command_turn = false;
+                    self.set_command_feedback(CommandFeedbackKind::Error, message, cx);
+                    self.run_next_queued_command(cx);
+                }
+                SlashCommandOutcome::NotReady => {
+                    self.awaiting_command_turn = false;
+                    self.set_command_feedback(
+                        CommandFeedbackKind::Error,
+                        format!("{} is not ready.", self.kind.display()),
+                        cx,
+                    );
+                    self.run_next_queued_command(cx);
+                }
+            },
             SessionEvent::TurnStarted => {
+                if claim_command_turn_start(&mut self.awaiting_command_turn) {
+                    self.turn_seq += 1;
+                    self.start_working(cx);
+                }
                 self.status = Status::Running;
                 cx.notify();
             }
             SessionEvent::TurnCompleted { error } => {
+                self.awaiting_command_turn = false;
                 self.finish_working(cx);
                 if self.status == Status::Running {
                     self.status = Status::Idle;
@@ -590,6 +1279,7 @@ impl AgentPane {
                 if let Some(text) = error {
                     self.push(ChatItem::Error { text }, cx);
                 }
+                self.run_next_queued_command(cx);
                 cx.notify();
             }
             SessionEvent::ItemStarted(item) => self.start_item(item, cx),
@@ -625,15 +1315,38 @@ impl AgentPane {
                 cx.notify();
             }
             SessionEvent::Error { message, fatal } => {
+                let cancelled_queue = fatal && !self.command_queue.is_empty();
                 if fatal {
                     self.status = Status::Exited;
+                    self.awaiting_command_turn = false;
+                    self.command_queue.clear();
+                } else if self.awaiting_command_turn {
+                    self.awaiting_command_turn = false;
                 }
                 self.push(ChatItem::Error { text: message }, cx);
+                if cancelled_queue {
+                    self.set_command_feedback(
+                        CommandFeedbackKind::Error,
+                        "Queued commands were cancelled because the session failed.".to_string(),
+                        cx,
+                    );
+                } else if !fatal {
+                    self.run_next_queued_command(cx);
+                }
             }
             SessionEvent::History(sessions) => {
                 // Pages accumulate: the first page lands in an empty list,
-                // later cursor pages extend it.
-                self.history.extend(sessions);
+                // later cursor pages extend it. A /new backend may publish
+                // the first page again, so ids are deduplicated in place.
+                for session in sessions {
+                    if !self
+                        .history
+                        .iter()
+                        .any(|existing| existing.id == session.id)
+                    {
+                        self.history.push(session);
+                    }
+                }
                 cx.notify();
             }
             SessionEvent::Replay(items) => self.apply_replay(items, cx),
@@ -996,6 +1709,33 @@ impl gpui::Focusable for AgentPane {
 impl Render for AgentPane {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let collapse = cx.global::<AppSettings>().collapse_tool_calls;
+        let command_palette = self.render_command_palette(cx);
+        let command_feedback = self.command_feedback.as_ref().map(|feedback| {
+            let (color, label) = match feedback.kind {
+                CommandFeedbackKind::Notice => (cx.theme().primary, "NOTICE"),
+                CommandFeedbackKind::Error => (cx.theme().danger, "ERROR"),
+                CommandFeedbackKind::Queued => (cx.theme().warning, "QUEUED"),
+            };
+
+            h_flex()
+                .w_full()
+                .gap_2()
+                .px_3()
+                .pb_2()
+                .text_xs()
+                .child(
+                    div()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(color)
+                        .child(label),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(feedback.message.clone()),
+                )
+        });
 
         // Transcript rows, one folded/expanded section per turn (entries are
         // tagged with a monotonic turn id, so turns are contiguous slices).
@@ -1176,64 +1916,236 @@ impl Render for AgentPane {
                 // border/shadow/surface contrast, exactly like t3code's
                 // context strip (mirrored to the top edge).
                 div().w_full().px_3().pb_3().pt_1().children(history).child(
-                    v_flex()
-                        .w_full()
-                        .when(layered, |this| this.mt(px(-14.)))
-                        .rounded(px(16.))
-                        .overflow_hidden()
-                        .border_1()
-                        .border_color(cx.theme().border)
-                        .bg(cx.theme().popover)
-                        .shadow_md()
-                        .children(approval)
+                    div()
+                        .relative()
                         .child(
-                            div()
-                                .px_3()
-                                .pt_3()
-                                .pb_2()
-                                // The prompt editor reads larger than the
-                                // chrome around it (t3code uses 16px over
-                                // a 14px UI); +2 keeps that ratio at any
-                                // configured agent font size.
-                                .text_size(px(
-                                    cx.global::<AppSettings>().agent_font_size as f32 + 2.0
-                                ))
-                                .child(Input::new(&self.input).appearance(false)),
-                        )
-                        .child(
-                            h_flex()
+                            v_flex()
                                 .w_full()
-                                .px_2p5()
-                                .pb_2p5()
-                                .pt_0p5()
-                                .items_center()
-                                .justify_between()
-                                .gap_2()
-                                .child(div().flex_1().min_w_0().child(self.render_settings_row(cx)))
-                                // Stop replaces Send in place while a
-                                // turn runs.
-                                .child(if running {
-                                    Button::new("agent-send")
-                                        .danger()
-                                        .rounded(px(999.))
-                                        .child(div().size(px(10.)).rounded_sm().bg(gpui::white()))
-                                        .on_click(cx.listener(|this, _, _, cx| this.interrupt(cx)))
-                                } else {
-                                    Button::new("agent-send")
-                                        .primary()
-                                        .rounded(px(999.))
-                                        .icon(IconName::ArrowUp)
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.send_user_message(window, cx)
-                                        }))
-                                }),
-                        ),
+                                .when(layered, |this| this.mt(px(-14.)))
+                                .rounded(px(16.))
+                                .overflow_hidden()
+                                .border_1()
+                                .border_color(cx.theme().border)
+                                .bg(cx.theme().popover)
+                                .shadow_md()
+                                .children(approval)
+                                .child(
+                                    div()
+                                        .px_3()
+                                        .pt_3()
+                                        .pb_2()
+                                        // GPUI resolves these keystrokes
+                                        // into Input actions before raw
+                                        // key listeners run. Capturing
+                                        // the actions lets the palette
+                                        // own navigation while visible;
+                                        // the handler propagates them
+                                        // unchanged when it is closed.
+                                        .capture_action(cx.listener(
+                                            |this, _: &MoveUp, window, cx| {
+                                                this.handle_palette_control(
+                                                    PaletteControl::Previous,
+                                                    window,
+                                                    cx,
+                                                )
+                                            },
+                                        ))
+                                        .capture_action(cx.listener(
+                                            |this, _: &MoveDown, window, cx| {
+                                                this.handle_palette_control(
+                                                    PaletteControl::Next,
+                                                    window,
+                                                    cx,
+                                                )
+                                            },
+                                        ))
+                                        .capture_action(cx.listener(
+                                            |this, action: &Enter, window, cx| {
+                                                if action.shift || action.secondary {
+                                                    cx.propagate();
+                                                } else {
+                                                    this.handle_palette_control(
+                                                        PaletteControl::Activate,
+                                                        window,
+                                                        cx,
+                                                    );
+                                                }
+                                            },
+                                        ))
+                                        .capture_action(cx.listener(
+                                            |this, _: &IndentInline, window, cx| {
+                                                this.handle_palette_control(
+                                                    PaletteControl::Complete,
+                                                    window,
+                                                    cx,
+                                                )
+                                            },
+                                        ))
+                                        .capture_action(cx.listener(
+                                            |this, _: &Escape, window, cx| {
+                                                this.handle_palette_control(
+                                                    PaletteControl::Dismiss,
+                                                    window,
+                                                    cx,
+                                                )
+                                            },
+                                        ))
+                                        // The prompt editor reads larger than the
+                                        // chrome around it (t3code uses 16px over
+                                        // a 14px UI); +2 keeps that ratio at any
+                                        // configured agent font size.
+                                        .text_size(px(cx.global::<AppSettings>().agent_font_size
+                                            as f32
+                                            + 2.0))
+                                        .child(Input::new(&self.input).appearance(false)),
+                                )
+                                .children(command_feedback)
+                                .child(
+                                    h_flex()
+                                        .w_full()
+                                        .px_2p5()
+                                        .pb_2p5()
+                                        .pt_0p5()
+                                        .items_center()
+                                        .justify_between()
+                                        .gap_2()
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .min_w_0()
+                                                .child(self.render_settings_row(cx)),
+                                        )
+                                        // Stop replaces Send in place while a
+                                        // turn runs.
+                                        .child(if running {
+                                            Button::new("agent-send")
+                                                .danger()
+                                                .rounded(px(999.))
+                                                .child(
+                                                    div()
+                                                        .size(px(10.))
+                                                        .rounded_sm()
+                                                        .bg(gpui::white()),
+                                                )
+                                                .on_click(
+                                                    cx.listener(|this, _, _, cx| {
+                                                        this.interrupt(cx)
+                                                    }),
+                                                )
+                                        } else {
+                                            Button::new("agent-send")
+                                                .primary()
+                                                .rounded(px(999.))
+                                                .icon(IconName::ArrowUp)
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    this.send_user_message(window, cx)
+                                                }))
+                                        }),
+                                ),
+                        )
+                        .children(command_palette.map(|palette| {
+                            div()
+                                .absolute()
+                                .left_0()
+                                .right_0()
+                                .bottom(relative(1.))
+                                .mb_2()
+                                .occlude()
+                                .child(palette)
+                        })),
                 )
             })
     }
 }
 
 impl AgentPane {
+    fn render_command_palette(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let model = self.palette_model(cx)?;
+        let selected = self
+            .palette_selected
+            .min(model.rows.len().saturating_sub(1));
+        let rows = model
+            .rows
+            .into_iter()
+            .enumerate()
+            .map(|(index, row)| {
+                let disabled = row.disabled_reason.is_some();
+                let detail = row.disabled_reason.clone().unwrap_or(row.description);
+                let background = (index == selected).then(|| cx.theme().muted.opacity(0.7));
+
+                div()
+                    .id(("agent-slash-command", index))
+                    .h(px(48.))
+                    .flex_none()
+                    .px_3()
+                    .py_1p5()
+                    .rounded(cx.theme().radius)
+                    .when_some(background, |this, color| this.bg(color))
+                    .when(disabled, |this| this.opacity(0.5))
+                    .when(!disabled, |this| {
+                        this.hover(|style| style.bg(cx.theme().muted.opacity(0.45)))
+                    })
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.activate_palette_index(index, true, window, cx)
+                    }))
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .items_center()
+                            .justify_between()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(cx.theme().foreground)
+                                    .child(row.label),
+                            )
+                            .children(row.hint.map(|hint| {
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground.opacity(0.75))
+                                    .child(hint)
+                            })),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .truncate()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(detail),
+                    )
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
+
+        let note = model.note.map(|note| {
+            div()
+                .px_3()
+                .py_2()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground.opacity(0.75))
+                .child(note)
+        });
+
+        Some(
+            v_flex()
+                .id("agent-slash-command-palette")
+                .w_full()
+                .max_h(px(9. * 48. + 36.))
+                .overflow_y_scroll()
+                .track_scroll(&self.palette_scroll)
+                .p_1()
+                .rounded(px(12.))
+                .border_1()
+                .border_color(cx.theme().border)
+                .bg(cx.theme().popover)
+                .shadow_lg()
+                .children(rows)
+                .children(note)
+                .into_any_element(),
+        )
+    }
+
     /// Render one turn: user rows, then (for settled turns) a clickable
     /// "Worked for Ns" fold header hiding the intermediate work rows by
     /// default, then the final reply. Running turns render chronologically.
