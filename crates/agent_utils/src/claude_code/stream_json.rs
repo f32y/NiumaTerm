@@ -15,16 +15,24 @@ use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead as _, BufReader, Write as _};
 use std::os::windows::process::CommandExt as _;
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::thread;
+use std::{fs, thread};
 
 use serde_json::{Value, json};
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use crate::chat::{Event, Item, ModelInfo, SendOutcome, ThreadSettings};
+use crate::hook_store::home_dir;
 
 /// Wire values for `--permission-mode` / the `set_permission_mode` control
-/// request.
-pub const PERMISSION_OPTIONS: [&str; 4] = ["default", "acceptEdits", "plan", "bypassPermissions"];
+/// request. `auto` is the CLI's dynamic mode (verified accepted by
+/// `set_permission_mode` on 2.1.222).
+pub const PERMISSION_OPTIONS: [&str; 5] = [
+    "default",
+    "auto",
+    "acceptEdits",
+    "plan",
+    "bypassPermissions",
+];
 
 const INIT_REQUEST_ID: &str = "nmt-init";
 
@@ -339,18 +347,23 @@ impl Session {
             self.session_id = Some(session_id.to_string());
         }
 
-        // The initialize handshake normally seeds the pickers before the
-        // first turn; `init` — emitted when the first turn opens — is the
-        // fallback for a CLI that didn't answer it, and is otherwise skipped
-        // so it can't clobber the user's picks.
-        if self.ready {
-            return Vec::new();
-        }
-        self.ready = true;
-
-        let model = message["model"].as_str().map(str::to_owned);
+        // `init` — emitted when the first turn opens — carries the session's
+        // ACTUAL permission mode, which the initialize response does not
+        // (its value is this client's best guess from config). Always
+        // applied: any user pick was already sent as a control request
+        // before the message that opened this turn, so `init` reports the
+        // post-change state and cannot clobber it. The model is only taken
+        // before the handshake settled: `init` reports the resolved model id
+        // (e.g. `claude-opus-5[1m]`), which is not a catalog wire value, so
+        // adopting it later would break the catalog-driven picker display.
+        let model = if self.ready {
+            self.applied_model.clone()
+        } else {
+            message["model"].as_str().map(str::to_owned)
+        };
         let permission = message["permissionMode"].as_str().map(str::to_owned);
 
+        self.ready = true;
         self.applied_model = model.clone();
         self.applied_permission = permission.clone();
 
@@ -650,18 +663,25 @@ impl Session {
         }
 
         // The initialize response arrives before any turn and carries the
-        // model catalog, so the pickers show real values immediately. The
-        // session starts on the catalog's "default" entry and the default
-        // permission mode (spawn passes no --permission-mode).
+        // model catalog, so the pickers show real values immediately. It
+        // does NOT report the session's current permission mode, and the CLI
+        // resolves its startup mode from user config — so the initial value
+        // comes from the same config file (`permissions.defaultMode`); the
+        // first turn's `init` message then confirms or corrects it. The
+        // session starts on the catalog's "default" entry (spawn passes no
+        // --model).
         if response["request_id"].as_str() == Some(INIT_REQUEST_ID) && !self.ready {
+            let permission =
+                Some(configured_permission_mode().unwrap_or_else(|| "default".to_string()));
+
             self.ready = true;
             self.applied_model = Some("default".to_string());
-            self.applied_permission = Some("default".to_string());
+            self.applied_permission = permission.clone();
 
             return vec![
                 Event::Ready(ThreadSettings {
                     model: Some("default".to_string()),
-                    approval: Some("default".to_string()),
+                    approval: permission,
                     ..ThreadSettings::default()
                 }),
                 Event::Models(parse_models(&response["response"]["models"])),
@@ -670,6 +690,20 @@ impl Session {
 
         Vec::new()
     }
+}
+
+/// The permission mode the CLI will start in, from `~/.claude/settings.json`
+/// (`permissions.defaultMode`). The protocol has no way to query the mode
+/// before the first turn, so this mirrors the CLI's own config resolution;
+/// project-level overrides are not consulted (rare, and the first turn's
+/// `init` message corrects any mismatch).
+fn configured_permission_mode() -> Option<String> {
+    let path = home_dir()?.join(".claude").join("settings.json");
+    let settings: Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
+
+    settings["permissions"]["defaultMode"]
+        .as_str()
+        .map(str::to_owned)
 }
 
 /// Map a tool-use block to a transcript item: Bash becomes a command card,

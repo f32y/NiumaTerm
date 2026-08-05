@@ -564,7 +564,13 @@ impl AgentPane {
             SessionEvent::Ready(settings) => {
                 // Seed the settings dropdowns with the thread's effective
                 // configuration so they show real values before any change.
-                self.settings = settings;
+                // Ready can fire again mid-session (Claude's first-turn init
+                // confirms the permission mode); a payload without effort
+                // keeps the user's pick — Claude never reports effort, so
+                // None there means "unknown", never "reset".
+                let effort = settings.effort.clone().or(self.settings.effort.take());
+
+                self.settings = ThreadSettings { effort, ..settings };
                 self.status = Status::Idle;
                 cx.notify();
             }
@@ -1901,7 +1907,13 @@ impl AgentPane {
                 "agent-effort",
                 "effort",
                 IconName::Gauge,
-                self.settings.effort.clone(),
+                // The protocol never reports the session's current effort;
+                // until the user picks one, the honest label is the CLI's
+                // own per-model default rather than an empty dash.
+                self.settings
+                    .effort
+                    .clone()
+                    .or_else(|| Some("default".to_string())),
                 effort_options,
                 |this, value, cx| {
                     this.settings.effort = Some(value.clone());
