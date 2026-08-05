@@ -747,6 +747,19 @@ fn session_item_id(item: &SessionItem) -> Option<&str> {
     }
 }
 
+/// Icon mirroring the current permission/approval choice (t3code's runtime
+/// mode iconography): closed lock = prompts on, pen = edits auto-approved,
+/// pencil-ruler = plan mode, open lock = no prompts. Covers both Claude's
+/// permission modes and Codex's approval policies.
+fn permission_icon(value: Option<&str>) -> IconName {
+    match value {
+        Some("acceptEdits") => IconName::PenLine,
+        Some("plan") => IconName::PencilRuler,
+        Some("bypassPermissions") | Some("never") => IconName::LockOpen,
+        _ => IconName::Lock,
+    }
+}
+
 impl gpui::Focusable for AgentPane {
     fn focus_handle(&self, _cx: &gpui::App) -> FocusHandle {
         self.focus.clone()
@@ -905,15 +918,22 @@ impl Render for AgentPane {
                             div()
                                 .px_3()
                                 .pt_3()
-                                .pb_1()
+                                .pb_2()
+                                // The prompt editor reads larger than the
+                                // chrome around it (t3code uses 16px over a
+                                // 14px UI); +2 keeps that ratio at any
+                                // configured agent font size.
+                                .text_size(px(
+                                    cx.global::<AppSettings>().agent_font_size as f32 + 2.0
+                                ))
                                 .child(Input::new(&self.input).appearance(false)),
                         )
                         .child(
                             h_flex()
                                 .w_full()
-                                .px_2()
-                                .pb_2()
-                                .pt_1()
+                                .px_2p5()
+                                .pb_2p5()
+                                .pt_0p5()
                                 .items_center()
                                 .justify_between()
                                 .gap_2()
@@ -1445,6 +1465,7 @@ impl AgentPane {
                 cx,
                 "agent-model",
                 "model",
+                IconName::Cpu,
                 self.settings.model.clone(),
                 model_options,
                 |this, value| this.settings.model = Some(value),
@@ -1453,6 +1474,7 @@ impl AgentPane {
                 cx,
                 "agent-permission",
                 "permissions",
+                permission_icon(self.settings.approval.as_deref()),
                 self.settings.approval.clone(),
                 permission_options,
                 |this, value| this.settings.approval = Some(value),
@@ -1503,6 +1525,7 @@ impl AgentPane {
                 cx,
                 "agent-model",
                 "model",
+                IconName::Cpu,
                 self.settings.model.clone(),
                 model_options,
                 |this, value| {
@@ -1524,6 +1547,7 @@ impl AgentPane {
                 cx,
                 "agent-approval",
                 "approval",
+                permission_icon(self.settings.approval.as_deref()),
                 self.settings.approval.clone(),
                 approval_options,
                 |this, value| this.settings.approval = Some(value),
@@ -1532,6 +1556,7 @@ impl AgentPane {
                 cx,
                 "agent-sandbox",
                 "sandbox",
+                IconName::Shield,
                 self.settings.sandbox.clone(),
                 sandbox_options,
                 |this, value| this.settings.sandbox = Some(value),
@@ -1540,6 +1565,7 @@ impl AgentPane {
                 cx,
                 "agent-effort",
                 "effort",
+                IconName::Gauge,
                 self.settings.effort.clone(),
                 effort_options,
                 |this, value| this.settings.effort = Some(value),
@@ -1548,6 +1574,7 @@ impl AgentPane {
                 cx,
                 "agent-tier",
                 "tier",
+                IconName::Zap,
                 Some(self.settings.tier.clone().unwrap_or_default()),
                 tier_options,
                 |this, value| {
@@ -1556,13 +1583,15 @@ impl AgentPane {
             ))
     }
 
-    /// One dropdown: a ghost button labeled `name: current` whose menu lists
-    /// `(wire value, display label)` options; picking one stores the wire
-    /// value via `set`.
+    /// One dropdown: a ghost button showing `icon · current value · chevron`
+    /// (t3code's composer-control look — the icon carries the control's
+    /// meaning, the tooltip its name) whose menu lists `(wire value, display
+    /// label)` options; picking one stores the wire value via `set`.
     fn setting_picker(
         cx: &mut Context<Self>,
         id: &'static str,
         name: &'static str,
+        icon: IconName,
         current: Option<String>,
         options: Vec<(String, String)>,
         set: fn(&mut Self, String),
@@ -1583,8 +1612,24 @@ impl AgentPane {
 
         Button::new(id)
             .ghost()
-            .xsmall()
-            .child(div().text_xs().child(format!("{name}: {current_label}")))
+            .small()
+            .tooltip(name)
+            .child(
+                h_flex()
+                    .gap_1p5()
+                    .items_center()
+                    .child(
+                        Icon::new(icon)
+                            .size_4()
+                            .text_color(cx.theme().muted_foreground.opacity(0.8)),
+                    )
+                    .child(div().text_sm().child(current_label))
+                    .child(
+                        Icon::new(IconName::ChevronDown)
+                            .size_3()
+                            .text_color(cx.theme().muted_foreground.opacity(0.7)),
+                    ),
+            )
             // Anchored bottom-left so the menu opens upward — the row sits at
             // the bottom edge of the pane.
             .dropdown_menu_with_anchor(gpui::Anchor::BottomLeft, move |menu, _, _| {
