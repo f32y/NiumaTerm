@@ -1492,6 +1492,9 @@ pub fn settings_view(cx: &App) -> Settings {
     Settings::new("app-settings")
         .sidebar_width(px(240.0))
         .sidebar_style(&sidebar_style)
+        // Each subcategory is its own page; the alternative scrolls the
+        // whole category top to bottom.
+        .single_group_pages(true)
         .page(
             SettingPage::new("Terminal").default_open(true).group(
                 SettingGroup::new()
