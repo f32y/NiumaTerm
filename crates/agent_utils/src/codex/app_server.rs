@@ -432,6 +432,7 @@ fn parse_models(result: &Value) -> Vec<ModelInfo> {
                         display,
                         tiers,
                         default_tier,
+                        efforts: Vec::new(),
                     })
                 })
                 .collect()
