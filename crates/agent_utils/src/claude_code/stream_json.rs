@@ -13,6 +13,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{BufRead as _, BufReader, Write as _};
+use std::iter::once;
 use std::os::windows::process::CommandExt as _;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::{fs, thread};
@@ -80,6 +81,9 @@ pub struct Session {
     pending_tools: HashMap<String, Item>,
     item_seq: u64,
     active_slash_command: Option<String>,
+    /// A structured initialize catalog carries richer metadata than the
+    /// string-only first-turn fallback and must remain authoritative.
+    structured_commands_published: bool,
 }
 
 impl Drop for Session {
@@ -193,6 +197,7 @@ impl Session {
             pending_tools: HashMap::new(),
             item_seq: 0,
             active_slash_command: None,
+            structured_commands_published: false,
         };
 
         session.send(json!({
@@ -417,12 +422,14 @@ impl Session {
             ..ThreadSettings::default()
         })];
 
-        // `system/init` is the authoritative snapshot. Older Claude versions
-        // omit the field; publishing an empty replacement ends the loading
-        // state without fabricating commands or opening a warm-up turn.
-        events.push(Event::Commands(parse_slash_commands(
+        // Older Claude versions only reveal this string catalog when the
+        // first turn opens. It must not erase richer initialize metadata.
+        if let Some(commands) = legacy_command_catalog(
+            self.structured_commands_published,
             &message["slash_commands"],
-        )));
+        ) {
+            events.push(Event::Commands(commands));
+        }
 
         events
     }
@@ -737,10 +744,10 @@ impl Session {
                 Event::Models(parse_models(&response["response"]["models"])),
             ];
 
-            if !response["response"]["slash_commands"].is_null() {
-                events.push(Event::Commands(parse_slash_commands(
-                    &response["response"]["slash_commands"],
-                )));
+            if let Some((commands, structured)) = initialize_command_catalog(&response["response"])
+            {
+                self.structured_commands_published = structured;
+                events.push(Event::Commands(commands));
             }
 
             return events;
@@ -780,54 +787,84 @@ fn claude_result_error(message: &Value) -> Option<String> {
     )
 }
 
+/// Prefer the current structured initialize field while accepting the older
+/// control-response spelling. The boolean tells first-turn handling whether
+/// a later string-only catalog is allowed to replace this result.
+fn initialize_command_catalog(response: &Value) -> Option<(Vec<SlashCommandInfo>, bool)> {
+    if !response["commands"].is_null() {
+        Some((parse_slash_commands(&response["commands"]), true))
+    } else if !response["slash_commands"].is_null() {
+        Some((parse_slash_commands(&response["slash_commands"]), false))
+    } else {
+        None
+    }
+}
+
+fn legacy_command_catalog(
+    structured_commands_published: bool,
+    commands: &Value,
+) -> Option<Vec<SlashCommandInfo>> {
+    (!structured_commands_published).then(|| parse_slash_commands(commands))
+}
+
 /// Claude versions have emitted both string entries and richer objects. The
-/// parser accepts both while enforcing the single-token name the composer
-/// can address. A new event is a complete replacement snapshot.
+/// parser accepts both and expands aliases while enforcing the single-token
+/// names the composer can address. A new event is a complete replacement.
 fn parse_slash_commands(commands: &Value) -> Vec<SlashCommandInfo> {
     let mut seen = HashSet::new();
+    let mut parsed = Vec::new();
 
-    commands
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|entry| {
-            let raw_name = entry
-                .as_str()
-                .or_else(|| entry["name"].as_str())
-                .or_else(|| entry["command"].as_str())?;
+    for entry in commands.as_array().into_iter().flatten() {
+        let Some(raw_name) = entry
+            .as_str()
+            .or_else(|| entry["name"].as_str())
+            .or_else(|| entry["command"].as_str())
+        else {
+            continue;
+        };
+        let canonical = raw_name.trim().trim_start_matches('/').to_ascii_lowercase();
+        let argument_hint = entry["argumentHint"]
+            .as_str()
+            .or_else(|| entry["argument_hint"].as_str())
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned);
+        let description = entry["description"]
+            .as_str()
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("Run Claude's /{canonical} command"));
+        let aliases = entry["aliases"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str);
+
+        for raw_name in once(raw_name).chain(aliases) {
             let name = raw_name.trim().trim_start_matches('/').to_ascii_lowercase();
 
             if name.is_empty()
                 || name.chars().any(char::is_whitespace)
                 || !seen.insert(name.clone())
             {
-                return None;
+                continue;
             }
 
-            let argument_hint = entry["argumentHint"]
-                .as_str()
-                .or_else(|| entry["argument_hint"].as_str())
-                .filter(|value| !value.is_empty())
-                .map(str::to_owned);
-
-            Some(SlashCommandInfo {
-                name: name.clone(),
-                description: entry["description"]
-                    .as_str()
-                    .filter(|value| !value.is_empty())
-                    .map(str::to_owned)
-                    .unwrap_or_else(|| format!("Run Claude's /{name} command")),
+            parsed.push(SlashCommandInfo {
+                name,
+                description: description.clone(),
                 arguments: if argument_hint.is_some() {
                     SlashCommandArguments::Freeform
                 } else {
                     SlashCommandArguments::None
                 },
-                argument_hint,
+                argument_hint: argument_hint.clone(),
                 source: SlashCommandSource::Provider,
                 run_policy: SlashCommandRunPolicy::QueueUntilIdle,
-            })
-        })
-        .collect()
+            });
+        }
+    }
+
+    parsed
 }
 
 /// The permission mode the CLI will start in, from `~/.claude/settings.json`
@@ -1064,18 +1101,51 @@ mod tests {
     fn dynamic_commands_accept_both_wire_shapes_and_drop_invalid_duplicates() {
         let parsed = parse_slash_commands(&json!([
             "/Review",
-            {"name": "compact", "description": "Compact it", "argumentHint": "[focus]"},
+            {"name": "compact", "description": "Compact it", "argumentHint": "[focus]",
+             "aliases": ["summarize", "/shrink", "not valid"]},
             {"command": "/review"},
             "",
             "not valid"
         ]));
 
-        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed.len(), 4);
         assert_eq!(parsed[0].name, "review");
         assert_eq!(parsed[1].name, "compact");
+        assert_eq!(parsed[2].name, "summarize");
+        assert_eq!(parsed[3].name, "shrink");
         assert_eq!(parsed[1].argument_hint.as_deref(), Some("[focus]"));
+        assert_eq!(parsed[2].description, "Compact it");
         assert_eq!(parsed[1].arguments, SlashCommandArguments::Freeform);
         assert!(parse_slash_commands(&Value::Null).is_empty());
+    }
+
+    #[test]
+    fn initialize_commands_are_primary_and_legacy_catalogs_are_fallbacks() {
+        let response = json!({
+            "commands": [{"name": "plugin:review", "aliases": ["pr"]}],
+            "slash_commands": ["legacy"]
+        });
+        let (commands, structured) = initialize_command_catalog(&response).unwrap();
+
+        assert!(structured);
+        assert_eq!(
+            commands
+                .iter()
+                .map(|command| command.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["plugin:review", "pr"]
+        );
+        assert!(legacy_command_catalog(structured, &json!(["legacy"])).is_none());
+
+        let (legacy, structured) =
+            initialize_command_catalog(&json!({"slash_commands": ["legacy"]})).unwrap();
+        assert!(!structured);
+        assert_eq!(legacy[0].name, "legacy");
+        assert_eq!(
+            legacy_command_catalog(structured, &json!(["newer"])).unwrap()[0].name,
+            "newer"
+        );
+        assert!(initialize_command_catalog(&json!({})).is_none());
     }
 
     #[test]

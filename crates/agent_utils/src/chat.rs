@@ -49,6 +49,7 @@ pub enum SlashCommandArguments {
     None,
     Freeform,
     Choices,
+    Skills,
 }
 
 /// When a command may run relative to a model turn.
@@ -69,6 +70,35 @@ pub struct SlashCommandInfo {
     pub source: SlashCommandSource,
     pub arguments: SlashCommandArguments,
     pub run_policy: SlashCommandRunPolicy,
+}
+
+/// One provider-discovered skill. `path` is part of the identity because
+/// Codex can publish the same skill name from multiple configuration scopes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SkillInfo {
+    pub name: String,
+    pub description: String,
+    pub path: String,
+    pub scope: String,
+    pub enabled: bool,
+    pub display_name: Option<String>,
+}
+
+/// Complete skill-directory state for the current backend session. Errors
+/// can coexist with usable entries when one configured working directory or
+/// skill file fails to load.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SkillCatalog {
+    pub skills: Vec<SkillInfo>,
+    pub errors: Vec<String>,
+}
+
+/// Exact provider identity selected by the UI for a structured skill input.
+/// The catalog is revalidated before this reference is sent on the wire.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SkillReference {
+    pub name: String,
+    pub path: String,
 }
 
 /// Immediate result of asking a backend to execute a slash command. Turn
@@ -150,6 +180,8 @@ pub enum Event {
     Models(Vec<ModelInfo>),
     /// Replacement snapshot of provider-discovered slash commands.
     Commands(Vec<SlashCommandInfo>),
+    /// Replacement snapshot of provider-discovered skills and load errors.
+    Skills(SkillCatalog),
     /// Asynchronous provider/RPC acknowledgement for a command request.
     /// Actual model work still uses the ordinary turn lifecycle events.
     SlashCommandResult {

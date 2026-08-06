@@ -4,7 +4,8 @@ use std::collections::{HashSet, VecDeque};
 use std::mem;
 
 use nmt_agent_utils::chat::{
-    SlashCommandArguments, SlashCommandInfo, SlashCommandRunPolicy, SlashCommandSource,
+    SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments, SlashCommandInfo,
+    SlashCommandRunPolicy, SlashCommandSource,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -120,27 +121,158 @@ pub(super) fn merge_catalog(
         .collect()
 }
 
-/// Exact matches precede prefixes, which precede substring matches. Within
-/// each bucket the merged catalog order remains stable.
-pub(super) fn filter_catalog(catalog: &[SlashCommandInfo], query: &str) -> Vec<SlashCommandInfo> {
-    let query = query.to_ascii_lowercase();
-    let mut exact = Vec::new();
-    let mut prefix = Vec::new();
-    let mut substring = Vec::new();
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum PaletteCatalogEntry {
+    Command(SlashCommandInfo),
+    Skill(SkillInfo),
+}
 
-    for command in catalog {
-        if command.name == query {
-            exact.push(command.clone());
-        } else if command.name.starts_with(&query) {
-            prefix.push(command.clone());
-        } else if command.name.contains(&query) {
-            substring.push(command.clone());
+fn text_match_rank<'a>(fields: impl IntoIterator<Item = &'a str>, query: &str) -> Option<usize> {
+    let query = query.to_ascii_lowercase();
+    let fields = fields
+        .into_iter()
+        .map(str::to_ascii_lowercase)
+        .collect::<Vec<_>>();
+
+    if fields.iter().any(|field| field == &query) {
+        Some(0)
+    } else if fields.iter().any(|field| field.starts_with(&query)) {
+        Some(1)
+    } else if fields.iter().any(|field| field.contains(&query)) {
+        Some(2)
+    } else {
+        None
+    }
+}
+
+fn command_match_rank(command: &SlashCommandInfo, query: &str) -> Option<usize> {
+    text_match_rank([command.name.as_str()], query)
+}
+
+fn skill_match_rank(skill: &SkillInfo, query: &str) -> Option<usize> {
+    text_match_rank(
+        [
+            Some(skill.name.as_str()),
+            skill.display_name.as_deref(),
+            Some(skill.description.as_str()),
+        ]
+        .into_iter()
+        .flatten(),
+        query,
+    )
+}
+
+/// Merge commands and skills into one ranked result without erasing their
+/// different activation semantics. Within each rank, command catalog order
+/// is stable and is followed by provider skill order.
+pub(super) fn filter_palette_catalog(
+    commands: &[SlashCommandInfo],
+    skills: &[SkillInfo],
+    query: &str,
+) -> Vec<PaletteCatalogEntry> {
+    let mut buckets = [Vec::new(), Vec::new(), Vec::new()];
+
+    for command in commands {
+        if let Some(rank) = command_match_rank(command, query) {
+            buckets[rank].push(PaletteCatalogEntry::Command(command.clone()));
+        }
+    }
+    for skill in skills {
+        if let Some(rank) = skill_match_rank(skill, query) {
+            buckets[rank].push(PaletteCatalogEntry::Skill(skill.clone()));
         }
     }
 
-    exact.extend(prefix);
-    exact.extend(substring);
-    exact
+    buckets.into_iter().flatten().collect()
+}
+
+/// Skill results use the command palette's exact/prefix/substring ranking,
+/// but identity stays attached to each full row so duplicate names from
+/// different scopes are never collapsed.
+pub(super) fn filter_skill_catalog(catalog: &[SkillInfo], query: &str) -> Vec<SkillInfo> {
+    let mut buckets = [Vec::new(), Vec::new(), Vec::new()];
+
+    for skill in catalog {
+        if let Some(rank) = skill_match_rank(skill, query) {
+            buckets[rank].push(skill.clone());
+        }
+    }
+
+    buckets.into_iter().flatten().collect()
+}
+
+fn input_has_bound_skill_token(input: &str, binding: &SkillReference) -> bool {
+    input
+        .split_whitespace()
+        .next()
+        .is_some_and(|token| token == format!("${}", binding.name))
+}
+
+/// Editing task text after `$name` is safe; changing the first token turns
+/// the composer back into ordinary unbound text.
+pub(super) fn reconcile_skill_binding(input: &str, binding: &mut Option<SkillReference>) {
+    if binding
+        .as_ref()
+        .is_some_and(|binding| !input_has_bound_skill_token(input, binding))
+    {
+        *binding = None;
+    }
+}
+
+/// Re-check the live replacement snapshot immediately before submission so
+/// a file watcher cannot leave the UI holding a removed or disabled path.
+pub(super) fn validate_skill_binding(
+    input: &str,
+    binding: Option<&SkillReference>,
+    catalog: Option<&SkillCatalog>,
+) -> Result<Option<SkillReference>, String> {
+    let Some(binding) = binding else {
+        return Ok(None);
+    };
+    if !input_has_bound_skill_token(input, binding) {
+        return Ok(None);
+    }
+
+    let Some(catalog) = catalog else {
+        return Err(
+            "Codex skill discovery is still loading; choose the skill again when it is ready."
+                .to_string(),
+        );
+    };
+    let Some(skill) = catalog
+        .skills
+        .iter()
+        .find(|skill| skill.name == binding.name && skill.path == binding.path)
+    else {
+        return Err(format!(
+            "${} is no longer available; run /skills and select it again.",
+            binding.name
+        ));
+    };
+    if !skill.enabled {
+        return Err(format!(
+            "${} is disabled; run /skills and choose an enabled skill.",
+            binding.name
+        ));
+    }
+
+    Ok(Some(binding.clone()))
+}
+
+pub(super) fn prepare_skill_selection(
+    skill: &SkillInfo,
+) -> Result<(String, SkillReference), String> {
+    if !skill.enabled {
+        return Err(format!("${} is disabled by Codex.", skill.name));
+    }
+
+    Ok((
+        format!("${} ", skill.name),
+        SkillReference {
+            name: skill.name.clone(),
+            path: skill.path.clone(),
+        },
+    ))
 }
 
 /// Resolve a typed choice by exact value/display label, then by a unique
@@ -277,13 +409,58 @@ mod tests {
             info("review-file", SlashCommandSource::Provider),
         ];
 
-        let names: Vec<String> = filter_catalog(&catalog, "review")
+        let names: Vec<String> = filter_palette_catalog(&catalog, &[], "review")
             .into_iter()
-            .map(|command| command.name)
+            .filter_map(|entry| match entry {
+                PaletteCatalogEntry::Command(command) => Some(command.name),
+                PaletteCatalogEntry::Skill(_) => None,
+            })
             .collect();
 
         assert_eq!(names, vec!["review", "review-file", "preview"]);
-        assert!(filter_catalog(&catalog, "missing").is_empty());
+        assert!(filter_palette_catalog(&catalog, &[], "missing").is_empty());
+    }
+
+    #[test]
+    fn combined_palette_ranks_skill_exact_matches_before_command_substrings() {
+        let commands = vec![
+            info("preview", SlashCommandSource::Provider),
+            info("status", SlashCommandSource::Local),
+        ];
+        let skills = vec![
+            skill("review", "C:\\user\\review\\SKILL.md", "user", true),
+            skill("review", "C:\\repo\\review\\SKILL.md", "repo", true),
+            skill(
+                "browser:control",
+                "C:\\plugins\\browser\\SKILL.md",
+                "system",
+                true,
+            ),
+        ];
+
+        let results = filter_palette_catalog(&commands, &skills, "review");
+
+        assert!(matches!(
+            &results[0],
+            PaletteCatalogEntry::Skill(skill) if skill.path == "C:\\user\\review\\SKILL.md"
+        ));
+        assert!(matches!(
+            &results[1],
+            PaletteCatalogEntry::Skill(skill) if skill.path == "C:\\repo\\review\\SKILL.md"
+        ));
+        assert!(matches!(
+            &results[2],
+            PaletteCatalogEntry::Command(command) if command.name == "preview"
+        ));
+        assert!(matches!(
+            &results[3],
+            PaletteCatalogEntry::Skill(skill) if skill.name == "browser:control"
+        ));
+
+        let all = filter_palette_catalog(&commands, &skills, "");
+        assert_eq!(all.len(), commands.len() + skills.len());
+        assert!(matches!(all[0], PaletteCatalogEntry::Command(_)));
+        assert!(matches!(all[2], PaletteCatalogEntry::Skill(_)));
     }
 
     #[test]
@@ -363,5 +540,121 @@ mod tests {
         assert!(history_dismissed);
         assert_eq!(history, vec!["persisted session"]);
         assert_eq!(next_session_epoch(7), 8);
+    }
+
+    fn skill(name: &str, path: &str, scope: &str, enabled: bool) -> SkillInfo {
+        SkillInfo {
+            name: name.into(),
+            description: format!("Use {name} for reviews"),
+            path: path.into(),
+            scope: scope.into(),
+            enabled,
+            display_name: None,
+        }
+    }
+
+    #[test]
+    fn skill_filter_ranks_fields_and_preserves_duplicate_paths() {
+        let mut plugin = skill(
+            "browser:control-in-app-browser",
+            "C:\\plugins\\browser\\SKILL.md",
+            "system",
+            true,
+        );
+        plugin.display_name = Some("Browser Control".into());
+        let catalog = vec![
+            skill("review", "C:\\user\\review\\SKILL.md", "user", true),
+            skill("review", "C:\\repo\\review\\SKILL.md", "repo", false),
+            plugin,
+        ];
+
+        let duplicate_results = filter_skill_catalog(&catalog, "review");
+        assert_eq!(duplicate_results.len(), 3);
+        assert_eq!(duplicate_results[0].name, "review");
+        assert_eq!(duplicate_results[1].name, "review");
+        assert_ne!(duplicate_results[0].path, duplicate_results[1].path);
+        assert_eq!(duplicate_results[2].name, "browser:control-in-app-browser");
+        assert_eq!(
+            filter_skill_catalog(&catalog, "browser control")[0].name,
+            "browser:control-in-app-browser"
+        );
+        assert_eq!(filter_skill_catalog(&catalog, "missing"), Vec::new());
+    }
+
+    #[test]
+    fn skill_binding_survives_argument_edits_but_not_token_edits() {
+        let mut binding = Some(SkillReference {
+            name: "review".into(),
+            path: "C:\\skills\\review\\SKILL.md".into(),
+        });
+
+        reconcile_skill_binding("$review focus on parsing", &mut binding);
+        assert!(binding.is_some());
+        reconcile_skill_binding("$other focus on parsing", &mut binding);
+        assert!(binding.is_none());
+    }
+
+    #[test]
+    fn skill_binding_validation_rejects_stale_and_disabled_paths() {
+        let binding = SkillReference {
+            name: "review".into(),
+            path: "C:\\skills\\review\\SKILL.md".into(),
+        };
+        let enabled = SkillCatalog {
+            skills: vec![skill("review", &binding.path, "user", true)],
+            errors: Vec::new(),
+        };
+        let disabled = SkillCatalog {
+            skills: vec![skill("review", &binding.path, "user", false)],
+            errors: Vec::new(),
+        };
+
+        assert_eq!(
+            validate_skill_binding("$review changes", Some(&binding), Some(&enabled)),
+            Ok(Some(binding.clone()))
+        );
+        assert!(
+            validate_skill_binding("$review changes", Some(&binding), Some(&disabled)).is_err()
+        );
+        assert!(
+            validate_skill_binding(
+                "$review changes",
+                Some(&binding),
+                Some(&SkillCatalog::default())
+            )
+            .is_err()
+        );
+        assert_eq!(
+            validate_skill_binding("$review changes", None, Some(&enabled)),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn skill_selection_keeps_exact_path_and_rejects_disabled_rows() {
+        let enabled = skill(
+            "browser:control",
+            "C:\\plugins\\browser\\SKILL.md",
+            "system",
+            true,
+        );
+        let disabled = skill(
+            "browser:control",
+            "C:\\repo\\browser\\SKILL.md",
+            "repo",
+            false,
+        );
+
+        assert_eq!(
+            prepare_skill_selection(&enabled),
+            Ok((
+                "$browser:control ".into(),
+                SkillReference {
+                    name: "browser:control".into(),
+                    path: "C:\\plugins\\browser\\SKILL.md".into(),
+                }
+            ))
+        );
+        assert!(prepare_skill_selection(&disabled).is_err());
     }
 }
