@@ -14,7 +14,7 @@ use futures::channel::mpsc;
 use gpui::prelude::*;
 use gpui::{
     AnyElement, ClipboardItem, Context, Div, Entity, FocusHandle, FontWeight, ListSizingBehavior,
-    ScrollHandle, Window, div, px, relative, size,
+    MouseButton, ScrollHandle, Window, div, px, relative, size,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{
@@ -564,13 +564,48 @@ impl AgentPane {
         self.kind
     }
 
+    /// The offset is negative while scrolling down and `max_offset` is the
+    /// corresponding positive extent, so their sum is the remaining distance
+    /// from the bottom. A small tolerance keeps subpixel layout rounding from
+    /// accidentally disabling output following. An extent within that
+    /// tolerance is not scrollable, so transient wheel overscroll before GPUI
+    /// clamps the offset still counts as being at the bottom.
+    fn transcript_is_at_bottom(&self) -> bool {
+        let max_offset = self.scroll.max_offset().y;
+
+        max_offset <= px(1.) || self.scroll.offset().y + max_offset <= px(1.)
+    }
+
+    /// Update the known offset immediately so scroll-dependent controls react
+    /// in the same render, then request bottom alignment again after layout in
+    /// case new transcript content changes the scroll extent.
+    fn scroll_transcript_to_bottom(&self) {
+        let mut offset = self.scroll.offset();
+        offset.y = -self.scroll.max_offset().y;
+        self.scroll.set_offset(offset);
+        self.scroll.scroll_to_bottom();
+    }
+
+    fn follow_transcript_if_at_bottom(&self) {
+        if self.transcript_is_at_bottom() {
+            self.scroll_transcript_to_bottom();
+        }
+    }
+
     fn push(&mut self, item: ChatItem, cx: &mut Context<Self>) {
+        // Submitting a user message explicitly returns to the live tail. Agent
+        // output preserves a manually chosen reading position until the user
+        // scrolls back to the bottom.
+        let follow_tail = matches!(&item, ChatItem::User { .. }) || self.transcript_is_at_bottom();
+
         self.items.push(Entry {
             at: Local::now().format("%H:%M").to_string(),
             turn: self.turn_seq,
             item,
         });
-        self.scroll.scroll_to_bottom();
+        if follow_tail {
+            self.scroll_transcript_to_bottom();
+        }
         cx.notify();
     }
 
@@ -1318,7 +1353,7 @@ impl AgentPane {
     /// progress row; the ticker stops itself once `finish_working` clears it.
     fn start_working(&mut self, cx: &mut Context<Self>) {
         self.working_started = Some(Instant::now());
-        self.scroll.scroll_to_bottom();
+        self.follow_transcript_if_at_bottom();
         cx.notify();
 
         cx.spawn(async move |this, cx| {
@@ -1489,7 +1524,7 @@ impl AgentPane {
             }
             SessionEvent::ApprovalRequested { description } => {
                 self.pending_approval = Some(description);
-                self.scroll.scroll_to_bottom();
+                self.follow_transcript_if_at_bottom();
                 cx.notify();
             }
             SessionEvent::ApprovalResolved => {
@@ -1566,7 +1601,7 @@ impl AgentPane {
             });
         }
 
-        self.scroll.scroll_to_bottom();
+        self.follow_transcript_if_at_bottom();
         cx.notify();
     }
 
@@ -1735,7 +1770,7 @@ impl AgentPane {
             break;
         }
 
-        self.scroll.scroll_to_bottom();
+        self.follow_transcript_if_at_bottom();
         cx.notify();
     }
 
@@ -1745,14 +1780,21 @@ impl AgentPane {
         delta: &str,
         select: fn(&mut ChatItem) -> Option<&mut String>,
     ) {
+        let follow_tail = self.transcript_is_at_bottom();
+        let mut appended = false;
+
         for entry in &mut self.items {
             if chat_item_id(&entry.item) == Some(item_id)
                 && let Some(text) = select(&mut entry.item)
             {
                 text.push_str(delta);
-                self.scroll.scroll_to_bottom();
-                return;
+                appended = true;
+                break;
             }
+        }
+
+        if appended && follow_tail {
+            self.scroll_transcript_to_bottom();
         }
     }
 }
@@ -2031,6 +2073,7 @@ impl Render for AgentPane {
         });
 
         let running = self.status == Status::Running;
+        let transcript_scrolled_up = !self.transcript_is_at_bottom();
 
         // The history list only makes sense while the tab is a blank slate:
         // no transcript yet and no conversation committed to. It shows as
@@ -2042,10 +2085,11 @@ impl Render for AgentPane {
         v_flex()
             .size_full()
             .track_focus(&self.focus)
-            // Escape in the composer force-stops the agent: the input's own
-            // Escape action propagates here whenever the editor didn't
-            // consume it (inline completion, IME). A pending approval is
-            // cancelled (deny + interrupt), a running turn interrupted.
+            // Escape force-stops the agent whenever the pane or composer has
+            // focus. The input propagates Escape here when the editor did not
+            // consume it (inline completion, IME), and transcript clicks focus
+            // the pane below. A pending approval is cancelled (deny +
+            // interrupt), while a running turn is interrupted directly.
             .on_action(cx.listener(|this, _: &Escape, _, cx| {
                 if this.pending_approval.is_some() {
                     this.respond_approval("cancel", cx);
@@ -2072,6 +2116,16 @@ impl Render for AgentPane {
                             .size_full()
                             .overflow_y_scroll()
                             .track_scroll(&self.scroll)
+                            // Reading or selecting transcript content should
+                            // leave Escape routed to the pane-level interrupt
+                            // handler instead of whichever control previously
+                            // held keyboard focus.
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _, window, cx| {
+                                    window.focus(&this.focus, cx);
+                                }),
+                            )
                             .child(v_flex().w_full().p_3().gap_2().children(rows)),
                     )
                     // The bare Scrollbar element carries no inset of its own,
@@ -2086,7 +2140,31 @@ impl Render for AgentPane {
                             .bottom_0()
                             .w(px(16.))
                             .child(Scrollbar::vertical(&self.scroll)),
-                    ),
+                    )
+                    .when(transcript_scrolled_up, |this| {
+                        this.child(
+                            div()
+                                .absolute()
+                                .left_0()
+                                .right_0()
+                                .bottom(px(12.))
+                                .flex()
+                                .justify_center()
+                                .child(
+                                    Button::new("agent-jump-to-bottom")
+                                        .outline()
+                                        .small()
+                                        .rounded(px(999.))
+                                        .icon(IconName::ArrowDown)
+                                        .tooltip("Jump to latest")
+                                        .shadow_md()
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.scroll_transcript_to_bottom();
+                                            cx.notify();
+                                        })),
+                                ),
+                        )
+                    }),
             )
             .child({
                 let layered = history.is_some();
