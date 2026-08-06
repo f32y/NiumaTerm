@@ -187,6 +187,7 @@ pub struct Button {
     style: StyleRefinement,
     icon: Option<ButtonIcon>,
     label: Option<SharedString>,
+    aria_label: Option<SharedString>,
     children: Vec<AnyElement>,
     disabled: bool,
     pub(crate) selected: bool,
@@ -230,6 +231,7 @@ impl Button {
             style: StyleRefinement::default(),
             icon: None,
             label: None,
+            aria_label: None,
             disabled: false,
             selected: false,
             variant: ButtonVariant::default(),
@@ -284,6 +286,12 @@ impl Button {
     /// Set label to the Button, if no label is set, the button will be in Icon Button mode.
     pub fn label(mut self, label: impl Into<SharedString>) -> Self {
         self.label = Some(label.into());
+        self
+    }
+
+    /// Set an accessible label without adding visible button text.
+    pub fn aria_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.aria_label = Some(label.into());
         self
     }
 
@@ -466,9 +474,10 @@ impl RenderOnce for Button {
             } else {
                 Role::Button
             })
-            .when_some(self.label.as_ref(), |this, label| {
-                this.aria_label(label.clone())
-            })
+            .when_some(
+                self.aria_label.as_ref().or(self.label.as_ref()),
+                |this, label| this.aria_label(label.clone()),
+            )
             .aria_selected(self.selected)
             .when(!self.disabled, |this| {
                 this.track_focus(
