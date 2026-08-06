@@ -2165,46 +2165,32 @@ fn preview_line(text: &str) -> String {
     }
 }
 
-/// Collapsed head of an oversized user prompt, cut at a line boundary, or
-/// `None` when the whole prompt fits under the caps. Byte-capped scanning
-/// keeps this O(cap) per call regardless of paste size, so calling it every
-/// frame for a visible row stays cheap.
+/// Collapsed head of an oversized user prompt, cut at a line boundary when
+/// possible, or `None` when the whole prompt fits under the caps. The character
+/// cap bounds visual wrapping for giant single-line pastes; a byte cap alone
+/// can still produce dozens of wrapped lines in a narrow bubble.
 fn truncated_user_prompt(text: &str) -> Option<&str> {
-    const MAX_LINES: usize = 3;
-    const MAX_BYTES: usize = 4096;
+    const MAX_SOURCE_LINES: usize = 3;
+    const MAX_CHARS: usize = 512;
 
-    if text.len() <= MAX_BYTES && line_count_at_most(text, MAX_LINES) {
-        return None;
-    }
-
-    let mut end = 0;
-    let mut lines = 0;
-
-    for line in text.split_inclusive('\n') {
-        if lines == MAX_LINES || end + line.len() > MAX_BYTES {
-            if end == 0 {
-                // A single line longer than the byte cap: cut inside it at a
-                // character boundary.
-                let cut = text
-                    .char_indices()
-                    .map(|(i, _)| i)
-                    .take_while(|i| *i <= MAX_BYTES)
-                    .last()
-                    .unwrap_or(0);
-                return Some(&text[..cut]);
-            }
-            return Some(&text[..end]);
+    let mut chars = 0;
+    let mut completed_lines = 0;
+    for (index, ch) in text.char_indices() {
+        if chars == MAX_CHARS {
+            return Some(&text[..index]);
         }
-        end += line.len();
-        lines += 1;
+        chars += 1;
+
+        if ch == '\n' {
+            completed_lines += 1;
+            let end = index + ch.len_utf8();
+            if completed_lines == MAX_SOURCE_LINES && end < text.len() {
+                return Some(&text[..end]);
+            }
+        }
     }
 
     None
-}
-
-/// Whether `text` has at most `max` lines, scanning no further than needed.
-fn line_count_at_most(text: &str, max: usize) -> bool {
-    text.split_inclusive('\n').take(max + 1).count() <= max
 }
 
 /// Wrap tool output in a Markdown fence so the transcript's TextView pipeline
@@ -3370,7 +3356,7 @@ impl AgentPane {
         let entry = &self.items[index];
 
         match &entry.item {
-            ChatItem::User { text } => self.render_user_row(index, text.clone(), cx),
+            ChatItem::User { text } => self.render_user_row(index, text, cx),
             ChatItem::Agent { text, .. } => self.render_agent_row(index, text.clone(), cx),
             ChatItem::Error { text } => self.render_error_row(index, text.clone(), cx),
             item if is_work_row(item) => self.render_work_row(index, cx),
@@ -3391,17 +3377,30 @@ impl AgentPane {
     }
 
     fn copy_menu(
+        pane: gpui::WeakEntity<Self>,
         index: usize,
-        item: &ChatItem,
     ) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
-        let _ = index;
-        let copy_text = entry_copy_text(item);
+        move |menu, _, cx| {
+            // Full transcript payloads can be very large. Resolve and clone the
+            // text only after a right click opens the menu, keeping ordinary
+            // list layout independent of the hidden message size.
+            let copy_text = pane
+                .read_with(cx, |pane, _| {
+                    pane.items
+                        .get(index)
+                        .map(|entry| entry_copy_text(&entry.item))
+                })
+                .ok()
+                .flatten();
 
-        move |menu, _, _| {
-            let copy_text = copy_text.clone();
-            menu.item(PopupMenuItem::new("Copy").on_click(move |_, _, cx| {
-                cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
-            }))
+            match copy_text {
+                Some(copy_text) => {
+                    menu.item(PopupMenuItem::new("Copy").on_click(move |_, _, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
+                    }))
+                }
+                None => menu,
+            }
         }
     }
 
@@ -3411,12 +3410,12 @@ impl AgentPane {
     /// a visible row re-lays-out its full text every frame, so an unbounded
     /// prompt would make every frame O(paste size). Expansion is an explicit
     /// per-row choice, and the right-click Copy always carries the full text.
-    fn render_user_row(&self, index: usize, text: String, cx: &mut Context<Self>) -> AnyElement {
-        let head_len = truncated_user_prompt(&text).map(str::len);
+    fn render_user_row(&self, index: usize, text: &str, cx: &mut Context<Self>) -> AnyElement {
+        let head_len = truncated_user_prompt(text).map(str::len);
         let expanded = head_len.is_some() && self.expanded_rows.contains(&index);
         let shown = match (head_len, expanded) {
             (Some(len), false) => text[..len].to_string(),
-            _ => text,
+            _ => text.to_string(),
         };
         let toggle = head_len.is_some().then(|| {
             div()
@@ -3445,7 +3444,7 @@ impl AgentPane {
             .justify_end()
             .items_end()
             .gap_2()
-            .context_menu(Self::copy_menu(index, &self.items[index].item))
+            .context_menu(Self::copy_menu(cx.entity().downgrade(), index))
             .child(self.hover_stamp(index, cx))
             .child(
                 div()
@@ -3471,7 +3470,7 @@ impl AgentPane {
             .w_full()
             .items_end()
             .gap_2()
-            .context_menu(Self::copy_menu(index, &self.items[index].item))
+            .context_menu(Self::copy_menu(cx.entity().downgrade(), index))
             .child(
                 div().flex_1().min_w_0().px_1().child(
                     text::TextView::markdown(("agent-md", index), text)
@@ -3490,7 +3489,7 @@ impl AgentPane {
         h_flex()
             .id(("entry", index))
             .w_full()
-            .context_menu(Self::copy_menu(index, &self.items[index].item))
+            .context_menu(Self::copy_menu(cx.entity().downgrade(), index))
             .child(
                 div()
                     .max_w(relative(0.9))
@@ -3621,7 +3620,7 @@ impl AgentPane {
         v_flex()
             .id(("entry", index))
             .w_full()
-            .context_menu(Self::copy_menu(index, &self.items[index].item))
+            .context_menu(Self::copy_menu(cx.entity().downgrade(), index))
             .child(header)
             .children(detail.filter(|_| expanded).map(|detail| {
                 // Fencing happens only for the expanded row, so collapsed
@@ -4368,9 +4367,12 @@ mod prompt_truncation_tests {
         assert_eq!(head.lines().count(), 3);
         assert!(head.ends_with('\n'));
 
-        let giant_line = "\u{4f60}".repeat(3000); // 9000 bytes, one line
-        let head = truncated_user_prompt(&giant_line).expect("over the byte cap");
-        assert!(head.len() <= 4096 + 3);
+        let exact_char_cap = "x".repeat(512);
+        assert_eq!(truncated_user_prompt(&exact_char_cap), None);
+
+        let giant_line = "\u{4f60}".repeat(3000);
+        let head = truncated_user_prompt(&giant_line).expect("over the character cap");
+        assert_eq!(head.chars().count(), 512);
         assert!(giant_line.is_char_boundary(head.len()));
     }
 }
