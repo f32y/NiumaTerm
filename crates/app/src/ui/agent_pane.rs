@@ -26,7 +26,7 @@ use gpui_component::input::{
     Enter, Escape, IndentInline, Input, InputEvent, InputState, MoveDown, MoveUp,
 };
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
-use gpui_component::scroll::Scrollbar;
+use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 use gpui_component::skeleton::Skeleton;
 use gpui_component::text::TextViewStyle;
 use gpui_component::{
@@ -2352,13 +2352,16 @@ const AGENT_DISCLOSURE_GAP: f32 = 4.0;
 const AGENT_DISCLOSURE_PADDING: f32 = 4.0;
 const AGENT_DISCLOSURE_DETAIL_INSET: f32 =
     AGENT_DISCLOSURE_PADDING + AGENT_DISCLOSURE_SLOT * 2.0 + AGENT_DISCLOSURE_GAP * 2.0;
+const AGENT_TEXT_MEASURE_REMS: f32 = 48.0;
 
 /// Shared geometry for expandable transcript rows. Empty chevron, type-icon,
-/// and trailing slots keep labels aligned when a particular row omits one.
+/// and trailing slots keep labels aligned by default; summary toggles can omit
+/// the unused type-icon slot so their label follows the chevron directly.
 struct AgentDisclosureRow {
     id: ElementId,
     expanded: Option<bool>,
     type_icon: Option<IconName>,
+    reserve_type_icon_slot: bool,
     label: String,
     preview: Option<String>,
     trailing: Option<AnyElement>,
@@ -2372,6 +2375,7 @@ impl AgentDisclosureRow {
             id: id.into(),
             expanded: None,
             type_icon: None,
+            reserve_type_icon_slot: true,
             accessible_label: label.clone(),
             label,
             preview: None,
@@ -2386,6 +2390,11 @@ impl AgentDisclosureRow {
 
     fn type_icon(mut self, icon: IconName) -> Self {
         self.type_icon = Some(icon);
+        self
+    }
+
+    fn without_type_icon_slot(mut self) -> Self {
+        self.reserve_type_icon_slot = false;
         self
     }
 
@@ -2416,6 +2425,7 @@ impl AgentDisclosureRow {
             .size_3()
             .text_color(cx.theme().muted_foreground.opacity(0.7))
         });
+        let show_type_icon_slot = self.type_icon.is_some() || self.reserve_type_icon_slot;
         let type_icon = self.type_icon.map(|icon| {
             Icon::new(icon)
                 .size_3p5()
@@ -2448,16 +2458,18 @@ impl AgentDisclosureRow {
                     .justify_center()
                     .children(chevron),
             )
-            .child(
-                div()
-                    .w(px(AGENT_DISCLOSURE_SLOT))
-                    .h(px(AGENT_DISCLOSURE_SLOT))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .children(type_icon),
-            )
+            .when(show_type_icon_slot, |this| {
+                this.child(
+                    div()
+                        .w(px(AGENT_DISCLOSURE_SLOT))
+                        .h(px(AGENT_DISCLOSURE_SLOT))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .children(type_icon),
+                )
+            })
             .child(
                 div()
                     .flex_none()
@@ -2765,8 +2777,8 @@ impl Render for AgentPane {
                                 // re-enters the pane through a weak handle.
                                 list(self.transcript_list.clone(), {
                                     let this = cx.entity().downgrade();
-                                    move |ix, _window, cx| {
-                                        this.update(cx, |this, cx| this.render_row(ix, cx))
+                                    move |ix, window, cx| {
+                                        this.update(cx, |this, cx| this.render_row(ix, window, cx))
                                             .unwrap_or_else(|_| div().into_any_element())
                                     }
                                 })
@@ -3309,14 +3321,14 @@ impl AgentPane {
     /// Build the element for one visible row. Row indices come from the list
     /// element during layout/paint, resolved through the spec snapshot taken
     /// in the current render pass.
-    fn render_row(&mut self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+    fn render_row(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let Some(spec) = self.row_specs.get(ix).cloned() else {
             return div().into_any_element();
         };
 
         let row = match spec {
-            RowSpec::Entry { index, .. } => self.render_entry_row(index, cx),
-            RowSpec::Work { index, .. } => self.render_work_row(index, cx),
+            RowSpec::Entry { index, .. } => self.render_entry_row(index, window, cx),
+            RowSpec::Work { index, .. } => self.render_work_row(index, window, cx),
             RowSpec::FoldHeader {
                 turn,
                 seconds,
@@ -3361,14 +3373,19 @@ impl AgentPane {
             .into_any_element()
     }
 
-    fn render_entry_row(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
+    fn render_entry_row(
+        &self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let entry = &self.items[index];
 
         match &entry.item {
             ChatItem::User { text } => self.render_user_row(index, text, cx),
             ChatItem::Agent { text, .. } => self.render_agent_row(index, text.clone(), cx),
             ChatItem::Error { text } => self.render_error_row(index, text.clone(), cx),
-            item if is_work_row(item) => self.render_work_row(index, cx),
+            item if is_work_row(item) => self.render_work_row(index, window, cx),
             // Working entries render as the turn's fold header, never here.
             _ => div().into_any_element(),
         }
@@ -3486,7 +3503,9 @@ impl AgentPane {
                         // Monospaced glyphs average roughly 0.6em wide, so
                         // 48rem yields an approximately 80-character prose
                         // measure while technical Markdown remains full-width.
-                        .style(TextViewStyle::default().prose_max_width(rems(48.)))
+                        .style(
+                            TextViewStyle::default().prose_max_width(rems(AGENT_TEXT_MEASURE_REMS)),
+                        )
                         .selectable(true),
                 ),
             )
@@ -3515,8 +3534,13 @@ impl AgentPane {
 
     /// One work-log line: chevron · type icon · heading · preview · status.
     /// Rows with detail (command output, reasoning text) expand on click into
-    /// an indented block behind a left hairline rail.
-    fn render_work_row(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
+    /// a bounded transcript surface with its own scroll position.
+    fn render_work_row(
+        &self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let (icon, heading, preview, status, detail) = match &self.items[index].item {
             ChatItem::Command {
                 command,
@@ -3658,6 +3682,10 @@ impl AgentPane {
                     },
                     _ => detail,
                 };
+                let detail_scroll = window
+                    .use_keyed_state(("wl-scroll", index), cx, |_, _| ScrollHandle::default())
+                    .read(cx)
+                    .clone();
 
                 div()
                     // Expanded transcript content starts at the same horizontal
@@ -3665,16 +3693,42 @@ impl AgentPane {
                     // indentation level inside an already grouped tool call.
                     .ml(px(AGENT_DISCLOSURE_DETAIL_INSET))
                     .mt_1()
+                    // Expanded technical content uses the same readable
+                    // measure as assistant prose instead of stretching across
+                    // the remaining window width.
+                    .max_w(rems(AGENT_TEXT_MEASURE_REMS))
+                    .relative()
                     .child(
                         div()
                             .id(("wl-out", index))
+                            .w_full()
                             .max_h(px(256.))
                             .overflow_y_scroll()
+                            .track_scroll(&detail_scroll)
+                            // The virtual list handles wheel input before child
+                            // bubble listeners run. Occluding its earlier
+                            // hitbox makes this nested viewport the only scroll
+                            // target under the pointer, even at either limit.
+                            .occlude()
+                            .context_menu(Self::copy_menu(cx.entity().downgrade(), index))
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
                             .child(
                                 text::TextView::markdown(("wl-md", index), markdown)
                                     .selectable(true),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .right_0()
+                            .bottom_0()
+                            .w(px(16.0))
+                            .child(
+                                Scrollbar::vertical(&detail_scroll)
+                                    .id(("wl-scrollbar", index))
+                                    .scrollbar_show(ScrollbarShow::Always),
                             ),
                     )
             }))
@@ -3734,6 +3788,7 @@ impl AgentPane {
 
         AgentDisclosureRow::new(("wl-run", run_start), label.clone())
             .expanded(expanded)
+            .without_type_icon_slot()
             .accessible_label(format!(
                 "{label}. {}",
                 if expanded { "Expanded" } else { "Collapsed" }
