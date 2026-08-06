@@ -2004,7 +2004,7 @@ fn preview_line(text: &str) -> String {
 /// keeps this O(cap) per call regardless of paste size, so calling it every
 /// frame for a visible row stays cheap.
 fn truncated_user_prompt(text: &str) -> Option<&str> {
-    const MAX_LINES: usize = 20;
+    const MAX_LINES: usize = 3;
     const MAX_BYTES: usize = 4096;
 
     if text.len() <= MAX_BYTES && line_count_at_most(text, MAX_LINES) {
@@ -3873,9 +3873,9 @@ mod prompt_truncation_tests {
     fn short_prompts_pass_through_and_long_ones_cut_at_boundaries() {
         assert_eq!(truncated_user_prompt("hello\nworld"), None);
 
-        let twenty_one_lines = "line\n".repeat(21);
-        let head = truncated_user_prompt(&twenty_one_lines).expect("over the line cap");
-        assert_eq!(head.lines().count(), 20);
+        let four_lines = "line\n".repeat(4);
+        let head = truncated_user_prompt(&four_lines).expect("over the line cap");
+        assert_eq!(head.lines().count(), 3);
         assert!(head.ends_with('\n'));
 
         let giant_line = "\u{4f60}".repeat(3000); // 9000 bytes, one line
