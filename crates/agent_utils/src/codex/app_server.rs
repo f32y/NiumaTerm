@@ -17,9 +17,9 @@ use serde_json::{Value, json};
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 pub use crate::chat::{
-    Event, Item, ModelInfo, ReplayItem, SendOutcome, SessionSummary, SkillCatalog, SkillInfo,
-    SkillReference, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
-    SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
+    ContextWindowUsage, Event, Item, ModelInfo, ReplayItem, SendOutcome, SessionSummary,
+    SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments, SlashCommandInfo,
+    SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
 };
 
 /// JSON-RPC ids for the fixed handshake requests; turn requests count up from
@@ -582,6 +582,10 @@ impl Session {
 
                 vec![Event::TurnCompleted { error }]
             }
+            "thread/tokenUsage/updated" => parse_context_window_usage(&params["tokenUsage"])
+                .map(Event::ContextWindowUpdated)
+                .into_iter()
+                .collect(),
             "item/started" => parse_item(&params["item"])
                 .map(Event::ItemStarted)
                 .into_iter()
@@ -630,6 +634,20 @@ impl Session {
             _ => Vec::new(),
         }
     }
+}
+
+fn parse_context_window_usage(value: &Value) -> Option<ContextWindowUsage> {
+    let used_tokens = value["last"]["totalTokens"].as_u64()?;
+    if used_tokens == 0 {
+        return None;
+    }
+
+    Some(ContextWindowUsage {
+        used_tokens,
+        max_tokens: value["modelContextWindow"]
+            .as_u64()
+            .filter(|value| *value > 0),
+    })
 }
 
 fn codex_command_request(rpc_id: u64, thread_id: &str, name: &str) -> Option<Value> {

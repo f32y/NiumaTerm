@@ -22,8 +22,9 @@ use serde_json::{Value, json};
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use crate::chat::{
-    Event, Item, ModelInfo, SendOutcome, SlashCommandArguments, SlashCommandInfo,
-    SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
+    ContextWindowUsage, Event, Item, ModelInfo, SendOutcome, SlashCommandArguments,
+    SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
+    ThreadSettings,
 };
 use crate::hook_store::home_dir;
 
@@ -84,6 +85,12 @@ pub struct Session {
     /// A structured initialize catalog carries richer metadata than the
     /// string-only first-turn fallback and must remain authoritative.
     structured_commands_published: bool,
+    /// The most recent assistant message's input/output accounting represents
+    /// the live context, unlike result-level totals which may sum retries and
+    /// tool-loop iterations.
+    context_input_tokens: u64,
+    context_output_tokens: u64,
+    context_window: Option<u64>,
 }
 
 impl Drop for Session {
@@ -198,6 +205,9 @@ impl Session {
             item_seq: 0,
             active_slash_command: None,
             structured_commands_published: false,
+            context_input_tokens: 0,
+            context_output_tokens: 0,
+            context_window: None,
         };
 
         session.send(json!({
@@ -450,7 +460,24 @@ impl Session {
                 self.open_texts.clear();
                 self.open_thinkings.clear();
 
-                Vec::new()
+                let usage = &event["message"]["usage"];
+                self.context_input_tokens = claude_input_tokens(usage);
+                self.context_output_tokens = usage["output_tokens"].as_u64().unwrap_or(0);
+
+                self.context_window_usage()
+                    .map(Event::ContextWindowUpdated)
+                    .into_iter()
+                    .collect()
+            }
+            Some("message_delta") => {
+                if let Some(output_tokens) = event["usage"]["output_tokens"].as_u64() {
+                    self.context_output_tokens = output_tokens;
+                }
+
+                self.context_window_usage()
+                    .map(Event::ContextWindowUpdated)
+                    .into_iter()
+                    .collect()
             }
             Some("content_block_start") => {
                 let Some(index) = index else {
@@ -643,6 +670,14 @@ impl Session {
             });
         }
 
+        if let Some(max_tokens) = claude_context_window(&message["modelUsage"]) {
+            self.context_window = Some(max_tokens);
+        }
+
+        if let Some(usage) = self.context_window_usage() {
+            events.push(Event::ContextWindowUpdated(usage));
+        }
+
         events.push(Event::TurnCompleted { error });
 
         events
@@ -755,6 +790,41 @@ impl Session {
 
         Vec::new()
     }
+
+    fn context_window_usage(&self) -> Option<ContextWindowUsage> {
+        let used_tokens = self
+            .context_input_tokens
+            .saturating_add(self.context_output_tokens);
+
+        (used_tokens > 0).then_some(ContextWindowUsage {
+            used_tokens,
+            max_tokens: self.context_window,
+        })
+    }
+}
+
+fn claude_input_tokens(usage: &Value) -> u64 {
+    [
+        "input_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+    ]
+    .into_iter()
+    .map(|field| usage[field].as_u64().unwrap_or(0))
+    .sum()
+}
+
+fn claude_context_window(model_usage: &Value) -> Option<u64> {
+    model_usage
+        .as_object()?
+        .values()
+        .filter_map(|usage| {
+            usage["contextWindow"]
+                .as_u64()
+                .or_else(|| usage["context_window"].as_u64())
+                .filter(|value| *value > 0)
+        })
+        .max()
 }
 
 fn slash_command_text(name: &str, arguments: &str) -> String {

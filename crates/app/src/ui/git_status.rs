@@ -78,6 +78,21 @@ pub(crate) fn resolve_repo_root(cwd: &str) -> Option<String> {
     (!root.is_empty()).then_some(root)
 }
 
+/// Return the checked-out branch for a working directory. Detached HEADs use
+/// their short commit so the footer never presents an empty branch label.
+pub(crate) fn current_branch(cwd: &str) -> Option<String> {
+    let branch = run_git(cwd, &["branch", "--show-current"])
+        .ok()
+        .map(|out| String::from_utf8_lossy(&out).trim().to_string())
+        .filter(|branch| !branch.is_empty());
+
+    branch.or_else(|| {
+        let commit = run_git(cwd, &["rev-parse", "--short", "HEAD"]).ok()?;
+        let commit = String::from_utf8_lossy(&commit).trim().to_string();
+        (!commit.is_empty()).then(|| format!("detached@{commit}"))
+    })
+}
+
 /// Full status snapshot for `root`: porcelain file list joined with summed
 /// unstaged + staged numstat counts; untracked files counted as all-added.
 pub(crate) fn fetch_snapshot(root: &str) -> Result<GitSnapshot, String> {
