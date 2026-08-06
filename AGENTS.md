@@ -24,16 +24,46 @@ opening that reference.
 
 ## Commit message conventions
 
-Recent history uses concise, imperative subjects. Prefer Conventional Commit-style
-subjects when the change has a clear type and scope:
+The repository uses hooks from `.githooks`. Do not bypass them with
+`--no-verify`; fix the reported issue or split the commit along the required
+boundary.
+
+The pre-commit hook enforces these commit boundaries:
+
+- Files under `.agents`, `.claude`, `.codex`, `.scratch`, `openspec`, `spec`,
+  `docs/adr`, `docs/agents`, and `docs/superpowers` must not be committed with
+  code files. Protected-path commits are rejected entirely on `main`.
+- Changes under `third_party/gpui` must be committed separately from every
+  other path. The same independent-commit rule applies to
+  `third_party/gpui-component`.
+- Newly added content containing the repository's AI-slop marker is rejected.
+- Added code comments are checked for implementation-instruction references;
+  comments must explain the underlying technical rationale as described above.
+- If staged files include Rust, the hook runs `cargo fmt --all --check`,
+  `cargo clippy --workspace --all-targets --quiet`, and a first-party clippy
+  pass with `-D clippy::absolute_paths`. This path requires `jq` to be
+  available.
+
+The commit-msg hook requires an English, printable-ASCII message and a
+Conventional Commit subject in this form:
+
+```text
+<type>(optional-scope): <lowercase subject>
+```
+
+Allowed types are `feat`, `fix`, `refactor`, `docs`, `perf`, `test`, `chore`,
+`build`, `ci`, `style`, `revert`, and `lint`. Examples:
 
 - `feat(area): add new behavior`
 - `fix(area): correct broken behavior`
 - `refactor(area): restructure without behavior change`
 - `docs(area): update documentation`
 
-Use a plain imperative subject for mechanical commits where a typed scope adds no
+Use an unscoped typed subject for mechanical commits where a scope adds no
 signal, for example `chore: apply cargo fmt`.
+
+The pre-push hook rejects pushing the local `dev` branch to `origin`; push that
+branch to the `private` remote instead.
 
 For non-trivial commits, include a body that explains the reason for the change,
 the important implementation details, and the verification that was run. Bullet
