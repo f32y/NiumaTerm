@@ -24,7 +24,7 @@ use gpui_component::slider::{Slider, SliderEvent, SliderState};
 use gpui_component::{
     ActiveTheme as _, AxisExt as _, Disableable as _, Sizable as _, Theme as ComponentTheme,
     ThemeConfig as ComponentThemeConfig, ThemeRegistry as ComponentThemeRegistry,
-    ThemeToken as ComponentThemeToken, h_flex, v_flex,
+    ThemeToken as ComponentThemeToken, WindowExt as _, h_flex, v_flex,
 };
 use nmt_agent_utils::HookInstallStatus;
 use nmt_agent_utils::claude_code::hook as claude_hook;
@@ -2113,8 +2113,31 @@ fn profiles_page(profiles: &[Profile]) -> SettingPage {
                                 .danger()
                                 .label("Remove")
                                 .disabled(count <= 1)
-                                .on_click(move |_, _, cx: &mut App| {
-                                    cx.global_mut::<AppSettings>().remove_profile(ix);
+                                .on_click(move |_, window, cx: &mut App| {
+                                    let name = cx
+                                        .global::<AppSettings>()
+                                        .profiles
+                                        .get(ix)
+                                        .map(|profile| profile.name.clone())
+                                        .unwrap_or_default();
+                                    let subject = if name.is_empty() {
+                                        "this profile".to_string()
+                                    } else {
+                                        format!("profile \"{name}\"")
+                                    };
+
+                                    window.open_alert_dialog(cx, move |alert, _, _| {
+                                        alert
+                                            .confirm()
+                                            .title("Remove Profile")
+                                            .description(format!(
+                                                "Remove {subject}? This cannot be undone."
+                                            ))
+                                            .on_ok(move |_, _, cx| {
+                                                cx.global_mut::<AppSettings>().remove_profile(ix);
+                                                true
+                                            })
+                                    });
                                 })
                         }),
                     )
