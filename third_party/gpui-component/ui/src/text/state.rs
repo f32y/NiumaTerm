@@ -46,6 +46,8 @@ pub(super) enum TextViewFormat {
     Markdown,
     /// HTML view
     Html,
+    /// Plain text view: no markup interpretation, newlines are hard breaks.
+    Plain,
 }
 
 /// The state of a TextView.
@@ -90,6 +92,11 @@ impl TextViewState {
     /// Create a HTML TextViewState.
     pub fn html(text: &str, cx: &mut Context<Self>) -> Self {
         Self::new(TextViewFormat::Html, text, cx)
+    }
+
+    /// Create a plain-text TextViewState.
+    pub fn plain(text: &str, cx: &mut Context<Self>) -> Self {
+        Self::new(TextViewFormat::Plain, text, cx)
     }
 
     /// Create a new TextViewState.
@@ -612,6 +619,7 @@ fn parse_content(
             format::markdown::parse(&source, &mut node_cx, &options.highlight_theme)
         }
         TextViewFormat::Html => format::html::parse(&source, &mut node_cx),
+        TextViewFormat::Plain => format::plain::parse(&source, &mut node_cx),
     }?;
 
     if options.append {
@@ -630,6 +638,31 @@ mod tests {
     use super::*;
     use crate::text::MarkdownNode;
     use gpui::TestAppContext;
+
+    #[gpui::test]
+    fn plain_format_keeps_markup_verbatim(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let text = "*raw* `not code`\n# not a heading";
+        let state = cx.update(|cx| cx.new(|cx| TextViewState::plain(text, cx)));
+        cx.run_until_parked();
+
+        state.read_with(cx, |state, _| {
+            assert_eq!(state.source().as_str(), text);
+            assert_eq!(state.parsed_content.document.blocks.len(), 1);
+            // Block text carries the paragraph convention of a trailing
+            // newline; the body must stay verbatim.
+            assert_eq!(state.parsed_content.document.text(), format!("{text}\n"));
+        });
+
+        state.update(cx, |state, cx| {
+            state.set_text("replaced", cx);
+        });
+        cx.run_until_parked();
+
+        state.read_with(cx, |state, _| {
+            assert_eq!(state.parsed_content.document.text(), "replaced\n");
+        });
+    }
 
     #[gpui::test]
     fn set_text_then_push_str_appends_to_replaced_content(cx: &mut TestAppContext) {
