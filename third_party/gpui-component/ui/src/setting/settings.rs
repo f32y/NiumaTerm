@@ -121,6 +121,28 @@ impl Settings {
         self
     }
 
+    /// Programmatically select a page (and optionally one of its groups) in
+    /// the settings view addressed by the element id given to
+    /// [`Settings::new`], as if its sidebar entry was clicked — for flows
+    /// like "Add profile" that create a group and want the view to jump to
+    /// it. Called before the first render, the selection simply becomes the
+    /// initial one.
+    pub fn select(id: impl Into<ElementId>, index: SelectIndex, window: &mut Window, cx: &mut App) {
+        let state = window
+            .use_keyed_state(id.into(), cx, |window, cx| {
+                SettingsState::new(index, window, cx)
+            })
+            .clone();
+
+        state.update(cx, |state, cx| {
+            state.selected_index = index;
+            // Classic scroll-through layout jumps to the group; the
+            // single-group layout ignores this and shows the group alone.
+            state.deferred_scroll_group_ix = index.group_ix;
+            cx.notify();
+        });
+    }
+
     fn filtered_pages(&self, query: &str, cx: &App) -> Vec<SettingPage> {
         self.pages
             .iter()
@@ -283,6 +305,22 @@ pub(super) struct SettingsState {
     pub(super) search_input: Entity<InputState>,
 }
 
+impl SettingsState {
+    fn new(default_selected: SelectIndex, window: &mut Window, cx: &mut App) -> Self {
+        let search_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(t!("Settings.search_placeholder"))
+                .default_value("")
+        });
+
+        SettingsState {
+            search_input,
+            selected_index: default_selected,
+            deferred_scroll_group_ix: None,
+        }
+    }
+}
+
 /// Options for rendering setting item.
 #[derive(Clone, Copy)]
 pub struct RenderOptions {
@@ -304,17 +342,7 @@ pub struct SelectIndex {
 impl RenderOnce for Settings {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let state = window.use_keyed_state(self.id.clone(), cx, |window, cx| {
-            let search_input = cx.new(|cx| {
-                InputState::new(window, cx)
-                    .placeholder(t!("Settings.search_placeholder"))
-                    .default_value("")
-            });
-
-            SettingsState {
-                search_input,
-                selected_index: self.default_selected_index,
-                deferred_scroll_group_ix: None,
-            }
+            SettingsState::new(self.default_selected_index, window, cx)
         });
 
         let query = state.read(cx).search_input.read(cx).value();
