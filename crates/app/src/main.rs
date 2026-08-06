@@ -479,8 +479,9 @@ fn foreground_last_active(cx: &mut App) {
 }
 
 /// Apply one `nmt://` action: validate the target
-/// directory, then open it as a tab in the best-matching workspace or as a
-/// new window. Invalid targets only bring the app forward.
+/// directory, then reuse an exact workspace, open it as a tab in the
+/// best-matching workspace, or create a new window. Invalid targets only bring
+/// the app forward.
 fn dispatch_cli_action(action: CliAction, cx: &mut App) {
     if let CliAction::FocusNotification {
         route,
@@ -507,6 +508,53 @@ fn dispatch_cli_action(action: CliAction, cx: &mut App) {
     };
     match action {
         CliAction::NewTab { .. } => {
+            // Prefer an exact-path workspace across all windows. The most
+            // recently active window wins when duplicates already exist;
+            // remaining windows are checked newest first.
+            let last = cx.global::<LastActiveWindow>().0;
+            let registry = cx.global::<ShellRegistry>();
+            let mut targets = Vec::with_capacity(registry.0.len());
+
+            if let Some(entry) = registry
+                .0
+                .iter()
+                .find(|entry| Some(entry.window_id) == last)
+            {
+                targets.push((entry.handle, entry.shell.clone()));
+            }
+
+            targets.extend(
+                registry
+                    .0
+                    .iter()
+                    .rev()
+                    .filter(|entry| Some(entry.window_id) != last)
+                    .map(|entry| (entry.handle, entry.shell.clone())),
+            );
+
+            for (handle, shell) in targets {
+                let activated = handle
+                    .update(cx, |_, window, cx| {
+                        shell
+                            .update(cx, |shell, cx| {
+                                if workspace::exact_match(&shell.workspaces.summaries(), &path)
+                                    .is_none()
+                                {
+                                    return false;
+                                }
+
+                                shell.open_dir_tab(&path, window, cx);
+                                true
+                            })
+                            .unwrap_or(false)
+                    })
+                    .unwrap_or(false);
+
+                if activated {
+                    return;
+                }
+            }
+
             // No live window (all closed mid-dispatch): degrade to new_window.
             let Some((handle, shell)) = last_active_shell(cx) else {
                 open_window_at(&path, cx);

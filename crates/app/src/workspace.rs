@@ -44,6 +44,25 @@ fn cmp_components(path: &path::Path) -> Vec<String> {
         .collect()
 }
 
+/// The first workspace whose cwd identifies exactly `target`. Comparison uses
+/// the same case-insensitive, separator-agnostic component identity as
+/// [`best_match`], while placeholder cwds remain ineligible.
+pub fn exact_match(summaries: &[WorkspaceSummary], target: &path::Path) -> Option<WorkspaceId> {
+    let target = cmp_components(target);
+    if target.is_empty() {
+        return None;
+    }
+
+    summaries.iter().find_map(|ws| {
+        let cwd = ws.cwd.trim();
+        if cwd.is_empty() || cwd == "." {
+            return None;
+        }
+
+        (cmp_components(path::Path::new(cwd)) == target).then_some(ws.id)
+    })
+}
+
 /// The workspace whose cwd is an ancestor of (or equal to) `target`, chosen
 /// by longest prefix in path components; ties go to the earlier workspace.
 /// Workspaces with an empty or `"."` cwd never match because they do not identify
@@ -305,6 +324,10 @@ mod tests {
         best_match(&summaries(cwds), path::Path::new(target))
     }
 
+    fn exactly_matched(cwds: &[&str], target: &str) -> Option<WorkspaceId> {
+        exact_match(&summaries(cwds), path::Path::new(target))
+    }
+
     #[test]
     fn deepest_ancestor_wins() {
         assert_eq!(
@@ -346,5 +369,18 @@ mod tests {
     #[test]
     fn tie_on_depth_goes_to_the_earlier_workspace() {
         assert_eq!(matched(&["C:/A", "c:/a"], "C:/A/B"), Some(WorkspaceId(1)));
+    }
+
+    #[test]
+    fn exact_match_reuses_the_same_workspace_path() {
+        assert_eq!(
+            exactly_matched(&["C:/A", "c:\\work\\project\\"], "C:/WORK/PROJECT"),
+            Some(WorkspaceId(2))
+        );
+    }
+
+    #[test]
+    fn exact_match_does_not_reuse_ancestor_workspace() {
+        assert_eq!(exactly_matched(&["C:/A"], "C:/A/child"), None);
     }
 }
