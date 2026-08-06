@@ -14,9 +14,10 @@ pub(crate) use self::shell::{
 mod active_list;
 mod agent_commands;
 mod agent_pane;
+mod agent_usage;
 mod assets;
 mod auto_refresh;
-mod codex_usage;
+mod floating_surface;
 mod font_picker;
 mod git_sidebar;
 mod git_status;
