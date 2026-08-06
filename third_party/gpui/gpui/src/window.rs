@@ -2302,11 +2302,23 @@ impl Window {
     /// the platform window, then notifies observers. Normally called automatically
     /// by the platform's resize callback, but exposed publicly for test infrastructure.
     pub fn bounds_changed(&mut self, cx: &mut App) {
-        self.scale_factor = self.platform_window.scale_factor();
-        self.viewport_size = self.platform_window.content_size();
-        self.display_id = self.platform_window.display().map(|display| display.id());
+        let scale_factor = self.platform_window.scale_factor();
+        let viewport_size = self.platform_window.content_size();
+        let display_id = self.platform_window.display().map(|display| display.id());
 
-        self.refresh();
+        // A pure move changes none of these, and window content is
+        // position-independent, so skip the whole-window redraw. Content
+        // updates arriving mid-move mark the invalidator dirty through their
+        // own notify path and still get drawn.
+        if scale_factor != self.scale_factor
+            || viewport_size != self.viewport_size
+            || display_id != self.display_id
+        {
+            self.scale_factor = scale_factor;
+            self.viewport_size = viewport_size;
+            self.display_id = display_id;
+            self.refresh();
+        }
 
         self.bounds_observers
             .clone()
