@@ -10,15 +10,11 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, from_str};
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
+use crate::usage::UsageSnapshot;
+
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Usage {
-    pub five_hour: Option<u8>,
-    pub weekly: Option<u8>,
-}
-
-pub fn fetch() -> Result<Usage, String> {
+pub fn fetch() -> Result<UsageSnapshot, String> {
     // The app-server is the Codex-owned boundary for OAuth refresh, account
     // selection, and backend compatibility; NiumaTerm only reads its RPC result.
     let mut child = Command::new("cmd.exe")
@@ -149,7 +145,7 @@ pub fn fetch() -> Result<Usage, String> {
     })
 }
 
-fn parse_rate_limits(message: &Value) -> Result<Usage, String> {
+fn parse_rate_limits(message: &Value) -> Result<UsageSnapshot, String> {
     if let Some(error) = message["error"]["message"].as_str() {
         return Err(error.to_string());
     }
@@ -166,13 +162,12 @@ fn parse_rate_limits(message: &Value) -> Result<Usage, String> {
         })
     };
 
-    let five_hour = left(5 * 60);
+    let usage = UsageSnapshot {
+        five_hour_remaining: left(5 * 60),
+        weekly_remaining: left(7 * 24 * 60),
+    };
 
-    let weekly = left(7 * 24 * 60);
-
-    let usage = Usage { five_hour, weekly };
-
-    if usage == Usage::default() {
+    if usage.is_unavailable() {
         return Err("Codex response did not include rate limits".to_string());
     }
 
@@ -198,9 +193,9 @@ mod tests {
         });
         assert_eq!(
             parse_rate_limits(&response).unwrap(),
-            Usage {
-                five_hour: Some(32),
-                weekly: Some(88),
+            UsageSnapshot {
+                five_hour_remaining: Some(32),
+                weekly_remaining: Some(88),
             }
         );
     }
@@ -223,9 +218,9 @@ mod tests {
         });
         assert_eq!(
             parse_rate_limits(&response).unwrap(),
-            Usage {
-                five_hour: None,
-                weekly: Some(88),
+            UsageSnapshot {
+                five_hour_remaining: None,
+                weekly_remaining: Some(88),
             }
         );
     }

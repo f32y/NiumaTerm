@@ -1,7 +1,7 @@
 use gpui::prelude::*;
 use gpui::{
     AnyElement, ClipboardItem, Context, DragMoveEvent, ElementId, Entity, KeyDownEvent,
-    MouseButton, ScrollHandle, SharedString, StatefulInteractiveElement, Window, div, px, rgb,
+    MouseButton, ScrollHandle, SharedString, StatefulInteractiveElement, Window, div, px,
 };
 use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants};
 use gpui_component::input::{Input, InputState};
@@ -12,7 +12,8 @@ use gpui_component::{ActiveTheme, Icon, IconNamed, Selectable, Sizable, h_flex, 
 use nmt_agent_utils::AgentRuntimeStatus;
 
 use super::{AppSettings, NewWorkspace, Shell};
-use crate::ui::codex_usage::CodexUsageView;
+use crate::ui::agent_usage::AgentUsageView;
+use crate::ui::floating_surface;
 use crate::ui::sidebar_resize::{self, ResizeDrag};
 use crate::window::WindowRegistry;
 use crate::workspace::{WorkspaceId, WorkspaceSummary};
@@ -24,43 +25,82 @@ pub(super) const SIDEBAR_WIDTH: f32 = 180.0;
 pub(super) const MIN_WIDTH: f32 = 140.0;
 pub(super) const MAX_WIDTH: f32 = 480.0;
 
-/// Sidebar idle indicator glyph (`assets/icons/idle.svg`), a static dot.
-struct IdleIcon;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WorkspaceStatusVisual {
+    Hidden,
+    Running,
+    NeedsInput,
+}
 
-impl IconNamed for IdleIcon {
-    fn path(self) -> SharedString {
-        "icons/idle.svg".into()
+fn workspace_status_presentation(
+    status: AgentRuntimeStatus,
+) -> (WorkspaceStatusVisual, &'static str) {
+    match status {
+        AgentRuntimeStatus::Running => (WorkspaceStatusVisual::Running, "Running"),
+        AgentRuntimeStatus::NeedsInput => (WorkspaceStatusVisual::NeedsInput, "Needs input"),
+        AgentRuntimeStatus::Idle => (WorkspaceStatusVisual::Hidden, "Idle"),
     }
 }
 
 fn agent_status_indicator(
     status: AgentRuntimeStatus,
     busy_id: impl Into<ElementId>,
-) -> (AnyElement, &'static str) {
-    match status {
-        AgentRuntimeStatus::Running => (
+    cx: &gpui::App,
+) -> (Option<AnyElement>, &'static str) {
+    let (visual, label) = workspace_status_presentation(status);
+    let indicator = match visual {
+        WorkspaceStatusVisual::Running => Some(
             ProgressCircle::new(busy_id)
                 .small()
                 .loading(true)
-                .color(rgb(0xD36803))
+                .color(cx.theme().warning)
                 .into_any_element(),
-            "Running",
         ),
-        AgentRuntimeStatus::NeedsInput => (
-            Icon::new(IdleIcon)
-                .small()
-                .text_color(rgb(0x4A90E2))
+        WorkspaceStatusVisual::NeedsInput => Some(
+            div()
+                .size(px(8.))
+                .rounded_full()
+                .bg(cx.theme().primary)
                 .into_any_element(),
-            "Needs input",
         ),
-        AgentRuntimeStatus::Idle => (
-            Icon::new(IdleIcon)
-                .small()
-                .text_color(rgb(0x46C878))
-                .into_any_element(),
-            "Idle",
-        ),
+        WorkspaceStatusVisual::Hidden => None,
+    };
+
+    (indicator, label)
+}
+
+fn workspace_display_label(name: &str, cwd: &str) -> String {
+    if name != "New Workspace" {
+        return name.to_string();
     }
+
+    cwd.trim_end_matches(['/', '\\'])
+        .rsplit(['/', '\\'])
+        .find(|component| !component.is_empty())
+        .filter(|component| *component != ".")
+        .map(str::to_string)
+        .unwrap_or_else(|| name.to_string())
+}
+
+fn tail_preserving_path(path: &str, max_chars: usize) -> String {
+    let length = path.chars().count();
+    if length <= max_chars || max_chars == 0 {
+        return path.to_string();
+    }
+    if max_chars == 1 {
+        return "…".to_string();
+    }
+
+    let raw_tail = path
+        .chars()
+        .skip(length - (max_chars - 1))
+        .collect::<String>();
+    let component_tail = raw_tail
+        .find(['/', '\\'])
+        .map(|separator| &raw_tail[separator..])
+        .filter(|tail| tail.len() > 1)
+        .unwrap_or(&raw_tail);
+    format!("…{component_tail}")
 }
 
 /// Sidebar pinned-workspace glyph (`assets/icons/pin.svg`).
@@ -90,12 +130,17 @@ struct WorkspaceDragPreview {
 impl Render for WorkspaceDragPreview {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (indicator, status_label) =
-            agent_status_indicator(self.agent_status, "workspace-drag-busy");
+            agent_status_indicator(self.agent_status, "workspace-drag-busy", cx);
 
         let indicator = div()
             .id("workspace-drag-status")
             .aria_label(status_label)
-            .child(indicator);
+            .size_4()
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .children(indicator);
 
         let background = cx
             .theme()
@@ -189,15 +234,20 @@ impl Sidebar {
         rename: Option<&(WorkspaceId, Entity<InputState>)>,
         cx: &mut Context<Shell>,
     ) -> AnyElement {
-        // Busy = animated progress circle, idle = static SVG dot, vertically
-        // centered on the item's left. SVG tint is applied as text color.
         let (indicator, status_label) =
-            agent_status_indicator(ws.agent_status, ("workspace-busy", idx));
+            agent_status_indicator(ws.agent_status, ("workspace-busy", idx), cx);
 
         let indicator = div()
             .id(("workspace-status", idx))
             .aria_label(status_label)
-            .child(indicator)
+            // The slot remains fixed so Idle can suppress its glyph without
+            // shifting workspace names relative to active status indicators.
+            .size_4()
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .children(indicator)
             .into_any_element();
 
         let ws_id = ws.id;
@@ -249,10 +299,15 @@ impl Sidebar {
             }))
             .child(controls);
 
-        let secondary = ws.cwd.clone();
+        let full_path = ws.cwd.clone();
+        let display_path = tail_preserving_path(
+            &full_path,
+            (((self.width - 80.0) / 7.0).floor() as usize).clamp(8, 64),
+        );
+        let display_label = workspace_display_label(&ws.name, &ws.cwd);
         let name = div()
             .id(("workspace-secondary", idx))
-            .aria_label(secondary.clone())
+            .aria_label(display_label.clone())
             .w_full()
             .text_left()
             .text_sm()
@@ -275,11 +330,11 @@ impl Sidebar {
                 )
                 .into_any_element()
         } else {
-            name.child(ws.name.clone()).into_any_element()
+            name.child(display_label.clone()).into_any_element()
         };
 
-        let drag_name: SharedString = ws.name.clone().into();
-        let drag_cwd: SharedString = ws.cwd.clone().into();
+        let drag_name: SharedString = display_label.into();
+        let drag_cwd: SharedString = display_path.clone().into();
         let drag_agent_status = ws.agent_status;
 
         // Replicate the item's rendered width: sidebar width minus the card
@@ -287,7 +342,13 @@ impl Sidebar {
         let drag_width = (self.width - 36.0).max(80.0);
         let item = Button::new(("workspace", idx))
             .ghost()
-            .tooltip(secondary.clone())
+            .tooltip(full_path.clone())
+            .aria_label(format!(
+                "Workspace {}, path {}, status {}",
+                workspace_display_label(&ws.name, &ws.cwd),
+                full_path,
+                status_label
+            ))
             .selected(ws.active)
             // Button resolves selected colors after element styles, so the
             // sidebar-accent pair must be the selected custom variant itself.
@@ -317,12 +378,15 @@ impl Sidebar {
                             .child(name)
                             .child(
                                 div()
+                                    .id(("workspace-path", idx))
                                     .w_full()
                                     .text_left()
                                     .text_xs()
-                                    .truncate()
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .aria_label(full_path.clone())
                                     .text_color(cx.theme().sidebar_foreground.opacity(0.6))
-                                    .child(secondary),
+                                    .child(display_path),
                             ),
                     )
                     .child(suffix),
@@ -426,7 +490,7 @@ impl Sidebar {
         &mut self,
         summaries: Vec<WorkspaceSummary>,
         rename: Option<&(WorkspaceId, Entity<InputState>)>,
-        codex_usage: Entity<CodexUsageView>,
+        agent_usage: Entity<AgentUsageView>,
         cx: &mut Context<Shell>,
     ) -> AnyElement {
         // Runs every render: close the make-way gap once the drag is gone
@@ -445,13 +509,9 @@ impl Sidebar {
         // a floating card — 1px border, large radius, its own background —
         // sitting in a gutter cut from the fixed width, so the drag/animation
         // math keeps operating on the full `width`.
-        let card = v_flex()
-            .size_full()
-            .bg(cx.theme().sidebar)
-            .border_1()
-            .border_color(cx.theme().sidebar_border)
-            .rounded(cx.theme().radius_lg)
-            .overflow_hidden()
+        let card = floating_surface::card(cx)
+            .flex()
+            .flex_col()
             .p_2()
             .gap_1()
             .child(
@@ -501,7 +561,7 @@ impl Sidebar {
                     .pt_1()
                     .border_t_1()
                     .border_color(cx.theme().sidebar_border)
-                    .child(codex_usage)
+                    .child(agent_usage)
             }));
 
         // Gutter floating the card inside the chrome; no right inset — the
@@ -512,9 +572,9 @@ impl Sidebar {
         let content = div()
             .w(px(width))
             .h_full()
-            .pl(px(6.))
-            .pt(px(4.))
-            .pb(px(6.))
+            .pl(px(floating_surface::SIDE_INSET))
+            .pt(px(floating_surface::TOP_INSET))
+            .pb(px(floating_surface::BOTTOM_INSET))
             .child(card);
 
         let collapsed = self.collapsed;
@@ -556,6 +616,45 @@ impl Sidebar {
         // Until the first toggle, render at the resting width — no slide-in on
         // startup.
         sidebar_resize::slide_width(wrapper, "sidebar", !collapsed, px(width), self.animated)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_workspace_uses_final_cwd_component() {
+        assert_eq!(
+            workspace_display_label("New Workspace", r"C:\Workspace\NiumaTerm\"),
+            "NiumaTerm"
+        );
+        assert_eq!(
+            workspace_display_label("Renamed", r"C:\Workspace\NiumaTerm"),
+            "Renamed"
+        );
+        assert_eq!(
+            workspace_display_label("New Workspace", "."),
+            "New Workspace"
+        );
+    }
+
+    #[test]
+    fn long_workspace_path_keeps_its_tail() {
+        assert_eq!(
+            tail_preserving_path(r"C:\very\long\workspace\NiumaTerm", 18),
+            "…\\NiumaTerm"
+        );
+        assert_eq!(tail_preserving_path("short/path", 18), "short/path");
+    }
+
+    #[test]
+    fn idle_status_has_no_glyph_but_retains_semantics() {
+        // Rendering owns the fixed slot; this state projection verifies that
+        // Idle supplies no visual child while keeping its accessible label.
+        let (visual, label) = workspace_status_presentation(AgentRuntimeStatus::Idle);
+        assert_eq!(visual, WorkspaceStatusVisual::Hidden);
+        assert_eq!(label, "Idle");
     }
 }
 

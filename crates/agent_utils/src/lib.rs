@@ -4,8 +4,11 @@ pub mod claude_code {
     pub mod sessions;
     #[cfg(target_os = "windows")]
     pub mod stream_json;
+    #[cfg(target_os = "windows")]
+    pub mod usage_fetcher;
 }
 mod hook_store;
+pub mod usage;
 pub mod codex {
     #[cfg(target_os = "windows")]
     pub mod app_server;

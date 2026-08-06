@@ -16,9 +16,10 @@ use futures::StreamExt as _;
 use futures::channel::mpsc;
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, ClipboardItem, Context, Div, Entity, FocusHandle, FollowMode, FontWeight,
-    ListAlignment, ListSizingBehavior, ListState, MouseButton, ScrollHandle, SharedString, Window,
-    div, list, px, relative, size,
+    AnyElement, ClipboardItem, Context, Div, ElementId, Entity, FocusHandle, FollowMode,
+    FontWeight, ListAlignment, ListSizingBehavior, ListState, MouseButton, Pixels, ScrollHandle,
+    SharedString, Stateful, Window, div, linear_color_stop, linear_gradient, list, px, relative,
+    rems, size,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{
@@ -27,9 +28,10 @@ use gpui_component::input::{
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_component::scroll::Scrollbar;
 use gpui_component::skeleton::Skeleton;
+use gpui_component::text::TextViewStyle;
 use gpui_component::{
-    ActiveTheme as _, Icon, IconName, Sizable as _, VirtualListScrollHandle, h_flex, text, v_flex,
-    v_virtual_list,
+    ActiveTheme as _, ElementExt as _, Icon, IconName, Sizable as _, VirtualListScrollHandle,
+    h_flex, text, v_flex, v_virtual_list,
 };
 use nmt_agent_utils::chat::{
     ContextWindowUsage, Event as SessionEvent, Item as SessionItem, ModelInfo, ReplayItem,
@@ -166,12 +168,44 @@ enum ChatItem {
     },
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Status {
     Starting,
     Idle,
     Running,
     Exited,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ComposerAction {
+    Send,
+    Stop,
+}
+
+fn composer_action(status: Status) -> ComposerAction {
+    if status == Status::Running {
+        ComposerAction::Stop
+    } else {
+        ComposerAction::Send
+    }
+}
+
+fn should_show_jump_to_latest(
+    is_following_tail: bool,
+    is_scrolled_to_end: Option<bool>,
+    max_scroll_offset: Pixels,
+) -> bool {
+    if is_following_tail {
+        return false;
+    }
+
+    match is_scrolled_to_end {
+        Some(at_end) => !at_end,
+        // A short bottom-aligned list can leave tail-follow after an upward
+        // wheel gesture even though it has no scroll range. Unknown-height
+        // scrollable lists still fall back to the established follow state.
+        None => max_scroll_offset > px(0.),
+    }
 }
 
 /// Which agent backs this pane; the persisted tab snapshot stores the wire
@@ -336,6 +370,9 @@ pub(crate) struct AgentPane {
     /// Row heights depend on the agent font, which the specs can't see; the
     /// last-seen font triggers a full remeasure when it changes.
     transcript_font: (SharedString, f64),
+    /// Virtual rows cache measured heights; a width change can rewrap prose
+    /// without changing row fingerprints, so the viewport width is tracked too.
+    transcript_width: Option<Pixels>,
     input: Entity<InputState>,
     session: Option<Backend>,
     /// Bumped on every (re)spawn; the message pump and EOF handler of an
@@ -467,6 +504,7 @@ impl AgentPane {
             },
             row_specs: Vec::new(),
             transcript_font: Default::default(),
+            transcript_width: None,
             input,
             session: None,
             session_epoch: 0,
@@ -765,12 +803,21 @@ impl AgentPane {
         self.kind
     }
 
-    /// While tail-follow is engaged the list snaps to the end on every
-    /// layout; the list disengages it on upward scroll and re-engages when
-    /// the user returns to the bottom, so the follow state IS the
-    /// at-the-bottom signal.
-    fn transcript_is_at_bottom(&self) -> bool {
-        self.transcript_list.is_following_tail()
+    fn transcript_has_hidden_content_below(&self) -> bool {
+        should_show_jump_to_latest(
+            self.transcript_list.is_following_tail(),
+            self.transcript_list.is_scrolled_to_end(),
+            self.transcript_list.max_offset_for_scrollbar().y,
+        )
+    }
+
+    fn transcript_has_hidden_content_above(&self) -> bool {
+        let logical = self.transcript_list.logical_scroll_top();
+        let has_logical_offset = logical.item_ix > 0 || logical.offset_in_item > px(0.);
+        // A short bottom-aligned list uses an end anchor even though no content
+        // is clipped. The pixel offset distinguishes that alignment sentinel
+        // from a genuine logical offset into earlier rows.
+        has_logical_offset && self.transcript_list.scroll_px_offset_for_scrollbar().y < px(0.)
     }
 
     /// Re-engaging tail mode also scrolls to the very end (past the last
@@ -2305,6 +2352,149 @@ fn permission_icon(value: Option<&str>) -> IconName {
     }
 }
 
+const AGENT_DISCLOSURE_SLOT: f32 = 16.0;
+const AGENT_DISCLOSURE_GAP: f32 = 4.0;
+const AGENT_DISCLOSURE_PADDING: f32 = 4.0;
+const AGENT_DISCLOSURE_DETAIL_INSET: f32 =
+    AGENT_DISCLOSURE_PADDING + AGENT_DISCLOSURE_SLOT * 2.0 + AGENT_DISCLOSURE_GAP * 2.0;
+
+/// Shared geometry for expandable transcript rows. Empty chevron, type-icon,
+/// and trailing slots keep labels aligned when a particular row omits one.
+struct AgentDisclosureRow {
+    id: ElementId,
+    expanded: Option<bool>,
+    type_icon: Option<IconName>,
+    label: String,
+    preview: Option<String>,
+    trailing: Option<AnyElement>,
+    accessible_label: String,
+}
+
+impl AgentDisclosureRow {
+    fn new(id: impl Into<ElementId>, label: impl Into<String>) -> Self {
+        let label = label.into();
+        Self {
+            id: id.into(),
+            expanded: None,
+            type_icon: None,
+            accessible_label: label.clone(),
+            label,
+            preview: None,
+            trailing: None,
+        }
+    }
+
+    fn expanded(mut self, expanded: bool) -> Self {
+        self.expanded = Some(expanded);
+        self
+    }
+
+    fn type_icon(mut self, icon: IconName) -> Self {
+        self.type_icon = Some(icon);
+        self
+    }
+
+    fn preview(mut self, preview: impl Into<String>) -> Self {
+        self.preview = Some(preview.into());
+        self
+    }
+
+    fn trailing(mut self, trailing: Option<AnyElement>) -> Self {
+        self.trailing = trailing;
+        self
+    }
+
+    fn accessible_label(mut self, label: impl Into<String>) -> Self {
+        self.accessible_label = label.into();
+        self
+    }
+
+    fn render(self, cx: &mut Context<AgentPane>) -> Stateful<Div> {
+        let hover_bg = cx.theme().muted.opacity(0.4);
+        let expandable = self.expanded.is_some();
+        let chevron = self.expanded.map(|expanded| {
+            Icon::new(if expanded {
+                IconName::ChevronDown
+            } else {
+                IconName::ChevronRight
+            })
+            .size_3()
+            .text_color(cx.theme().muted_foreground.opacity(0.7))
+        });
+        let type_icon = self.type_icon.map(|icon| {
+            Icon::new(icon)
+                .size_3p5()
+                .text_color(cx.theme().muted_foreground.opacity(0.8))
+        });
+        let has_preview = self.preview.is_some();
+
+        h_flex()
+            .id(self.id)
+            .w_full()
+            .min_h(px(24.))
+            .gap(px(AGENT_DISCLOSURE_GAP))
+            .items_center()
+            .px(px(AGENT_DISCLOSURE_PADDING))
+            .py_0p5()
+            .rounded(cx.theme().radius)
+            .aria_label(self.accessible_label)
+            .when(expandable, |this| {
+                this.cursor_pointer()
+                    .role(gpui::Role::Button)
+                    .hover(move |style| style.bg(hover_bg))
+            })
+            .child(
+                div()
+                    .w(px(AGENT_DISCLOSURE_SLOT))
+                    .h(px(AGENT_DISCLOSURE_SLOT))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .children(chevron),
+            )
+            .child(
+                div()
+                    .w(px(AGENT_DISCLOSURE_SLOT))
+                    .h(px(AGENT_DISCLOSURE_SLOT))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .children(type_icon),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .max_w(relative(0.6))
+                    .truncate()
+                    .text_sm()
+                    .text_color(cx.theme().foreground.opacity(0.82))
+                    .child(self.label),
+            )
+            .children(self.preview.map(|preview| {
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground.opacity(0.55))
+                    .child(preview)
+            }))
+            .when(!has_preview, |this| this.child(div().flex_1()))
+            .child(
+                div()
+                    .w(px(AGENT_DISCLOSURE_SLOT))
+                    .h(px(AGENT_DISCLOSURE_SLOT))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .children(self.trailing),
+            )
+    }
+}
+
 /// One transcript row for the virtualized list. `PartialEq` powers the
 /// render-time diff: kind + indices catch structural changes (fold, collapse,
 /// appended rows), the fingerprint catches in-place content changes that move
@@ -2507,8 +2697,9 @@ impl Render for AgentPane {
                 )
         });
 
-        let running = self.status == Status::Running;
-        let transcript_scrolled_up = !self.transcript_is_at_bottom();
+        let running = composer_action(self.status) == ComposerAction::Stop;
+        let transcript_has_hidden_content_below = self.transcript_has_hidden_content_below();
+        let transcript_scrolled_from_top = self.transcript_has_hidden_content_above();
 
         // The history list only makes sense while the tab is a blank slate:
         // no transcript yet and no conversation committed to. It shows as
@@ -2549,6 +2740,20 @@ impl Render for AgentPane {
                         div()
                             .id("agent-transcript")
                             .size_full()
+                            .on_prepaint({
+                                let pane = cx.entity().downgrade();
+                                move |bounds, _, cx| {
+                                    pane.update(cx, |this, cx| {
+                                        let width = bounds.size.width;
+                                        if this.transcript_width != Some(width) {
+                                            this.transcript_width = Some(width);
+                                            this.transcript_list.remeasure();
+                                            cx.notify();
+                                        }
+                                    })
+                                    .ok();
+                                }
+                            })
                             // Reading or selecting transcript content should
                             // leave Escape routed to the pane-level interrupt
                             // handler instead of whichever control previously
@@ -2571,9 +2776,24 @@ impl Render for AgentPane {
                                     }
                                 })
                                 .size_full()
-                                .pt_3(),
+                                .pt(px(16.)),
                             ),
                     )
+                    .children(transcript_scrolled_from_top.then(|| {
+                        // This decorative overlay has no handlers, so text
+                        // selection and wheel input continue to reach the list.
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .right(px(16.))
+                            .h(px(24.))
+                            .bg(linear_gradient(
+                                180.,
+                                linear_color_stop(cx.theme().sidebar, 0.),
+                                linear_color_stop(cx.theme().sidebar.opacity(0.), 1.),
+                            ))
+                    }))
                     // The bare Scrollbar element carries no inset of its own,
                     // so it lands at its static flow position (below the
                     // full-height sibling); the pinned strip gives it a
@@ -2587,7 +2807,7 @@ impl Render for AgentPane {
                             .w(px(16.))
                             .child(Scrollbar::vertical(&self.transcript_list)),
                     )
-                    .when(transcript_scrolled_up, |this| {
+                    .when(transcript_has_hidden_content_below, |this| {
                         this.child(
                             div()
                                 .absolute()
@@ -2744,12 +2964,15 @@ impl Render for AgentPane {
                                         .child(if running {
                                             Button::new("agent-send")
                                                 .danger()
+                                                .size(px(32.))
                                                 .rounded(px(999.))
+                                                .tooltip("Stop response")
+                                                .aria_label("Stop response")
                                                 .child(
                                                     div()
                                                         .size(px(10.))
                                                         .rounded_sm()
-                                                        .bg(gpui::white()),
+                                                        .bg(cx.theme().button_danger_foreground),
                                                 )
                                                 .on_click(
                                                     cx.listener(|this, _, _, cx| {
@@ -2759,8 +2982,11 @@ impl Render for AgentPane {
                                         } else {
                                             Button::new("agent-send")
                                                 .primary()
+                                                .size(px(32.))
                                                 .rounded(px(999.))
                                                 .icon(IconName::ArrowUp)
+                                                .tooltip("Send message")
+                                                .aria_label("Send message")
                                                 .on_click(cx.listener(|this, _, window, cx| {
                                                     this.send_user_message(window, cx)
                                                 }))
@@ -3247,11 +3473,14 @@ impl AgentPane {
             .gap_2()
             .context_menu(Self::copy_menu(index, &self.items[index].item))
             .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .px_1()
-                    .child(text::TextView::markdown(("agent-md", index), text).selectable(true)),
+                div().flex_1().min_w_0().px_1().child(
+                    text::TextView::markdown(("agent-md", index), text)
+                        // Monospaced glyphs average roughly 0.6em wide, so
+                        // 48rem yields an approximately 80-character prose
+                        // measure while technical Markdown remains full-width.
+                        .style(TextViewStyle::default().prose_max_width(rems(48.)))
+                        .selectable(true),
+                ),
             )
             .child(self.hover_stamp(index, cx))
             .into_any_element()
@@ -3276,7 +3505,7 @@ impl AgentPane {
             .into_any_element()
     }
 
-    /// One work-log line: icon · heading · dimmed preview · chevron · status.
+    /// One work-log line: chevron · type icon · heading · preview · status.
     /// Rows with detail (command output, reasoning text) expand on click into
     /// an indented block behind a left hairline rail.
     fn render_work_row(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -3343,69 +3572,51 @@ impl AgentPane {
 
         let expandable = detail.is_some();
         let expanded = expandable && self.expanded_rows.contains(&index);
-        let hover_bg = cx.theme().muted.opacity(0.4);
-
-        let status_glyph = status.map(|state| {
+        let status_label = status.as_deref().unwrap_or("No status");
+        let status_glyph = status.as_ref().map(|state| {
             let (name, color) = match state.as_str() {
                 "failed" | "declined" => (IconName::CircleX, cx.theme().danger),
                 "completed" => (IconName::Check, cx.theme().muted_foreground),
                 _ => (IconName::Minus, cx.theme().muted_foreground.opacity(0.6)),
             };
 
-            Icon::new(name).size_3().text_color(color)
+            Icon::new(name)
+                .size_3()
+                .text_color(color)
+                .into_any_element()
         });
 
-        let header = h_flex()
-            .id(("wl-head", index))
-            .w_full()
-            .gap_2()
-            .items_center()
-            .px_1()
-            .py_0p5()
-            .rounded(cx.theme().radius)
-            .when(expandable, |this| {
-                this.cursor_pointer()
-                    .hover(move |style| style.bg(hover_bg))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if !this.expanded_rows.insert(index) {
-                            this.expanded_rows.remove(&index);
-                        }
-                        cx.notify();
-                    }))
-            })
-            .child(
-                Icon::new(icon)
-                    .size_3p5()
-                    .text_color(cx.theme().muted_foreground.opacity(0.8)),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .max_w(relative(0.6))
-                    .truncate()
-                    .text_sm()
-                    .text_color(cx.theme().foreground.opacity(0.82))
-                    .child(heading),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground.opacity(0.55))
-                    .child(preview),
-            )
-            .children(expandable.then(|| {
-                Icon::new(if expanded {
-                    IconName::ChevronDown
+        let accessible_label = format!(
+            "{}: {}. {}{}",
+            heading,
+            preview,
+            status_label,
+            if expandable {
+                if expanded {
+                    ". Expanded"
                 } else {
-                    IconName::ChevronRight
-                })
-                .size_3()
-                .text_color(cx.theme().muted_foreground.opacity(0.7))
+                    ". Collapsed"
+                }
+            } else {
+                ""
+            }
+        );
+        let mut header = AgentDisclosureRow::new(("wl-head", index), heading)
+            .type_icon(icon)
+            .preview(preview)
+            .trailing(status_glyph)
+            .accessible_label(accessible_label);
+        if expandable {
+            header = header.expanded(expanded);
+        }
+        let header = header.render(cx).when(expandable, |this| {
+            this.on_click(cx.listener(move |this, _, _, cx| {
+                if !this.expanded_rows.insert(index) {
+                    this.expanded_rows.remove(&index);
+                }
+                cx.notify();
             }))
-            .children(status_glyph);
+        });
 
         v_flex()
             .id(("entry", index))
@@ -3441,7 +3652,7 @@ impl AgentPane {
                 };
 
                 div()
-                    .ml(px(28.))
+                    .ml(px(AGENT_DISCLOSURE_DETAIL_INSET))
                     .mt_1()
                     .border_l_1()
                     .border_color(cx.theme().border.opacity(0.45))
@@ -3471,28 +3682,19 @@ impl AgentPane {
         folded: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let foreground = cx.theme().foreground;
-        let chevron = if folded {
-            IconName::ChevronRight
-        } else {
-            IconName::ChevronDown
-        };
+        let label = format!("Worked for {seconds}s");
 
         v_flex()
             .w_full()
             .gap_1()
             .child(
-                h_flex()
-                    .id(("turn-fold", turn as usize))
-                    .gap_1()
-                    .items_center()
-                    .px_1()
-                    .cursor_pointer()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .hover(move |style| style.text_color(foreground))
-                    .child(format!("Worked for {seconds}s"))
-                    .child(Icon::new(chevron).size_3p5())
+                AgentDisclosureRow::new(("turn-fold", turn as usize), label.clone())
+                    .expanded(!folded)
+                    .accessible_label(format!(
+                        "{label}. {}",
+                        if folded { "Collapsed" } else { "Expanded" }
+                    ))
+                    .render(cx)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if !this.expanded_turns.insert(turn) {
                             this.expanded_turns.remove(&turn);
@@ -3513,7 +3715,6 @@ impl AgentPane {
         expanded: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let hover_bg = cx.theme().muted.opacity(0.4);
         let label = if expanded {
             "Show fewer tool calls".to_string()
         } else {
@@ -3523,27 +3724,13 @@ impl AgentPane {
             )
         };
 
-        h_flex()
-            .id(("wl-run", run_start))
-            .gap_1()
-            .items_center()
-            .px_1()
-            .py_0p5()
-            .rounded(cx.theme().radius)
-            .cursor_pointer()
-            .hover(move |style| style.bg(hover_bg))
-            .text_sm()
-            .text_color(cx.theme().foreground.opacity(0.82))
-            .child(
-                Icon::new(if expanded {
-                    IconName::ChevronDown
-                } else {
-                    IconName::ChevronRight
-                })
-                .size_3()
-                .text_color(cx.theme().muted_foreground.opacity(0.7)),
-            )
-            .child(label)
+        AgentDisclosureRow::new(("wl-run", run_start), label.clone())
+            .expanded(expanded)
+            .accessible_label(format!(
+                "{label}. {}",
+                if expanded { "Expanded" } else { "Collapsed" }
+            ))
+            .render(cx)
             .on_click(cx.listener(move |this, _, _, cx| {
                 if !this.expanded_groups.insert(run_start) {
                     this.expanded_groups.remove(&run_start);
@@ -3842,38 +4029,49 @@ impl AgentPane {
             .map(|m| m.efforts.iter().map(|v| (v.clone(), v.clone())).collect())
             .unwrap_or_default();
 
+        let model = Self::setting_picker(
+            cx,
+            "agent-model",
+            "model",
+            IconName::Cpu,
+            self.settings.model.clone(),
+            model_options,
+            true,
+            |this, value, cx| {
+                this.settings.model = Some(value);
+                this.remember_thread_defaults(cx);
+            },
+        )
+        .into_any_element();
+        let permission = Self::setting_picker(
+            cx,
+            "agent-permission",
+            "permissions",
+            permission_icon(self.settings.approval.as_deref()),
+            self.settings.approval.clone(),
+            permission_options,
+            false,
+            |this, value, cx| {
+                this.settings.approval = Some(value);
+                this.remember_thread_defaults(cx);
+            },
+        )
+        .into_any_element();
+
         let mut row = h_flex()
             .w_full()
             .gap_1()
             .flex_wrap()
             .text_color(cx.theme().muted_foreground)
-            .child(Self::setting_picker(
+            .child(model)
+            .child(Self::settings_group(
+                "Execution policy",
+                vec![permission],
                 cx,
-                "agent-model",
-                "model",
-                IconName::Cpu,
-                self.settings.model.clone(),
-                model_options,
-                |this, value, cx| {
-                    this.settings.model = Some(value);
-                    this.remember_thread_defaults(cx);
-                },
-            ))
-            .child(Self::setting_picker(
-                cx,
-                "agent-permission",
-                "permissions",
-                permission_icon(self.settings.approval.as_deref()),
-                self.settings.approval.clone(),
-                permission_options,
-                |this, value, cx| {
-                    this.settings.approval = Some(value);
-                    this.remember_thread_defaults(cx);
-                },
             ));
 
         if !effort_options.is_empty() {
-            row = row.child(Self::setting_picker(
+            let effort = Self::setting_picker(
                 cx,
                 "agent-effort",
                 "effort",
@@ -3886,12 +4084,15 @@ impl AgentPane {
                     .clone()
                     .or_else(|| Some("default".to_string())),
                 effort_options,
+                false,
                 |this, value, cx| {
                     this.settings.effort = Some(value.clone());
                     this.remember_thread_defaults(cx);
                     this.send_text(format!("/effort {value}"), cx);
                 },
-            ));
+            )
+            .into_any_element();
+            row = row.child(Self::settings_group("Quality and cost", vec![effort], cx));
         }
 
         row
@@ -3932,88 +4133,126 @@ impl AgentPane {
             .map(|v| (v.to_string(), v.to_string()))
             .collect();
 
+        let model = Self::setting_picker(
+            cx,
+            "agent-model",
+            "model",
+            IconName::Cpu,
+            self.settings.model.clone(),
+            model_options,
+            true,
+            |this, value, cx| {
+                // A tier the new model doesn't offer falls back to that
+                // model's default tier instead of erroring the next turn.
+                if let Some(info) = this.models.iter().find(|m| m.model == value)
+                    && !this
+                        .settings
+                        .tier
+                        .as_ref()
+                        .is_some_and(|tier| info.tiers.iter().any(|(id, _)| id == tier))
+                {
+                    this.settings.tier = info.default_tier.clone();
+                }
+                this.settings.model = Some(value);
+                this.remember_thread_defaults(cx);
+            },
+        )
+        .into_any_element();
+        let approval = Self::setting_picker(
+            cx,
+            "agent-approval",
+            "approval",
+            permission_icon(self.settings.approval.as_deref()),
+            self.settings.approval.clone(),
+            approval_options,
+            false,
+            |this, value, cx| {
+                this.settings.approval = Some(value);
+                this.remember_thread_defaults(cx);
+            },
+        )
+        .into_any_element();
+        let sandbox = Self::setting_picker(
+            cx,
+            "agent-sandbox",
+            "sandbox",
+            IconName::Shield,
+            self.settings.sandbox.clone(),
+            sandbox_options,
+            false,
+            |this, value, cx| {
+                this.settings.sandbox = Some(value);
+                this.remember_thread_defaults(cx);
+            },
+        )
+        .into_any_element();
+        let effort = Self::setting_picker(
+            cx,
+            "agent-effort",
+            "effort",
+            IconName::Gauge,
+            self.settings.effort.clone(),
+            effort_options,
+            false,
+            |this, value, cx| {
+                this.settings.effort = Some(value);
+                this.remember_thread_defaults(cx);
+            },
+        )
+        .into_any_element();
+        let tier = Self::setting_picker(
+            cx,
+            "agent-tier",
+            "tier",
+            IconName::Zap,
+            Some(self.settings.tier.clone().unwrap_or_default()),
+            tier_options,
+            false,
+            |this, value, cx| {
+                this.settings.tier = (!value.is_empty()).then_some(value);
+                this.remember_thread_defaults(cx);
+            },
+        )
+        .into_any_element();
+
         h_flex()
             .w_full()
             .gap_1()
             .flex_wrap()
             .text_color(cx.theme().muted_foreground)
-            .child(Self::setting_picker(
+            .child(model)
+            .child(Self::settings_group(
+                "Execution policy",
+                vec![approval, sandbox],
                 cx,
-                "agent-model",
-                "model",
-                IconName::Cpu,
-                self.settings.model.clone(),
-                model_options,
-                |this, value, cx| {
-                    // A tier the new model doesn't offer falls back to that
-                    // model's default tier instead of erroring the next turn.
-                    if let Some(info) = this.models.iter().find(|m| m.model == value)
-                        && !this
-                            .settings
-                            .tier
-                            .as_ref()
-                            .is_some_and(|tier| info.tiers.iter().any(|(id, _)| id == tier))
-                    {
-                        this.settings.tier = info.default_tier.clone();
-                    }
-                    this.settings.model = Some(value);
-                    this.remember_thread_defaults(cx);
-                },
             ))
-            .child(Self::setting_picker(
+            .child(Self::settings_group(
+                "Quality and cost",
+                vec![effort, tier],
                 cx,
-                "agent-approval",
-                "approval",
-                permission_icon(self.settings.approval.as_deref()),
-                self.settings.approval.clone(),
-                approval_options,
-                |this, value, cx| {
-                    this.settings.approval = Some(value);
-                    this.remember_thread_defaults(cx);
-                },
-            ))
-            .child(Self::setting_picker(
-                cx,
-                "agent-sandbox",
-                "sandbox",
-                IconName::Shield,
-                self.settings.sandbox.clone(),
-                sandbox_options,
-                |this, value, cx| {
-                    this.settings.sandbox = Some(value);
-                    this.remember_thread_defaults(cx);
-                },
-            ))
-            .child(Self::setting_picker(
-                cx,
-                "agent-effort",
-                "effort",
-                IconName::Gauge,
-                self.settings.effort.clone(),
-                effort_options,
-                |this, value, cx| {
-                    this.settings.effort = Some(value);
-                    this.remember_thread_defaults(cx);
-                },
-            ))
-            .child(Self::setting_picker(
-                cx,
-                "agent-tier",
-                "tier",
-                IconName::Zap,
-                Some(self.settings.tier.clone().unwrap_or_default()),
-                tier_options,
-                |this, value, cx| {
-                    this.settings.tier = (!value.is_empty()).then_some(value);
-                    this.remember_thread_defaults(cx);
-                },
             ))
     }
 
-    /// One dropdown: a ghost button showing `icon · current value · chevron`
-    /// (t3code's composer-control look — the icon carries the control's
-    /// meaning, the tooltip its name) whose menu lists `(wire value, display
-    /// label)` options; picking one stores the wire value via `set`.
+    fn settings_group(
+        label: &'static str,
+        controls: Vec<AnyElement>,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        h_flex()
+            .id(label)
+            .aria_label(label)
+            .gap_0p5()
+            .p(px(1.))
+            .rounded(cx.theme().radius)
+            .border_1()
+            .border_color(cx.theme().border.opacity(0.65))
+            .bg(cx.theme().muted.opacity(0.2))
+            .children(controls)
+    }
+
+    /// One dropdown showing `icon · current value · chevron`. Every picker uses
+    /// the same quiet color treatment; the model remains wider so its value is
+    /// easier to scan. Menus keep the existing wire values and setters.
     fn setting_picker(
         cx: &mut Context<Self>,
         id: &'static str,
@@ -4021,6 +4260,7 @@ impl AgentPane {
         icon: IconName,
         current: Option<String>,
         options: Vec<(String, String)>,
+        is_model: bool,
         set: fn(&mut Self, String, &mut Context<Self>),
     ) -> impl IntoElement + use<> {
         let pane = cx.entity();
@@ -4039,8 +4279,10 @@ impl AgentPane {
 
         Button::new(id)
             .ghost()
+            .when(is_model, |this| this.min_w(px(120.)))
             .small()
             .tooltip(name)
+            .aria_label(format!("{name}: {current_label}"))
             .child(
                 h_flex()
                     .gap_1p5()
@@ -4083,7 +4325,39 @@ impl AgentPane {
 
 #[cfg(test)]
 mod prompt_truncation_tests {
-    use super::truncated_user_prompt;
+    use gpui::px;
+
+    use super::{
+        AGENT_DISCLOSURE_DETAIL_INSET, AGENT_DISCLOSURE_GAP, AGENT_DISCLOSURE_PADDING,
+        AGENT_DISCLOSURE_SLOT, ComposerAction, Status, composer_action, should_show_jump_to_latest,
+        truncated_user_prompt,
+    };
+
+    #[test]
+    fn disclosure_detail_rail_matches_the_shared_leading_slots() {
+        assert_eq!(
+            AGENT_DISCLOSURE_DETAIL_INSET,
+            AGENT_DISCLOSURE_PADDING + AGENT_DISCLOSURE_SLOT * 2.0 + AGENT_DISCLOSURE_GAP * 2.0
+        );
+    }
+
+    #[test]
+    fn composer_replaces_send_with_stop_only_while_running() {
+        assert_eq!(composer_action(Status::Running), ComposerAction::Stop);
+        for status in [Status::Starting, Status::Idle, Status::Exited] {
+            assert_eq!(composer_action(status), ComposerAction::Send);
+        }
+    }
+
+    #[test]
+    fn jump_to_latest_requires_hidden_content_below_the_viewport() {
+        assert!(!should_show_jump_to_latest(false, None, px(0.)));
+        assert!(!should_show_jump_to_latest(false, Some(true), px(200.)));
+        assert!(should_show_jump_to_latest(false, Some(false), px(200.)));
+        assert!(!should_show_jump_to_latest(true, Some(false), px(200.)));
+        assert!(!should_show_jump_to_latest(true, None, px(200.)));
+        assert!(should_show_jump_to_latest(false, None, px(200.)));
+    }
 
     #[test]
     fn short_prompts_pass_through_and_long_ones_cut_at_boundaries() {

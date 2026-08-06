@@ -34,7 +34,8 @@ use crate::tabs::{TabId, TabManager};
 use crate::terminal::session::HostEvent;
 use crate::terminal::view::{AgentInterrupted, TerminalPane};
 use crate::ui::agent_pane::{AgentKind, AgentPane, AgentPaneEvent};
-use crate::ui::codex_usage::CodexUsageView;
+use crate::ui::agent_usage::AgentUsageView;
+use crate::ui::floating_surface;
 use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::git_status::{GitStatusModel, GitStatusView};
 use crate::ui::settings::{AppSettings, settings_view};
@@ -194,8 +195,8 @@ pub(crate) struct Shell {
     /// Titlebar daily-token-usage widget; rendered only while the
     /// `show_daily_token_usage` setting is on.
     token_usage: Entity<TokenUsageView>,
-    /// Active Codex account rate limits, refreshed independently of terminals.
-    codex_usage: Entity<CodexUsageView>,
+    /// Compact Codex and Claude rate limits, refreshed independently of terminals.
+    agent_usage: Entity<AgentUsageView>,
     /// Shared git status poller feeding the titlebar indicator and sidebar.
     git_model: Entity<GitStatusModel>,
     /// Titlebar `+N -M` indicator (self-gating on its setting).
@@ -335,7 +336,7 @@ impl Shell {
             focus: cx.focus_handle(),
             window_id,
             token_usage: cx.new(TokenUsageView::new),
-            codex_usage: cx.new(CodexUsageView::new),
+            agent_usage: cx.new(AgentUsageView::new),
             git_status: cx.new(|cx| GitStatusView::new(git_model.clone(), cx)),
             git_sidebar: cx.new(|cx| GitSidebar::new(git_model.clone(), cx)),
             git_model,
@@ -2234,17 +2235,12 @@ impl Shell {
         });
     }
 
-    /// The active tab's pane tree as nested resizable groups; a single-leaf
-    /// tab renders its pane bare (no split chrome).
+    /// The active tab's pane tree as nested resizable groups. The main surface
+    /// owns the outer frame, so a single pane renders without another card.
     fn render_active_tree(&self, cx: &mut Context<Self>) -> AnyElement {
-        // An agent tab renders its chat view in the same rounded card frame a
-        // single terminal pane gets, so tab switching keeps a stable layout.
         if let Some(agent) = self.active_agent() {
             return div()
                 .size_full()
-                .border_1()
-                .rounded(cx.theme().radius_lg)
-                .border_color(cx.theme().border)
                 .overflow_hidden()
                 .child(agent)
                 .into_any_element();
@@ -2267,19 +2263,17 @@ impl Shell {
             PaneNode::Leaf { id, pane, .. } => {
                 let id = *id;
 
-                // Every leaf renders as a rounded card framed by a 1px border,
-                // separating the terminal surface from the window chrome. In
-                // multi-pane layouts the border doubles as the focused-pane
-                // highlight; it is present on every leaf so focus changes
-                // don't shift layout.
                 div()
                     .size_full()
-                    .border_1()
-                    .rounded(cx.theme().radius_lg)
-                    .border_color(if multi && id == focused {
-                        cx.theme().primary
-                    } else {
-                        cx.theme().border
+                    // Split leaves retain equal-width borders so focus changes
+                    // never shift layout; the parent surface clips their outer
+                    // edges and provides the single-pane frame.
+                    .when(multi, |this| {
+                        this.border_1().border_color(if id == focused {
+                            cx.theme().primary
+                        } else {
+                            cx.theme().border
+                        })
                     })
                     .capture_any_mouse_down(cx.listener(
                         move |this, _: &MouseDownEvent, window, cx| {
@@ -2426,7 +2420,7 @@ impl Render for Shell {
         let sidebar = self.sidebar.render(
             summaries,
             self.workspace_rename.as_ref(),
-            self.codex_usage.clone(),
+            self.agent_usage.clone(),
             cx,
         );
 
@@ -2588,19 +2582,14 @@ impl Render for Shell {
                     .child(
                         div()
                             .flex_1()
-                            // Don't let the tab strip's content width inflate
-                            // this column past its flex share (min-width:auto
-                            // would); the strip scrolls instead.
                             .min_w_0()
                             .flex()
                             .flex_col()
-                            // Tab bar sits directly above the terminal (client
-                            // area — no occlude needed outside the titlebar).
+                            // Keep the established tab strip outside the pane
+                            // card so its shape, spacing, and background remain
+                            // unchanged from the pre-hierarchy layout.
                             .child(tab_bar)
-                            // `min_*_0`: the restored pane tree carries pixel
-                            // flex-basis sizes whose sum sets a content min-size;
-                            // without an explicit zero min the slot refuses to
-                            // shrink.
+                            .min_h_0()
                             .child(
                                 div()
                                     .flex_1()
@@ -2608,15 +2597,18 @@ impl Render for Shell {
                                     .min_w_0()
                                     .relative()
                                     .overflow_hidden()
-                                    // Gutter floating the terminal card inside
-                                    // the chrome; the tab strip above carries
-                                    // its own 4px inset, so no top gap here.
-                                    .px(px(6.))
-                                    .pb(px(6.))
-                                    .child(pane_tree)
-                                    // Anchor notifications to the terminal viewport instead of
-                                    // window chrome so its top margin remains layout-independent.
-                                    .children(notification_layer),
+                                    .px(px(floating_surface::SIDE_INSET))
+                                    .pb(px(floating_surface::BOTTOM_INSET))
+                                    .child(
+                                        floating_surface::card(cx)
+                                            .id("main-floating-surface")
+                                            .min_w_0()
+                                            .relative()
+                                            .child(pane_tree)
+                                            // Notifications are anchored to the
+                                            // pane viewport inside the clipped card.
+                                            .children(notification_layer),
+                                    ),
                             ),
                     )
                     .child(self.git_sidebar.clone()),

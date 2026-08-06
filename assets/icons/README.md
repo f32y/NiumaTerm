@@ -1,0 +1,16 @@
+# Provider icon provenance
+
+`codex.svg` and `claude.svg` are derived from Lobe Icons' static SVG package,
+version 1.94.0:
+
+- https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/codex.svg
+- https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/claude.svg
+
+Lobe Icons is Copyright © 2023 LobeHub and distributed under the MIT License:
+https://github.com/lobehub/lobe-icons/blob/master/LICENSE
+The required notice and permission text are retained in `LICENSE-LobeIcons`.
+
+The local copies retain the original 24-by-24 paths and proportions. Their
+root attributes were normalized to the application's fixed 24-by-24,
+single-color `currentColor` icon convention; embedded titles and CSS sizing
+were removed because accessible names are supplied by the consuming controls.
