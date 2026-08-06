@@ -886,18 +886,12 @@ fn parse_thread_summaries(result: &Value, own_thread: Option<&str>) -> Vec<Sessi
         .unwrap_or_default()
 }
 
-/// Flatten a resumed thread's `turns[].items` into replay entries:
-/// conversation text stays, everything else (commands, file changes, tool
-/// calls) collapses into counts.
+/// Flatten a resumed thread's `turns[].items` into replay entries while using
+/// the same typed item parser as live notifications. Keeping one parser is the
+/// invariant that prevents restored tool cards from losing output or status as
+/// the app-server schema evolves.
 fn parse_replay(turns: &Value) -> Vec<ReplayItem> {
     let mut items: Vec<ReplayItem> = Vec::new();
-    let mut tools = 0usize;
-    let flush = |items: &mut Vec<ReplayItem>, tools: &mut usize| {
-        if *tools > 0 {
-            items.push(ReplayItem::Tools { count: *tools });
-            *tools = 0;
-        }
-    };
 
     for item in turns
         .as_array()
@@ -911,7 +905,6 @@ fn parse_replay(turns: &Value) -> Vec<ReplayItem> {
                 let text = user_input_text(&item["content"]);
 
                 if !text.is_empty() {
-                    flush(&mut items, &mut tools);
                     items.push(ReplayItem::User { text });
                 }
             }
@@ -919,19 +912,22 @@ fn parse_replay(turns: &Value) -> Vec<ReplayItem> {
                 let text = item["text"].as_str().unwrap_or_default().trim();
 
                 if !text.is_empty() {
-                    flush(&mut items, &mut tools);
                     items.push(ReplayItem::Agent {
                         text: text.to_string(),
                     });
                 }
             }
-            // Reasoning and hook records are working noise, not conversation.
-            Some("reasoning") | Some("hookPrompt") | None => {}
-            Some(_) => tools += 1,
+            // Hook prompts are provider plumbing rather than transcript
+            // activity. Every other supported item goes through the live
+            // parser so command output, diffs, and tool results survive.
+            Some("hookPrompt") | None => {}
+            Some(_) => {
+                if let Some(item) = parse_item(item) {
+                    items.push(ReplayItem::Item(item));
+                }
+            }
         }
     }
-
-    flush(&mut items, &mut tools);
 
     items
 }
@@ -1260,14 +1256,16 @@ mod tests {
     }
 
     #[test]
-    fn resumed_turns_replay_dialogue_and_collapse_tools() {
+    fn resumed_turns_replay_dialogue_and_preserve_activity_details() {
         let turns = json!([
             {"id": "turn1", "items": [
                 {"id": "i1", "type": "userMessage",
                  "content": [{"type": "text", "text": "question"}]},
-                {"id": "i2", "type": "commandExecution", "command": "ls"},
-                {"id": "i3", "type": "reasoning", "summary": []},
-                {"id": "i4", "type": "mcpToolCall", "server": "s", "tool": "t"},
+                {"id": "i2", "type": "commandExecution", "command": "ls",
+                 "aggregatedOutput": "file.txt", "status": "completed", "exitCode": 0},
+                {"id": "i3", "type": "reasoning", "summary": ["checked files"]},
+                {"id": "i4", "type": "mcpToolCall", "server": "s", "tool": "t",
+                 "result": "match", "status": "completed"},
                 {"id": "i5", "type": "agentMessage", "text": "answer"}
             ]},
             {"id": "turn2", "items": [
@@ -1281,7 +1279,24 @@ mod tests {
                 ReplayItem::User {
                     text: "question".into()
                 },
-                ReplayItem::Tools { count: 2 },
+                ReplayItem::Item(Item::CommandExecution {
+                    id: "i2".into(),
+                    command: "ls".into(),
+                    aggregated_output: Some("file.txt".into()),
+                    status: Some("completed".into()),
+                    exit_code: Some(0),
+                }),
+                ReplayItem::Item(Item::Reasoning {
+                    id: "i3".into(),
+                    summary: Some("checked files".into()),
+                }),
+                ReplayItem::Item(Item::Other {
+                    id: "i4".into(),
+                    kind: "mcpToolCall".into(),
+                    title: "s/t".into(),
+                    output: Some("match".into()),
+                    status: Some("completed".into()),
+                }),
                 ReplayItem::Agent {
                     text: "answer".into()
                 },

@@ -167,14 +167,15 @@ pub struct SessionSummary {
 }
 
 /// One transcript entry reconstructed from a persisted session when resuming.
-/// Only conversation text is replayed; runs of tool/command activity collapse
-/// into a count, so replay cost tracks dialogue length rather than tool
-/// volume.
+/// Conversation text keeps dedicated variants because [`Item::UserMessage`]
+/// carries no text, while provider-backed activity reuses [`Item`] so replayed
+/// commands, reasoning, file changes, and tools retain the same detail as live
+/// events.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ReplayItem {
     User { text: String },
     Agent { text: String },
-    Tools { count: usize },
+    Item(Item),
 }
 
 /// Latest active context-window usage for one agent thread. Providers expose
