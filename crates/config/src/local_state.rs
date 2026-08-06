@@ -4,6 +4,7 @@
 //! Unlike `config.toml` this file is not meant for hand editing: it is
 //! rewritten wholesale on save.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 
@@ -21,6 +22,26 @@ fn is_false(value: &bool) -> bool {
 pub struct LocalState {
     #[serde(default)]
     pub windows: Vec<WindowLocalState>,
+    /// Last-chosen agent thread settings per agent wire name ("claude",
+    /// "codex"); newly opened agent tabs seed their dropdowns from these.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub agent_defaults: BTreeMap<String, AgentDefaults>,
+}
+
+/// The thread-settings picks worth carrying into the next conversation of
+/// the same agent kind. All optional: `None` leaves the CLI's own default.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AgentDefaults {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tier: Option<String>,
 }
 
 /// One window's persisted state: geometry plus its session snapshot.
@@ -207,6 +228,16 @@ mod tests {
         assert_eq!(load_from(&path), LocalState::default());
 
         let state = LocalState {
+            agent_defaults: BTreeMap::from([(
+                "claude".to_string(),
+                AgentDefaults {
+                    model: Some("opus".to_string()),
+                    approval: Some("acceptEdits".to_string()),
+                    sandbox: None,
+                    effort: Some("high".to_string()),
+                    tier: None,
+                },
+            )]),
             windows: vec![
                 WindowLocalState {
                     window: Some(WindowState {
@@ -332,6 +363,7 @@ mod tests {
             }),
         };
         let state = LocalState {
+            agent_defaults: Default::default(),
             windows: vec![WindowLocalState {
                 window: None,
                 session: Some(SessionState {
@@ -352,6 +384,7 @@ mod tests {
 
         // A single-pane tab serializes without any `panes` key at all.
         let flat = LocalState {
+            agent_defaults: Default::default(),
             windows: vec![WindowLocalState {
                 window: None,
                 session: Some(SessionState {

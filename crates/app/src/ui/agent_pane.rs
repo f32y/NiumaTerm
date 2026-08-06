@@ -4,8 +4,9 @@
 //! [`nmt_agent_utils::claude_code::stream_json`]; this module only maps their
 //! shared typed events onto the transcript UI.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::env;
+use std::mem::take;
 use std::path::Path;
 use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime};
@@ -41,6 +42,7 @@ use nmt_agent_utils::codex::app_server;
 use nmt_agent_utils::{
     AgentEvent, AgentEventKind, AgentRoute, agent_process, normalize_body, normalize_title,
 };
+use nmt_config::local_state::AgentDefaults as StoredAgentDefaults;
 use serde_json::Value;
 use tracing::warn;
 
@@ -212,6 +214,54 @@ impl AgentKind {
     }
 }
 
+/// Last-chosen thread settings per agent wire name, seeding the dropdowns of
+/// newly opened (non-resumed) agent conversations. Loaded from
+/// local_state.toml at startup and flushed back on quit.
+#[derive(Default)]
+pub(crate) struct AgentThreadDefaults(pub(crate) HashMap<String, ThreadSettings>);
+
+impl gpui::Global for AgentThreadDefaults {}
+
+impl AgentThreadDefaults {
+    pub(crate) fn from_local_state(stored: &BTreeMap<String, StoredAgentDefaults>) -> Self {
+        Self(
+            stored
+                .iter()
+                .map(|(kind, d)| {
+                    (
+                        kind.clone(),
+                        ThreadSettings {
+                            model: d.model.clone(),
+                            approval: d.approval.clone(),
+                            sandbox: d.sandbox.clone(),
+                            effort: d.effort.clone(),
+                            tier: d.tier.clone(),
+                        },
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    pub(crate) fn to_local_state(&self) -> BTreeMap<String, StoredAgentDefaults> {
+        self.0
+            .iter()
+            .map(|(kind, s)| {
+                (
+                    kind.clone(),
+                    StoredAgentDefaults {
+                        model: s.model.clone(),
+                        approval: s.approval.clone(),
+                        sandbox: s.sandbox.clone(),
+                        effort: s.effort.clone(),
+                        tier: s.tier.clone(),
+                    },
+                )
+            })
+            .collect()
+    }
+}
+
 /// The pane's protocol session, one variant per agent kind. Both backends
 /// share the [`nmt_agent_utils::chat`] event vocabulary and method surface,
 /// so the pane dispatches here and stays protocol-agnostic.
@@ -312,6 +362,10 @@ pub(crate) struct AgentPane {
     /// changed via the dropdowns under the input; sent as overrides on every
     /// turn start (idempotent when unchanged).
     settings: ThreadSettings,
+    /// Whether the next `Ready` should overlay the remembered per-kind
+    /// defaults onto the backend's reported configuration. True for fresh
+    /// conversations; resumed threads keep their own stored settings.
+    seed_thread_defaults: bool,
     /// Model catalog; service tiers are per model, so the tier dropdown lists
     /// the selected model's tiers.
     models: Vec<ModelInfo>,
@@ -423,6 +477,7 @@ impl AgentPane {
             history_scroll: VirtualListScrollHandle::new(),
             pending_approval: None,
             settings: ThreadSettings::default(),
+            seed_thread_defaults: true,
             models: Vec::new(),
             expanded_groups: HashSet::new(),
             expanded_turns: HashSet::new(),
@@ -601,6 +656,8 @@ impl AgentPane {
         let kind = self.kind;
         let name = kind.display();
         let cwd = self.cwd.clone();
+
+        self.seed_thread_defaults = resume.is_none();
 
         // Replacing a conversation must clear any running or unread state
         // associated with the previous backend before the new epoch can emit.
@@ -917,6 +974,7 @@ impl AgentPane {
             match resolve_choice(&parsed.arguments, &choices) {
                 Ok(value) if command.name == "model" => {
                     self.settings.model = Some(value.clone());
+                    self.remember_thread_defaults(cx);
                     self.set_command_feedback(
                         CommandFeedbackKind::Notice,
                         format!("Model set to {value}."),
@@ -926,6 +984,7 @@ impl AgentPane {
                 }
                 Ok(value) if command.name == "permissions" => {
                     self.settings.approval = Some(value.clone());
+                    self.remember_thread_defaults(cx);
                     self.set_command_feedback(
                         CommandFeedbackKind::Notice,
                         format!("Permissions set to {value}."),
@@ -1553,8 +1612,26 @@ impl AgentPane {
                 // keeps the user's pick — Claude never reports effort, so
                 // None there means "unknown", never "reset".
                 let effort = settings.effort.clone().or(self.settings.effort.take());
+                let mut next = ThreadSettings { effort, ..settings };
 
-                self.settings = ThreadSettings { effort, ..settings };
+                // Fresh conversations seed from the remembered per-kind picks
+                // (a remembered value wins over the CLI default); resumed
+                // threads and later Ready confirmations take the wire as-is.
+                if take(&mut self.seed_thread_defaults)
+                    && let Some(stored) = cx
+                        .try_global::<AgentThreadDefaults>()
+                        .and_then(|defaults| defaults.0.get(self.kind.wire()))
+                {
+                    next = ThreadSettings {
+                        model: stored.model.clone().or(next.model),
+                        approval: stored.approval.clone().or(next.approval),
+                        sandbox: stored.sandbox.clone().or(next.sandbox),
+                        effort: stored.effort.clone().or(next.effort),
+                        tier: stored.tier.clone().or(next.tier),
+                    };
+                }
+
+                self.settings = next;
                 // Claude's first-turn init confirms settings after its
                 // synthetic TurnStarted event; that confirmation must not
                 // make an active turn look idle and admit overlapping work.
@@ -1772,6 +1849,9 @@ impl AgentPane {
         let id = summary.id.clone();
 
         self.history_dismissed = true;
+        // The resumed thread's own settings are authoritative; the remembered
+        // per-kind defaults must not overwrite them on the next Ready.
+        self.seed_thread_defaults = false;
 
         match self.kind {
             AgentKind::Codex => {
@@ -1949,6 +2029,15 @@ impl AgentPane {
         }
 
         cx.notify();
+    }
+
+    /// Remember the pane's current thread settings as the defaults for future
+    /// conversations of this agent kind. Called after every user-driven
+    /// settings change (dropdowns and slash commands).
+    fn remember_thread_defaults(&self, cx: &mut Context<Self>) {
+        cx.default_global::<AgentThreadDefaults>()
+            .0
+            .insert(self.kind.wire().to_string(), self.settings.clone());
     }
 
     fn append_delta(
@@ -3765,7 +3854,10 @@ impl AgentPane {
                 IconName::Cpu,
                 self.settings.model.clone(),
                 model_options,
-                |this, value, _| this.settings.model = Some(value),
+                |this, value, cx| {
+                    this.settings.model = Some(value);
+                    this.remember_thread_defaults(cx);
+                },
             ))
             .child(Self::setting_picker(
                 cx,
@@ -3774,7 +3866,10 @@ impl AgentPane {
                 permission_icon(self.settings.approval.as_deref()),
                 self.settings.approval.clone(),
                 permission_options,
-                |this, value, _| this.settings.approval = Some(value),
+                |this, value, cx| {
+                    this.settings.approval = Some(value);
+                    this.remember_thread_defaults(cx);
+                },
             ));
 
         if !effort_options.is_empty() {
@@ -3793,6 +3888,7 @@ impl AgentPane {
                 effort_options,
                 |this, value, cx| {
                     this.settings.effort = Some(value.clone());
+                    this.remember_thread_defaults(cx);
                     this.send_text(format!("/effort {value}"), cx);
                 },
             ));
@@ -3848,7 +3944,7 @@ impl AgentPane {
                 IconName::Cpu,
                 self.settings.model.clone(),
                 model_options,
-                |this, value, _| {
+                |this, value, cx| {
                     // A tier the new model doesn't offer falls back to that
                     // model's default tier instead of erroring the next turn.
                     if let Some(info) = this.models.iter().find(|m| m.model == value)
@@ -3861,6 +3957,7 @@ impl AgentPane {
                         this.settings.tier = info.default_tier.clone();
                     }
                     this.settings.model = Some(value);
+                    this.remember_thread_defaults(cx);
                 },
             ))
             .child(Self::setting_picker(
@@ -3870,7 +3967,10 @@ impl AgentPane {
                 permission_icon(self.settings.approval.as_deref()),
                 self.settings.approval.clone(),
                 approval_options,
-                |this, value, _| this.settings.approval = Some(value),
+                |this, value, cx| {
+                    this.settings.approval = Some(value);
+                    this.remember_thread_defaults(cx);
+                },
             ))
             .child(Self::setting_picker(
                 cx,
@@ -3879,7 +3979,10 @@ impl AgentPane {
                 IconName::Shield,
                 self.settings.sandbox.clone(),
                 sandbox_options,
-                |this, value, _| this.settings.sandbox = Some(value),
+                |this, value, cx| {
+                    this.settings.sandbox = Some(value);
+                    this.remember_thread_defaults(cx);
+                },
             ))
             .child(Self::setting_picker(
                 cx,
@@ -3888,7 +3991,10 @@ impl AgentPane {
                 IconName::Gauge,
                 self.settings.effort.clone(),
                 effort_options,
-                |this, value, _| this.settings.effort = Some(value),
+                |this, value, cx| {
+                    this.settings.effort = Some(value);
+                    this.remember_thread_defaults(cx);
+                },
             ))
             .child(Self::setting_picker(
                 cx,
@@ -3897,8 +4003,9 @@ impl AgentPane {
                 IconName::Zap,
                 Some(self.settings.tier.clone().unwrap_or_default()),
                 tier_options,
-                |this, value, _| {
+                |this, value, cx| {
                     this.settings.tier = (!value.is_empty()).then_some(value);
+                    this.remember_thread_defaults(cx);
                 },
             ))
     }
