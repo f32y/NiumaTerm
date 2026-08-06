@@ -16,6 +16,12 @@ pub struct TextViewStyle {
     /// The first parameter is the heading level (1-6), the second parameter is the base font size.
     /// The second parameter is the base font size.
     pub heading_font_size: Option<Arc<dyn Fn(u8, Pixels) -> Pixels + Send + Sync + 'static>>,
+    /// Optional maximum width for prose blocks.
+    ///
+    /// Paragraphs, headings, blockquotes, and lists honor this width. Technical
+    /// blocks such as code and tables remain full-width so their own overflow
+    /// behavior is not constrained by the prose measure.
+    pub prose_max_width: Option<Rems>,
     /// Highlight theme for code blocks. Default: [`HighlightTheme::default_light()`]
     pub highlight_theme: Arc<HighlightTheme>,
     /// The style refinement for code blocks.
@@ -35,6 +41,7 @@ impl PartialEq for TextViewStyle {
     fn eq(&self, other: &Self) -> bool {
         self.paragraph_gap == other.paragraph_gap
             && self.heading_base_font_size == other.heading_base_font_size
+            && self.prose_max_width == other.prose_max_width
             && self.highlight_theme == other.highlight_theme
     }
 }
@@ -45,6 +52,7 @@ impl Default for TextViewStyle {
             paragraph_gap: rems(1.),
             heading_base_font_size: px(14.),
             heading_font_size: None,
+            prose_max_width: None,
             highlight_theme: HighlightTheme::default_light().clone(),
             code_block: StyleRefinement::default(),
             table: StyleRefinement::default(),
@@ -69,6 +77,12 @@ impl TextViewStyle {
         self
     }
 
+    /// Constrain prose blocks while leaving code and tables full-width.
+    pub fn prose_max_width(mut self, width: Rems) -> Self {
+        self.prose_max_width = Some(width);
+        self
+    }
+
     /// Set style for code blocks.
     pub fn code_block(mut self, style: StyleRefinement) -> Self {
         self.code_block = style;
@@ -88,5 +102,20 @@ impl TextViewStyle {
     pub fn table_cell(mut self, style: StyleRefinement) -> Self {
         self.table_cell = style;
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prose_measure_is_opt_in_and_part_of_style_equality() {
+        let default = TextViewStyle::default();
+        let constrained = TextViewStyle::default().prose_max_width(rems(78.));
+
+        assert_eq!(default.prose_max_width, None);
+        assert_eq!(constrained.prose_max_width, Some(rems(78.)));
+        assert!(default != constrained);
     }
 }

@@ -95,6 +95,31 @@ enum BlockTextKind {
 }
 
 impl BlockNode {
+    fn prose_max_width(&self, style: &TextViewStyle) -> Option<gpui::Rems> {
+        let is_prose_container = match self {
+            Self::Paragraph(_) | Self::Heading { .. } => true,
+            Self::Blockquote { .. } | Self::List { .. } => !self.contains_technical_block(),
+            _ => false,
+        };
+
+        is_prose_container
+            .then_some(style.prose_max_width)
+            .flatten()
+    }
+
+    fn contains_technical_block(&self) -> bool {
+        match self {
+            Self::CodeBlock(_) | Self::Table(_) => true,
+            Self::Root { children, .. }
+            | Self::Blockquote { children, .. }
+            | Self::List { children, .. }
+            | Self::ListItem { children, .. } => {
+                children.iter().any(Self::contains_technical_block)
+            }
+            _ => false,
+        }
+    }
+
     pub(super) fn is_list_item(&self) -> bool {
         matches!(self, Self::ListItem { .. })
     }
@@ -1627,6 +1652,10 @@ impl BlockNode {
                 .into_any_element(),
             BlockNode::Paragraph(paragraph) => div()
                 .id(("p", ix))
+                .w_full()
+                .when_some(self.prose_max_width(&node_cx.style), |this, width| {
+                    this.max_w(width)
+                })
                 .pb(mb)
                 .child(paragraph.render(node_cx, window, cx))
                 .into_any_element(),
@@ -1650,6 +1679,10 @@ impl BlockNode {
 
                 div()
                     .id(SharedString::from(format!("h{}-{}", level, ix)))
+                    .w_full()
+                    .when_some(self.prose_max_width(&node_cx.style), |this, width| {
+                        this.max_w(width)
+                    })
                     .pb(rems(0.3))
                     .whitespace_normal()
                     .text_size(text_size)
@@ -1659,6 +1692,9 @@ impl BlockNode {
             }
             BlockNode::Blockquote { children, .. } => div()
                 .w_full()
+                .when_some(self.prose_max_width(&node_cx.style), |this, width| {
+                    this.max_w(width)
+                })
                 .pb(mb)
                 .child(
                     div()
@@ -1681,6 +1717,10 @@ impl BlockNode {
                 children, ordered, ..
             } => v_flex()
                 .id((if *ordered { "ol" } else { "ul" }, ix))
+                .w_full()
+                .when_some(self.prose_max_width(&node_cx.style), |this, width| {
+                    this.max_w(width)
+                })
                 .pb(mb)
                 .children({
                     let mut items = Vec::with_capacity(children.len());
@@ -1758,6 +1798,58 @@ mod tests {
         );
 
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn prose_measure_targets_reading_blocks_and_leaves_technical_blocks_full_width() {
+        let style = TextViewStyle::default().prose_max_width(rems(48.));
+        let paragraph = BlockNode::Paragraph(Paragraph::new("paragraph".to_string()));
+        let heading = BlockNode::Heading {
+            level: 2,
+            children: Paragraph::new("heading".to_string()),
+            span: None,
+        };
+        let quote = BlockNode::Blockquote {
+            children: vec![],
+            span: None,
+        };
+        let list = BlockNode::List {
+            children: vec![],
+            ordered: false,
+            span: None,
+        };
+        let code = BlockNode::CodeBlock(CodeBlock::new(
+            "wide technical output".into(),
+            Some("text".into()),
+            &HighlightTheme::default_light(),
+            None::<Span>,
+        ));
+        let table = BlockNode::Table(Table {
+            children: vec![],
+            column_aligns: vec![],
+            span: None,
+        });
+        let list_with_code = BlockNode::List {
+            children: vec![BlockNode::ListItem {
+                children: vec![code.clone()],
+                spread: false,
+                checked: None,
+                span: None,
+            }],
+            ordered: false,
+            span: None,
+        };
+
+        for node in [&paragraph, &heading, &quote, &list] {
+            assert_eq!(node.prose_max_width(&style), Some(rems(48.)));
+        }
+        for node in [&code, &table, &list_with_code] {
+            assert_eq!(node.prose_max_width(&style), None);
+        }
+
+        // max-width remains optional rather than a fixed width, allowing a
+        // prose block to shrink with a narrower parent container.
+        assert_eq!(paragraph.prose_max_width(&TextViewStyle::default()), None);
     }
 
     #[cfg(feature = "tree-sitter")]
