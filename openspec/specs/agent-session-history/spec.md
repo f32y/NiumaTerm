@@ -68,12 +68,16 @@ After the user selects a Claude history row, the system SHALL start Claude with 
 - **WHEN** Claude returns an error such as "No conversation found" because the session file was deleted
 - **THEN** the transcript displays a restore error and the composer remains usable
 
-### Requirement: Limit Claude Code transcript replay
-When replaying JSONL, the system SHALL render user and assistant text messages. It SHALL skip tool calls, hook output, sidechain records, and queue-operation records or render them as folded placeholders, and SHALL NOT render every record in full.
+### Requirement: Replay Claude Code transcript details
+When replaying JSONL, the system SHALL render user text, assistant text, and reasoning. It SHALL associate each `tool_use` with a later `tool_result` through `tool_use_id` and preserve every tool type already supported by the live transcript, its input summary, result output, success or failure state, and file-change diff. Tool rows MAY reuse the live transcript's grouping and on-demand expansion, but grouping SHALL affect only presentation and SHALL NOT reduce persisted details to a count or discard them. Hook output, internal sidechain records, meta records, and queue-operation records SHALL be skipped.
 
 #### Scenario: History contains tool calls
-- **WHEN** a restored session has 20 tool calls and five user and assistant exchanges
-- **THEN** the transcript shows the five exchanges and either combines tool calls into placeholders or omits them, with render cost proportional to the number of conversation turns
+- **WHEN** a restored session contains 20 tool calls and five user and assistant exchanges
+- **THEN** the transcript shows all five exchanges and all 20 tool calls; consecutive calls may be grouped by default, and expanding the group reveals each call's true type, title, state, result, and available diff
+
+#### Scenario: Associate tool results with calls
+- **WHEN** a historical tool call has id `tool_123` and a later `tool_result.tool_use_id` is `tool_123`
+- **THEN** the system updates that tool row with the result and completion state, allowing the restored row to reveal the result instead of creating a count placeholder or separate result row
 
 ### Requirement: Enumerate Codex sessions
 For the Codex backend, after app-server initialization the system SHALL request historical sessions through `thread/list` with the current tab cwd as `cwd`, `sortKey: "recency_at"`, and default sourceKinds for interactive sources only. It SHALL map row fields as id from `id`, title from `name` or `preview`, time from `recencyAt`, and branch from `gitInfo` when available. It SHALL load additional pages on demand through `nextCursor`.
@@ -83,7 +87,7 @@ For the Codex backend, after app-server initialization the system SHALL request 
 - **THEN** the Client sends `thread/list` filtered by cwd, each returned thread produces a row, and subagent threads are excluded by the default filters
 
 ### Requirement: Restore a Codex session
-After the user selects a Codex history row, the system SHALL call `thread/resume` with `threadId` instead of `thread/start` and SHALL rebuild the transcript from `thread.turns[].items` in the response. The model and reasoning effort SHALL use restored persisted values and update the settings row. Replay SHALL match the Claude scope: render user and assistant text fully and fold or omit command and tool items.
+After the user selects a Codex history row, the system SHALL call `thread/resume` with `threadId` instead of `thread/start` and SHALL rebuild the transcript from `thread.turns[].items` in the response. The model and reasoning effort SHALL use restored persisted values and update the settings row. Replay SHALL reuse live item parsing: render user and assistant text in full, and retain each reasoning, command, file-change, and other tool item's id, type, title, output, state, exit code, and available diff. Consecutive work items MAY be grouped only in the UI and SHALL NOT be reduced to counts or omitted from replay data.
 
 #### Scenario: Restore a Codex thread successfully
 - **WHEN** the user selects thread `thr_123`
