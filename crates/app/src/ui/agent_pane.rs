@@ -135,6 +135,9 @@ enum ChatItem {
     FileChange {
         item_id: String,
         summary: String,
+        /// Reviewable diff body when the provider exposes one; renders as
+        /// the row's expandable detail with diff highlighting.
+        diff: Option<String>,
         status: String,
     },
     /// Fallback card for every other tool-call item kind (mcpToolCall,
@@ -143,6 +146,9 @@ enum ChatItem {
         item_id: String,
         kind: String,
         title: String,
+        /// Result payload (search matches, fetched content, …), delivered on
+        /// completion; renders as the row's expandable detail.
+        output: Option<String>,
         status: String,
     },
     /// Per-turn duration record; marks the turn as settled and renders as its
@@ -1737,6 +1743,7 @@ impl AgentPane {
                     item_id: format!("replay-{i}"),
                     kind: format!("{count} tool call{}", if count == 1 { "" } else { "s" }),
                     title: String::new(),
+                    output: None,
                     status: "completed".to_string(),
                 },
             };
@@ -1817,20 +1824,28 @@ impl AgentPane {
                 status: status.unwrap_or_else(|| "inProgress".to_string()),
                 exit_code,
             },
-            SessionItem::FileChange { id, paths, status } => ChatItem::FileChange {
+            SessionItem::FileChange {
+                id,
+                paths,
+                diff,
+                status,
+            } => ChatItem::FileChange {
                 item_id: id,
                 summary: paths,
+                diff,
                 status: status.unwrap_or_else(|| "inProgress".to_string()),
             },
             SessionItem::Other {
                 id,
                 kind,
                 title,
+                output,
                 status,
             } => ChatItem::Tool {
                 item_id: id,
                 kind,
                 title,
+                output,
                 status: status.unwrap_or_else(|| "inProgress".to_string()),
             },
         };
@@ -1888,19 +1903,33 @@ impl AgentPane {
                     *exit_code = *new_exit;
                 }
                 (
-                    ChatItem::FileChange { status, .. },
+                    ChatItem::FileChange { status, diff, .. },
                     SessionItem::FileChange {
-                        status: new_status, ..
-                    },
-                )
-                | (
-                    ChatItem::Tool { status, .. },
-                    SessionItem::Other {
-                        status: new_status, ..
+                        status: new_status,
+                        diff: new_diff,
+                        ..
                     },
                 ) => {
                     if let Some(state) = new_status {
                         *status = state.clone();
+                    }
+                    if new_diff.is_some() {
+                        *diff = new_diff.clone();
+                    }
+                }
+                (
+                    ChatItem::Tool { status, output, .. },
+                    SessionItem::Other {
+                        status: new_status,
+                        output: new_output,
+                        ..
+                    },
+                ) => {
+                    if let Some(state) = new_status {
+                        *status = state.clone();
+                    }
+                    if new_output.is_some() {
+                        *output = new_output.clone();
                     }
                 }
                 (ChatItem::Reasoning { text, .. }, SessionItem::Reasoning { summary, .. }) => {
@@ -2046,7 +2075,12 @@ fn line_count_at_most(text: &str, max: usize) -> bool {
 /// backtick run in the body, so raw output can never terminate the block
 /// early.
 fn fenced_code_block(output: &str) -> String {
-    let lang = detect_output_language(output);
+    fenced_code_block_as(output, detect_output_language(output))
+}
+
+/// Same fence-growing wrap with an explicit language tag, for content whose
+/// format is known from context (e.g. edit diffs) rather than sniffed.
+fn fenced_code_block_as(output: &str, lang: &str) -> String {
     let mut fence = String::from("```");
     while output.contains(fence.as_str()) {
         fence.push('`');
@@ -2080,14 +2114,24 @@ fn entry_copy_text(item: &ChatItem) -> String {
             command, output, ..
         } => format!("$ {command}\n{output}"),
         ChatItem::FileChange {
-            summary, status, ..
-        } => format!("Edit {summary} — {status}"),
+            summary,
+            diff,
+            status,
+            ..
+        } => match diff {
+            Some(diff) => format!("Edit {summary} — {status}\n{diff}"),
+            None => format!("Edit {summary} — {status}"),
+        },
         ChatItem::Tool {
             kind,
             title,
+            output,
             status,
             ..
-        } => format!("{kind} {title} — {status}"),
+        } => match output {
+            Some(output) => format!("{kind} {title} — {status}\n{output}"),
+            None => format!("{kind} {title} — {status}"),
+        },
         ChatItem::Working {
             started,
             done_seconds,
@@ -2190,14 +2234,26 @@ fn entry_fingerprint(item: &ChatItem, detail_expanded: bool) -> u64 {
             exit_code.map_or(0, |code| (code as u64) ^ (1 << 20)),
         ),
         ChatItem::FileChange {
-            summary, status, ..
-        } => (summary.len(), status.len(), 0),
+            summary,
+            diff,
+            status,
+            ..
+        } => (
+            summary.len() + diff.as_ref().map_or(0, String::len),
+            status.len(),
+            0,
+        ),
         ChatItem::Tool {
             kind,
             title,
+            output,
             status,
             ..
-        } => (kind.len() + title.len(), status.len(), 0),
+        } => (
+            kind.len() + title.len() + output.as_ref().map_or(0, String::len),
+            status.len(),
+            0,
+        ),
         ChatItem::Working { done_seconds, .. } => (done_seconds.unwrap_or(0) as usize, 0, 0),
     };
 
@@ -3127,17 +3183,21 @@ impl AgentPane {
                 )
             }
             ChatItem::FileChange {
-                summary, status, ..
+                summary,
+                diff,
+                status,
+                ..
             } => (
                 IconName::File,
                 "Edit".to_string(),
                 summary.clone(),
                 Some(status.clone()),
-                None,
+                diff.clone().filter(|diff| !diff.trim().is_empty()),
             ),
             ChatItem::Tool {
                 kind,
                 title,
+                output,
                 status,
                 ..
             } => (
@@ -3149,7 +3209,7 @@ impl AgentPane {
                 kind.clone(),
                 title.clone(),
                 Some(status.clone()),
-                None,
+                output.clone().filter(|output| !output.trim().is_empty()),
             ),
             ChatItem::Reasoning { text, .. } => (
                 IconName::Bot,
@@ -3234,11 +3294,13 @@ impl AgentPane {
             .child(header)
             .children(detail.filter(|_| expanded).map(|detail| {
                 // Fencing happens only for the expanded row, so collapsed
-                // transcripts never pay for it. Command output becomes a
-                // highlighted code block; reasoning is the agent's own
-                // markdown and renders as such.
+                // transcripts never pay for it. Command and tool output
+                // become highlighted code blocks (sniffed language), edit
+                // diffs are known-format, and reasoning stays the agent's
+                // own markdown.
                 let markdown = match &self.items[index].item {
-                    ChatItem::Command { .. } => fenced_code_block(&detail),
+                    ChatItem::Command { .. } | ChatItem::Tool { .. } => fenced_code_block(&detail),
+                    ChatItem::FileChange { .. } => fenced_code_block_as(&detail, "diff"),
                     _ => detail,
                 };
 
