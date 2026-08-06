@@ -29,8 +29,8 @@ use gpui_component::{
 };
 use nmt_agent_utils::chat::{
     Event as SessionEvent, Item as SessionItem, ModelInfo, ReplayItem, SendOutcome, SessionSummary,
-    SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy,
-    SlashCommandSource, ThreadSettings,
+    SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments, SlashCommandInfo,
+    SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
 };
 use nmt_agent_utils::claude_code::{sessions, stream_json};
 use nmt_agent_utils::codex::app_server;
@@ -39,9 +39,10 @@ use tracing::warn;
 
 use crate::ui::AppSettings;
 use crate::ui::agent_commands::{
-    PaletteDirection, claim_command_turn_start, filter_catalog, local_commands, merge_catalog,
-    move_palette_selection, next_session_epoch, parse_slash_command, reset_command_runtime,
-    resolve_choice,
+    PaletteCatalogEntry, PaletteDirection, claim_command_turn_start, filter_palette_catalog,
+    filter_skill_catalog, local_commands, merge_catalog, move_palette_selection,
+    next_session_epoch, parse_slash_command, prepare_skill_selection, reconcile_skill_binding,
+    reset_command_runtime, resolve_choice, validate_skill_binding,
 };
 
 #[derive(Clone)]
@@ -67,6 +68,7 @@ struct CommandFeedback {
 enum PaletteAction {
     Command(SlashCommandInfo),
     Choice { command: String, value: String },
+    Skill(SkillInfo),
 }
 
 #[derive(Clone)]
@@ -206,9 +208,14 @@ impl Backend {
         }
     }
 
-    fn send_user_message(&mut self, text: &str, settings: &ThreadSettings) -> SendOutcome {
+    fn send_user_message(
+        &mut self,
+        text: &str,
+        settings: &ThreadSettings,
+        skill: Option<&SkillReference>,
+    ) -> SendOutcome {
         match self {
-            Backend::Codex(session) => session.send_user_message(text, settings),
+            Backend::Codex(session) => session.send_user_message_with_skill(text, settings, skill),
             Backend::Claude(session) => session.send_user_message(text, settings),
         }
     }
@@ -300,6 +307,12 @@ pub(crate) struct AgentPane {
     /// remain available independently of whether discovery has arrived.
     provider_commands: Vec<SlashCommandInfo>,
     provider_commands_ready: bool,
+    /// `None` means Codex discovery is still loading. A populated catalog can
+    /// contain both usable skills and non-fatal per-file errors.
+    skill_catalog: Option<SkillCatalog>,
+    /// Exact picker identity retained while the composer keeps its `$name`
+    /// token. It is validated against `skill_catalog` before every send.
+    skill_binding: Option<SkillReference>,
     palette_selected: usize,
     palette_dismissed: bool,
     palette_scroll: ScrollHandle,
@@ -334,6 +347,8 @@ impl AgentPane {
             if matches!(event, InputEvent::PressEnter { shift: false, .. }) {
                 this.send_user_message(window, cx);
             } else if matches!(event, InputEvent::Change) {
+                let text = this.input.read(cx).text().to_string();
+                reconcile_skill_binding(&text, &mut this.skill_binding);
                 this.palette_selected = 0;
                 this.palette_dismissed = false;
                 if !matches!(
@@ -373,6 +388,8 @@ impl AgentPane {
             working_started: None,
             provider_commands: Vec::new(),
             provider_commands_ready: kind == AgentKind::Codex,
+            skill_catalog: None,
+            skill_binding: None,
             palette_selected: 0,
             palette_dismissed: false,
             palette_scroll: ScrollHandle::new(),
@@ -447,6 +464,8 @@ impl AgentPane {
         let cwd = self.cwd.clone();
 
         self.session_epoch = next_session_epoch(self.session_epoch);
+        self.skill_catalog = None;
+        self.skill_binding = None;
         let epoch = self.session_epoch;
 
         let (tx, mut rx) = mpsc::unbounded::<Value>();
@@ -569,7 +588,25 @@ impl AgentPane {
             return;
         }
 
-        if self.send_text(text, cx) {
+        reconcile_skill_binding(&text, &mut self.skill_binding);
+        let skill = if self.kind == AgentKind::Codex {
+            match validate_skill_binding(
+                &text,
+                self.skill_binding.as_ref(),
+                self.skill_catalog.as_ref(),
+            ) {
+                Ok(skill) => skill,
+                Err(message) => {
+                    self.set_command_feedback(CommandFeedbackKind::Error, message, cx);
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+
+        if self.send_text_with_skill(text, skill.as_ref(), cx) {
+            self.skill_binding = None;
             self.input
                 .update(cx, |input, cx| input.set_value("", window, cx));
         }
@@ -579,6 +616,15 @@ impl AgentPane {
     /// also used for UI-generated messages such as the `/effort` command.
     /// Returns false when the session isn't ready yet.
     fn send_text(&mut self, text: String, cx: &mut Context<Self>) -> bool {
+        self.send_text_with_skill(text, None, cx)
+    }
+
+    fn send_text_with_skill(
+        &mut self,
+        text: String,
+        skill: Option<&SkillReference>,
+        cx: &mut Context<Self>,
+    ) -> bool {
         if self.awaiting_command_turn {
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
@@ -590,7 +636,7 @@ impl AgentPane {
 
         let settings = self.settings.clone();
         let outcome = match self.session.as_mut() {
-            Some(session) => session.send_user_message(&text, &settings),
+            Some(session) => session.send_user_message(&text, &settings, skill),
             None => SendOutcome::NotReady,
         };
 
@@ -664,6 +710,25 @@ impl AgentPane {
             );
             return false;
         };
+
+        // `/skills` owns a picker stage. A selected row rewrites the
+        // composer to `$name`; the slash input itself is never a provider
+        // command or an ordinary user turn.
+        if command.arguments == SlashCommandArguments::Skills {
+            let message = match self.skill_catalog.as_ref() {
+                None => "Codex skill discovery is still loading.".to_string(),
+                Some(catalog) if catalog.skills.is_empty() && !catalog.errors.is_empty() => {
+                    catalog.errors[0].clone()
+                }
+                Some(catalog) if catalog.skills.is_empty() => {
+                    "No Codex skills are available for this folder.".to_string()
+                }
+                Some(_) => "Choose a skill from the list.".to_string(),
+            };
+
+            self.set_command_feedback(CommandFeedbackKind::Error, message, cx);
+            return false;
+        }
 
         if command.arguments == SlashCommandArguments::None && !parsed.arguments.trim().is_empty() {
             self.set_command_feedback(
@@ -859,6 +924,8 @@ impl AgentPane {
         self.expanded_rows.clear();
         self.turn_seq = 0;
         self.working_started = None;
+        self.skill_catalog = None;
+        self.skill_binding = None;
         reset_command_runtime(
             self.kind == AgentKind::Codex,
             &mut self.pending_approval,
@@ -920,6 +987,20 @@ impl AgentPane {
         self.status == Status::Running || self.awaiting_command_turn
     }
 
+    fn skill_disabled_reason(&self, skill: &SkillInfo) -> Option<String> {
+        if !skill.enabled {
+            Some("Disabled by Codex".to_string())
+        } else if matches!(self.status, Status::Starting | Status::Exited) {
+            Some(match self.status {
+                Status::Starting => "Agent is still starting".to_string(),
+                Status::Exited => "Agent has exited".to_string(),
+                _ => unreachable!(),
+            })
+        } else {
+            None
+        }
+    }
+
     fn command_catalog(&self) -> Vec<SlashCommandInfo> {
         let adapter = self
             .session
@@ -968,6 +1049,43 @@ impl AgentPane {
         if parsed.has_argument_separator {
             let command = catalog.iter().find(|command| command.name == parsed.name)?;
 
+            if command.arguments == SlashCommandArguments::Skills {
+                let query = parsed.arguments.trim().to_ascii_lowercase();
+                let Some(skill_catalog) = self.skill_catalog.as_ref() else {
+                    return Some(PaletteModel {
+                        rows: Vec::new(),
+                        note: Some("Codex skill discovery is still loading".to_string()),
+                    });
+                };
+                let rows = filter_skill_catalog(&skill_catalog.skills, &query)
+                    .into_iter()
+                    .map(|skill| {
+                        let disabled_reason = self.skill_disabled_reason(&skill);
+
+                        PaletteRow {
+                            label: format!("${}", skill.name),
+                            description: skill.description.clone(),
+                            hint: Some(skill.scope.clone()),
+                            disabled_reason,
+                            action: PaletteAction::Skill(skill),
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                let note = if rows.is_empty() && !skill_catalog.errors.is_empty() {
+                    Some(skill_catalog.errors[0].clone())
+                } else if rows.is_empty() && query.is_empty() {
+                    Some("No Codex skills are available for this folder".to_string())
+                } else if rows.is_empty() {
+                    Some("No matching skills".to_string())
+                } else if let Some(error) = skill_catalog.errors.first() {
+                    Some(format!("Some skills could not be loaded: {error}"))
+                } else {
+                    None
+                };
+
+                return Some(PaletteModel { rows, note });
+            }
+
             if command.arguments != SlashCommandArguments::Choices {
                 return None;
             }
@@ -1005,38 +1123,77 @@ impl AgentPane {
             return None;
         }
 
-        let rows = filter_catalog(&catalog, &parsed.name)
+        let skills: &[SkillInfo] = if self.kind == AgentKind::Codex {
+            self.skill_catalog
+                .as_ref()
+                .map(|catalog| catalog.skills.as_slice())
+                .unwrap_or_default()
+        } else {
+            &[]
+        };
+        let rows = filter_palette_catalog(&catalog, skills, &parsed.name)
             .into_iter()
-            .map(|command| {
-                let disabled_reason = if command.run_policy == SlashCommandRunPolicy::IdleOnly
-                    && self.is_command_busy()
-                {
-                    Some("Available when the agent is idle".to_string())
-                } else if command.source != SlashCommandSource::Local
-                    && matches!(self.status, Status::Starting | Status::Exited)
-                {
-                    Some(match self.status {
-                        Status::Starting => "Agent is still starting".to_string(),
-                        Status::Exited => "Agent has exited".to_string(),
-                        _ => unreachable!(),
-                    })
-                } else {
-                    None
-                };
+            .map(|entry| match entry {
+                PaletteCatalogEntry::Command(command) => {
+                    let disabled_reason = if command.run_policy == SlashCommandRunPolicy::IdleOnly
+                        && self.is_command_busy()
+                    {
+                        Some("Available when the agent is idle".to_string())
+                    } else if command.source != SlashCommandSource::Local
+                        && matches!(self.status, Status::Starting | Status::Exited)
+                    {
+                        Some(match self.status {
+                            Status::Starting => "Agent is still starting".to_string(),
+                            Status::Exited => "Agent has exited".to_string(),
+                            _ => unreachable!(),
+                        })
+                    } else {
+                        None
+                    };
 
-                PaletteRow {
-                    label: format!("/{}", command.name),
-                    description: command.description.clone(),
-                    hint: command.argument_hint.clone(),
-                    disabled_reason,
-                    action: PaletteAction::Command(command),
+                    PaletteRow {
+                        label: format!("/{}", command.name),
+                        description: command.description.clone(),
+                        hint: command.argument_hint.clone(),
+                        disabled_reason,
+                        action: PaletteAction::Command(command),
+                    }
                 }
+                PaletteCatalogEntry::Skill(skill) => PaletteRow {
+                    label: format!("/{}", skill.name),
+                    description: skill.description.clone(),
+                    hint: Some(format!("skill · {}", skill.scope)),
+                    disabled_reason: self.skill_disabled_reason(&skill),
+                    action: PaletteAction::Skill(skill),
+                },
             })
             .collect::<Vec<_>>();
         let note = if rows.is_empty() {
-            Some("No matching commands".to_string())
+            if self.kind == AgentKind::Codex && self.skill_catalog.is_none() {
+                Some("Codex skill discovery is still loading".to_string())
+            } else if self.kind == AgentKind::Codex
+                && self
+                    .skill_catalog
+                    .as_ref()
+                    .is_some_and(|catalog| !catalog.errors.is_empty())
+            {
+                self.skill_catalog
+                    .as_ref()
+                    .and_then(|catalog| catalog.errors.first().cloned())
+            } else if self.kind == AgentKind::Codex {
+                Some("No matching commands or skills".to_string())
+            } else {
+                Some("No matching commands".to_string())
+            }
         } else if self.kind == AgentKind::Claude && !self.provider_commands_ready {
             Some("Claude command discovery is still loading".to_string())
+        } else if self.kind == AgentKind::Codex && self.skill_catalog.is_none() {
+            Some("Codex skill discovery is still loading".to_string())
+        } else if self.kind == AgentKind::Codex {
+            self.skill_catalog
+                .as_ref()
+                .and_then(|catalog| catalog.errors.first())
+                .map(|error| format!("Some skills could not be loaded: {error}"))
         } else {
             None
         };
@@ -1122,6 +1279,26 @@ impl AgentPane {
                 )
             }
             PaletteAction::Choice { command, value } => (format!("/{command} {value}"), true),
+            PaletteAction::Skill(skill) => {
+                let Ok((text, binding)) = prepare_skill_selection(&skill) else {
+                    self.set_command_feedback(
+                        CommandFeedbackKind::Error,
+                        format!("${} is disabled by Codex.", skill.name),
+                        cx,
+                    );
+                    return;
+                };
+
+                self.input.update(cx, |input, cx| {
+                    input.set_value(text.clone(), window, cx);
+                    input.set_selected_range(text.len()..text.len(), cx);
+                });
+                self.skill_binding = Some(binding);
+                self.palette_selected = 0;
+                self.palette_dismissed = true;
+                cx.notify();
+                return;
+            }
         };
 
         self.input.update(cx, |input, cx| {
@@ -1225,6 +1402,11 @@ impl AgentPane {
             SessionEvent::Commands(commands) => {
                 self.provider_commands = commands;
                 self.provider_commands_ready = true;
+                self.palette_selected = 0;
+                cx.notify();
+            }
+            SessionEvent::Skills(catalog) => {
+                self.skill_catalog = Some(catalog);
                 self.palette_selected = 0;
                 cx.notify();
             }

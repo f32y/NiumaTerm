@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead as _, BufReader, Write as _};
+use std::mem::take;
 use std::os::windows::process::CommandExt as _;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::thread;
@@ -16,9 +17,9 @@ use serde_json::{Value, json};
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 pub use crate::chat::{
-    Event, Item, ModelInfo, ReplayItem, SendOutcome, SessionSummary, SlashCommandArguments,
-    SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
-    ThreadSettings,
+    Event, Item, ModelInfo, ReplayItem, SendOutcome, SessionSummary, SkillCatalog, SkillInfo,
+    SkillReference, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
+    SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
 };
 
 /// JSON-RPC ids for the fixed handshake requests; turn requests count up from
@@ -33,6 +34,41 @@ const FIRST_TURN_RPC_ID: u64 = 100;
 /// First page size for the history list; enough to fill the visible list
 /// several times over. `nextCursor` remains available for deeper paging.
 const THREAD_LIST_LIMIT: u64 = 50;
+
+#[derive(Default)]
+struct SkillRefreshState {
+    in_flight: Option<u64>,
+    force_reload_queued: bool,
+}
+
+impl SkillRefreshState {
+    /// Return true when an active request owns refresh scheduling and the
+    /// caller must not allocate another request id yet.
+    fn queue_if_in_flight(&mut self, force_reload: bool) -> bool {
+        if self.in_flight.is_none() {
+            return false;
+        }
+
+        self.force_reload_queued |= force_reload;
+        true
+    }
+
+    fn start(&mut self, rpc_id: u64) {
+        debug_assert!(self.in_flight.is_none());
+        self.in_flight = Some(rpc_id);
+    }
+
+    /// Complete only the current request and report whether invalidations
+    /// accumulated while it was in flight.
+    fn finish(&mut self, rpc_id: u64) -> Option<bool> {
+        if self.in_flight != Some(rpc_id) {
+            return None;
+        }
+
+        self.in_flight = None;
+        Some(take(&mut self.force_reload_queued))
+    }
+}
 
 /// Wire values for approval-policy selection (`AskForApproval` serializes
 /// kebab-case).
@@ -62,6 +98,7 @@ pub struct Session {
     /// Command RPC responses are independent of turn ids. Tracking their
     /// request ids keeps command failures non-fatal to the live thread.
     pending_commands: HashMap<u64, String>,
+    skill_refresh: SkillRefreshState,
 }
 
 impl Drop for Session {
@@ -93,6 +130,14 @@ impl Session {
                 source: SlashCommandSource::Adapter,
                 arguments: SlashCommandArguments::None,
                 run_policy: SlashCommandRunPolicy::QueueUntilIdle,
+            },
+            SlashCommandInfo {
+                name: "skills".to_string(),
+                description: "Choose an installed Codex skill".to_string(),
+                argument_hint: Some("<skill>".to_string()),
+                source: SlashCommandSource::Adapter,
+                arguments: SlashCommandArguments::Skills,
+                run_policy: SlashCommandRunPolicy::Immediate,
             },
         ]
     }
@@ -151,6 +196,7 @@ impl Session {
             pending_approval: None,
             history_cursor: None,
             pending_commands: HashMap::new(),
+            skill_refresh: SkillRefreshState::default(),
         };
 
         session.send(json!({
@@ -181,11 +227,23 @@ impl Session {
     /// interjection); otherwise it starts the next turn carrying the settings
     /// as overrides.
     pub fn send_user_message(&mut self, text: &str, settings: &ThreadSettings) -> SendOutcome {
+        self.send_user_message_with_skill(text, settings, None)
+    }
+
+    /// Send text plus the exact skill identity selected by a client picker.
+    /// Text-only callers keep the original one-item wire shape.
+    pub fn send_user_message_with_skill(
+        &mut self,
+        text: &str,
+        settings: &ThreadSettings,
+        skill: Option<&SkillReference>,
+    ) -> SendOutcome {
         let Some(thread_id) = self.thread_id.clone() else {
             return SendOutcome::NotReady;
         };
 
         let rpc_id = self.alloc_rpc_id();
+        let input = codex_user_input(text, skill);
 
         if let Some(turn_id) = self.current_turn.clone() {
             self.send(json!({
@@ -195,7 +253,7 @@ impl Session {
                 "params": {
                     "threadId": thread_id,
                     "expectedTurnId": turn_id,
-                    "input": [{"type": "text", "text": text}],
+                    "input": input,
                 },
             }));
 
@@ -204,7 +262,7 @@ impl Session {
 
         let mut params = json!({
             "threadId": thread_id,
-            "input": [{"type": "text", "text": text}],
+            "input": input,
         });
 
         if let Some(model) = &settings.model {
@@ -232,9 +290,9 @@ impl Session {
         SendOutcome::StartedTurn
     }
 
-    /// Execute the two Codex operations NiumaTerm can represent faithfully.
-    /// Other Codex CLI surface areas (skills, plugins, configuration) are not
-    /// advertised as chat commands until they have dedicated UI semantics.
+    /// Execute Codex operations that map directly to dedicated app-server
+    /// requests. `/skills` is handled entirely by the UI picker and never
+    /// reaches this method.
     pub fn execute_slash_command(&mut self, name: &str, arguments: &str) -> SlashCommandOutcome {
         let Some(thread_id) = self.thread_id.clone() else {
             return SlashCommandOutcome::NotReady;
@@ -335,6 +393,16 @@ impl Session {
         id
     }
 
+    fn request_skills(&mut self, force_reload: bool) {
+        if self.skill_refresh.queue_if_in_flight(force_reload) {
+            return;
+        }
+
+        let rpc_id = self.alloc_rpc_id();
+        self.skill_refresh.start(rpc_id);
+        self.send(skills_list_request(rpc_id, force_reload));
+    }
+
     /// Write one request line. Failures are not surfaced here: a dead process
     /// also closes its stdout, so the reader-side EOF is the single
     /// exit-detection path.
@@ -377,6 +445,17 @@ impl Session {
     }
 
     fn process_response(&mut self, rpc_id: u64, message: &Value) -> Vec<Event> {
+        if self.skill_refresh.in_flight == Some(rpc_id) {
+            let catalog = skill_catalog_from_response(message);
+            let force_reload_again = self.skill_refresh.finish(rpc_id).unwrap_or(false);
+
+            if force_reload_again {
+                self.request_skills(true);
+            }
+
+            return vec![Event::Skills(catalog)];
+        }
+
         let pending_command = self.pending_commands.remove(&rpc_id);
         let is_command = pending_command.is_some();
 
@@ -413,6 +492,7 @@ impl Session {
         match rpc_id {
             INIT_RPC_ID => {
                 self.send(json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}));
+                self.request_skills(false);
                 self.send(json!({
                     "jsonrpc": "2.0",
                     "id": THREAD_START_RPC_ID,
@@ -483,6 +563,10 @@ impl Session {
 
     fn process_notification(&mut self, method: &str, params: &Value) -> Vec<Event> {
         match method {
+            "skills/changed" => {
+                self.request_skills(true);
+                Vec::new()
+            }
             "turn/started" => {
                 self.current_turn = params["turn"]["id"].as_str().map(str::to_owned);
 
@@ -568,6 +652,95 @@ fn codex_command_request(rpc_id: u64, thread_id: &str, name: &str) -> Option<Val
         })),
         _ => None,
     }
+}
+
+fn skills_list_request(rpc_id: u64, force_reload: bool) -> Value {
+    let params = if force_reload {
+        json!({"forceReload": true})
+    } else {
+        json!({})
+    };
+
+    json!({
+        "jsonrpc": "2.0",
+        "id": rpc_id,
+        "method": "skills/list",
+        "params": params,
+    })
+}
+
+fn codex_user_input(text: &str, skill: Option<&SkillReference>) -> Value {
+    let mut input = vec![json!({"type": "text", "text": text})];
+
+    if let Some(skill) = skill {
+        input.push(json!({
+            "type": "skill",
+            "name": &skill.name,
+            "path": &skill.path,
+        }));
+    }
+
+    Value::Array(input)
+}
+
+fn skill_catalog_from_response(message: &Value) -> SkillCatalog {
+    if let Some(error) = message["error"]["message"].as_str() {
+        return SkillCatalog {
+            skills: Vec::new(),
+            errors: vec![format!("Codex skill catalog is unavailable: {error}")],
+        };
+    }
+
+    parse_skill_catalog(&message["result"])
+}
+
+fn parse_skill_catalog(result: &Value) -> SkillCatalog {
+    let mut catalog = SkillCatalog::default();
+
+    for entry in result["data"].as_array().into_iter().flatten() {
+        for error in entry["errors"].as_array().into_iter().flatten() {
+            let message = error["message"]
+                .as_str()
+                .unwrap_or("unknown skill loading error");
+            let path = error["path"].as_str().unwrap_or_default();
+
+            catalog.errors.push(if path.is_empty() {
+                message.to_string()
+            } else {
+                format!("{message} ({path})")
+            });
+        }
+
+        for skill in entry["skills"].as_array().into_iter().flatten() {
+            let (Some(name), Some(description), Some(path), Some(scope), Some(enabled)) = (
+                skill["name"].as_str(),
+                skill["description"].as_str(),
+                skill["path"].as_str(),
+                skill["scope"].as_str(),
+                skill["enabled"].as_bool(),
+            ) else {
+                continue;
+            };
+
+            if name.is_empty() || path.is_empty() {
+                continue;
+            }
+
+            catalog.skills.push(SkillInfo {
+                name: name.to_string(),
+                description: description.to_string(),
+                path: path.to_string(),
+                scope: scope.to_string(),
+                enabled,
+                display_name: skill["interface"]["displayName"]
+                    .as_str()
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned),
+            });
+        }
+    }
+
+    catalog
 }
 
 fn codex_command_response(name: &str, error: Option<&str>) -> SlashCommandOutcome {
@@ -853,6 +1026,119 @@ fn tool_title(item: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn skill_list_requests_and_refresh_state_coalesce_invalidations() {
+        assert_eq!(
+            skills_list_request(10, false),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 10,
+                "method": "skills/list",
+                "params": {},
+            })
+        );
+        assert_eq!(
+            skills_list_request(11, true)["params"],
+            json!({"forceReload": true})
+        );
+
+        let mut refresh = SkillRefreshState::default();
+        assert!(!refresh.queue_if_in_flight(false));
+        refresh.start(10);
+        assert!(refresh.queue_if_in_flight(true));
+        assert!(refresh.queue_if_in_flight(true));
+        assert_eq!(refresh.finish(9), None);
+        assert_eq!(refresh.finish(10), Some(true));
+        refresh.start(11);
+        assert_eq!(refresh.finish(11), Some(false));
+    }
+
+    #[test]
+    fn skill_catalog_preserves_duplicate_names_disabled_state_and_errors() {
+        let catalog = parse_skill_catalog(&json!({
+            "data": [{
+                "cwd": "C:\\repo",
+                "skills": [
+                    {
+                        "name": "review",
+                        "description": "User review",
+                        "path": "C:\\skills\\user\\SKILL.md",
+                        "scope": "user",
+                        "enabled": true,
+                        "interface": {"displayName": "Review changes"}
+                    },
+                    {
+                        "name": "review",
+                        "description": "Repo review",
+                        "path": "C:\\repo\\.codex\\skills\\review\\SKILL.md",
+                        "scope": "repo",
+                        "enabled": false
+                    }
+                ],
+                "errors": [{"path": "C:\\broken\\SKILL.md", "message": "invalid frontmatter"}]
+            }]
+        }));
+
+        assert_eq!(catalog.skills.len(), 2);
+        assert_eq!(catalog.skills[0].name, catalog.skills[1].name);
+        assert_ne!(catalog.skills[0].path, catalog.skills[1].path);
+        assert!(catalog.skills[0].enabled);
+        assert!(!catalog.skills[1].enabled);
+        assert_eq!(
+            catalog.skills[0].display_name.as_deref(),
+            Some("Review changes")
+        );
+        assert!(catalog.errors[0].contains("invalid frontmatter"));
+    }
+
+    #[test]
+    fn skill_catalog_rpc_errors_are_nonfatal_catalog_state() {
+        let catalog = skill_catalog_from_response(&json!({
+            "error": {"code": -32601, "message": "Method not found"}
+        }));
+
+        assert!(catalog.skills.is_empty());
+        assert_eq!(catalog.errors.len(), 1);
+        assert!(catalog.errors[0].contains("Method not found"));
+    }
+
+    #[test]
+    fn structured_skill_input_extends_the_original_text_shape() {
+        assert_eq!(
+            codex_user_input("plain text", None),
+            json!([{"type": "text", "text": "plain text"}])
+        );
+
+        let skill = SkillReference {
+            name: "browser:control".into(),
+            path: "C:\\skills\\browser\\SKILL.md".into(),
+        };
+        assert_eq!(
+            codex_user_input("$browser:control inspect", Some(&skill)),
+            json!([
+                {"type": "text", "text": "$browser:control inspect"},
+                {
+                    "type": "skill",
+                    "name": "browser:control",
+                    "path": "C:\\skills\\browser\\SKILL.md"
+                }
+            ])
+        );
+    }
+
+    #[test]
+    fn codex_advertises_the_picker_but_not_plugin_management() {
+        let commands = Session::adapter_commands();
+        let skills = commands
+            .iter()
+            .find(|command| command.name == "skills")
+            .unwrap();
+
+        assert_eq!(skills.arguments, SlashCommandArguments::Skills);
+        assert!(!commands.iter().any(|command| command.name == "plugins"));
+        assert!(codex_command_request(12, "thread", "skills").is_none());
+    }
 
     #[test]
     fn commands_render_as_string_or_joined_argv() {
