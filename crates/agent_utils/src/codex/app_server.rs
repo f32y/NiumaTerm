@@ -979,12 +979,14 @@ fn parse_item(item: &Value) -> Option<Item> {
         "fileChange" => Item::FileChange {
             id,
             paths: file_change_paths(&item["changes"]),
+            diff: file_change_diff(&item["changes"]),
             status,
         },
         kind => Item::Other {
             id,
             kind: kind.to_string(),
             title: tool_title(item),
+            output: None,
             status,
         },
     };
@@ -1020,6 +1022,31 @@ fn file_change_paths(changes: &Value) -> String {
     } else {
         paths.join(", ")
     }
+}
+
+/// Concatenate whatever diff text the wire provides for each change. Field
+/// names vary across server versions (and sit either on the change or inside
+/// its `kind`); absent diffs just leave the card without expandable detail.
+fn file_change_diff(changes: &Value) -> Option<String> {
+    let parts: Vec<&str> = changes
+        .as_array()
+        .map(|list| {
+            list.iter()
+                .filter_map(|change| {
+                    ["diff", "unified_diff", "unifiedDiff"]
+                        .iter()
+                        .find_map(|k| {
+                            change[*k]
+                                .as_str()
+                                .or_else(|| change["kind"][*k].as_str())
+                                .filter(|s| !s.trim().is_empty())
+                        })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    (!parts.is_empty()).then(|| parts.join("\n"))
 }
 
 /// Best-effort one-line label for an arbitrary tool item: MCP calls have
@@ -1264,6 +1291,7 @@ mod tests {
                 id: "call1".into(),
                 kind: "mcpToolCall".into(),
                 title: "github/search_issues".into(),
+                output: None,
                 status: Some("inProgress".into()),
             })
         );
@@ -1325,6 +1353,7 @@ mod tests {
                     id: "item".into(),
                     kind: kind.into(),
                     title: title.into(),
+                    output: None,
                     status: Some("completed".into()),
                 })
             );

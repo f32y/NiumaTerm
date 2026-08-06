@@ -137,6 +137,9 @@ pub enum Item {
     FileChange {
         id: String,
         paths: String,
+        /// Reviewable diff body when the provider exposes one (Claude:
+        /// reconstructed from the edit-tool input; Codex: wire diffs).
+        diff: Option<String>,
         status: Option<String>,
     },
     /// Every other tool-call kind (mcpToolCall, webSearch, dynamicToolCall,
@@ -145,6 +148,9 @@ pub enum Item {
         id: String,
         kind: String,
         title: String,
+        /// The tool's result payload (search matches, fetched content, …),
+        /// delivered with the completion event.
+        output: Option<String>,
         status: Option<String>,
     },
 }

@@ -626,13 +626,21 @@ impl Session {
                     status,
                     exit_code: None,
                 },
-                Item::FileChange { id, paths, .. } => Item::FileChange { id, paths, status },
+                Item::FileChange {
+                    id, paths, diff, ..
+                } => Item::FileChange {
+                    id,
+                    paths,
+                    diff,
+                    status,
+                },
                 Item::Other {
                     id, kind, title, ..
                 } => Item::Other {
                     id,
                     kind,
                     title,
+                    output: Some(output),
                     status,
                 },
                 other => other,
@@ -972,15 +980,50 @@ fn tool_item(id: &str, name: &str, input: &Value) -> Item {
                 .as_str()
                 .unwrap_or("(unknown file)")
                 .to_string(),
+            diff: edit_diff(name, input),
             status,
         },
         _ => Item::Other {
             id,
             kind: name.to_string(),
             title: tool_title(input),
+            output: None,
             status,
         },
     }
+}
+
+/// Reconstruct a reviewable +/- diff body from a file-editing tool's input.
+/// The stream carries only the tool input (old/new text), so the change
+/// itself is the reviewable content; per-line prefixes make it read (and
+/// highlight) as a unified diff body.
+fn edit_diff(name: &str, input: &Value) -> Option<String> {
+    let (removed, added) = match name {
+        "Edit" => (
+            input["old_string"].as_str().unwrap_or_default(),
+            input["new_string"].as_str().unwrap_or_default(),
+        ),
+        "Write" => ("", input["content"].as_str().unwrap_or_default()),
+        "NotebookEdit" => ("", input["new_source"].as_str().unwrap_or_default()),
+        _ => return None,
+    };
+
+    if removed.is_empty() && added.is_empty() {
+        return None;
+    }
+
+    let mut diff = String::new();
+    for line in removed.lines() {
+        diff.push('-');
+        diff.push_str(line);
+        diff.push('\n');
+    }
+    for line in added.lines() {
+        diff.push('+');
+        diff.push_str(line);
+        diff.push('\n');
+    }
+    Some(diff)
 }
 
 /// Best-effort one-line label for an arbitrary tool call, from the input
@@ -1090,6 +1133,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn edit_diff_prefixes_old_and_new_lines() {
+        let diff = edit_diff("Edit", &json!({"old_string": "a\nb", "new_string": "c"}));
+        assert_eq!(diff.as_deref(), Some("-a\n-b\n+c\n"));
+
+        assert_eq!(edit_diff("Edit", &json!({})), None);
+    }
+
+    #[test]
     fn bash_and_file_tools_map_to_dedicated_cards() {
         let bash = tool_item("t1", "Bash", &json!({"command": "cargo check"}));
 
@@ -1115,6 +1166,7 @@ mod tests {
             Item::FileChange {
                 id: "t2".into(),
                 paths: "C:\\a.txt".into(),
+                diff: Some("+x\n".into()),
                 status: Some("inProgress".into()),
             }
         );
@@ -1127,6 +1179,7 @@ mod tests {
                 id: "t3".into(),
                 kind: "Grep".into(),
                 title: "foo.*bar".into(),
+                output: None,
                 status: Some("inProgress".into()),
             }
         );
