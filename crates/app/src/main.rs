@@ -38,10 +38,10 @@ use crate::terminal::view::{
     CopyBlockCommand, CopyBlockOutput, NextBlock, PreviousBlock, RerunBlock, SendShiftTab, SendTab,
 };
 use crate::ui::{
-    AppAssets, AppSettings, CloseTab, NewAgentTab, NewRemoteTab, NewTab, NewWindow, NewWorkspace,
-    NextTab, NextWorkspace, PrevTab, PrevWorkspace, ResizePaneDown, ResizePaneLeft,
-    ResizePaneRight, ResizePaneUp, ShowSettings, SplitDown, SplitLeft, SplitRight, SplitUp,
-    ToggleSidebar,
+    AgentThreadDefaults, AppAssets, AppSettings, CloseTab, NewAgentTab, NewRemoteTab, NewTab,
+    NewWindow, NewWorkspace, NextTab, NextWorkspace, PrevTab, PrevWorkspace, ResizePaneDown,
+    ResizePaneLeft, ResizePaneRight, ResizePaneUp, ShowSettings, SplitDown, SplitLeft, SplitRight,
+    SplitUp, ToggleSidebar,
 };
 use crate::window::{AppWindow, LastActiveWindow, ShellRegistry, WindowRegistry};
 
@@ -316,6 +316,7 @@ fn run_app(argv_url: Option<String>, testing: bool) {
             if !restore_session && remembered_state.windows.iter().any(|w| w.session.is_some()) {
                 let clean = LocalState {
                     windows: initials.iter().map(|w| w.to_local_state(false)).collect(),
+                    agent_defaults: remembered_state.agent_defaults.clone(),
                 };
 
                 if let Err(err) = local_state::save(&clean) {
@@ -326,6 +327,9 @@ fn run_app(argv_url: Option<String>, testing: bool) {
             cx.set_global(WindowRegistry(Vec::new()));
             cx.set_global(ShellRegistry(Vec::new()));
             cx.set_global(LastActiveWindow(None));
+            cx.set_global(AgentThreadDefaults::from_local_state(
+                &remembered_state.agent_defaults,
+            ));
 
             // A closed window is discarded — except the last one: GPUI's
             // LastWindowClosed quit follows, and the quit hook saves it.
@@ -351,6 +355,7 @@ fn run_app(argv_url: Option<String>, testing: bool) {
                         .iter()
                         .map(|(_, w)| w.to_local_state(save_session))
                         .collect(),
+                    agent_defaults: cx.global::<AgentThreadDefaults>().to_local_state(),
                 };
 
                 if !state.windows.is_empty()

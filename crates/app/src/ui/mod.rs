@@ -1,4 +1,5 @@
 pub(crate) use self::active_list::{ActiveList, HasId};
+pub(crate) use self::agent_pane::AgentThreadDefaults;
 pub(crate) use self::assets::AppAssets;
 pub(crate) use self::settings::{
     AppSettings, apply_ui_theme, apply_window_translucency, background_image_layer_opacity,
