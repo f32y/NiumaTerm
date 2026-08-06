@@ -42,7 +42,9 @@ use crate::ui::tab_bar::TabStrip;
 use crate::ui::token_usage::TokenUsageView;
 use crate::ui::workspace_sidebar::{self, Sidebar};
 use crate::window::{AppWindow, LastActiveWindow, ShellEntry, ShellRegistry, WindowRegistry};
-use crate::workspace::{self, DEFAULT_WORKSPACE_NAME, WorkspaceId, WorkspaceManager, best_match};
+use crate::workspace::{
+    self, DEFAULT_WORKSPACE_NAME, WorkspaceId, WorkspaceManager, best_match, exact_match,
+};
 use crate::{remote, ui};
 
 /// A workspace cwd as a shell working directory: `None` for empty or the
@@ -1172,6 +1174,22 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let summaries = self.workspaces.summaries();
+        if let Some(index) = exact_match(&summaries, path).and_then(|workspace_id| {
+            summaries
+                .iter()
+                .position(|workspace| workspace.id == workspace_id)
+        }) {
+            // Workspace activation preserves its TabManager's active index,
+            // restoring the tab the user last used without spawning a shell.
+            self.workspaces.activate(index);
+            window.activate_window();
+            self.focus_active(window, cx);
+            self.sync_session_memory(cx);
+            cx.notify();
+            return;
+        }
+
         let target = path.display().to_string();
 
         let Some(ws_id) = best_match(&self.workspaces.summaries(), path) else {
