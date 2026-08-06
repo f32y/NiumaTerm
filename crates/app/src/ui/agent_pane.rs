@@ -6,6 +6,7 @@
 
 use std::collections::{HashSet, VecDeque};
 use std::env;
+use std::path::Path;
 use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -2102,6 +2103,36 @@ fn detect_output_language(output: &str) -> &'static str {
     }
 }
 
+/// Claude's Read tool returns cat -n style lines ("   12→text"); strip the
+/// gutter so the source underneath highlights as its own language. Any line
+/// without the gutter leaves the text untouched (format drift safety).
+fn strip_read_gutter(output: &str) -> Option<String> {
+    let mut body = String::with_capacity(output.len());
+
+    for line in output.lines() {
+        let (gutter, text) = line.split_once('→')?;
+        let number = gutter.trim_start();
+        if number.is_empty() || !number.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        body.push_str(text);
+        body.push('\n');
+    }
+
+    (!body.is_empty()).then_some(body)
+}
+
+/// Fence-language tag for a file path. The highlight registry accepts file
+/// extensions as language aliases (rs, py, yml, …) and resolves unknown ones
+/// to plain, so the extension itself is the tag.
+fn file_extension_lang(path: &str) -> String {
+    Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+}
+
 /// Full text of an entry for the right-click Copy action — the whole message,
 /// independent of any partial selection or truncated preview.
 fn entry_copy_text(item: &ChatItem) -> String {
@@ -3299,8 +3330,24 @@ impl AgentPane {
                 // diffs are known-format, and reasoning stays the agent's
                 // own markdown.
                 let markdown = match &self.items[index].item {
-                    ChatItem::Command { .. } | ChatItem::Tool { .. } => fenced_code_block(&detail),
+                    ChatItem::Command { .. } => fenced_code_block(&detail),
                     ChatItem::FileChange { .. } => fenced_code_block_as(&detail, "diff"),
+                    ChatItem::Tool { kind, title, .. } => match kind.as_str() {
+                        // Markdown-native payloads: plan approvals, todo
+                        // checklists, and subagent reports read as prose.
+                        "TodoWrite" | "ExitPlanMode" | "Task" => detail,
+                        // File reads highlight as their source language; the
+                        // extension is a registry alias, unknown ones fall
+                        // back to plain.
+                        "Read" => {
+                            let lang = file_extension_lang(title);
+                            match strip_read_gutter(&detail) {
+                                Some(body) => fenced_code_block_as(&body, &lang),
+                                None => fenced_code_block_as(&detail, &lang),
+                            }
+                        }
+                        _ => fenced_code_block(&detail),
+                    },
                     _ => detail,
                 };
 
@@ -3944,6 +3991,27 @@ mod prompt_truncation_tests {
         let head = truncated_user_prompt(&giant_line).expect("over the byte cap");
         assert!(head.len() <= 4096 + 3);
         assert!(giant_line.is_char_boundary(head.len()));
+    }
+}
+
+#[cfg(test)]
+mod read_gutter_tests {
+    use super::{file_extension_lang, strip_read_gutter};
+
+    #[test]
+    fn gutter_strips_only_when_every_line_matches() {
+        assert_eq!(
+            strip_read_gutter("     1\u{2192}fn main() {\n     2\u{2192}}").as_deref(),
+            Some("fn main() {\n}\n")
+        );
+        assert_eq!(strip_read_gutter("plain output"), None);
+        assert_eq!(strip_read_gutter("     1\u{2192}ok\nno gutter"), None);
+    }
+
+    #[test]
+    fn extension_is_the_language_tag() {
+        assert_eq!(file_extension_lang("C:\\src\\main.RS"), "rs");
+        assert_eq!(file_extension_lang("noext"), "");
     }
 }
 

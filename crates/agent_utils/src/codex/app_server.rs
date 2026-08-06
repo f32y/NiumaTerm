@@ -986,12 +986,29 @@ fn parse_item(item: &Value) -> Option<Item> {
             id,
             kind: kind.to_string(),
             title: tool_title(item),
-            output: None,
+            output: tool_output(item),
             status,
         },
     };
 
     Some(parsed)
+}
+
+/// Best-effort result payload of a generic tool item. Field names vary by
+/// item kind and server version; structured payloads pretty-print as JSON so
+/// the transcript card can render (and highlight) them.
+fn tool_output(item: &Value) -> Option<String> {
+    for key in ["output", "result", "aggregatedOutput", "content"] {
+        let value = &item[key];
+        if let Some(text) = value.as_str() {
+            if !text.trim().is_empty() {
+                return Some(text.to_string());
+            }
+        } else if value.is_object() || value.is_array() {
+            return serde_json::to_string_pretty(value).ok();
+        }
+    }
+    None
 }
 
 /// The protocol sends commands as either a shell string or an argv array.

@@ -635,12 +635,19 @@ impl Session {
                     status,
                 },
                 Item::Other {
-                    id, kind, title, ..
+                    id,
+                    kind,
+                    title,
+                    output: seeded,
+                    ..
                 } => Item::Other {
                     id,
                     kind,
                     title,
-                    output: Some(output),
+                    // Input-seeded detail (todo lists, plans) beats the
+                    // result ack; everything else shows what the tool
+                    // returned.
+                    output: seeded.or(Some(output)),
                     status,
                 },
                 other => other,
@@ -987,9 +994,34 @@ fn tool_item(id: &str, name: &str, input: &Value) -> Item {
             id,
             kind: name.to_string(),
             title: tool_title(input),
-            output: None,
+            output: input_detail(name, input),
             status,
         },
+    }
+}
+
+/// Detail seeded from the tool INPUT, for tools whose interesting payload is
+/// the request rather than the result (the result is just an ack). A seeded
+/// detail survives completion; tools without one get the tool_result text.
+fn input_detail(name: &str, input: &Value) -> Option<String> {
+    match name {
+        "TodoWrite" => input["todos"].as_array().map(|todos| {
+            todos
+                .iter()
+                .filter_map(|todo| {
+                    let content = todo["content"].as_str()?;
+                    let mark = if todo["status"].as_str() == Some("completed") {
+                        "x"
+                    } else {
+                        " "
+                    };
+                    Some(format!("- [{mark}] {content}"))
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        }),
+        "ExitPlanMode" => input["plan"].as_str().map(str::to_owned),
+        _ => None,
     }
 }
 
@@ -1131,6 +1163,23 @@ fn tool_result_text(content: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn content_bearing_inputs_seed_the_card_detail() {
+        let todos = input_detail(
+            "TodoWrite",
+            &json!({"todos": [
+                {"content": "done thing", "status": "completed"},
+                {"content": "next thing", "status": "pending"},
+            ]}),
+        );
+        assert_eq!(todos.as_deref(), Some("- [x] done thing\n- [ ] next thing"));
+
+        let plan = input_detail("ExitPlanMode", &json!({"plan": "1. do it"}));
+        assert_eq!(plan.as_deref(), Some("1. do it"));
+
+        assert_eq!(input_detail("Grep", &json!({"pattern": "x"})), None);
+    }
 
     #[test]
     fn edit_diff_prefixes_old_and_new_lines() {
