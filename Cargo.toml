@@ -106,7 +106,12 @@ sum_tree = { path = "third_party/gpui/sum_tree" }
 util_macros = { path = "third_party/gpui/util_macros" }
 
 # gpui-component fork
-gpui-component = { path = "third_party/gpui-component/ui" }
+# tree-sitter features power syntax highlighting in transcript code blocks
+# and tool-call output (agent tabs).
+gpui-component = { path = "third_party/gpui-component/ui", features = [
+    "tree-sitter",
+    "tree-sitter-languages",
+] }
 gpui-component-assets = { path = "third_party/gpui-component/assets" }
 gpui-component-macros = { path = "third_party/gpui-component/macros" }
 
