@@ -18,7 +18,7 @@ use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::group_box::GroupBoxVariant;
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::setting::{
-    NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage, Settings,
+    NumberFieldOptions, SelectIndex, SettingField, SettingGroup, SettingItem, SettingPage, Settings,
 };
 use gpui_component::slider::{Slider, SliderEvent, SliderState};
 use gpui_component::{
@@ -1973,6 +1973,11 @@ pub fn settings_view(cx: &App) -> Settings {
         .page(remote_session_page())
 }
 
+/// Position of the Profiles page in `settings_view`'s `.page(...)` chain
+/// (Terminal, Appearance, Profiles, …); the Add Profile button targets it
+/// when jumping to a freshly created profile card.
+const PROFILES_PAGE_IX: usize = 2;
+
 fn profiles_page(profiles: &[Profile]) -> SettingPage {
     // Selector options come from the current names; the settings view is
     // rebuilt per render, so renames refresh the list immediately.
@@ -2015,8 +2020,22 @@ fn profiles_page(profiles: &[Profile]) -> SettingPage {
                     "Add Profile",
                     SettingField::render(|_, _, _| {
                         Button::new("profile-add").outline().label("Add").on_click(
-                            |_, _, cx: &mut App| {
+                            |_, window, cx: &mut App| {
                                 cx.global_mut::<AppSettings>().add_profile();
+
+                                // Jump to the new profile's card: group 0 is
+                                // this page-level group, profile cards follow
+                                // in list order.
+                                let group_ix = cx.global::<AppSettings>().profiles.len();
+                                Settings::select(
+                                    "app-settings",
+                                    SelectIndex {
+                                        page_ix: PROFILES_PAGE_IX,
+                                        group_ix: Some(group_ix),
+                                    },
+                                    window,
+                                    cx,
+                                );
                             },
                         )
                     }),
