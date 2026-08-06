@@ -1864,13 +1864,12 @@ impl AgentPane {
                     item_id: format!("replay-{i}"),
                     text,
                 },
-                ReplayItem::Tools { count } => ChatItem::Tool {
-                    item_id: format!("replay-{i}"),
-                    kind: format!("{count} tool call{}", if count == 1 { "" } else { "s" }),
-                    title: String::new(),
-                    output: None,
-                    status: "completed".to_string(),
-                },
+                ReplayItem::Item(item) => {
+                    let Some(item) = chat_item_from_session_item(item) else {
+                        continue;
+                    };
+                    item
+                }
             };
 
             // Replayed entries predate this pane; they get no wall-clock
@@ -1928,54 +1927,10 @@ impl AgentPane {
     }
 
     fn start_item(&mut self, item: SessionItem, cx: &mut Context<Self>) {
-        let chat_item = match item {
-            // Echoes of our own turn input, already rendered locally on send.
-            SessionItem::UserMessage => return,
-            SessionItem::AgentMessage { id, text } => ChatItem::Agent {
-                item_id: id,
-                text: text.unwrap_or_default(),
-            },
-            SessionItem::Reasoning { id, summary } => ChatItem::Reasoning {
-                item_id: id,
-                text: summary.unwrap_or_default(),
-            },
-            SessionItem::CommandExecution {
-                id,
-                command,
-                aggregated_output,
-                status,
-                exit_code,
-            } => ChatItem::Command {
-                item_id: id,
-                command,
-                output: aggregated_output.unwrap_or_default(),
-                status: status.unwrap_or_else(|| "inProgress".to_string()),
-                exit_code,
-            },
-            SessionItem::FileChange {
-                id,
-                paths,
-                diff,
-                status,
-            } => ChatItem::FileChange {
-                item_id: id,
-                summary: paths,
-                diff,
-                status: status.unwrap_or_else(|| "inProgress".to_string()),
-            },
-            SessionItem::Other {
-                id,
-                kind,
-                title,
-                output,
-                status,
-            } => ChatItem::Tool {
-                item_id: id,
-                kind,
-                title,
-                output,
-                status: status.unwrap_or_else(|| "inProgress".to_string()),
-            },
+        let Some(chat_item) = chat_item_from_session_item(item) else {
+            // Echoes of our own turn input are already rendered locally on
+            // send and historical user text uses ReplayItem::User.
+            return;
         };
 
         self.push(chat_item, cx);
@@ -2302,6 +2257,60 @@ fn session_item_id(item: &SessionItem) -> Option<&str> {
         | SessionItem::FileChange { id, .. }
         | SessionItem::Other { id, .. } => Some(id),
     }
+}
+
+/// Translate the backend-neutral item model into the transcript model. Live
+/// events and persisted replay both use this path so newly supported output,
+/// status, or diff fields cannot silently disappear only after a resume.
+fn chat_item_from_session_item(item: SessionItem) -> Option<ChatItem> {
+    Some(match item {
+        SessionItem::UserMessage => return None,
+        SessionItem::AgentMessage { id, text } => ChatItem::Agent {
+            item_id: id,
+            text: text.unwrap_or_default(),
+        },
+        SessionItem::Reasoning { id, summary } => ChatItem::Reasoning {
+            item_id: id,
+            text: summary.unwrap_or_default(),
+        },
+        SessionItem::CommandExecution {
+            id,
+            command,
+            aggregated_output,
+            status,
+            exit_code,
+        } => ChatItem::Command {
+            item_id: id,
+            command,
+            output: aggregated_output.unwrap_or_default(),
+            status: status.unwrap_or_else(|| "inProgress".to_string()),
+            exit_code,
+        },
+        SessionItem::FileChange {
+            id,
+            paths,
+            diff,
+            status,
+        } => ChatItem::FileChange {
+            item_id: id,
+            summary: paths,
+            diff,
+            status: status.unwrap_or_else(|| "inProgress".to_string()),
+        },
+        SessionItem::Other {
+            id,
+            kind,
+            title,
+            output,
+            status,
+        } => ChatItem::Tool {
+            item_id: id,
+            kind,
+            title,
+            output,
+            status: status.unwrap_or_else(|| "inProgress".to_string()),
+        },
+    })
 }
 
 /// Compact "how long ago" label for a history row ("now", "5m", "3h", "2d").
@@ -3651,11 +3660,11 @@ impl AgentPane {
                 };
 
                 div()
+                    // Expanded transcript content starts at the same horizontal
+                    // position as its title; inner padding would add a redundant
+                    // indentation level inside an already grouped tool call.
                     .ml(px(AGENT_DISCLOSURE_DETAIL_INSET))
                     .mt_1()
-                    .border_l_1()
-                    .border_color(cx.theme().border.opacity(0.45))
-                    .pl_3()
                     .child(
                         div()
                             .id(("wl-out", index))
@@ -4325,15 +4334,16 @@ impl AgentPane {
 #[cfg(test)]
 mod prompt_truncation_tests {
     use gpui::px;
+    use nmt_agent_utils::chat::Item as SessionItem;
 
     use super::{
         AGENT_DISCLOSURE_DETAIL_INSET, AGENT_DISCLOSURE_GAP, AGENT_DISCLOSURE_PADDING,
-        AGENT_DISCLOSURE_SLOT, ComposerAction, Status, composer_action, should_show_jump_to_latest,
-        truncated_user_prompt,
+        AGENT_DISCLOSURE_SLOT, ChatItem, ComposerAction, Status, chat_item_from_session_item,
+        composer_action, should_show_jump_to_latest, truncated_user_prompt,
     };
 
     #[test]
-    fn disclosure_detail_rail_matches_the_shared_leading_slots() {
+    fn disclosure_detail_matches_the_title_start() {
         assert_eq!(
             AGENT_DISCLOSURE_DETAIL_INSET,
             AGENT_DISCLOSURE_PADDING + AGENT_DISCLOSURE_SLOT * 2.0 + AGENT_DISCLOSURE_GAP * 2.0
@@ -4356,6 +4366,33 @@ mod prompt_truncation_tests {
         assert!(!should_show_jump_to_latest(true, Some(false), px(200.)));
         assert!(!should_show_jump_to_latest(true, None, px(200.)));
         assert!(should_show_jump_to_latest(false, None, px(200.)));
+    }
+
+    #[test]
+    fn replayed_tools_use_the_live_item_mapping_with_output_intact() {
+        let item = chat_item_from_session_item(SessionItem::Other {
+            id: "tool-1".into(),
+            kind: "Read".into(),
+            title: "src/lib.rs".into(),
+            output: Some("contents".into()),
+            status: Some("completed".into()),
+        });
+
+        let Some(ChatItem::Tool {
+            item_id,
+            kind,
+            title,
+            output,
+            status,
+        }) = item
+        else {
+            panic!("replayed tool did not map to a transcript tool row");
+        };
+        assert_eq!(item_id, "tool-1");
+        assert_eq!(kind, "Read");
+        assert_eq!(title, "src/lib.rs");
+        assert_eq!(output.as_deref(), Some("contents"));
+        assert_eq!(status, "completed");
     }
 
     #[test]

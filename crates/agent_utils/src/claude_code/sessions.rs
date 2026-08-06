@@ -2,18 +2,20 @@
 //! CLI persists under `~/.claude/projects/<munged-cwd>/<session-id>.jsonl`.
 //!
 //! The transcript format is an implementation detail of the CLI, so parsing
-//! here depends on a minimal field set (`type`, `message.content`,
-//! `isSidechain`, `isMeta`, `gitBranch`) and skips any line it does not
-//! recognize — an unparseable session degrades to an id-prefix title instead
-//! of failing the list.
+//! here depends on a minimal field set (`type`, `message.content`, tool block
+//! ids/names/inputs, `isSidechain`, `isMeta`, `gitBranch`) and skips any line
+//! it does not recognize — an unparseable session degrades to an id-prefix
+//! title instead of failing the list.
 
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read as _};
 use std::path::{Path, PathBuf};
 use std::{env, fs};
 
 use serde_json::Value;
 
-use crate::chat::{ReplayItem, SessionSummary};
+use super::tool_items::{complete_tool_item, tool_item};
+use crate::chat::{Item, ReplayItem, SessionSummary};
 use crate::hook_store::home_dir;
 
 /// The CLI resolves `--resume` against the project directory derived from the
@@ -223,31 +225,31 @@ pub fn load_replay(cwd: Option<&str>, session_id: &str) -> Vec<ReplayItem> {
 
 fn parse_replay(reader: impl BufRead) -> Vec<ReplayItem> {
     let mut items: Vec<ReplayItem> = Vec::new();
-    let mut tools = 0usize;
+    let mut pending_tools: HashMap<String, usize> = HashMap::new();
+    let mut thinking_seq = 0usize;
 
     for line in reader.lines().map_while(Result::ok) {
         let Ok(record) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
 
+        if record["isSidechain"].as_bool() == Some(true) || record["isMeta"].as_bool() == Some(true)
+        {
+            continue;
+        }
+
         match record["type"].as_str() {
             Some("user") => {
-                let Some(text) = user_prompt_text(&record) else {
-                    continue;
-                };
-                let text = clean_prompt(&text);
+                complete_replayed_tools(&record, &mut items, &mut pending_tools);
 
-                if text.is_empty() {
-                    continue;
+                if let Some(text) = user_prompt_text(&record) {
+                    let text = clean_prompt(&text);
+                    if !text.is_empty() {
+                        items.push(ReplayItem::User { text });
+                    }
                 }
-
-                flush_tools(&mut items, &mut tools);
-                items.push(ReplayItem::User { text });
             }
             Some("assistant") => {
-                if record["isSidechain"].as_bool() == Some(true) {
-                    continue;
-                }
                 let Some(blocks) = record["message"]["content"].as_array() else {
                     continue;
                 };
@@ -258,16 +260,39 @@ fn parse_replay(reader: impl BufRead) -> Vec<ReplayItem> {
                             let text = block["text"].as_str().unwrap_or_default().trim();
 
                             if !text.is_empty() {
-                                flush_tools(&mut items, &mut tools);
                                 items.push(ReplayItem::Agent {
                                     text: text.to_string(),
                                 });
                             }
                         }
-                        Some("tool_use") | Some("server_tool_use") | Some("mcp_tool_use") => {
-                            tools += 1;
+                        Some("thinking") => {
+                            let summary = block["thinking"].as_str().unwrap_or_default().trim();
+                            if summary.is_empty() {
+                                continue;
+                            }
+
+                            let id = block["id"].as_str().map(str::to_owned).unwrap_or_else(|| {
+                                let id = format!("replay-thinking-{thinking_seq}");
+                                thinking_seq += 1;
+                                id
+                            });
+                            items.push(ReplayItem::Item(Item::Reasoning {
+                                id,
+                                summary: Some(summary.to_string()),
+                            }));
                         }
-                        // Thinking blocks are working noise, not conversation.
+                        Some("tool_use") | Some("server_tool_use") | Some("mcp_tool_use") => {
+                            let Some(id) = block["id"].as_str() else {
+                                continue;
+                            };
+                            let item = tool_item(
+                                id,
+                                block["name"].as_str().unwrap_or("tool"),
+                                &block["input"],
+                            );
+                            pending_tools.insert(id.to_string(), items.len());
+                            items.push(ReplayItem::Item(item));
+                        }
                         _ => {}
                     }
                 }
@@ -276,15 +301,36 @@ fn parse_replay(reader: impl BufRead) -> Vec<ReplayItem> {
         }
     }
 
-    flush_tools(&mut items, &mut tools);
-
     items
 }
 
-fn flush_tools(items: &mut Vec<ReplayItem>, tools: &mut usize) {
-    if *tools > 0 {
-        items.push(ReplayItem::Tools { count: *tools });
-        *tools = 0;
+/// Historical `tool_use` and `tool_result` blocks live in separate JSONL
+/// records. Updating the already-positioned replay item keeps transcript order
+/// while adding the completion payload and status.
+fn complete_replayed_tools(
+    record: &Value,
+    items: &mut [ReplayItem],
+    pending_tools: &mut HashMap<String, usize>,
+) {
+    let Some(blocks) = record["message"]["content"].as_array() else {
+        return;
+    };
+
+    for block in blocks {
+        if block["type"].as_str() != Some("tool_result") {
+            continue;
+        }
+        let Some(id) = block["tool_use_id"].as_str() else {
+            continue;
+        };
+        let Some(index) = pending_tools.remove(id) else {
+            continue;
+        };
+        let Some(ReplayItem::Item(item)) = items.get_mut(index) else {
+            continue;
+        };
+
+        *item = complete_tool_item(item.clone(), block);
     }
 }
 
@@ -344,16 +390,24 @@ mod tests {
     }
 
     #[test]
-    fn replay_keeps_dialogue_and_collapses_tools() {
+    fn replay_keeps_dialogue_and_preserves_tool_details() {
         let lines = [
             serde_json::json!({"type": "queue-operation", "operation": "enqueue"}),
             serde_json::json!({"type": "user",
                 "message": {"content": [{"type": "text", "text": "question"}]}}),
             serde_json::json!({"type": "assistant", "message": {"content": [
-                {"type": "tool_use", "id": "t1", "name": "Bash", "input": {}},
-                {"type": "tool_use", "id": "t2", "name": "Read", "input": {}}]}}),
+                {"type": "thinking", "thinking": "checking files"},
+                {"type": "tool_use", "id": "t1", "name": "Bash",
+                 "input": {"command": "cargo check"}},
+                {"type": "tool_use", "id": "t2", "name": "Read",
+                 "input": {"file_path": "src/lib.rs"}}]}}),
             serde_json::json!({"type": "user",
-                "message": {"content": [{"type": "tool_result", "tool_use_id": "t1"}]}}),
+            "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": "ok"},
+                {"type": "tool_result", "tool_use_id": "t2",
+                 "is_error": true,
+                 "content": [{"type": "text", "text": "fn main() {}"}]}
+            ]}}),
             serde_json::json!({"type": "assistant", "isSidechain": true,
                 "message": {"content": [{"type": "text", "text": "subagent"}]}}),
             serde_json::json!({"type": "assistant",
@@ -369,7 +423,24 @@ mod tests {
                 ReplayItem::User {
                     text: "question".into()
                 },
-                ReplayItem::Tools { count: 2 },
+                ReplayItem::Item(Item::Reasoning {
+                    id: "replay-thinking-0".into(),
+                    summary: Some("checking files".into()),
+                }),
+                ReplayItem::Item(Item::CommandExecution {
+                    id: "t1".into(),
+                    command: "cargo check".into(),
+                    aggregated_output: Some("ok".into()),
+                    status: Some("completed".into()),
+                    exit_code: None,
+                }),
+                ReplayItem::Item(Item::Other {
+                    id: "t2".into(),
+                    kind: "Read".into(),
+                    title: "src/lib.rs".into(),
+                    output: Some("fn main() {}".into()),
+                    status: Some("failed".into()),
+                }),
                 ReplayItem::Agent {
                     text: "answer".into()
                 },
