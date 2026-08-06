@@ -14,8 +14,9 @@ use futures::StreamExt as _;
 use futures::channel::mpsc;
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, ClipboardItem, Context, Div, Entity, FocusHandle, FontWeight, ListSizingBehavior,
-    MouseButton, ScrollHandle, Window, div, px, relative, size,
+    AnyElement, ClipboardItem, Context, Div, Entity, FocusHandle, FollowMode, FontWeight,
+    ListAlignment, ListSizingBehavior, ListState, MouseButton, ScrollHandle, SharedString, Window,
+    div, list, px, relative, size,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{
@@ -270,7 +271,14 @@ pub(crate) struct AgentPane {
     /// same directory).
     cwd: Option<String>,
     items: Vec<Entry>,
-    scroll: ScrollHandle,
+    /// Virtualized transcript: only visible rows build elements each frame.
+    /// `row_specs` mirrors the list's item count; render() diffs freshly
+    /// built specs against it and splices/remeasures just the changed range.
+    transcript_list: ListState,
+    row_specs: Vec<RowSpec>,
+    /// Row heights depend on the agent font, which the specs can't see; the
+    /// last-seen font triggers a full remeasure when it changes.
+    transcript_font: (SharedString, f64),
     input: Entity<InputState>,
     session: Option<Backend>,
     /// Bumped on every (re)spawn; the message pump and EOF handler of an
@@ -387,7 +395,17 @@ impl AgentPane {
             kind,
             cwd,
             items: Vec::new(),
-            scroll: ScrollHandle::new(),
+            transcript_list: {
+                // Bottom alignment + tail follow give chat-log behavior: pinned
+                // to the newest row until the user scrolls up, re-engaging when
+                // they return to the bottom. The overdraw keeps a viewport's
+                // worth of offscreen rows measured so scrolling doesn't pop.
+                let state = ListState::new(0, ListAlignment::Bottom, px(512.));
+                state.set_follow_mode(FollowMode::Tail);
+                state
+            },
+            row_specs: Vec::new(),
+            transcript_font: Default::default(),
             input,
             session: None,
             session_epoch: 0,
@@ -683,48 +701,33 @@ impl AgentPane {
         self.kind
     }
 
-    /// The offset is negative while scrolling down and `max_offset` is the
-    /// corresponding positive extent, so their sum is the remaining distance
-    /// from the bottom. A small tolerance keeps subpixel layout rounding from
-    /// accidentally disabling output following. An extent within that
-    /// tolerance is not scrollable, so transient wheel overscroll before GPUI
-    /// clamps the offset still counts as being at the bottom.
+    /// While tail-follow is engaged the list snaps to the end on every
+    /// layout; the list disengages it on upward scroll and re-engages when
+    /// the user returns to the bottom, so the follow state IS the
+    /// at-the-bottom signal.
     fn transcript_is_at_bottom(&self) -> bool {
-        let max_offset = self.scroll.max_offset().y;
-
-        max_offset <= px(1.) || self.scroll.offset().y + max_offset <= px(1.)
+        self.transcript_list.is_following_tail()
     }
 
-    /// Update the known offset immediately so scroll-dependent controls react
-    /// in the same render, then request bottom alignment again after layout in
-    /// case new transcript content changes the scroll extent.
+    /// Re-engaging tail mode also scrolls to the very end (past the last
+    /// item), which stays correct while the last row is still growing.
     fn scroll_transcript_to_bottom(&self) {
-        let mut offset = self.scroll.offset();
-        offset.y = -self.scroll.max_offset().y;
-        self.scroll.set_offset(offset);
-        self.scroll.scroll_to_bottom();
-    }
-
-    fn follow_transcript_if_at_bottom(&self) {
-        if self.transcript_is_at_bottom() {
-            self.scroll_transcript_to_bottom();
-        }
+        self.transcript_list.set_follow_mode(FollowMode::Tail);
     }
 
     fn push(&mut self, item: ChatItem, cx: &mut Context<Self>) {
-        // Submitting a user message explicitly returns to the live tail. Agent
-        // output preserves a manually chosen reading position until the user
-        // scrolls back to the bottom.
-        let follow_tail = matches!(&item, ChatItem::User { .. }) || self.transcript_is_at_bottom();
+        // Submitting a user message explicitly returns to the live tail.
+        // Agent output preserves a manually chosen reading position via the
+        // list's own tail-follow state.
+        if matches!(&item, ChatItem::User { .. }) {
+            self.scroll_transcript_to_bottom();
+        }
 
         self.items.push(Entry {
             at: Local::now().format("%H:%M").to_string(),
             turn: self.turn_seq,
             item,
         });
-        if follow_tail {
-            self.scroll_transcript_to_bottom();
-        }
         cx.notify();
     }
 
@@ -1071,6 +1074,9 @@ impl AgentPane {
     fn reset_conversation(&mut self, cx: &mut Context<Self>) {
         self.session = None;
         self.items.clear();
+        // A fresh conversation always follows the live tail again, even if
+        // the previous transcript was scrolled up when it was discarded.
+        self.scroll_transcript_to_bottom();
         self.settings = ThreadSettings::default();
         self.models.clear();
         self.expanded_groups.clear();
@@ -1472,7 +1478,6 @@ impl AgentPane {
     /// progress row; the ticker stops itself once `finish_working` clears it.
     fn start_working(&mut self, cx: &mut Context<Self>) {
         self.working_started = Some(Instant::now());
-        self.follow_transcript_if_at_bottom();
         cx.notify();
 
         cx.spawn(async move |this, cx| {
@@ -1667,7 +1672,6 @@ impl AgentPane {
                     cx,
                 );
                 self.pending_approval = Some(description);
-                self.follow_transcript_if_at_bottom();
                 cx.notify();
             }
             SessionEvent::ApprovalResolved => {
@@ -1746,7 +1750,6 @@ impl AgentPane {
             });
         }
 
-        self.follow_transcript_if_at_bottom();
         cx.notify();
     }
 
@@ -1915,7 +1918,6 @@ impl AgentPane {
             break;
         }
 
-        self.follow_transcript_if_at_bottom();
         cx.notify();
     }
 
@@ -1925,21 +1927,13 @@ impl AgentPane {
         delta: &str,
         select: fn(&mut ChatItem) -> Option<&mut String>,
     ) {
-        let follow_tail = self.transcript_is_at_bottom();
-        let mut appended = false;
-
         for entry in &mut self.items {
             if chat_item_id(&entry.item) == Some(item_id)
                 && let Some(text) = select(&mut entry.item)
             {
                 text.push_str(delta);
-                appended = true;
                 break;
             }
-        }
-
-        if appended && follow_tail {
-            self.scroll_transcript_to_bottom();
         }
     }
 }
@@ -2105,6 +2099,72 @@ fn permission_icon(value: Option<&str>) -> IconName {
     }
 }
 
+/// One transcript row for the virtualized list. `PartialEq` powers the
+/// render-time diff: kind + indices catch structural changes (fold, collapse,
+/// appended rows), the fingerprint catches in-place content changes that move
+/// a row's height (streamed text, status flips, detail expansion).
+#[derive(Clone, PartialEq, Eq)]
+enum RowSpec {
+    Entry {
+        index: usize,
+        fingerprint: u64,
+    },
+    Work {
+        index: usize,
+        fingerprint: u64,
+    },
+    FoldHeader {
+        turn: u64,
+        seconds: u64,
+        folded: bool,
+    },
+    RunToggle {
+        run_start: usize,
+        hidden_count: usize,
+        expanded: bool,
+    },
+    Working,
+}
+
+/// Height-relevant signature of a transcript entry. Lengths and small fields
+/// instead of hashing full text: O(1) per row per frame, and every real
+/// mutation (streamed append, status transition, exit code, expansion) moves
+/// at least one component.
+fn entry_fingerprint(item: &ChatItem, detail_expanded: bool) -> u64 {
+    let (content_len, status_len, extra) = match item {
+        ChatItem::User { text }
+        | ChatItem::Agent { text, .. }
+        | ChatItem::Reasoning { text, .. }
+        | ChatItem::Error { text } => (text.len(), 0, 0),
+        ChatItem::Command {
+            command,
+            output,
+            status,
+            exit_code,
+            ..
+        } => (
+            command.len() + output.len(),
+            status.len(),
+            exit_code.map_or(0, |code| (code as u64) ^ (1 << 20)),
+        ),
+        ChatItem::FileChange {
+            summary, status, ..
+        } => (summary.len(), status.len(), 0),
+        ChatItem::Tool {
+            kind,
+            title,
+            status,
+            ..
+        } => (kind.len() + title.len(), status.len(), 0),
+        ChatItem::Working { done_seconds, .. } => (done_seconds.unwrap_or(0) as usize, 0, 0),
+    };
+
+    (content_len as u64)
+        ^ ((status_len as u64) << 48)
+        ^ (extra << 24)
+        ^ ((detail_expanded as u64) << 63)
+}
+
 impl gpui::EventEmitter<AgentPaneEvent> for AgentPane {}
 
 impl gpui::Focusable for AgentPane {
@@ -2146,44 +2206,18 @@ impl Render for AgentPane {
 
         // Transcript rows, one folded/expanded section per turn (entries are
         // tagged with a monotonic turn id, so turns are contiguous slices).
-        let mut rows: Vec<AnyElement> = Vec::new();
-        let mut start = 0;
+        // Only the visible slice becomes elements; the spec diff tells the
+        // list which rows changed shape.
+        let specs = self.build_row_specs(collapse);
+        self.sync_transcript_list(specs);
 
-        while start < self.items.len() {
-            let turn = self.items[start].turn;
-            let mut end = start + 1;
-
-            while end < self.items.len() && self.items[end].turn == turn {
-                end += 1;
-            }
-
-            self.render_turn(turn, start, end, collapse, &mut rows, cx);
-            start = end;
-        }
-
-        // Live progress row, pinned below everything the running turn has
-        // produced; replaced by the turn's fold header on completion.
-        if let Some(started) = self.working_started {
-            rows.push(
-                h_flex()
-                    .w_full()
-                    .gap_2()
-                    .items_center()
-                    .px_1()
-                    .child(h_flex().gap_1().children((0..3).map(|i| {
-                        div()
-                            .size(px(4.))
-                            .rounded_full()
-                            .bg(cx.theme().muted_foreground.opacity(0.85 - 0.28 * i as f32))
-                    })))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground.opacity(0.7))
-                            .child(working_label(started, None)),
-                    )
-                    .into_any_element(),
-            );
+        let font = (
+            cx.global::<AppSettings>().agent_font_family.clone(),
+            cx.global::<AppSettings>().agent_font_size,
+        );
+        if self.transcript_font != font {
+            self.transcript_font = font;
+            self.transcript_list.remeasure();
         }
 
         // A pending approval transforms the composer: the panel slots into
@@ -2297,8 +2331,6 @@ impl Render for AgentPane {
                         div()
                             .id("agent-transcript")
                             .size_full()
-                            .overflow_y_scroll()
-                            .track_scroll(&self.scroll)
                             // Reading or selecting transcript content should
                             // leave Escape routed to the pane-level interrupt
                             // handler instead of whichever control previously
@@ -2309,7 +2341,20 @@ impl Render for AgentPane {
                                     window.focus(&this.focus, cx);
                                 }),
                             )
-                            .child(v_flex().w_full().p_3().gap_2().children(rows)),
+                            .child(
+                                // Element callbacks run after this render's
+                                // entity lease is released, so the row builder
+                                // re-enters the pane through a weak handle.
+                                list(self.transcript_list.clone(), {
+                                    let this = cx.entity().downgrade();
+                                    move |ix, _window, cx| {
+                                        this.update(cx, |this, cx| this.render_row(ix, cx))
+                                            .unwrap_or_else(|_| div().into_any_element())
+                                    }
+                                })
+                                .size_full()
+                                .pt_3(),
+                            ),
                     )
                     // The bare Scrollbar element carries no inset of its own,
                     // so it lands at its static flow position (below the
@@ -2322,7 +2367,7 @@ impl Render for AgentPane {
                             .right_0()
                             .bottom_0()
                             .w(px(16.))
-                            .child(Scrollbar::vertical(&self.scroll)),
+                            .child(Scrollbar::vertical(&self.transcript_list)),
                     )
                     .when(transcript_scrolled_up, |this| {
                         this.child(
@@ -2610,14 +2655,61 @@ impl AgentPane {
     /// Render one turn: user rows, then (for settled turns) a clickable
     /// "Worked for Ns" fold header hiding the intermediate work rows by
     /// default, then the final reply. Running turns render chronologically.
-    fn render_turn(
+    fn entry_spec(&self, index: usize) -> RowSpec {
+        RowSpec::Entry {
+            index,
+            fingerprint: entry_fingerprint(
+                &self.items[index].item,
+                self.expanded_rows.contains(&index),
+            ),
+        }
+    }
+
+    fn work_spec(&self, index: usize) -> RowSpec {
+        RowSpec::Work {
+            index,
+            fingerprint: entry_fingerprint(
+                &self.items[index].item,
+                self.expanded_rows.contains(&index),
+            ),
+        }
+    }
+
+    /// Data-only description of every transcript row, in render order. This
+    /// is the single source of truth for the transcript's structure; the
+    /// virtualized list builds elements only for the visible slice of it.
+    fn build_row_specs(&self, collapse: bool) -> Vec<RowSpec> {
+        let mut rows = Vec::new();
+        let mut start = 0;
+
+        while start < self.items.len() {
+            let turn = self.items[start].turn;
+            let mut end = start + 1;
+
+            while end < self.items.len() && self.items[end].turn == turn {
+                end += 1;
+            }
+
+            self.turn_specs(turn, start, end, collapse, &mut rows);
+            start = end;
+        }
+
+        // Live progress row, pinned below everything the running turn has
+        // produced; replaced by the turn's fold header on completion.
+        if self.working_started.is_some() {
+            rows.push(RowSpec::Working);
+        }
+
+        rows
+    }
+
+    fn turn_specs(
         &self,
         turn: u64,
         start: usize,
         end: usize,
         collapse: bool,
-        rows: &mut Vec<AnyElement>,
-        cx: &mut Context<Self>,
+        rows: &mut Vec<RowSpec>,
     ) {
         let fold_seconds = (start..end).find_map(|i| match &self.items[i].item {
             ChatItem::Working {
@@ -2629,7 +2721,7 @@ impl AgentPane {
 
         let Some(seconds) = fold_seconds else {
             // Running (or pre-thread) turn: plain chronological stream.
-            self.render_stream(start, end, &|_| false, collapse, rows, cx);
+            self.stream_specs(start, end, &|_| false, collapse, rows);
             return;
         };
 
@@ -2643,28 +2735,32 @@ impl AgentPane {
 
         for i in start..end {
             if matches!(&self.items[i].item, ChatItem::User { .. }) {
-                rows.push(self.render_entry_row(i, cx));
+                rows.push(self.entry_spec(i));
             }
         }
 
-        rows.push(self.render_fold_header(turn, seconds, folded, cx));
+        rows.push(RowSpec::FoldHeader {
+            turn,
+            seconds,
+            folded,
+        });
 
         if folded {
             // Errors stay visible even inside a folded turn.
             for i in start..end {
                 if matches!(&self.items[i].item, ChatItem::Error { .. }) {
-                    rows.push(self.render_entry_row(i, cx));
+                    rows.push(self.entry_spec(i));
                 }
             }
         } else {
             let skip = |i: usize| {
                 Some(i) == final_agent || matches!(&self.items[i].item, ChatItem::User { .. })
             };
-            self.render_stream(start, end, &skip, collapse, rows, cx);
+            self.stream_specs(start, end, &skip, collapse, rows);
         }
 
         if let Some(i) = final_agent {
-            rows.push(self.render_entry_row(i, cx));
+            rows.push(self.entry_spec(i));
         }
     }
 
@@ -2672,14 +2768,13 @@ impl AgentPane {
     /// consecutive work-log rows to the newest one plus a "+N previous tool
     /// calls" toggle (when the collapse setting is on). Hidden entries are
     /// transparent: they neither render nor split a run.
-    fn render_stream(
+    fn stream_specs(
         &self,
         start: usize,
         end: usize,
         skip: &dyn Fn(usize) -> bool,
         collapse: bool,
-        rows: &mut Vec<AnyElement>,
-        cx: &mut Context<Self>,
+        rows: &mut Vec<RowSpec>,
     ) {
         let mut i = start;
 
@@ -2692,7 +2787,7 @@ impl AgentPane {
             }
 
             if !is_work_row(item) {
-                rows.push(self.render_entry_row(i, cx));
+                rows.push(self.entry_spec(i));
                 i += 1;
                 continue;
             }
@@ -2715,23 +2810,116 @@ impl AgentPane {
             if collapse && visible.len() > 1 {
                 let expanded = self.expanded_groups.contains(&run_start);
 
-                rows.push(self.render_run_toggle(run_start, visible.len() - 1, expanded, cx));
+                rows.push(RowSpec::RunToggle {
+                    run_start,
+                    hidden_count: visible.len() - 1,
+                    expanded,
+                });
 
                 if expanded {
                     for &k in &visible {
-                        rows.push(self.render_work_row(k, cx));
+                        rows.push(self.work_spec(k));
                     }
                 } else if let Some(&last) = visible.last() {
-                    rows.push(self.render_work_row(last, cx));
+                    rows.push(self.work_spec(last));
                 }
             } else {
                 for &k in &visible {
-                    rows.push(self.render_work_row(k, cx));
+                    rows.push(self.work_spec(k));
                 }
             }
 
             i = j;
         }
+    }
+
+    /// Diff freshly built specs against the list's current contents and
+    /// notify it as narrowly as possible: an equal-count middle means rows
+    /// changed in place (streaming growth, expansion) and only needs
+    /// remeasuring, which preserves the scroll position exactly; a count
+    /// change is a real splice.
+    fn sync_transcript_list(&mut self, new: Vec<RowSpec>) {
+        if self.row_specs == new {
+            return;
+        }
+
+        let prefix = self
+            .row_specs
+            .iter()
+            .zip(&new)
+            .take_while(|(a, b)| a == b)
+            .count();
+        let suffix = self.row_specs[prefix..]
+            .iter()
+            .rev()
+            .zip(new[prefix..].iter().rev())
+            .take_while(|(a, b)| a == b)
+            .count();
+        let old_mid = prefix..self.row_specs.len() - suffix;
+        let new_mid = new.len() - suffix - prefix;
+
+        if old_mid.len() == new_mid {
+            self.transcript_list.remeasure_items(old_mid);
+        } else {
+            self.transcript_list.splice(old_mid, new_mid);
+        }
+
+        self.row_specs = new;
+    }
+
+    /// Build the element for one visible row. Row indices come from the list
+    /// element during layout/paint, resolved through the spec snapshot taken
+    /// in the current render pass.
+    fn render_row(&mut self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+        let Some(spec) = self.row_specs.get(ix).cloned() else {
+            return div().into_any_element();
+        };
+
+        let row = match spec {
+            RowSpec::Entry { index, .. } => self.render_entry_row(index, cx),
+            RowSpec::Work { index, .. } => self.render_work_row(index, cx),
+            RowSpec::FoldHeader {
+                turn,
+                seconds,
+                folded,
+            } => self.render_fold_header(turn, seconds, folded, cx),
+            RowSpec::RunToggle {
+                run_start,
+                hidden_count,
+                expanded,
+            } => self.render_run_toggle(run_start, hidden_count, expanded, cx),
+            RowSpec::Working => self.render_working_row(cx),
+        };
+
+        // The pre-virtualization container spaced rows with `gap_2` inside a
+        // `p_3` body; each row now carries its own horizontal inset and
+        // bottom gap.
+        div().w_full().px_3().pb_2().child(row).into_any_element()
+    }
+
+    fn render_working_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(started) = self.working_started else {
+            return div().into_any_element();
+        };
+
+        h_flex()
+            .w_full()
+            .gap_2()
+            .items_center()
+            .px_1()
+            .child(h_flex().gap_1().children((0..3).map(|i| {
+                div()
+                    .size(px(4.))
+                    .rounded_full()
+                    .bg(cx.theme().muted_foreground.opacity(0.85 - 0.28 * i as f32))
+            })))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground.opacity(0.7))
+                    .child(working_label(started, None)),
+            )
+            .into_any_element()
     }
 
     fn render_entry_row(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -2861,7 +3049,7 @@ impl AgentPane {
                     command.clone(),
                     preview_line(output),
                     Some(state.to_string()),
-                    (!output.trim().is_empty()).then(|| fenced_code_block(output)),
+                    (!output.trim().is_empty()).then(|| output.clone()),
                 )
             }
             ChatItem::FileChange {
@@ -2971,6 +3159,15 @@ impl AgentPane {
             .context_menu(Self::copy_menu(index, &self.items[index].item))
             .child(header)
             .children(detail.filter(|_| expanded).map(|detail| {
+                // Fencing happens only for the expanded row, so collapsed
+                // transcripts never pay for it. Command output becomes a
+                // highlighted code block; reasoning is the agent's own
+                // markdown and renders as such.
+                let markdown = match &self.items[index].item {
+                    ChatItem::Command { .. } => fenced_code_block(&detail),
+                    _ => detail,
+                };
+
                 div()
                     .ml(px(28.))
                     .mt_1()
@@ -2984,11 +3181,9 @@ impl AgentPane {
                             .overflow_y_scroll()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            // Command details arrive pre-fenced (code block,
-                            // highlighted); reasoning details are the agent's
-                            // own markdown.
                             .child(
-                                text::TextView::markdown(("wl-md", index), detail).selectable(true),
+                                text::TextView::markdown(("wl-md", index), markdown)
+                                    .selectable(true),
                             ),
                     )
             }))
