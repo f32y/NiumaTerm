@@ -1999,6 +1999,48 @@ fn preview_line(text: &str) -> String {
     }
 }
 
+/// Collapsed head of an oversized user prompt, cut at a line boundary, or
+/// `None` when the whole prompt fits under the caps. Byte-capped scanning
+/// keeps this O(cap) per call regardless of paste size, so calling it every
+/// frame for a visible row stays cheap.
+fn truncated_user_prompt(text: &str) -> Option<&str> {
+    const MAX_LINES: usize = 20;
+    const MAX_BYTES: usize = 4096;
+
+    if text.len() <= MAX_BYTES && line_count_at_most(text, MAX_LINES) {
+        return None;
+    }
+
+    let mut end = 0;
+    let mut lines = 0;
+
+    for line in text.split_inclusive('\n') {
+        if lines == MAX_LINES || end + line.len() > MAX_BYTES {
+            if end == 0 {
+                // A single line longer than the byte cap: cut inside it at a
+                // character boundary.
+                let cut = text
+                    .char_indices()
+                    .map(|(i, _)| i)
+                    .take_while(|i| *i <= MAX_BYTES)
+                    .last()
+                    .unwrap_or(0);
+                return Some(&text[..cut]);
+            }
+            return Some(&text[..end]);
+        }
+        end += line.len();
+        lines += 1;
+    }
+
+    None
+}
+
+/// Whether `text` has at most `max` lines, scanning no further than needed.
+fn line_count_at_most(text: &str, max: usize) -> bool {
+    text.split_inclusive('\n').take(max + 1).count() <= max
+}
+
 /// Wrap tool output in a Markdown fence so the transcript's TextView pipeline
 /// renders it as a syntax-highlighted code block. The fence grows past any
 /// backtick run in the body, so raw output can never terminate the block
@@ -2962,7 +3004,38 @@ impl AgentPane {
     }
 
     /// User prompt: right-aligned quiet bubble (muted surface, no border).
+    ///
+    /// Oversized prompts (huge pastes) collapse to their head by default:
+    /// a visible row re-lays-out its full text every frame, so an unbounded
+    /// prompt would make every frame O(paste size). Expansion is an explicit
+    /// per-row choice, and the right-click Copy always carries the full text.
     fn render_user_row(&self, index: usize, text: String, cx: &mut Context<Self>) -> AnyElement {
+        let head_len = truncated_user_prompt(&text).map(str::len);
+        let expanded = head_len.is_some() && self.expanded_rows.contains(&index);
+        let shown = match (head_len, expanded) {
+            (Some(len), false) => text[..len].to_string(),
+            _ => text,
+        };
+        let toggle = head_len.is_some().then(|| {
+            div()
+                .mt_1()
+                .text_xs()
+                .text_color(cx.theme().primary)
+                .cursor_pointer()
+                .child(if expanded {
+                    "Show less".to_string()
+                } else {
+                    "Show full message".to_string()
+                })
+                .id(("user-expand", index))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if !this.expanded_rows.insert(index) {
+                        this.expanded_rows.remove(&index);
+                    }
+                    cx.notify();
+                }))
+        });
+
         h_flex()
             .id(("entry", index))
             .group("entry")
@@ -2981,7 +3054,8 @@ impl AgentPane {
                     .bg(cx.theme().muted)
                     // Plain, not markdown: the prompt is user-authored text and
                     // must render verbatim, but stays drag-selectable.
-                    .child(text::TextView::plain(("user-text", index), text).selectable(true)),
+                    .child(text::TextView::plain(("user-text", index), shown).selectable(true))
+                    .children(toggle),
             )
             .into_any_element()
     }
@@ -3788,6 +3862,26 @@ impl AgentPane {
 
                 menu
             })
+    }
+}
+
+#[cfg(test)]
+mod prompt_truncation_tests {
+    use super::truncated_user_prompt;
+
+    #[test]
+    fn short_prompts_pass_through_and_long_ones_cut_at_boundaries() {
+        assert_eq!(truncated_user_prompt("hello\nworld"), None);
+
+        let twenty_one_lines = "line\n".repeat(21);
+        let head = truncated_user_prompt(&twenty_one_lines).expect("over the line cap");
+        assert_eq!(head.lines().count(), 20);
+        assert!(head.ends_with('\n'));
+
+        let giant_line = "\u{4f60}".repeat(3000); // 9000 bytes, one line
+        let head = truncated_user_prompt(&giant_line).expect("over the byte cap");
+        assert!(head.len() <= 4096 + 3);
+        assert!(giant_line.is_char_boundary(head.len()));
     }
 }
 
