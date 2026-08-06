@@ -34,6 +34,9 @@ use nmt_agent_utils::chat::{
 };
 use nmt_agent_utils::claude_code::{sessions, stream_json};
 use nmt_agent_utils::codex::app_server;
+use nmt_agent_utils::{
+    AgentEvent, AgentEventKind, AgentRoute, agent_process, normalize_body, normalize_title,
+};
 use serde_json::Value;
 use tracing::warn;
 
@@ -166,6 +169,12 @@ pub(crate) enum AgentKind {
     Claude,
 }
 
+#[derive(Clone)]
+pub(crate) enum AgentPaneEvent {
+    Lifecycle(AgentEvent),
+    Interrupted,
+}
+
 impl AgentKind {
     pub(crate) fn wire(self) -> &'static str {
         match self {
@@ -251,6 +260,7 @@ impl Backend {
 
 pub(crate) struct AgentPane {
     pub(crate) focus: FocusHandle,
+    agent_route: AgentRoute,
     kind: AgentKind,
     /// The tab's working directory; the session process runs here and the
     /// session history is scoped to it (resume ids only resolve against the
@@ -366,6 +376,7 @@ impl AgentPane {
 
         let mut this = Self {
             focus: cx.focus_handle(),
+            agent_route: agent_process().allocate_route(),
             kind,
             cwd,
             items: Vec::new(),
@@ -454,6 +465,40 @@ impl AgentPane {
         this
     }
 
+    pub(crate) fn agent_route(&self) -> &AgentRoute {
+        &self.agent_route
+    }
+
+    fn emit_lifecycle(
+        &self,
+        kind: AgentEventKind,
+        title: &str,
+        body: &str,
+        cx: &mut Context<Self>,
+    ) {
+        cx.emit(AgentPaneEvent::Lifecycle(AgentEvent {
+            route: self.agent_route.clone(),
+            agent: self.kind.wire().to_string(),
+            session_id: format!("agent-tab-{}", self.session_epoch),
+            turn_id: (kind != AgentEventKind::SessionStarted)
+                .then(|| format!("turn-{}", self.turn_seq)),
+            kind,
+            title: normalize_title(title),
+            body: normalize_body(body),
+        }));
+    }
+
+    fn latest_agent_message(&self) -> Option<&str> {
+        self.items.iter().rev().find_map(|entry| match &entry.item {
+            ChatItem::Agent { text, .. }
+                if entry.turn == self.turn_seq && !text.trim().is_empty() =>
+            {
+                Some(text.as_str())
+            }
+            _ => None,
+        })
+    }
+
     /// Spawn the backend process (optionally resuming a persisted Claude
     /// session) and pump its messages onto the UI thread. Channel closure is
     /// the EOF signal (the sender is owned by the reader thread). Does not
@@ -463,6 +508,9 @@ impl AgentPane {
         let name = kind.display();
         let cwd = self.cwd.clone();
 
+        // Replacing a conversation must clear any running or unread state
+        // associated with the previous backend before the new epoch can emit.
+        cx.emit(AgentPaneEvent::Interrupted);
         self.session_epoch = next_session_epoch(self.session_epoch);
         self.skill_catalog = None;
         self.skill_binding = None;
@@ -520,6 +568,7 @@ impl AgentPane {
                         if this.session_epoch != epoch {
                             return;
                         }
+                        cx.emit(AgentPaneEvent::Interrupted);
                         this.status = Status::Exited;
                         this.awaiting_command_turn = false;
                         if !this.command_queue.is_empty() {
@@ -542,6 +591,7 @@ impl AgentPane {
                 .detach();
             }
             Err(err) => {
+                cx.emit(AgentPaneEvent::Interrupted);
                 self.status = Status::Exited;
                 self.awaiting_command_turn = false;
                 self.command_queue.clear();
@@ -1394,14 +1444,16 @@ impl AgentPane {
     fn interrupt(&mut self, cx: &mut Context<Self>) {
         if let Some(session) = self.session.as_mut() {
             session.interrupt();
+            cx.emit(AgentPaneEvent::Interrupted);
             cx.notify();
         }
     }
 
     fn respond_approval(&mut self, decision: &str, cx: &mut Context<Self>) {
         // The card is dismissed immediately for a snappy UI; the session's
-        // `ApprovalResolved` confirmation is then a no-op.
+        // `ApprovalResolved` confirmation is then an idempotent status refresh.
         self.pending_approval = None;
+        self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
 
         if let Some(session) = self.session.as_mut() {
             session.respond_approval(decision);
@@ -1485,9 +1537,14 @@ impl AgentPane {
                     self.start_working(cx);
                 }
                 self.status = Status::Running;
+                self.emit_lifecycle(AgentEventKind::PromptSubmitted, "", "", cx);
                 cx.notify();
             }
             SessionEvent::TurnCompleted { error } => {
+                let completion_body = error
+                    .clone()
+                    .or_else(|| self.latest_agent_message().map(str::to_owned))
+                    .unwrap_or_else(|| format!("{} completed the turn", self.kind.display()));
                 self.awaiting_command_turn = false;
                 self.finish_working(cx);
                 if self.status == Status::Running {
@@ -1496,6 +1553,12 @@ impl AgentPane {
                 if let Some(text) = error {
                     self.push(ChatItem::Error { text }, cx);
                 }
+                self.emit_lifecycle(
+                    AgentEventKind::Stopped,
+                    &format!("{} finished", self.kind.display()),
+                    &completion_body,
+                    cx,
+                );
                 self.run_next_queued_command(cx);
                 cx.notify();
             }
@@ -1523,17 +1586,25 @@ impl AgentPane {
                 cx.notify();
             }
             SessionEvent::ApprovalRequested { description } => {
+                self.emit_lifecycle(
+                    AgentEventKind::PermissionRequested,
+                    &format!("{} needs input", self.kind.display()),
+                    &description,
+                    cx,
+                );
                 self.pending_approval = Some(description);
                 self.follow_transcript_if_at_bottom();
                 cx.notify();
             }
             SessionEvent::ApprovalResolved => {
                 self.pending_approval = None;
+                self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
                 cx.notify();
             }
             SessionEvent::Error { message, fatal } => {
                 let cancelled_queue = fatal && !self.command_queue.is_empty();
                 if fatal {
+                    cx.emit(AgentPaneEvent::Interrupted);
                     self.status = Status::Exited;
                     self.awaiting_command_turn = false;
                     self.command_queue.clear();
@@ -1923,6 +1994,8 @@ fn permission_icon(value: Option<&str>) -> IconName {
         _ => IconName::Lock,
     }
 }
+
+impl gpui::EventEmitter<AgentPaneEvent> for AgentPane {}
 
 impl gpui::Focusable for AgentPane {
     fn focus_handle(&self, _cx: &gpui::App) -> FocusHandle {
