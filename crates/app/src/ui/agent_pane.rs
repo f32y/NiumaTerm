@@ -2005,6 +2005,33 @@ fn preview_line(text: &str) -> String {
     }
 }
 
+/// Wrap tool output in a Markdown fence so the transcript's TextView pipeline
+/// renders it as a syntax-highlighted code block. The fence grows past any
+/// backtick run in the body, so raw output can never terminate the block
+/// early.
+fn fenced_code_block(output: &str) -> String {
+    let lang = detect_output_language(output);
+    let mut fence = String::from("```");
+    while output.contains(fence.as_str()) {
+        fence.push('`');
+    }
+    format!("{fence}{lang}\n{output}\n{fence}")
+}
+
+/// First-bytes sniff covering the two formats tool output actually produces
+/// in bulk (diffs and JSON payloads); anything else renders as an unhighlighted
+/// code block. Extend per-tool only if more grammars earn their keep.
+fn detect_output_language(output: &str) -> &'static str {
+    let trimmed = output.trim_start();
+    if trimmed.starts_with("diff --git") || trimmed.starts_with("@@ ") {
+        "diff"
+    } else if trimmed.starts_with('{') || trimmed.starts_with('[') {
+        "json"
+    } else {
+        ""
+    }
+}
+
 /// Full text of an entry for the right-click Copy action — the whole message,
 /// independent of any partial selection or truncated preview.
 fn entry_copy_text(item: &ChatItem) -> String {
@@ -2764,7 +2791,9 @@ impl AgentPane {
                     .py_2()
                     .rounded(cx.theme().radius_lg)
                     .bg(cx.theme().muted)
-                    .child(text),
+                    // Plain, not markdown: the prompt is user-authored text and
+                    // must render verbatim, but stays drag-selectable.
+                    .child(text::TextView::plain(("user-text", index), text).selectable(true)),
             )
             .into_any_element()
     }
@@ -2832,7 +2861,7 @@ impl AgentPane {
                     command.clone(),
                     preview_line(output),
                     Some(state.to_string()),
-                    (!output.trim().is_empty()).then(|| output.clone()),
+                    (!output.trim().is_empty()).then(|| fenced_code_block(output)),
                 )
             }
             ChatItem::FileChange {
@@ -2955,7 +2984,12 @@ impl AgentPane {
                             .overflow_y_scroll()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(detail),
+                            // Command details arrive pre-fenced (code block,
+                            // highlighted); reasoning details are the agent's
+                            // own markdown.
+                            .child(
+                                text::TextView::markdown(("wl-md", index), detail).selectable(true),
+                            ),
                     )
             }))
             .into_any_element()
@@ -3559,5 +3593,28 @@ impl AgentPane {
 
                 menu
             })
+    }
+}
+
+#[cfg(test)]
+mod fence_tests {
+    use super::{detect_output_language, fenced_code_block};
+
+    #[test]
+    fn fence_outgrows_backtick_runs_and_sniffs_language() {
+        assert_eq!(fenced_code_block("plain output"), "```\nplain output\n```");
+        assert_eq!(
+            fenced_code_block("{\"key\": 1}"),
+            "```json\n{\"key\": 1}\n```"
+        );
+        assert_eq!(detect_output_language("diff --git a/x b/x"), "diff");
+
+        let tricky = "text with ```` four backticks";
+        let fenced = fenced_code_block(tricky);
+        assert!(
+            fenced.starts_with("`````\n"),
+            "fence must outgrow body runs"
+        );
+        assert!(fenced.ends_with("\n`````"));
     }
 }
