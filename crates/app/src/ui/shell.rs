@@ -33,7 +33,7 @@ use crate::pane_tree::{PaneId, PaneNode, PaneTree, RemoveOutcome, SplitDirection
 use crate::tabs::{TabId, TabManager};
 use crate::terminal::session::HostEvent;
 use crate::terminal::view::{AgentInterrupted, TerminalPane};
-use crate::ui::agent_pane::{AgentKind, AgentPane};
+use crate::ui::agent_pane::{AgentKind, AgentPane, AgentPaneEvent};
 use crate::ui::codex_usage::CodexUsageView;
 use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::git_status::{GitStatusModel, GitStatusView};
@@ -89,8 +89,9 @@ pub(crate) type TerminalPaneTree = PaneTree<Entity<TerminalPane>, Entity<Resizab
 pub(crate) enum TabSurface {
     Pending(Box<TabState>),
     Live(TerminalPaneTree),
-    /// A Codex conversation rendered as chat bubbles instead of a terminal
-    /// grid; owns no panes, so pane/route/process sweeps skip it via `tree()`.
+    /// An agent conversation rendered as chat bubbles instead of a terminal
+    /// grid. It owns an agent route but no terminal panes or child-process
+    /// accounting exposed through `tree()`.
     Agent(Entity<AgentPane>),
 }
 
@@ -148,8 +149,15 @@ struct AgentRouteLocation {
     workspace_index: usize,
     tab_id: TabId,
     tab_index: usize,
-    pane_id: PaneId,
-    pane: Entity<TerminalPane>,
+    target: AgentRouteTarget,
+}
+
+enum AgentRouteTarget {
+    Terminal {
+        pane_id: PaneId,
+        pane: Entity<TerminalPane>,
+    },
+    Agent(Entity<AgentPane>),
 }
 
 pub(crate) struct Shell {
@@ -301,8 +309,8 @@ impl Shell {
 
         for tabs in workspaces.all_tabs() {
             for tab in tabs.tabs() {
-                for (_, pane) in tab.surface().leaves() {
-                    agent_monitor.register_route(pane.read(cx).agent_route().clone(), now);
+                for route in Self::agent_routes_in_surface(tab.surface(), cx) {
+                    agent_monitor.register_route(route, now);
                 }
             }
         }
@@ -390,6 +398,11 @@ impl Shell {
             .register_route(pane.read(cx).agent_route().clone(), time::Instant::now());
     }
 
+    fn register_agent_tab(&mut self, pane: &Entity<AgentPane>, cx: &App) {
+        self.agent_monitor
+            .register_route(pane.read(cx).agent_route().clone(), time::Instant::now());
+    }
+
     fn remove_agent_route(&mut self, route: &AgentRoute, cx: &mut Context<Self>) {
         let mutation = self.agent_monitor.remove_route(route);
 
@@ -456,9 +469,8 @@ impl Shell {
 
         let visible_route = self
             .window_active
-            .then(|| self.try_active_pane())
-            .flatten()
-            .map(|pane| pane.read(cx).agent_route().clone());
+            .then(|| self.active_agent_route(cx))
+            .flatten();
         for notification in self.agent_monitor.pending_native_notifications() {
             if !request_native_delivery(visible_route.as_ref(), &notification.route) {
                 self.acknowledge_notification(&notification.route, &notification.id, cx);
@@ -498,20 +510,26 @@ impl Shell {
         }
     }
 
-    fn agent_routes_in_tree(tree: &TabSurface, cx: &App) -> Vec<AgentRoute> {
-        tree.leaves()
+    fn agent_routes_in_surface(surface: &TabSurface, cx: &App) -> Vec<AgentRoute> {
+        let mut routes: Vec<_> = surface
+            .leaves()
             .into_iter()
             .map(|(_, pane)| pane.read(cx).agent_route().clone())
-            .collect()
+            .collect();
+
+        if let Some(pane) = surface.agent() {
+            routes.push(pane.read(cx).agent_route().clone());
+        }
+
+        routes
     }
 
     fn owns_agent_route(&self, route: &AgentRoute, cx: &App) -> bool {
         self.workspaces.all_tabs().any(|tabs| {
             tabs.tabs().iter().any(|tab| {
-                tab.surface()
-                    .leaves()
-                    .into_iter()
-                    .any(|(_, pane)| pane.read(cx).agent_route() == route)
+                Self::agent_routes_in_surface(tab.surface(), cx)
+                    .iter()
+                    .any(|candidate| candidate == route)
             })
         })
     }
@@ -521,6 +539,18 @@ impl Shell {
             let tabs = self.workspaces.tabs_of(summary.id)?;
 
             for (tab_index, tab) in tabs.tabs().iter().enumerate() {
+                if let Some(pane) = tab.surface().agent()
+                    && pane.read(cx).agent_route() == route
+                {
+                    return Some(AgentRouteLocation {
+                        workspace_id: summary.id,
+                        workspace_index,
+                        tab_id: tab.id(),
+                        tab_index,
+                        target: AgentRouteTarget::Agent(pane.clone()),
+                    });
+                }
+
                 for (pane_id, pane) in tab.surface().leaves() {
                     if pane.read(cx).agent_route() == route {
                         return Some(AgentRouteLocation {
@@ -528,8 +558,10 @@ impl Shell {
                             workspace_index,
                             tab_id: tab.id(),
                             tab_index,
-                            pane_id,
-                            pane: pane.clone(),
+                            target: AgentRouteTarget::Terminal {
+                                pane_id,
+                                pane: pane.clone(),
+                            },
                         });
                     }
                 }
@@ -567,17 +599,23 @@ impl Shell {
 
         debug_assert_eq!(self.workspaces.active_tabs().active_id(), location.tab_id);
 
-        self.workspaces
-            .active_tabs_mut()
-            .active_mut()
-            .live_mut()
-            .set_focused(location.pane_id);
-
         window.activate_window();
 
-        let handle = location.pane.read(cx).focus.clone();
+        match location.target {
+            AgentRouteTarget::Terminal { pane_id, pane } => {
+                self.workspaces
+                    .active_tabs_mut()
+                    .active_mut()
+                    .live_mut()
+                    .set_focused(pane_id);
 
-        window.focus(&handle, cx);
+                let handle = pane.read(cx).focus.clone();
+                window.focus(&handle, cx);
+            }
+            AgentRouteTarget::Agent(pane) => {
+                pane.update(cx, |pane, cx| pane.focus(window, cx));
+            }
+        }
 
         self.acknowledge_notification(route, notification_id, cx);
 
@@ -691,6 +729,15 @@ impl Shell {
         self.workspaces.active_tabs().active().agent().cloned()
     }
 
+    fn active_agent_route(&self, cx: &App) -> Option<AgentRoute> {
+        self.active_agent()
+            .map(|pane| pane.read(cx).agent_route().clone())
+            .or_else(|| {
+                self.try_active_pane()
+                    .map(|pane| pane.read(cx).agent_route().clone())
+            })
+    }
+
     /// Spawn a still-pending (lazily-restored) active tab, then register its
     /// panes' agent routes — the startup registration sweep only saw tabs that
     /// were live at window creation.
@@ -699,14 +746,7 @@ impl Shell {
             return;
         }
 
-        let routes: Vec<AgentRoute> = self
-            .workspaces
-            .active_tabs()
-            .active()
-            .leaves()
-            .into_iter()
-            .map(|(_, pane)| pane.read(cx).agent_route().clone())
-            .collect();
+        let routes = Self::agent_routes_in_surface(self.workspaces.active_tabs().active(), cx);
 
         let now = time::Instant::now();
 
@@ -737,10 +777,11 @@ impl Shell {
             cx.notify();
         }
 
-        // An agent tab focuses its message input; it has no terminal pane or
-        // agent-route notifications to acknowledge.
+        // Agent tabs focus their composer and acknowledge their own monitor
+        // route just like a focused terminal pane.
         if let Some(agent) = self.active_agent() {
             agent.update(cx, |pane, cx| pane.focus(window, cx));
+            self.acknowledge_visible(window, true, cx);
             return;
         }
 
@@ -761,10 +802,9 @@ impl Shell {
             return;
         }
 
-        let Some(pane) = self.try_active_pane() else {
+        let Some(route) = self.active_agent_route(cx) else {
             return;
         };
-        let route = pane.read(cx).agent_route().clone();
 
         let Some(id) = self
             .agent_monitor
@@ -788,8 +828,7 @@ impl Shell {
                 .tabs_of(summary.id)
                 .into_iter()
                 .flat_map(|tabs| tabs.tabs())
-                .flat_map(|tab| tab.surface().leaves())
-                .map(|(_, pane)| pane.read(cx).agent_route().clone())
+                .flat_map(|tab| Self::agent_routes_in_surface(tab.surface(), cx))
                 .collect();
 
             let projection = self.agent_monitor.project(&routes);
@@ -807,12 +846,7 @@ impl Shell {
             .tabs()
             .iter()
             .filter_map(|tab| {
-                let routes: Vec<_> = tab
-                    .surface()
-                    .leaves()
-                    .into_iter()
-                    .map(|(_, pane)| pane.read(cx).agent_route().clone())
-                    .collect();
+                let routes = Self::agent_routes_in_surface(tab.surface(), cx);
 
                 (self.agent_monitor.project(&routes).unread_count > 0).then_some(tab.id())
             })
@@ -837,6 +871,31 @@ impl Shell {
             }
 
             this.reschedule_agent_timer(cx);
+        })
+        .detach();
+    }
+
+    pub(crate) fn watch_agent_tab(pane: &Entity<AgentPane>, cx: &mut Context<Self>) {
+        cx.subscribe(pane, |this, pane, event: &AgentPaneEvent, cx| {
+            let route = pane.read(cx).agent_route().clone();
+            let mutation = match event {
+                AgentPaneEvent::Lifecycle(event) if event.route == route => this
+                    .agent_monitor
+                    .apply(event.clone(), time::Instant::now()),
+                AgentPaneEvent::Lifecycle(_) => return,
+                AgentPaneEvent::Interrupted => {
+                    this.agent_monitor.interrupt(&route, time::Instant::now())
+                }
+            };
+
+            Self::remove_native_notifications(&mutation.removed_notifications);
+
+            if mutation.visible_changed {
+                cx.notify();
+            }
+
+            this.reschedule_agent_timer(cx);
+            this.process_native_notifications(cx);
         })
         .detach();
     }
@@ -1079,6 +1138,9 @@ impl Shell {
         let id = Self::alloc_id(&mut self.next_id);
         let cwd = explicit_cwd(self.workspaces.active_cwd());
         let pane = cx.new(|cx| AgentPane::new(kind, cwd, window, cx));
+
+        Self::watch_agent_tab(&pane, cx);
+        self.register_agent_tab(&pane, cx);
 
         self.workspaces.active_tabs_mut().new_tab(
             TabSurface::Agent(pane),
@@ -1370,7 +1432,7 @@ impl Shell {
         // `close` refuses the last tab and returns the removed pane entity;
         // dropping it drops the pane's surface and PTY.
         if let Some(tree) = self.workspaces.active_tabs_mut().close(id) {
-            for route in Self::agent_routes_in_tree(&tree, cx) {
+            for route in Self::agent_routes_in_surface(&tree, cx) {
                 self.remove_agent_route(&route, cx);
             }
 
@@ -1712,7 +1774,7 @@ impl Shell {
             .map(|tabs| {
                 tabs.tabs()
                     .iter()
-                    .flat_map(|tab| Self::agent_routes_in_tree(tab.surface(), cx))
+                    .flat_map(|tab| Self::agent_routes_in_surface(tab.surface(), cx))
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();

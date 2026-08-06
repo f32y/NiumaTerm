@@ -238,6 +238,8 @@ impl Shell {
             let cwd = explicit_cwd(workspaces.active_cwd());
             let pane = cx.new(|cx| AgentPane::new(kind, cwd, window, cx));
 
+            Self::watch_agent_tab(&pane, cx);
+
             *workspaces.active_tabs_mut().active_mut() = TabSurface::Agent(pane);
 
             return true;
