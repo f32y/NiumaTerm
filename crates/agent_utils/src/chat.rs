@@ -171,6 +171,15 @@ pub enum ReplayItem {
     Tools { count: usize },
 }
 
+/// Latest active context-window usage for one agent thread. Providers expose
+/// richer token accounting, but the composer only needs the live context size
+/// and its model limit to communicate how much working capacity remains.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ContextWindowUsage {
+    pub used_tokens: u64,
+    pub max_tokens: Option<u64>,
+}
+
 /// What a chat UI needs to react to, in transcript order.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
@@ -192,6 +201,8 @@ pub enum Event {
     TurnCompleted {
         error: Option<String>,
     },
+    /// Replacement snapshot of the current thread's active context window.
+    ContextWindowUpdated(ContextWindowUsage),
     ItemStarted(Item),
     ItemCompleted(Item),
     AgentMessageDelta {

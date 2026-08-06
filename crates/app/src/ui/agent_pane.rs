@@ -5,6 +5,7 @@
 //! shared typed events onto the transcript UI.
 
 use std::collections::{HashSet, VecDeque};
+use std::env;
 use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -28,9 +29,10 @@ use gpui_component::{
     v_virtual_list,
 };
 use nmt_agent_utils::chat::{
-    Event as SessionEvent, Item as SessionItem, ModelInfo, ReplayItem, SendOutcome, SessionSummary,
-    SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments, SlashCommandInfo,
-    SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
+    ContextWindowUsage, Event as SessionEvent, Item as SessionItem, ModelInfo, ReplayItem,
+    SendOutcome, SessionSummary, SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments,
+    SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
+    ThreadSettings,
 };
 use nmt_agent_utils::claude_code::{sessions, stream_json};
 use nmt_agent_utils::codex::app_server;
@@ -47,6 +49,7 @@ use crate::ui::agent_commands::{
     next_session_epoch, parse_slash_command, prepare_skill_selection, reconcile_skill_binding,
     reset_command_runtime, resolve_choice, validate_skill_binding,
 };
+use crate::ui::git_status::current_branch;
 
 #[derive(Clone)]
 struct PendingSlashCommand {
@@ -331,6 +334,10 @@ pub(crate) struct AgentPane {
     /// An accepted backend command starts the progress clock only after the
     /// protocol reports a real turn, not when the request is written.
     awaiting_command_turn: bool,
+    git_branch: Option<String>,
+    git_branch_ready: bool,
+    git_branch_refreshing: bool,
+    context_window_usage: Option<ContextWindowUsage>,
 }
 
 impl AgentPane {
@@ -407,9 +414,36 @@ impl AgentPane {
             command_feedback: None,
             command_queue: VecDeque::new(),
             awaiting_command_turn: false,
+            git_branch: None,
+            git_branch_ready: false,
+            git_branch_refreshing: false,
+            context_window_usage: None,
         };
 
         this.start_session(None, cx);
+        this.refresh_git_branch(cx);
+
+        cx.spawn(async move |this, cx| {
+            loop {
+                let Ok(interval) = this.update(cx, |_, cx| {
+                    cx.global::<AppSettings>().git_status_refresh_interval
+                }) else {
+                    break;
+                };
+
+                cx.background_executor()
+                    .timer(Duration::from_secs(interval.max(1)))
+                    .await;
+
+                if this
+                    .update(cx, |this, cx| this.refresh_git_branch(cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
 
         // Claude's history comes from scanning the CLI's transcript
         // directory (Codex delivers its history over the protocol instead,
@@ -467,6 +501,41 @@ impl AgentPane {
 
     pub(crate) fn agent_route(&self) -> &AgentRoute {
         &self.agent_route
+    }
+
+    fn refresh_git_branch(&mut self, cx: &mut Context<Self>) {
+        if self.git_branch_refreshing {
+            return;
+        }
+
+        let Some(cwd) = self.cwd.clone().or_else(|| {
+            env::current_dir()
+                .ok()
+                .map(|path| path.to_string_lossy().to_string())
+        }) else {
+            self.git_branch = None;
+            self.git_branch_ready = true;
+            return;
+        };
+
+        self.git_branch_refreshing = true;
+
+        let fetch = cx
+            .background_executor()
+            .spawn(async move { current_branch(&cwd) });
+
+        cx.spawn(async move |this, cx| {
+            let branch = fetch.await;
+
+            this.update(cx, |this, cx| {
+                this.git_branch = branch;
+                this.git_branch_ready = true;
+                this.git_branch_refreshing = false;
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn emit_lifecycle(
@@ -1547,6 +1616,7 @@ impl AgentPane {
                     .unwrap_or_else(|| format!("{} completed the turn", self.kind.display()));
                 self.awaiting_command_turn = false;
                 self.finish_working(cx);
+                self.refresh_git_branch(cx);
                 if self.status == Status::Running {
                     self.status = Status::Idle;
                 }
@@ -1560,6 +1630,10 @@ impl AgentPane {
                     cx,
                 );
                 self.run_next_queued_command(cx);
+                cx.notify();
+            }
+            SessionEvent::ContextWindowUpdated(usage) => {
+                self.context_window_usage = Some(usage);
                 cx.notify();
             }
             SessionEvent::ItemStarted(item) => self.start_item(item, cx),
@@ -1982,6 +2056,15 @@ fn relative_time(at: SystemTime) -> String {
     }
 }
 
+fn compact_token_count(tokens: u64) -> String {
+    match tokens {
+        0..=999 => tokens.to_string(),
+        1_000..=9_999 => format!("{:.1}k", tokens as f64 / 1_000.0).replace(".0k", "k"),
+        10_000..=999_999 => format!("{}k", tokens / 1_000),
+        _ => format!("{:.1}m", tokens as f64 / 1_000_000.0).replace(".0m", "m"),
+    }
+}
+
 /// Icon mirroring the current permission/approval choice (t3code's runtime
 /// mode iconography): closed lock = prompts on, pen = edits auto-approved,
 /// pencil-ruler = plan mode, open lock = no prompts. Covers both Claude's
@@ -2240,22 +2323,40 @@ impl Render for AgentPane {
                     }),
             )
             .child({
-                let layered = history.is_some();
-
-                // Composer area: the history strip sits OUTSIDE the shell,
-                // on the pane background; the shell (bordered, shadowed
-                // card) then overlaps the strip's lower edge with a negative
-                // margin. Front card over back strip is carried by the
-                // border/shadow/surface contrast, exactly like t3code's
-                // context strip (mirrored to the top edge).
-                div().w_full().px_3().pb_3().pt_1().children(history).child(
+                // Composer area: auxiliary strips sit outside the bordered,
+                // shadowed shell on a deeper surface. History is absolutely
+                // anchored above the shell because it only exists while the
+                // transcript is empty; loading it must never participate in
+                // composer height calculation. Both strips are painted before
+                // the shell, whose edge and shadow keep them visibly tucked
+                // behind the input card.
+                div().w_full().px_3().pb_3().pt_1().child(
                     div()
                         .relative()
+                        .pb(px(30.))
+                        .children(history.map(|history| {
+                            div()
+                                .absolute()
+                                .left_0()
+                                .right_0()
+                                .bottom(relative(1.))
+                                .mb(px(-14.))
+                                .child(history)
+                        }))
+                        .child(
+                            div()
+                                .absolute()
+                                .left_0()
+                                .right_0()
+                                .bottom_0()
+                                .flex()
+                                .justify_center()
+                                .child(self.render_composer_status(cx)),
+                        )
                         .child(
                             v_flex()
                                 .w_full()
-                                .when(layered, |this| this.mt(px(-14.)))
-                                .rounded(px(16.))
+                                .rounded(px(12.))
                                 .overflow_hidden()
                                 .border_1()
                                 .border_color(cx.theme().border)
@@ -2966,11 +3067,17 @@ impl AgentPane {
     /// of persisted sessions cost only the visible ten.
     fn render_history(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let rows = self.history_pending.unwrap_or(self.history.len());
+        let body_height =
+            px((Self::HISTORY_ROW_HEIGHT * rows as f32).min(Self::HISTORY_MAX_HEIGHT));
 
         let body: AnyElement = if self.history_pending.is_some() {
-            // Height reserved from the count; content still loading.
+            // Both loading and loaded bodies use the same explicit viewport
+            // height. The virtual list's inferred first-frame measurement
+            // must not move the composer when it replaces these placeholders.
             v_flex()
                 .w_full()
+                .h(body_height)
+                .flex_none()
                 .px_2()
                 .gap_0()
                 .children((0..rows.min(10)).map(|i| {
@@ -2993,7 +3100,8 @@ impl AgentPane {
             div()
                 .relative()
                 .w_full()
-                .max_h(px(Self::HISTORY_MAX_HEIGHT))
+                .h(body_height)
+                .flex_none()
                 .overflow_hidden()
                 .px_2()
                 .child(
@@ -3114,6 +3222,88 @@ impl AgentPane {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground.opacity(0.55))
                     .child(relative_time(session.last_active)),
+            )
+            .into_any_element()
+    }
+
+    fn render_composer_status(&self, cx: &mut Context<Self>) -> AnyElement {
+        let branch = self.git_branch.clone().unwrap_or_else(|| {
+            if self.git_branch_ready {
+                "No Git branch".to_string()
+            } else {
+                "Detecting branch…".to_string()
+            }
+        });
+        let branch_opacity = if self.git_branch.is_some() {
+            0.72
+        } else {
+            0.48
+        };
+
+        let usage = self.context_window_usage.map(|usage| {
+            let (label, color) = match usage.max_tokens {
+                Some(max_tokens) if max_tokens > 0 => {
+                    let remaining_tokens = max_tokens.saturating_sub(usage.used_tokens);
+                    let remaining_percent =
+                        (remaining_tokens as f64 * 100.0 / max_tokens as f64).round() as u64;
+                    let color = if remaining_percent <= 10 {
+                        cx.theme().danger
+                    } else {
+                        cx.theme().muted_foreground.opacity(0.72)
+                    };
+
+                    (
+                        format!(
+                            "Context {remaining_percent}% left · {}",
+                            compact_token_count(remaining_tokens)
+                        ),
+                        color,
+                    )
+                }
+                _ => (
+                    format!("Context {} used", compact_token_count(usage.used_tokens)),
+                    cx.theme().muted_foreground.opacity(0.72),
+                ),
+            };
+
+            h_flex()
+                .flex_none()
+                .gap_1p5()
+                .items_center()
+                .text_color(color)
+                .child(Icon::new(IconName::Gauge).size_3())
+                .child(div().child(label))
+        });
+
+        v_flex()
+            .w(relative(0.95))
+            .rounded_b(px(12.))
+            .border_1()
+            .border_t_0()
+            .border_color(cx.theme().border.opacity(0.6))
+            .bg(cx.theme().popover)
+            .pt(px(18.))
+            .child(
+                h_flex()
+                    .w_full()
+                    .min_h(px(26.))
+                    .px_4()
+                    .pt_1()
+                    .pb_2()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .text_xs()
+                    .child(
+                        h_flex()
+                            .min_w_0()
+                            .gap_1p5()
+                            .items_center()
+                            .text_color(cx.theme().muted_foreground.opacity(branch_opacity))
+                            .child(Icon::new(IconName::GitBranch).size_3())
+                            .child(div().min_w_0().truncate().child(branch)),
+                    )
+                    .children(usage),
             )
             .into_any_element()
     }
