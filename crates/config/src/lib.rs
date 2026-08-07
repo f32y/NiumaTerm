@@ -160,6 +160,9 @@ pub struct Config {
     /// The `[profiles]` section: default-profile name + profile entries.
     #[serde(default)]
     pub profiles: profile::ProfilesConfig,
+    /// The `[agent-profiles]` section: default agent-profile name + entries.
+    #[serde(default, rename = "agent-profiles")]
+    pub agent_profiles: profile::AgentProfilesConfig,
     /// Agent integration settings (settings dialog, Agent page).
     #[serde(default = "agent::AgentConfig::default")]
     pub agent: agent::AgentConfig,
@@ -451,6 +454,7 @@ impl Default for Config {
             effects: effects::Effects::default(),
             appearance: appearance::AppearanceConfig::default(),
             profiles: profile::ProfilesConfig::default(),
+            agent_profiles: profile::AgentProfilesConfig::default(),
             agent: agent::AgentConfig::default(),
             system: system::SystemConfig::default(),
             remote_session: remote_session::RemoteSessionConfig::default(),
@@ -554,6 +558,8 @@ pub struct SettingsPatch<'a> {
     pub remote_session: &'a remote_session::RemoteSessionConfig,
     pub profiles: &'a [Profile],
     pub default_profile: &'a str,
+    pub agent_profiles: &'a [profile::AgentProfile],
+    pub default_agent_profile: &'a str,
 }
 
 pub fn save_settings(patch: &SettingsPatch<'_>) -> io::Result<()> {
@@ -593,6 +599,8 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) {
         profiles,
         remote_session,
         default_profile,
+        agent_profiles,
+        default_agent_profile,
     } = patch;
 
     doc["theme"] = value(theme);
@@ -637,6 +645,7 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) {
     remote_session::patch_document(doc, remote_session);
 
     profile::patch_document(doc, profiles, default_profile);
+    profile::patch_agent_document(doc, agent_profiles, default_agent_profile);
 }
 
 /// Make `doc[key]` an explicit table so nested managed keys never turn into an
@@ -705,6 +714,22 @@ mod tests {
         }]
     }
 
+    fn sample_agent_profiles() -> Vec<profile::AgentProfile> {
+        vec![profile::AgentProfile {
+            name: "Claude Code".to_string(),
+            kind: profile::AgentProfileKind::ClaudeCode,
+            executable: "claude".to_string(),
+            model: "claude-opus-4-8".to_string(),
+            use_custom_endpoint: true,
+            api_base_url: "https://proxy.example.com".to_string(),
+            api_key: "sk-test".to_string(),
+            env: vec![profile::EnvVar {
+                name: "FOO".to_string(),
+                value: "bar".to_string(),
+            }],
+        }]
+    }
+
     fn patch_settings(doc: &mut DocumentMut) {
         patch_settings_document(
             doc,
@@ -717,6 +742,8 @@ mod tests {
                 remote_session: &remote_session::RemoteSessionConfig::default(),
                 profiles: &sample_profiles(),
                 default_profile: "PowerShell",
+                agent_profiles: &sample_agent_profiles(),
+                default_agent_profile: "Claude Code",
             },
         );
     }
@@ -738,6 +765,9 @@ mod tests {
         assert_eq!(config.system, sample_system());
         assert_eq!(config.profiles.list, sample_profiles());
         assert_eq!(config.profiles.default, "PowerShell");
+        assert_eq!(config.agent_profiles.list, sample_agent_profiles());
+        assert_eq!(config.agent_profiles.default, "Claude Code");
+        assert!(config.agent_profiles.initialized);
         assert_eq!(config.cursor.shape, CursorShape::Beam);
     }
 
@@ -773,6 +803,8 @@ mod tests {
                     remote_session: &remote_session::RemoteSessionConfig::default(),
                     profiles: &sample_profiles(),
                     default_profile: "PowerShell",
+                    agent_profiles: &sample_agent_profiles(),
+                    default_agent_profile: "Claude Code",
                 },
             )
         };

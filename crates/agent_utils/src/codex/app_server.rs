@@ -21,6 +21,7 @@ pub use crate::chat::{
     SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments, SlashCommandInfo,
     SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
 };
+use crate::{AgentLaunch, CodexProviderConfig};
 
 /// JSON-RPC ids for the fixed handshake requests; turn requests count up from
 /// `FIRST_TURN_RPC_ID` so response routing can tell the phases apart.
@@ -70,6 +71,21 @@ impl SkillRefreshState {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+struct ThreadProfile {
+    model: Option<String>,
+    provider: Option<CodexProviderConfig>,
+}
+
+impl From<&AgentLaunch> for ThreadProfile {
+    fn from(launch: &AgentLaunch) -> Self {
+        Self {
+            model: launch.model.clone(),
+            provider: launch.codex_provider.clone(),
+        }
+    }
+}
+
 /// Wire values for approval-policy selection (`AskForApproval` serializes
 /// kebab-case).
 pub const APPROVAL_OPTIONS: [&str; 3] = ["untrusted", "on-request", "never"];
@@ -99,6 +115,9 @@ pub struct Session {
     /// request ids keeps command failures non-fatal to the live thread.
     pending_commands: HashMap<u64, String>,
     skill_refresh: SkillRefreshState,
+    /// Profile-level model/provider overrides reused for thread start, history
+    /// filtering, and resume. Provider credentials remain only in process env.
+    thread_profile: ThreadProfile,
 }
 
 impl Drop for Session {
@@ -148,14 +167,26 @@ impl Session {
     /// stderr lines go to `on_stderr`. Dropping `deliver` signals EOF: the
     /// closure is owned by the reader thread and dropped when the pipe closes.
     pub fn spawn(
+        launch: &AgentLaunch,
         cwd: Option<String>,
         deliver: impl Fn(Value) + Send + 'static,
         on_stderr: impl Fn(String) + Send + 'static,
     ) -> Result<Self, String> {
+        let thread_profile = ThreadProfile::from(launch);
+        // Launching through cmd.exe keeps PATHEXT resolution, so a bare
+        // executable name finds `codex.exe` as well as the npm `codex.cmd`
+        // shim.
+        let executable = if launch.executable.trim().is_empty() {
+            "codex"
+        } else {
+            launch.executable.trim()
+        };
+
         let mut command = Command::new("cmd.exe");
 
         command
-            .args(["/D", "/C", "codex", "app-server"])
+            .args(["/D", "/C", executable, "app-server"])
+            .envs(launch.env.iter().map(|(name, value)| (name, value)))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -167,7 +198,7 @@ impl Session {
 
         let mut child = command
             .spawn()
-            .map_err(|err| format!("could not run `codex app-server`: {err}"))?;
+            .map_err(|err| format!("could not run `{executable} app-server`: {err}"))?;
 
         let stdin = child.stdin.take().ok_or("Codex stdin unavailable")?;
         let stdout = child.stdout.take().ok_or("Codex stdout unavailable")?;
@@ -197,6 +228,7 @@ impl Session {
             history_cursor: None,
             pending_commands: HashMap::new(),
             skill_refresh: SkillRefreshState::default(),
+            thread_profile,
         };
 
         session.send(json!({
@@ -344,11 +376,12 @@ impl Session {
     /// `turn/start` calls append to the resumed thread. On failure the
     /// session keeps the thread it started with, so the tab stays usable.
     pub fn resume_thread(&mut self, thread_id: &str) {
+        let params = thread_resume_params(thread_id, &self.thread_profile);
         self.send(json!({
             "jsonrpc": "2.0",
             "id": THREAD_RESUME_RPC_ID,
             "method": "thread/resume",
-            "params": {"threadId": thread_id},
+            "params": params,
         }));
     }
 
@@ -358,16 +391,12 @@ impl Session {
             return;
         };
 
+        let params = thread_list_params(&self.thread_profile, Some(&cursor));
         self.send(json!({
             "jsonrpc": "2.0",
             "id": THREAD_LIST_RPC_ID,
             "method": "thread/list",
-            "params": {
-                "cwd": ".",
-                "sortKey": "recency_at",
-                "limit": THREAD_LIST_LIMIT,
-                "cursor": cursor,
-            },
+            "params": params,
         }));
     }
 
@@ -493,11 +522,12 @@ impl Session {
             INIT_RPC_ID => {
                 self.send(json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}));
                 self.request_skills(false);
+                let params = thread_start_params(&self.thread_profile);
                 self.send(json!({
                     "jsonrpc": "2.0",
                     "id": THREAD_START_RPC_ID,
                     "method": "thread/start",
-                    "params": {},
+                    "params": params,
                 }));
 
                 Vec::new()
@@ -517,20 +547,20 @@ impl Session {
                 // against the app-server process cwd — the same directory
                 // the started thread runs in — and the exact-match filter
                 // keeps other projects' threads out.
+                let history_params = thread_list_params(&self.thread_profile, None);
                 self.send(json!({
                     "jsonrpc": "2.0",
                     "id": THREAD_LIST_RPC_ID,
                     "method": "thread/list",
-                    "params": {
-                        "cwd": ".",
-                        "sortKey": "recency_at",
-                        "limit": THREAD_LIST_LIMIT,
-                    },
+                    "params": history_params,
                 }));
 
                 vec![Event::Ready(parse_thread_settings(result))]
             }
-            MODEL_LIST_RPC_ID => vec![Event::Models(parse_models(&message["result"]))],
+            MODEL_LIST_RPC_ID => vec![Event::Models(parse_models(
+                &message["result"],
+                self.thread_profile.model.as_deref(),
+            ))],
             THREAD_LIST_RPC_ID => {
                 let result = &message["result"];
 
@@ -786,6 +816,65 @@ fn delta_event(params: &Value, make: fn(String, String) -> Event) -> Vec<Event> 
     }
 }
 
+fn add_provider_config(params: &mut Value, provider: &CodexProviderConfig) {
+    let mut provider_value = json!({
+        "name": provider.name.as_str(),
+        "base_url": provider.base_url.as_str(),
+        "wire_api": "responses",
+    });
+    if let Some(env_key) = provider.api_key_env.as_deref() {
+        provider_value["env_key"] = json!(env_key);
+    }
+
+    let mut config = serde_json::Map::new();
+    config.insert(format!("model_providers.{}", provider.id), provider_value);
+    params["config"] = Value::Object(config);
+}
+
+fn thread_start_params(profile: &ThreadProfile) -> Value {
+    let mut params = json!({});
+    if let Some(model) = profile.model.as_deref() {
+        params["model"] = json!(model);
+    }
+    if let Some(provider) = profile.provider.as_ref() {
+        params["modelProvider"] = json!(provider.id.as_str());
+        add_provider_config(&mut params, provider);
+    }
+    params
+}
+
+fn thread_resume_params(thread_id: &str, profile: &ThreadProfile) -> Value {
+    let mut params = json!({"threadId": thread_id});
+    if let Some(model) = profile.model.as_deref() {
+        params["model"] = json!(model);
+    }
+    if let Some(provider) = profile.provider.as_ref() {
+        // With no explicit model, omitting modelProvider lets Codex restore
+        // both the persisted model and provider id while this config entry
+        // makes that provider resolvable in the new app-server process.
+        if profile.model.is_some() {
+            params["modelProvider"] = json!(provider.id.as_str());
+        }
+        add_provider_config(&mut params, provider);
+    }
+    params
+}
+
+fn thread_list_params(profile: &ThreadProfile, cursor: Option<&str>) -> Value {
+    let mut params = json!({
+        "cwd": ".",
+        "sortKey": "recency_at",
+        "limit": THREAD_LIST_LIMIT,
+    });
+    if let Some(provider) = profile.provider.as_ref() {
+        params["modelProviders"] = json!([provider.id.as_str()]);
+    }
+    if let Some(cursor) = cursor {
+        params["cursor"] = json!(cursor);
+    }
+    params
+}
+
 fn parse_thread_settings(result: &Value) -> ThreadSettings {
     ThreadSettings {
         model: result["model"].as_str().map(str::to_owned),
@@ -796,8 +885,8 @@ fn parse_thread_settings(result: &Value) -> ThreadSettings {
     }
 }
 
-fn parse_models(result: &Value) -> Vec<ModelInfo> {
-    result["data"]
+fn parse_models(result: &Value, selected_model: Option<&str>) -> Vec<ModelInfo> {
+    let mut models: Vec<ModelInfo> = result["data"]
         .as_array()
         .map(|data| {
             data.iter()
@@ -838,7 +927,26 @@ fn parse_models(result: &Value) -> Vec<ModelInfo> {
                 })
                 .collect()
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
+
+    if let Some(model) = selected_model
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+        && !models.iter().any(|entry| entry.model == model)
+    {
+        models.insert(
+            0,
+            ModelInfo {
+                model: model.to_string(),
+                display: model.to_string(),
+                tiers: Vec::new(),
+                default_tier: None,
+                efforts: Vec::new(),
+            },
+        );
+    }
+
+    models
 }
 
 /// One `thread/list` page as backend-neutral summaries, skipping
@@ -1222,11 +1330,92 @@ mod tests {
             ]
         });
 
-        let models = parse_models(&result);
+        let models = parse_models(&result, None);
 
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].model, "gpt-a");
         assert_eq!(models[0].tiers, vec![("priority".into(), "Fast".into())]);
+    }
+
+    #[test]
+    fn thread_start_injects_profile_model_and_provider_without_a_secret() {
+        let profile = ThreadProfile {
+            model: Some("vendor/custom-model".into()),
+            provider: Some(CodexProviderConfig {
+                id: "niumaterm-a1".into(),
+                name: "Proxy".into(),
+                base_url: "https://proxy.example.com/v1".into(),
+                api_key_env: Some("OPENAI_API_KEY".into()),
+            }),
+        };
+
+        assert_eq!(
+            thread_start_params(&profile),
+            json!({
+                "model": "vendor/custom-model",
+                "modelProvider": "niumaterm-a1",
+                "config": {
+                    "model_providers.niumaterm-a1": {
+                        "name": "Proxy",
+                        "base_url": "https://proxy.example.com/v1",
+                        "env_key": "OPENAI_API_KEY",
+                        "wire_api": "responses"
+                    }
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn resume_without_profile_model_restores_the_persisted_model_and_provider() {
+        let profile = ThreadProfile {
+            model: None,
+            provider: Some(CodexProviderConfig {
+                id: "niumaterm-a1".into(),
+                name: "Proxy".into(),
+                base_url: "https://proxy.example.com/v1".into(),
+                api_key_env: None,
+            }),
+        };
+
+        let params = thread_resume_params("thr_123", &profile);
+
+        assert_eq!(params["threadId"], "thr_123");
+        assert!(params.get("model").is_none());
+        assert!(params.get("modelProvider").is_none());
+        assert_eq!(
+            params["config"]["model_providers.niumaterm-a1"]["base_url"],
+            "https://proxy.example.com/v1"
+        );
+    }
+
+    #[test]
+    fn custom_profile_filters_history_and_adds_an_unknown_selected_model() {
+        let profile = ThreadProfile {
+            model: Some("vendor/custom-model".into()),
+            provider: Some(CodexProviderConfig {
+                id: "niumaterm-a1".into(),
+                ..CodexProviderConfig::default()
+            }),
+        };
+        assert_eq!(
+            thread_list_params(&profile, Some("next"))["modelProviders"],
+            json!(["niumaterm-a1"])
+        );
+
+        let models = parse_models(
+            &json!({
+                "data": [{
+                    "model": "gpt-default",
+                    "displayName": "GPT Default",
+                    "hidden": false
+                }]
+            }),
+            profile.model.as_deref(),
+        );
+
+        assert_eq!(models[0].model, "vendor/custom-model");
+        assert_eq!(models[1].model, "gpt-default");
     }
 
     #[test]

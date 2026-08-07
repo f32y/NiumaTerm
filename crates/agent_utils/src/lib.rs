@@ -50,6 +50,26 @@ pub const AGENT_HOOK_VERSION_ENV: &str = "NMT_AGENT_HOOK_VERSION";
 pub const AGENT_HOOK_EXE_ENV: &str = "NMT_AGENT_HOOK_EXE";
 pub const AGENT_TESTING_ENV: &str = "NMT_TESTING";
 
+/// A profile-scoped Codex provider injected through app-server thread config.
+/// The credential stays in the process environment named by `api_key_env`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CodexProviderConfig {
+    pub id: String,
+    pub name: String,
+    pub base_url: String,
+    pub api_key_env: Option<String>,
+}
+
+/// How to launch an agent CLI. Protocol-specific settings are carried here so
+/// adapters can map them onto their native environment or RPC surfaces.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentLaunch {
+    pub executable: String,
+    pub env: Vec<(String, String)>,
+    pub model: Option<String>,
+    pub codex_provider: Option<CodexProviderConfig>,
+}
+
 pub struct AgentProcess {
     nonce: String,
     hook_token: String,

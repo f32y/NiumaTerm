@@ -10,7 +10,7 @@ use tracing::warn;
 
 use super::Shell;
 use super::agent_pane::{AgentKind, AgentPane};
-use super::settings::AppSettings;
+use super::settings::{AgentProfile, AppSettings, builtin_agent_profile};
 use super::shell::{TabSurface, explicit_cwd};
 use crate::pane_tree::{PaneId, PaneNode, PaneTree};
 use crate::tabs::{TabId, TabManager};
@@ -54,6 +54,29 @@ fn resolve_restored_launch(state: &mut TabState, settings: &AppSettings) {
         state.shell = shell;
         state.args = args;
     }
+}
+
+/// Resolve a restored agent tab's launch profile: the saved name when it
+/// still exists, then the first configured profile of the same kind, then
+/// the built-in profile — so the tab always reopens even after the profile
+/// it was created from was renamed or deleted.
+fn restored_agent_profile(
+    name: Option<&str>,
+    kind: AgentKind,
+    settings: &AppSettings,
+) -> AgentProfile {
+    settings
+        .agent_profiles
+        .iter()
+        .find(|p| name.is_some_and(|name| p.name == name))
+        .or_else(|| {
+            settings
+                .agent_profiles
+                .iter()
+                .find(|p| p.kind == kind.profile_kind())
+        })
+        .cloned()
+        .unwrap_or_else(|| builtin_agent_profile(kind.profile_kind()))
 }
 
 fn axis_to_state(axis: Axis) -> PaneSplitAxis {
@@ -236,7 +259,12 @@ impl Shell {
         // path below rather than losing the tab.
         if let Some(kind) = state.agent.as_deref().and_then(AgentKind::from_wire) {
             let cwd = explicit_cwd(workspaces.active_cwd());
-            let pane = cx.new(|cx| AgentPane::new(kind, cwd, window, cx));
+            let profile = restored_agent_profile(
+                state.agent_profile.as_deref(),
+                kind,
+                cx.global::<AppSettings>(),
+            );
+            let pane = cx.new(|cx| AgentPane::new(profile, cwd, window, cx));
 
             Self::watch_agent_tab(&pane, cx);
 
@@ -303,7 +331,20 @@ impl Shell {
             // tabs label identically to spawned ones. Unknown agent kinds
             // materialize as terminals, so they take the profile title too.
             let default_title = match tab_state.agent.as_deref().and_then(AgentKind::from_wire) {
-                Some(kind) => kind.display().to_string(),
+                Some(kind) => {
+                    let name = restored_agent_profile(
+                        tab_state.agent_profile.as_deref(),
+                        kind,
+                        cx.global::<AppSettings>(),
+                    )
+                    .name;
+
+                    if name.trim().is_empty() {
+                        kind.display().to_string()
+                    } else {
+                        name
+                    }
+                }
                 None => cx
                     .global::<AppSettings>()
                     .profile_name_for_command(tab_state.shell.as_deref(), &tab_state.args),
@@ -359,6 +400,7 @@ impl Shell {
                     args: args.clone(),
                     cwd: cwd.clone(),
                     agent: None,
+                    agent_profile: None,
                     panes: None,
                 };
 
@@ -504,6 +546,7 @@ impl Shell {
                             // the saved kind reopens a fresh agent tab.
                             TabSurface::Agent(pane) => TabState {
                                 agent: Some(pane.read(cx).kind().wire().to_string()),
+                                agent_profile: Some(pane.read(cx).profile_name().to_string()),
                                 ..TabState::default()
                             },
                         };
@@ -563,6 +606,7 @@ mod launch_resolution_tests {
             args: args.iter().map(|a| a.to_string()).collect(),
             cwd: None,
             agent: None,
+            agent_profile: None,
             panes: None,
         }
     }

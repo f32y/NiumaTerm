@@ -1233,6 +1233,7 @@ mod tests {
             args: vec!["-NoLogo".into()],
             cwd: Some("C:/old".into()),
             agent: None,
+            agent_profile: None,
             panes: None,
         };
 
