@@ -65,10 +65,21 @@ signal, for example `chore: apply cargo fmt`.
 The pre-push hook rejects pushing the local `dev` branch to `origin`; push that
 branch to the `private` remote instead.
 
-For non-trivial commits, include a body that explains the reason for the change,
-the important implementation details, and the verification that was run. Bullet
-lists are common. Keep the subject focused on the user-visible or architectural
-effect, not just the files touched.
+For non-trivial commits, include a body that explains the reason for the change
+and the important implementation details. Bullet lists are common. Keep the
+subject focused on the user-visible or architectural effect, not just the files
+touched.
+
+Do not add a `Verification` section merely to list routine development checks
+such as `cargo check`, `cargo fmt`, `cargo clippy`, compilation, or analogous
+formatting and lint commands. These checks are mandatory parts of modifying the
+codebase; by themselves they do not verify that the changed behavior works.
+
+Include a `Verification` section only when the change itself was meaningfully
+validated, such as by manually exercising the affected behavior, running an
+automated functional or regression test that directly covers it, or collecting
+concrete before-and-after performance data. If no such validation was performed,
+omit the section instead of substituting routine tool output as boilerplate.
 
 When an AI coding agent materially contributes to the change, include an
 appropriate `Co-Authored-By` trailer at the end of the commit message. For Codex
