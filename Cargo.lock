@@ -4175,10 +4175,13 @@ name = "nmt_agent_utils"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "chrono",
  "getrandom 0.4.3",
  "reqwest",
  "serde",
  "serde_json",
+ "tracing",
+ "uuid",
  "windows-sys 0.61.2",
 ]
 

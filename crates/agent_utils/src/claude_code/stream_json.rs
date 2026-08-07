@@ -14,6 +14,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{BufRead as _, BufReader, Write as _};
 use std::iter::once;
+use std::mem::take;
 use std::os::windows::process::CommandExt as _;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::{fs, thread};
@@ -46,6 +47,12 @@ pub const PERMISSION_OPTIONS: [&str; 5] = [
 
 const INIT_REQUEST_ID: &str = "nmt-init";
 const ANTHROPIC_MODEL_ENV: &str = "ANTHROPIC_MODEL";
+const FILE_CHECKPOINTING_ENV: &str = "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PendingControlOperation {
+    FileRewind,
+}
 
 fn launch_model(launch: &AgentLaunch) -> Option<String> {
     // Command environment overrides are last-value-wins, so the adapter must
@@ -61,6 +68,17 @@ fn launch_model(launch: &AgentLaunch) -> Option<String> {
 
 fn initial_ready_model(model: Option<&str>) -> String {
     model.unwrap_or("default").to_string()
+}
+
+fn enable_file_checkpointing(command: &mut Command) {
+    command.env(FILE_CHECKPOINTING_ENV, "true");
+}
+
+fn file_rewind_request(user_message_id: &str) -> Value {
+    json!({
+        "subtype": "rewind_files",
+        "user_message_id": user_message_id,
+    })
 }
 
 /// A `can_use_tool` control request awaiting the user's decision. The original
@@ -104,6 +122,10 @@ pub struct Session {
     pending_tools: HashMap<String, Item>,
     item_seq: u64,
     active_slash_command: Option<String>,
+    /// Control requests with user-visible completion semantics. Fire-and-forget
+    /// settings requests are deliberately absent; only operations that the UI
+    /// must await are correlated here.
+    pending_control_operations: HashMap<String, PendingControlOperation>,
     /// A structured initialize catalog carries richer metadata than the
     /// string-only first-turn fallback and must remain authoritative.
     structured_commands_published: bool,
@@ -134,14 +156,24 @@ impl Session {
     /// Commands implemented by the Claude CLI but not necessarily included
     /// in every version's dynamic discovery payload.
     pub fn adapter_commands() -> Vec<SlashCommandInfo> {
-        vec![SlashCommandInfo {
-            name: "compact".to_string(),
-            description: "Compact the current conversation context".to_string(),
-            argument_hint: None,
-            source: SlashCommandSource::Adapter,
-            arguments: SlashCommandArguments::None,
-            run_policy: SlashCommandRunPolicy::QueueUntilIdle,
-        }]
+        vec![
+            SlashCommandInfo {
+                name: "compact".to_string(),
+                description: "Compact the current conversation context".to_string(),
+                argument_hint: None,
+                source: SlashCommandSource::Adapter,
+                arguments: SlashCommandArguments::None,
+                run_policy: SlashCommandRunPolicy::QueueUntilIdle,
+            },
+            SlashCommandInfo {
+                name: "rewind".to_string(),
+                description: "Restore files or conversation to an earlier prompt".to_string(),
+                argument_hint: None,
+                source: SlashCommandSource::Adapter,
+                arguments: SlashCommandArguments::None,
+                run_policy: SlashCommandRunPolicy::IdleOnly,
+            },
+        ]
     }
 
     /// Spawn `claude` in bidirectional stream-json mode and send the SDK-style
@@ -189,7 +221,12 @@ impl Session {
                 "stdio",
                 "--allow-dangerously-skip-permissions",
             ])
-            .envs(launch.env.iter().map(|(name, value)| (name, value)))
+            .envs(launch.env.iter().map(|(name, value)| (name, value)));
+        // File snapshots are opt-in for stream-json SDK clients. This is
+        // applied after profile overrides so every NiumaTerm Claude session
+        // can create checkpoints for subsequent `/rewind` operations.
+        enable_file_checkpointing(&mut command);
+        command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -230,7 +267,11 @@ impl Session {
             stdin: Some(stdin),
             next_request_id: 1,
             ready: false,
-            session_id: None,
+            // A resumed process may not emit `system/init` until its next
+            // model turn. The caller already obtained this identity from the
+            // same cwd's history, so it is immediately valid for local
+            // checkpoint lookup; a later init can still confirm or replace it.
+            session_id: resume,
             turn_active: false,
             turn_reported: false,
             pending_approval: None,
@@ -242,6 +283,7 @@ impl Session {
             pending_tools: HashMap::new(),
             item_seq: 0,
             active_slash_command: None,
+            pending_control_operations: HashMap::new(),
             structured_commands_published: false,
             context_input_tokens: 0,
             context_output_tokens: 0,
@@ -333,6 +375,11 @@ impl Session {
     /// This intentionally bypasses `send_user_message`: the UI must not add
     /// a user bubble or steer a running model turn for slash commands.
     pub fn execute_slash_command(&mut self, name: &str, arguments: &str) -> SlashCommandOutcome {
+        if ui_owns_slash_command(name) {
+            return SlashCommandOutcome::Rejected {
+                message: "/rewind is handled by NiumaTerm's checkpoint picker.".to_string(),
+            };
+        }
         if !self.ready || self.stdin.is_none() {
             return SlashCommandOutcome::NotReady;
         }
@@ -355,13 +402,51 @@ impl Session {
         SlashCommandOutcome::Accepted
     }
 
+    /// Restore files tracked by Claude to the state captured before the user
+    /// message. Completion arrives asynchronously as `FileRewindCompleted`.
+    pub fn rewind_files(&mut self, user_message_id: &str) -> SlashCommandOutcome {
+        if !self.ready || self.stdin.is_none() {
+            return SlashCommandOutcome::NotReady;
+        }
+        if self.turn_active || self.pending_approval.is_some() {
+            return SlashCommandOutcome::Rejected {
+                message: "Claude must be idle before restoring files.".to_string(),
+            };
+        }
+        if self
+            .pending_control_operations
+            .values()
+            .any(|operation| *operation == PendingControlOperation::FileRewind)
+        {
+            return SlashCommandOutcome::Rejected {
+                message: "A Claude file restore is already running.".to_string(),
+            };
+        }
+
+        let request_id = self.send_control(file_rewind_request(user_message_id));
+        self.pending_control_operations
+            .insert(request_id, PendingControlOperation::FileRewind);
+
+        SlashCommandOutcome::Accepted
+    }
+
+    /// Resolve operations that can no longer receive a control response after
+    /// stdout closes. The pane calls this before reporting the process exit.
+    pub fn process_exit(&mut self) -> Vec<Event> {
+        fail_pending_control_operations(
+            &mut self.pending_control_operations,
+            "Claude exited before file restore completed.",
+        )
+    }
+
     /// Interrupt the running turn (the Esc/Ctrl-C equivalent).
     pub fn interrupt(&mut self) {
         self.send_control(json!({"subtype": "interrupt"}));
     }
 
-    /// The CLI's session id, once the `init` message delivered it. This is
-    /// what `spawn`'s `resume` takes to reopen the conversation later.
+    /// The CLI's session id, known immediately for a resumed process and
+    /// otherwise populated by its `init` message. This is what `spawn`'s
+    /// `resume` takes to reopen the conversation later.
     pub fn session_id(&self) -> Option<&str> {
         self.session_id.as_deref()
     }
@@ -411,7 +496,7 @@ impl Session {
         format!("{prefix}-{}", self.item_seq)
     }
 
-    fn send_control(&mut self, request: Value) {
+    fn send_control(&mut self, request: Value) -> String {
         let request_id = format!("nmt-{}", self.next_request_id);
 
         self.next_request_id += 1;
@@ -420,6 +505,8 @@ impl Session {
             "request_id": request_id,
             "request": request,
         }));
+
+        request_id
     }
 
     /// Write one line. Failures are not surfaced here: a dead process also
@@ -807,6 +894,12 @@ impl Session {
     fn process_control_response(&mut self, message: &Value) -> Vec<Event> {
         let response = &message["response"];
 
+        if let Some(event) =
+            resolve_pending_control_operation(&mut self.pending_control_operations, response)
+        {
+            return vec![event];
+        }
+
         if response["subtype"].as_str() == Some("error") {
             let error = response["error"]
                 .as_str()
@@ -869,6 +962,44 @@ impl Session {
             max_tokens: self.context_window,
         })
     }
+}
+
+fn resolve_pending_control_operation(
+    pending: &mut HashMap<String, PendingControlOperation>,
+    response: &Value,
+) -> Option<Event> {
+    let request_id = response["request_id"].as_str()?;
+    let operation = pending.remove(request_id)?;
+    let error = match response["subtype"].as_str() {
+        Some("success") => None,
+        Some("error") => Some(
+            response["error"]
+                .as_str()
+                .unwrap_or("unknown Claude control error")
+                .to_string(),
+        ),
+        _ => Some("Claude returned a malformed file restore response.".to_string()),
+    };
+
+    match operation {
+        PendingControlOperation::FileRewind => Some(Event::FileRewindCompleted { error }),
+    }
+}
+
+fn fail_pending_control_operations(
+    pending: &mut HashMap<String, PendingControlOperation>,
+    message: &str,
+) -> Vec<Event> {
+    let operations = take(pending);
+
+    operations
+        .into_values()
+        .map(|operation| match operation {
+            PendingControlOperation::FileRewind => Event::FileRewindCompleted {
+                error: Some(message.to_string()),
+            },
+        })
+        .collect()
 }
 
 fn claude_input_tokens(usage: &Value) -> u64 {
@@ -936,6 +1067,12 @@ fn slash_command_text(name: &str, arguments: &str) -> String {
     } else {
         format!("/{name} {arguments}")
     }
+}
+
+fn ui_owns_slash_command(name: &str) -> bool {
+    name.trim()
+        .trim_start_matches('/')
+        .eq_ignore_ascii_case("rewind")
 }
 
 fn claude_result_error(message: &Value) -> Option<String> {
@@ -1140,6 +1277,216 @@ fn parse_models(models: &Value, selected_model: Option<&str>) -> Vec<ModelInfo> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_claude_process_enables_sdk_file_checkpointing() {
+        let mut command = Command::new("claude");
+        command.env(FILE_CHECKPOINTING_ENV, "false");
+
+        enable_file_checkpointing(&mut command);
+
+        let value = command
+            .get_envs()
+            .find(|(name, _)| *name == FILE_CHECKPOINTING_ENV)
+            .and_then(|(_, value)| value)
+            .and_then(|value| value.to_str());
+        assert_eq!(value, Some("true"));
+    }
+
+    #[test]
+    fn rewind_is_an_idle_ui_command_not_a_provider_slash_turn() {
+        let commands = Session::adapter_commands();
+        let rewind = commands
+            .iter()
+            .find(|command| command.name == "rewind")
+            .expect("Claude rewind metadata");
+
+        assert_eq!(rewind.source, SlashCommandSource::Adapter);
+        assert_eq!(rewind.arguments, SlashCommandArguments::None);
+        assert_eq!(rewind.run_policy, SlashCommandRunPolicy::IdleOnly);
+        assert!(ui_owns_slash_command("rewind"));
+        assert!(ui_owns_slash_command("/ReWiNd"));
+        assert!(!ui_owns_slash_command("compact"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn fake_stream_json_process_never_receives_rewind_as_a_user_turn() {
+        use std::env;
+        use std::path::Path;
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        use uuid::Uuid;
+
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/claude/fake-stream-json.cmd");
+        let log = env::temp_dir().join(format!("niumaterm-fake-claude-{}.jsonl", Uuid::new_v4()));
+        let launch = AgentLaunch {
+            executable: fixture.to_string_lossy().into_owned(),
+            env: vec![(
+                "NMT_FAKE_STREAM_LOG".to_string(),
+                log.to_string_lossy().into_owned(),
+            )],
+            ..AgentLaunch::default()
+        };
+        let (messages_tx, messages_rx) = mpsc::channel();
+        let mut session = Session::spawn(
+            &launch,
+            None,
+            None,
+            move |message| {
+                let _ = messages_tx.send(message);
+            },
+            |_| {},
+        )
+        .expect("fake Claude process starts");
+        let init = messages_rx
+            .recv_timeout(Duration::from_secs(3))
+            .expect("fake Claude init");
+        assert!(
+            session
+                .process(init)
+                .iter()
+                .any(|event| matches!(event, Event::Ready(_)))
+        );
+
+        assert!(matches!(
+            session.execute_slash_command("rewind", ""),
+            SlashCommandOutcome::Rejected { .. }
+        ));
+
+        for _ in 0..50 {
+            if log.exists() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        drop(session);
+        let input = fs::read_to_string(&log).expect("fake process captured stdin");
+        assert!(input.contains("initialize"));
+        assert!(!input.contains("/rewind"));
+        assert!(!input.contains("\"type\":\"user\""));
+        fs::remove_file(log).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn resumed_session_id_is_available_before_the_first_init_event() {
+        use std::env;
+        use std::path::Path;
+        use std::time::Duration;
+
+        use uuid::Uuid;
+
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/claude/fake-stream-json.cmd");
+        let log = env::temp_dir().join(format!("niumaterm-resume-{}.jsonl", Uuid::new_v4()));
+        let launch = AgentLaunch {
+            executable: fixture.to_string_lossy().into_owned(),
+            env: vec![(
+                "NMT_FAKE_STREAM_LOG".to_string(),
+                log.to_string_lossy().into_owned(),
+            )],
+            ..AgentLaunch::default()
+        };
+        let resume_id = "70000000-0000-4000-8000-000000000000".to_string();
+        let session = Session::spawn(&launch, None, Some(resume_id.clone()), |_| {}, |_| {})
+            .expect("fake resumed Claude process starts");
+
+        let published_id = session.session_id().map(str::to_owned);
+        drop(session);
+        for _ in 0..50 {
+            if log.exists() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        if log.exists() {
+            fs::remove_file(log).unwrap();
+        }
+
+        assert_eq!(published_id, Some(resume_id));
+    }
+
+    #[test]
+    fn file_rewind_request_matches_the_sdk_control_shape() {
+        assert_eq!(
+            file_rewind_request("user-message-1"),
+            json!({
+                "subtype": "rewind_files",
+                "user_message_id": "user-message-1",
+            })
+        );
+    }
+
+    #[test]
+    fn file_rewind_control_response_is_correlated_by_request_id() {
+        let mut pending =
+            HashMap::from([("nmt-7".to_string(), PendingControlOperation::FileRewind)]);
+
+        assert_eq!(
+            resolve_pending_control_operation(
+                &mut pending,
+                &json!({"request_id": "other", "subtype": "success"})
+            ),
+            None
+        );
+        assert!(pending.contains_key("nmt-7"));
+        assert_eq!(
+            resolve_pending_control_operation(
+                &mut pending,
+                &json!({"request_id": "nmt-7", "subtype": "success"})
+            ),
+            Some(Event::FileRewindCompleted { error: None })
+        );
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn file_rewind_rejection_and_malformed_responses_are_nonfatal_results() {
+        for (subtype, expected) in [
+            ("error", "checkpoint expired"),
+            (
+                "unexpected",
+                "Claude returned a malformed file restore response.",
+            ),
+        ] {
+            let mut pending =
+                HashMap::from([("nmt-8".to_string(), PendingControlOperation::FileRewind)]);
+            let response = if subtype == "error" {
+                json!({
+                    "request_id": "nmt-8",
+                    "subtype": subtype,
+                    "error": "checkpoint expired",
+                })
+            } else {
+                json!({"request_id": "nmt-8", "subtype": subtype})
+            };
+
+            assert_eq!(
+                resolve_pending_control_operation(&mut pending, &response),
+                Some(Event::FileRewindCompleted {
+                    error: Some(expected.to_string()),
+                })
+            );
+            assert!(pending.is_empty());
+        }
+    }
+
+    #[test]
+    fn process_exit_fails_and_clears_pending_file_rewinds() {
+        let mut pending =
+            HashMap::from([("nmt-9".to_string(), PendingControlOperation::FileRewind)]);
+
+        assert_eq!(
+            fail_pending_control_operations(&mut pending, "Claude exited."),
+            vec![Event::FileRewindCompleted {
+                error: Some("Claude exited.".into()),
+            }]
+        );
+        assert!(pending.is_empty());
+    }
 
     #[test]
     fn content_bearing_inputs_seed_the_card_detail() {
