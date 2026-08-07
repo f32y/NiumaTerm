@@ -154,9 +154,11 @@ pub struct Compaction {
 /// streaming already produced".
 #[derive(Clone, Debug, PartialEq)]
 pub enum Item {
-    /// Echo of our own turn input; a UI that renders the user message locally
-    /// skips these.
-    UserMessage,
+    /// User text is present for persisted replay and optional for live echoes,
+    /// which a UI that already rendered the submitted prompt can skip.
+    UserMessage {
+        text: Option<String>,
+    },
     AgentMessage {
         id: String,
         text: Option<String>,
@@ -198,6 +200,123 @@ pub enum Item {
         output: Option<String>,
         status: Option<String>,
     },
+    /// A provider failure stored as part of the conversation transcript.
+    Error {
+        text: String,
+    },
+}
+
+impl Item {
+    /// Stable provider identity for streaming updates. User and error rows are
+    /// complete when created and therefore need no update identity.
+    pub fn id(&self) -> Option<&str> {
+        match self {
+            Self::AgentMessage { id, .. }
+            | Self::Reasoning { id, .. }
+            | Self::CommandExecution { id, .. }
+            | Self::FileChange { id, .. }
+            | Self::Compaction { id, .. }
+            | Self::Other { id, .. } => Some(id),
+            Self::UserMessage { .. } | Self::Error { .. } => None,
+        }
+    }
+
+    /// Fold an authoritative completed payload into transcript state without
+    /// discarding streamed fields that the provider omitted at completion.
+    /// Returns false when the payload belongs to another item kind or id.
+    pub fn merge_completed(&mut self, completed: &Self) -> bool {
+        if self.id().is_none() || self.id() != completed.id() {
+            return false;
+        }
+
+        match (self, completed) {
+            (
+                Self::AgentMessage { text, .. },
+                Self::AgentMessage {
+                    text: completed, ..
+                },
+            ) => {
+                if let Some(completed) = completed {
+                    *text = Some(completed.clone());
+                }
+            }
+            (
+                Self::Reasoning { summary, .. },
+                Self::Reasoning {
+                    summary: completed, ..
+                },
+            ) => {
+                if summary.as_deref().unwrap_or_default().is_empty()
+                    && let Some(completed) = completed
+                {
+                    *summary = Some(completed.clone());
+                }
+            }
+            (
+                Self::CommandExecution {
+                    aggregated_output,
+                    status,
+                    exit_code,
+                    ..
+                },
+                Self::CommandExecution {
+                    aggregated_output: completed_output,
+                    status: completed_status,
+                    exit_code: completed_exit,
+                    ..
+                },
+            ) => {
+                if let Some(completed_output) = completed_output {
+                    *aggregated_output = Some(completed_output.clone());
+                }
+                if let Some(completed_status) = completed_status {
+                    *status = Some(completed_status.clone());
+                }
+                if completed_exit.is_some() {
+                    *exit_code = *completed_exit;
+                }
+            }
+            (
+                Self::FileChange { diff, status, .. },
+                Self::FileChange {
+                    diff: completed_diff,
+                    status: completed_status,
+                    ..
+                },
+            ) => {
+                if let Some(completed_diff) = completed_diff {
+                    *diff = Some(completed_diff.clone());
+                }
+                if let Some(completed_status) = completed_status {
+                    *status = Some(completed_status.clone());
+                }
+            }
+            (
+                Self::Other { output, status, .. },
+                Self::Other {
+                    output: completed_output,
+                    status: completed_status,
+                    ..
+                },
+            ) => {
+                if let Some(completed_output) = completed_output {
+                    *output = Some(completed_output.clone());
+                }
+                if let Some(completed_status) = completed_status {
+                    *status = Some(completed_status.clone());
+                }
+            }
+            (
+                Self::Compaction { detail, .. },
+                Self::Compaction {
+                    detail: completed, ..
+                },
+            ) => *detail = completed.clone(),
+            _ => return false,
+        }
+
+        true
+    }
 }
 
 /// One resumable persisted session, for the history list an empty chat tab
@@ -209,19 +328,6 @@ pub struct SessionSummary {
     pub title: String,
     pub branch: Option<String>,
     pub last_active: SystemTime,
-}
-
-/// One transcript entry reconstructed from a persisted session when resuming.
-/// Conversation text and persisted provider errors keep dedicated variants
-/// because [`Item::UserMessage`] carries no text, while provider-backed
-/// activity reuses [`Item`] so replayed commands, reasoning, file changes, and
-/// tools retain the same detail as live events.
-#[derive(Clone, Debug, PartialEq)]
-pub enum ReplayItem {
-    User { text: String },
-    Agent { text: String },
-    Error { text: String },
-    Item(Item),
 }
 
 /// Latest active context-window usage for one agent thread. Providers expose
@@ -289,7 +395,7 @@ pub enum Event {
     /// Resumable sessions for the tab's working directory, newest first.
     History(Vec<SessionSummary>),
     /// Reconstructed transcript of a resumed session, to pre-fill the UI.
-    Replay(Vec<ReplayItem>),
+    Replay(Vec<Item>),
     StatusDetail(Option<String>),
     Error {
         message: String,
@@ -307,4 +413,66 @@ pub enum SendOutcome {
     Steered,
     /// The handshake has not produced a thread yet.
     NotReady,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Item;
+
+    #[test]
+    fn completed_items_merge_without_erasing_streamed_fields() {
+        let mut command = Item::CommandExecution {
+            id: "command-1".into(),
+            command: "cargo test".into(),
+            aggregated_output: Some("streamed output".into()),
+            status: Some("inProgress".into()),
+            exit_code: None,
+        };
+        let completed = Item::CommandExecution {
+            id: "command-1".into(),
+            command: "cargo test".into(),
+            aggregated_output: None,
+            status: Some("completed".into()),
+            exit_code: Some(0),
+        };
+
+        assert!(command.merge_completed(&completed));
+        assert_eq!(
+            command,
+            Item::CommandExecution {
+                id: "command-1".into(),
+                command: "cargo test".into(),
+                aggregated_output: Some("streamed output".into()),
+                status: Some("completed".into()),
+                exit_code: Some(0),
+            }
+        );
+    }
+
+    #[test]
+    fn completed_reasoning_is_only_a_fallback_for_missing_stream_text() {
+        let mut streamed = Item::Reasoning {
+            id: "reasoning-1".into(),
+            summary: Some("streamed".into()),
+        };
+        let completed = Item::Reasoning {
+            id: "reasoning-1".into(),
+            summary: Some("completed".into()),
+        };
+        assert!(streamed.merge_completed(&completed));
+        assert_eq!(
+            streamed,
+            Item::Reasoning {
+                id: "reasoning-1".into(),
+                summary: Some("streamed".into())
+            }
+        );
+
+        let mut missing = Item::Reasoning {
+            id: "reasoning-1".into(),
+            summary: None,
+        };
+        assert!(missing.merge_completed(&completed));
+        assert_eq!(missing, completed);
+    }
 }

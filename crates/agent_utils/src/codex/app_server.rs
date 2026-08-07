@@ -17,9 +17,9 @@ use serde_json::{Value, json};
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 pub use crate::chat::{
-    ContextWindowUsage, Event, Item, ModelInfo, ReplayItem, SendOutcome, SessionSummary,
-    SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments, SlashCommandInfo,
-    SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
+    ContextWindowUsage, Event, Item, ModelInfo, SendOutcome, SessionSummary, SkillCatalog,
+    SkillInfo, SkillReference, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
+    SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
 };
 use crate::{AgentLaunch, CodexProviderConfig};
 
@@ -998,8 +998,8 @@ fn parse_thread_summaries(result: &Value, own_thread: Option<&str>) -> Vec<Sessi
 /// the same typed item parser as live notifications. Keeping one parser is the
 /// invariant that prevents restored tool cards from losing output or status as
 /// the app-server schema evolves.
-fn parse_replay(turns: &Value) -> Vec<ReplayItem> {
-    let mut items: Vec<ReplayItem> = Vec::new();
+fn parse_replay(turns: &Value) -> Vec<Item> {
+    let mut items: Vec<Item> = Vec::new();
 
     for item in turns
         .as_array()
@@ -1009,29 +1009,22 @@ fn parse_replay(turns: &Value) -> Vec<ReplayItem> {
         .flatten()
     {
         match item["type"].as_str() {
-            Some("userMessage") => {
-                let text = user_input_text(&item["content"]);
-
-                if !text.is_empty() {
-                    items.push(ReplayItem::User { text });
-                }
-            }
-            Some("agentMessage") => {
-                let text = item["text"].as_str().unwrap_or_default().trim();
-
-                if !text.is_empty() {
-                    items.push(ReplayItem::Agent {
-                        text: text.to_string(),
-                    });
-                }
-            }
             // Hook prompts are provider plumbing rather than transcript
-            // activity. Every other supported item goes through the live
-            // parser so command output, diffs, and tool results survive.
+            // activity. Every supported transcript item goes through the live
+            // parser so dialogue, command output, diffs, and tool results
+            // cannot diverge between live and restored sessions.
             Some("hookPrompt") | None => {}
             Some(_) => {
                 if let Some(item) = parse_item(item) {
-                    items.push(ReplayItem::Item(item));
+                    let visible = match &item {
+                        Item::UserMessage { text } | Item::AgentMessage { text, .. } => {
+                            text.as_deref().is_some_and(|text| !text.trim().is_empty())
+                        }
+                        _ => true,
+                    };
+                    if visible {
+                        items.push(item);
+                    }
                 }
             }
         }
@@ -1058,7 +1051,12 @@ fn parse_item(item: &Value) -> Option<Item> {
     let status = item["status"].as_str().map(str::to_owned);
 
     let parsed = match item["type"].as_str()? {
-        "userMessage" => Item::UserMessage,
+        "userMessage" => {
+            let text = user_input_text(&item["content"]);
+            Item::UserMessage {
+                text: (!text.is_empty()).then_some(text),
+            }
+        }
         "agentMessage" => Item::AgentMessage {
             id,
             text: item["text"].as_str().map(str::to_owned),
@@ -1465,32 +1463,34 @@ mod tests {
         assert_eq!(
             parse_replay(&turns),
             vec![
-                ReplayItem::User {
-                    text: "question".into()
+                Item::UserMessage {
+                    text: Some("question".into())
                 },
-                ReplayItem::Item(Item::CommandExecution {
+                Item::CommandExecution {
                     id: "i2".into(),
                     command: "ls".into(),
                     aggregated_output: Some("file.txt".into()),
                     status: Some("completed".into()),
                     exit_code: Some(0),
-                }),
-                ReplayItem::Item(Item::Reasoning {
+                },
+                Item::Reasoning {
                     id: "i3".into(),
                     summary: Some("checked files".into()),
-                }),
-                ReplayItem::Item(Item::Other {
+                },
+                Item::Other {
                     id: "i4".into(),
                     kind: "mcpToolCall".into(),
                     title: "s/t".into(),
                     output: Some("match".into()),
                     status: Some("completed".into()),
-                }),
-                ReplayItem::Agent {
-                    text: "answer".into()
                 },
-                ReplayItem::Agent {
-                    text: "follow-up".into()
+                Item::AgentMessage {
+                    id: "i5".into(),
+                    text: Some("answer".into())
+                },
+                Item::AgentMessage {
+                    id: "i6".into(),
+                    text: Some("follow-up".into())
                 },
             ]
         );
