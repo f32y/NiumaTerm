@@ -2081,18 +2081,8 @@ impl AgentPane {
     /// so they render as a plain chronological stream above the new turns.
     fn apply_replay(&mut self, replay: Vec<ReplayItem>, cx: &mut Context<Self>) {
         for (i, item) in replay.into_iter().enumerate() {
-            let item = match item {
-                ReplayItem::User { text } => ChatItem::User { text },
-                ReplayItem::Agent { text } => ChatItem::Agent {
-                    item_id: format!("replay-{i}"),
-                    text,
-                },
-                ReplayItem::Item(item) => {
-                    let Some(item) = chat_item_from_session_item(item) else {
-                        continue;
-                    };
-                    item
-                }
+            let Some(item) = chat_item_from_replay_item(item, i) else {
+                continue;
             };
 
             // Replayed entries predate this pane; they get no wall-clock
@@ -2740,6 +2730,18 @@ fn chat_item_from_session_item(item: SessionItem) -> Option<ChatItem> {
             status: status.unwrap_or_else(|| "inProgress".to_string()),
         },
     })
+}
+
+fn chat_item_from_replay_item(item: ReplayItem, index: usize) -> Option<ChatItem> {
+    match item {
+        ReplayItem::User { text } => Some(ChatItem::User { text }),
+        ReplayItem::Agent { text } => Some(ChatItem::Agent {
+            item_id: format!("replay-{index}"),
+            text,
+        }),
+        ReplayItem::Error { text } => Some(ChatItem::Error { text }),
+        ReplayItem::Item(item) => chat_item_from_session_item(item),
+    }
 }
 
 /// Compact "how long ago" label for a history row ("now", "5m", "3h", "2d").
@@ -5196,15 +5198,15 @@ mod agent_profile_launch_tests {
 #[cfg(test)]
 mod prompt_truncation_tests {
     use gpui::px;
-    use nmt_agent_utils::chat::{Compaction, CompactionTrigger, Item as SessionItem};
+    use nmt_agent_utils::chat::{Compaction, CompactionTrigger, Item as SessionItem, ReplayItem};
 
     use super::{
         AGENT_DISCLOSURE_DETAIL_INSET, AGENT_DISCLOSURE_GAP, AGENT_DISCLOSURE_PADDING,
         AGENT_DISCLOSURE_SLOT, ChatItem, ComposerAction, Status,
-        VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES, chat_item_from_session_item, compaction_accounting,
-        compaction_label, composer_action, entry_copy_text, is_work_row,
-        should_show_jump_to_latest, should_virtualize_transcript, transcript_segments,
-        truncated_user_prompt,
+        VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES, chat_item_from_replay_item,
+        chat_item_from_session_item, compaction_accounting, compaction_label, composer_action,
+        entry_copy_text, is_work_row, should_show_jump_to_latest, should_virtualize_transcript,
+        transcript_segments, truncated_user_prompt,
     };
 
     #[test]
@@ -5314,6 +5316,21 @@ mod prompt_truncation_tests {
         assert_eq!(title, "src/lib.rs");
         assert_eq!(output.as_deref(), Some("contents"));
         assert_eq!(status, "completed");
+    }
+
+    #[test]
+    fn replayed_errors_keep_error_row_semantics() {
+        let item = chat_item_from_replay_item(
+            ReplayItem::Error {
+                text: "session limit reached".into(),
+            },
+            0,
+        );
+
+        assert!(matches!(
+            item,
+            Some(ChatItem::Error { text }) if text == "session limit reached"
+        ));
     }
 
     #[test]
