@@ -4370,7 +4370,7 @@ impl AgentPane {
             .gap_1()
             .flex_wrap()
             .text_color(cx.theme().muted_foreground)
-            .child(model)
+            .child(Self::settings_group("Model", vec![model], cx))
             .child(Self::settings_group(
                 "Execution policy",
                 vec![permission],
@@ -4527,7 +4527,7 @@ impl AgentPane {
             .gap_1()
             .flex_wrap()
             .text_color(cx.theme().muted_foreground)
-            .child(model)
+            .child(Self::settings_group("Model", vec![model], cx))
             .child(Self::settings_group(
                 "Execution policy",
                 vec![approval, sandbox],
