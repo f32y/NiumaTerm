@@ -2422,6 +2422,23 @@ fn code_transcript_format(item: &SessionItem, detail: &str) -> Option<(Cow<'stat
     }
 }
 
+const COMMAND_EXECUTION_HEADING: &str = "Run Command";
+
+fn command_execution_detail(command: &str, aggregated_output: Option<&str>) -> String {
+    let mut detail = String::with_capacity(
+        command.len() + aggregated_output.map_or(0, str::len) + "$ \n\n".len(),
+    );
+    detail.push_str("$ ");
+    detail.push_str(command);
+
+    if let Some(output) = aggregated_output.filter(|output| !output.is_empty()) {
+        detail.push_str("\n\n");
+        detail.push_str(output);
+    }
+
+    detail
+}
+
 /// Full text of an entry for the right-click Copy action — the whole message,
 /// independent of any partial selection or truncated preview.
 fn entry_copy_text(item: &SessionItem) -> String {
@@ -2434,10 +2451,7 @@ fn entry_copy_text(item: &SessionItem) -> String {
             command,
             aggregated_output,
             ..
-        } => format!(
-            "$ {command}\n{}",
-            aggregated_output.as_deref().unwrap_or_default()
-        ),
+        } => command_execution_detail(command, aggregated_output.as_deref()),
         SessionItem::FileChange {
             paths,
             diff,
@@ -3829,13 +3843,13 @@ impl AgentPane {
                 let failed = matches!(state, "failed" | "declined")
                     || exit_code.is_some_and(|code| code != 0);
                 let state = if failed { "failed" } else { state };
-                let output = aggregated_output.as_deref().unwrap_or_default();
+                let detail = command_execution_detail(command, aggregated_output.as_deref());
 
                 (
                     IconName::SquareTerminal,
-                    command.clone(),
+                    COMMAND_EXECUTION_HEADING.to_string(),
                     Some(state.to_string()),
-                    (!output.trim().is_empty()).then_some(output),
+                    Some(Cow::Owned(detail)),
                 )
             }
             SessionItem::FileChange {
@@ -3847,7 +3861,9 @@ impl AgentPane {
                 IconName::File,
                 format!("Edit {paths}"),
                 Some(status.as_deref().unwrap_or("inProgress").to_string()),
-                diff.as_deref().filter(|diff| !diff.trim().is_empty()),
+                diff.as_deref()
+                    .filter(|diff| !diff.trim().is_empty())
+                    .map(Cow::Borrowed),
             ),
             SessionItem::Other {
                 kind,
@@ -3867,13 +3883,19 @@ impl AgentPane {
                     format!("{kind} {title}")
                 },
                 Some(status.as_deref().unwrap_or("inProgress").to_string()),
-                output.as_deref().filter(|output| !output.trim().is_empty()),
+                output
+                    .as_deref()
+                    .filter(|output| !output.trim().is_empty())
+                    .map(Cow::Borrowed),
             ),
             SessionItem::Reasoning { summary, .. } => (
                 IconName::Bot,
                 "Thinking".to_string(),
                 None,
-                summary.as_deref().filter(|text| !text.trim().is_empty()),
+                summary
+                    .as_deref()
+                    .filter(|text| !text.trim().is_empty())
+                    .map(Cow::Borrowed),
             ),
             _ => return div().into_any_element(),
         };
@@ -3930,7 +3952,7 @@ impl AgentPane {
             .w_full()
             .context_menu(Self::copy_menu(cx.entity().downgrade(), index))
             .child(header)
-            .children(detail.filter(|_| expanded).map(|detail| {
+            .children(detail.as_deref().filter(|_| expanded).map(|detail| {
                 let code_format = code_transcript_format(&self.items[index].item, detail);
                 let virtualized = should_virtualize_transcript(code_format.is_some(), detail);
 
@@ -4980,10 +5002,10 @@ mod prompt_truncation_tests {
 
     use super::{
         AGENT_DISCLOSURE_DETAIL_INSET, AGENT_DISCLOSURE_GAP, AGENT_DISCLOSURE_PADDING,
-        AGENT_DISCLOSURE_SLOT, AgentKind, ComposerAction, Status,
-        VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES, compaction_accounting, compaction_label,
-        compaction_row_is_expandable, composer_action, entry_copy_text, is_work_row,
-        should_show_jump_to_latest, should_virtualize_transcript, transcript_segments,
+        AGENT_DISCLOSURE_SLOT, AgentKind, COMMAND_EXECUTION_HEADING, ComposerAction, Status,
+        VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES, command_execution_detail, compaction_accounting,
+        compaction_label, compaction_row_is_expandable, composer_action, entry_copy_text,
+        is_work_row, should_show_jump_to_latest, should_virtualize_transcript, transcript_segments,
         truncated_user_prompt,
     };
 
@@ -5073,6 +5095,19 @@ mod prompt_truncation_tests {
     fn compaction_disclosure_matches_provider_capabilities() {
         assert!(!compaction_row_is_expandable(AgentKind::Codex));
         assert!(compaction_row_is_expandable(AgentKind::Claude));
+    }
+
+    #[test]
+    fn command_tool_moves_the_full_command_and_output_into_detail() {
+        assert_eq!(COMMAND_EXECUTION_HEADING, "Run Command");
+        assert_eq!(
+            command_execution_detail("cargo test --workspace", Some("running 42 tests\nok")),
+            "$ cargo test --workspace\n\nrunning 42 tests\nok"
+        );
+        assert_eq!(
+            command_execution_detail("cargo check", None),
+            "$ cargo check"
+        );
     }
 
     #[test]
