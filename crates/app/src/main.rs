@@ -194,6 +194,8 @@ fn run_app(argv_url: Option<String>, testing: bool) {
             notification.margins.top = px(16.);
 
             cx.set_global(AppSettings::load());
+            let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
+            ui::agent_updates::initialize(testing, &agent_profiles, cx);
 
             // Bring up the remote host service if it was left enabled. Runs on
             // its own runtime thread; failures only log.
@@ -215,6 +217,8 @@ fn run_app(argv_url: Option<String>, testing: bool) {
             // Keep live behavior in sync on any settings change. Persistence is
             // deferred to when the settings dialog closes (see Shell::on_show_settings).
             cx.observe_global::<AppSettings>(|cx| {
+                let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
+                ui::agent_updates::reconcile_profiles(&agent_profiles, cx);
                 set_job_management(cx.global::<AppSettings>().manage_subprocess_job);
 
                 // Opacity changes retint the theme and switch each window
@@ -371,6 +375,7 @@ fn run_app(argv_url: Option<String>, testing: bool) {
             for initial in initials {
                 AppWindow::open(cx, initial);
             }
+            ui::agent_updates::schedule_startup_checks(cx);
 
             // Apply CLI actions (argv + forwarded over the IPC pipe) on the
             // foreground; windows above exist before the first poll.

@@ -8,13 +8,11 @@
 use std::collections::HashMap;
 use std::io::{BufRead as _, BufReader, Write as _};
 use std::mem::take;
-use std::os::windows::process::CommandExt as _;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::thread;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use serde_json::{Value, json};
-use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 pub use crate::chat::{
     Compaction, CompactionTrigger, ContextWindowUsage, Event, Item, ModelInfo, SendOutcome,
@@ -22,6 +20,7 @@ pub use crate::chat::{
     SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
     ThreadSettings,
 };
+use crate::launcher::{ConfiguredLauncher, KillOnCloseJob};
 use crate::{AgentLaunch, CodexProviderConfig};
 
 /// JSON-RPC ids for the fixed handshake requests; turn requests count up from
@@ -195,6 +194,7 @@ pub const EFFORT_OPTIONS: [&str; 8] = [
 
 pub struct Session {
     child: Child,
+    process_job: Option<KillOnCloseJob>,
     stdin: Option<ChildStdin>,
     next_rpc_id: u64,
     thread_id: Option<String>,
@@ -211,6 +211,8 @@ pub struct Session {
     /// Profile-level model/provider overrides reused for thread start, history
     /// filtering, and resume. Provider credentials remain only in process env.
     thread_profile: ThreadProfile,
+    initial_resume: Option<String>,
+    suppress_resume_replay: bool,
 }
 
 impl Drop for Session {
@@ -219,8 +221,7 @@ impl Drop for Session {
         // cmd.exe would strand it. Closing stdin delivers EOF, which
         // app-server treats as shutdown, and the reader thread exits with the
         // pipe. The kill is a belt-and-braces cleanup for the shim itself.
-        drop(self.stdin.take());
-        let _ = self.child.kill();
+        let _ = self.shutdown(Duration::from_millis(250), true);
     }
 }
 
@@ -265,25 +266,48 @@ impl Session {
         deliver: impl Fn(Value) + Send + 'static,
         on_stderr: impl Fn(String) + Send + 'static,
     ) -> Result<Self, String> {
-        let thread_profile = ThreadProfile::from(launch);
-        // Launching through cmd.exe keeps PATHEXT resolution, so a bare
-        // executable name finds `codex.exe` as well as the npm `codex.cmd`
-        // shim.
-        let executable = if launch.executable.trim().is_empty() {
-            "codex"
-        } else {
-            launch.executable.trim()
-        };
+        Self::spawn_inner(launch, cwd, None, false, deliver, on_stderr)
+    }
 
-        let mut command = Command::new("cmd.exe");
+    /// Start app-server directly into an existing thread. The initialize
+    /// handshake sends `thread/resume` instead of creating a disposable empty
+    /// thread first; replay can be suppressed when the caller already retains
+    /// the visible transcript in place.
+    pub fn spawn_resuming(
+        launch: &AgentLaunch,
+        cwd: Option<String>,
+        thread_id: String,
+        suppress_replay: bool,
+        deliver: impl Fn(Value) + Send + 'static,
+        on_stderr: impl Fn(String) + Send + 'static,
+    ) -> Result<Self, String> {
+        Self::spawn_inner(
+            launch,
+            cwd,
+            Some(thread_id),
+            suppress_replay,
+            deliver,
+            on_stderr,
+        )
+    }
+
+    fn spawn_inner(
+        launch: &AgentLaunch,
+        cwd: Option<String>,
+        initial_resume: Option<String>,
+        suppress_resume_replay: bool,
+        deliver: impl Fn(Value) + Send + 'static,
+        on_stderr: impl Fn(String) + Send + 'static,
+    ) -> Result<Self, String> {
+        let thread_profile = ThreadProfile::from(launch);
+        let launcher = ConfiguredLauncher::from_launch(launch, "codex");
+        let executable = launcher.executable().to_string();
+        let mut command = launcher.command(["app-server"]);
 
         command
-            .args(["/D", "/C", executable, "app-server"])
-            .envs(launch.env.iter().map(|(name, value)| (name, value)))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .creation_flags(CREATE_NO_WINDOW);
+            .stderr(Stdio::piped());
 
         if let Some(cwd) = cwd {
             command.current_dir(cwd);
@@ -292,6 +316,11 @@ impl Session {
         let mut child = command
             .spawn()
             .map_err(|err| format!("could not run `{executable} app-server`: {err}"))?;
+        let process_job = KillOnCloseJob::attach(&child).map_err(|error| {
+            let _ = child.kill();
+            let _ = child.wait();
+            error
+        })?;
 
         let stdin = child.stdin.take().ok_or("Codex stdin unavailable")?;
         let stdout = child.stdout.take().ok_or("Codex stdout unavailable")?;
@@ -313,6 +342,7 @@ impl Session {
 
         let mut session = Self {
             child,
+            process_job: Some(process_job),
             stdin: Some(stdin),
             next_rpc_id: FIRST_TURN_RPC_ID,
             thread_id: None,
@@ -323,6 +353,8 @@ impl Session {
             skill_refresh: SkillRefreshState::default(),
             compaction: CompactionState::default(),
             thread_profile,
+            initial_resume,
+            suppress_resume_replay,
         };
 
         session.send(json!({
@@ -333,6 +365,47 @@ impl Session {
         }));
 
         Ok(session)
+    }
+
+    pub fn thread_id(&self) -> Option<&str> {
+        self.thread_id.as_deref()
+    }
+
+    pub fn has_active_operation(&self) -> bool {
+        self.current_turn.is_some()
+            || self.pending_approval.is_some()
+            || !self.pending_commands.is_empty()
+            || self.compaction.active.is_some()
+    }
+
+    /// Close the protocol input and wait for the owned process tree to exit.
+    /// Forced termination is opt-in because it can interrupt an active tool
+    /// operation; dropping the Job Object affects only this session's tree.
+    pub fn shutdown(&mut self, timeout: Duration, force: bool) -> Result<(), String> {
+        drop(self.stdin.take());
+        let started = Instant::now();
+        loop {
+            match self.child.try_wait() {
+                Ok(Some(_)) => {
+                    self.process_job.take();
+                    return Ok(());
+                }
+                Ok(None) if started.elapsed() < timeout => {
+                    thread::sleep(Duration::from_millis(20));
+                }
+                Ok(None) if force => {
+                    self.process_job.take();
+                    self.child
+                        .wait()
+                        .map_err(|error| format!("could not wait for Codex to stop: {error}"))?;
+                    return Ok(());
+                }
+                Ok(None) => return Err("Codex did not stop before the update timeout".to_string()),
+                Err(error) => {
+                    return Err(format!("could not observe Codex process exit: {error}"));
+                }
+            }
+        }
     }
 
     /// Handle one message from the server: advances the handshake, answers
@@ -600,6 +673,8 @@ impl Session {
             // A failed resume (deleted/corrupt thread) is not fatal: the
             // session still has the thread it started with, so the composer
             // keeps working for a fresh conversation.
+            let initial_resume_failed =
+                rpc_id == THREAD_RESUME_RPC_ID && self.initial_resume.is_some();
             let message = if rpc_id == THREAD_RESUME_RPC_ID {
                 format!("Could not resume session: {error}")
             } else {
@@ -608,7 +683,7 @@ impl Session {
 
             return vec![Event::Error {
                 message,
-                fatal: !is_command && rpc_id <= THREAD_START_RPC_ID,
+                fatal: initial_resume_failed || (!is_command && rpc_id <= THREAD_START_RPC_ID),
             }];
         }
 
@@ -623,13 +698,10 @@ impl Session {
             INIT_RPC_ID => {
                 self.send(json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}));
                 self.request_skills(false);
-                let params = thread_start_params(&self.thread_profile);
-                self.send(json!({
-                    "jsonrpc": "2.0",
-                    "id": THREAD_START_RPC_ID,
-                    "method": "thread/start",
-                    "params": params,
-                }));
+                self.send(initial_thread_request(
+                    self.initial_resume.as_deref(),
+                    &self.thread_profile,
+                ));
 
                 Vec::new()
             }
@@ -680,13 +752,8 @@ impl Session {
                 let result = &message["result"];
 
                 self.thread_id = result["thread"]["id"].as_str().map(str::to_owned);
-
-                vec![
-                    Event::Replay(parse_replay(&result["thread"]["turns"])),
-                    // Resume restores the thread's persisted model/effort;
-                    // Ready re-seeds the pickers with those values.
-                    Event::Ready(parse_thread_settings(result)),
-                ]
+                self.initial_resume = None;
+                resumed_thread_events(result, take(&mut self.suppress_resume_replay))
             }
             _ => Vec::new(),
         }
@@ -1007,6 +1074,24 @@ fn thread_start_params(profile: &ThreadProfile) -> Value {
     params
 }
 
+fn initial_thread_request(thread_id: Option<&str>, profile: &ThreadProfile) -> Value {
+    if let Some(thread_id) = thread_id {
+        json!({
+            "jsonrpc": "2.0",
+            "id": THREAD_RESUME_RPC_ID,
+            "method": "thread/resume",
+            "params": thread_resume_params(thread_id, profile),
+        })
+    } else {
+        json!({
+            "jsonrpc": "2.0",
+            "id": THREAD_START_RPC_ID,
+            "method": "thread/start",
+            "params": thread_start_params(profile),
+        })
+    }
+}
+
 fn thread_resume_params(thread_id: &str, profile: &ThreadProfile) -> Value {
     let mut params = json!({"threadId": thread_id});
     if let Some(model) = profile.model.as_deref() {
@@ -1047,6 +1132,17 @@ fn parse_thread_settings(result: &Value) -> ThreadSettings {
         effort: result["reasoningEffort"].as_str().map(str::to_owned),
         tier: result["serviceTier"].as_str().map(str::to_owned),
     }
+}
+
+fn resumed_thread_events(result: &Value, suppress_replay: bool) -> Vec<Event> {
+    let mut events = Vec::new();
+    if !suppress_replay {
+        events.push(Event::Replay(parse_replay(&result["thread"]["turns"])));
+    }
+    // Resume restores the thread's persisted model/effort; Ready re-seeds the
+    // pickers even when replay is suppressed for a retained transcript.
+    events.push(Event::Ready(parse_thread_settings(result)));
+    events
 }
 
 fn parse_models(result: &Value, selected_model: Option<&str>) -> Vec<ModelInfo> {
@@ -1529,6 +1625,39 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn initial_resume_never_creates_an_orphan_thread() {
+        let profile = ThreadProfile::default();
+        let resumed = initial_thread_request(Some("thr_retained"), &profile);
+        assert_eq!(resumed["method"], "thread/resume");
+        assert_eq!(resumed["id"], THREAD_RESUME_RPC_ID);
+        assert_eq!(resumed["params"]["threadId"], "thr_retained");
+
+        let fresh = initial_thread_request(None, &profile);
+        assert_eq!(fresh["method"], "thread/start");
+        assert_eq!(fresh["id"], THREAD_START_RPC_ID);
+    }
+
+    #[test]
+    fn in_place_resume_suppresses_transcript_replay_but_still_becomes_ready() {
+        let result = json!({
+            "thread": {
+                "id": "thr_retained",
+                "turns": [{"items": [{"type": "userMessage", "content": [{"type": "text", "text": "already visible"}]}]}]
+            },
+            "model": "gpt-5"
+        });
+        let suppressed = resumed_thread_events(&result, true);
+        assert_eq!(suppressed.len(), 1);
+        assert!(
+            matches!(&suppressed[0], Event::Ready(settings) if settings.model.as_deref() == Some("gpt-5"))
+        );
+
+        let normal = resumed_thread_events(&result, false);
+        assert!(matches!(&normal[0], Event::Replay(_)));
+        assert!(matches!(&normal[1], Event::Ready(_)));
     }
 
     #[test]

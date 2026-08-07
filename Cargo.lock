@@ -311,6 +311,7 @@ dependencies = [
  "percent-encoding",
  "raw-window-handle",
  "rust-embed",
+ "semver",
  "serde",
  "serde_json",
  "tokio",
@@ -4177,11 +4178,15 @@ dependencies = [
  "base64",
  "chrono",
  "getrandom 0.4.3",
+ "parking_lot",
  "reqwest",
+ "semver",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tracing",
  "uuid",
+ "which",
  "windows-sys 0.61.2",
 ]
 

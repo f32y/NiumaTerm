@@ -10,6 +10,10 @@ pub mod claude_code {
     pub mod usage_fetcher;
 }
 mod hook_store;
+#[cfg(target_os = "windows")]
+pub mod launcher;
+#[cfg(target_os = "windows")]
+pub mod update;
 pub mod usage;
 pub mod codex {
     #[cfg(target_os = "windows")]
