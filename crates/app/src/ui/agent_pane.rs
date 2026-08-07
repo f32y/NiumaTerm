@@ -4,9 +4,11 @@
 //! [`nmt_agent_utils::claude_code::stream_json`]; this module only maps their
 //! shared typed events onto the transcript UI.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::env;
 use std::mem::take;
+use std::ops::Range;
 use std::path::Path;
 use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime};
@@ -17,9 +19,9 @@ use futures::channel::mpsc;
 use gpui::prelude::*;
 use gpui::{
     AnyElement, ClipboardItem, Context, Div, ElementId, Entity, FocusHandle, FollowMode,
-    FontWeight, ListAlignment, ListSizingBehavior, ListState, MouseButton, Pixels, ScrollHandle,
-    SharedString, Stateful, Window, div, linear_color_stop, linear_gradient, list, px, relative,
-    rems, size,
+    FontWeight, ListAlignment, ListHorizontalSizingBehavior, ListSizingBehavior, ListState,
+    MouseButton, Pixels, ScrollHandle, SharedString, Stateful, UniformListScrollHandle, Window,
+    div, linear_color_stop, linear_gradient, list, px, relative, rems, size, uniform_list,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{
@@ -415,6 +417,10 @@ pub(crate) struct AgentPane {
     /// Work-log rows whose detail (command output, reasoning text) is
     /// expanded, keyed by transcript index.
     expanded_rows: HashSet<usize>,
+    /// Long expanded code transcripts retain their segmented source and
+    /// independent uniform-list position while visible. Collapsing a row drops
+    /// the duplicate source so large outputs do not stay resident twice.
+    virtual_transcripts: HashMap<usize, VirtualTranscriptState>,
     /// Monotonic turn counter; entries are tagged with the turn they arrived
     /// in so a settled turn can fold as one unit.
     turn_seq: u64,
@@ -520,6 +526,7 @@ impl AgentPane {
             expanded_groups: HashSet::new(),
             expanded_turns: HashSet::new(),
             expanded_rows: HashSet::new(),
+            virtual_transcripts: HashMap::new(),
             turn_seq: 0,
             working_started: None,
             provider_commands: Vec::new(),
@@ -1195,6 +1202,7 @@ impl AgentPane {
         self.expanded_groups.clear();
         self.expanded_turns.clear();
         self.expanded_rows.clear();
+        self.virtual_transcripts.clear();
         self.turn_seq = 0;
         self.working_started = None;
         self.skill_catalog = None;
@@ -2148,16 +2156,9 @@ fn truncated_user_prompt(text: &str) -> Option<&str> {
     None
 }
 
-/// Wrap tool output in a Markdown fence so the transcript's TextView pipeline
-/// renders it as a syntax-highlighted code block. The fence grows past any
-/// backtick run in the body, so raw output can never terminate the block
-/// early.
-fn fenced_code_block(output: &str) -> String {
-    fenced_code_block_as(output, detect_output_language(output))
-}
-
-/// Same fence-growing wrap with an explicit language tag, for content whose
-/// format is known from context (e.g. edit diffs) rather than sniffed.
+/// Wrap tool output in a Markdown fence with an explicit language tag. The
+/// fence grows past any backtick run in the body, so raw output can never
+/// terminate the syntax-highlighted block early.
 fn fenced_code_block_as(output: &str, lang: &str) -> String {
     let mut fence = String::from("```");
     while output.contains(fence.as_str()) {
@@ -2208,6 +2209,152 @@ fn file_extension_lang(path: &str) -> String {
         .and_then(|ext| ext.to_str())
         .unwrap_or("")
         .to_ascii_lowercase()
+}
+
+const VIRTUAL_TRANSCRIPT_MIN_BYTES: usize = 16 * 1024;
+const VIRTUAL_TRANSCRIPT_MIN_ROWS: usize = 128;
+const VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES: usize = 4 * 1024;
+
+fn should_virtualize_transcript(code: bool, text: &str) -> bool {
+    code && (text.len() >= VIRTUAL_TRANSCRIPT_MIN_BYTES
+        || text.lines().take(VIRTUAL_TRANSCRIPT_MIN_ROWS + 1).count() > VIRTUAL_TRANSCRIPT_MIN_ROWS)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct TranscriptSourceKey {
+    allocation: usize,
+    len: usize,
+    edge_hash: u64,
+    strip_read_gutter: bool,
+}
+
+fn transcript_source_key(text: &str, strip_read_gutter: bool) -> TranscriptSourceKey {
+    // Allocation identity and bounded edges catch streamed appends and full
+    // payload replacements without rescanning a potentially multi-megabyte
+    // transcript whenever unrelated pane state triggers a render.
+    let bytes = text.as_bytes();
+    let mut edge_hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in bytes.iter().take(64).chain(bytes.iter().rev().take(64)) {
+        edge_hash ^= u64::from(*byte);
+        edge_hash = edge_hash.wrapping_mul(0x100_0000_01b3);
+    }
+
+    TranscriptSourceKey {
+        allocation: bytes.as_ptr() as usize,
+        len: bytes.len(),
+        edge_hash,
+        strip_read_gutter,
+    }
+}
+
+fn transcript_segments(text: &str) -> Vec<Range<usize>> {
+    let mut segments = Vec::new();
+    let mut line_start = 0;
+
+    for line in text.split_inclusive('\n') {
+        let mut line_end = line_start + line.len();
+        if line.ends_with('\n') {
+            line_end -= 1;
+            if line_end > line_start && text.as_bytes()[line_end - 1] == b'\r' {
+                line_end -= 1;
+            }
+        }
+
+        if line_start == line_end {
+            segments.push(line_start..line_start);
+        } else {
+            let mut segment_start = line_start;
+            while segment_start < line_end {
+                let mut segment_end =
+                    (segment_start + VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES).min(line_end);
+                while !text.is_char_boundary(segment_end) {
+                    segment_end -= 1;
+                }
+                segments.push(segment_start..segment_end);
+                segment_start = segment_end;
+            }
+        }
+
+        line_start += line.len();
+    }
+
+    if segments.is_empty() && !text.is_empty() {
+        segments.push(0..text.len());
+    }
+
+    segments
+}
+
+struct VirtualTranscriptState {
+    source_key: TranscriptSourceKey,
+    source: SharedString,
+    segments: Rc<Vec<Range<usize>>>,
+    widest_segment: usize,
+    scroll: UniformListScrollHandle,
+}
+
+impl VirtualTranscriptState {
+    fn new(text: &str, strip_gutter: bool) -> Self {
+        let source_key = transcript_source_key(text, strip_gutter);
+        let source = normalized_virtual_transcript(text, strip_gutter);
+        let segments = transcript_segments(&source);
+        let widest_segment = segments
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, range)| range.len())
+            .map_or(0, |(index, _)| index);
+
+        Self {
+            source_key,
+            source: SharedString::from(source),
+            segments: Rc::new(segments),
+            widest_segment,
+            scroll: UniformListScrollHandle::default(),
+        }
+    }
+
+    fn sync(&mut self, text: &str, strip_gutter: bool) {
+        let source_key = transcript_source_key(text, strip_gutter);
+        if self.source_key == source_key {
+            return;
+        }
+
+        let source = normalized_virtual_transcript(text, strip_gutter);
+        let segments = transcript_segments(&source);
+        self.widest_segment = segments
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, range)| range.len())
+            .map_or(0, |(index, _)| index);
+        self.source_key = source_key;
+        self.source = SharedString::from(source);
+        self.segments = Rc::new(segments);
+    }
+}
+
+fn normalized_virtual_transcript(text: &str, strip_gutter: bool) -> String {
+    if strip_gutter {
+        strip_read_gutter(text).unwrap_or_else(|| text.to_owned())
+    } else {
+        text.to_owned()
+    }
+}
+
+/// Returns the syntax language and whether a Read gutter needs stripping.
+/// `None` identifies Markdown-native transcript details that retain rich text
+/// rendering instead of entering the code-oriented virtual list.
+fn code_transcript_format(item: &ChatItem, detail: &str) -> Option<(Cow<'static, str>, bool)> {
+    match item {
+        ChatItem::Command { .. } => Some((Cow::Borrowed(detect_output_language(detail)), false)),
+        ChatItem::FileChange { .. } => Some((Cow::Borrowed("diff"), false)),
+        ChatItem::Tool { kind, title, .. } => match kind.as_str() {
+            "TodoWrite" | "ExitPlanMode" | "Task" => None,
+            "Read" => Some((Cow::Owned(file_extension_lang(title)), true)),
+            _ => Some((Cow::Borrowed(detect_output_language(detail)), false)),
+        },
+        ChatItem::Reasoning { .. } => None,
+        _ => None,
+    }
 }
 
 /// Full text of an entry for the right-click Copy action — the whole message,
@@ -3374,7 +3521,7 @@ impl AgentPane {
     }
 
     fn render_entry_row(
-        &self,
+        &mut self,
         index: usize,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -3536,7 +3683,7 @@ impl AgentPane {
     /// Rows with detail (command output, reasoning text) expand on click into
     /// a bounded transcript surface with its own scroll position.
     fn render_work_row(
-        &self,
+        &mut self,
         index: usize,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -3560,7 +3707,7 @@ impl AgentPane {
                     command.clone(),
                     preview_line(output),
                     Some(state.to_string()),
-                    (!output.trim().is_empty()).then(|| output.clone()),
+                    (!output.trim().is_empty()).then_some(output.as_str()),
                 )
             }
             ChatItem::FileChange {
@@ -3573,7 +3720,7 @@ impl AgentPane {
                 "Edit".to_string(),
                 summary.clone(),
                 Some(status.clone()),
-                diff.clone().filter(|diff| !diff.trim().is_empty()),
+                diff.as_deref().filter(|diff| !diff.trim().is_empty()),
             ),
             ChatItem::Tool {
                 kind,
@@ -3590,14 +3737,14 @@ impl AgentPane {
                 kind.clone(),
                 title.clone(),
                 Some(status.clone()),
-                output.clone().filter(|output| !output.trim().is_empty()),
+                output.as_deref().filter(|output| !output.trim().is_empty()),
             ),
             ChatItem::Reasoning { text, .. } => (
                 IconName::Bot,
                 "Thinking".to_string(),
                 preview_line(text),
                 None,
-                Some(text.clone()),
+                Some(text.as_str()),
             ),
             _ => return div().into_any_element(),
         };
@@ -3645,6 +3792,7 @@ impl AgentPane {
             this.on_click(cx.listener(move |this, _, _, cx| {
                 if !this.expanded_rows.insert(index) {
                     this.expanded_rows.remove(&index);
+                    this.virtual_transcripts.remove(&index);
                 }
                 cx.notify();
             }))
@@ -3656,36 +3804,164 @@ impl AgentPane {
             .context_menu(Self::copy_menu(cx.entity().downgrade(), index))
             .child(header)
             .children(detail.filter(|_| expanded).map(|detail| {
-                // Fencing happens only for the expanded row, so collapsed
-                // transcripts never pay for it. Command and tool output
-                // become highlighted code blocks (sniffed language), edit
-                // diffs are known-format, and reasoning stays the agent's
-                // own markdown.
-                let markdown = match &self.items[index].item {
-                    ChatItem::Command { .. } => fenced_code_block(&detail),
-                    ChatItem::FileChange { .. } => fenced_code_block_as(&detail, "diff"),
-                    ChatItem::Tool { kind, title, .. } => match kind.as_str() {
-                        // Markdown-native payloads: plan approvals, todo
-                        // checklists, and subagent reports read as prose.
-                        "TodoWrite" | "ExitPlanMode" | "Task" => detail,
-                        // File reads highlight as their source language; the
-                        // extension is a registry alias, unknown ones fall
-                        // back to plain.
-                        "Read" => {
-                            let lang = file_extension_lang(title);
-                            match strip_read_gutter(&detail) {
-                                Some(body) => fenced_code_block_as(&body, &lang),
-                                None => fenced_code_block_as(&detail, &lang),
-                            }
+                let code_format = code_transcript_format(&self.items[index].item, detail);
+                let virtualized = should_virtualize_transcript(code_format.is_some(), detail);
+
+                let body = if virtualized {
+                    let (_, strip_gutter) = code_format.as_ref().expect("code format");
+                    let (source, segments, widest_segment, scroll) = {
+                        let state = self
+                            .virtual_transcripts
+                            .entry(index)
+                            .or_insert_with(|| VirtualTranscriptState::new(detail, *strip_gutter));
+                        state.sync(detail, *strip_gutter);
+                        (
+                            state.source.clone(),
+                            state.segments.clone(),
+                            state.widest_segment,
+                            state.scroll.clone(),
+                        )
+                    };
+                    let segment_count = segments.len();
+                    let line_height = px(f32::from(cx.theme().mono_font_size) * 1.5);
+                    let text_color = cx.theme().muted_foreground;
+                    let list_source = source.clone();
+                    let list_segments = segments.clone();
+
+                    div()
+                        .id(("wl-out", index))
+                        .w_full()
+                        .h(px(256.))
+                        .relative()
+                        .overflow_hidden()
+                        .rounded(cx.theme().radius)
+                        .bg(cx.theme().tokens.muted)
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .text_size(cx.theme().mono_font_size)
+                        // The outer transcript list is behind this viewport in
+                        // hit-test order. Occlusion prevents wheel input at the
+                        // virtual list's limits from moving the conversation.
+                        .occlude()
+                        .context_menu(Self::copy_menu(cx.entity().downgrade(), index))
+                        .child(
+                            uniform_list(
+                                SharedString::from(format!("wl-virtual-{index}")),
+                                segment_count,
+                                move |range, _, _| {
+                                    range
+                                        .filter_map(|segment_index| {
+                                            let range = list_segments.get(segment_index)?.clone();
+                                            Some(
+                                                div()
+                                                    .h(line_height)
+                                                    .flex_none()
+                                                    .line_height(line_height)
+                                                    .whitespace_nowrap()
+                                                    .text_color(text_color)
+                                                    .child(list_source[range].to_string()),
+                                            )
+                                        })
+                                        .collect::<Vec<_>>()
+                                },
+                            )
+                            .with_width_from_item(Some(widest_segment))
+                            .with_horizontal_sizing_behavior(
+                                ListHorizontalSizingBehavior::Unconstrained,
+                            )
+                            .track_scroll(&scroll)
+                            .size_full()
+                            .p_3(),
+                        )
+                        .child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .right_0()
+                                .bottom_0()
+                                .w(px(16.0))
+                                .child(
+                                    Scrollbar::vertical(&scroll)
+                                        .id(("wl-virtual-v-scrollbar", index))
+                                        .scrollbar_show(ScrollbarShow::Always),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .absolute()
+                                .left_0()
+                                .right_0()
+                                .bottom_0()
+                                .h(px(16.0))
+                                .child(
+                                    Scrollbar::horizontal(&scroll)
+                                        .id(("wl-virtual-h-scrollbar", index))
+                                        .scrollbar_show(ScrollbarShow::Always),
+                                ),
+                        )
+                        .into_any_element()
+                } else {
+                    self.virtual_transcripts.remove(&index);
+
+                    // Small technical transcripts retain syntax highlighting;
+                    // Markdown-native tool output and reasoning retain their
+                    // rich formatting. The expensive fence and gutter copy are
+                    // therefore bounded by the virtualization thresholds.
+                    let markdown = match code_format {
+                        Some((language, strip_gutter)) => {
+                            let normalized = if strip_gutter {
+                                strip_read_gutter(detail)
+                                    .map(Cow::Owned)
+                                    .unwrap_or(Cow::Borrowed(detail))
+                            } else {
+                                Cow::Borrowed(detail)
+                            };
+                            fenced_code_block_as(&normalized, language.as_ref())
                         }
-                        _ => fenced_code_block(&detail),
-                    },
-                    _ => detail,
+                        None => detail.to_owned(),
+                    };
+                    let detail_scroll = window
+                        .use_keyed_state(("wl-scroll", index), cx, |_, _| ScrollHandle::default())
+                        .read(cx)
+                        .clone();
+
+                    div()
+                        .w_full()
+                        .relative()
+                        .child(
+                            div()
+                                .id(("wl-out", index))
+                                .w_full()
+                                .max_h(px(256.))
+                                .overflow_y_scroll()
+                                .track_scroll(&detail_scroll)
+                                // The virtual conversation list handles wheel input
+                                // before child bubble listeners run. Occluding its
+                                // earlier hitbox makes this viewport the only scroll
+                                // target under the pointer, even at either limit.
+                                .occlude()
+                                .context_menu(Self::copy_menu(cx.entity().downgrade(), index))
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(
+                                    text::TextView::markdown(("wl-md", index), markdown)
+                                        .selectable(true),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .right_0()
+                                .bottom_0()
+                                .w(px(16.0))
+                                .child(
+                                    Scrollbar::vertical(&detail_scroll)
+                                        .id(("wl-scrollbar", index))
+                                        .scrollbar_show(ScrollbarShow::Always),
+                                ),
+                        )
+                        .into_any_element()
                 };
-                let detail_scroll = window
-                    .use_keyed_state(("wl-scroll", index), cx, |_, _| ScrollHandle::default())
-                    .read(cx)
-                    .clone();
 
                 div()
                     // Expanded transcript content starts at the same horizontal
@@ -3698,39 +3974,7 @@ impl AgentPane {
                     // the remaining window width.
                     .max_w(rems(AGENT_TEXT_MEASURE_REMS))
                     .relative()
-                    .child(
-                        div()
-                            .id(("wl-out", index))
-                            .w_full()
-                            .max_h(px(256.))
-                            .overflow_y_scroll()
-                            .track_scroll(&detail_scroll)
-                            // The virtual list handles wheel input before child
-                            // bubble listeners run. Occluding its earlier
-                            // hitbox makes this nested viewport the only scroll
-                            // target under the pointer, even at either limit.
-                            .occlude()
-                            .context_menu(Self::copy_menu(cx.entity().downgrade(), index))
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(
-                                text::TextView::markdown(("wl-md", index), markdown)
-                                    .selectable(true),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .absolute()
-                            .top_0()
-                            .right_0()
-                            .bottom_0()
-                            .w(px(16.0))
-                            .child(
-                                Scrollbar::vertical(&detail_scroll)
-                                    .id(("wl-scrollbar", index))
-                                    .scrollbar_show(ScrollbarShow::Always),
-                            ),
-                    )
+                    .child(body)
             }))
             .into_any_element()
     }
@@ -4393,8 +4637,10 @@ mod prompt_truncation_tests {
 
     use super::{
         AGENT_DISCLOSURE_DETAIL_INSET, AGENT_DISCLOSURE_GAP, AGENT_DISCLOSURE_PADDING,
-        AGENT_DISCLOSURE_SLOT, ChatItem, ComposerAction, Status, chat_item_from_session_item,
-        composer_action, should_show_jump_to_latest, truncated_user_prompt,
+        AGENT_DISCLOSURE_SLOT, ChatItem, ComposerAction, Status,
+        VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES, chat_item_from_session_item, composer_action,
+        should_show_jump_to_latest, should_virtualize_transcript, transcript_segments,
+        truncated_user_prompt,
     };
 
     #[test]
@@ -4467,6 +4713,44 @@ mod prompt_truncation_tests {
         assert_eq!(head.chars().count(), 512);
         assert!(giant_line.is_char_boundary(head.len()));
     }
+
+    #[test]
+    fn long_code_transcripts_switch_to_virtual_rows() {
+        let many_rows = "output\n".repeat(129);
+        let large_single_row = "x".repeat(16 * 1024);
+
+        assert!(should_virtualize_transcript(true, &many_rows));
+        assert!(should_virtualize_transcript(true, &large_single_row));
+        assert!(!should_virtualize_transcript(true, "short output"));
+        assert!(!should_virtualize_transcript(false, &many_rows));
+    }
+
+    #[test]
+    fn virtual_transcript_segments_preserve_rows_and_utf8_boundaries() {
+        let source = format!("alpha\r\n\n{}\nend", "你".repeat(2_000));
+        let segments = transcript_segments(&source);
+
+        assert_eq!(&source[segments[0].clone()], "alpha");
+        assert_eq!(&source[segments[1].clone()], "");
+        assert_eq!(&source[segments.last().expect("final row").clone()], "end");
+        assert!(
+            segments
+                .iter()
+                .all(|range| source.is_char_boundary(range.start)
+                    && source.is_char_boundary(range.end)
+                    && range.len() <= VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES)
+        );
+        assert!(segments.iter().filter(|range| range.len() > 0).count() > 3);
+    }
+
+    #[test]
+    fn virtual_transcript_keeps_one_segment_per_short_logical_row() {
+        let source = "row\n".repeat(10_000);
+        let segments = transcript_segments(&source);
+
+        assert_eq!(segments.len(), 10_000);
+        assert!(segments.iter().all(|range| &source[range.clone()] == "row"));
+    }
 }
 
 #[cfg(test)]
@@ -4492,19 +4776,22 @@ mod read_gutter_tests {
 
 #[cfg(test)]
 mod fence_tests {
-    use super::{detect_output_language, fenced_code_block};
+    use super::{detect_output_language, fenced_code_block_as};
 
     #[test]
     fn fence_outgrows_backtick_runs_and_sniffs_language() {
-        assert_eq!(fenced_code_block("plain output"), "```\nplain output\n```");
         assert_eq!(
-            fenced_code_block("{\"key\": 1}"),
+            fenced_code_block_as("plain output", detect_output_language("plain output")),
+            "```\nplain output\n```"
+        );
+        assert_eq!(
+            fenced_code_block_as("{\"key\": 1}", detect_output_language("{\"key\": 1}")),
             "```json\n{\"key\": 1}\n```"
         );
         assert_eq!(detect_output_language("diff --git a/x b/x"), "diff");
 
         let tricky = "text with ```` four backticks";
-        let fenced = fenced_code_block(tricky);
+        let fenced = fenced_code_block_as(tricky, "");
         assert!(
             fenced.starts_with("`````\n"),
             "fence must outgrow body runs"
