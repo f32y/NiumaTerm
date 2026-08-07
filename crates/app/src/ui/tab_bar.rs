@@ -13,7 +13,6 @@ use gpui_component::{ActiveTheme, Sizable};
 use nmt_terminal::event::{ProgressReport, ProgressState};
 
 use super::Shell;
-use super::agent_pane::AgentKind;
 use super::shell::TabSurface;
 use crate::tabs::{TabId, TabManager};
 use crate::ui::AppSettings;
@@ -189,8 +188,8 @@ impl TabStrip {
             .collect();
 
         // `+` right after the last tab opens the new-tab menu: one entry per
-        // configured terminal profile, plus the Codex agent tab. Ctrl+Shift+T
-        // still opens the default profile directly.
+        // configured terminal profile, plus one per agent profile.
+        // Ctrl+Shift+T still opens the default profile directly.
         let menu_shell = cx.entity();
         let new_tab = Button::new("tab-new")
             .ghost()
@@ -224,20 +223,29 @@ impl TabStrip {
                     ));
                 }
 
-                let codex_shell = menu_shell.clone();
-                let claude_shell = menu_shell.clone();
+                let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
 
-                menu.separator()
-                    .item(PopupMenuItem::new("Codex").on_click(move |_, window, cx| {
-                        codex_shell.update(cx, |this, cx| {
-                            this.open_agent_tab(AgentKind::Codex, window, cx)
-                        });
-                    }))
-                    .item(PopupMenuItem::new("Claude").on_click(move |_, window, cx| {
-                        claude_shell.update(cx, |this, cx| {
-                            this.open_agent_tab(AgentKind::Claude, window, cx)
-                        });
-                    }))
+                // No separator over an empty agent section (every agent
+                // profile deleted).
+                if !agent_profiles.is_empty() {
+                    menu = menu.separator();
+                }
+
+                for (ix, profile) in agent_profiles.into_iter().enumerate() {
+                    let label = if profile.name.trim().is_empty() {
+                        format!("Agent Profile {}", ix + 1)
+                    } else {
+                        profile.name.clone()
+                    };
+                    let item_shell = menu_shell.clone();
+
+                    menu = menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
+                        let profile = profile.clone();
+                        item_shell.update(cx, |this, cx| this.open_agent_tab(profile, window, cx));
+                    }));
+                }
+
+                menu
             });
 
         let closeable = items.len() > 1;

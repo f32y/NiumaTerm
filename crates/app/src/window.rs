@@ -168,6 +168,7 @@ mod tests {
                     args: vec!["-NoLogo".into()],
                     cwd: Some("C:/Projects/example/repo".into()),
                     agent: None,
+                    agent_profile: None,
                     panes: None,
                 }],
             }],

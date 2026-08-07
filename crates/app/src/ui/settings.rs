@@ -10,17 +10,22 @@ use futures::StreamExt as _;
 use futures::channel::mpsc::unbounded;
 use gpui::prelude::{FluentBuilder as _, InteractiveElement as _, StatefulInteractiveElement as _};
 use gpui::{
-    App, AppContext as _, BorrowAppContext as _, ClipboardItem, Div, Entity, FileDialogFilter,
-    Global, Hsla, ParentElement as _, PathPromptOptions, SharedString, StyleRefinement,
-    Styled as _, Subscription, Task, WindowBackgroundAppearance, div, px, relative, rgba,
+    AnyElement, App, AppContext as _, BorrowAppContext as _, ClipboardItem, Div, Entity,
+    FileDialogFilter, Global, Hsla, IntoElement as _, ParentElement as _, PathPromptOptions,
+    SharedString, StyleRefinement, Styled as _, Subscription, Task, Window,
+    WindowBackgroundAppearance, div, px, relative, rgba,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::group_box::GroupBoxVariant;
+use gpui_component::dialog::{DialogClose, DialogFooter};
+use gpui_component::group_box::{GroupBox, GroupBoxVariants as _};
 use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::label::Label;
+use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::setting::{
-    NumberFieldOptions, SelectIndex, SettingField, SettingGroup, SettingItem, SettingPage, Settings,
+    NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage, Settings,
 };
 use gpui_component::slider::{Slider, SliderEvent, SliderState};
+use gpui_component::switch::Switch;
 use gpui_component::{
     ActiveTheme as _, AxisExt as _, Disableable as _, Sizable as _, Theme as ComponentTheme,
     ThemeConfig as ComponentThemeConfig, ThemeRegistry as ComponentThemeRegistry,
@@ -70,7 +75,7 @@ fn initial_font_family() -> SharedString {
 }
 
 pub use nmt_config::appearance::InputStyle;
-pub use nmt_config::profile::Profile;
+pub use nmt_config::profile::{AgentProfile, AgentProfileKind, EnvVar, Profile};
 
 fn input_style_label(style: InputStyle) -> &'static str {
     match style {
@@ -103,6 +108,40 @@ fn builtin_profile() -> Profile {
     }
 }
 
+/// Display name of a supported agent CLI, doubling as the seeded profile name.
+fn agent_kind_label(kind: AgentProfileKind) -> &'static str {
+    match kind {
+        AgentProfileKind::ClaudeCode => "Claude Code",
+        AgentProfileKind::Codex => "Codex",
+    }
+}
+
+/// The built-in agent profile for `kind`. The bare executable name resolves
+/// through PATH (and PATHEXT on Windows), so it finds `claude.exe` as well as
+/// the npm `claude.cmd` shim.
+pub(crate) fn builtin_agent_profile(kind: AgentProfileKind) -> AgentProfile {
+    let executable = match kind {
+        AgentProfileKind::ClaudeCode => "claude",
+        AgentProfileKind::Codex => "codex",
+    };
+
+    AgentProfile {
+        name: agent_kind_label(kind).to_string(),
+        kind,
+        executable: executable.to_string(),
+        ..AgentProfile::default()
+    }
+}
+
+/// The agent profiles seeded when the config file defines none: one per
+/// supported agent CLI.
+fn builtin_agent_profiles() -> Vec<AgentProfile> {
+    vec![
+        builtin_agent_profile(AgentProfileKind::ClaudeCode),
+        builtin_agent_profile(AgentProfileKind::Codex),
+    ]
+}
+
 /// The app-wide settings model, stored as a gpui global.
 pub struct AppSettings {
     /// Selected file stem in the per-user `themes` directory.
@@ -117,6 +156,11 @@ pub struct AppSettings {
     /// Name of the profile new terminals use. Always references an existing
     /// profile by name (seeded to the first profile when unset).
     pub default_profile: String,
+    /// Launch profiles for agent tabs (executable, endpoint, env vars).
+    pub agent_profiles: Vec<AgentProfile>,
+    /// Name of the agent profile new agent tabs use. Always references an
+    /// existing profile by name (seeded to the first profile when unset).
+    pub default_agent_profile: String,
     /// Render command blocks as a split frozen-history list.
     pub command_blocks: bool,
     /// Show today's ccusage token totals in the titlebar.
@@ -193,6 +237,8 @@ impl Default for AppSettings {
             cursor_shape: CursorShape::Block,
             profiles: vec![builtin_profile()],
             default_profile: builtin_profile().name,
+            agent_profiles: builtin_agent_profiles(),
+            default_agent_profile: agent_kind_label(AgentProfileKind::ClaudeCode).to_string(),
             command_blocks: true,
             show_daily_token_usage: false,
             show_git_status_on_title_bar: false,
@@ -229,9 +275,70 @@ impl Default for AppSettings {
 
 impl Global for AppSettings {}
 
-struct ShellPathFieldState {
+/// Draft edited in the agent-profile dialog: `target` is the list index in
+/// edit mode, `None` while adding. Inputs write here; only Save commits the
+/// draft into `AppSettings`, so Cancel is a plain close.
+#[derive(Default)]
+struct AgentProfileDraft {
+    target: Option<usize>,
+    profile: AgentProfile,
+}
+
+impl Global for AgentProfileDraft {}
+
+/// Persistent input state for a text field inside a profile card, created
+/// via `window.use_keyed_state` so it survives the per-frame settings-view
+/// rebuild. The subscription writes edits back into the `AppSettings` global.
+struct CardInputState {
     input: Entity<InputState>,
     _subscription: Subscription,
+}
+
+/// A window-keyed text input bound to a value in the `AppSettings` global.
+/// `apply` receives the new text on every change. When the backing value
+/// changes underneath a reused key (e.g. a profile removal shifts indices),
+/// the sync below rewrites the input to match.
+fn card_text_input(
+    key: String,
+    value: SharedString,
+    masked: bool,
+    apply: impl Fn(String, &mut App) + 'static,
+    window: &mut Window,
+    cx: &mut App,
+) -> Entity<InputState> {
+    let state = window.use_keyed_state(SharedString::from(key), cx, {
+        let value = value.clone();
+
+        move |window, cx| {
+            let input = cx.new(|cx| {
+                InputState::new(window, cx)
+                    .masked(masked)
+                    .default_value(value)
+            });
+
+            let _subscription = cx.subscribe(&input, move |_, input, event, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let value = input.read(cx).value().to_string();
+                    apply(value, cx);
+                }
+            });
+
+            CardInputState {
+                input,
+                _subscription,
+            }
+        }
+    });
+
+    let input = state.read(cx).input.clone();
+
+    if input.read(cx).value() != value {
+        input.update(cx, |input, cx| {
+            input.set_value(value.clone(), window, cx);
+        });
+    }
+
+    input
 }
 
 /// Snap a persisted refresh interval to the allowed set, falling back to 30.
@@ -325,6 +432,28 @@ impl AppSettings {
             profiles[0].name.clone()
         };
 
+        // Seed the built-ins only for a never-configured section; once the
+        // dialog has saved (`initialized`), an empty list is a deliberate
+        // "no agent profiles" state.
+        let agent_profiles: Vec<AgentProfile> =
+            if config.agent_profiles.list.is_empty() && !config.agent_profiles.initialized {
+                builtin_agent_profiles()
+            } else {
+                config.agent_profiles.list.clone()
+            };
+
+        let default_agent_profile = if agent_profiles
+            .iter()
+            .any(|p| p.name == config.agent_profiles.default)
+        {
+            config.agent_profiles.default.clone()
+        } else {
+            agent_profiles
+                .first()
+                .map(|p| p.name.clone())
+                .unwrap_or_default()
+        };
+
         Self {
             theme: if config.theme.is_empty() {
                 default_theme()
@@ -337,6 +466,8 @@ impl AppSettings {
             cursor_shape: config.cursor.shape,
             profiles,
             default_profile,
+            agent_profiles,
+            default_agent_profile,
             command_blocks: appearance.command_blocks,
             show_daily_token_usage: appearance.show_daily_token_usage,
             show_git_status_on_title_bar: appearance.show_git_status_on_title_bar,
@@ -420,6 +551,85 @@ impl AppSettings {
         }
 
         profile.name = name;
+    }
+
+    /// A profile name that collides with no existing agent profile
+    /// (`exclude` skips the entry being edited): the trimmed `desired` name,
+    /// the kind label when empty, plus a numeric suffix on collision. Names
+    /// must stay unique — they key the default selector, tab persistence,
+    /// and per-profile thread defaults.
+    pub fn unique_agent_profile_name(
+        &self,
+        desired: &str,
+        kind: AgentProfileKind,
+        exclude: Option<usize>,
+    ) -> String {
+        let base = if desired.trim().is_empty() {
+            agent_kind_label(kind)
+        } else {
+            desired.trim()
+        };
+
+        let taken = |name: &str| {
+            self.agent_profiles
+                .iter()
+                .enumerate()
+                .any(|(ix, p)| Some(ix) != exclude && p.name == name)
+        };
+
+        let mut n = 2;
+        let mut name = base.to_string();
+        while taken(&name) {
+            name = format!("{base} {n}");
+            n += 1;
+        }
+        name
+    }
+
+    /// Remove the agent profile at `ix`; removing the default falls the
+    /// default back to the first remaining profile (or clears it when the
+    /// list becomes empty).
+    pub fn remove_agent_profile(&mut self, ix: usize) {
+        if ix >= self.agent_profiles.len() {
+            return;
+        }
+
+        let removed = self.agent_profiles.remove(ix);
+
+        if self.default_agent_profile == removed.name {
+            self.default_agent_profile = self
+                .agent_profiles
+                .first()
+                .map(|p| p.name.clone())
+                .unwrap_or_default();
+        }
+    }
+
+    /// Replace the agent profile at `ix`, keeping the default reference in
+    /// sync with a rename. Out-of-range updates are ignored (stale index
+    /// after a removal).
+    pub fn update_agent_profile(&mut self, ix: usize, profile: AgentProfile) {
+        let Some(slot) = self.agent_profiles.get_mut(ix) else {
+            return;
+        };
+
+        if slot.name == self.default_agent_profile {
+            self.default_agent_profile = profile.name.clone();
+        }
+
+        *slot = profile;
+    }
+
+    /// The agent profile new agent tabs launch with: the default by name,
+    /// falling back to the first profile, then to the built-in Claude Code
+    /// profile if the list is somehow empty.
+    pub fn default_agent_profile_entry(&self) -> AgentProfile {
+        self.agent_profiles
+            .iter()
+            .find(|p| p.name == self.default_agent_profile)
+            .or_else(|| self.agent_profiles.first())
+            .cloned()
+            .unwrap_or_else(|| builtin_agent_profile(AgentProfileKind::ClaudeCode))
     }
 
     /// The default profile's launch command: shell plus whitespace-split
@@ -514,6 +724,8 @@ impl AppSettings {
             remote_session: &remote_session,
             profiles: &profiles,
             default_profile: &self.default_profile,
+            agent_profiles: &self.agent_profiles,
+            default_agent_profile: &self.default_agent_profile,
         }) {
             warn!("failed to save settings to config.toml: {err}");
         }
@@ -1476,6 +1688,7 @@ fn remote_client_status(_cx: &mut App) -> Div {
 
 pub fn settings_view(cx: &App) -> Settings {
     let profiles = cx.global::<AppSettings>().profiles.clone();
+    let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
     let transparency_enabled = cx.global::<AppSettings>().window_transparency_enabled;
     let background_image_enabled = cx.global::<AppSettings>().background_image.is_some();
     let shell_integration_mismatched = shell_integration_dll_mismatched();
@@ -1809,7 +2022,7 @@ pub fn settings_view(cx: &App) -> Settings {
                         ),
                 ),
         )
-        .page(profiles_page(&profiles))
+        .page(profiles_page(&profiles, &agent_profiles))
         .page(agent_page())
         .page(
             SettingPage::new("System")
@@ -1973,12 +2186,48 @@ pub fn settings_view(cx: &App) -> Settings {
         .page(remote_session_page())
 }
 
-/// Position of the Profiles page in `settings_view`'s `.page(...)` chain
-/// (Terminal, Appearance, Profiles, …); the Add Profile button targets it
-/// when jumping to a freshly created profile card.
-const PROFILES_PAGE_IX: usize = 2;
+/// The Profiles page: exactly two groups — Terminal Profile and Agent
+/// Profile — so the sidebar shows two stable entries. Profile cards render
+/// inside each group instead of as their own groups, which would otherwise
+/// add one sidebar entry per profile under `single_group_pages`.
+fn profiles_page(profiles: &[Profile], agent_profiles: &[AgentProfile]) -> SettingPage {
+    SettingPage::new("Profiles")
+        .default_open(true)
+        .group(terminal_profiles_group(profiles))
+        .group(agent_profiles_group(agent_profiles))
+}
 
-fn profiles_page(profiles: &[Profile]) -> SettingPage {
+/// One labeled row inside a profile card: title and muted description on the
+/// left, the control on the right (mirrors `SettingItem`'s horizontal
+/// layout so cards read like regular setting rows).
+fn card_row(
+    title: impl Into<SharedString>,
+    description: impl Into<SharedString>,
+    control: impl gpui::IntoElement,
+    cx: &App,
+) -> Div {
+    h_flex()
+        .w_full()
+        .justify_between()
+        .items_start()
+        .gap_3()
+        .child(
+            v_flex()
+                .flex_1()
+                .max_w_3_5()
+                .gap_1()
+                .child(Label::new(title.into()).text_sm())
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(description.into()),
+                ),
+        )
+        .child(control.into_any_element())
+}
+
+fn terminal_profiles_group(profiles: &[Profile]) -> SettingGroup {
     // Selector options come from the current names; the settings view is
     // rebuilt per render, so renames refresh the list immediately.
     let options: Vec<(SharedString, SharedString)> = profiles
@@ -1998,238 +2247,106 @@ fn profiles_page(profiles: &[Profile]) -> SettingPage {
         })
         .collect();
 
-    let mut page = SettingPage::new("Profiles").default_open(true).group(
-        SettingGroup::new()
-            .title("Profiles")
-            .description("Shell profiles available to terminals.")
-            .item(
-                SettingItem::new(
-                    "Default Profile",
-                    SettingField::dropdown(
-                        options,
-                        |cx| cx.global::<AppSettings>().default_profile.clone().into(),
-                        |value, cx| {
-                            cx.global_mut::<AppSettings>().default_profile = value.to_string();
-                        },
-                    ),
-                )
-                .description("Profile used by new terminals."),
+    let mut group = SettingGroup::new()
+        .title("Terminal Profile")
+        .description("Shell profiles available to terminals.")
+        .item(
+            SettingItem::new(
+                "Default Profile",
+                SettingField::dropdown(
+                    options,
+                    |cx| cx.global::<AppSettings>().default_profile.clone().into(),
+                    |value, cx| {
+                        cx.global_mut::<AppSettings>().default_profile = value.to_string();
+                    },
+                ),
             )
-            .item(
-                SettingItem::new(
-                    "Add Profile",
-                    SettingField::render(|_, _, _| {
-                        Button::new("profile-add").outline().label("Add").on_click(
-                            |_, window, cx: &mut App| {
-                                cx.global_mut::<AppSettings>().add_profile();
-
-                                // Jump to the new profile's card: group 0 is
-                                // this page-level group, profile cards follow
-                                // in list order.
-                                let group_ix = cx.global::<AppSettings>().profiles.len();
-                                Settings::select(
-                                    "app-settings",
-                                    SelectIndex {
-                                        page_ix: PROFILES_PAGE_IX,
-                                        group_ix: Some(group_ix),
-                                    },
-                                    window,
-                                    cx,
-                                );
-                            },
-                        )
-                    }),
-                )
-                .description("Create a new profile."),
-            ),
-    );
+            .description("Profile used by new terminals."),
+        )
+        .item(
+            SettingItem::new(
+                "Add Profile",
+                SettingField::render(|_, _, _| {
+                    Button::new("profile-add").outline().label("Add").on_click(
+                        |_, _, cx: &mut App| {
+                            cx.global_mut::<AppSettings>().add_profile();
+                        },
+                    )
+                }),
+            )
+            .description("Create a new profile."),
+        );
 
     let count = profiles.len();
-    for (ix, profile) in profiles.iter().enumerate() {
+    for ix in 0..count {
+        group = group.item(terminal_profile_card(ix, count));
+    }
+    group
+}
+
+fn terminal_profile_card(ix: usize, count: usize) -> SettingItem {
+    SettingItem::render(move |options, window, cx| {
+        // get(ix): the render closure outlives profile removal, so a stale
+        // index must read as empty, not panic.
+        let profile = cx
+            .global::<AppSettings>()
+            .profiles
+            .get(ix)
+            .cloned()
+            .unwrap_or_default();
+
         let title = if profile.name.is_empty() {
             format!("Profile {}", ix + 1)
         } else {
             profile.name.clone()
         };
 
-        page = page.group(
-            SettingGroup::new()
-                // Rounded outline box so each profile reads as one card.
-                .variant(GroupBoxVariant::Outline)
-                .title(title)
-                .item(
-                    SettingItem::new(
-                        "Name",
-                        SettingField::input(
-                            // get(ix): the closure outlives profile removal,
-                            // so a stale index must read as empty, not panic.
-                            move |cx| {
-                                cx.global::<AppSettings>()
-                                    .profiles
-                                    .get(ix)
-                                    .map(|profile| profile.name.clone())
-                                    .unwrap_or_default()
-                                    .into()
-                            },
-                            move |value, cx| {
-                                cx.global_mut::<AppSettings>()
-                                    .rename_profile(ix, value.to_string());
-                            },
-                        ),
-                    )
-                    .description("Display name; the card title and default selector follow it."),
-                )
-                .item(
-                    SettingItem::new(
-                        "Shell Path",
-                        shell_path_field(ix).on_reset(
-                            move |cx| {
-                                cx.global::<AppSettings>()
-                                    .profiles
-                                    .get(ix)
-                                    .is_some_and(|profile| profile.shell != DEFAULT_SHELL)
-                            },
-                            move |_, cx| {
-                                if let Some(profile) =
-                                    cx.global_mut::<AppSettings>().profiles.get_mut(ix)
-                                {
-                                    profile.shell = DEFAULT_SHELL.to_string();
-                                }
-                            },
-                        ),
-                    )
-                    .description("Path to the shell executable."),
-                )
-                .item(
-                    SettingItem::new(
-                        "Arguments",
-                        SettingField::input(
-                            move |cx| {
-                                cx.global::<AppSettings>()
-                                    .profiles
-                                    .get(ix)
-                                    .map(|profile| profile.args.clone())
-                                    .unwrap_or_default()
-                                    .into()
-                            },
-                            move |value, cx| {
-                                if let Some(profile) =
-                                    cx.global_mut::<AppSettings>().profiles.get_mut(ix)
-                                {
-                                    profile.args = value.to_string();
-                                }
-                            },
-                        )
-                        .default_value(SharedString::from("")),
-                    )
-                    .description("Command-line arguments, space-separated."),
-                )
-                .item(
-                    SettingItem::new(
-                        "Remove Profile",
-                        SettingField::render(move |_, _, _| {
-                            Button::new(("profile-remove", ix))
-                                .danger()
-                                .label("Remove")
-                                .disabled(count <= 1)
-                                .on_click(move |_, window, cx: &mut App| {
-                                    let name = cx
-                                        .global::<AppSettings>()
-                                        .profiles
-                                        .get(ix)
-                                        .map(|profile| profile.name.clone())
-                                        .unwrap_or_default();
-                                    let subject = if name.is_empty() {
-                                        "this profile".to_string()
-                                    } else {
-                                        format!("profile \"{name}\"")
-                                    };
+        let disabled = options.disabled;
+        let size = options.size;
 
-                                    window.open_alert_dialog(cx, move |alert, _, _| {
-                                        alert
-                                            .confirm()
-                                            .title("Remove Profile")
-                                            .description(format!(
-                                                "Remove {subject}? This cannot be undone."
-                                            ))
-                                            .on_ok(move |_, _, cx| {
-                                                cx.global_mut::<AppSettings>().remove_profile(ix);
-                                                true
-                                            })
-                                    });
-                                })
-                        }),
-                    )
-                    .description(if count <= 1 {
-                        "The last profile cannot be removed."
-                    } else {
-                        "Removing the default falls back to the first profile."
-                    }),
-                ),
-        );
-    }
-    page
-}
-
-fn shell_path_field(ix: usize) -> SettingField<SharedString> {
-    SettingField::render(move |options, window, cx| {
-        let value = SharedString::from(
-            cx.global::<AppSettings>()
-                .profiles
-                .get(ix)
-                .map(|profile| profile.shell.clone())
-                .unwrap_or_default(),
+        let name_input = card_text_input(
+            format!("terminal-profile-name-{ix}"),
+            profile.name.clone().into(),
+            false,
+            move |value, cx| cx.global_mut::<AppSettings>().rename_profile(ix, value),
+            window,
+            cx,
         );
 
-        let state =
-            window.use_keyed_state(SharedString::from(format!("shell-path-state-{ix}")), cx, {
-                let value = value.clone();
-
-                move |window, cx| {
-                    let input = cx.new(|cx| InputState::new(window, cx).default_value(value));
-
-                    let _subscription = cx.subscribe(&input, move |_, input, event, cx| {
-                        if matches!(event, InputEvent::Change) {
-                            let value = input.read(cx).value().to_string();
-
-                            if let Some(profile) =
-                                cx.global_mut::<AppSettings>().profiles.get_mut(ix)
-                            {
-                                profile.shell = value;
-                            }
-                        }
-                    });
-
-                    ShellPathFieldState {
-                        input,
-                        _subscription,
-                    }
+        let shell_input = card_text_input(
+            format!("terminal-profile-shell-{ix}"),
+            profile.shell.clone().into(),
+            false,
+            move |value, cx| {
+                if let Some(profile) = cx.global_mut::<AppSettings>().profiles.get_mut(ix) {
+                    profile.shell = value;
                 }
-            });
+            },
+            window,
+            cx,
+        );
 
-        let input = state.read(cx).input.clone();
+        let args_input = card_text_input(
+            format!("terminal-profile-args-{ix}"),
+            profile.args.clone().into(),
+            false,
+            move |value, cx| {
+                if let Some(profile) = cx.global_mut::<AppSettings>().profiles.get_mut(ix) {
+                    profile.args = value;
+                }
+            },
+            window,
+            cx,
+        );
 
-        if input.read(cx).value() != value {
-            input.update(cx, |input, cx| {
-                input.set_value(value.clone(), window, cx);
-            });
-        }
-
-        let browse_input = input.clone();
-
-        v_flex()
+        let browse_input = shell_input.clone();
+        let shell_control = v_flex()
             .gap_2()
-            .map(|this| {
-                if options.layout.is_horizontal() {
-                    this.w_64()
-                } else {
-                    this.w_full()
-                }
-            })
+            .w_64()
             .child(
-                Input::new(&input)
-                    .disabled(options.disabled)
-                    .with_size(options.size)
+                Input::new(&shell_input)
+                    .disabled(disabled)
+                    .with_size(size)
                     .w_full(),
             )
             .child(
@@ -2237,7 +2354,7 @@ fn shell_path_field(ix: usize) -> SettingField<SharedString> {
                     Button::new(("profile-shell-browse", ix))
                         .outline()
                         .label("Browse")
-                        .disabled(options.disabled)
+                        .disabled(disabled)
                         .w(relative(1. / 3.))
                         .on_click(move |_, window, cx| {
                             let rx = cx.prompt_for_paths(PathPromptOptions {
@@ -2268,8 +2385,549 @@ fn shell_path_field(ix: usize) -> SettingField<SharedString> {
                                 .detach();
                         }),
                 ),
-            )
+            );
+
+        let remove_button = Button::new(("profile-remove", ix))
+            .danger()
+            .label("Remove")
+            .disabled(disabled || count <= 1)
+            .on_click(move |_, window, cx: &mut App| {
+                let name = cx
+                    .global::<AppSettings>()
+                    .profiles
+                    .get(ix)
+                    .map(|profile| profile.name.clone())
+                    .unwrap_or_default();
+                let subject = if name.is_empty() {
+                    "this profile".to_string()
+                } else {
+                    format!("profile \"{name}\"")
+                };
+
+                window.open_alert_dialog(cx, move |alert, _, _| {
+                    alert
+                        .confirm()
+                        .title("Remove Profile")
+                        .description(format!("Remove {subject}? This cannot be undone."))
+                        .on_ok(move |_, _, cx| {
+                            cx.global_mut::<AppSettings>().remove_profile(ix);
+                            true
+                        })
+                });
+            });
+
+        GroupBox::new().outline().title(title).child(
+            v_flex()
+                .w_full()
+                .gap_4()
+                .child(card_row(
+                    "Name",
+                    "Display name; the card title and default selector follow it.",
+                    Input::new(&name_input)
+                        .disabled(disabled)
+                        .with_size(size)
+                        .w_64(),
+                    cx,
+                ))
+                .child(card_row(
+                    "Shell Path",
+                    "Path to the shell executable.",
+                    shell_control,
+                    cx,
+                ))
+                .child(card_row(
+                    "Arguments",
+                    "Command-line arguments, space-separated.",
+                    Input::new(&args_input)
+                        .disabled(disabled)
+                        .with_size(size)
+                        .w_64(),
+                    cx,
+                ))
+                .child(card_row(
+                    "Remove Profile",
+                    if count <= 1 {
+                        "The last profile cannot be removed."
+                    } else {
+                        "Removing the default falls back to the first profile."
+                    },
+                    remove_button,
+                    cx,
+                )),
+        )
     })
+}
+
+fn agent_profiles_group(agent_profiles: &[AgentProfile]) -> SettingGroup {
+    let options: Vec<(SharedString, SharedString)> = agent_profiles
+        .iter()
+        .enumerate()
+        .map(|(ix, p)| {
+            let label = if p.name.is_empty() {
+                format!("Agent Profile {}", ix + 1)
+            } else {
+                p.name.clone()
+            };
+
+            (
+                SharedString::from(p.name.clone()),
+                SharedString::from(label),
+            )
+        })
+        .collect();
+
+    let mut group = SettingGroup::new()
+        .title("Agent Profile")
+        .description("Launch profiles for agent tabs (Claude Code and Codex).")
+        .item(
+            SettingItem::new(
+                "Default Profile",
+                SettingField::dropdown(
+                    options,
+                    |cx| {
+                        cx.global::<AppSettings>()
+                            .default_agent_profile
+                            .clone()
+                            .into()
+                    },
+                    |value, cx| {
+                        cx.global_mut::<AppSettings>().default_agent_profile = value.to_string();
+                    },
+                ),
+            )
+            .description("Profile used by new agent tabs."),
+        )
+        .item(
+            SettingItem::new(
+                "Add Profile",
+                SettingField::render(|_, _, _| {
+                    Button::new("agent-profile-add")
+                        .outline()
+                        .label("Add")
+                        .on_click(|_, window, cx: &mut App| {
+                            open_agent_profile_dialog(None, window, cx);
+                        })
+                }),
+            )
+            .description("Create a new agent profile."),
+        );
+
+    for (ix, profile) in agent_profiles.iter().enumerate() {
+        let label = if profile.name.is_empty() {
+            format!("Agent Profile {}", ix + 1)
+        } else {
+            profile.name.clone()
+        };
+
+        group = group.item(
+            SettingItem::new(
+                label,
+                SettingField::render(move |_, _, _| {
+                    Button::new(("agent-profile-edit", ix))
+                        .outline()
+                        .label("Edit")
+                        .on_click(move |_, window, cx: &mut App| {
+                            open_agent_profile_dialog(Some(ix), window, cx);
+                        })
+                }),
+            )
+            .description(agent_kind_label(profile.kind)),
+        );
+    }
+    group
+}
+
+/// Open the add/edit dialog for an agent profile. `target` is the index in
+/// `AppSettings::agent_profiles` for edit mode, `None` for a new profile.
+/// The dialog edits an [`AgentProfileDraft`]; Save commits, Cancel discards.
+fn open_agent_profile_dialog(target: Option<usize>, window: &mut Window, cx: &mut App) {
+    let profile = match target {
+        Some(ix) => cx
+            .global::<AppSettings>()
+            .agent_profiles
+            .get(ix)
+            .cloned()
+            .unwrap_or_default(),
+        // A new profile starts from the Claude Code built-in with a blank
+        // name; Save fills in a unique placeholder.
+        None => AgentProfile {
+            name: String::new(),
+            ..builtin_agent_profile(AgentProfileKind::ClaudeCode)
+        },
+    };
+    cx.set_global(AgentProfileDraft { target, profile });
+
+    window.open_dialog(cx, move |dialog, window, _| {
+        let title = if target.is_some() {
+            "Edit Agent Profile"
+        } else {
+            "Add Agent Profile"
+        };
+        let settings_height = window.viewport_size().height;
+        let dialog_height = settings_height * 0.6;
+        let dialog_top = (settings_height - dialog_height) * 0.5;
+
+        let mut footer = DialogFooter::new()
+            .child(DialogClose::new().child(Button::new("agent-profile-cancel").label("Cancel")));
+
+        if let Some(ix) = target {
+            footer = footer.child(
+                Button::new("agent-profile-delete")
+                    .danger()
+                    .label("Delete")
+                    .on_click(move |_, window, cx: &mut App| {
+                        let name = cx.global::<AgentProfileDraft>().profile.name.clone();
+                        let subject = if name.is_empty() {
+                            "this profile".to_string()
+                        } else {
+                            format!("profile \"{name}\"")
+                        };
+
+                        window.open_alert_dialog(cx, move |alert, _, _| {
+                            alert
+                                .confirm()
+                                .title("Delete Agent Profile")
+                                .description(format!("Delete {subject}? This cannot be undone."))
+                                .on_ok(move |_, window, cx| {
+                                    cx.global_mut::<AppSettings>().remove_agent_profile(ix);
+                                    // Pop the confirm and the edit dialog
+                                    // explicitly, then return false so the
+                                    // alert's own close path does not pop a
+                                    // third dialog (the settings one).
+                                    window.close_dialog(cx);
+                                    window.close_dialog(cx);
+                                    false
+                                })
+                        });
+                    }),
+            );
+        }
+
+        footer = footer.child(
+            Button::new("agent-profile-save")
+                .primary()
+                .label("Save")
+                .on_click(|_, window, cx: &mut App| {
+                    save_agent_profile_draft(cx);
+                    window.close_dialog(cx);
+                }),
+        );
+
+        dialog
+            .title(title)
+            .overlay_closable(false)
+            .margin_top(dialog_top)
+            .w(px(560.))
+            .h(dialog_height)
+            .content(|content, window, cx| {
+                content.overflow_hidden().child(
+                    div().flex_1().overflow_hidden().child(
+                        v_flex()
+                            .size_full()
+                            .overflow_y_scrollbar()
+                            .child(div().pr_2().child(agent_profile_dialog_content(window, cx))),
+                    ),
+                )
+            })
+            .footer(footer)
+    });
+}
+
+/// Commit the dialog draft into `AppSettings`: dedupe the name, then update
+/// the edited entry or append a new one.
+fn save_agent_profile_draft(cx: &mut App) {
+    let target = cx.global::<AgentProfileDraft>().target;
+    let mut profile = cx.global::<AgentProfileDraft>().profile.clone();
+
+    let settings = cx.global_mut::<AppSettings>();
+    profile.name = settings.unique_agent_profile_name(&profile.name, profile.kind, target);
+
+    match target {
+        Some(ix) => settings.update_agent_profile(ix, profile),
+        None => {
+            settings.agent_profiles.push(profile);
+
+            // Adding to a previously empty list makes the new profile the
+            // default, so NewAgentTab immediately uses it.
+            if settings.default_agent_profile.is_empty() {
+                settings.default_agent_profile = settings
+                    .agent_profiles
+                    .last()
+                    .map(|p| p.name.clone())
+                    .unwrap_or_default();
+            }
+        }
+    }
+}
+
+/// One of the two Base Agent choice buttons in the add dialog; the selected
+/// kind renders as the primary variant.
+fn kind_choice_button(
+    id: &'static str,
+    kind: AgentProfileKind,
+    current: AgentProfileKind,
+) -> Button {
+    let button = Button::new(id).label(agent_kind_label(kind));
+    let button = if kind == current {
+        button.primary()
+    } else {
+        button.outline()
+    };
+
+    button.on_click(move |_, _, cx: &mut App| {
+        let draft = cx.global_mut::<AgentProfileDraft>();
+        if draft.profile.kind == kind {
+            return;
+        }
+
+        // The executable follows the kind while it still holds a built-in
+        // default; a hand-typed path survives the switch.
+        let executable = draft.profile.executable.trim();
+        if executable.is_empty() || executable == "claude" || executable == "codex" {
+            draft.profile.executable = builtin_agent_profile(kind).executable;
+        }
+        draft.profile.kind = kind;
+    })
+}
+
+fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
+    let profile = cx.global::<AgentProfileDraft>().profile.clone();
+    let is_edit = cx.global::<AgentProfileDraft>().target.is_some();
+
+    let kind_label = agent_kind_label(profile.kind);
+    let key_env = match profile.kind {
+        AgentProfileKind::ClaudeCode => "ANTHROPIC_API_KEY",
+        AgentProfileKind::Codex => "OPENAI_API_KEY",
+    };
+    let endpoint_on = profile.use_custom_endpoint;
+
+    let name_input = card_text_input(
+        "agent-profile-dialog-name".to_string(),
+        profile.name.clone().into(),
+        false,
+        |value, cx| cx.global_mut::<AgentProfileDraft>().profile.name = value,
+        window,
+        cx,
+    );
+
+    let exe_input = card_text_input(
+        "agent-profile-dialog-exe".to_string(),
+        profile.executable.clone().into(),
+        false,
+        |value, cx| cx.global_mut::<AgentProfileDraft>().profile.executable = value,
+        window,
+        cx,
+    );
+
+    let model_input = card_text_input(
+        "agent-profile-dialog-model".to_string(),
+        profile.model.clone().into(),
+        false,
+        |value, cx| cx.global_mut::<AgentProfileDraft>().profile.model = value,
+        window,
+        cx,
+    );
+
+    let url_input = card_text_input(
+        "agent-profile-dialog-url".to_string(),
+        profile.api_base_url.clone().into(),
+        false,
+        |value, cx| cx.global_mut::<AgentProfileDraft>().profile.api_base_url = value,
+        window,
+        cx,
+    );
+
+    let key_input = card_text_input(
+        "agent-profile-dialog-key".to_string(),
+        profile.api_key.clone().into(),
+        false,
+        |value, cx| cx.global_mut::<AgentProfileDraft>().profile.api_key = value,
+        window,
+        cx,
+    );
+
+    let kind_control: AnyElement = if is_edit {
+        // The kind decides the wire protocol; changing it under an existing
+        // profile would silently repurpose tabs and persisted state, so it
+        // is fixed after creation.
+        Label::new(kind_label).text_sm().into_any_element()
+    } else {
+        h_flex()
+            .gap_2()
+            .child(kind_choice_button(
+                "agent-profile-kind-claude",
+                AgentProfileKind::ClaudeCode,
+                profile.kind,
+            ))
+            .child(kind_choice_button(
+                "agent-profile-kind-codex",
+                AgentProfileKind::Codex,
+                profile.kind,
+            ))
+            .into_any_element()
+    };
+
+    let endpoint_switch = Switch::new("agent-profile-dialog-endpoint")
+        .checked(endpoint_on)
+        .on_click(|checked: &bool, _, cx: &mut App| {
+            cx.global_mut::<AgentProfileDraft>()
+                .profile
+                .use_custom_endpoint = *checked;
+        });
+
+    let mut env_rows = v_flex().w_full().gap_2();
+    for (row, var) in profile.env.iter().enumerate() {
+        let env_name_input = card_text_input(
+            format!("agent-profile-dialog-env-{row}-name"),
+            var.name.clone().into(),
+            false,
+            move |value, cx| {
+                if let Some(var) = cx
+                    .global_mut::<AgentProfileDraft>()
+                    .profile
+                    .env
+                    .get_mut(row)
+                {
+                    var.name = value;
+                }
+            },
+            window,
+            cx,
+        );
+
+        let env_value_input = card_text_input(
+            format!("agent-profile-dialog-env-{row}-value"),
+            var.value.clone().into(),
+            false,
+            move |value, cx| {
+                if let Some(var) = cx
+                    .global_mut::<AgentProfileDraft>()
+                    .profile
+                    .env
+                    .get_mut(row)
+                {
+                    var.value = value;
+                }
+            },
+            window,
+            cx,
+        );
+
+        env_rows = env_rows.child(
+            h_flex()
+                .w_full()
+                .gap_2()
+                .child(Input::new(&env_name_input).flex_1())
+                .child(Input::new(&env_value_input).flex_1())
+                .child(
+                    Button::new(SharedString::from(format!(
+                        "agent-profile-dialog-env-remove-{row}"
+                    )))
+                    .outline()
+                    .label("Remove")
+                    .on_click(move |_, _, cx: &mut App| {
+                        let env = &mut cx.global_mut::<AgentProfileDraft>().profile.env;
+                        if row < env.len() {
+                            env.remove(row);
+                        }
+                    }),
+                ),
+        );
+    }
+
+    let env_section = v_flex()
+        .w_full()
+        .gap_2()
+        .child(Label::new("Environment Variables").text_sm())
+        .child(
+            div()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child("Extra environment variables applied to the agent process."),
+        )
+        .child(env_rows)
+        .child(
+            h_flex().child(
+                Button::new("agent-profile-dialog-env-add")
+                    .outline()
+                    .label("Add Variable")
+                    .on_click(|_, _, cx: &mut App| {
+                        cx.global_mut::<AgentProfileDraft>()
+                            .profile
+                            .env
+                            .push(EnvVar::default());
+                    }),
+            ),
+        );
+
+    v_flex()
+        .w_full()
+        .gap_4()
+        .child(card_row(
+            "Name",
+            "Display name; it keys the default selector and per-profile settings.",
+            Input::new(&name_input).w_64(),
+            cx,
+        ))
+        .child(card_row(
+            "Base Agent",
+            "Which agent CLI this profile launches.",
+            kind_control,
+            cx,
+        ))
+        .child(card_row(
+            "Executable Path",
+            "Executable name or full path; a bare name resolves via PATH.",
+            Input::new(&exe_input).w_64(),
+            cx,
+        ))
+        .child(card_row(
+            "Model",
+            match profile.kind {
+                AgentProfileKind::ClaudeCode => {
+                    "Initial model; passed to Claude Code as ANTHROPIC_MODEL."
+                }
+                AgentProfileKind::Codex => {
+                    "Initial model; passed to Codex when its app-server thread starts."
+                }
+            },
+            Input::new(&model_input).w_64(),
+            cx,
+        ))
+        .child(card_row(
+            "Use Custom API Endpoint",
+            "Route this agent through your own API endpoint.",
+            endpoint_switch,
+            cx,
+        ))
+        .child(card_row(
+            "API URL",
+            match profile.kind {
+                AgentProfileKind::ClaudeCode => {
+                    "Exported as ANTHROPIC_BASE_URL while the custom endpoint is enabled."
+                        .to_string()
+                }
+                AgentProfileKind::Codex => {
+                    "Injected as a profile-scoped Codex model provider base URL.".to_string()
+                }
+            },
+            Input::new(&url_input).disabled(!endpoint_on).w_64(),
+            cx,
+        ))
+        .child(card_row(
+            "API Key",
+            match profile.kind {
+                AgentProfileKind::ClaudeCode => {
+                    format!("Exported as {key_env} while the custom endpoint is enabled.")
+                }
+                AgentProfileKind::Codex => {
+                    format!("Exported as {key_env} and referenced by the profile-scoped provider.")
+                }
+            },
+            Input::new(&key_input).disabled(!endpoint_on).w_64(),
+            cx,
+        ))
+        .child(env_section)
 }
 
 #[cfg(test)]
@@ -2456,6 +3114,70 @@ mod tests {
         settings.remove_profile(0);
         settings.remove_profile(0);
         assert_eq!(settings.profiles.len(), 1);
+    }
+
+    #[test]
+    fn agent_profile_mutations_keep_default_valid() {
+        let mut settings = AppSettings::default();
+        assert_eq!(settings.agent_profiles.len(), 2);
+        assert_eq!(settings.default_agent_profile, "Claude Code");
+
+        // Unique-name resolution: an empty desired name takes the kind
+        // label, collisions get a numeric suffix, and the excluded index
+        // (edit mode) keeps its own name available.
+        assert_eq!(
+            settings.unique_agent_profile_name("", AgentProfileKind::ClaudeCode, None),
+            "Claude Code 2"
+        );
+        assert_eq!(
+            settings.unique_agent_profile_name("Codex", AgentProfileKind::Codex, Some(1)),
+            "Codex"
+        );
+        assert_eq!(
+            settings.unique_agent_profile_name(" Mine ", AgentProfileKind::Codex, None),
+            "Mine"
+        );
+
+        // Update with a rename: the default reference follows.
+        let renamed = AgentProfile {
+            name: "Proxy".into(),
+            ..settings.agent_profiles[0].clone()
+        };
+        settings.update_agent_profile(0, renamed);
+        assert_eq!(settings.default_agent_profile, "Proxy");
+
+        // Remove the default: falls back to the first remaining profile.
+        settings.remove_agent_profile(0);
+        assert_eq!(settings.default_agent_profile, "Codex");
+
+        // Every profile can be removed; an empty list clears the default.
+        settings.remove_agent_profile(0);
+        assert!(settings.agent_profiles.is_empty());
+        assert_eq!(settings.default_agent_profile, "");
+
+        // The shortcut fallback still produces a launchable profile.
+        assert_eq!(
+            settings.default_agent_profile_entry().kind,
+            AgentProfileKind::ClaudeCode
+        );
+    }
+
+    #[test]
+    fn default_agent_profile_entry_resolves_by_name() {
+        let mut settings = AppSettings::default();
+        settings.agent_profiles[1].executable = "custom-codex".into();
+        settings.default_agent_profile = "Codex".into();
+        assert_eq!(
+            settings.default_agent_profile_entry().executable,
+            "custom-codex"
+        );
+
+        // Dangling name falls back to the first profile.
+        settings.default_agent_profile = "Nope".into();
+        assert_eq!(
+            settings.default_agent_profile_entry().kind,
+            AgentProfileKind::ClaudeCode
+        );
     }
 
     #[test]

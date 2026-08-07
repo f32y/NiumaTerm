@@ -672,6 +672,7 @@ impl TerminalSessionConfig {
             args: self.args.clone(),
             cwd: self.working_dir.clone(),
             agent: None,
+            agent_profile: None,
             panes: None,
         }
     }

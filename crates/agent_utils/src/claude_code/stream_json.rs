@@ -25,6 +25,7 @@ use super::compaction::{compaction_metadata, parse_compaction};
 use super::tool_items::{complete_tool_item, tool_item, tool_title};
 #[cfg(test)]
 use super::tool_items::{edit_diff, input_detail};
+use crate::AgentLaunch;
 use crate::chat::{
     ContextWindowUsage, Event, Item, ModelInfo, SendOutcome, SlashCommandArguments,
     SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
@@ -44,6 +45,23 @@ pub const PERMISSION_OPTIONS: [&str; 5] = [
 ];
 
 const INIT_REQUEST_ID: &str = "nmt-init";
+const ANTHROPIC_MODEL_ENV: &str = "ANTHROPIC_MODEL";
+
+fn launch_model(launch: &AgentLaunch) -> Option<String> {
+    // Command environment overrides are last-value-wins, so the adapter must
+    // resolve duplicate entries the same way as the spawned Claude process.
+    launch
+        .env
+        .iter()
+        .rev()
+        .find(|(name, _)| name.trim().eq_ignore_ascii_case(ANTHROPIC_MODEL_ENV))
+        .map(|(_, value)| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn initial_ready_model(model: Option<&str>) -> String {
+    model.unwrap_or("default").to_string()
+}
 
 /// A `can_use_tool` control request awaiting the user's decision. The original
 /// input is kept because an allow response must echo it as `updatedInput`, and
@@ -137,18 +155,29 @@ impl Session {
     /// listing for the same directory. Nothing is replayed on the wire — the
     /// UI pre-fills its transcript from the session file instead.
     pub fn spawn(
+        launch: &AgentLaunch,
         cwd: Option<String>,
         resume: Option<String>,
         deliver: impl Fn(Value) + Send + 'static,
         on_stderr: impl Fn(String) + Send + 'static,
     ) -> Result<Self, String> {
+        let initial_model = launch_model(launch);
+        // Launching through cmd.exe keeps PATHEXT resolution, so a bare
+        // executable name finds `claude.exe` as well as the npm `claude.cmd`
+        // shim.
+        let executable = if launch.executable.trim().is_empty() {
+            "claude"
+        } else {
+            launch.executable.trim()
+        };
+
         let mut command = Command::new("cmd.exe");
 
         command
             .args([
                 "/D",
                 "/C",
-                "claude",
+                executable,
                 "-p",
                 "--output-format",
                 "stream-json",
@@ -160,6 +189,7 @@ impl Session {
                 "stdio",
                 "--allow-dangerously-skip-permissions",
             ])
+            .envs(launch.env.iter().map(|(name, value)| (name, value)))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -175,7 +205,7 @@ impl Session {
 
         let mut child = command
             .spawn()
-            .map_err(|err| format!("could not run `claude`: {err}"))?;
+            .map_err(|err| format!("could not run `{executable}`: {err}"))?;
 
         let stdin = child.stdin.take().ok_or("Claude stdin unavailable")?;
         let stdout = child.stdout.take().ok_or("Claude stdout unavailable")?;
@@ -204,7 +234,7 @@ impl Session {
             turn_active: false,
             turn_reported: false,
             pending_approval: None,
-            applied_model: None,
+            applied_model: initial_model,
             applied_permission: None,
             open_blocks: HashMap::new(),
             open_texts: VecDeque::new(),
@@ -796,23 +826,25 @@ impl Session {
         // resolves its startup mode from user config — so the initial value
         // comes from the same config file (`permissions.defaultMode`); the
         // first turn's `init` message then confirms or corrects it. The
-        // session starts on the catalog's "default" entry (spawn passes no
-        // --model).
+        // `ANTHROPIC_MODEL` fixes the model before the handshake; without it,
+        // the session starts on the catalog's "default" entry because spawn
+        // passes no `--model` argument.
         if response["request_id"].as_str() == Some(INIT_REQUEST_ID) && !self.ready {
             let permission =
                 Some(configured_permission_mode().unwrap_or_else(|| "default".to_string()));
+            let model = initial_ready_model(self.applied_model.as_deref());
 
             self.ready = true;
-            self.applied_model = Some("default".to_string());
+            self.applied_model = Some(model.clone());
             self.applied_permission = permission.clone();
 
             let mut events = vec![
                 Event::Ready(ThreadSettings {
-                    model: Some("default".to_string()),
+                    model: Some(model.clone()),
                     approval: permission,
                     ..ThreadSettings::default()
                 }),
-                Event::Models(parse_models(&response["response"]["models"])),
+                Event::Models(parse_models(&response["response"]["models"], Some(&model))),
             ];
 
             if let Some((commands, structured)) = initialize_command_catalog(&response["response"])
@@ -1051,8 +1083,8 @@ fn approval_description(tool_name: &str, input: &Value) -> String {
 /// no per-model service tiers, but each entry lists its reasoning-effort
 /// levels in `supportedEffortLevels` (absent on models without effort, e.g.
 /// Haiku).
-fn parse_models(models: &Value) -> Vec<ModelInfo> {
-    models
+fn parse_models(models: &Value, selected_model: Option<&str>) -> Vec<ModelInfo> {
+    let mut parsed: Vec<ModelInfo> = models
         .as_array()
         .map(|list| {
             list.iter()
@@ -1083,7 +1115,26 @@ fn parse_models(models: &Value) -> Vec<ModelInfo> {
                 })
                 .collect()
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
+
+    if let Some(model) = selected_model
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+        && !parsed.iter().any(|entry| entry.model == model)
+    {
+        parsed.insert(
+            0,
+            ModelInfo {
+                model: model.to_string(),
+                display: model.to_string(),
+                tiers: Vec::new(),
+                default_tier: None,
+                efforts: Vec::new(),
+            },
+        );
+    }
+
+    parsed
 }
 
 #[cfg(test)]
@@ -1239,7 +1290,7 @@ mod tests {
             {"displayName": "no value — skipped"}
         ]);
 
-        let parsed = parse_models(&models);
+        let parsed = parse_models(&models, None);
 
         assert_eq!(parsed.len(), 2);
         assert_eq!(parsed[0].model, "default");
@@ -1247,6 +1298,36 @@ mod tests {
         assert_eq!(parsed[0].efforts, vec!["low", "high"]);
         assert_eq!(parsed[1].model, "opus[1m]");
         assert!(parsed[1].efforts.is_empty());
+    }
+
+    #[test]
+    fn initialize_model_catalog_keeps_a_selected_custom_model() {
+        let parsed = parse_models(
+            &json!([{"value": "default", "displayName": "Default"}]),
+            Some("claude-custom-model"),
+        );
+
+        assert_eq!(parsed[0].model, "claude-custom-model");
+        assert_eq!(parsed[1].model, "default");
+    }
+
+    #[test]
+    fn initialize_uses_model_pinned_by_launch_environment() {
+        let launch = AgentLaunch {
+            executable: "claude".into(),
+            env: vec![
+                ("UNRELATED".into(), "value".into()),
+                (
+                    ANTHROPIC_MODEL_ENV.into(),
+                    "claude-opus-4-8-v4-flash[1m]".into(),
+                ),
+            ],
+            ..AgentLaunch::default()
+        };
+
+        let model = initial_ready_model(launch_model(&launch).as_deref());
+
+        assert_eq!(model, "claude-opus-4-8-v4-flash[1m]");
     }
 
     #[test]

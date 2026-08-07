@@ -38,7 +38,7 @@ use crate::ui::agent_usage::AgentUsageView;
 use crate::ui::floating_surface;
 use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::git_status::{GitStatusModel, GitStatusView};
-use crate::ui::settings::{AppSettings, settings_view};
+use crate::ui::settings::{AgentProfile, AppSettings, settings_view};
 use crate::ui::tab_bar::TabStrip;
 use crate::ui::token_usage::TokenUsageView;
 use crate::ui::workspace_sidebar::{self, Sidebar};
@@ -1134,22 +1134,30 @@ impl Shell {
     /// The conversation's agent process starts in the workspace cwd.
     pub(crate) fn open_agent_tab(
         &mut self,
-        kind: AgentKind,
+        profile: AgentProfile,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let id = Self::alloc_id(&mut self.next_id);
         let cwd = explicit_cwd(self.workspaces.active_cwd());
-        let pane = cx.new(|cx| AgentPane::new(kind, cwd, window, cx));
+
+        // The tab is titled by the profile so multiple profiles of the same
+        // agent stay distinguishable; an unnamed profile falls back to the
+        // agent name.
+        let title = if profile.name.trim().is_empty() {
+            AgentKind::from_profile(profile.kind).display().to_string()
+        } else {
+            profile.name.clone()
+        };
+
+        let pane = cx.new(|cx| AgentPane::new(profile, cwd, window, cx));
 
         Self::watch_agent_tab(&pane, cx);
         self.register_agent_tab(&pane, cx);
 
-        self.workspaces.active_tabs_mut().new_tab(
-            TabSurface::Agent(pane),
-            TabId(id),
-            kind.display().to_string(),
-        );
+        self.workspaces
+            .active_tabs_mut()
+            .new_tab(TabSurface::Agent(pane), TabId(id), title);
 
         self.focus_active(window, cx);
         self.sync_session_memory(cx);
@@ -1163,7 +1171,8 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_agent_tab(AgentKind::Codex, window, cx);
+        let profile = cx.global::<AppSettings>().default_agent_profile_entry();
+        self.open_agent_tab(profile, window, cx);
     }
 
     /// CLI `new_tab`: open `path` in the deepest workspace whose cwd contains

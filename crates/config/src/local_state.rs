@@ -22,14 +22,15 @@ fn is_false(value: &bool) -> bool {
 pub struct LocalState {
     #[serde(default)]
     pub windows: Vec<WindowLocalState>,
-    /// Last-chosen agent thread settings per agent wire name ("claude",
-    /// "codex"); newly opened agent tabs seed their dropdowns from these.
+    /// Last-chosen agent thread settings per agent profile name (older
+    /// snapshots keyed by agent wire name, which still reads as a fallback);
+    /// newly opened agent tabs seed their dropdowns from these.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub agent_defaults: BTreeMap<String, AgentDefaults>,
 }
 
-/// The thread-settings picks worth carrying into the next conversation of
-/// the same agent kind. All optional: `None` leaves the CLI's own default.
+/// The thread-settings picks worth carrying into the next conversation from
+/// the same agent profile. All optional: `None` leaves the CLI's own default.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct AgentDefaults {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -131,6 +132,11 @@ pub struct TabState {
     /// degrades to a plain terminal tab.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
+    /// Name of the agent launch profile the tab was opened with. Restore
+    /// resolves it against the configured agent profiles; a missing or
+    /// deleted name falls back to the built-in profile for `agent`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_profile: Option<String>,
     /// Split-pane layout for a multi-pane tab. Absent for single-pane tabs,
     /// which keep the flat fields above as their whole format (so snapshots
     /// without splits stay readable by older builds). Declared last: TOML
@@ -261,6 +267,7 @@ mod tests {
                                 args: vec!["-NoLogo".into()],
                                 cwd: Some("C:/Projects/example/repo".into()),
                                 agent: None,
+                                agent_profile: None,
                                 panes: None,
                             }],
                         }],
@@ -334,6 +341,7 @@ mod tests {
             args: vec![],
             cwd: Some("C:/a".into()),
             agent: None,
+            agent_profile: None,
             panes: Some(PaneNodeState::Split {
                 axis: PaneSplitAxis::Horizontal,
                 ratios: vec![0.6, 0.4],

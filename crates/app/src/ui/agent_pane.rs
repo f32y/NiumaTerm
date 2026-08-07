@@ -45,11 +45,12 @@ use nmt_agent_utils::chat::{
 use nmt_agent_utils::claude_code::{sessions, stream_json};
 use nmt_agent_utils::codex::app_server;
 use nmt_agent_utils::{
-    AgentEvent, AgentEventKind, AgentRoute, agent_process, normalize_body, normalize_title,
+    AgentEvent, AgentEventKind, AgentLaunch, AgentRoute, CodexProviderConfig, agent_process,
+    normalize_body, normalize_title,
 };
 use nmt_config::local_state::AgentDefaults as StoredAgentDefaults;
 use serde_json::Value;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::ui::AppSettings;
 use crate::ui::agent_commands::{
@@ -59,6 +60,7 @@ use crate::ui::agent_commands::{
     reset_command_runtime, resolve_choice, validate_skill_binding,
 };
 use crate::ui::git_status::current_branch;
+use crate::ui::settings::{AgentProfile, AgentProfileKind};
 
 #[derive(Clone)]
 struct PendingSlashCommand {
@@ -256,11 +258,116 @@ impl AgentKind {
             _ => None,
         }
     }
+
+    pub(crate) fn from_profile(kind: AgentProfileKind) -> Self {
+        match kind {
+            AgentProfileKind::ClaudeCode => AgentKind::Claude,
+            AgentProfileKind::Codex => AgentKind::Codex,
+        }
+    }
+
+    pub(crate) fn profile_kind(self) -> AgentProfileKind {
+        match self {
+            AgentKind::Claude => AgentProfileKind::ClaudeCode,
+            AgentKind::Codex => AgentProfileKind::Codex,
+        }
+    }
 }
 
-/// Last-chosen thread settings per agent wire name, seeding the dropdowns of
-/// newly opened (non-resumed) agent conversations. Loaded from
-/// local_state.toml at startup and flushed back on quit.
+const ANTHROPIC_MODEL_ENV: &str = "ANTHROPIC_MODEL";
+const OPENAI_API_KEY_ENV: &str = "OPENAI_API_KEY";
+
+/// A deterministic provider id keeps Codex history scoped to the profile
+/// without exposing display names as config keys. Profile names are already
+/// unique and act as the identity for restored tabs and remembered settings.
+fn codex_provider_id(profile_name: &str) -> String {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in profile_name.trim().as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("niumaterm-{hash:016x}")
+}
+
+fn launch_env_value(launch: &AgentLaunch, target: &str) -> Option<String> {
+    launch
+        .env
+        .iter()
+        .rev()
+        .find(|(name, _)| name.trim().eq_ignore_ascii_case(target))
+        .map(|(_, value)| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+/// Turn a profile into a protocol-neutral launch spec. Generated environment
+/// entries precede user entries so the explicit environment table retains
+/// last-value-wins behavior.
+fn agent_launch(profile: &AgentProfile) -> AgentLaunch {
+    let mut env: Vec<(String, String)> = Vec::new();
+    let model = (!profile.model.trim().is_empty()).then(|| profile.model.trim().to_string());
+
+    if profile.use_custom_endpoint {
+        let url = profile.api_base_url.trim();
+        if profile.kind == AgentProfileKind::ClaudeCode && !url.is_empty() {
+            env.push(("ANTHROPIC_BASE_URL".to_string(), url.to_string()));
+        }
+
+        let key = profile.api_key.trim();
+        if !key.is_empty() {
+            let key_env = match profile.kind {
+                AgentProfileKind::ClaudeCode => "ANTHROPIC_API_KEY",
+                AgentProfileKind::Codex => OPENAI_API_KEY_ENV,
+            };
+            env.push((key_env.to_string(), key.to_string()));
+        }
+    }
+
+    if profile.kind == AgentProfileKind::ClaudeCode
+        && let Some(model) = model.as_ref()
+    {
+        env.push((ANTHROPIC_MODEL_ENV.to_string(), model.clone()));
+    }
+
+    env.extend(
+        profile
+            .env
+            .iter()
+            .filter(|var| !var.name.trim().is_empty())
+            .map(|var| (var.name.trim().to_string(), var.value.clone())),
+    );
+
+    let api_key_env = env
+        .iter()
+        .rev()
+        .find(|(name, _)| name.trim().eq_ignore_ascii_case(OPENAI_API_KEY_ENV))
+        .filter(|(_, value)| !value.trim().is_empty())
+        .map(|_| OPENAI_API_KEY_ENV.to_string());
+    let codex_provider = (profile.kind == AgentProfileKind::Codex && profile.use_custom_endpoint)
+        .then(|| profile.api_base_url.trim())
+        .filter(|url| !url.is_empty())
+        .map(|base_url| CodexProviderConfig {
+            id: codex_provider_id(&profile.name),
+            name: if profile.name.trim().is_empty() {
+                "NiumaTerm custom endpoint".to_string()
+            } else {
+                profile.name.trim().to_string()
+            },
+            base_url: base_url.to_string(),
+            api_key_env,
+        });
+
+    AgentLaunch {
+        executable: profile.executable.trim().to_string(),
+        env,
+        model,
+        codex_provider,
+    }
+}
+
+/// Last-chosen thread settings per agent profile name (agent wire name for
+/// entries written by older builds), seeding the dropdowns of newly opened
+/// (non-resumed) agent conversations. Loaded from local_state.toml at
+/// startup and flushed back on quit.
 #[derive(Default)]
 pub(crate) struct AgentThreadDefaults(pub(crate) HashMap<String, ThreadSettings>);
 
@@ -367,6 +474,9 @@ pub(crate) struct AgentPane {
     pub(crate) focus: FocusHandle,
     agent_route: AgentRoute,
     kind: AgentKind,
+    /// The launch profile this pane was opened with (executable, endpoint,
+    /// env vars); every session (re)start uses it.
+    profile: AgentProfile,
     /// The tab's working directory; the session process runs here and the
     /// session history is scoped to it (resume ids only resolve against the
     /// same directory).
@@ -466,11 +576,12 @@ pub(crate) struct AgentPane {
 
 impl AgentPane {
     pub(crate) fn new(
-        kind: AgentKind,
+        profile: AgentProfile,
         cwd: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let kind = AgentKind::from_profile(profile.kind);
         let name = kind.display();
         // Auto-grow wraps long prompts instead of scrolling them off-screen;
         // Enter still submits (submit_on_enter), Shift+Enter inserts a
@@ -509,6 +620,7 @@ impl AgentPane {
             focus: cx.focus_handle(),
             agent_route: agent_process().allocate_route(),
             kind,
+            profile,
             cwd,
             items: Vec::new(),
             transcript_list: {
@@ -711,6 +823,27 @@ impl AgentPane {
     /// the EOF signal (the sender is owned by the reader thread). Does not
     /// notify — callers decide whether a repaint is due.
     fn start_session(&mut self, resume: Option<String>, cx: &mut Context<Self>) {
+        // The pane's profile is a snapshot from when the tab opened; profile
+        // edits in settings don't reach into live panes. Re-resolving by
+        // name at every (re)start picks them up, so a new conversation
+        // launches with the profile as currently configured. A renamed or
+        // deleted profile keeps the snapshot so the tab still works.
+        if let Some(fresh) = cx
+            .global::<AppSettings>()
+            .agent_profiles
+            .iter()
+            .find(|p| p.kind == self.profile.kind && p.name == self.profile.name)
+        {
+            self.profile = fresh.clone();
+        }
+
+        // The profile model is known before either CLI completes its
+        // handshake, so the picker need not flash the backend default while a
+        // custom endpoint is starting.
+        if let Some(model) = self.profile_model() {
+            self.settings.model = Some(model);
+        }
+
         let kind = self.kind;
         let name = kind.display();
         let cwd = self.cwd.clone();
@@ -729,14 +862,29 @@ impl AgentPane {
         let deliver = move |message| {
             let _ = tx.unbounded_send(message);
         };
+        let launch = agent_launch(&self.profile);
+        // Env names only: the values can carry API keys.
+        info!(
+            "agent session start: profile=\"{}\", executable=\"{}\", env=[{}]",
+            self.profile.name,
+            launch.executable,
+            launch
+                .env
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
         let spawned = match kind {
-            AgentKind::Codex => {
-                app_server::Session::spawn(cwd, deliver, |line| warn!("codex app-server: {line}"))
-                    .map(Backend::Codex)
-            }
+            AgentKind::Codex => app_server::Session::spawn(&launch, cwd, deliver, |line| {
+                warn!("codex app-server: {line}")
+            })
+            .map(Backend::Codex),
             AgentKind::Claude => {
-                stream_json::Session::spawn(cwd, resume, deliver, |line| warn!("claude: {line}"))
-                    .map(Backend::Claude)
+                stream_json::Session::spawn(&launch, cwd, resume, deliver, |line| {
+                    warn!("claude: {line}")
+                })
+                .map(Backend::Claude)
             }
         };
 
@@ -821,6 +969,12 @@ impl AgentPane {
 
     pub(crate) fn kind(&self) -> AgentKind {
         self.kind
+    }
+
+    /// Name of the launch profile, persisted with the tab snapshot so
+    /// restore reopens the same profile.
+    pub(crate) fn profile_name(&self) -> &str {
+        &self.profile.name
     }
 
     fn transcript_has_hidden_content_below(&self) -> bool {
@@ -1684,13 +1838,20 @@ impl AgentPane {
                 let effort = settings.effort.clone().or(self.settings.effort.take());
                 let mut next = ThreadSettings { effort, ..settings };
 
-                // Fresh conversations seed from the remembered per-kind picks
-                // (a remembered value wins over the CLI default); resumed
-                // threads and later Ready confirmations take the wire as-is.
-                if take(&mut self.seed_thread_defaults)
-                    && let Some(stored) = cx
-                        .try_global::<AgentThreadDefaults>()
-                        .and_then(|defaults| defaults.0.get(self.kind.wire()))
+                // Fresh conversations seed from the remembered per-profile
+                // picks (a remembered value wins over the CLI default);
+                // resumed threads and later Ready confirmations take the
+                // wire as-is. Older local_state entries were keyed by agent
+                // kind, so that key still works as a fallback.
+                let seed_thread_defaults = take(&mut self.seed_thread_defaults);
+                if seed_thread_defaults
+                    && let Some(stored) =
+                        cx.try_global::<AgentThreadDefaults>().and_then(|defaults| {
+                            defaults
+                                .0
+                                .get(&self.defaults_key())
+                                .or_else(|| defaults.0.get(self.kind.wire()))
+                        })
                 {
                     next = ThreadSettings {
                         model: stored.model.clone().or(next.model),
@@ -1701,7 +1862,21 @@ impl AgentPane {
                     };
                 }
 
+                // A profile model is the startup default and therefore beats
+                // remembered per-profile picker state for a fresh thread.
+                // Later Ready events report live model changes and must pass
+                // through unchanged.
+                if seed_thread_defaults && let Some(model) = self.profile_model() {
+                    next.model = Some(model);
+                }
+
                 self.settings = next;
+                info!(
+                    "agent thread ready: profile=\"{}\", model={:?}, profile_model={:?}",
+                    self.profile.name,
+                    self.settings.model,
+                    self.profile_model()
+                );
                 // Claude's first-turn init confirms settings after its
                 // synthetic TurnStarted event; that confirmation must not
                 // make an active turn look idle and admit overlapping work.
@@ -2073,13 +2248,35 @@ impl AgentPane {
         cx.notify();
     }
 
+    /// Key for the per-profile thread-settings memory; a profile without a
+    /// name shares the agent-kind bucket (also the key older local_state
+    /// snapshots used).
+    fn defaults_key(&self) -> String {
+        if self.profile.name.trim().is_empty() {
+            self.kind.wire().to_string()
+        } else {
+            self.profile.name.clone()
+        }
+    }
+
+    /// Effective startup model after protocol mapping and user environment
+    /// overrides. Claude resolves `ANTHROPIC_MODEL` with last-value-wins
+    /// semantics; Codex receives the profile field over app-server RPC.
+    fn profile_model(&self) -> Option<String> {
+        let launch = agent_launch(&self.profile);
+        match self.kind {
+            AgentKind::Claude => launch_env_value(&launch, ANTHROPIC_MODEL_ENV),
+            AgentKind::Codex => launch.model,
+        }
+    }
+
     /// Remember the pane's current thread settings as the defaults for future
-    /// conversations of this agent kind. Called after every user-driven
-    /// settings change (dropdowns and slash commands).
+    /// conversations launched from this profile. Called after every
+    /// user-driven settings change (dropdowns and slash commands).
     fn remember_thread_defaults(&self, cx: &mut Context<Self>) {
         cx.default_global::<AgentThreadDefaults>()
             .0
-            .insert(self.kind.wire().to_string(), self.settings.clone());
+            .insert(self.defaults_key(), self.settings.clone());
     }
 
     fn append_delta(
@@ -4951,6 +5148,67 @@ impl AgentPane {
 
                 menu
             })
+    }
+}
+
+#[cfg(test)]
+mod agent_profile_launch_tests {
+    use nmt_config::profile::{AgentProfile, AgentProfileKind, EnvVar};
+
+    use super::{ANTHROPIC_MODEL_ENV, OPENAI_API_KEY_ENV, agent_launch, launch_env_value};
+
+    #[test]
+    fn claude_profile_model_is_an_environment_default_with_user_override_last() {
+        let profile = AgentProfile {
+            name: "Claude Proxy".into(),
+            kind: AgentProfileKind::ClaudeCode,
+            executable: "claude".into(),
+            model: "claude-profile-model".into(),
+            env: vec![EnvVar {
+                name: "anthropic_model".into(),
+                value: "claude-env-override".into(),
+            }],
+            ..AgentProfile::default()
+        };
+
+        let launch = agent_launch(&profile);
+
+        assert_eq!(
+            launch_env_value(&launch, ANTHROPIC_MODEL_ENV).as_deref(),
+            Some("claude-env-override")
+        );
+        assert!(launch.codex_provider.is_none());
+    }
+
+    #[test]
+    fn codex_custom_endpoint_becomes_a_thread_provider_not_a_base_url_env_var() {
+        let profile = AgentProfile {
+            name: "Codex Proxy".into(),
+            kind: AgentProfileKind::Codex,
+            executable: "codex".into(),
+            model: "vendor/custom-model".into(),
+            use_custom_endpoint: true,
+            api_base_url: "https://proxy.example.com/v1".into(),
+            api_key: "secret".into(),
+            ..AgentProfile::default()
+        };
+
+        let launch = agent_launch(&profile);
+        let provider = launch.codex_provider.as_ref().expect("custom provider");
+
+        assert_eq!(launch.model.as_deref(), Some("vendor/custom-model"));
+        assert_eq!(provider.base_url, "https://proxy.example.com/v1");
+        assert_eq!(provider.api_key_env.as_deref(), Some(OPENAI_API_KEY_ENV));
+        assert!(
+            launch
+                .env
+                .iter()
+                .all(|(name, _)| !name.eq_ignore_ascii_case("OPENAI_BASE_URL"))
+        );
+        assert_eq!(
+            launch_env_value(&launch, OPENAI_API_KEY_ENV).as_deref(),
+            Some("secret")
+        );
     }
 }
 
