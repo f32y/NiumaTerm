@@ -15,4 +15,9 @@ serde.workspace = true
 serde_json.workspace = true
 
 [target.'cfg(windows)'.dependencies]
+reqwest = { workspace = true, features = [
+    "blocking",
+    "rustls-tls-native-roots",
+    "system-proxy",
+] }
 windows-sys.workspace = true
