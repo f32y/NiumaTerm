@@ -70,10 +70,13 @@ pub struct Notification {
     title: Option<SharedString>,
     message: Option<SharedString>,
     icon: Option<Icon>,
+    placement: Option<Anchor>,
     autohide: bool,
     autohide_after: Duration,
     show_close: bool,
     action_builder: Option<Rc<dyn Fn(&mut Self, &mut Window, &mut Context<Self>) -> Button>>,
+    secondary_action_builder:
+        Option<Rc<dyn Fn(&mut Self, &mut Window, &mut Context<Self>) -> Button>>,
     content_builder: Option<Rc<dyn Fn(&mut Self, &mut Window, &mut Context<Self>) -> AnyElement>>,
     on_click: Option<Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>>,
     on_close: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
@@ -130,10 +133,12 @@ impl Notification {
             message: None,
             type_: None,
             icon: None,
+            placement: None,
             autohide: true,
             autohide_after: Duration::from_secs(5),
             show_close: true,
             action_builder: None,
+            secondary_action_builder: None,
             content_builder: None,
             on_click: None,
             on_close: None,
@@ -208,6 +213,13 @@ impl Notification {
         self
     }
 
+    /// Override the animation direction for this card without changing the
+    /// shared notification-list placement used by unrelated notifications.
+    pub fn placement(mut self, placement: Anchor) -> Self {
+        self.placement = Some(placement);
+        self
+    }
+
     /// Set the type of the notification, default is NotificationType::Info.
     pub fn with_type(mut self, type_: NotificationType) -> Self {
         self.type_ = Some(type_);
@@ -262,6 +274,18 @@ impl Notification {
         self
     }
 
+    /// Set a secondary action below the primary action.
+    ///
+    /// When a secondary action is set, the notification will not autohide.
+    pub fn secondary_action<F>(mut self, action: F) -> Self
+    where
+        F: Fn(&mut Self, &mut Window, &mut Context<Self>) -> Button + 'static,
+    {
+        self.secondary_action_builder = Some(Rc::new(action));
+        self.autohide = false;
+        self
+    }
+
     /// Dismiss the notification.
     pub fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.closing {
@@ -312,19 +336,31 @@ impl Render for Notification {
             .content_builder
             .clone()
             .map(|builder| builder(self, window, cx));
-        let action = self
+        let primary_action = self
             .action_builder
             .clone()
-            .map(|builder| builder(self, window, cx).small().mr_3p5());
+            .map(|builder| builder(self, window, cx).small());
+        let secondary_action = self
+            .secondary_action_builder
+            .clone()
+            .map(|builder| builder(self, window, cx).small());
+        let actions = (primary_action.is_some() || secondary_action.is_some()).then(|| {
+            v_flex()
+                .items_end()
+                .gap_1()
+                .mr_3p5()
+                .children(primary_action)
+                .children(secondary_action)
+        });
 
         let closing = self.closing;
         let show_close = self.show_close;
-        let icon = match self.type_ {
-            None => self.icon.clone(),
-            Some(type_) => Some(type_.icon(cx)),
-        };
+        let icon = self
+            .icon
+            .clone()
+            .or_else(|| self.type_.map(|type_| type_.icon(cx)));
         let has_icon = icon.is_some();
-        let placement = cx.theme().notification.placement;
+        let placement = self.placement.unwrap_or(cx.theme().notification.placement);
 
         h_flex()
             .id("notification")
@@ -358,7 +394,7 @@ impl Render for Notification {
                     })
                     .when_some(content, |this, content| this.child(content)),
             )
-            .when_some(action, |this, action| this.child(action))
+            .when_some(actions, |this, actions| this.child(actions))
             .when(show_close, |this| {
                 this.child(
                     div()
@@ -632,6 +668,21 @@ mod tests {
 
     struct TestRoot {
         list: Entity<NotificationList>,
+    }
+
+    #[test]
+    fn card_placement_can_differ_from_the_shared_notification_list() {
+        let notification = Notification::new().placement(Anchor::TopRight);
+        assert!(matches!(notification.placement, Some(Anchor::TopRight)));
+    }
+
+    #[test]
+    fn secondary_action_is_independent_and_disables_autohide() {
+        let notification = Notification::new().secondary_action(|_, _, _| Button::new("secondary"));
+
+        assert!(notification.action_builder.is_none());
+        assert!(notification.secondary_action_builder.is_some());
+        assert!(!notification.autohide);
     }
 
     impl Render for TestRoot {
