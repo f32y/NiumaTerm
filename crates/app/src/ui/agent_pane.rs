@@ -2165,7 +2165,7 @@ fn working_label(started: Instant) -> String {
 }
 
 /// Work-log rows: the single-line tool/thinking entries that participate in
-/// "+N previous tool calls" run-collapsing. Conversation text never does.
+/// "+N tool calls" run-collapsing. Conversation text never does.
 fn is_work_row(item: &SessionItem) -> bool {
     matches!(
         item,
@@ -2750,7 +2750,7 @@ enum RowSpec {
     },
     RunToggle {
         run_start: usize,
-        hidden_count: usize,
+        tool_count: usize,
         expanded: bool,
     },
     /// The live progress line. `compacting` is part of the spec because the
@@ -3450,9 +3450,9 @@ impl AgentPane {
     }
 
     /// Chronological rows for a slice of the transcript, collapsing runs of
-    /// consecutive work-log rows to the newest one plus a "+N previous tool
-    /// calls" toggle (when the collapse setting is on). Hidden entries are
-    /// transparent: they neither render nor split a run.
+    /// consecutive work-log rows into a "+N tool calls" toggle (when the
+    /// collapse setting is on). Hidden entries are transparent: they neither
+    /// render nor split a run.
     fn stream_specs(
         &self,
         start: usize,
@@ -3497,7 +3497,7 @@ impl AgentPane {
 
                 rows.push(RowSpec::RunToggle {
                     run_start,
-                    hidden_count: visible.len() - 1,
+                    tool_count: visible.len(),
                     expanded,
                 });
 
@@ -3505,8 +3505,6 @@ impl AgentPane {
                     for &k in &visible {
                         rows.push(self.work_spec(k));
                     }
-                } else if let Some(&last) = visible.last() {
-                    rows.push(self.work_spec(last));
                 }
             } else {
                 for &k in &visible {
@@ -3570,9 +3568,9 @@ impl AgentPane {
             } => self.render_fold_header(turn, seconds, folded, cx),
             RowSpec::RunToggle {
                 run_start,
-                hidden_count,
+                tool_count,
                 expanded,
-            } => self.render_run_toggle(run_start, hidden_count, expanded, cx),
+            } => self.render_run_toggle(run_start, tool_count, expanded, cx),
             RowSpec::Working { compacting } => self.render_working_row(compacting, cx),
         };
 
@@ -4298,22 +4296,18 @@ impl AgentPane {
             .into_any_element()
     }
 
-    /// The "+N previous tool calls" / "Show fewer tool calls" toggle above the
-    /// newest row of a collapsed work run.
+    /// The "+N tool calls" / "Show fewer tool calls" toggle for a work run.
     fn render_run_toggle(
         &self,
         run_start: usize,
-        hidden_count: usize,
+        tool_count: usize,
         expanded: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let label = if expanded {
             "Show fewer tool calls".to_string()
         } else {
-            format!(
-                "+{hidden_count} previous tool call{}",
-                if hidden_count == 1 { "" } else { "s" }
-            )
+            format!("+{tool_count} tool calls")
         };
 
         AgentDisclosureRow::new(("wl-run", run_start), label.clone())
@@ -5063,7 +5057,7 @@ mod prompt_truncation_tests {
             },
         };
 
-        // Work rows collapse into "+N previous tool calls" runs; a structural
+        // Work rows collapse into "+N tool calls" runs; a structural
         // break must never be swallowed by one.
         assert!(!is_work_row(&item));
         assert_eq!(
