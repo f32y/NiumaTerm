@@ -2493,6 +2493,10 @@ fn compaction_label(detail: &Compaction) -> &'static str {
     }
 }
 
+fn compaction_row_is_expandable(kind: AgentKind) -> bool {
+    kind == AgentKind::Claude
+}
+
 /// Token and message accounting of a compaction, as display-ready fragments.
 /// Only what the backend actually reported appears, so a partially described
 /// compaction shows fewer fragments instead of zeros.
@@ -4105,7 +4109,7 @@ impl AgentPane {
     /// A context-compaction boundary. Rendered as a divider rather than a card
     /// because it is a structural break in the conversation: the rows above it
     /// are no longer what the model sees. Expanding reveals the accounting and
-    /// the summary the thread continued from.
+    /// the summary the thread continued from when the provider exposes it.
     fn render_compaction_row(
         &self,
         index: usize,
@@ -4115,25 +4119,34 @@ impl AgentPane {
     ) -> AnyElement {
         let label = compaction_label(&detail);
         let preview = compaction_accounting(&detail).join(" · ");
-        let expanded = self.expanded_rows.contains(&index);
+        let expandable = compaction_row_is_expandable(self.kind);
+        let expanded = expandable && self.expanded_rows.contains(&index);
         let accent = cx.theme().info;
 
-        let header = AgentDisclosureRow::new(("compaction-head", index), label)
+        let mut header_row = AgentDisclosureRow::new(("compaction-head", index), label)
             .type_icon(IconName::Minimize)
             .preview(preview.clone())
-            .expanded(expanded)
-            .accent(accent)
-            .accessible_label(format!(
+            .accent(accent);
+        if expandable {
+            header_row = header_row.expanded(expanded);
+        }
+        let accessible_label = if expandable {
+            format!(
                 "{label}. {preview}. {}",
                 if expanded { "Expanded" } else { "Collapsed" }
-            ))
-            .render(cx)
-            .on_click(cx.listener(move |this, _, _, cx| {
+            )
+        } else {
+            format!("{label}. {preview}")
+        };
+        let mut header = header_row.accessible_label(accessible_label).render(cx);
+        if expandable {
+            header = header.on_click(cx.listener(move |this, _, _, cx| {
                 if !this.expanded_rows.insert(index) {
                     this.expanded_rows.remove(&index);
                 }
                 cx.notify();
             }));
+        }
 
         v_flex()
             .id(("entry", index))
@@ -4249,17 +4262,6 @@ impl AgentPane {
                             ),
                     )
             }))
-            .when(detail.summary.is_none(), |this| {
-                // Live boundaries carry accounting only: the CLI writes the
-                // replacement summary to the session file and marks it visible
-                // there, so it appears once this thread is resumed.
-                this.child(
-                    div()
-                        .mt_1()
-                        .text_color(cx.theme().muted_foreground.opacity(0.6))
-                        .child("The summary is stored with the session and appears on resume."),
-                )
-            })
             .into_any_element()
     }
 
@@ -4978,8 +4980,9 @@ mod prompt_truncation_tests {
 
     use super::{
         AGENT_DISCLOSURE_DETAIL_INSET, AGENT_DISCLOSURE_GAP, AGENT_DISCLOSURE_PADDING,
-        AGENT_DISCLOSURE_SLOT, ComposerAction, Status, VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES,
-        compaction_accounting, compaction_label, composer_action, entry_copy_text, is_work_row,
+        AGENT_DISCLOSURE_SLOT, AgentKind, ComposerAction, Status,
+        VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES, compaction_accounting, compaction_label,
+        compaction_row_is_expandable, composer_action, entry_copy_text, is_work_row,
         should_show_jump_to_latest, should_virtualize_transcript, transcript_segments,
         truncated_user_prompt,
     };
@@ -5064,6 +5067,12 @@ mod prompt_truncation_tests {
             entry_copy_text(&item),
             "Context compacted\n120k → 40k · 80k freed · manual\n\nwhat happened so far"
         );
+    }
+
+    #[test]
+    fn compaction_disclosure_matches_provider_capabilities() {
+        assert!(!compaction_row_is_expandable(AgentKind::Codex));
+        assert!(compaction_row_is_expandable(AgentKind::Claude));
     }
 
     #[test]
