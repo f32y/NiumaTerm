@@ -1,5 +1,9 @@
 # agent-session-history
 
+## Purpose
+
+When an Agent Tab opens, it displays historical sessions for the current working directory and lets the user restore and continue a conversation with either Claude Code through its stream-json CLI or Codex through app-server.
+
 ## Requirements
 
 ### Requirement: Show historical sessions in the empty state
