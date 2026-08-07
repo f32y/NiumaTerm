@@ -16,8 +16,8 @@ use gpui_component::resizable::{
 };
 use gpui_component::{ActiveTheme, IconName, IconNamed, Root, TitleBar, WindowExt, h_flex, v_flex};
 use nmt_agent_utils::{
-    AgentEvent, AgentMonitor, AgentNotification, AgentRoute, agent_process, exact_window_is_active,
-    request_native_delivery,
+    AgentEvent, AgentMonitor, AgentNotification, AgentRoute, AgentRuntimeStatus, agent_process,
+    exact_window_is_active, request_native_delivery,
 };
 use nmt_config::get;
 use nmt_config::local_state::{TabState, WindowState};
@@ -843,17 +843,31 @@ impl Shell {
         summaries
     }
 
-    fn unread_tabs(&self, cx: &App) -> collections::HashSet<TabId> {
-        self.workspaces
-            .active_tabs()
-            .tabs()
-            .iter()
-            .filter_map(|tab| {
-                let routes = Self::agent_routes_in_surface(tab.surface(), cx);
+    /// Project each tab's routes once for the two chrome indicators. Busy is
+    /// limited to the dedicated Agent surface; terminal progress continues to
+    /// use OSC 9;4 and must not acquire a second activity signal.
+    fn tab_agent_indicators(
+        &self,
+        cx: &App,
+    ) -> (collections::HashSet<TabId>, collections::HashSet<TabId>) {
+        let mut unread_tabs = collections::HashSet::new();
+        let mut busy_agent_tabs = collections::HashSet::new();
 
-                (self.agent_monitor.project(&routes).unread_count > 0).then_some(tab.id())
-            })
-            .collect()
+        for tab in self.workspaces.active_tabs().tabs() {
+            let routes = Self::agent_routes_in_surface(tab.surface(), cx);
+            let projection = self.agent_monitor.project(&routes);
+
+            if projection.unread_count > 0 {
+                unread_tabs.insert(tab.id());
+            }
+            if matches!(tab.surface(), TabSurface::Agent(_))
+                && projection.status == AgentRuntimeStatus::Running
+            {
+                busy_agent_tabs.insert(tab.id());
+            }
+        }
+
+        (unread_tabs, busy_agent_tabs)
     }
 
     /// Observe a pane so its host events reach the shell pump even when the tab
@@ -2453,11 +2467,12 @@ impl Render for Shell {
 
         self.tab_strip.reveal_active(active_id, active_index, cx);
 
-        let unread_tabs = self.unread_tabs(cx);
+        let (unread_tabs, busy_agent_tabs) = self.tab_agent_indicators(cx);
 
         let tab_bar = self.tab_strip.render(
             self.workspaces.active_tabs(),
             &unread_tabs,
+            &busy_agent_tabs,
             self.tab_rename.as_ref(),
             cx,
         );

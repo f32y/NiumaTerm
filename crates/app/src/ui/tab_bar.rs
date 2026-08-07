@@ -8,6 +8,7 @@ use gpui::{
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputState};
 use gpui_component::menu::{ContextMenuExt, DropdownMenu as _, PopupMenuItem};
+use gpui_component::progress::ProgressCircle;
 use gpui_component::tab::{Tab, TabBar, TabVariant};
 use gpui_component::{ActiveTheme, Sizable};
 use nmt_terminal::event::{ProgressReport, ProgressState};
@@ -80,6 +81,7 @@ struct TabItem {
     id: u64,
     label: String,
     unread: bool,
+    busy: bool,
     bell: bool,
     /// Restored but not yet spawned.
     pending: bool,
@@ -164,6 +166,7 @@ impl TabStrip {
         &self,
         tabs: &TabManager<TabSurface>,
         unread_tabs: &collections::HashSet<TabId>,
+        busy_agent_tabs: &collections::HashSet<TabId>,
         rename: Option<&(TabId, Entity<InputState>)>,
         cx: &mut Context<Shell>,
     ) -> AnyElement {
@@ -180,6 +183,7 @@ impl TabStrip {
                     tab.title().to_string()
                 },
                 unread: unread_tabs.contains(&tab.id()),
+                busy: busy_agent_tabs.contains(&tab.id()),
                 bell: tab.bell(),
                 pending: matches!(tab.surface(), TabSurface::Pending(_)),
                 exited: tab.exited(),
@@ -274,6 +278,7 @@ impl TabStrip {
                     id,
                     label,
                     unread,
+                    busy,
                     bell,
                     pending,
                     exited,
@@ -403,6 +408,24 @@ impl TabStrip {
                     // pointer.
                     .when(self.drag_over == Some(index), |this| {
                         this.ml(px(TAB_MAKE_WAY_PX))
+                    })
+                    .when(busy, |this| {
+                        this.prefix(
+                            div()
+                                .id(("tab-agent-busy", id as usize))
+                                .aria_label("Agent busy")
+                                .size_4()
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(
+                                    ProgressCircle::new(("tab-agent-busy-spinner", id as usize))
+                                        .small()
+                                        .loading(true)
+                                        .color(cx.theme().warning),
+                                ),
+                        )
                     })
                     .child(content)
                     .suffix(close)
