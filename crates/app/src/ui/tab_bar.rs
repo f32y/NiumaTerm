@@ -252,7 +252,8 @@ impl TabStrip {
                 menu
             });
 
-        let closeable = items.len() > 1;
+        let tab_count = items.len();
+        let closeable = tab_count > 1;
         let shell = cx.entity();
 
         // Fixed width from the Appearance setting; long titles clip inside
@@ -298,6 +299,25 @@ impl TabStrip {
                         cx.stop_propagation();
                         this.request_close_tab(TabId(id), window, cx);
                     }));
+                // The divider shares the suffix's fixed space so adding visual
+                // separation never reduces the room available to the title.
+                let suffix = div()
+                    .relative()
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .child(close)
+                    .when(index + 1 < tab_count, |this| {
+                        this.child(
+                            div()
+                                .absolute()
+                                .right_0()
+                                .top(px(7.0))
+                                .bottom(px(7.0))
+                                .w(px(1.0))
+                                .bg(cx.theme().border.opacity(0.45)),
+                        )
+                    });
 
                 // Inline rename: the label swaps for an input. The mouse-down
                 // stopper keeps clicks in the input from activating the tab
@@ -428,7 +448,7 @@ impl TabStrip {
                         )
                     })
                     .child(content)
-                    .suffix(close)
+                    .suffix(suffix)
                     .group("shell-tab")
                     // Drag a tab to reorder it; drop maps the source position
                     // (`from`) onto this tab's position.
