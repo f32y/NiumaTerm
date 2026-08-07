@@ -21,6 +21,7 @@ use std::{fs, thread};
 use serde_json::{Value, json};
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
+use super::compaction::{compaction_metadata, parse_compaction};
 use super::tool_items::{complete_tool_item, tool_item, tool_title};
 #[cfg(test)]
 use super::tool_items::{edit_diff, input_detail};
@@ -94,6 +95,10 @@ pub struct Session {
     context_input_tokens: u64,
     context_output_tokens: u64,
     context_window: Option<u64>,
+    /// A compaction is running. Tracked because the CLI re-announces it every
+    /// 30 seconds while a long compaction proceeds, and the UI only needs the
+    /// state transitions.
+    compacting: bool,
 }
 
 impl Drop for Session {
@@ -211,6 +216,7 @@ impl Session {
             context_input_tokens: 0,
             context_output_tokens: 0,
             context_window: None,
+            compacting: false,
         };
 
         session.send(json!({
@@ -396,12 +402,17 @@ impl Session {
     }
 
     fn process_system(&mut self, message: &Value) -> Vec<Event> {
-        // Every subtype but `init` (status, hook_*, thinking_tokens, …) is
-        // telemetry the UI ignores.
-        if message["subtype"].as_str() != Some("init") {
-            return Vec::new();
+        match message["subtype"].as_str() {
+            Some("init") => self.process_init(message),
+            Some("status") => self.process_status(message),
+            Some("compact_boundary") => self.process_compact_boundary(message),
+            // Every other subtype (hook_*, thinking_tokens, informational, …)
+            // is telemetry the UI ignores.
+            _ => Vec::new(),
         }
+    }
 
+    fn process_init(&mut self, message: &Value) -> Vec<Event> {
         // The session id makes this conversation resumable by a future tab
         // (`--resume`); captured on every `init` since a resumed session
         // keeps the id of the transcript it reloaded.
@@ -442,6 +453,44 @@ impl Session {
             &message["slash_commands"],
         ) {
             events.push(Event::Commands(commands));
+        }
+
+        events
+    }
+
+    fn process_status(&mut self, message: &Value) -> Vec<Event> {
+        compaction_progress(&mut self.compacting, message)
+    }
+
+    /// The post-compaction boundary. Live it carries only the token accounting:
+    /// the replacement summary is written to the transcript file and marked
+    /// visible there only, so a resumed thread shows it and this one does not.
+    fn process_compact_boundary(&mut self, message: &Value) -> Vec<Event> {
+        let detail = parse_compaction(compaction_metadata(message));
+        let id = match message["uuid"].as_str() {
+            Some(uuid) => format!("compaction-{uuid}"),
+            None => self.alloc_item_id("compaction"),
+        };
+        let post_tokens = detail.post_tokens;
+
+        self.compacting = false;
+
+        let mut events = vec![
+            Event::CompactionFinished { error: None },
+            Event::ItemCompleted(Item::Compaction { id, detail }),
+        ];
+
+        // Compaction replaces the prompt, so the live context is this size from
+        // here on. Without the correction the gauge keeps showing the
+        // pre-compaction total until the next assistant message reports usage,
+        // which is exactly when the boundary row claims space was reclaimed.
+        if let Some(post_tokens) = post_tokens {
+            self.context_input_tokens = post_tokens;
+            self.context_output_tokens = 0;
+
+            if let Some(usage) = self.context_window_usage() {
+                events.push(Event::ContextWindowUpdated(usage));
+            }
         }
 
         events
@@ -635,6 +684,14 @@ impl Session {
             events.push(Event::ApprovalResolved);
         }
 
+        // Compaction only runs inside a turn, so a still-set flag here means
+        // its end notification was lost (interrupt, aborted turn); the
+        // indicator must not outlive the turn that owned it.
+        if self.compacting {
+            self.compacting = false;
+            events.push(Event::CompactionFinished { error: None });
+        }
+
         let error = claude_result_error(message);
 
         if let Some(name) = self.active_slash_command.take() {
@@ -791,6 +848,38 @@ fn claude_input_tokens(usage: &Value) -> u64 {
     .into_iter()
     .map(|field| usage[field].as_u64().unwrap_or(0))
     .sum()
+}
+
+/// Translate a `system/status` message into compaction progress events.
+///
+/// The subtype multiplexes unrelated notifications — a per-request `requesting`
+/// marker, permission-mode echoes, and compaction — so each transition is
+/// recognized by its own field rather than by `status` alone. `compact_result`
+/// appears only on a compaction's final message, and `requesting` also fires for
+/// the summarization call that compaction itself makes, which would otherwise
+/// look like the end of it. `compacting` is re-announced roughly every 30
+/// seconds while a long compaction runs, so `active` suppresses the repeats.
+fn compaction_progress(active: &mut bool, message: &Value) -> Vec<Event> {
+    if let Some(result) = message["compact_result"].as_str() {
+        *active = false;
+
+        return vec![Event::CompactionFinished {
+            error: (result != "success").then(|| {
+                message["compact_error"]
+                    .as_str()
+                    .unwrap_or("Compacting the conversation failed.")
+                    .to_string()
+            }),
+        }];
+    }
+
+    if message["status"].as_str() == Some("compacting") && !*active {
+        *active = true;
+
+        return vec![Event::CompactionStarted];
+    }
+
+    Vec::new()
 }
 
 fn claude_context_window(model_usage: &Value) -> Option<u64> {
@@ -1069,6 +1158,76 @@ mod tests {
                 status: Some("inProgress".into()),
             }
         );
+    }
+
+    #[test]
+    fn only_the_compaction_status_shapes_drive_progress_events() {
+        let mut active = false;
+
+        // Per-request and permission-mode notifications share the subtype.
+        assert!(
+            compaction_progress(&mut active, &json!({"status": "requesting"})).is_empty(),
+            "an API request start is not compaction"
+        );
+        assert!(
+            compaction_progress(
+                &mut active,
+                &json!({"status": null, "permissionMode": "acceptEdits"})
+            )
+            .is_empty(),
+            "a permission-mode echo must not end a compaction"
+        );
+        assert!(!active);
+
+        assert_eq!(
+            compaction_progress(&mut active, &json!({"status": "compacting"})),
+            vec![Event::CompactionStarted]
+        );
+        assert!(active);
+
+        // The CLI re-announces the running compaction; the UI needs one edge.
+        assert!(
+            compaction_progress(&mut active, &json!({"status": "compacting"})).is_empty(),
+            "repeat announcements are not new transitions"
+        );
+        // The summarization call itself reports as a request in flight.
+        assert!(compaction_progress(&mut active, &json!({"status": "requesting"})).is_empty());
+        assert!(active, "a request in flight must not end the compaction");
+
+        assert_eq!(
+            compaction_progress(
+                &mut active,
+                &json!({"status": null, "compact_result": "success"})
+            ),
+            vec![Event::CompactionFinished { error: None }]
+        );
+        assert!(!active);
+    }
+
+    #[test]
+    fn a_failed_compaction_reports_its_reason() {
+        let mut active = true;
+
+        assert_eq!(
+            compaction_progress(
+                &mut active,
+                &json!({"status": null, "compact_result": "failed",
+                    "compact_error": "not enough messages to summarize"})
+            ),
+            vec![Event::CompactionFinished {
+                error: Some("not enough messages to summarize".into())
+            }]
+        );
+        assert!(!active);
+
+        // A failure with no detail still has to surface as a failure.
+        let mut active = true;
+        let events = compaction_progress(&mut active, &json!({"compact_result": "failed"}));
+
+        assert!(matches!(
+            events.as_slice(),
+            [Event::CompactionFinished { error: Some(_) }]
+        ));
     }
 
     #[test]
