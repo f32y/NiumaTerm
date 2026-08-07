@@ -1,5 +1,6 @@
 pub mod chat;
 pub mod claude_code {
+    mod compaction;
     pub mod hook;
     pub mod sessions;
     #[cfg(target_os = "windows")]

@@ -111,6 +111,44 @@ pub enum SlashCommandOutcome {
     NotReady,
 }
 
+/// Why a context compaction ran.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CompactionTrigger {
+    /// The backend reached its own context threshold and compacted unprompted.
+    Automatic,
+    /// The user asked for it (`/compact`).
+    Manual,
+}
+
+impl CompactionTrigger {
+    pub fn label(self) -> &'static str {
+        match self {
+            CompactionTrigger::Automatic => "automatic",
+            CompactionTrigger::Manual => "manual",
+        }
+    }
+}
+
+/// One finished context compaction: the conversation before it was replaced by
+/// a summary. Every field is optional because backends report different subsets
+/// live and in their persisted transcript, and the boundary is worth showing
+/// even when only part of the accounting is known.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Compaction {
+    pub trigger: Option<CompactionTrigger>,
+    /// Context size that triggered the compaction.
+    pub pre_tokens: Option<u64>,
+    /// Context size the conversation continues from.
+    pub post_tokens: Option<u64>,
+    /// How many messages were folded into the summary.
+    pub messages_summarized: Option<u64>,
+    /// Extra instructions the user passed alongside a manual compaction.
+    pub user_context: Option<String>,
+    /// The summary the conversation continues from. Claude marks it visible in
+    /// the transcript only, so it arrives on resume rather than live.
+    pub summary: Option<String>,
+}
+
 /// A typed view of one transcript item, used for both started and completed
 /// notifications. `Option` fields mean "absent in this payload — keep what
 /// streaming already produced".
@@ -141,6 +179,13 @@ pub enum Item {
         /// reconstructed from the edit-tool input; Codex: wire diffs).
         diff: Option<String>,
         status: Option<String>,
+    },
+    /// A context-compaction boundary: everything above it was replaced by the
+    /// carried summary. It has no status — the record only exists once the
+    /// compaction finished.
+    Compaction {
+        id: String,
+        detail: Compaction,
     },
     /// Every other tool-call kind (mcpToolCall, webSearch, dynamicToolCall,
     /// …): kind + best-effort title, so no activity is invisible.
@@ -210,6 +255,15 @@ pub enum Event {
     },
     /// Replacement snapshot of the current thread's active context window.
     ContextWindowUpdated(ContextWindowUsage),
+    /// The backend started rewriting the conversation to reclaim context. Turn
+    /// output stops until it finishes, so this drives a progress indicator; the
+    /// finished boundary arrives separately as [`Item::Compaction`].
+    CompactionStarted,
+    /// Compaction ended. A failure is worth surfacing because the turn that
+    /// triggered it usually dies next with an over-length prompt.
+    CompactionFinished {
+        error: Option<String>,
+    },
     ItemStarted(Item),
     ItemCompleted(Item),
     AgentMessageDelta {

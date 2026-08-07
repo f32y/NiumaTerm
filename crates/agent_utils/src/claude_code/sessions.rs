@@ -2,10 +2,11 @@
 //! CLI persists under `~/.claude/projects/<munged-cwd>/<session-id>.jsonl`.
 //!
 //! The transcript format is an implementation detail of the CLI, so parsing
-//! here depends on a minimal field set (`type`, `message.content`, tool block
-//! ids/names/inputs, `isSidechain`, `isMeta`, `gitBranch`) and skips any line
-//! it does not recognize — an unparseable session degrades to an id-prefix
-//! title instead of failing the list.
+//! here depends on a minimal field set (`type`, `subtype`, `message.content`,
+//! tool block ids/names/inputs, `isSidechain`, `isMeta`, `isCompactSummary`,
+//! `compactMetadata`, `uuid`, `gitBranch`) and skips any line it does not
+//! recognize — an unparseable session degrades to an id-prefix title instead of
+//! failing the list.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read as _};
@@ -14,8 +15,9 @@ use std::{env, fs};
 
 use serde_json::Value;
 
+use super::compaction::{compaction_metadata, parse_compaction};
 use super::tool_items::{complete_tool_item, tool_item};
-use crate::chat::{Item, ReplayItem, SessionSummary};
+use crate::chat::{Compaction, Item, ReplayItem, SessionSummary};
 use crate::hook_store::home_dir;
 
 /// The CLI resolves `--resume` against the project directory derived from the
@@ -136,20 +138,42 @@ fn head_title(path: &Path) -> (Option<String>, Option<String>) {
 }
 
 /// The prompt text of a `user` record, or `None` for records that carry no
-/// real prompt: sidechain (subagent) traffic, meta records, and tool-result
-/// containers.
+/// real prompt: sidechain (subagent) traffic, meta records, compaction
+/// summaries, and tool-result containers.
 fn user_prompt_text(record: &Value) -> Option<String> {
     if record["type"].as_str() != Some("user")
         || record["isSidechain"].as_bool() == Some(true)
         || record["isMeta"].as_bool() == Some(true)
+        // The CLI stores a compaction summary as a synthesized user turn. It is
+        // machine-written continuation context, so treating it as a prompt would
+        // title a session with it and replay it as something the user typed;
+        // `compaction_summary_text` claims it for its own transcript row.
+        || is_compaction_summary(record)
     {
         return None;
     }
 
-    let content = &record["message"]["content"];
+    record_text(record)
+}
 
-    // Content is either a plain string or an array of typed blocks.
-    let text = match content {
+/// A `user` record the CLI synthesized to carry a compaction summary rather
+/// than to record something the user sent.
+fn is_compaction_summary(record: &Value) -> bool {
+    record["type"].as_str() == Some("user") && record["isCompactSummary"].as_bool() == Some(true)
+}
+
+/// The summary a compaction left behind, if this record is the one carrying it.
+fn compaction_summary_text(record: &Value) -> Option<String> {
+    is_compaction_summary(record)
+        .then(|| record_text(record))
+        .flatten()
+}
+
+/// Readable text of a message record. Content is either a plain string or an
+/// array of typed blocks; `None` covers both an unknown shape and a record
+/// whose text is blank.
+fn record_text(record: &Value) -> Option<String> {
+    let text = match &record["message"]["content"] {
         Value::String(text) => text.clone(),
         Value::Array(blocks) => {
             let parts: Vec<&str> = blocks
@@ -227,6 +251,12 @@ fn parse_replay(reader: impl BufRead) -> Vec<ReplayItem> {
     let mut items: Vec<ReplayItem> = Vec::new();
     let mut pending_tools: HashMap<String, usize> = HashMap::new();
     let mut thinking_seq = 0usize;
+    let mut compaction_seq = 0usize;
+    // A compaction writes its summary first and its boundary marker second (the
+    // marker's parent is the last summary message). The summary is the part
+    // worth keeping, so it opens the row immediately and the marker enriches it,
+    // which also leaves the row intact if the marker never made it to disk.
+    let mut open_compaction: Option<usize> = None;
 
     for line in reader.lines().map_while(Result::ok) {
         let Ok(record) = serde_json::from_str::<Value>(&line) else {
@@ -242,10 +272,52 @@ fn parse_replay(reader: impl BufRead) -> Vec<ReplayItem> {
             Some("user") => {
                 complete_replayed_tools(&record, &mut items, &mut pending_tools);
 
+                if let Some(summary) = compaction_summary_text(&record) {
+                    compaction_seq += 1;
+                    open_compaction = Some(items.len());
+                    items.push(ReplayItem::Item(Item::Compaction {
+                        id: replayed_compaction_id(&record, compaction_seq),
+                        detail: Compaction {
+                            summary: Some(summary),
+                            ..Compaction::default()
+                        },
+                    }));
+                    continue;
+                }
+
                 if let Some(text) = user_prompt_text(&record) {
                     let text = clean_prompt(&text);
                     if !text.is_empty() {
                         items.push(ReplayItem::User { text });
+                    }
+                }
+            }
+            Some("system") if record["subtype"].as_str() == Some("compact_boundary") => {
+                let detail = parse_compaction(compaction_metadata(&record));
+
+                match open_compaction
+                    .take()
+                    .and_then(|index| items.get_mut(index))
+                {
+                    Some(ReplayItem::Item(Item::Compaction { id, detail: opened })) => {
+                        // The boundary marker is the record the live protocol
+                        // reports, so adopting its identity keeps a resumed row
+                        // and a live one from being two separate entries.
+                        *id = replayed_compaction_id(&record, compaction_seq);
+                        *opened = Compaction {
+                            summary: opened.summary.take(),
+                            ..detail
+                        };
+                    }
+                    // Some compaction paths preserve a message segment instead
+                    // of writing a summary turn; the boundary still belongs in
+                    // the transcript.
+                    _ => {
+                        compaction_seq += 1;
+                        items.push(ReplayItem::Item(Item::Compaction {
+                            id: replayed_compaction_id(&record, compaction_seq),
+                            detail,
+                        }));
                     }
                 }
             }
@@ -304,6 +376,16 @@ fn parse_replay(reader: impl BufRead) -> Vec<ReplayItem> {
     items
 }
 
+/// Stable transcript id for a replayed compaction. The record's own uuid keeps
+/// a resumed row identical to the one the live boundary event produces, so the
+/// same compaction cannot end up with two entries.
+fn replayed_compaction_id(record: &Value, sequence: usize) -> String {
+    match record["uuid"].as_str() {
+        Some(uuid) => format!("compaction-{uuid}"),
+        None => format!("replay-compaction-{sequence}"),
+    }
+}
+
 /// Historical `tool_use` and `tool_result` blocks live in separate JSONL
 /// records. Updating the already-positioned replay item keeps transcript order
 /// while adding the completion payload and status.
@@ -337,6 +419,7 @@ fn complete_replayed_tools(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chat::CompactionTrigger;
 
     #[test]
     fn cwd_munges_to_the_cli_project_directory_name() {
@@ -372,6 +455,123 @@ mod tests {
         assert_eq!(
             user_prompt_text(&record).as_deref().and_then(title_line),
             Some("fix the login bug".to_string())
+        );
+    }
+
+    #[test]
+    fn a_compaction_summary_is_never_mistaken_for_a_prompt() {
+        // The CLI stores it as a user turn, so without the guard it would both
+        // title the session and replay as something the user typed.
+        let summary = serde_json::json!({"type": "user", "isCompactSummary": true,
+            "message": {"content": "This session is being continued from a previous…"}});
+
+        assert_eq!(user_prompt_text(&summary), None);
+        assert_eq!(
+            compaction_summary_text(&summary).as_deref(),
+            Some("This session is being continued from a previous…")
+        );
+        assert_eq!(
+            compaction_summary_text(&serde_json::json!({"type": "user",
+                "message": {"content": "a real prompt"}})),
+            None
+        );
+    }
+
+    #[test]
+    fn a_compaction_replays_as_one_row_carrying_summary_and_accounting() {
+        let lines = [
+            serde_json::json!({"type": "user",
+                "message": {"content": [{"type": "text", "text": "question"}]}}),
+            serde_json::json!({"type": "user", "uuid": "summary-uuid",
+                "isCompactSummary": true, "isVisibleInTranscriptOnly": true,
+                "message": {"content": "## Summary\nwhat happened so far"}}),
+            serde_json::json!({"type": "system", "subtype": "compact_boundary",
+                "uuid": "boundary-uuid", "parentUuid": "summary-uuid", "isMeta": false,
+                "content": "Conversation compacted",
+                "compactMetadata": {"trigger": "auto", "preTokens": 154_000,
+                    "postTokens": 32_000, "messagesSummarized": 87}}),
+            serde_json::json!({"type": "assistant",
+                "message": {"content": [{"type": "text", "text": "answer"}]}}),
+        ];
+        let content: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+
+        let items = parse_replay(content.join("\n").as_bytes());
+
+        assert_eq!(
+            items,
+            vec![
+                ReplayItem::User {
+                    text: "question".into()
+                },
+                ReplayItem::Item(Item::Compaction {
+                    // The boundary record's identity wins, so the same
+                    // compaction cannot also arrive live as a second row.
+                    id: "compaction-boundary-uuid".into(),
+                    detail: Compaction {
+                        trigger: Some(CompactionTrigger::Automatic),
+                        pre_tokens: Some(154_000),
+                        post_tokens: Some(32_000),
+                        messages_summarized: Some(87),
+                        user_context: None,
+                        summary: Some("## Summary\nwhat happened so far".into()),
+                    },
+                }),
+                ReplayItem::Agent {
+                    text: "answer".into()
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_boundary_without_a_summary_turn_still_marks_the_break() {
+        let lines = [
+            serde_json::json!({"type": "system", "subtype": "compact_boundary",
+                "compactMetadata": {"trigger": "manual", "preTokens": 90_000}}),
+            serde_json::json!({"type": "assistant",
+                "message": {"content": [{"type": "text", "text": "after"}]}}),
+        ];
+        let content: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+
+        let items = parse_replay(content.join("\n").as_bytes());
+
+        assert_eq!(
+            items,
+            vec![
+                ReplayItem::Item(Item::Compaction {
+                    id: "replay-compaction-1".into(),
+                    detail: Compaction {
+                        trigger: Some(CompactionTrigger::Manual),
+                        pre_tokens: Some(90_000),
+                        post_tokens: None,
+                        messages_summarized: None,
+                        user_context: None,
+                        summary: None,
+                    },
+                }),
+                ReplayItem::Agent {
+                    text: "after".into()
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_summary_whose_boundary_never_reached_disk_keeps_its_row() {
+        let line = serde_json::json!({"type": "user", "uuid": "s1",
+            "isCompactSummary": true, "message": {"content": "partial summary"}});
+
+        let items = parse_replay(line.to_string().as_bytes());
+
+        assert_eq!(
+            items,
+            vec![ReplayItem::Item(Item::Compaction {
+                id: "compaction-s1".into(),
+                detail: Compaction {
+                    summary: Some("partial summary".into()),
+                    ..Compaction::default()
+                },
+            })]
         );
     }
 

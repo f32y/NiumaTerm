@@ -19,7 +19,7 @@ use futures::channel::mpsc;
 use gpui::prelude::*;
 use gpui::{
     AnyElement, ClipboardItem, Context, Div, ElementId, Entity, FocusHandle, FollowMode,
-    FontWeight, ListAlignment, ListHorizontalSizingBehavior, ListSizingBehavior, ListState,
+    FontWeight, Hsla, ListAlignment, ListHorizontalSizingBehavior, ListSizingBehavior, ListState,
     MouseButton, Pixels, ScrollHandle, SharedString, Stateful, UniformListScrollHandle, Window,
     div, linear_color_stop, linear_gradient, list, px, relative, rems, size, uniform_list,
 };
@@ -30,16 +30,17 @@ use gpui_component::input::{
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 use gpui_component::skeleton::Skeleton;
+use gpui_component::spinner::Spinner;
 use gpui_component::text::TextViewStyle;
 use gpui_component::{
     ActiveTheme as _, ElementExt as _, Icon, IconName, Sizable as _, VirtualListScrollHandle,
     h_flex, text, v_flex, v_virtual_list,
 };
 use nmt_agent_utils::chat::{
-    ContextWindowUsage, Event as SessionEvent, Item as SessionItem, ModelInfo, ReplayItem,
-    SendOutcome, SessionSummary, SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments,
-    SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
-    ThreadSettings,
+    Compaction, CompactionTrigger, ContextWindowUsage, Event as SessionEvent, Item as SessionItem,
+    ModelInfo, ReplayItem, SendOutcome, SessionSummary, SkillCatalog, SkillInfo, SkillReference,
+    SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy,
+    SlashCommandSource, ThreadSettings,
 };
 use nmt_agent_utils::claude_code::{sessions, stream_json};
 use nmt_agent_utils::codex::app_server;
@@ -164,6 +165,13 @@ enum ChatItem {
     Working {
         started: Instant,
         done_seconds: Option<u64>,
+    },
+    /// A context-compaction boundary: everything above it was replaced by a
+    /// summary. Renders as a divider that expands to the token accounting and
+    /// the summary the conversation continued from.
+    Compaction {
+        item_id: String,
+        detail: Compaction,
     },
     Error {
         text: String,
@@ -450,6 +458,10 @@ pub(crate) struct AgentPane {
     git_branch_ready: bool,
     git_branch_refreshing: bool,
     context_window_usage: Option<ContextWindowUsage>,
+    /// The backend is compacting the conversation. Turn output pauses for the
+    /// duration, so the live progress row explains the wait instead of leaving
+    /// a bare seconds counter that looks stalled.
+    compacting: bool,
 }
 
 impl AgentPane {
@@ -543,6 +555,7 @@ impl AgentPane {
             git_branch_ready: false,
             git_branch_refreshing: false,
             context_window_usage: None,
+            compacting: false,
         };
 
         this.start_session(None, cx);
@@ -1205,6 +1218,8 @@ impl AgentPane {
         self.virtual_transcripts.clear();
         self.turn_seq = 0;
         self.working_started = None;
+        self.compacting = false;
+        self.context_window_usage = None;
         self.skill_catalog = None;
         self.skill_binding = None;
         reset_command_runtime(
@@ -1759,6 +1774,9 @@ impl AgentPane {
                     .or_else(|| self.latest_agent_message().map(str::to_owned))
                     .unwrap_or_else(|| format!("{} completed the turn", self.kind.display()));
                 self.awaiting_command_turn = false;
+                // Compaction lives inside a turn; a flag surviving the turn
+                // would leave the indicator spinning with nothing behind it.
+                self.compacting = false;
                 self.finish_working(cx);
                 self.refresh_git_branch(cx);
                 if self.status == Status::Running {
@@ -1778,6 +1796,20 @@ impl AgentPane {
             }
             SessionEvent::ContextWindowUpdated(usage) => {
                 self.context_window_usage = Some(usage);
+                cx.notify();
+            }
+            SessionEvent::CompactionStarted => {
+                self.compacting = true;
+                cx.notify();
+            }
+            SessionEvent::CompactionFinished { error } => {
+                self.compacting = false;
+                // A failed compaction is not the turn's own failure, so it needs
+                // its own row: the turn continues (and usually then dies on an
+                // over-length prompt) with no other trace of why.
+                if let Some(text) = error {
+                    self.push(ChatItem::Error { text }, cx);
+                }
                 cx.notify();
             }
             SessionEvent::ItemStarted(item) => self.start_item(item, cx),
@@ -2074,7 +2106,8 @@ fn chat_item_id(item: &ChatItem) -> Option<&str> {
         | ChatItem::Reasoning { item_id, .. }
         | ChatItem::Command { item_id, .. }
         | ChatItem::FileChange { item_id, .. }
-        | ChatItem::Tool { item_id, .. } => Some(item_id),
+        | ChatItem::Tool { item_id, .. }
+        | ChatItem::Compaction { item_id, .. } => Some(item_id),
         ChatItem::User { .. } | ChatItem::Error { .. } | ChatItem::Working { .. } => None,
     }
 }
@@ -2391,7 +2424,63 @@ fn entry_copy_text(item: &ChatItem) -> String {
             started,
             done_seconds,
         } => working_label(*started, *done_seconds),
+        ChatItem::Compaction { detail, .. } => {
+            let head = format!(
+                "{}\n{}",
+                compaction_label(detail),
+                compaction_accounting(detail).join(" · ")
+            );
+
+            match &detail.summary {
+                Some(summary) => format!("{head}\n\n{summary}"),
+                None => head,
+            }
+        }
     }
+}
+
+/// Heading of a compaction row. An unprompted compaction is named as such
+/// because it explains a context-gauge jump the user did not ask for.
+fn compaction_label(detail: &Compaction) -> &'static str {
+    match detail.trigger {
+        Some(CompactionTrigger::Automatic) => "Context auto-compacted",
+        Some(CompactionTrigger::Manual) | None => "Context compacted",
+    }
+}
+
+/// Token and message accounting of a compaction, as display-ready fragments.
+/// Only what the backend actually reported appears, so a partially described
+/// compaction shows fewer fragments instead of zeros.
+fn compaction_accounting(detail: &Compaction) -> Vec<String> {
+    let mut parts = Vec::new();
+
+    match (detail.pre_tokens, detail.post_tokens) {
+        (Some(pre), Some(post)) => parts.push(format!(
+            "{} → {}",
+            compact_token_count(pre),
+            compact_token_count(post)
+        )),
+        (Some(pre), None) => parts.push(format!("from {}", compact_token_count(pre))),
+        (None, Some(post)) => parts.push(format!("to {}", compact_token_count(post))),
+        (None, None) => {}
+    }
+
+    if let Some(pre) = detail.pre_tokens
+        && let Some(post) = detail.post_tokens
+        && let Some(freed) = pre.checked_sub(post).filter(|freed| *freed > 0)
+    {
+        parts.push(format!("{} freed", compact_token_count(freed)));
+    }
+
+    if let Some(messages) = detail.messages_summarized {
+        parts.push(format!("{messages} messages summarized"));
+    }
+
+    if let Some(trigger) = detail.trigger {
+        parts.push(trigger.label().to_string());
+    }
+
+    parts
 }
 
 /// The protocol item id, used to match a completed item to its entry.
@@ -2402,6 +2491,7 @@ fn session_item_id(item: &SessionItem) -> Option<&str> {
         | SessionItem::Reasoning { id, .. }
         | SessionItem::CommandExecution { id, .. }
         | SessionItem::FileChange { id, .. }
+        | SessionItem::Compaction { id, .. }
         | SessionItem::Other { id, .. } => Some(id),
     }
 }
@@ -2443,6 +2533,10 @@ fn chat_item_from_session_item(item: SessionItem) -> Option<ChatItem> {
             summary: paths,
             diff,
             status: status.unwrap_or_else(|| "inProgress".to_string()),
+        },
+        SessionItem::Compaction { id, detail } => ChatItem::Compaction {
+            item_id: id,
+            detail,
         },
         SessionItem::Other {
             id,
@@ -2513,6 +2607,10 @@ struct AgentDisclosureRow {
     preview: Option<String>,
     trailing: Option<AnyElement>,
     accessible_label: String,
+    /// Tint for the label and type icon, replacing the quiet work-log default.
+    /// The row sets its own text colors per slot, so a caller cannot override
+    /// them from the outside.
+    accent: Option<Hsla>,
 }
 
 impl AgentDisclosureRow {
@@ -2527,7 +2625,14 @@ impl AgentDisclosureRow {
             label,
             preview: None,
             trailing: None,
+            accent: None,
         }
+    }
+
+    /// Mark the row as a structural break rather than one step of the work log.
+    fn accent(mut self, color: Hsla) -> Self {
+        self.accent = Some(color);
+        self
     }
 
     fn expanded(mut self, expanded: bool) -> Self {
@@ -2573,11 +2678,15 @@ impl AgentDisclosureRow {
             .text_color(cx.theme().muted_foreground.opacity(0.7))
         });
         let show_type_icon_slot = self.type_icon.is_some() || self.reserve_type_icon_slot;
-        let type_icon = self.type_icon.map(|icon| {
-            Icon::new(icon)
-                .size_3p5()
-                .text_color(cx.theme().muted_foreground.opacity(0.8))
-        });
+        let icon_color = self
+            .accent
+            .unwrap_or_else(|| cx.theme().muted_foreground.opacity(0.8));
+        let label_color = self
+            .accent
+            .unwrap_or_else(|| cx.theme().foreground.opacity(0.82));
+        let type_icon = self
+            .type_icon
+            .map(|icon| Icon::new(icon).size_3p5().text_color(icon_color));
         let has_preview = self.preview.is_some();
 
         h_flex()
@@ -2623,7 +2732,7 @@ impl AgentDisclosureRow {
                     .max_w(relative(0.6))
                     .truncate()
                     .text_sm()
-                    .text_color(cx.theme().foreground.opacity(0.82))
+                    .text_color(label_color)
                     .child(self.label),
             )
             .children(self.preview.map(|preview| {
@@ -2673,7 +2782,12 @@ enum RowSpec {
         hidden_count: usize,
         expanded: bool,
     },
-    Working,
+    /// The live progress line. `compacting` is part of the spec because the
+    /// compaction form is a different, taller row, so flipping it has to
+    /// remeasure rather than only repaint.
+    Working {
+        compacting: bool,
+    },
 }
 
 /// Height-relevant signature of a transcript entry. Lengths and small fields
@@ -2719,6 +2833,11 @@ fn entry_fingerprint(item: &ChatItem, detail_expanded: bool) -> u64 {
             0,
         ),
         ChatItem::Working { done_seconds, .. } => (done_seconds.unwrap_or(0) as usize, 0, 0),
+        ChatItem::Compaction { detail, .. } => (
+            detail.summary.as_ref().map_or(0, String::len),
+            compaction_accounting(detail).len(),
+            detail.user_context.as_ref().map_or(0, String::len) as u64,
+        ),
     };
 
     (content_len as u64)
@@ -3295,7 +3414,9 @@ impl AgentPane {
         // Live progress row, pinned below everything the running turn has
         // produced; replaced by the turn's fold header on completion.
         if self.working_started.is_some() {
-            rows.push(RowSpec::Working);
+            rows.push(RowSpec::Working {
+                compacting: self.compacting,
+            });
         }
 
         rows
@@ -3344,9 +3465,14 @@ impl AgentPane {
         });
 
         if folded {
-            // Errors stay visible even inside a folded turn.
+            // Errors and compaction boundaries stay visible inside a folded
+            // turn: an error is what the user needs to act on, and a boundary
+            // marks where the conversation above it stopped being verbatim.
             for i in start..end {
-                if matches!(&self.items[i].item, ChatItem::Error { .. }) {
+                if matches!(
+                    &self.items[i].item,
+                    ChatItem::Error { .. } | ChatItem::Compaction { .. }
+                ) {
                     rows.push(self.entry_spec(i));
                 }
             }
@@ -3486,7 +3612,7 @@ impl AgentPane {
                 hidden_count,
                 expanded,
             } => self.render_run_toggle(run_start, hidden_count, expanded, cx),
-            RowSpec::Working => self.render_working_row(cx),
+            RowSpec::Working { compacting } => self.render_working_row(compacting, cx),
         };
 
         // The pre-virtualization container spaced rows with `gap_2` inside a
@@ -3495,10 +3621,42 @@ impl AgentPane {
         div().w_full().px_3().pb_2().child(row).into_any_element()
     }
 
-    fn render_working_row(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// The live progress line. While the backend is compacting it names that
+    /// explicitly and spins: compaction produces no streamed output, so a bare
+    /// seconds counter would read as a hung turn for as long as a minute.
+    fn render_working_row(&self, compacting: bool, cx: &mut Context<Self>) -> AnyElement {
         let Some(started) = self.working_started else {
             return div().into_any_element();
         };
+
+        if compacting {
+            let accent = cx.theme().info;
+
+            return h_flex()
+                .w_full()
+                .gap_2()
+                .items_center()
+                .px_1()
+                .child(
+                    Spinner::new()
+                        .icon(IconName::LoaderCircle)
+                        .with_size(px(12.))
+                        .color(accent),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(accent)
+                        .child("Compacting context…"),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground.opacity(0.55))
+                        .child(working_label(started, None)),
+                )
+                .into_any_element();
+        }
 
         h_flex()
             .w_full()
@@ -3532,6 +3690,11 @@ impl AgentPane {
             ChatItem::User { text } => self.render_user_row(index, text, cx),
             ChatItem::Agent { text, .. } => self.render_agent_row(index, text.clone(), cx),
             ChatItem::Error { text } => self.render_error_row(index, text.clone(), cx),
+            ChatItem::Compaction { detail, .. } => {
+                let detail = detail.clone();
+
+                self.render_compaction_row(index, detail, window, cx)
+            }
             item if is_work_row(item) => self.render_work_row(index, window, cx),
             // Working entries render as the turn's fold header, never here.
             _ => div().into_any_element(),
@@ -3976,6 +4139,167 @@ impl AgentPane {
                     .relative()
                     .child(body)
             }))
+            .into_any_element()
+    }
+
+    /// A context-compaction boundary. Rendered as a divider rather than a card
+    /// because it is a structural break in the conversation: the rows above it
+    /// are no longer what the model sees. Expanding reveals the accounting and
+    /// the summary the thread continued from.
+    fn render_compaction_row(
+        &self,
+        index: usize,
+        detail: Compaction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let label = compaction_label(&detail);
+        let preview = compaction_accounting(&detail).join(" · ");
+        let expanded = self.expanded_rows.contains(&index);
+        let accent = cx.theme().info;
+
+        let header = AgentDisclosureRow::new(("compaction-head", index), label)
+            .type_icon(IconName::Minimize)
+            .preview(preview.clone())
+            .expanded(expanded)
+            .accent(accent)
+            .accessible_label(format!(
+                "{label}. {preview}. {}",
+                if expanded { "Expanded" } else { "Collapsed" }
+            ))
+            .render(cx)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if !this.expanded_rows.insert(index) {
+                    this.expanded_rows.remove(&index);
+                }
+                cx.notify();
+            }));
+
+        v_flex()
+            .id(("entry", index))
+            .w_full()
+            .gap_1()
+            .context_menu(Self::copy_menu(cx.entity().downgrade(), index))
+            // The rule sits above the heading: it closes off the conversation
+            // that the summary below replaced.
+            .child(div().w_full().h(px(1.)).bg(accent.opacity(0.35)))
+            .child(header)
+            .children(expanded.then(|| self.render_compaction_detail(index, &detail, window, cx)))
+            .into_any_element()
+    }
+
+    /// Expanded compaction body: the accounting as labelled rows, the manual
+    /// instructions when the user gave any, and the summary itself in a bounded
+    /// scroll surface (summaries routinely run to several kilobytes).
+    fn render_compaction_detail(
+        &self,
+        index: usize,
+        detail: &Compaction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let facts = [
+            ("Before", detail.pre_tokens.map(compact_token_count)),
+            ("After", detail.post_tokens.map(compact_token_count)),
+            (
+                "Messages summarized",
+                detail.messages_summarized.map(|count| count.to_string()),
+            ),
+            (
+                "Trigger",
+                detail.trigger.map(|trigger| trigger.label().to_string()),
+            ),
+            ("Instructions", detail.user_context.clone()),
+        ];
+        let summary_scroll = window
+            .use_keyed_state(("compaction-scroll", index), cx, |_, _| {
+                ScrollHandle::default()
+            })
+            .read(cx)
+            .clone();
+
+        v_flex()
+            .ml(px(AGENT_DISCLOSURE_DETAIL_INSET))
+            .max_w(rems(AGENT_TEXT_MEASURE_REMS))
+            .gap_1()
+            .text_xs()
+            .children(facts.into_iter().filter_map(|(name, value)| {
+                let value = value?;
+
+                Some(
+                    h_flex()
+                        .w_full()
+                        .gap_2()
+                        .items_start()
+                        .child(
+                            div()
+                                .flex_none()
+                                .w(px(148.))
+                                .text_color(cx.theme().muted_foreground.opacity(0.6))
+                                .child(name),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(value),
+                        ),
+                )
+            }))
+            .children(detail.summary.clone().map(|summary| {
+                div()
+                    .w_full()
+                    .mt_1()
+                    .relative()
+                    .child(
+                        div()
+                            .id(("compaction-summary", index))
+                            .w_full()
+                            .max_h(px(320.))
+                            .overflow_y_scroll()
+                            .track_scroll(&summary_scroll)
+                            // The virtual conversation list handles wheel input
+                            // before child listeners run. Occluding its earlier
+                            // hitbox makes this the only scroll target under the
+                            // pointer, even at either limit.
+                            .occlude()
+                            .context_menu(Self::copy_menu(cx.entity().downgrade(), index))
+                            .px_3()
+                            .py_2()
+                            .rounded(cx.theme().radius)
+                            .bg(cx.theme().tokens.muted)
+                            .text_color(cx.theme().muted_foreground)
+                            .child(
+                                text::TextView::markdown(("compaction-md", index), summary)
+                                    .selectable(true),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .right_0()
+                            .bottom_0()
+                            .w(px(16.0))
+                            .child(
+                                Scrollbar::vertical(&summary_scroll)
+                                    .id(("compaction-scrollbar", index))
+                                    .scrollbar_show(ScrollbarShow::Always),
+                            ),
+                    )
+            }))
+            .when(detail.summary.is_none(), |this| {
+                // Live boundaries carry accounting only: the CLI writes the
+                // replacement summary to the session file and marks it visible
+                // there, so it appears once this thread is resumed.
+                this.child(
+                    div()
+                        .mt_1()
+                        .text_color(cx.theme().muted_foreground.opacity(0.6))
+                        .child("The summary is stored with the session and appears on resume."),
+                )
+            })
             .into_any_element()
     }
 
@@ -4633,12 +4957,13 @@ impl AgentPane {
 #[cfg(test)]
 mod prompt_truncation_tests {
     use gpui::px;
-    use nmt_agent_utils::chat::Item as SessionItem;
+    use nmt_agent_utils::chat::{Compaction, CompactionTrigger, Item as SessionItem};
 
     use super::{
         AGENT_DISCLOSURE_DETAIL_INSET, AGENT_DISCLOSURE_GAP, AGENT_DISCLOSURE_PADDING,
         AGENT_DISCLOSURE_SLOT, ChatItem, ComposerAction, Status,
-        VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES, chat_item_from_session_item, composer_action,
+        VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES, chat_item_from_session_item, compaction_accounting,
+        compaction_label, composer_action, entry_copy_text, is_work_row,
         should_show_jump_to_latest, should_virtualize_transcript, transcript_segments,
         truncated_user_prompt,
     };
@@ -4667,6 +4992,62 @@ mod prompt_truncation_tests {
         assert!(!should_show_jump_to_latest(true, Some(false), px(200.)));
         assert!(!should_show_jump_to_latest(true, None, px(200.)));
         assert!(should_show_jump_to_latest(false, None, px(200.)));
+    }
+
+    #[test]
+    fn compaction_rows_name_the_trigger_and_report_only_known_numbers() {
+        let full = Compaction {
+            trigger: Some(CompactionTrigger::Automatic),
+            pre_tokens: Some(154_000),
+            post_tokens: Some(32_000),
+            messages_summarized: Some(87),
+            user_context: None,
+            summary: None,
+        };
+
+        assert_eq!(compaction_label(&full), "Context auto-compacted");
+        assert_eq!(
+            compaction_accounting(&full),
+            vec![
+                "154k → 32k".to_string(),
+                "122k freed".to_string(),
+                "87 messages summarized".to_string(),
+                "automatic".to_string(),
+            ]
+        );
+
+        // A boundary the backend described only partially must not invent
+        // zeroes for the fields it never reported.
+        let sparse = Compaction {
+            pre_tokens: Some(90_000),
+            ..Compaction::default()
+        };
+
+        assert_eq!(compaction_label(&sparse), "Context compacted");
+        assert_eq!(compaction_accounting(&sparse), vec!["from 90k".to_string()]);
+        assert!(compaction_accounting(&Compaction::default()).is_empty());
+    }
+
+    #[test]
+    fn a_compaction_row_is_a_divider_and_copies_its_summary() {
+        let item = ChatItem::Compaction {
+            item_id: "compaction-1".into(),
+            detail: Compaction {
+                trigger: Some(CompactionTrigger::Manual),
+                pre_tokens: Some(120_000),
+                post_tokens: Some(40_000),
+                summary: Some("what happened so far".into()),
+                ..Compaction::default()
+            },
+        };
+
+        // Work rows collapse into "+N previous tool calls" runs; a structural
+        // break must never be swallowed by one.
+        assert!(!is_work_row(&item));
+        assert_eq!(
+            entry_copy_text(&item),
+            "Context compacted\n120k → 40k · 80k freed · manual\n\nwhat happened so far"
+        );
     }
 
     #[test]
