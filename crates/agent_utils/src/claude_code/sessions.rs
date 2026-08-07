@@ -325,6 +325,7 @@ fn parse_replay(reader: impl BufRead) -> Vec<ReplayItem> {
                 let Some(blocks) = record["message"]["content"].as_array() else {
                     continue;
                 };
+                let is_api_error = record["isApiErrorMessage"].as_bool() == Some(true);
 
                 for block in blocks {
                     match block["type"].as_str() {
@@ -332,9 +333,16 @@ fn parse_replay(reader: impl BufRead) -> Vec<ReplayItem> {
                             let text = block["text"].as_str().unwrap_or_default().trim();
 
                             if !text.is_empty() {
-                                items.push(ReplayItem::Agent {
-                                    text: text.to_string(),
-                                });
+                                let item = if is_api_error {
+                                    ReplayItem::Error {
+                                        text: text.to_string(),
+                                    }
+                                } else {
+                                    ReplayItem::Agent {
+                                        text: text.to_string(),
+                                    }
+                                };
+                                items.push(item);
                             }
                         }
                         Some("thinking") => {
@@ -645,6 +653,31 @@ mod tests {
                     text: "answer".into()
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn replay_preserves_api_error_semantics() {
+        let line = serde_json::json!({
+            "type": "assistant",
+            "isApiErrorMessage": true,
+            "error": "rate_limit",
+            "message": {
+                "role": "assistant",
+                "content": [{
+                    "type": "text",
+                    "text": "You've hit your session limit · resets 3:20pm (Asia/Shanghai)"
+                }]
+            }
+        });
+
+        let items = parse_replay(line.to_string().as_bytes());
+
+        assert_eq!(
+            items,
+            vec![ReplayItem::Error {
+                text: "You've hit your session limit · resets 3:20pm (Asia/Shanghai)".into()
+            }]
         );
     }
 }
