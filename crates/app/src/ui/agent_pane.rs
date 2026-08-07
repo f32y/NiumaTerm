@@ -33,8 +33,8 @@ use gpui_component::skeleton::Skeleton;
 use gpui_component::spinner::Spinner;
 use gpui_component::text::TextViewStyle;
 use gpui_component::{
-    ActiveTheme as _, ElementExt as _, Icon, IconName, Sizable as _, VirtualListScrollHandle,
-    h_flex, text, v_flex, v_virtual_list,
+    ActiveTheme as _, ElementExt as _, Icon, IconName, IconNamed, Sizable as _,
+    VirtualListScrollHandle, h_flex, text, v_flex, v_virtual_list,
 };
 use nmt_agent_utils::chat::{
     Compaction, CompactionTrigger, ContextWindowUsage, Event as SessionEvent, Item as SessionItem,
@@ -276,6 +276,14 @@ impl AgentKind {
 
 const ANTHROPIC_MODEL_ENV: &str = "ANTHROPIC_MODEL";
 const OPENAI_API_KEY_ENV: &str = "OPENAI_API_KEY";
+
+struct StopResponseIcon;
+
+impl IconNamed for StopResponseIcon {
+    fn path(self) -> SharedString {
+        "icons/stop.svg".into()
+    }
+}
 
 /// A deterministic provider id keeps Codex history scoped to the profile
 /// without exposing display names as config keys. Profile names are already
@@ -2341,23 +2349,6 @@ fn hidden(item: &ChatItem) -> bool {
     }
 }
 
-/// First non-empty line, truncated, for a work row's one-line preview.
-fn preview_line(text: &str) -> String {
-    let line = text
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .unwrap_or("")
-        .trim();
-
-    if line.chars().count() > 84 {
-        let mut preview: String = line.chars().take(84).collect();
-        preview.push('…');
-        preview
-    } else {
-        line.to_string()
-    }
-}
-
 /// Collapsed head of an oversized user prompt, cut at a line boundary when
 /// possible, or `None` when the whole prompt fits under the caps. The character
 /// cap bounds visual wrapping for giant single-line pastes; a byte cap alone
@@ -2884,8 +2875,6 @@ impl AgentDisclosureRow {
         let type_icon = self
             .type_icon
             .map(|icon| Icon::new(icon).size_3p5().text_color(icon_color));
-        let has_preview = self.preview.is_some();
-
         h_flex()
             .id(self.id)
             .w_full()
@@ -2941,7 +2930,6 @@ impl AgentDisclosureRow {
                     .text_color(cx.theme().muted_foreground.opacity(0.55))
                     .child(preview)
             }))
-            .when(!has_preview, |this| this.child(div().flex_1()))
             .child(
                 div()
                     .w(px(AGENT_DISCLOSURE_SLOT))
@@ -3436,14 +3424,9 @@ impl Render for AgentPane {
                                                 .danger()
                                                 .size(px(32.))
                                                 .rounded(px(999.))
+                                                .icon(StopResponseIcon)
                                                 .tooltip("Stop response")
                                                 .aria_label("Stop response")
-                                                .child(
-                                                    div()
-                                                        .size(px(10.))
-                                                        .rounded_sm()
-                                                        .bg(cx.theme().button_danger_foreground),
-                                                )
                                                 .on_click(
                                                     cx.listener(|this, _, _, cx| {
                                                         this.interrupt(cx)
@@ -4039,7 +4022,7 @@ impl AgentPane {
             .into_any_element()
     }
 
-    /// One work-log line: chevron · type icon · heading · preview · status.
+    /// One work-log line: chevron · type icon · heading · status.
     /// Rows with detail (command output, reasoning text) expand on click into
     /// a bounded transcript surface with its own scroll position.
     fn render_work_row(
@@ -4048,7 +4031,7 @@ impl AgentPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let (icon, heading, preview, status, detail) = match &self.items[index].item {
+        let (icon, heading, status, detail) = match &self.items[index].item {
             ChatItem::Command {
                 command,
                 output,
@@ -4065,7 +4048,6 @@ impl AgentPane {
                 (
                     IconName::SquareTerminal,
                     command.clone(),
-                    preview_line(output),
                     Some(state.to_string()),
                     (!output.trim().is_empty()).then_some(output.as_str()),
                 )
@@ -4077,8 +4059,7 @@ impl AgentPane {
                 ..
             } => (
                 IconName::File,
-                "Edit".to_string(),
-                summary.clone(),
+                format!("Edit {summary}"),
                 Some(status.clone()),
                 diff.as_deref().filter(|diff| !diff.trim().is_empty()),
             ),
@@ -4094,15 +4075,17 @@ impl AgentPane {
                 } else {
                     IconName::Settings2
                 },
-                kind.clone(),
-                title.clone(),
+                if title.trim().is_empty() {
+                    kind.clone()
+                } else {
+                    format!("{kind} {title}")
+                },
                 Some(status.clone()),
                 output.as_deref().filter(|output| !output.trim().is_empty()),
             ),
             ChatItem::Reasoning { text, .. } => (
                 IconName::Bot,
                 "Thinking".to_string(),
-                preview_line(text),
                 None,
                 Some(text.as_str()),
             ),
@@ -4126,9 +4109,8 @@ impl AgentPane {
         });
 
         let accessible_label = format!(
-            "{}: {}. {}{}",
+            "{}. {}{}",
             heading,
-            preview,
             status_label,
             if expandable {
                 if expanded {
@@ -4142,7 +4124,6 @@ impl AgentPane {
         );
         let mut header = AgentDisclosureRow::new(("wl-head", index), heading)
             .type_icon(icon)
-            .preview(preview)
             .trailing(status_glyph)
             .accessible_label(accessible_label);
         if expandable {
