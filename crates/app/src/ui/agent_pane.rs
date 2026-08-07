@@ -38,7 +38,7 @@ use gpui_component::{
 };
 use nmt_agent_utils::chat::{
     Compaction, CompactionTrigger, ContextWindowUsage, Event as SessionEvent, Item as SessionItem,
-    ModelInfo, ReplayItem, SendOutcome, SessionSummary, SkillCatalog, SkillInfo, SkillReference,
+    ModelInfo, SendOutcome, SessionSummary, SkillCatalog, SkillInfo, SkillReference,
     SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy,
     SlashCommandSource, ThreadSettings,
 };
@@ -117,67 +117,7 @@ enum PaletteControl {
 struct Entry {
     at: String,
     turn: u64,
-    item: ChatItem,
-}
-
-/// One entry in the conversation transcript. Streaming notifications mutate
-/// the entry in place (keyed by the protocol's item id) until `item/completed`
-/// finalizes it with the authoritative payload.
-enum ChatItem {
-    User {
-        text: String,
-    },
-    Agent {
-        item_id: String,
-        text: String,
-    },
-    Reasoning {
-        item_id: String,
-        text: String,
-    },
-    Command {
-        item_id: String,
-        command: String,
-        output: String,
-        status: String,
-        exit_code: Option<i64>,
-    },
-    FileChange {
-        item_id: String,
-        summary: String,
-        /// Reviewable diff body when the provider exposes one; renders as
-        /// the row's expandable detail with diff highlighting.
-        diff: Option<String>,
-        status: String,
-    },
-    /// Fallback card for every other tool-call item kind (mcpToolCall,
-    /// webSearch, dynamicToolCall, …): kind + best-effort title + status.
-    Tool {
-        item_id: String,
-        kind: String,
-        title: String,
-        /// Result payload (search matches, fetched content, …), delivered on
-        /// completion; renders as the row's expandable detail.
-        output: Option<String>,
-        status: String,
-    },
-    /// Per-turn duration record; marks the turn as settled and renders as its
-    /// "Worked for Ns" fold header. The live ticking line is a render-only
-    /// row pinned to the transcript end (see `working_started`).
-    Working {
-        started: Instant,
-        done_seconds: Option<u64>,
-    },
-    /// A context-compaction boundary: everything above it was replaced by a
-    /// summary. Renders as a divider that expands to the token accounting and
-    /// the summary the conversation continued from.
-    Compaction {
-        item_id: String,
-        detail: Compaction,
-    },
-    Error {
-        text: String,
-    },
+    item: SessionItem,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -540,6 +480,9 @@ pub(crate) struct AgentPane {
     /// Completed turns the user has unfolded (completed turns fold their
     /// intermediate work rows behind a "Worked for Ns" header by default).
     expanded_turns: HashSet<u64>,
+    /// Settled turn durations drive fold headers without masquerading as
+    /// provider transcript items.
+    completed_turn_seconds: HashMap<u64, u64>,
     /// Work-log rows whose detail (command output, reasoning text) is
     /// expanded, keyed by transcript index.
     expanded_rows: HashSet<usize>,
@@ -657,6 +600,7 @@ impl AgentPane {
             models: Vec::new(),
             expanded_groups: HashSet::new(),
             expanded_turns: HashSet::new(),
+            completed_turn_seconds: HashMap::new(),
             expanded_rows: HashSet::new(),
             virtual_transcripts: HashMap::new(),
             turn_seq: 0,
@@ -817,11 +761,9 @@ impl AgentPane {
 
     fn latest_agent_message(&self) -> Option<&str> {
         self.items.iter().rev().find_map(|entry| match &entry.item {
-            ChatItem::Agent { text, .. }
-                if entry.turn == self.turn_seq && !text.trim().is_empty() =>
-            {
-                Some(text.as_str())
-            }
+            SessionItem::AgentMessage {
+                text: Some(text), ..
+            } if entry.turn == self.turn_seq && !text.trim().is_empty() => Some(text.as_str()),
             _ => None,
         })
     }
@@ -946,7 +888,7 @@ impl AgentPane {
                         }
                         this.finish_working(cx);
                         this.push(
-                            ChatItem::Error {
+                            SessionItem::Error {
                                 text: format!("{name} exited."),
                             },
                             cx,
@@ -963,7 +905,7 @@ impl AgentPane {
                 self.items.push(Entry {
                     at: Local::now().format("%H:%M").to_string(),
                     turn: self.turn_seq,
-                    item: ChatItem::Error {
+                    item: SessionItem::Error {
                         text: format!("Failed to start {name}: {err}"),
                     },
                 });
@@ -1008,11 +950,11 @@ impl AgentPane {
         self.transcript_list.set_follow_mode(FollowMode::Tail);
     }
 
-    fn push(&mut self, item: ChatItem, cx: &mut Context<Self>) {
+    fn push(&mut self, item: SessionItem, cx: &mut Context<Self>) {
         // Submitting a user message explicitly returns to the live tail.
         // Agent output preserves a manually chosen reading position via the
         // list's own tail-follow state.
-        if matches!(&item, ChatItem::User { .. }) {
+        if matches!(&item, SessionItem::UserMessage { .. }) {
             self.scroll_transcript_to_bottom();
         }
 
@@ -1092,7 +1034,7 @@ impl AgentPane {
 
         if outcome == SendOutcome::NotReady {
             self.push(
-                ChatItem::Error {
+                SessionItem::Error {
                     text: format!(
                         "{} is still starting; try again in a moment.",
                         self.kind.display()
@@ -1113,7 +1055,7 @@ impl AgentPane {
             self.turn_seq += 1;
         }
 
-        self.push(ChatItem::User { text }, cx);
+        self.push(SessionItem::UserMessage { text: Some(text) }, cx);
 
         if outcome == SendOutcome::StartedTurn {
             self.start_working(cx);
@@ -1376,6 +1318,7 @@ impl AgentPane {
         self.models.clear();
         self.expanded_groups.clear();
         self.expanded_turns.clear();
+        self.completed_turn_seconds.clear();
         self.expanded_rows.clear();
         self.virtual_transcripts.clear();
         self.turn_seq = 0;
@@ -1799,17 +1742,14 @@ impl AgentPane {
         .detach();
     }
 
-    /// Record the finished turn's duration as a permanent transcript entry —
-    /// appended last, so it sits below the turn's output cards.
+    /// Settle the current turn's duration for its fold header. Duration is UI
+    /// state rather than provider transcript content, so it stays outside the
+    /// shared item stream.
     fn finish_working(&mut self, cx: &mut Context<Self>) {
         if let Some(started) = self.working_started.take() {
-            self.push(
-                ChatItem::Working {
-                    started,
-                    done_seconds: Some(started.elapsed().as_secs()),
-                },
-                cx,
-            );
+            self.completed_turn_seconds
+                .insert(self.turn_seq, started.elapsed().as_secs());
+            cx.notify();
         }
     }
 
@@ -1966,7 +1906,7 @@ impl AgentPane {
                     self.status = Status::Idle;
                 }
                 if let Some(text) = error {
-                    self.push(ChatItem::Error { text }, cx);
+                    self.push(SessionItem::Error { text }, cx);
                 }
                 self.emit_lifecycle(
                     AgentEventKind::Stopped,
@@ -1991,7 +1931,7 @@ impl AgentPane {
                 // its own row: the turn continues (and usually then dies on an
                 // over-length prompt) with no other trace of why.
                 if let Some(text) = error {
-                    self.push(ChatItem::Error { text }, cx);
+                    self.push(SessionItem::Error { text }, cx);
                 }
                 cx.notify();
             }
@@ -1999,21 +1939,23 @@ impl AgentPane {
             SessionEvent::ItemCompleted(item) => self.complete_item(item, cx),
             SessionEvent::AgentMessageDelta { item_id, delta } => {
                 self.append_delta(&item_id, &delta, |item| match item {
-                    ChatItem::Agent { text, .. } => Some(text),
+                    SessionItem::AgentMessage { text, .. } => Some(text),
                     _ => None,
                 });
                 cx.notify();
             }
             SessionEvent::ReasoningSummaryDelta { item_id, delta } => {
                 self.append_delta(&item_id, &delta, |item| match item {
-                    ChatItem::Reasoning { text, .. } => Some(text),
+                    SessionItem::Reasoning { summary, .. } => Some(summary),
                     _ => None,
                 });
                 cx.notify();
             }
             SessionEvent::CommandOutputDelta { item_id, delta } => {
                 self.append_delta(&item_id, &delta, |item| match item {
-                    ChatItem::Command { output, .. } => Some(output),
+                    SessionItem::CommandExecution {
+                        aggregated_output, ..
+                    } => Some(aggregated_output),
                     _ => None,
                 });
                 cx.notify();
@@ -2043,7 +1985,7 @@ impl AgentPane {
                 } else if self.awaiting_command_turn {
                     self.awaiting_command_turn = false;
                 }
-                self.push(ChatItem::Error { text: message }, cx);
+                self.push(SessionItem::Error { text: message }, cx);
                 if cancelled_queue {
                     self.set_command_feedback(
                         CommandFeedbackKind::Error,
@@ -2079,12 +2021,8 @@ impl AgentPane {
     /// Pre-fill the transcript with a resumed session's reconstructed
     /// conversation. Replay entries share one turn and carry no fold header,
     /// so they render as a plain chronological stream above the new turns.
-    fn apply_replay(&mut self, replay: Vec<ReplayItem>, cx: &mut Context<Self>) {
-        for (i, item) in replay.into_iter().enumerate() {
-            let Some(item) = chat_item_from_replay_item(item, i) else {
-                continue;
-            };
-
+    fn apply_replay(&mut self, replay: Vec<SessionItem>, cx: &mut Context<Self>) {
+        for item in replay {
             // Replayed entries predate this pane; they get no wall-clock
             // hover stamp.
             self.items.push(Entry {
@@ -2140,24 +2078,23 @@ impl AgentPane {
     }
 
     fn start_item(&mut self, item: SessionItem, cx: &mut Context<Self>) {
-        let Some(chat_item) = chat_item_from_session_item(item) else {
-            // Echoes of our own turn input are already rendered locally on
-            // send and historical user text uses ReplayItem::User.
+        if matches!(item, SessionItem::UserMessage { .. }) {
+            // Echoes of our own turn input are already rendered locally.
             return;
-        };
+        }
 
-        self.push(chat_item, cx);
+        self.push(item, cx);
     }
 
     fn complete_item(&mut self, item: SessionItem, cx: &mut Context<Self>) {
-        let Some(id) = session_item_id(&item).map(str::to_owned) else {
+        let Some(id) = item.id().map(str::to_owned) else {
             return;
         };
 
         let known = self
             .items
             .iter()
-            .any(|entry| chat_item_id(&entry.item) == Some(id.as_str()));
+            .any(|entry| entry.item.id() == Some(id.as_str()));
 
         // A completed item this pane never saw start (e.g. joined mid-turn)
         // still gets a transcript entry.
@@ -2166,81 +2103,9 @@ impl AgentPane {
         }
 
         for entry in &mut self.items {
-            if chat_item_id(&entry.item) != Some(id.as_str()) {
-                continue;
+            if entry.item.merge_completed(&item) {
+                break;
             }
-
-            match (&mut entry.item, &item) {
-                (ChatItem::Agent { text, .. }, SessionItem::AgentMessage { text: full, .. }) => {
-                    if let Some(full) = full {
-                        *text = full.clone();
-                    }
-                }
-                (
-                    ChatItem::Command {
-                        output,
-                        status,
-                        exit_code,
-                        ..
-                    },
-                    SessionItem::CommandExecution {
-                        aggregated_output,
-                        status: new_status,
-                        exit_code: new_exit,
-                        ..
-                    },
-                ) => {
-                    if let Some(full) = aggregated_output {
-                        *output = full.clone();
-                    }
-                    if let Some(state) = new_status {
-                        *status = state.clone();
-                    }
-                    *exit_code = *new_exit;
-                }
-                (
-                    ChatItem::FileChange { status, diff, .. },
-                    SessionItem::FileChange {
-                        status: new_status,
-                        diff: new_diff,
-                        ..
-                    },
-                ) => {
-                    if let Some(state) = new_status {
-                        *status = state.clone();
-                    }
-                    if new_diff.is_some() {
-                        *diff = new_diff.clone();
-                    }
-                }
-                (
-                    ChatItem::Tool { status, output, .. },
-                    SessionItem::Other {
-                        status: new_status,
-                        output: new_output,
-                        ..
-                    },
-                ) => {
-                    if let Some(state) = new_status {
-                        *status = state.clone();
-                    }
-                    if new_output.is_some() {
-                        *output = new_output.clone();
-                    }
-                }
-                (ChatItem::Reasoning { text, .. }, SessionItem::Reasoning { summary, .. }) => {
-                    // Some reasoning items never stream summary deltas; the
-                    // completed payload's summary is the fallback. Items that
-                    // stay empty are hidden by the renderer.
-                    if text.is_empty()
-                        && let Some(summary) = summary
-                    {
-                        *text = summary.clone();
-                    }
-                }
-                _ => {}
-            }
-            break;
         }
 
         cx.notify();
@@ -2281,50 +2146,33 @@ impl AgentPane {
         &mut self,
         item_id: &str,
         delta: &str,
-        select: fn(&mut ChatItem) -> Option<&mut String>,
+        select: fn(&mut SessionItem) -> Option<&mut Option<String>>,
     ) {
         for entry in &mut self.items {
-            if chat_item_id(&entry.item) == Some(item_id)
+            if entry.item.id() == Some(item_id)
                 && let Some(text) = select(&mut entry.item)
             {
-                text.push_str(delta);
+                text.get_or_insert_default().push_str(delta);
                 break;
             }
         }
     }
 }
 
-/// Item ids key streaming deltas to their transcript entry.
-fn chat_item_id(item: &ChatItem) -> Option<&str> {
-    match item {
-        ChatItem::Agent { item_id, .. }
-        | ChatItem::Reasoning { item_id, .. }
-        | ChatItem::Command { item_id, .. }
-        | ChatItem::FileChange { item_id, .. }
-        | ChatItem::Tool { item_id, .. }
-        | ChatItem::Compaction { item_id, .. } => Some(item_id),
-        ChatItem::User { .. } | ChatItem::Error { .. } | ChatItem::Working { .. } => None,
-    }
-}
-
-/// The turn-duration line, live ("Working for 12s") and settled
-/// ("Worked for 12s") forms.
-fn working_label(started: Instant, done_seconds: Option<u64>) -> String {
-    match done_seconds {
-        Some(seconds) => format!("Worked for {seconds}s"),
-        None => format!("Working for {}s", started.elapsed().as_secs()),
-    }
+/// The live turn-duration label.
+fn working_label(started: Instant) -> String {
+    format!("Working for {}s", started.elapsed().as_secs())
 }
 
 /// Work-log rows: the single-line tool/thinking entries that participate in
 /// "+N previous tool calls" run-collapsing. Conversation text never does.
-fn is_work_row(item: &ChatItem) -> bool {
+fn is_work_row(item: &SessionItem) -> bool {
     matches!(
         item,
-        ChatItem::Command { .. }
-            | ChatItem::FileChange { .. }
-            | ChatItem::Tool { .. }
-            | ChatItem::Reasoning { .. }
+        SessionItem::CommandExecution { .. }
+            | SessionItem::FileChange { .. }
+            | SessionItem::Other { .. }
+            | SessionItem::Reasoning { .. }
     )
 }
 
@@ -2332,9 +2180,13 @@ fn is_work_row(item: &ChatItem) -> bool {
 /// or a reasoning item that never streamed a summary. They render no row and
 /// are transparent to work-run grouping, so an invisible entry can't split a
 /// run of tool calls into two summary lines.
-fn hidden(item: &ChatItem) -> bool {
+fn hidden(item: &SessionItem) -> bool {
     match item {
-        ChatItem::Agent { text, .. } | ChatItem::Reasoning { text, .. } => text.trim().is_empty(),
+        SessionItem::UserMessage { text }
+        | SessionItem::AgentMessage { text, .. }
+        | SessionItem::Reasoning { summary: text, .. } => {
+            text.as_deref().is_none_or(|text| text.trim().is_empty())
+        }
         _ => false,
     }
 }
@@ -2554,55 +2406,70 @@ fn normalized_virtual_transcript(text: &str, strip_gutter: bool) -> String {
 /// Returns the syntax language and whether a Read gutter needs stripping.
 /// `None` identifies Markdown-native transcript details that retain rich text
 /// rendering instead of entering the code-oriented virtual list.
-fn code_transcript_format(item: &ChatItem, detail: &str) -> Option<(Cow<'static, str>, bool)> {
+fn code_transcript_format(item: &SessionItem, detail: &str) -> Option<(Cow<'static, str>, bool)> {
     match item {
-        ChatItem::Command { .. } => Some((Cow::Borrowed(detect_output_language(detail)), false)),
-        ChatItem::FileChange { .. } => Some((Cow::Borrowed("diff"), false)),
-        ChatItem::Tool { kind, title, .. } => match kind.as_str() {
+        SessionItem::CommandExecution { .. } => {
+            Some((Cow::Borrowed(detect_output_language(detail)), false))
+        }
+        SessionItem::FileChange { .. } => Some((Cow::Borrowed("diff"), false)),
+        SessionItem::Other { kind, title, .. } => match kind.as_str() {
             "TodoWrite" | "ExitPlanMode" | "Task" => None,
             "Read" => Some((Cow::Owned(file_extension_lang(title)), true)),
             _ => Some((Cow::Borrowed(detect_output_language(detail)), false)),
         },
-        ChatItem::Reasoning { .. } => None,
+        SessionItem::Reasoning { .. } => None,
         _ => None,
     }
 }
 
 /// Full text of an entry for the right-click Copy action — the whole message,
 /// independent of any partial selection or truncated preview.
-fn entry_copy_text(item: &ChatItem) -> String {
+fn entry_copy_text(item: &SessionItem) -> String {
     match item {
-        ChatItem::User { text }
-        | ChatItem::Error { text }
-        | ChatItem::Agent { text, .. }
-        | ChatItem::Reasoning { text, .. } => text.clone(),
-        ChatItem::Command {
-            command, output, ..
-        } => format!("$ {command}\n{output}"),
-        ChatItem::FileChange {
-            summary,
+        SessionItem::UserMessage { text }
+        | SessionItem::AgentMessage { text, .. }
+        | SessionItem::Reasoning { summary: text, .. } => text.clone().unwrap_or_default(),
+        SessionItem::Error { text } => text.clone(),
+        SessionItem::CommandExecution {
+            command,
+            aggregated_output,
+            ..
+        } => format!(
+            "$ {command}\n{}",
+            aggregated_output.as_deref().unwrap_or_default()
+        ),
+        SessionItem::FileChange {
+            paths,
             diff,
             status,
             ..
         } => match diff {
-            Some(diff) => format!("Edit {summary} — {status}\n{diff}"),
-            None => format!("Edit {summary} — {status}"),
+            Some(diff) => format!(
+                "Edit {paths} — {}\n{diff}",
+                status.as_deref().unwrap_or("inProgress")
+            ),
+            None => format!(
+                "Edit {paths} — {}",
+                status.as_deref().unwrap_or("inProgress")
+            ),
         },
-        ChatItem::Tool {
+        SessionItem::Other {
             kind,
             title,
             output,
             status,
             ..
         } => match output {
-            Some(output) => format!("{kind} {title} — {status}\n{output}"),
-            None => format!("{kind} {title} — {status}"),
+            Some(output) => format!(
+                "{kind} {title} — {}\n{output}",
+                status.as_deref().unwrap_or("inProgress")
+            ),
+            None => format!(
+                "{kind} {title} — {}",
+                status.as_deref().unwrap_or("inProgress")
+            ),
         },
-        ChatItem::Working {
-            started,
-            done_seconds,
-        } => working_label(*started, *done_seconds),
-        ChatItem::Compaction { detail, .. } => {
+        SessionItem::Compaction { detail, .. } => {
             let head = format!(
                 "{}\n{}",
                 compaction_label(detail),
@@ -2659,89 +2526,6 @@ fn compaction_accounting(detail: &Compaction) -> Vec<String> {
     }
 
     parts
-}
-
-/// The protocol item id, used to match a completed item to its entry.
-fn session_item_id(item: &SessionItem) -> Option<&str> {
-    match item {
-        SessionItem::UserMessage => None,
-        SessionItem::AgentMessage { id, .. }
-        | SessionItem::Reasoning { id, .. }
-        | SessionItem::CommandExecution { id, .. }
-        | SessionItem::FileChange { id, .. }
-        | SessionItem::Compaction { id, .. }
-        | SessionItem::Other { id, .. } => Some(id),
-    }
-}
-
-/// Translate the backend-neutral item model into the transcript model. Live
-/// events and persisted replay both use this path so newly supported output,
-/// status, or diff fields cannot silently disappear only after a resume.
-fn chat_item_from_session_item(item: SessionItem) -> Option<ChatItem> {
-    Some(match item {
-        SessionItem::UserMessage => return None,
-        SessionItem::AgentMessage { id, text } => ChatItem::Agent {
-            item_id: id,
-            text: text.unwrap_or_default(),
-        },
-        SessionItem::Reasoning { id, summary } => ChatItem::Reasoning {
-            item_id: id,
-            text: summary.unwrap_or_default(),
-        },
-        SessionItem::CommandExecution {
-            id,
-            command,
-            aggregated_output,
-            status,
-            exit_code,
-        } => ChatItem::Command {
-            item_id: id,
-            command,
-            output: aggregated_output.unwrap_or_default(),
-            status: status.unwrap_or_else(|| "inProgress".to_string()),
-            exit_code,
-        },
-        SessionItem::FileChange {
-            id,
-            paths,
-            diff,
-            status,
-        } => ChatItem::FileChange {
-            item_id: id,
-            summary: paths,
-            diff,
-            status: status.unwrap_or_else(|| "inProgress".to_string()),
-        },
-        SessionItem::Compaction { id, detail } => ChatItem::Compaction {
-            item_id: id,
-            detail,
-        },
-        SessionItem::Other {
-            id,
-            kind,
-            title,
-            output,
-            status,
-        } => ChatItem::Tool {
-            item_id: id,
-            kind,
-            title,
-            output,
-            status: status.unwrap_or_else(|| "inProgress".to_string()),
-        },
-    })
-}
-
-fn chat_item_from_replay_item(item: ReplayItem, index: usize) -> Option<ChatItem> {
-    match item {
-        ReplayItem::User { text } => Some(ChatItem::User { text }),
-        ReplayItem::Agent { text } => Some(ChatItem::Agent {
-            item_id: format!("replay-{index}"),
-            text,
-        }),
-        ReplayItem::Error { text } => Some(ChatItem::Error { text }),
-        ReplayItem::Item(item) => chat_item_from_session_item(item),
-    }
 }
 
 /// Compact "how long ago" label for a history row ("now", "5m", "3h", "2d").
@@ -2981,34 +2765,36 @@ enum RowSpec {
 /// instead of hashing full text: O(1) per row per frame, and every real
 /// mutation (streamed append, status transition, exit code, expansion) moves
 /// at least one component.
-fn entry_fingerprint(item: &ChatItem, detail_expanded: bool) -> u64 {
+fn entry_fingerprint(item: &SessionItem, detail_expanded: bool) -> u64 {
     let (content_len, status_len, extra) = match item {
-        ChatItem::User { text }
-        | ChatItem::Agent { text, .. }
-        | ChatItem::Reasoning { text, .. }
-        | ChatItem::Error { text } => (text.len(), 0, 0),
-        ChatItem::Command {
+        SessionItem::UserMessage { text }
+        | SessionItem::AgentMessage { text, .. }
+        | SessionItem::Reasoning { summary: text, .. } => {
+            (text.as_ref().map_or(0, String::len), 0, 0)
+        }
+        SessionItem::Error { text } => (text.len(), 0, 0),
+        SessionItem::CommandExecution {
             command,
-            output,
+            aggregated_output,
             status,
             exit_code,
             ..
         } => (
-            command.len() + output.len(),
-            status.len(),
+            command.len() + aggregated_output.as_ref().map_or(0, String::len),
+            status.as_ref().map_or(0, String::len),
             exit_code.map_or(0, |code| (code as u64) ^ (1 << 20)),
         ),
-        ChatItem::FileChange {
-            summary,
+        SessionItem::FileChange {
+            paths,
             diff,
             status,
             ..
         } => (
-            summary.len() + diff.as_ref().map_or(0, String::len),
-            status.len(),
+            paths.len() + diff.as_ref().map_or(0, String::len),
+            status.as_ref().map_or(0, String::len),
             0,
         ),
-        ChatItem::Tool {
+        SessionItem::Other {
             kind,
             title,
             output,
@@ -3016,11 +2802,10 @@ fn entry_fingerprint(item: &ChatItem, detail_expanded: bool) -> u64 {
             ..
         } => (
             kind.len() + title.len() + output.as_ref().map_or(0, String::len),
-            status.len(),
+            status.as_ref().map_or(0, String::len),
             0,
         ),
-        ChatItem::Working { done_seconds, .. } => (done_seconds.unwrap_or(0) as usize, 0, 0),
-        ChatItem::Compaction { detail, .. } => (
+        SessionItem::Compaction { detail, .. } => (
             detail.summary.as_ref().map_or(0, String::len),
             compaction_accounting(detail).len(),
             detail.user_context.as_ref().map_or(0, String::len) as u64,
@@ -3612,15 +3397,7 @@ impl AgentPane {
         collapse: bool,
         rows: &mut Vec<RowSpec>,
     ) {
-        let fold_seconds = (start..end).find_map(|i| match &self.items[i].item {
-            ChatItem::Working {
-                done_seconds: Some(seconds),
-                ..
-            } => Some(*seconds),
-            _ => None,
-        });
-
-        let Some(seconds) = fold_seconds else {
+        let Some(&seconds) = self.completed_turn_seconds.get(&turn) else {
             // Running (or pre-thread) turn: plain chronological stream.
             self.stream_specs(start, end, &|_| false, collapse, rows);
             return;
@@ -3631,11 +3408,12 @@ impl AgentPane {
         // The final reply stays visible when the turn folds; everything
         // between the prompt and the answer is what the fold hides.
         let final_agent = (start..end).rev().find(|&i| {
-            matches!(&self.items[i].item, ChatItem::Agent { .. }) && !hidden(&self.items[i].item)
+            matches!(&self.items[i].item, SessionItem::AgentMessage { .. })
+                && !hidden(&self.items[i].item)
         });
 
         for i in start..end {
-            if matches!(&self.items[i].item, ChatItem::User { .. }) {
+            if matches!(&self.items[i].item, SessionItem::UserMessage { .. }) {
                 rows.push(self.entry_spec(i));
             }
         }
@@ -3653,14 +3431,15 @@ impl AgentPane {
             for i in start..end {
                 if matches!(
                     &self.items[i].item,
-                    ChatItem::Error { .. } | ChatItem::Compaction { .. }
+                    SessionItem::Error { .. } | SessionItem::Compaction { .. }
                 ) {
                     rows.push(self.entry_spec(i));
                 }
             }
         } else {
             let skip = |i: usize| {
-                Some(i) == final_agent || matches!(&self.items[i].item, ChatItem::User { .. })
+                Some(i) == final_agent
+                    || matches!(&self.items[i].item, SessionItem::UserMessage { .. })
             };
             self.stream_specs(start, end, &skip, collapse, rows);
         }
@@ -3687,7 +3466,7 @@ impl AgentPane {
         while i < end {
             let item = &self.items[i].item;
 
-            if skip(i) || hidden(item) || matches!(item, ChatItem::Working { .. }) {
+            if skip(i) || hidden(item) {
                 i += 1;
                 continue;
             }
@@ -3835,7 +3614,7 @@ impl AgentPane {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground.opacity(0.55))
-                        .child(working_label(started, None)),
+                        .child(working_label(started)),
                 )
                 .into_any_element();
         }
@@ -3855,7 +3634,7 @@ impl AgentPane {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground.opacity(0.7))
-                    .child(working_label(started, None)),
+                    .child(working_label(started)),
             )
             .into_any_element()
     }
@@ -3869,16 +3648,17 @@ impl AgentPane {
         let entry = &self.items[index];
 
         match &entry.item {
-            ChatItem::User { text } => self.render_user_row(index, text, cx),
-            ChatItem::Agent { text, .. } => self.render_agent_row(index, text.clone(), cx),
-            ChatItem::Error { text } => self.render_error_row(index, text.clone(), cx),
-            ChatItem::Compaction { detail, .. } => {
+            SessionItem::UserMessage { text: Some(text) } => self.render_user_row(index, text, cx),
+            SessionItem::AgentMessage {
+                text: Some(text), ..
+            } => self.render_agent_row(index, text.clone(), cx),
+            SessionItem::Error { text } => self.render_error_row(index, text.clone(), cx),
+            SessionItem::Compaction { detail, .. } => {
                 let detail = detail.clone();
 
                 self.render_compaction_row(index, detail, window, cx)
             }
             item if is_work_row(item) => self.render_work_row(index, window, cx),
-            // Working entries render as the turn's fold header, never here.
             _ => div().into_any_element(),
         }
     }
@@ -4034,38 +3814,40 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let (icon, heading, status, detail) = match &self.items[index].item {
-            ChatItem::Command {
+            SessionItem::CommandExecution {
                 command,
-                output,
+                aggregated_output,
                 status,
                 exit_code,
                 ..
             } => {
                 // Belt and braces: a non-zero exit code is a failure even if
                 // the provider reported the execution as completed.
-                let failed = matches!(status.as_str(), "failed" | "declined")
+                let state = status.as_deref().unwrap_or("inProgress");
+                let failed = matches!(state, "failed" | "declined")
                     || exit_code.is_some_and(|code| code != 0);
-                let state = if failed { "failed" } else { status.as_str() };
+                let state = if failed { "failed" } else { state };
+                let output = aggregated_output.as_deref().unwrap_or_default();
 
                 (
                     IconName::SquareTerminal,
                     command.clone(),
                     Some(state.to_string()),
-                    (!output.trim().is_empty()).then_some(output.as_str()),
+                    (!output.trim().is_empty()).then_some(output),
                 )
             }
-            ChatItem::FileChange {
-                summary,
+            SessionItem::FileChange {
+                paths,
                 diff,
                 status,
                 ..
             } => (
                 IconName::File,
-                format!("Edit {summary}"),
-                Some(status.clone()),
+                format!("Edit {paths}"),
+                Some(status.as_deref().unwrap_or("inProgress").to_string()),
                 diff.as_deref().filter(|diff| !diff.trim().is_empty()),
             ),
-            ChatItem::Tool {
+            SessionItem::Other {
                 kind,
                 title,
                 output,
@@ -4082,14 +3864,14 @@ impl AgentPane {
                 } else {
                     format!("{kind} {title}")
                 },
-                Some(status.clone()),
+                Some(status.as_deref().unwrap_or("inProgress").to_string()),
                 output.as_deref().filter(|output| !output.trim().is_empty()),
             ),
-            ChatItem::Reasoning { text, .. } => (
+            SessionItem::Reasoning { summary, .. } => (
                 IconName::Bot,
                 "Thinking".to_string(),
                 None,
-                Some(text.as_str()),
+                summary.as_deref().filter(|text| !text.trim().is_empty()),
             ),
             _ => return div().into_any_element(),
         };
@@ -5198,15 +4980,14 @@ mod agent_profile_launch_tests {
 #[cfg(test)]
 mod prompt_truncation_tests {
     use gpui::px;
-    use nmt_agent_utils::chat::{Compaction, CompactionTrigger, Item as SessionItem, ReplayItem};
+    use nmt_agent_utils::chat::{Compaction, CompactionTrigger, Item as SessionItem};
 
     use super::{
         AGENT_DISCLOSURE_DETAIL_INSET, AGENT_DISCLOSURE_GAP, AGENT_DISCLOSURE_PADDING,
-        AGENT_DISCLOSURE_SLOT, ChatItem, ComposerAction, Status,
-        VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES, chat_item_from_replay_item,
-        chat_item_from_session_item, compaction_accounting, compaction_label, composer_action,
-        entry_copy_text, is_work_row, should_show_jump_to_latest, should_virtualize_transcript,
-        transcript_segments, truncated_user_prompt,
+        AGENT_DISCLOSURE_SLOT, ComposerAction, Status, VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES,
+        compaction_accounting, compaction_label, composer_action, entry_copy_text, is_work_row,
+        should_show_jump_to_latest, should_virtualize_transcript, transcript_segments,
+        truncated_user_prompt,
     };
 
     #[test]
@@ -5271,8 +5052,8 @@ mod prompt_truncation_tests {
 
     #[test]
     fn a_compaction_row_is_a_divider_and_copies_its_summary() {
-        let item = ChatItem::Compaction {
-            item_id: "compaction-1".into(),
+        let item = SessionItem::Compaction {
+            id: "compaction-1".into(),
             detail: Compaction {
                 trigger: Some(CompactionTrigger::Manual),
                 pre_tokens: Some(120_000),
@@ -5292,45 +5073,30 @@ mod prompt_truncation_tests {
     }
 
     #[test]
-    fn replayed_tools_use_the_live_item_mapping_with_output_intact() {
-        let item = chat_item_from_session_item(SessionItem::Other {
+    fn shared_tool_items_keep_transcript_details_intact() {
+        let item = SessionItem::Other {
             id: "tool-1".into(),
             kind: "Read".into(),
             title: "src/lib.rs".into(),
             output: Some("contents".into()),
             status: Some("completed".into()),
-        });
+        };
 
-        let Some(ChatItem::Tool {
-            item_id,
+        let SessionItem::Other {
+            id,
             kind,
             title,
             output,
             status,
-        }) = item
+        } = item
         else {
-            panic!("replayed tool did not map to a transcript tool row");
+            panic!("expected a tool item");
         };
-        assert_eq!(item_id, "tool-1");
+        assert_eq!(id, "tool-1");
         assert_eq!(kind, "Read");
         assert_eq!(title, "src/lib.rs");
         assert_eq!(output.as_deref(), Some("contents"));
-        assert_eq!(status, "completed");
-    }
-
-    #[test]
-    fn replayed_errors_keep_error_row_semantics() {
-        let item = chat_item_from_replay_item(
-            ReplayItem::Error {
-                text: "session limit reached".into(),
-            },
-            0,
-        );
-
-        assert!(matches!(
-            item,
-            Some(ChatItem::Error { text }) if text == "session limit reached"
-        ));
+        assert_eq!(status.as_deref(), Some("completed"));
     }
 
     #[test]

@@ -17,7 +17,7 @@ use serde_json::Value;
 
 use super::compaction::{compaction_metadata, parse_compaction};
 use super::tool_items::{complete_tool_item, tool_item};
-use crate::chat::{Compaction, Item, ReplayItem, SessionSummary};
+use crate::chat::{Compaction, Item, SessionSummary};
 use crate::hook_store::home_dir;
 
 /// The CLI resolves `--resume` against the project directory derived from the
@@ -236,7 +236,7 @@ fn title_line(text: &str) -> Option<String> {
 /// Reconstruct a session's conversation for the transcript UI. Reads the
 /// whole file (resume replays nothing on the wire, so this is the only
 /// source); meant for a background thread.
-pub fn load_replay(cwd: Option<&str>, session_id: &str) -> Vec<ReplayItem> {
+pub fn load_replay(cwd: Option<&str>, session_id: &str) -> Vec<Item> {
     let Some(path) = project_dir(cwd).map(|dir| dir.join(format!("{session_id}.jsonl"))) else {
         return Vec::new();
     };
@@ -247,9 +247,10 @@ pub fn load_replay(cwd: Option<&str>, session_id: &str) -> Vec<ReplayItem> {
     parse_replay(BufReader::new(file))
 }
 
-fn parse_replay(reader: impl BufRead) -> Vec<ReplayItem> {
-    let mut items: Vec<ReplayItem> = Vec::new();
+fn parse_replay(reader: impl BufRead) -> Vec<Item> {
+    let mut items: Vec<Item> = Vec::new();
     let mut pending_tools: HashMap<String, usize> = HashMap::new();
+    let mut message_seq = 0usize;
     let mut thinking_seq = 0usize;
     let mut compaction_seq = 0usize;
     // A compaction writes its summary first and its boundary marker second (the
@@ -275,20 +276,20 @@ fn parse_replay(reader: impl BufRead) -> Vec<ReplayItem> {
                 if let Some(summary) = compaction_summary_text(&record) {
                     compaction_seq += 1;
                     open_compaction = Some(items.len());
-                    items.push(ReplayItem::Item(Item::Compaction {
+                    items.push(Item::Compaction {
                         id: replayed_compaction_id(&record, compaction_seq),
                         detail: Compaction {
                             summary: Some(summary),
                             ..Compaction::default()
                         },
-                    }));
+                    });
                     continue;
                 }
 
                 if let Some(text) = user_prompt_text(&record) {
                     let text = clean_prompt(&text);
                     if !text.is_empty() {
-                        items.push(ReplayItem::User { text });
+                        items.push(Item::UserMessage { text: Some(text) });
                     }
                 }
             }
@@ -299,7 +300,7 @@ fn parse_replay(reader: impl BufRead) -> Vec<ReplayItem> {
                     .take()
                     .and_then(|index| items.get_mut(index))
                 {
-                    Some(ReplayItem::Item(Item::Compaction { id, detail: opened })) => {
+                    Some(Item::Compaction { id, detail: opened }) => {
                         // The boundary marker is the record the live protocol
                         // reports, so adopting its identity keeps a resumed row
                         // and a live one from being two separate entries.
@@ -314,10 +315,10 @@ fn parse_replay(reader: impl BufRead) -> Vec<ReplayItem> {
                     // the transcript.
                     _ => {
                         compaction_seq += 1;
-                        items.push(ReplayItem::Item(Item::Compaction {
+                        items.push(Item::Compaction {
                             id: replayed_compaction_id(&record, compaction_seq),
                             detail,
-                        }));
+                        });
                     }
                 }
             }
@@ -334,12 +335,15 @@ fn parse_replay(reader: impl BufRead) -> Vec<ReplayItem> {
 
                             if !text.is_empty() {
                                 let item = if is_api_error {
-                                    ReplayItem::Error {
+                                    Item::Error {
                                         text: text.to_string(),
                                     }
                                 } else {
-                                    ReplayItem::Agent {
-                                        text: text.to_string(),
+                                    let id = format!("replay-message-{message_seq}");
+                                    message_seq += 1;
+                                    Item::AgentMessage {
+                                        id,
+                                        text: Some(text.to_string()),
                                     }
                                 };
                                 items.push(item);
@@ -356,10 +360,10 @@ fn parse_replay(reader: impl BufRead) -> Vec<ReplayItem> {
                                 thinking_seq += 1;
                                 id
                             });
-                            items.push(ReplayItem::Item(Item::Reasoning {
+                            items.push(Item::Reasoning {
                                 id,
                                 summary: Some(summary.to_string()),
-                            }));
+                            });
                         }
                         Some("tool_use") | Some("server_tool_use") | Some("mcp_tool_use") => {
                             let Some(id) = block["id"].as_str() else {
@@ -371,7 +375,7 @@ fn parse_replay(reader: impl BufRead) -> Vec<ReplayItem> {
                                 &block["input"],
                             );
                             pending_tools.insert(id.to_string(), items.len());
-                            items.push(ReplayItem::Item(item));
+                            items.push(item);
                         }
                         _ => {}
                     }
@@ -399,7 +403,7 @@ fn replayed_compaction_id(record: &Value, sequence: usize) -> String {
 /// while adding the completion payload and status.
 fn complete_replayed_tools(
     record: &Value,
-    items: &mut [ReplayItem],
+    items: &mut [Item],
     pending_tools: &mut HashMap<String, usize>,
 ) {
     let Some(blocks) = record["message"]["content"].as_array() else {
@@ -416,7 +420,7 @@ fn complete_replayed_tools(
         let Some(index) = pending_tools.remove(id) else {
             continue;
         };
-        let Some(ReplayItem::Item(item)) = items.get_mut(index) else {
+        let Some(item) = items.get_mut(index) else {
             continue;
         };
 
@@ -508,10 +512,10 @@ mod tests {
         assert_eq!(
             items,
             vec![
-                ReplayItem::User {
-                    text: "question".into()
+                Item::UserMessage {
+                    text: Some("question".into())
                 },
-                ReplayItem::Item(Item::Compaction {
+                Item::Compaction {
                     // The boundary record's identity wins, so the same
                     // compaction cannot also arrive live as a second row.
                     id: "compaction-boundary-uuid".into(),
@@ -523,9 +527,10 @@ mod tests {
                         user_context: None,
                         summary: Some("## Summary\nwhat happened so far".into()),
                     },
-                }),
-                ReplayItem::Agent {
-                    text: "answer".into()
+                },
+                Item::AgentMessage {
+                    id: "replay-message-0".into(),
+                    text: Some("answer".into())
                 },
             ]
         );
@@ -546,7 +551,7 @@ mod tests {
         assert_eq!(
             items,
             vec![
-                ReplayItem::Item(Item::Compaction {
+                Item::Compaction {
                     id: "replay-compaction-1".into(),
                     detail: Compaction {
                         trigger: Some(CompactionTrigger::Manual),
@@ -556,9 +561,10 @@ mod tests {
                         user_context: None,
                         summary: None,
                     },
-                }),
-                ReplayItem::Agent {
-                    text: "after".into()
+                },
+                Item::AgentMessage {
+                    id: "replay-message-0".into(),
+                    text: Some("after".into())
                 },
             ]
         );
@@ -573,13 +579,13 @@ mod tests {
 
         assert_eq!(
             items,
-            vec![ReplayItem::Item(Item::Compaction {
+            vec![Item::Compaction {
                 id: "compaction-s1".into(),
                 detail: Compaction {
                     summary: Some("partial summary".into()),
                     ..Compaction::default()
                 },
-            })]
+            }]
         );
     }
 
@@ -628,29 +634,30 @@ mod tests {
         assert_eq!(
             items,
             vec![
-                ReplayItem::User {
-                    text: "question".into()
+                Item::UserMessage {
+                    text: Some("question".into())
                 },
-                ReplayItem::Item(Item::Reasoning {
+                Item::Reasoning {
                     id: "replay-thinking-0".into(),
                     summary: Some("checking files".into()),
-                }),
-                ReplayItem::Item(Item::CommandExecution {
+                },
+                Item::CommandExecution {
                     id: "t1".into(),
                     command: "cargo check".into(),
                     aggregated_output: Some("ok".into()),
                     status: Some("completed".into()),
                     exit_code: None,
-                }),
-                ReplayItem::Item(Item::Other {
+                },
+                Item::Other {
                     id: "t2".into(),
                     kind: "Read".into(),
                     title: "src/lib.rs".into(),
                     output: Some("fn main() {}".into()),
                     status: Some("failed".into()),
-                }),
-                ReplayItem::Agent {
-                    text: "answer".into()
+                },
+                Item::AgentMessage {
+                    id: "replay-message-0".into(),
+                    text: Some("answer".into())
                 },
             ]
         );
@@ -675,7 +682,7 @@ mod tests {
 
         assert_eq!(
             items,
-            vec![ReplayItem::Error {
+            vec![Item::Error {
                 text: "You've hit your session limit · resets 3:20pm (Asia/Shanghai)".into()
             }]
         );
