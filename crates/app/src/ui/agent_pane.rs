@@ -20,8 +20,8 @@ use gpui::prelude::*;
 use gpui::{
     AnyElement, ClipboardItem, Context, Div, ElementId, Entity, FocusHandle, FollowMode,
     FontWeight, Hsla, ListAlignment, ListHorizontalSizingBehavior, ListSizingBehavior, ListState,
-    MouseButton, Pixels, ScrollHandle, SharedString, Stateful, UniformListScrollHandle, Window,
-    div, linear_color_stop, linear_gradient, list, px, relative, rems, size, uniform_list,
+    MouseButton, Pixels, ScrollHandle, SharedString, Stateful, Task, UniformListScrollHandle,
+    Window, div, linear_color_stop, linear_gradient, list, px, relative, rems, size, uniform_list,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{
@@ -44,6 +44,8 @@ use nmt_agent_utils::chat::{
 };
 use nmt_agent_utils::claude_code::{sessions, stream_json};
 use nmt_agent_utils::codex::app_server;
+use nmt_agent_utils::launcher::ConfiguredLauncher;
+use nmt_agent_utils::update::{InstallationKey, ProviderKind};
 use nmt_agent_utils::{
     AgentEvent, AgentEventKind, AgentLaunch, AgentRoute, CodexProviderConfig, agent_process,
     normalize_body, normalize_title,
@@ -55,9 +57,9 @@ use tracing::{info, warn};
 use crate::ui::AppSettings;
 use crate::ui::agent_commands::{
     PaletteCatalogEntry, PaletteDirection, claim_command_turn_start, filter_palette_catalog,
-    filter_skill_catalog, local_commands, merge_catalog, move_palette_selection,
-    next_session_epoch, parse_slash_command, prepare_skill_selection, reconcile_skill_binding,
-    reset_command_runtime, resolve_choice, validate_skill_binding,
+    filter_skill_catalog, is_current_session_epoch, local_commands, merge_catalog,
+    move_palette_selection, next_session_epoch, parse_slash_command, prepare_skill_selection,
+    reconcile_skill_binding, reset_command_runtime, resolve_choice, validate_skill_binding,
 };
 use crate::ui::git_status::current_branch;
 use crate::ui::settings::{AgentProfile, AgentProfileKind};
@@ -273,6 +275,43 @@ pub(crate) enum AgentKind {
     Claude,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum RecoveryIdentity {
+    NewConversation,
+    ClaudeSession(String),
+    CodexThread(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RecoverySnapshot {
+    pub(crate) installation: InstallationKey,
+    pub(crate) identity: RecoveryIdentity,
+    pub(crate) profile_name: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum RecoveryReadiness {
+    Ready(RecoverySnapshot),
+    Busy(String),
+    MissingIdentity(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum RestorationReadiness {
+    Pending,
+    Ready,
+    Failed(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum UpdateSuspension {
+    Waiting,
+    Stopping,
+    Updating,
+    Reconnecting,
+    Failed(String),
+}
+
 #[derive(Clone)]
 pub(crate) enum AgentPaneEvent {
     Lifecycle(AgentEvent),
@@ -355,7 +394,7 @@ fn launch_env_value(launch: &AgentLaunch, target: &str) -> Option<String> {
 /// Turn a profile into a protocol-neutral launch spec. Generated environment
 /// entries precede user entries so the explicit environment table retains
 /// last-value-wins behavior.
-fn agent_launch(profile: &AgentProfile) -> AgentLaunch {
+pub(crate) fn agent_launch(profile: &AgentProfile) -> AgentLaunch {
     let mut env: Vec<(String, String)> = Vec::new();
     let model = (!profile.model.trim().is_empty()).then(|| profile.model.trim().to_string());
 
@@ -524,6 +563,31 @@ impl Backend {
         }
     }
 
+    fn recovery_identity(&self) -> Option<RecoveryIdentity> {
+        match self {
+            Backend::Claude(session) => session
+                .session_id()
+                .map(|id| RecoveryIdentity::ClaudeSession(id.to_string())),
+            Backend::Codex(session) => session
+                .thread_id()
+                .map(|id| RecoveryIdentity::CodexThread(id.to_string())),
+        }
+    }
+
+    fn has_active_operation(&self) -> bool {
+        match self {
+            Backend::Claude(session) => session.has_active_operation(),
+            Backend::Codex(session) => session.has_active_operation(),
+        }
+    }
+
+    fn shutdown(&mut self, timeout: Duration, force: bool) -> Result<(), String> {
+        match self {
+            Backend::Claude(session) => session.shutdown(timeout, force),
+            Backend::Codex(session) => session.shutdown(timeout, force),
+        }
+    }
+
     fn process_exit(&mut self) -> Vec<SessionEvent> {
         match self {
             Backend::Claude(session) => session.process_exit(),
@@ -661,6 +725,11 @@ pub(crate) struct AgentPane {
     /// duration, so the live progress row explains the wait instead of leaving
     /// a bare seconds counter that looks stalled.
     compacting: bool,
+    /// Process replacement for a provider update is pane state rather than a
+    /// terminal exit. Keeping it separate retains transcript and composer
+    /// contents while preventing input from reaching a missing backend.
+    update_suspension: Option<UpdateSuspension>,
+    last_recovery_snapshot: Option<RecoverySnapshot>,
 }
 
 impl AgentPane {
@@ -762,6 +831,8 @@ impl AgentPane {
             git_branch_refreshing: false,
             context_window_usage: None,
             compacting: false,
+            update_suspension: None,
+            last_recovery_snapshot: None,
         };
 
         this.start_session(None, cx);
@@ -915,12 +986,12 @@ impl AgentPane {
     /// the EOF signal (the sender is owned by the reader thread). Does not
     /// notify — callers decide whether a repaint is due.
     fn start_session(&mut self, resume: Option<String>, cx: &mut Context<Self>) -> bool {
-        self.start_session_with_options(resume, false, cx)
+        self.start_session_with_options(resume.map(RecoveryIdentity::ClaudeSession), false, cx)
     }
 
     fn start_session_with_options(
         &mut self,
-        resume: Option<String>,
+        recovery: Option<RecoveryIdentity>,
         preserve_thread_settings: bool,
         cx: &mut Context<Self>,
     ) -> bool {
@@ -949,7 +1020,7 @@ impl AgentPane {
         let name = kind.display();
         let cwd = self.cwd.clone();
 
-        self.seed_thread_defaults = !preserve_thread_settings && resume.is_none();
+        self.seed_thread_defaults = !preserve_thread_settings && recovery.is_none();
         self.restore_thread_settings_on_ready =
             preserve_thread_settings.then(|| self.settings.clone());
 
@@ -978,13 +1049,28 @@ impl AgentPane {
                 .collect::<Vec<_>>()
                 .join(", ")
         );
-        let spawned = match kind {
-            AgentKind::Codex => app_server::Session::spawn(&launch, cwd, deliver, |line| {
+        let spawned = match (kind, recovery) {
+            (AgentKind::Codex, Some(RecoveryIdentity::CodexThread(thread_id))) => {
+                app_server::Session::spawn_resuming(
+                    &launch,
+                    cwd,
+                    thread_id,
+                    true,
+                    deliver,
+                    |line| warn!("codex app-server: {line}"),
+                )
+                .map(Backend::Codex)
+            }
+            (AgentKind::Codex, _) => app_server::Session::spawn(&launch, cwd, deliver, |line| {
                 warn!("codex app-server: {line}")
             })
             .map(Backend::Codex),
-            AgentKind::Claude => {
-                stream_json::Session::spawn(&launch, cwd, resume, deliver, |line| {
+            (AgentKind::Claude, recovery) => {
+                let session_id = match recovery {
+                    Some(RecoveryIdentity::ClaudeSession(id)) => Some(id),
+                    _ => None,
+                };
+                stream_json::Session::spawn(&launch, cwd, session_id, deliver, |line| {
                     warn!("claude: {line}")
                 })
                 .map(Backend::Claude)
@@ -1001,7 +1087,7 @@ impl AgentPane {
                         let updated = this.update(cx, |this, cx| {
                             // A newer session owns the pane now; this pump's
                             // messages belong to the replaced process.
-                            if this.session_epoch != epoch {
+                            if !is_current_session_epoch(this.session_epoch, epoch) {
                                 return false;
                             }
 
@@ -1025,7 +1111,7 @@ impl AgentPane {
                     let _ = this.update(cx, |this, cx| {
                         // A deliberately replaced session exits by design;
                         // only the live session's death is worth a line.
-                        if this.session_epoch != epoch {
+                        if !is_current_session_epoch(this.session_epoch, epoch) {
                             return;
                         }
                         let exit_events = this
@@ -1038,6 +1124,11 @@ impl AgentPane {
                         }
                         cx.emit(AgentPaneEvent::Interrupted);
                         this.status = Status::Exited;
+                        if matches!(this.update_suspension, Some(UpdateSuspension::Reconnecting)) {
+                            this.update_suspension = Some(UpdateSuspension::Failed(format!(
+                                "{name} exited before the conversation was restored."
+                            )));
+                        }
                         this.awaiting_command_turn = false;
                         if !this.command_queue.is_empty() {
                             this.command_queue.clear();
@@ -1074,6 +1165,194 @@ impl AgentPane {
                 false
             }
         }
+    }
+
+    pub(crate) fn installation_key(&self) -> InstallationKey {
+        let provider = match self.kind {
+            AgentKind::Claude => ProviderKind::Claude,
+            AgentKind::Codex => ProviderKind::Codex,
+        };
+        let launch = agent_launch(&self.profile);
+        let launcher = ConfiguredLauncher::from_launch(&launch, provider.default_executable());
+        InstallationKey::derive(provider, &launcher).key
+    }
+
+    /// Assess both quiescence and recoverability before any related backend
+    /// is stopped. A blank tab needs no provider identity because restarting
+    /// it as another blank conversation loses no conversation state.
+    pub(crate) fn recovery_readiness(&self) -> RecoveryReadiness {
+        if self
+            .update_suspension
+            .as_ref()
+            .is_some_and(|state| !matches!(state, UpdateSuspension::Waiting))
+        {
+            return RecoveryReadiness::Busy(format!(
+                "{} is already participating in an update",
+                self.profile.name
+            ));
+        }
+        if matches!(self.status, Status::Starting | Status::Running)
+            || self.pending_approval.is_some()
+            || self.awaiting_command_turn
+            || !self.command_queue.is_empty()
+            || self.rewind_state.is_some()
+            || self.compacting
+            || self
+                .session
+                .as_ref()
+                .is_some_and(Backend::has_active_operation)
+        {
+            return RecoveryReadiness::Busy(format!(
+                "{} still has active agent work",
+                self.profile.name
+            ));
+        }
+
+        self.recovery_identity_snapshot()
+    }
+
+    pub(crate) fn recovery_identity_snapshot(&self) -> RecoveryReadiness {
+        let identity = if self.items.is_empty() {
+            RecoveryIdentity::NewConversation
+        } else if let Some(identity) = self.session.as_ref().and_then(Backend::recovery_identity) {
+            identity
+        } else {
+            return RecoveryReadiness::MissingIdentity(format!(
+                "{} has conversation content but has not published a resumable {} identity yet",
+                self.profile.name,
+                self.kind.display()
+            ));
+        };
+
+        RecoveryReadiness::Ready(RecoverySnapshot {
+            installation: self.installation_key(),
+            identity,
+            profile_name: self.profile.name.clone(),
+        })
+    }
+
+    pub(crate) fn prepare_update_wait(&mut self, cx: &mut Context<Self>) {
+        self.update_suspension = Some(UpdateSuspension::Waiting);
+        cx.notify();
+    }
+
+    pub(crate) fn cancel_update_wait(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.update_suspension, Some(UpdateSuspension::Waiting)) {
+            self.update_suspension = None;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn stop_active_work_for_update(&mut self, cx: &mut Context<Self>) {
+        if self.pending_approval.is_some() {
+            self.respond_approval("cancel", cx);
+        } else {
+            self.interrupt(cx);
+        }
+        self.command_queue.clear();
+        self.awaiting_command_turn = false;
+        if self
+            .rewind_state
+            .as_ref()
+            .is_some_and(RewindState::is_picker)
+        {
+            self.rewind_state = None;
+        }
+        self.compacting = false;
+        self.update_suspension = Some(UpdateSuspension::Waiting);
+        cx.notify();
+    }
+
+    /// Detach the backend before shutdown so its EOF cannot be mistaken for
+    /// an unexpected pane exit. The transcript, draft, selection, scroll, and
+    /// thread controls remain owned by this entity throughout the operation.
+    pub(crate) fn suspend_for_update(
+        &mut self,
+        force: bool,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<(), String>> {
+        self.session_epoch = next_session_epoch(self.session_epoch);
+        self.update_suspension = Some(UpdateSuspension::Stopping);
+        self.status = Status::Starting;
+        cx.emit(AgentPaneEvent::Interrupted);
+        cx.notify();
+
+        let Some(mut backend) = self.session.take() else {
+            return Task::ready(Ok(()));
+        };
+        let worker = cx.background_executor().spawn(async move {
+            let result = backend.shutdown(Duration::from_secs(5), force);
+            (backend, result)
+        });
+        cx.spawn(async move |this, cx| {
+            let (backend, result) = worker.await;
+            if result.is_err() {
+                let _ = this.update(cx, |this, cx| {
+                    this.session = Some(backend);
+                    this.update_suspension = None;
+                    this.status = Status::Idle;
+                    cx.notify();
+                });
+            }
+            result
+        })
+    }
+
+    pub(crate) fn mark_provider_updating(&mut self, cx: &mut Context<Self>) {
+        self.update_suspension = Some(UpdateSuspension::Updating);
+        cx.notify();
+    }
+
+    pub(crate) fn restore_after_update(
+        &mut self,
+        snapshot: &RecoverySnapshot,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.update_suspension = Some(UpdateSuspension::Reconnecting);
+        self.last_recovery_snapshot = Some(snapshot.clone());
+        let recovery = match &snapshot.identity {
+            RecoveryIdentity::NewConversation => None,
+            identity => Some(identity.clone()),
+        };
+        let started = self.start_session_with_options(recovery, true, cx);
+        if !started {
+            self.update_suspension = Some(UpdateSuspension::Failed(
+                "The provider could not restart. Retry or start a new session.".to_string(),
+            ));
+        }
+        cx.notify();
+        started
+    }
+
+    fn retry_update_recovery(&mut self, cx: &mut Context<Self>) {
+        if let Some(snapshot) = self.last_recovery_snapshot.clone() {
+            self.restore_after_update(&snapshot, cx);
+        }
+    }
+
+    pub(crate) fn restoration_readiness(&self) -> RestorationReadiness {
+        match self.update_suspension.as_ref() {
+            None if self.status == Status::Idle => RestorationReadiness::Ready,
+            Some(UpdateSuspension::Failed(message)) => {
+                RestorationReadiness::Failed(message.clone())
+            }
+            _ => RestorationReadiness::Pending,
+        }
+    }
+
+    pub(crate) fn fail_update_recovery(&mut self, message: String, cx: &mut Context<Self>) {
+        self.update_suspension = Some(UpdateSuspension::Failed(message));
+        cx.notify();
+    }
+
+    fn start_new_after_update_failure(&mut self, cx: &mut Context<Self>) {
+        self.update_suspension = Some(UpdateSuspension::Reconnecting);
+        if !self.start_session_with_options(None, true, cx) {
+            self.update_suspension = Some(UpdateSuspension::Failed(
+                "The provider could not start a new session.".to_string(),
+            ));
+        }
+        cx.notify();
     }
 
     pub(crate) fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -2401,7 +2680,11 @@ impl AgentPane {
             input.set_value(prompt.clone(), window, cx);
             input.set_selected_range(prompt.len()..prompt.len(), cx);
         });
-        let started = self.start_session_with_options(fork.session_id, true, cx);
+        let started = self.start_session_with_options(
+            fork.session_id.map(RecoveryIdentity::ClaudeSession),
+            true,
+            cx,
+        );
         self.set_command_feedback(
             if started {
                 CommandFeedbackKind::Notice
@@ -2550,6 +2833,9 @@ impl AgentPane {
                 // make an active turn look idle and admit overlapping work.
                 if self.status != Status::Running {
                     self.status = Status::Idle;
+                }
+                if matches!(self.update_suspension, Some(UpdateSuspension::Reconnecting)) {
+                    self.update_suspension = None;
                 }
                 cx.notify();
             }
@@ -2704,6 +2990,9 @@ impl AgentPane {
                 }
             }
             SessionEvent::Error { message, fatal } => {
+                if fatal && matches!(self.update_suspension, Some(UpdateSuspension::Reconnecting)) {
+                    self.update_suspension = Some(UpdateSuspension::Failed(message.clone()));
+                }
                 let cancelled_queue = fatal && !self.command_queue.is_empty();
                 if fatal {
                     cx.emit(AgentPaneEvent::Interrupted);
@@ -3689,6 +3978,82 @@ impl Render for AgentPane {
         });
 
         let running = composer_action(self.status) == ComposerAction::Stop;
+        let update_suspended = self.update_suspension.is_some();
+        let update_banner = self.update_suspension.as_ref().map(|state| {
+            let (label, detail, failed) = match state {
+                UpdateSuspension::Waiting => (
+                    "WAITING FOR UPDATE",
+                    "New provider input is paused until this tab becomes recoverably idle.",
+                    false,
+                ),
+                UpdateSuspension::Stopping => (
+                    "STOPPING AGENT",
+                    "The provider process is closing while this tab stays open.",
+                    false,
+                ),
+                UpdateSuspension::Updating => (
+                    "UPDATING PROVIDER",
+                    "The provider binary is being updated; transcript and draft are retained.",
+                    false,
+                ),
+                UpdateSuspension::Reconnecting => (
+                    "RECONNECTING",
+                    "Restoring this tab to its provider conversation.",
+                    false,
+                ),
+                UpdateSuspension::Failed(message) => ("RECONNECT FAILED", message.as_str(), true),
+            };
+
+            h_flex()
+                .w_full()
+                .px_4()
+                .py_2()
+                .gap_3()
+                .border_b_1()
+                .border_color(cx.theme().border)
+                .bg(if failed {
+                    cx.theme().danger.opacity(0.12)
+                } else {
+                    cx.theme().primary.opacity(0.10)
+                })
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(if failed {
+                            cx.theme().danger
+                        } else {
+                            cx.theme().primary
+                        })
+                        .child(label),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(detail.to_string()),
+                )
+                .when(failed, |row| {
+                    row.child(
+                        Button::new("agent-update-retry")
+                            .outline()
+                            .small()
+                            .label("Retry")
+                            .on_click(cx.listener(|this, _, _, cx| this.retry_update_recovery(cx))),
+                    )
+                    .child(
+                        Button::new("agent-update-new-session")
+                            .danger()
+                            .small()
+                            .label("Start new session")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.start_new_after_update_failure(cx)
+                            })),
+                    )
+                })
+        });
         let rewind_active = self.rewind_state.is_some();
         let rewind_processing = self
             .rewind_state
@@ -3730,6 +4095,7 @@ impl Render for AgentPane {
             // Font), same as the terminal pane does with the terminal font.
             .font_family(cx.global::<AppSettings>().agent_font_family.clone())
             .text_size(px(cx.global::<AppSettings>().agent_font_size as f32))
+            .children(update_banner)
             .child(
                 // The scrollbar must sit OUTSIDE the scrolling element (a
                 // child would scroll away with the content), so a relative
@@ -3946,7 +4312,7 @@ impl Render for AgentPane {
                                         .child(
                                             Input::new(&self.input)
                                                 .appearance(false)
-                                                .disabled(rewind_processing),
+                                                .disabled(rewind_processing || update_suspended),
                                         ),
                                 )
                                 .children(command_feedback)
@@ -3983,7 +4349,7 @@ impl Render for AgentPane {
                                         } else {
                                             Button::new("agent-send")
                                                 .primary()
-                                                .disabled(rewind_active)
+                                                .disabled(rewind_active || update_suspended)
                                                 .size(px(32.))
                                                 .rounded(px(999.))
                                                 .icon(IconName::ArrowUp)

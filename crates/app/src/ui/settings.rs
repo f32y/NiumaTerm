@@ -34,6 +34,7 @@ use gpui_component::{
 use nmt_agent_utils::HookInstallStatus;
 use nmt_agent_utils::claude_code::hook as claude_hook;
 use nmt_agent_utils::codex::hook as codex_hook;
+use nmt_agent_utils::update::{DiscoverySupport, InstallationKey, ProviderKind, UpdatePhase};
 use nmt_config::agent::AgentConfig;
 use nmt_config::appearance::AppearanceConfig;
 use nmt_config::colors::{ColorArray, Colors};
@@ -1324,55 +1325,74 @@ fn agent_hook_item(
     .disabled(!detected)
 }
 
-fn agent_page() -> SettingPage {
+fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPage {
+    let installations = ui::agent_updates::installations_for_profiles(agent_profiles, cx);
+    let mut general = SettingGroup::new()
+        .title("General")
+        .item(
+            SettingItem::new(
+                "Enable Agent Hooks",
+                SettingField::switch(
+                    |cx| cx.global::<AppSettings>().enable_agent_hooks,
+                    |value, cx| {
+                        cx.global_mut::<AppSettings>().enable_agent_hooks = value;
+                    },
+                ),
+            )
+            .description(
+                "Process new lifecycle events from installed Agent Hooks. This does not change their installation state.",
+            ),
+        )
+        .item(
+            SettingItem::new(
+                "Show Agent Usage",
+                SettingField::switch(
+                    |cx| cx.global::<AppSettings>().show_agent_usage,
+                    |value, cx| {
+                        cx.global_mut::<AppSettings>().show_agent_usage = value;
+                    },
+                ),
+            )
+            .description("Show Agent account usage in the workspace sidebar."),
+        )
+        .item(
+            SettingItem::new(
+                "Collapse Tool Call details by default",
+                SettingField::switch(
+                    |cx| cx.global::<AppSettings>().collapse_tool_calls,
+                    |value, cx| {
+                        cx.global_mut::<AppSettings>().collapse_tool_calls = value;
+                    },
+                ),
+            )
+            .description(
+                "In agent tabs, show only the newest of consecutive tool calls; older \
+                 ones sit behind a \"+N previous tool calls\" toggle.",
+            ),
+        )
+        .item(agent_update_check_item());
+
+    for (index, snapshot) in installations.iter().enumerate() {
+        let provider = snapshot.identity.provider;
+        let provider_total = installations
+            .iter()
+            .filter(|item| item.identity.provider == provider)
+            .count();
+        let provider_ordinal = installations[..=index]
+            .iter()
+            .filter(|item| item.identity.provider == provider)
+            .count();
+        general = general.item(agent_update_status_item(
+            index,
+            installation_update_title(provider, provider_ordinal, provider_total),
+            snapshot.identity.key.clone(),
+        ));
+    }
+
     SettingPage::new("Agent")
         .default_open(true)
         .description("Configure Agent event handling and per-Agent Hook installation.")
-        .group(
-            SettingGroup::new()
-                .title("General")
-                .item(
-                    SettingItem::new(
-                        "Enable Agent Hooks",
-                        SettingField::switch(
-                            |cx| cx.global::<AppSettings>().enable_agent_hooks,
-                            |value, cx| {
-                                cx.global_mut::<AppSettings>().enable_agent_hooks = value;
-                            },
-                        ),
-                    )
-                    .description(
-                        "Process new lifecycle events from installed Agent Hooks. This does not change their installation state.",
-                    ),
-                )
-                .item(
-                    SettingItem::new(
-                        "Show Agent Usage",
-                        SettingField::switch(
-                            |cx| cx.global::<AppSettings>().show_agent_usage,
-                            |value, cx| {
-                                cx.global_mut::<AppSettings>().show_agent_usage = value;
-                            },
-                        ),
-                    )
-                    .description("Show Agent account usage in the workspace sidebar."),
-                )
-                .item(
-                    SettingItem::new(
-                        "Collapse Tool Call details by default",
-                        SettingField::switch(
-                            |cx| cx.global::<AppSettings>().collapse_tool_calls,
-                            |value, cx| {
-                                cx.global_mut::<AppSettings>().collapse_tool_calls = value;
-                            },
-                        ),
-                    )
-                    .description(
-                        "In agent tabs, show only the newest of consecutive tool calls; older \
-                         ones sit behind a \"+N previous tool calls\" toggle.",
-                    ),
-                ),
-        )
+        .group(general)
         .group(
             SettingGroup::new()
                 .title("Installed Agents")
@@ -2023,7 +2043,7 @@ pub fn settings_view(cx: &App) -> Settings {
                 ),
         )
         .page(profiles_page(&profiles, &agent_profiles))
-        .page(agent_page())
+        .page(agent_page(&agent_profiles, cx))
         .page(
             SettingPage::new("System")
                 .default_open(true)
@@ -2535,6 +2555,133 @@ fn agent_profiles_group(agent_profiles: &[AgentProfile]) -> SettingGroup {
         );
     }
     group
+}
+
+fn installation_update_title(
+    provider: ProviderKind,
+    provider_ordinal: usize,
+    provider_total: usize,
+) -> String {
+    if provider_total > 1 {
+        format!("{} Updates {provider_ordinal}", provider.display())
+    } else {
+        format!("{} Updates", provider.display())
+    }
+}
+
+fn installation_version_text(phase: UpdatePhase, current: &str, available: &str) -> String {
+    if phase == UpdatePhase::Unknown {
+        "Not checked".to_string()
+    } else {
+        format!("{current} → {available}")
+    }
+}
+
+fn agent_update_check_item() -> SettingItem {
+    SettingItem::render(move |options, _window, cx| {
+        let profiles = cx.global::<AppSettings>().agent_profiles.clone();
+        let installations = ui::agent_updates::installations_for_profiles(&profiles, cx);
+        let busy = installations.iter().any(|snapshot| snapshot.busy);
+        let check_profiles = profiles.clone();
+        let check = Button::new("agent-updates-check-all")
+            .outline()
+            .label(if busy { "Working…" } else { "Check" })
+            .disabled(options.disabled || busy || installations.is_empty())
+            .on_click(move |_, _, cx| {
+                ui::agent_updates::manual_check_profiles(&check_profiles, cx);
+            });
+
+        card_row(
+            "Check for Updates",
+            "Check each distinct Claude Code and Codex installation referenced by Agent Profiles.",
+            check,
+            cx,
+        )
+        .into_any_element()
+    })
+}
+
+fn agent_update_status_item(ix: usize, title: String, key: InstallationKey) -> SettingItem {
+    SettingItem::render(move |options, _window, cx| {
+        let snapshot = ui::agent_updates::installation(&key, cx);
+        let (detail, busy, can_update) = snapshot.map_or_else(
+            || ("Update status unavailable".to_string(), false, false),
+            |snapshot| {
+                let versions = snapshot.state.versions.as_ref();
+                let current = versions
+                    .and_then(|status| status.current.as_ref())
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "unknown".to_string());
+                let available = versions
+                    .and_then(|status| status.available.as_ref())
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "unknown".to_string());
+                let labels = versions
+                    .map(|status| {
+                        [status.install_method.as_deref(), status.channel.as_deref()]
+                            .into_iter()
+                            .flatten()
+                            .collect::<Vec<_>>()
+                            .join(" · ")
+                    })
+                    .filter(|labels| !labels.is_empty())
+                    .map(|labels| format!(" · {labels}"))
+                    .unwrap_or_default();
+                let checked = snapshot
+                    .last_checked
+                    .map(|time| format!(" · checked {}", time.format("%Y-%m-%d %H:%M")))
+                    .unwrap_or_default();
+                let diagnostic = snapshot
+                    .state
+                    .error
+                    .as_ref()
+                    .map(|error| error.message())
+                    .or_else(|| {
+                        versions.and_then(|status| match &status.support {
+                            DiscoverySupport::Supported => None,
+                            DiscoverySupport::Unsupported { reason } => Some(reason.as_str()),
+                        })
+                    })
+                    .map(|message| format!(" · {}", message.chars().take(256).collect::<String>()))
+                    .unwrap_or_default();
+                let phase = match snapshot.state.phase {
+                    UpdatePhase::Unknown => "not checked",
+                    UpdatePhase::Checking => "checking",
+                    UpdatePhase::Current => "current",
+                    UpdatePhase::Available => "update available",
+                    UpdatePhase::WaitingForIdle => "waiting for idle",
+                    UpdatePhase::Suspending => "stopping agents",
+                    UpdatePhase::Updating => "updating",
+                    UpdatePhase::Verifying => "verifying",
+                    UpdatePhase::Restoring => "restoring tabs",
+                    UpdatePhase::Updated => "updated",
+                    UpdatePhase::Unchanged => "version unchanged",
+                    UpdatePhase::Unsupported => "automatic discovery unsupported",
+                    UpdatePhase::Failed => "failed",
+                };
+                let can_update =
+                    versions.is_some_and(|status| status.can_update && status.update_available());
+                let version = installation_version_text(snapshot.state.phase, &current, &available);
+                let detail = if snapshot.state.phase == UpdatePhase::Unknown {
+                    version
+                } else {
+                    format!("{version} · {phase}{labels}{checked}{diagnostic}")
+                };
+                (detail, snapshot.busy, can_update)
+            },
+        );
+
+        let update_key = key.clone();
+        let update = Button::new(("agent-update-install", ix))
+            .primary()
+            .label("Update")
+            .disabled(options.disabled || busy || !can_update)
+            .on_click(move |_, window, cx| {
+                ui::agent_updates::request_update(update_key.clone(), window, cx);
+            });
+
+        card_row(title.clone(), detail, update, cx).into_any_element()
+    })
 }
 
 /// Open the add/edit dialog for an agent profile. `target` is the index in
@@ -3159,6 +3306,30 @@ mod tests {
         assert_eq!(
             settings.default_agent_profile_entry().kind,
             AgentProfileKind::ClaudeCode
+        );
+    }
+
+    #[test]
+    fn installation_update_titles_only_number_distinct_provider_installations() {
+        assert_eq!(
+            installation_update_title(ProviderKind::Claude, 1, 1),
+            "Claude Code Updates"
+        );
+        assert_eq!(
+            installation_update_title(ProviderKind::Codex, 2, 3),
+            "Codex Updates 2"
+        );
+    }
+
+    #[test]
+    fn unchecked_installations_do_not_render_unknown_versions() {
+        assert_eq!(
+            installation_version_text(UpdatePhase::Unknown, "unknown", "unknown"),
+            "Not checked"
+        );
+        assert_eq!(
+            installation_version_text(UpdatePhase::Available, "1.0.0", "1.1.0"),
+            "1.0.0 → 1.1.0"
         );
     }
 

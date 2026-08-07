@@ -15,12 +15,11 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{BufRead as _, BufReader, Write as _};
 use std::iter::once;
 use std::mem::take;
-use std::os::windows::process::CommandExt as _;
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::time::{Duration, Instant};
 use std::{fs, thread};
 
 use serde_json::{Value, json};
-use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use super::compaction::{compaction_metadata, parse_compaction};
 use super::tool_items::{complete_tool_item, tool_item, tool_title};
@@ -33,6 +32,7 @@ use crate::chat::{
     ThreadSettings,
 };
 use crate::hook_store::home_dir;
+use crate::launcher::{ConfiguredLauncher, KillOnCloseJob};
 
 /// Wire values for `--permission-mode` / the `set_permission_mode` control
 /// request. `auto` is the CLI's dynamic mode (verified accepted by
@@ -92,6 +92,7 @@ struct PendingApproval {
 
 pub struct Session {
     child: Child,
+    process_job: Option<KillOnCloseJob>,
     stdin: Option<ChildStdin>,
     next_request_id: u64,
     ready: bool,
@@ -147,8 +148,7 @@ impl Drop for Session {
         // cmd.exe would strand it. Closing stdin delivers EOF, which ends the
         // stream-json input and lets the CLI exit; the kill is belt-and-braces
         // cleanup for the shim itself.
-        drop(self.stdin.take());
-        let _ = self.child.kill();
+        let _ = self.shutdown(Duration::from_millis(250), true);
     }
 }
 
@@ -194,34 +194,21 @@ impl Session {
         on_stderr: impl Fn(String) + Send + 'static,
     ) -> Result<Self, String> {
         let initial_model = launch_model(launch);
-        // Launching through cmd.exe keeps PATHEXT resolution, so a bare
-        // executable name finds `claude.exe` as well as the npm `claude.cmd`
-        // shim.
-        let executable = if launch.executable.trim().is_empty() {
-            "claude"
-        } else {
-            launch.executable.trim()
-        };
+        let launcher = ConfiguredLauncher::from_launch(launch, "claude");
+        let executable = launcher.executable().to_string();
+        let mut command = launcher.command([
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--input-format",
+            "stream-json",
+            "--verbose",
+            "--include-partial-messages",
+            "--permission-prompt-tool",
+            "stdio",
+            "--allow-dangerously-skip-permissions",
+        ]);
 
-        let mut command = Command::new("cmd.exe");
-
-        command
-            .args([
-                "/D",
-                "/C",
-                executable,
-                "-p",
-                "--output-format",
-                "stream-json",
-                "--input-format",
-                "stream-json",
-                "--verbose",
-                "--include-partial-messages",
-                "--permission-prompt-tool",
-                "stdio",
-                "--allow-dangerously-skip-permissions",
-            ])
-            .envs(launch.env.iter().map(|(name, value)| (name, value)));
         // File snapshots are opt-in for stream-json SDK clients. This is
         // applied after profile overrides so every NiumaTerm Claude session
         // can create checkpoints for subsequent `/rewind` operations.
@@ -229,8 +216,7 @@ impl Session {
         command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .creation_flags(CREATE_NO_WINDOW);
+            .stderr(Stdio::piped());
 
         if let Some(session_id) = &resume {
             command.args(["--resume", session_id]);
@@ -243,6 +229,11 @@ impl Session {
         let mut child = command
             .spawn()
             .map_err(|err| format!("could not run `{executable}`: {err}"))?;
+        let process_job = KillOnCloseJob::attach(&child).map_err(|error| {
+            let _ = child.kill();
+            let _ = child.wait();
+            error
+        })?;
 
         let stdin = child.stdin.take().ok_or("Claude stdin unavailable")?;
         let stdout = child.stdout.take().ok_or("Claude stdout unavailable")?;
@@ -264,6 +255,7 @@ impl Session {
 
         let mut session = Self {
             child,
+            process_job: Some(process_job),
             stdin: Some(stdin),
             next_request_id: 1,
             ready: false,
@@ -298,6 +290,43 @@ impl Session {
         }));
 
         Ok(session)
+    }
+
+    pub fn has_active_operation(&self) -> bool {
+        self.turn_active
+            || self.pending_approval.is_some()
+            || self.compacting
+            || !self.pending_control_operations.is_empty()
+    }
+
+    /// Request EOF shutdown and wait for the launcher plus every contained
+    /// descendant. Forced termination is used only after an explicit user
+    /// choice to interrupt active work.
+    pub fn shutdown(&mut self, timeout: Duration, force: bool) -> Result<(), String> {
+        drop(self.stdin.take());
+        let started = Instant::now();
+        loop {
+            match self.child.try_wait() {
+                Ok(Some(_)) => {
+                    self.process_job.take();
+                    return Ok(());
+                }
+                Ok(None) if started.elapsed() < timeout => {
+                    thread::sleep(Duration::from_millis(20));
+                }
+                Ok(None) if force => {
+                    self.process_job.take();
+                    self.child
+                        .wait()
+                        .map_err(|error| format!("could not wait for Claude to stop: {error}"))?;
+                    return Ok(());
+                }
+                Ok(None) => return Err("Claude did not stop before the update timeout".to_string()),
+                Err(error) => {
+                    return Err(format!("could not observe Claude process exit: {error}"));
+                }
+            }
+        }
     }
 
     /// Handle one message from the CLI: answers control requests and returns

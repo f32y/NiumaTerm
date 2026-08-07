@@ -335,6 +335,10 @@ pub(super) fn next_session_epoch(current: u64) -> u64 {
     current.wrapping_add(1)
 }
 
+pub(super) fn is_current_session_epoch(current: u64, event_epoch: u64) -> bool {
+    current == event_epoch
+}
+
 /// Reset command-only session state while keeping provider history and the
 /// tab's history-dismissal choice outside this function untouched.
 pub(super) fn reset_command_runtime<A, T>(
@@ -359,6 +363,14 @@ pub(super) fn reset_command_runtime<A, T>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replaced_session_epoch_rejects_expected_old_output_and_eof() {
+        let old_epoch = 41;
+        let current_epoch = next_session_epoch(old_epoch);
+        assert!(!is_current_session_epoch(current_epoch, old_epoch));
+        assert!(is_current_session_epoch(current_epoch, current_epoch));
+    }
 
     fn info(name: &str, source: SlashCommandSource) -> SlashCommandInfo {
         SlashCommandInfo {
@@ -540,6 +552,8 @@ mod tests {
         assert!(history_dismissed);
         assert_eq!(history, vec!["persisted session"]);
         assert_eq!(next_session_epoch(7), 8);
+        assert!(is_current_session_epoch(8, 8));
+        assert!(!is_current_session_epoch(8, 7));
     }
 
     fn skill(name: &str, path: &str, scope: &str, enabled: bool) -> SkillInfo {

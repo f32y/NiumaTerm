@@ -14,6 +14,7 @@ pub(crate) use self::shell::{
 mod active_list;
 mod agent_commands;
 mod agent_pane;
+pub(crate) mod agent_updates;
 mod agent_usage;
 mod assets;
 mod auto_refresh;
