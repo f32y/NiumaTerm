@@ -17,9 +17,10 @@ use serde_json::{Value, json};
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 pub use crate::chat::{
-    ContextWindowUsage, Event, Item, ModelInfo, SendOutcome, SessionSummary, SkillCatalog,
-    SkillInfo, SkillReference, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
-    SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
+    Compaction, CompactionTrigger, ContextWindowUsage, Event, Item, ModelInfo, SendOutcome,
+    SessionSummary, SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments,
+    SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
+    ThreadSettings,
 };
 use crate::{AgentLaunch, CodexProviderConfig};
 
@@ -86,6 +87,97 @@ impl From<&AgentLaunch> for ThreadProfile {
     }
 }
 
+#[derive(Debug)]
+struct ActiveCompaction {
+    id: String,
+    trigger: CompactionTrigger,
+    pre_tokens: Option<u64>,
+}
+
+/// Correlates the separate item and token-usage streams that describe one
+/// Codex context rewrite. The app-server item itself contains only an id, so
+/// live trigger and accounting details come from client intent and adjacent
+/// usage snapshots.
+#[derive(Default)]
+struct CompactionState {
+    latest_usage: Option<ContextWindowUsage>,
+    manual_pending: bool,
+    active: Option<ActiveCompaction>,
+}
+
+impl CompactionState {
+    fn update_usage(&mut self, usage: ContextWindowUsage) {
+        self.latest_usage = Some(usage);
+    }
+
+    fn request_manual(&mut self) {
+        self.manual_pending = true;
+    }
+
+    fn reject_manual_request(&mut self) {
+        self.manual_pending = false;
+    }
+
+    fn start(&mut self, id: &str) -> bool {
+        if self.active.as_ref().is_some_and(|active| active.id == id) {
+            return false;
+        }
+
+        let trigger = if take(&mut self.manual_pending) {
+            CompactionTrigger::Manual
+        } else {
+            CompactionTrigger::Automatic
+        };
+
+        self.active = Some(ActiveCompaction {
+            id: id.to_string(),
+            trigger,
+            pre_tokens: self.latest_usage.map(|usage| usage.used_tokens),
+        });
+
+        true
+    }
+
+    fn finish(&mut self, id: &str) -> Compaction {
+        let active = self.active.take().filter(|active| active.id == id);
+        let (trigger, pre_tokens) = match active {
+            Some(active) => (active.trigger, active.pre_tokens),
+            None => {
+                let trigger = if take(&mut self.manual_pending) {
+                    CompactionTrigger::Manual
+                } else {
+                    CompactionTrigger::Automatic
+                };
+                (trigger, None)
+            }
+        };
+        let post_tokens = pre_tokens.and_then(|pre_tokens| {
+            self.latest_usage
+                .map(|usage| usage.used_tokens)
+                .filter(|post_tokens| *post_tokens < pre_tokens)
+        });
+
+        Compaction {
+            trigger: Some(trigger),
+            pre_tokens,
+            post_tokens,
+            ..Compaction::default()
+        }
+    }
+
+    /// A failed or interrupted turn cannot leave manual intent attached to a
+    /// future provider-initiated compaction. The latest usage remains useful
+    /// as the baseline for the next turn.
+    fn clear_incomplete(&mut self) {
+        self.manual_pending = false;
+        self.active = None;
+    }
+
+    fn reset_thread(&mut self) {
+        *self = Self::default();
+    }
+}
+
 /// Wire values for approval-policy selection (`AskForApproval` serializes
 /// kebab-case).
 pub const APPROVAL_OPTIONS: [&str; 3] = ["untrusted", "on-request", "never"];
@@ -115,6 +207,7 @@ pub struct Session {
     /// request ids keeps command failures non-fatal to the live thread.
     pending_commands: HashMap<u64, String>,
     skill_refresh: SkillRefreshState,
+    compaction: CompactionState,
     /// Profile-level model/provider overrides reused for thread start, history
     /// filtering, and resume. Provider credentials remain only in process env.
     thread_profile: ThreadProfile,
@@ -228,6 +321,7 @@ impl Session {
             history_cursor: None,
             pending_commands: HashMap::new(),
             skill_refresh: SkillRefreshState::default(),
+            compaction: CompactionState::default(),
             thread_profile,
         };
 
@@ -347,6 +441,9 @@ impl Session {
             };
         };
 
+        if name == "compact" {
+            self.compaction.request_manual();
+        }
         self.pending_commands.insert(rpc_id, name.to_string());
         self.send(request);
 
@@ -376,6 +473,7 @@ impl Session {
     /// `turn/start` calls append to the resumed thread. On failure the
     /// session keeps the thread it started with, so the tab stays usable.
     pub fn resume_thread(&mut self, thread_id: &str) {
+        self.compaction.reset_thread();
         let params = thread_resume_params(thread_id, &self.thread_profile);
         self.send(json!({
             "jsonrpc": "2.0",
@@ -490,6 +588,9 @@ impl Session {
 
         if let Some(error) = message["error"]["message"].as_str() {
             if let Some(command) = pending_command.as_deref() {
+                if command == "compact" {
+                    self.compaction.reject_manual_request();
+                }
                 return vec![Event::SlashCommandResult {
                     name: command.to_string(),
                     outcome: codex_command_response(command, Some(error)),
@@ -592,6 +693,13 @@ impl Session {
     }
 
     fn process_notification(&mut self, method: &str, params: &Value) -> Vec<Event> {
+        if is_legacy_compaction_notification(method) {
+            // Current servers can publish this deprecated notification beside
+            // the authoritative item lifecycle. Ignoring it prevents a second
+            // boundary for the same context rewrite.
+            return Vec::new();
+        }
+
         match method {
             "skills/changed" => {
                 self.request_skills(true);
@@ -609,21 +717,40 @@ impl Session {
                     .then(|| params["turn"]["error"]["message"].as_str())
                     .flatten()
                     .map(str::to_owned);
+                self.compaction.clear_incomplete();
 
                 vec![Event::TurnCompleted { error }]
             }
-            "thread/tokenUsage/updated" => parse_context_window_usage(&params["tokenUsage"])
-                .map(Event::ContextWindowUpdated)
-                .into_iter()
-                .collect(),
-            "item/started" => parse_item(&params["item"])
-                .map(Event::ItemStarted)
-                .into_iter()
-                .collect(),
-            "item/completed" => parse_item(&params["item"])
-                .map(Event::ItemCompleted)
-                .into_iter()
-                .collect(),
+            "thread/tokenUsage/updated" => {
+                let Some(usage) = parse_context_window_usage(&params["tokenUsage"]) else {
+                    return Vec::new();
+                };
+
+                self.compaction.update_usage(usage);
+                vec![Event::ContextWindowUpdated(usage)]
+            }
+            "item/started" => {
+                let item = &params["item"];
+                if item["type"].as_str() == Some("contextCompaction") {
+                    return compaction_started(&mut self.compaction, item);
+                }
+
+                parse_item(item)
+                    .map(Event::ItemStarted)
+                    .into_iter()
+                    .collect()
+            }
+            "item/completed" => {
+                let item = &params["item"];
+                if item["type"].as_str() == Some("contextCompaction") {
+                    return compaction_completed(&mut self.compaction, item);
+                }
+
+                parse_item(item)
+                    .map(Event::ItemCompleted)
+                    .into_iter()
+                    .collect()
+            }
             "item/agentMessage/delta" => delta_event(params, |item_id, delta| {
                 Event::AgentMessageDelta { item_id, delta }
             }),
@@ -664,6 +791,48 @@ impl Session {
             _ => Vec::new(),
         }
     }
+}
+
+fn is_legacy_compaction_notification(method: &str) -> bool {
+    method == "thread/compacted"
+}
+
+fn compaction_started(state: &mut CompactionState, item: &Value) -> Vec<Event> {
+    let Some(id) = item["id"].as_str().filter(|id| !id.is_empty()) else {
+        return Vec::new();
+    };
+
+    state
+        .start(id)
+        .then_some(Event::CompactionStarted)
+        .into_iter()
+        .collect()
+}
+
+fn compaction_completed(state: &mut CompactionState, item: &Value) -> Vec<Event> {
+    let Some(id) = item["id"].as_str().filter(|id| !id.is_empty()) else {
+        return Vec::new();
+    };
+    let detail = state.finish(id);
+    let manual = detail.trigger == Some(CompactionTrigger::Manual);
+    let mut events = vec![
+        Event::CompactionFinished { error: None },
+        Event::ItemCompleted(Item::Compaction {
+            id: id.to_string(),
+            detail,
+        }),
+    ];
+
+    if manual {
+        events.push(Event::SlashCommandResult {
+            name: "compact".to_string(),
+            outcome: SlashCommandOutcome::Completed {
+                message: Some("Conversation context compacted.".to_string()),
+            },
+        });
+    }
+
+    events
 }
 
 fn parse_context_window_usage(value: &Value) -> Option<ContextWindowUsage> {
@@ -798,15 +967,10 @@ fn codex_command_response(name: &str, error: Option<&str>) -> SlashCommandOutcom
         };
     }
 
-    if name == "compact" {
-        SlashCommandOutcome::Completed {
-            message: Some("Conversation context compacted.".to_string()),
-        }
-    } else {
-        // review/start acknowledges creation before its inline review turn
-        // reports the ordinary turn lifecycle.
-        SlashCommandOutcome::Accepted
-    }
+    // Dedicated command RPCs acknowledge scheduling before their turn and
+    // item notifications report the actual work. Treating this response as
+    // completion can admit another queued command while the thread is busy.
+    SlashCommandOutcome::Accepted
 }
 
 fn delta_event(params: &Value, make: fn(String, String) -> Event) -> Vec<Event> {
@@ -1084,6 +1248,10 @@ fn parse_item(item: &Value) -> Option<Item> {
             diff: file_change_diff(&item["changes"]),
             status,
         },
+        "contextCompaction" => Item::Compaction {
+            id,
+            detail: Compaction::default(),
+        },
         kind => Item::Other {
             id,
             kind: kind.to_string(),
@@ -1172,7 +1340,6 @@ fn file_change_diff(changes: &Value) -> Option<String> {
 /// `server` + `tool`, dynamic tools `tool`, web searches `query`.
 fn tool_title(item: &Value) -> String {
     match item["type"].as_str() {
-        Some("contextCompaction") => return "Compacting conversation context".to_string(),
         Some("enteredReviewMode") => return "Entered review mode".to_string(),
         Some("exitedReviewMode") => return "Exited review mode".to_string(),
         _ => {}
@@ -1545,9 +1712,7 @@ mod tests {
         assert_eq!(codex_command_request(102, "thr_1", "unknown"), None);
         assert_eq!(
             codex_command_response("compact", None),
-            SlashCommandOutcome::Completed {
-                message: Some("Conversation context compacted.".into())
-            }
+            SlashCommandOutcome::Accepted
         );
         assert_eq!(
             codex_command_response("review", None),
@@ -1562,9 +1727,194 @@ mod tests {
     }
 
     #[test]
-    fn compaction_and_review_lifecycle_items_remain_visible() {
+    fn automatic_compaction_reports_progress_and_reclaimed_context() {
+        let mut state = CompactionState::default();
+        state.update_usage(ContextWindowUsage {
+            used_tokens: 230_000,
+            max_tokens: Some(258_400),
+        });
+
+        assert_eq!(
+            compaction_started(
+                &mut state,
+                &json!({"id": "compact-1", "type": "contextCompaction"})
+            ),
+            vec![Event::CompactionStarted]
+        );
+
+        state.update_usage(ContextWindowUsage {
+            used_tokens: 17_000,
+            max_tokens: Some(258_400),
+        });
+
+        assert_eq!(
+            compaction_completed(
+                &mut state,
+                &json!({"id": "compact-1", "type": "contextCompaction"})
+            ),
+            vec![
+                Event::CompactionFinished { error: None },
+                Event::ItemCompleted(Item::Compaction {
+                    id: "compact-1".into(),
+                    detail: Compaction {
+                        trigger: Some(CompactionTrigger::Automatic),
+                        pre_tokens: Some(230_000),
+                        post_tokens: Some(17_000),
+                        ..Compaction::default()
+                    },
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn compaction_omits_a_post_count_without_an_observed_drop() {
+        let mut state = CompactionState::default();
+        state.update_usage(ContextWindowUsage {
+            used_tokens: 90_000,
+            max_tokens: None,
+        });
+        compaction_started(
+            &mut state,
+            &json!({"id": "compact-1", "type": "contextCompaction"}),
+        );
+        state.update_usage(ContextWindowUsage {
+            used_tokens: 95_000,
+            max_tokens: None,
+        });
+
+        let events = compaction_completed(
+            &mut state,
+            &json!({"id": "compact-1", "type": "contextCompaction"}),
+        );
+        let Event::ItemCompleted(Item::Compaction { detail, .. }) = &events[1] else {
+            panic!("completed compaction boundary missing");
+        };
+
+        assert_eq!(detail.pre_tokens, Some(90_000));
+        assert_eq!(detail.post_tokens, None);
+    }
+
+    #[test]
+    fn manual_compaction_completes_only_from_the_item_lifecycle() {
+        let mut state = CompactionState::default();
+        state.request_manual();
+
+        compaction_started(
+            &mut state,
+            &json!({"id": "compact-manual", "type": "contextCompaction"}),
+        );
+        let events = compaction_completed(
+            &mut state,
+            &json!({"id": "compact-manual", "type": "contextCompaction"}),
+        );
+
+        assert!(matches!(
+            &events[1],
+            Event::ItemCompleted(Item::Compaction {
+                detail: Compaction {
+                    trigger: Some(CompactionTrigger::Manual),
+                    ..
+                },
+                ..
+            })
+        ));
+        assert_eq!(
+            events[2],
+            Event::SlashCommandResult {
+                name: "compact".into(),
+                outcome: SlashCommandOutcome::Completed {
+                    message: Some("Conversation context compacted.".into())
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn incomplete_manual_compaction_cannot_mark_a_later_auto_run_manual() {
+        let mut state = CompactionState::default();
+        state.request_manual();
+        compaction_started(
+            &mut state,
+            &json!({"id": "aborted", "type": "contextCompaction"}),
+        );
+
+        state.clear_incomplete();
+        compaction_started(
+            &mut state,
+            &json!({"id": "automatic", "type": "contextCompaction"}),
+        );
+        let events = compaction_completed(
+            &mut state,
+            &json!({"id": "automatic", "type": "contextCompaction"}),
+        );
+
+        assert!(matches!(
+            &events[1],
+            Event::ItemCompleted(Item::Compaction {
+                detail: Compaction {
+                    trigger: Some(CompactionTrigger::Automatic),
+                    ..
+                },
+                ..
+            })
+        ));
+        assert_eq!(events.len(), 2);
+
+        let mut rejected = CompactionState::default();
+        rejected.request_manual();
+        rejected.reject_manual_request();
+        compaction_started(
+            &mut rejected,
+            &json!({"id": "after-rejection", "type": "contextCompaction"}),
+        );
+        let events = compaction_completed(
+            &mut rejected,
+            &json!({"id": "after-rejection", "type": "contextCompaction"}),
+        );
+        assert!(matches!(
+            &events[1],
+            Event::ItemCompleted(Item::Compaction {
+                detail: Compaction {
+                    trigger: Some(CompactionTrigger::Automatic),
+                    ..
+                },
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn replayed_compaction_ignores_non_protocol_summary_fields() {
+        let turns = json!([{"id": "turn1", "items": [
+            {"id": "compact-1", "type": "contextCompaction",
+             "message": "manual compact context",
+             "replacementHistory": [{"type": "compaction", "encryptedContent": "opaque"}]}
+        ]}]);
+
+        assert_eq!(
+            parse_replay(&turns),
+            vec![Item::Compaction {
+                id: "compact-1".into(),
+                detail: Compaction::default(),
+            }]
+        );
+    }
+
+    #[test]
+    fn compaction_is_structural_while_review_lifecycle_items_remain_tools() {
+        assert!(is_legacy_compaction_notification("thread/compacted"));
+        assert!(!is_legacy_compaction_notification("item/completed"));
+
+        assert_eq!(
+            parse_item(&json!({"id": "compact", "type": "contextCompaction"})),
+            Some(Item::Compaction {
+                id: "compact".into(),
+                detail: Compaction::default(),
+            })
+        );
+
         for (kind, title) in [
-            ("contextCompaction", "Compacting conversation context"),
             ("enteredReviewMode", "Entered review mode"),
             ("exitedReviewMode", "Exited review mode"),
         ] {
