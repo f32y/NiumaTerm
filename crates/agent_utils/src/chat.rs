@@ -371,6 +371,11 @@ pub enum Event {
     CompactionFinished {
         error: Option<String>,
     },
+    /// A file-only rewind control request finished. It is not a model turn and
+    /// therefore has no transcript item or turn lifecycle of its own.
+    FileRewindCompleted {
+        error: Option<String>,
+    },
     ItemStarted(Item),
     ItemCompleted(Item),
     AgentMessageDelta {

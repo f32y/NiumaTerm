@@ -15,7 +15,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use chrono::Local;
 use futures::StreamExt as _;
-use futures::channel::mpsc;
+use futures::channel::{mpsc, oneshot};
 use gpui::prelude::*;
 use gpui::{
     AnyElement, ClipboardItem, Context, Div, ElementId, Entity, FocusHandle, FollowMode,
@@ -33,7 +33,7 @@ use gpui_component::skeleton::Skeleton;
 use gpui_component::spinner::Spinner;
 use gpui_component::text::TextViewStyle;
 use gpui_component::{
-    ActiveTheme as _, ElementExt as _, Icon, IconName, IconNamed, Sizable as _,
+    ActiveTheme as _, Disableable as _, ElementExt as _, Icon, IconName, IconNamed, Sizable as _,
     VirtualListScrollHandle, h_flex, text, v_flex, v_virtual_list,
 };
 use nmt_agent_utils::chat::{
@@ -86,6 +86,8 @@ enum PaletteAction {
     Command(SlashCommandInfo),
     Choice { command: String, value: String },
     Skill(SkillInfo),
+    RewindCheckpoint(sessions::ClaudeCheckpoint),
+    RewindAction(RewindAction),
 }
 
 #[derive(Clone)]
@@ -109,6 +111,109 @@ enum PaletteControl {
     Activate,
     Complete,
     Dismiss,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RewindAction {
+    Files,
+    Conversation,
+    FilesAndConversation,
+    Cancel,
+}
+
+enum RewindState {
+    Loading {
+        operation_id: u64,
+    },
+    SelectingCheckpoint {
+        operation_id: u64,
+        checkpoints: Vec<sessions::ClaudeCheckpoint>,
+    },
+    SelectingAction {
+        operation_id: u64,
+        checkpoint: sessions::ClaudeCheckpoint,
+    },
+    RestoringFiles {
+        operation_id: u64,
+    },
+    ForkingConversation {
+        operation_id: u64,
+    },
+}
+
+impl RewindState {
+    fn is_picker(&self) -> bool {
+        matches!(
+            self,
+            Self::Loading { .. } | Self::SelectingCheckpoint { .. } | Self::SelectingAction { .. }
+        )
+    }
+
+    fn has_operation(&self, operation_id: u64) -> bool {
+        match self {
+            Self::Loading {
+                operation_id: current,
+            }
+            | Self::SelectingCheckpoint {
+                operation_id: current,
+                ..
+            }
+            | Self::SelectingAction {
+                operation_id: current,
+                ..
+            }
+            | Self::RestoringFiles {
+                operation_id: current,
+            }
+            | Self::ForkingConversation {
+                operation_id: current,
+            } => *current == operation_id,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum FileRestoreNext {
+    Complete,
+    ForkConversation,
+    RetryAction(String),
+}
+
+fn file_restore_next(continue_with_fork: bool, result: Result<(), String>) -> FileRestoreNext {
+    match (continue_with_fork, result) {
+        (true, Ok(())) => FileRestoreNext::ForkConversation,
+        (false, Ok(())) => FileRestoreNext::Complete,
+        (_, Err(message)) => FileRestoreNext::RetryAction(message),
+    }
+}
+
+fn rewind_blocks_submission(state: Option<&RewindState>) -> bool {
+    state.is_some()
+}
+
+fn rewind_prompt_label(prompt: &str) -> String {
+    let line = prompt
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("Untitled prompt")
+        .trim();
+    let mut label = line.chars().take(72).collect::<String>();
+    if line.chars().count() > 72 {
+        label.push('…');
+    }
+    label
+}
+
+fn rewind_timestamp(timestamp: Option<&str>) -> Option<String> {
+    let timestamp = timestamp?;
+    chrono::DateTime::parse_from_rfc3339(timestamp)
+        .map(|time| {
+            time.with_timezone(&Local)
+                .format("%Y-%m-%d %H:%M")
+                .to_string()
+        })
+        .ok()
+        .or_else(|| Some(timestamp.to_string()))
 }
 
 /// A transcript entry plus the local wall-clock time it first appeared
@@ -403,6 +508,29 @@ impl Backend {
         }
     }
 
+    fn rewind_files(&mut self, user_message_id: &str) -> SlashCommandOutcome {
+        match self {
+            Backend::Claude(session) => session.rewind_files(user_message_id),
+            Backend::Codex(_) => SlashCommandOutcome::Rejected {
+                message: "File rewind is available only for Claude.".to_string(),
+            },
+        }
+    }
+
+    fn session_id(&self) -> Option<&str> {
+        match self {
+            Backend::Claude(session) => session.session_id(),
+            Backend::Codex(_) => None,
+        }
+    }
+
+    fn process_exit(&mut self) -> Vec<SessionEvent> {
+        match self {
+            Backend::Claude(session) => session.process_exit(),
+            Backend::Codex(_) => Vec::new(),
+        }
+    }
+
     fn interrupt(&mut self) {
         match self {
             Backend::Codex(session) => session.interrupt(),
@@ -471,6 +599,10 @@ pub(crate) struct AgentPane {
     /// defaults onto the backend's reported configuration. True for fresh
     /// conversations; resumed threads keep their own stored settings.
     seed_thread_defaults: bool,
+    /// A rewind starts a new backend identity but keeps the user's current
+    /// thread controls. The first Ready payload describes process defaults,
+    /// so these values are overlaid once instead of being replaced by them.
+    restore_thread_settings_on_ready: Option<ThreadSettings>,
     /// Model catalog; service tiers are per model, so the tier dropdown lists
     /// the selected model's tiers.
     models: Vec<ModelInfo>,
@@ -515,6 +647,12 @@ pub(crate) struct AgentPane {
     /// An accepted backend command starts the progress clock only after the
     /// protocol reports a real turn, not when the request is written.
     awaiting_command_turn: bool,
+    /// Rewind is a local multi-step operation, not a model turn. Keeping its
+    /// state separate prevents timers, transcript rows, and slash queues from
+    /// treating file restoration or session forking as provider output.
+    rewind_state: Option<RewindState>,
+    rewind_operation_seq: u64,
+    rewind_file_completion: Option<oneshot::Sender<Result<(), String>>>,
     git_branch: Option<String>,
     git_branch_ready: bool,
     git_branch_refreshing: bool,
@@ -597,6 +735,7 @@ impl AgentPane {
             pending_approval: None,
             settings: ThreadSettings::default(),
             seed_thread_defaults: true,
+            restore_thread_settings_on_ready: None,
             models: Vec::new(),
             expanded_groups: HashSet::new(),
             expanded_turns: HashSet::new(),
@@ -615,6 +754,9 @@ impl AgentPane {
             command_feedback: None,
             command_queue: VecDeque::new(),
             awaiting_command_turn: false,
+            rewind_state: None,
+            rewind_operation_seq: 0,
+            rewind_file_completion: None,
             git_branch: None,
             git_branch_ready: false,
             git_branch_refreshing: false,
@@ -772,7 +914,16 @@ impl AgentPane {
     /// session) and pump its messages onto the UI thread. Channel closure is
     /// the EOF signal (the sender is owned by the reader thread). Does not
     /// notify — callers decide whether a repaint is due.
-    fn start_session(&mut self, resume: Option<String>, cx: &mut Context<Self>) {
+    fn start_session(&mut self, resume: Option<String>, cx: &mut Context<Self>) -> bool {
+        self.start_session_with_options(resume, false, cx)
+    }
+
+    fn start_session_with_options(
+        &mut self,
+        resume: Option<String>,
+        preserve_thread_settings: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
         // The pane's profile is a snapshot from when the tab opened; profile
         // edits in settings don't reach into live panes. Re-resolving by
         // name at every (re)start picks them up, so a new conversation
@@ -790,7 +941,7 @@ impl AgentPane {
         // The profile model is known before either CLI completes its
         // handshake, so the picker need not flash the backend default while a
         // custom endpoint is starting.
-        if let Some(model) = self.profile_model() {
+        if !preserve_thread_settings && let Some(model) = self.profile_model() {
             self.settings.model = Some(model);
         }
 
@@ -798,7 +949,9 @@ impl AgentPane {
         let name = kind.display();
         let cwd = self.cwd.clone();
 
-        self.seed_thread_defaults = resume.is_none();
+        self.seed_thread_defaults = !preserve_thread_settings && resume.is_none();
+        self.restore_thread_settings_on_ready =
+            preserve_thread_settings.then(|| self.settings.clone());
 
         // Replacing a conversation must clear any running or unread state
         // associated with the previous backend before the new epoch can emit.
@@ -875,6 +1028,14 @@ impl AgentPane {
                         if this.session_epoch != epoch {
                             return;
                         }
+                        let exit_events = this
+                            .session
+                            .as_mut()
+                            .map(Backend::process_exit)
+                            .unwrap_or_default();
+                        for event in exit_events {
+                            this.apply_event(event, cx);
+                        }
                         cx.emit(AgentPaneEvent::Interrupted);
                         this.status = Status::Exited;
                         this.awaiting_command_turn = false;
@@ -896,6 +1057,7 @@ impl AgentPane {
                     });
                 })
                 .detach();
+                true
             }
             Err(err) => {
                 cx.emit(AgentPaneEvent::Interrupted);
@@ -909,6 +1071,7 @@ impl AgentPane {
                         text: format!("Failed to start {name}: {err}"),
                     },
                 });
+                false
             }
         }
     }
@@ -967,6 +1130,15 @@ impl AgentPane {
     }
 
     fn send_user_message(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if rewind_blocks_submission(self.rewind_state.as_ref()) {
+            self.set_command_feedback(
+                CommandFeedbackKind::Error,
+                "Finish or cancel the current rewind before sending a message.".to_string(),
+                cx,
+            );
+            return;
+        }
+
         let text = self.input.read(cx).text().to_string();
 
         if parse_slash_command(&text).is_some() {
@@ -1017,6 +1189,14 @@ impl AgentPane {
         skill: Option<&SkillReference>,
         cx: &mut Context<Self>,
     ) -> bool {
+        if rewind_blocks_submission(self.rewind_state.as_ref()) {
+            self.set_command_feedback(
+                CommandFeedbackKind::Error,
+                "Finish or cancel the current rewind before sending a message.".to_string(),
+                cx,
+            );
+            return false;
+        }
         if self.awaiting_command_turn {
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
@@ -1192,6 +1372,7 @@ impl AgentPane {
                 self.show_status(cx);
                 true
             }
+            "rewind" if self.kind == AgentKind::Claude => self.open_rewind(cx),
             "model" | "permissions" => false,
             _ => self.route_backend_command(
                 PendingSlashCommand {
@@ -1327,6 +1508,8 @@ impl AgentPane {
         self.context_window_usage = None;
         self.skill_catalog = None;
         self.skill_binding = None;
+        self.rewind_state = None;
+        self.rewind_file_completion = None;
         reset_command_runtime(
             self.kind == AgentKind::Codex,
             &mut self.pending_approval,
@@ -1342,6 +1525,105 @@ impl AgentPane {
         // History records belong to the provider and remain intact; only the
         // live backend and this tab's conversation presentation are reset.
         self.start_session(None, cx);
+    }
+
+    fn open_rewind(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.status != Status::Idle || self.is_command_busy() {
+            self.set_command_feedback(
+                CommandFeedbackKind::Error,
+                "/rewind is available only while Claude is idle.".to_string(),
+                cx,
+            );
+            return false;
+        }
+
+        let Some(session_id) = self
+            .session
+            .as_ref()
+            .and_then(Backend::session_id)
+            .map(str::to_owned)
+        else {
+            self.set_command_feedback(
+                CommandFeedbackKind::Error,
+                "Claude has not published a resumable session id yet.".to_string(),
+                cx,
+            );
+            return false;
+        };
+
+        self.rewind_operation_seq = self.rewind_operation_seq.wrapping_add(1);
+        let operation_id = self.rewind_operation_seq;
+        self.rewind_state = Some(RewindState::Loading { operation_id });
+        self.palette_selected = 0;
+        self.palette_dismissed = false;
+        self.set_command_feedback(
+            CommandFeedbackKind::Notice,
+            "Loading Claude rewind checkpoints…".to_string(),
+            cx,
+        );
+
+        let cwd = self.cwd.clone();
+        let load = cx
+            .background_executor()
+            .spawn(async move { sessions::load_checkpoints(cwd.as_deref(), &session_id) });
+        cx.spawn(async move |this, cx| {
+            let checkpoints = load.await;
+
+            let _ = this.update(cx, |this, cx| {
+                let is_current = matches!(
+                    &this.rewind_state,
+                    Some(RewindState::Loading {
+                        operation_id: current,
+                    }) if *current == operation_id
+                );
+                if !is_current {
+                    return;
+                }
+
+                match checkpoints {
+                    Ok(checkpoints) if checkpoints.is_empty() => {
+                        this.rewind_state = None;
+                        this.set_command_feedback(
+                            CommandFeedbackKind::Error,
+                            "This Claude session has no rewindable human prompts.".to_string(),
+                            cx,
+                        );
+                    }
+                    Ok(checkpoints) => {
+                        this.rewind_state = Some(RewindState::SelectingCheckpoint {
+                            operation_id,
+                            checkpoints,
+                        });
+                        this.command_feedback = None;
+                        this.palette_selected = 0;
+                        cx.notify();
+                    }
+                    Err(message) => {
+                        this.rewind_state = None;
+                        this.set_command_feedback(CommandFeedbackKind::Error, message, cx);
+                    }
+                }
+            });
+        })
+        .detach();
+
+        true
+    }
+
+    fn cancel_rewind_picker(&mut self, cx: &mut Context<Self>) {
+        if self
+            .rewind_state
+            .as_ref()
+            .is_some_and(RewindState::is_picker)
+        {
+            self.rewind_state = None;
+            self.palette_selected = 0;
+            self.set_command_feedback(
+                CommandFeedbackKind::Notice,
+                "Rewind cancelled; no files or conversation were changed.".to_string(),
+                cx,
+            );
+        }
     }
 
     fn show_status(&mut self, cx: &mut Context<Self>) {
@@ -1385,7 +1667,9 @@ impl AgentPane {
     }
 
     fn is_command_busy(&self) -> bool {
-        self.status == Status::Running || self.awaiting_command_turn
+        self.status == Status::Running
+            || self.awaiting_command_turn
+            || rewind_blocks_submission(self.rewind_state.as_ref())
     }
 
     fn skill_disabled_reason(&self, skill: &SkillInfo) -> Option<String> {
@@ -1437,6 +1721,9 @@ impl AgentPane {
     }
 
     fn palette_model(&self, cx: &Context<Self>) -> Option<PaletteModel> {
+        if let Some(state) = self.rewind_state.as_ref() {
+            return self.rewind_palette_model(state);
+        }
         if self.palette_dismissed {
             return None;
         }
@@ -1602,6 +1889,110 @@ impl AgentPane {
         Some(PaletteModel { rows, note })
     }
 
+    fn rewind_palette_model(&self, state: &RewindState) -> Option<PaletteModel> {
+        match state {
+            RewindState::Loading { .. } => Some(PaletteModel {
+                rows: vec![PaletteRow {
+                    label: "Cancel".to_string(),
+                    description: "Close rewind without changing anything".to_string(),
+                    hint: None,
+                    disabled_reason: None,
+                    action: PaletteAction::RewindAction(RewindAction::Cancel),
+                }],
+                note: Some("Loading checkpoints from the active Claude branch…".to_string()),
+            }),
+            RewindState::SelectingCheckpoint { checkpoints, .. } => {
+                let mut rows = checkpoints
+                    .iter()
+                    .cloned()
+                    .map(|checkpoint| PaletteRow {
+                        label: rewind_prompt_label(&checkpoint.prompt),
+                        description: "Return to immediately before this prompt".to_string(),
+                        hint: rewind_timestamp(checkpoint.timestamp.as_deref()),
+                        disabled_reason: None,
+                        action: PaletteAction::RewindCheckpoint(checkpoint),
+                    })
+                    .collect::<Vec<_>>();
+                rows.push(PaletteRow {
+                    label: "Cancel".to_string(),
+                    description: "Close rewind without changing anything".to_string(),
+                    hint: None,
+                    disabled_reason: None,
+                    action: PaletteAction::RewindAction(RewindAction::Cancel),
+                });
+
+                Some(PaletteModel {
+                    rows,
+                    note: Some("Choose a prompt · newest first · Esc cancels".to_string()),
+                })
+            }
+            RewindState::SelectingAction { checkpoint, .. } => {
+                let file_disabled = match checkpoint.file_restore_availability {
+                    sessions::FileRestoreAvailability::Unavailable => Some(
+                        "No file checkpoint was recorded for this prompt; conversation rewind is still available."
+                            .to_string(),
+                    ),
+                    _ => None,
+                };
+                let file_description = match checkpoint.file_restore_availability {
+                    sessions::FileRestoreAvailability::Available => {
+                        "Restore tracked files; keep this conversation and composer unchanged"
+                    }
+                    sessions::FileRestoreAvailability::Unknown => {
+                        "Ask Claude to restore tracked files; checkpoint availability is unknown"
+                    }
+                    sessions::FileRestoreAvailability::Unavailable => {
+                        "No persisted file snapshot is associated with this prompt"
+                    }
+                };
+
+                Some(PaletteModel {
+                    rows: vec![
+                        PaletteRow {
+                            label: "Restore files".to_string(),
+                            description: file_description.to_string(),
+                            hint: Some("files only".to_string()),
+                            disabled_reason: file_disabled.clone(),
+                            action: PaletteAction::RewindAction(RewindAction::Files),
+                        },
+                        PaletteRow {
+                            label: "Restore conversation".to_string(),
+                            description:
+                                "Open an independent prefix session and put this prompt in the composer"
+                                    .to_string(),
+                            hint: Some("conversation only".to_string()),
+                            disabled_reason: None,
+                            action: PaletteAction::RewindAction(RewindAction::Conversation),
+                        },
+                        PaletteRow {
+                            label: "Restore files and conversation".to_string(),
+                            description:
+                                "Restore files first, then open the independent prefix session"
+                                    .to_string(),
+                            hint: Some("combined".to_string()),
+                            disabled_reason: file_disabled,
+                            action: PaletteAction::RewindAction(
+                                RewindAction::FilesAndConversation,
+                            ),
+                        },
+                        PaletteRow {
+                            label: "Cancel".to_string(),
+                            description: "Close rewind without changing anything".to_string(),
+                            hint: None,
+                            disabled_reason: None,
+                            action: PaletteAction::RewindAction(RewindAction::Cancel),
+                        },
+                    ],
+                    note: Some(format!(
+                        "Selected: {} · Esc cancels",
+                        rewind_prompt_label(&checkpoint.prompt)
+                    )),
+                })
+            }
+            RewindState::RestoringFiles { .. } | RewindState::ForkingConversation { .. } => None,
+        }
+    }
+
     fn handle_palette_control(
         &mut self,
         control: PaletteControl,
@@ -1642,8 +2033,16 @@ impl AgentPane {
                 self.activate_palette_index(self.palette_selected, false, window, cx);
             }
             PaletteControl::Dismiss => {
-                self.palette_dismissed = true;
-                cx.notify();
+                if self
+                    .rewind_state
+                    .as_ref()
+                    .is_some_and(RewindState::is_picker)
+                {
+                    self.cancel_rewind_picker(cx);
+                } else {
+                    self.palette_dismissed = true;
+                    cx.notify();
+                }
             }
         }
     }
@@ -1700,6 +2099,25 @@ impl AgentPane {
                 cx.notify();
                 return;
             }
+            PaletteAction::RewindCheckpoint(checkpoint) => {
+                let Some(operation_id) = self.rewind_state.as_ref().and_then(|state| match state {
+                    RewindState::SelectingCheckpoint { operation_id, .. } => Some(*operation_id),
+                    _ => None,
+                }) else {
+                    return;
+                };
+                self.rewind_state = Some(RewindState::SelectingAction {
+                    operation_id,
+                    checkpoint,
+                });
+                self.palette_selected = 0;
+                cx.notify();
+                return;
+            }
+            PaletteAction::RewindAction(action) => {
+                self.activate_rewind_action(action, window, cx);
+                return;
+            }
         };
 
         self.input.update(cx, |input, cx| {
@@ -1713,6 +2131,298 @@ impl AgentPane {
         } else {
             cx.notify();
         }
+    }
+
+    fn activate_rewind_action(
+        &mut self,
+        action: RewindAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if action == RewindAction::Cancel {
+            self.cancel_rewind_picker(cx);
+            return;
+        }
+
+        let Some((operation_id, checkpoint)) =
+            self.rewind_state.as_ref().and_then(|state| match state {
+                RewindState::SelectingAction {
+                    operation_id,
+                    checkpoint,
+                } => Some((*operation_id, checkpoint.clone())),
+                _ => None,
+            })
+        else {
+            return;
+        };
+
+        match action {
+            RewindAction::Files => {
+                self.start_file_restore(operation_id, checkpoint, false, window, cx)
+            }
+            RewindAction::Conversation => {
+                self.start_conversation_fork(operation_id, checkpoint, false, window, cx)
+            }
+            RewindAction::FilesAndConversation => {
+                self.start_file_restore(operation_id, checkpoint, true, window, cx)
+            }
+            RewindAction::Cancel => unreachable!(),
+        }
+    }
+
+    fn start_file_restore(
+        &mut self,
+        operation_id: u64,
+        checkpoint: sessions::ClaudeCheckpoint,
+        continue_with_fork: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let outcome = self
+            .session
+            .as_mut()
+            .map(|session| session.rewind_files(&checkpoint.user_message_id))
+            .unwrap_or(SlashCommandOutcome::NotReady);
+
+        match outcome {
+            SlashCommandOutcome::Accepted => {}
+            SlashCommandOutcome::Rejected { message } => {
+                self.set_command_feedback(CommandFeedbackKind::Error, message, cx);
+                return;
+            }
+            SlashCommandOutcome::NotReady => {
+                self.set_command_feedback(
+                    CommandFeedbackKind::Error,
+                    "Claude is not ready to restore files.".to_string(),
+                    cx,
+                );
+                return;
+            }
+            SlashCommandOutcome::Completed { message } => {
+                self.set_command_feedback(
+                    CommandFeedbackKind::Error,
+                    message
+                        .unwrap_or_else(|| "Claude returned an invalid file restore state.".into()),
+                    cx,
+                );
+                return;
+            }
+        }
+
+        let (completion_tx, completion_rx) = oneshot::channel();
+        self.rewind_file_completion = Some(completion_tx);
+        self.rewind_state = Some(RewindState::RestoringFiles { operation_id });
+        self.set_command_feedback(
+            CommandFeedbackKind::Notice,
+            if continue_with_fork {
+                "Restoring Claude files before creating the conversation fork…".to_string()
+            } else {
+                "Restoring Claude files…".to_string()
+            },
+            cx,
+        );
+
+        cx.spawn_in(window, async move |this, cx| {
+            let result = completion_rx.await.unwrap_or_else(|_| {
+                Err("The file restore was cancelled before Claude replied.".to_string())
+            });
+
+            let _ = this.update_in(cx, |this, window, cx| {
+                let is_current = this.rewind_state.as_ref().is_some_and(|state| {
+                    state.has_operation(operation_id)
+                        && matches!(state, RewindState::RestoringFiles { .. })
+                });
+                if !is_current {
+                    return;
+                }
+
+                match file_restore_next(continue_with_fork, result) {
+                    FileRestoreNext::ForkConversation => this.start_conversation_fork(
+                        operation_id,
+                        checkpoint,
+                        true,
+                        window,
+                        cx,
+                    ),
+                    FileRestoreNext::Complete => {
+                        this.rewind_state = None;
+                        this.set_command_feedback(
+                            CommandFeedbackKind::Notice,
+                            "Files restored. The conversation and session id were not changed."
+                                .to_string(),
+                            cx,
+                        );
+                    }
+                    FileRestoreNext::RetryAction(message) => {
+                        this.rewind_state = Some(RewindState::SelectingAction {
+                            operation_id,
+                            checkpoint,
+                        });
+                        this.palette_selected = 0;
+                        this.set_command_feedback(
+                            CommandFeedbackKind::Error,
+                            if continue_with_fork {
+                                format!(
+                                    "File restore failed; the conversation was not rewound: {message}"
+                                )
+                            } else {
+                                format!("File restore failed: {message}")
+                            },
+                            cx,
+                        );
+                    }
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn start_conversation_fork(
+        &mut self,
+        operation_id: u64,
+        checkpoint: sessions::ClaudeCheckpoint,
+        files_restored: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(source_session_id) = self
+            .session
+            .as_ref()
+            .and_then(Backend::session_id)
+            .map(str::to_owned)
+        else {
+            self.rewind_state = Some(RewindState::SelectingAction {
+                operation_id,
+                checkpoint,
+            });
+            self.set_command_feedback(
+                CommandFeedbackKind::Error,
+                if files_restored {
+                    "Files were restored, but Claude no longer exposes the source session id. The original conversation remains in history."
+                        .to_string()
+                } else {
+                    "Claude no longer exposes the source session id.".to_string()
+                },
+                cx,
+            );
+            return;
+        };
+
+        let cwd = self.cwd.clone();
+        let user_message_id = checkpoint.user_message_id.clone();
+        self.rewind_state = Some(RewindState::ForkingConversation { operation_id });
+        self.set_command_feedback(
+            CommandFeedbackKind::Notice,
+            "Creating an independent Claude conversation prefix…".to_string(),
+            cx,
+        );
+
+        let fork = cx.background_executor().spawn(async move {
+            sessions::fork_session_before(cwd.as_deref(), &source_session_id, &user_message_id)
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = fork.await;
+
+            let _ = this.update_in(cx, |this, window, cx| {
+                let is_current = this.rewind_state.as_ref().is_some_and(|state| {
+                    state.has_operation(operation_id)
+                        && matches!(state, RewindState::ForkingConversation { .. })
+                });
+                if !is_current {
+                    return;
+                }
+
+                match result {
+                    Ok(fork) => this.replace_with_conversation_fork(
+                        fork,
+                        checkpoint.prompt,
+                        files_restored,
+                        window,
+                        cx,
+                    ),
+                    Err(message) => {
+                        this.rewind_state = None;
+                        this.set_command_feedback(
+                            CommandFeedbackKind::Error,
+                            if files_restored {
+                                format!(
+                                    "Files were restored, but conversation rewind failed: {message}. The original session remains available in history."
+                                )
+                            } else {
+                                format!("Conversation rewind failed: {message}")
+                            },
+                            cx,
+                        );
+                    }
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn replace_with_conversation_fork(
+        &mut self,
+        fork: sessions::ClaudeFork,
+        prompt: String,
+        files_restored: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.session = None;
+        self.items.clear();
+        self.scroll_transcript_to_bottom();
+        self.expanded_groups.clear();
+        self.expanded_turns.clear();
+        self.completed_turn_seconds.clear();
+        self.expanded_rows.clear();
+        self.virtual_transcripts.clear();
+        self.turn_seq = 0;
+        self.working_started = None;
+        self.compacting = false;
+        self.context_window_usage = None;
+        self.skill_catalog = None;
+        self.skill_binding = None;
+        self.rewind_state = None;
+        self.rewind_file_completion = None;
+        reset_command_runtime(
+            false,
+            &mut self.pending_approval,
+            &mut self.provider_commands,
+            &mut self.provider_commands_ready,
+            &mut self.command_queue,
+            &mut self.awaiting_command_turn,
+            &mut self.palette_selected,
+            &mut self.palette_dismissed,
+        );
+        self.history_dismissed = true;
+
+        self.apply_replay(fork.replay, cx);
+        self.input.update(cx, |input, cx| {
+            input.set_value(prompt.clone(), window, cx);
+            input.set_selected_range(prompt.len()..prompt.len(), cx);
+        });
+        let started = self.start_session_with_options(fork.session_id, true, cx);
+        self.set_command_feedback(
+            if started {
+                CommandFeedbackKind::Notice
+            } else {
+                CommandFeedbackKind::Error
+            },
+            if !started && files_restored {
+                "Files were restored and the conversation fork was created, but Claude could not start it. The original session remains available in history."
+                    .to_string()
+            } else if !started {
+                "The conversation fork was created, but Claude could not start it. The original session remains available in history."
+                    .to_string()
+            } else if files_restored {
+                "Files restored and conversation rewound. Review the recovered prompt, then send it when ready."
+                    .to_string()
+            } else {
+                "Conversation rewound. Review the recovered prompt, then send it when ready."
+                    .to_string()
+            },
+            cx,
+        );
     }
 
     /// Start the turn clock and drive the once-a-second repaint of the live
@@ -1816,6 +2526,16 @@ impl AgentPane {
                 // through unchanged.
                 if seed_thread_defaults && let Some(model) = self.profile_model() {
                     next.model = Some(model);
+                }
+
+                if let Some(restored) = self.restore_thread_settings_on_ready.take() {
+                    next = ThreadSettings {
+                        model: restored.model.or(next.model),
+                        approval: restored.approval.or(next.approval),
+                        sandbox: restored.sandbox.or(next.sandbox),
+                        effort: restored.effort.or(next.effort),
+                        tier: restored.tier.or(next.tier),
+                    };
                 }
 
                 self.settings = next;
@@ -1974,6 +2694,14 @@ impl AgentPane {
                 self.pending_approval = None;
                 self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
                 cx.notify();
+            }
+            SessionEvent::FileRewindCompleted { error } => {
+                let result = error.map_or(Ok(()), Err);
+                if let Some(completion) = self.rewind_file_completion.take() {
+                    let _ = completion.send(result);
+                } else {
+                    warn!("received a Claude file rewind result with no pending UI operation");
+                }
             }
             SessionEvent::Error { message, fatal } => {
                 let cancelled_queue = fatal && !self.command_queue.is_empty();
@@ -2961,6 +3689,11 @@ impl Render for AgentPane {
         });
 
         let running = composer_action(self.status) == ComposerAction::Stop;
+        let rewind_active = self.rewind_state.is_some();
+        let rewind_processing = self
+            .rewind_state
+            .as_ref()
+            .is_some_and(|state| !state.is_picker());
         let transcript_has_hidden_content_below = self.transcript_has_hidden_content_below();
         let transcript_scrolled_from_top = self.transcript_has_hidden_content_above();
 
@@ -2980,7 +3713,13 @@ impl Render for AgentPane {
             // the pane below. A pending approval is cancelled (deny +
             // interrupt), while a running turn is interrupted directly.
             .on_action(cx.listener(|this, _: &Escape, _, cx| {
-                if this.pending_approval.is_some() {
+                if this
+                    .rewind_state
+                    .as_ref()
+                    .is_some_and(RewindState::is_picker)
+                {
+                    this.cancel_rewind_picker(cx);
+                } else if this.pending_approval.is_some() {
                     this.respond_approval("cancel", cx);
                 } else if this.status == Status::Running {
                     this.interrupt(cx);
@@ -3204,7 +3943,11 @@ impl Render for AgentPane {
                                         .text_size(px(cx.global::<AppSettings>().agent_font_size
                                             as f32
                                             + 2.0))
-                                        .child(Input::new(&self.input).appearance(false)),
+                                        .child(
+                                            Input::new(&self.input)
+                                                .appearance(false)
+                                                .disabled(rewind_processing),
+                                        ),
                                 )
                                 .children(command_feedback)
                                 .child(
@@ -3240,6 +3983,7 @@ impl Render for AgentPane {
                                         } else {
                                             Button::new("agent-send")
                                                 .primary()
+                                                .disabled(rewind_active)
                                                 .size(px(32.))
                                                 .rounded(px(999.))
                                                 .icon(IconName::ArrowUp)
@@ -4931,6 +5675,85 @@ impl AgentPane {
 
                 menu
             })
+    }
+}
+
+#[cfg(test)]
+mod rewind_state_tests {
+    use nmt_agent_utils::chat::SlashCommandRunPolicy;
+
+    use super::{
+        FileRestoreNext, RewindState, app_server, file_restore_next, rewind_blocks_submission,
+        sessions, stream_json,
+    };
+
+    fn checkpoint() -> sessions::ClaudeCheckpoint {
+        sessions::ClaudeCheckpoint {
+            user_message_id: "00000000-0000-4000-8000-000000000001".into(),
+            parent_message_id: None,
+            prompt: "recover this prompt".into(),
+            timestamp: Some("2026-08-07T01:00:00Z".into()),
+            file_restore_availability: sessions::FileRestoreAvailability::Available,
+        }
+    }
+
+    #[test]
+    fn picker_cancellation_and_processing_phases_are_distinct() {
+        let picker_states = [
+            RewindState::Loading { operation_id: 7 },
+            RewindState::SelectingCheckpoint {
+                operation_id: 7,
+                checkpoints: vec![checkpoint()],
+            },
+            RewindState::SelectingAction {
+                operation_id: 7,
+                checkpoint: checkpoint(),
+            },
+        ];
+        for state in &picker_states {
+            assert!(state.is_picker());
+            assert!(state.has_operation(7));
+            assert!(!state.has_operation(6), "stale operations must be ignored");
+            assert!(rewind_blocks_submission(Some(state)));
+        }
+
+        for state in [
+            RewindState::RestoringFiles { operation_id: 7 },
+            RewindState::ForkingConversation { operation_id: 7 },
+        ] {
+            assert!(!state.is_picker());
+            assert!(rewind_blocks_submission(Some(&state)));
+        }
+        assert!(!rewind_blocks_submission(None));
+    }
+
+    #[test]
+    fn file_phase_success_and_failure_choose_the_safe_next_step() {
+        assert_eq!(file_restore_next(false, Ok(())), FileRestoreNext::Complete);
+        assert_eq!(
+            file_restore_next(true, Ok(())),
+            FileRestoreNext::ForkConversation
+        );
+        assert_eq!(
+            file_restore_next(true, Err("expired checkpoint".into())),
+            FileRestoreNext::RetryAction("expired checkpoint".into())
+        );
+    }
+
+    #[test]
+    fn rewind_catalog_is_claude_only_and_idle_only() {
+        let claude = stream_json::Session::adapter_commands();
+        let rewind = claude
+            .iter()
+            .find(|command| command.name == "rewind")
+            .expect("Claude rewind command");
+
+        assert_eq!(rewind.run_policy, SlashCommandRunPolicy::IdleOnly);
+        assert!(
+            app_server::Session::adapter_commands()
+                .iter()
+                .all(|command| command.name != "rewind")
+        );
     }
 }
 
