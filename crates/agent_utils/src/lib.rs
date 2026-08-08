@@ -1,12 +1,13 @@
 pub mod chat;
 pub mod claude_code;
 pub mod codex;
-mod hook_store;
 #[cfg(target_os = "windows")]
 pub mod launcher;
 #[cfg(target_os = "windows")]
 pub mod update;
 pub mod usage;
+
+mod hook_store;
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -52,11 +53,11 @@ pub struct CodexProviderConfig {
 /// How to launch an agent CLI. Protocol-specific settings are carried here so
 /// adapters can map them onto their native environment or RPC surfaces.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct AgentLaunch {
+pub struct LaunchConfig {
     pub executable: String,
-    pub env: Vec<(String, String)>,
     pub model: Option<String>,
-    pub codex_provider: Option<CodexProviderConfig>,
+    pub provider: Option<CodexProviderConfig>,
+    pub env: Vec<(String, String)>,
 }
 
 pub struct AgentProcess {

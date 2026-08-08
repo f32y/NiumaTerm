@@ -21,7 +21,7 @@ pub use crate::chat::{
     ThreadSettings,
 };
 use crate::launcher::{ConfiguredLauncher, KillOnCloseJob};
-use crate::{AgentLaunch, CodexProviderConfig};
+use crate::{CodexProviderConfig, LaunchConfig};
 
 /// JSON-RPC ids for the fixed handshake requests; turn requests count up from
 /// `FIRST_TURN_RPC_ID` so response routing can tell the phases apart.
@@ -77,11 +77,11 @@ struct ThreadProfile {
     provider: Option<CodexProviderConfig>,
 }
 
-impl From<&AgentLaunch> for ThreadProfile {
-    fn from(launch: &AgentLaunch) -> Self {
+impl From<&LaunchConfig> for ThreadProfile {
+    fn from(launch: &LaunchConfig) -> Self {
         Self {
             model: launch.model.clone(),
-            provider: launch.codex_provider.clone(),
+            provider: launch.provider.clone(),
         }
     }
 }
@@ -261,7 +261,7 @@ impl Session {
     /// stderr lines go to `on_stderr`. Dropping `deliver` signals EOF: the
     /// closure is owned by the reader thread and dropped when the pipe closes.
     pub fn spawn(
-        launch: &AgentLaunch,
+        launch: &LaunchConfig,
         cwd: Option<String>,
         deliver: impl Fn(Value) + Send + 'static,
         on_stderr: impl Fn(String) + Send + 'static,
@@ -274,7 +274,7 @@ impl Session {
     /// thread first; replay can be suppressed when the caller already retains
     /// the visible transcript in place.
     pub fn spawn_resuming(
-        launch: &AgentLaunch,
+        launch: &LaunchConfig,
         cwd: Option<String>,
         thread_id: String,
         suppress_replay: bool,
@@ -292,7 +292,7 @@ impl Session {
     }
 
     fn spawn_inner(
-        launch: &AgentLaunch,
+        launch: &LaunchConfig,
         cwd: Option<String>,
         initial_resume: Option<String>,
         suppress_resume_replay: bool,

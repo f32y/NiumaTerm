@@ -47,7 +47,7 @@ use nmt_agent_utils::codex::app_server;
 use nmt_agent_utils::launcher::ConfiguredLauncher;
 use nmt_agent_utils::update::{InstallationKey, ProviderKind};
 use nmt_agent_utils::{
-    AgentEvent, AgentEventKind, AgentLaunch, AgentRoute, CodexProviderConfig, agent_process,
+    AgentEvent, AgentEventKind, AgentRoute, CodexProviderConfig, LaunchConfig, agent_process,
     normalize_body, normalize_title,
 };
 use nmt_config::local_state::AgentDefaults as StoredAgentDefaults;
@@ -381,7 +381,7 @@ fn codex_provider_id(profile_name: &str) -> String {
     format!("niumaterm-{hash:016x}")
 }
 
-fn launch_env_value(launch: &AgentLaunch, target: &str) -> Option<String> {
+fn launch_env_value(launch: &LaunchConfig, target: &str) -> Option<String> {
     launch
         .env
         .iter()
@@ -394,7 +394,7 @@ fn launch_env_value(launch: &AgentLaunch, target: &str) -> Option<String> {
 /// Turn a profile into a protocol-neutral launch spec. Generated environment
 /// entries precede user entries so the explicit environment table retains
 /// last-value-wins behavior.
-pub(crate) fn agent_launch(profile: &AgentProfile) -> AgentLaunch {
+pub(crate) fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
     let mut env: Vec<(String, String)> = Vec::new();
     let model = (!profile.model.trim().is_empty()).then(|| profile.model.trim().to_string());
 
@@ -448,11 +448,11 @@ pub(crate) fn agent_launch(profile: &AgentProfile) -> AgentLaunch {
             api_key_env,
         });
 
-    AgentLaunch {
+    LaunchConfig {
         executable: profile.executable.trim().to_string(),
         env,
         model,
-        codex_provider,
+        provider: codex_provider,
     }
 }
 
@@ -6149,7 +6149,7 @@ mod agent_profile_launch_tests {
             launch_env_value(&launch, ANTHROPIC_MODEL_ENV).as_deref(),
             Some("claude-env-override")
         );
-        assert!(launch.codex_provider.is_none());
+        assert!(launch.provider.is_none());
     }
 
     #[test]
@@ -6166,7 +6166,7 @@ mod agent_profile_launch_tests {
         };
 
         let launch = agent_launch(&profile);
-        let provider = launch.codex_provider.as_ref().expect("custom provider");
+        let provider = launch.provider.as_ref().expect("custom provider");
 
         assert_eq!(launch.model.as_deref(), Some("vendor/custom-model"));
         assert_eq!(provider.base_url, "https://proxy.example.com/v1");
