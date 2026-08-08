@@ -36,8 +36,6 @@ split = "#2A2B2C"
 split-active = "#297AA0"
 
 [colors.ui]
-radius = 4
-"radius.lg" = 8
 background = "#191A1B"
 foreground = "#BFBFBF"
 border = "#2A2B2C"

@@ -621,6 +621,7 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) {
     doc["appearance"]["agent-font-size"] = value(appearance.agent_font_size);
     doc["appearance"]["monospace-only"] = value(appearance.monospace_only);
     doc["appearance"]["enable-window-transparency"] = value(appearance.window_transparency_enabled);
+    doc["appearance"]["transparent-main-view"] = value(appearance.transparent_main_view);
     doc["appearance"]["background-opacity"] = value(appearance.background_opacity);
     if let Some(path) = &appearance.background_image {
         doc["appearance"]["background-image"] = value(path);
@@ -682,6 +683,7 @@ mod tests {
             agent_font_size: 15.0,
             monospace_only: false,
             window_transparency_enabled: true,
+            transparent_main_view: false,
             background_opacity: 0.85,
             background_image: Some(r"C:\Wallpapers\background.png".to_string()),
             background_image_opacity: 0.4,

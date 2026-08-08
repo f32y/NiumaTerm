@@ -3,6 +3,7 @@ use crate::agent_pane::composer::{
 };
 use crate::agent_pane::transcript::{compact_token_count, permission_icon, relative_time};
 use crate::agent_pane::*;
+use crate::ui::main_view_background_opacity;
 
 struct StopResponseIcon;
 
@@ -90,7 +91,7 @@ impl Render for AgentPane {
                     div()
                         .px_3()
                         .py_2()
-                        .rounded(cx.theme().radius)
+                        .rounded(UI_RADIUS)
                         .border_1()
                         .border_color(cx.theme().border)
                         .bg(cx.theme().background.opacity(0.7))
@@ -230,6 +231,11 @@ impl Render for AgentPane {
 
         v_flex()
             .size_full()
+            // The outer frame matches the window chrome. The Agent surface owns
+            // its fill so an opaque main view does not color the rounded frame.
+            .bg(cx.theme().sidebar.alpha(main_view_background_opacity(cx)))
+            .rounded(UI_RADIUS - px(1.))
+            .overflow_hidden()
             .track_focus(&self.focus)
             // Escape force-stops the agent whenever the pane or composer has
             // focus. The input propagates Escape here when the editor did not
@@ -347,7 +353,7 @@ impl Render for AgentPane {
                                     Button::new("agent-jump-to-bottom")
                                         .outline()
                                         .small()
-                                        .rounded(px(999.))
+                                        .rounded_full()
                                         .icon(IconName::ArrowDown)
                                         .tooltip("Jump to latest")
                                         .shadow_md()
@@ -393,7 +399,7 @@ impl Render for AgentPane {
                         .child(
                             v_flex()
                                 .w_full()
-                                .rounded(px(12.))
+                                .rounded(UI_RADIUS)
                                 .overflow_hidden()
                                 .border_1()
                                 .border_color(cx.theme().border)
@@ -496,7 +502,7 @@ impl Render for AgentPane {
                                             Button::new("agent-send")
                                                 .danger()
                                                 .size(px(32.))
-                                                .rounded(px(999.))
+                                                .rounded_full()
                                                 .icon(StopResponseIcon)
                                                 .tooltip("Stop response")
                                                 .aria_label("Stop response")
@@ -510,7 +516,7 @@ impl Render for AgentPane {
                                                 .primary()
                                                 .disabled(rewind_active || update_suspended)
                                                 .size(px(32.))
-                                                .rounded(px(999.))
+                                                .rounded_full()
                                                 .icon(IconName::ArrowUp)
                                                 .tooltip("Send message")
                                                 .aria_label("Send message")
@@ -574,7 +580,7 @@ impl AgentPane {
                             Skeleton::new()
                                 .h(px(14.))
                                 .w(relative(if i % 2 == 0 { 0.72 } else { 0.55 }))
-                                .rounded(px(4.)),
+                                .rounded(UI_RADIUS),
                         )
                 }))
                 .into_any_element()
@@ -632,7 +638,7 @@ impl AgentPane {
         div().w_full().flex().justify_center().child(
             v_flex()
                 .w(relative(0.95))
-                .rounded_t(px(12.))
+                .rounded_t(UI_RADIUS)
                 .border_1()
                 .border_b_0()
                 .border_color(cx.theme().border.opacity(0.6))
@@ -667,7 +673,7 @@ impl AgentPane {
             .px_2()
             .gap_2()
             .items_center()
-            .rounded(cx.theme().radius)
+            .rounded(UI_RADIUS)
             .cursor_pointer()
             .hover(move |style| style.bg(hover_bg))
             .on_click(cx.listener(move |this, _, _, cx| this.resume_session(index, cx)))
@@ -761,7 +767,7 @@ impl AgentPane {
 
         v_flex()
             .w(relative(0.95))
-            .rounded_b(px(12.))
+            .rounded_b(UI_RADIUS)
             .border_1()
             .border_t_0()
             .border_color(cx.theme().border.opacity(0.6))
@@ -1039,7 +1045,7 @@ impl AgentPane {
             .aria_label(label)
             .gap_0p5()
             .p(px(1.))
-            .rounded(cx.theme().radius)
+            .rounded(UI_RADIUS)
             .border_1()
             .border_color(cx.theme().border.opacity(0.65))
             .bg(cx.theme().muted.opacity(0.2))

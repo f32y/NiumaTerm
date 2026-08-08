@@ -8,6 +8,7 @@ use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 use gpui_component::{ActiveTheme, IconName, Sizable as _, h_flex, v_flex};
 
 use crate::terminal::metrics;
+use crate::ui::UI_RADIUS;
 use crate::ui::git_status::{DiffLine, DiffLineKind, GitStatusModel, fetch_file_diff};
 use crate::ui::sidebar_resize::{self, ResizeDrag};
 
@@ -355,7 +356,7 @@ impl Render for GitSidebar {
             .bg(cx.theme().sidebar)
             .border_1()
             .border_color(cx.theme().sidebar_border)
-            .rounded(cx.theme().radius_lg)
+            .rounded(UI_RADIUS)
             .overflow_hidden()
             .child(header)
             .child(body);

@@ -16,7 +16,7 @@ use nmt_terminal::event::{ProgressReport, ProgressState};
 use super::Shell;
 use super::shell::TabSurface;
 use crate::tabs::{TabId, TabManager};
-use crate::ui::AppSettings;
+use crate::ui::{AppSettings, UI_RADIUS};
 
 struct TabDrag {
     from: usize,
@@ -33,24 +33,21 @@ struct TabDragPreview {
 
 impl Render for TabDragPreview {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .rounded(cx.theme().radius)
-            .bg(cx.theme().background)
-            .child(
-                div()
-                    .w(px(self.width))
-                    .h(px(30.0))
-                    .px_2()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .overflow_hidden()
-                    .rounded(cx.theme().radius)
-                    .bg(cx.theme().tab_active)
-                    .text_sm()
-                    .text_color(cx.theme().tab_active_foreground)
-                    .child(div().truncate().child(self.label.clone())),
-            )
+        div().rounded(UI_RADIUS).bg(cx.theme().background).child(
+            div()
+                .w(px(self.width))
+                .h(px(30.0))
+                .px_2()
+                .flex()
+                .items_center()
+                .justify_center()
+                .overflow_hidden()
+                .rounded(UI_RADIUS)
+                .bg(cx.theme().tab_active)
+                .text_sm()
+                .text_color(cx.theme().tab_active_foreground)
+                .child(div().truncate().child(self.label.clone())),
+        )
     }
 }
 

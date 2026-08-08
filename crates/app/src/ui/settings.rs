@@ -56,6 +56,7 @@ use toml::{Table as TomlTable, Value as TomlValue};
 use tracing::warn;
 
 use crate::agent_pane::updates as agent_updates;
+use crate::ui::{UI_BORDER_OPACITY, UI_RADIUS};
 use crate::{PlatformHandle, remote, ui};
 
 pub const DEFAULT_SHELL: &str = r"C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe";
@@ -189,6 +190,8 @@ pub struct AppSettings {
     pub monospace_only: bool,
     /// Whether windows use an alpha-capable render target and acrylic backdrop.
     pub window_transparency_enabled: bool,
+    /// Allow the Terminal View and Agent Pane background to remain translucent.
+    pub transparent_main_view: bool,
     /// Whole-window background opacity (0.2..=1.0) while transparency is enabled.
     pub background_opacity: f64,
     /// Local image drawn behind all window content.
@@ -254,6 +257,7 @@ impl Default for AppSettings {
             tab_width: DEFAULT_TAB_WIDTH,
             monospace_only: true,
             window_transparency_enabled: true,
+            transparent_main_view: true,
             background_opacity: 1.0,
             background_image: None,
             background_image_opacity: DEFAULT_BACKGROUND_IMAGE_OPACITY,
@@ -483,6 +487,7 @@ impl AppSettings {
             tab_width: clamp_tab_width(appearance.tab_width),
             monospace_only: appearance.monospace_only,
             window_transparency_enabled: appearance.window_transparency_enabled,
+            transparent_main_view: appearance.transparent_main_view,
             background_opacity: clamp_background_opacity(appearance.background_opacity),
             background_image: appearance
                 .background_image
@@ -690,6 +695,7 @@ impl AppSettings {
             agent_font_size: self.agent_font_size,
             monospace_only: self.monospace_only,
             window_transparency_enabled: self.window_transparency_enabled,
+            transparent_main_view: self.transparent_main_view,
             background_opacity: self.background_opacity,
             background_image: self.background_image.clone(),
             background_image_opacity: self.background_image_opacity,
@@ -757,6 +763,21 @@ pub(crate) fn surface_background_opacity(cx: &App) -> f32 {
     ) as f32
 }
 
+fn effective_main_view_background_opacity(transparent: bool, opacity: f32) -> f32 {
+    if transparent { opacity } else { 1.0 }
+}
+
+fn main_view_is_transparent(cx: &App) -> bool {
+    cx.global::<AppSettings>().transparent_main_view
+}
+
+pub(crate) fn main_view_background_opacity(cx: &App) -> f32 {
+    effective_main_view_background_opacity(
+        main_view_is_transparent(cx),
+        surface_background_opacity(cx),
+    )
+}
+
 fn effective_background_image_layer_opacity(window_opacity: f64, image_opacity: f64) -> f64 {
     let uncovered = 1.0 - effective_surface_background_opacity(window_opacity, Some(image_opacity));
 
@@ -799,15 +820,11 @@ pub(crate) fn apply_ui_theme(value: Option<&UiTheme>, cx: &mut App) {
 
         let mut colors = value.colors.clone();
 
-        // Size/behavior tokens live at the top level of `ThemeConfig`, but the
-        // theme file format keeps everything under `[colors.ui]` — lift them
-        // out so themes can set corner radii (they'd otherwise be silently
-        // ignored inside the colors table).
+        // Shadow lives at the top level of `ThemeConfig`, while the theme file
+        // format keeps it under `[colors.ui]`.
         if let Some(colors) = colors.as_table_mut() {
-            for key in ["radius", "radius.lg", "shadow"] {
-                if let Some(v) = colors.remove(key) {
-                    config.insert(key.to_string(), v);
-                }
+            if let Some(value) = colors.remove("shadow") {
+                config.insert("shadow".to_string(), value);
             }
         }
 
@@ -830,6 +847,14 @@ pub(crate) fn apply_ui_theme(value: Option<&UiTheme>, cx: &mut App) {
 
     ComponentTheme::global_mut(cx).apply_config(&theme);
     ComponentTheme::change(mode, None, cx);
+
+    apply_ui_constants(ComponentTheme::global_mut(cx));
+}
+
+fn apply_ui_constants(theme: &mut ComponentTheme) {
+    theme.radius = UI_RADIUS;
+    theme.radius_lg = UI_RADIUS;
+    theme.colors.sidebar_border = theme.colors.sidebar_border.opacity(UI_BORDER_OPACITY);
 }
 
 fn select_theme(name: String, cx: &mut App) {
@@ -936,7 +961,7 @@ fn theme_preview(colors: Colors) -> Div {
         .h(px(72.0))
         .p_3()
         .gap_2()
-        .rounded_md()
+        .rounded(UI_RADIUS)
         .bg(preview_color(colors.background.0))
         .child(
             h_flex()
@@ -962,7 +987,7 @@ fn theme_preview(colors: Colors) -> Div {
             div()
                 .w(px(18.0))
                 .h(px(6.0))
-                .rounded_sm()
+                .rounded(UI_RADIUS)
                 .bg(preview_color(color))
         })))
 }
@@ -1026,7 +1051,7 @@ fn theme_list(cx: &mut App) -> Div {
                         .id(("theme-card", index))
                         .w_full()
                         .p_3()
-                        .rounded_lg()
+                        .rounded(UI_RADIUS)
                         .border_1()
                         .border_color(if is_selected { selected_border } else { border })
                         .when(is_selected, |this| this.bg(selected_background))
@@ -1046,6 +1071,10 @@ fn theme_list(cx: &mut App) -> Div {
         )
 }
 
+fn tab_background_opacity(opacity: f32) -> f32 {
+    1.0 - (1.0 - opacity) * 0.5
+}
+
 /// Retint the component theme for the foreground surface opacity. A configured
 /// image shows through by reducing this tint; without an image it remains the
 /// effective window opacity. Reset first so repeated calls do not compound alpha.
@@ -1060,6 +1089,7 @@ pub(crate) fn apply_window_translucency(cx: &mut App) {
     };
 
     theme.apply_config(&palette);
+    apply_ui_constants(theme);
 
     if opacity < 1.0 {
         theme.colors.sidebar = theme.colors.sidebar.opacity(opacity);
@@ -1069,14 +1099,19 @@ pub(crate) fn apply_window_translucency(cx: &mut App) {
         // be defeated by an opaque backdrop.
         theme.colors.background = theme.colors.background.opacity(opacity);
 
-        for token in [
-            &mut theme.tokens.title_bar,
-            &mut theme.tokens.tab_bar,
-            &mut theme.tokens.tab_active,
-        ] {
+        for token in [&mut theme.tokens.title_bar, &mut theme.tokens.tab_bar] {
             let color = token.color.opacity(opacity);
             *token = ComponentThemeToken::new(color, color.into());
         }
+
+        // The selected tab needs a stronger fill than the surrounding title-bar
+        // chrome, so only half of the configured transparency is applied here.
+        let color = theme
+            .tokens
+            .tab_active
+            .color
+            .opacity(tab_background_opacity(opacity));
+        theme.tokens.tab_active = ComponentThemeToken::new(color, color.into());
     }
 }
 
@@ -1563,7 +1598,7 @@ fn remote_host_status(cx: &mut App) -> Div {
                 v_flex()
                     .gap_2()
                     .p_3()
-                    .rounded_lg()
+                    .rounded(UI_RADIUS)
                     .border_1()
                     .border_color(border)
                     .bg(surface)
@@ -1720,7 +1755,7 @@ pub fn settings_view(cx: &App) -> Settings {
         .border_b_1()
         .border_l_1()
         .border_color(cx.theme().sidebar_border)
-        .rounded(cx.theme().radius_lg)
+        .rounded(UI_RADIUS)
         .overflow_hidden();
 
     Settings::new("app-settings")
@@ -1842,6 +1877,20 @@ pub fn settings_view(cx: &App) -> Settings {
                             )
                             .description(
                                 "Use an acrylic backdrop and preserve window alpha for live transparency.",
+                            ),
+                        )
+                        .item(
+                            SettingItem::new(
+                                "Transparent Main View",
+                                SettingField::switch(
+                                    |cx| cx.global::<AppSettings>().transparent_main_view,
+                                    |value, cx| {
+                                        cx.global_mut::<AppSettings>().transparent_main_view = value;
+                                    },
+                                ),
+                            )
+                            .description(
+                                "Use a translucent background for Terminal View and Agent Pane.",
                             ),
                         )
                         .item(
@@ -3137,12 +3186,16 @@ mod tests {
 
     #[test]
     fn window_transparency_controls_opacity_and_blur() {
+        assert_eq!(tab_background_opacity(1.0), 1.0);
+        assert!((tab_background_opacity(0.65) - 0.825).abs() < f32::EPSILON);
         assert_eq!(clamp_background_opacity(0.1), 0.2);
         assert_eq!(clamp_background_opacity(0.65), 0.65);
         assert_eq!(clamp_background_opacity(2.0), 1.0);
         assert_eq!(clamp_background_opacity(f64::NAN), 1.0);
         assert_eq!(effective_background_opacity(false, 0.65), 1.0);
         assert_eq!(effective_background_opacity(true, 0.65), 0.65);
+        assert_eq!(effective_main_view_background_opacity(false, 0.65), 1.0);
+        assert_eq!(effective_main_view_background_opacity(true, 0.65), 0.65);
         assert_eq!(clamp_background_image_opacity(-1.0), 0.0);
         assert_eq!(clamp_background_image_opacity(2.0), 1.0);
         assert_eq!(

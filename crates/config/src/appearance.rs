@@ -67,6 +67,10 @@ fn default_window_transparency_enabled() -> bool {
     true
 }
 
+fn default_transparent_main_view() -> bool {
+    true
+}
+
 /// The `[appearance]` section: visual settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppearanceConfig {
@@ -125,6 +129,12 @@ pub struct AppearanceConfig {
         rename = "enable-window-transparency"
     )]
     pub window_transparency_enabled: bool,
+    /// Allow the Terminal View and Agent Pane background to show content behind it.
+    #[serde(
+        default = "default_transparent_main_view",
+        rename = "transparent-main-view"
+    )]
+    pub transparent_main_view: bool,
     /// Whole-window background opacity (0.2–1.0; clamped on load).
     #[serde(default = "default_background_opacity", rename = "background-opacity")]
     pub background_opacity: f64,
@@ -168,6 +178,7 @@ impl Default for AppearanceConfig {
             agent_font_size: default_agent_font_size(),
             monospace_only: true,
             window_transparency_enabled: default_window_transparency_enabled(),
+            transparent_main_view: default_transparent_main_view(),
             background_opacity: default_background_opacity(),
             background_image: None,
             background_image_opacity: default_background_image_opacity(),
