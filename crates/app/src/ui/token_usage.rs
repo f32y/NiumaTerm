@@ -1,8 +1,8 @@
 //! Titlebar widget showing today's Claude token usage from `ccusage`.
 //!
 //! Runs `npx ccusage@latest -j --offline --since <today>` on the background
-//! executor (hidden console via `CREATE_NO_WINDOW`), parses the JSON `totals`,
-//! and renders them as `i:<input> o:<output> cw:<cache_write> cr:<cache_read>`.
+//! executor (hidden console via `CREATE_NO_WINDOW`), reads the JSON
+//! `totals.totalTokens` value, and renders it beside a token icon.
 //! Auto-refreshes every 60 seconds while the Appearance toggle is on; clicking
 //! the widget refreshes immediately.
 
@@ -13,8 +13,8 @@ use std::time::Duration;
 use chrono::Local;
 use gpui::prelude::*;
 use gpui::{Context, SharedString, Window};
-use gpui_component::Sizable as _;
 use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::{IconNamed, Sizable as _};
 use serde_json::{Value, from_slice};
 use tracing::warn;
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
@@ -23,7 +23,15 @@ use crate::ui::AppSettings;
 use crate::ui::auto_refresh::{self, AutoRefresh, RefreshState};
 
 /// Shown before the first successful fetch (and kept on fetch errors).
-const PLACEHOLDER: &str = "i:- o:- cw:- cr:-";
+const PLACEHOLDER: &str = "-";
+
+struct TokenIcon;
+
+impl IconNamed for TokenIcon {
+    fn path(self) -> SharedString {
+        "icons/coins.svg".into()
+    }
+}
 
 pub(crate) struct TokenUsageView {
     text: SharedString,
@@ -74,10 +82,15 @@ impl TokenUsageView {
 
 impl Render for TokenUsageView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let aria_label = format!("Daily token usage: {}", self.text);
+
         Button::new("token-usage")
             .ghost()
             .small()
+            .icon(TokenIcon)
             .label(self.text.clone())
+            .aria_label(aria_label)
+            .tooltip("Daily token usage")
             .loading(self.state.refreshing)
             .on_click(cx.listener(|this, _, _, cx| auto_refresh::refresh(this, cx)))
     }
@@ -110,19 +123,10 @@ fn fetch_usage(today: &str) -> Result<String, String> {
     Ok(format_usage(&json))
 }
 
-/// `i:<input> o:<output> cw:<cache_write> cr:<cache_read>` from the report's
-/// `totals` object; missing fields read as 0.
+/// `totalTokens` from the report's `totals` object; a missing value reads as 0.
 fn format_usage(json: &Value) -> String {
-    let totals = &json["totals"];
-    let field = |key: &str| totals[key].as_u64().unwrap_or(0);
-
-    format!(
-        "i:{} o:{} cw:{} cr:{}",
-        compact(field("inputTokens")),
-        compact(field("outputTokens")),
-        compact(field("cacheCreationTokens")),
-        compact(field("cacheReadTokens")),
-    )
+    let total = json["totals"]["totalTokens"].as_u64().unwrap_or(0);
+    compact(total)
 }
 
 /// Shorten large counts so the titlebar label stays narrow: 9999 stays
@@ -138,30 +142,34 @@ fn compact(n: u64) -> String {
 
 #[cfg(test)]
 mod tests {
+    use gpui::AssetSource as _;
     use serde_json::from_str;
 
     use super::*;
+    use crate::ui::assets::AppAssets;
 
     #[test]
-    fn format_usage_reads_totals() {
+    fn token_icon_is_embedded() {
+        assert!(AppAssets.load("icons/coins.svg").unwrap().is_some());
+    }
+
+    #[test]
+    fn format_usage_reads_total_tokens() {
         let json: Value = from_str(
             r#"{
                 "daily": [{"date": "2026-07-03"}],
                 "totals": {
-                    "inputTokens": 1234,
-                    "outputTokens": 56789,
-                    "cacheCreationTokens": 2500000,
-                    "cacheReadTokens": 1200000000
+                    "totalTokens": 3758023
                 }
             }"#,
         )
         .unwrap();
-        assert_eq!(format_usage(&json), "i:1234 o:56.8k cw:2.5M cr:1.20B");
+        assert_eq!(format_usage(&json), "3.8M");
     }
 
     #[test]
     fn format_usage_defaults_missing_fields_to_zero() {
         let json: Value = from_str("{}").unwrap();
-        assert_eq!(format_usage(&json), "i:0 o:0 cw:0 cr:0");
+        assert_eq!(format_usage(&json), "0");
     }
 }
