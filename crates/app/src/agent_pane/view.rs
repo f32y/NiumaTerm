@@ -3,6 +3,7 @@ use crate::agent_pane::composer::{
 };
 use crate::agent_pane::transcript::{compact_token_count, permission_icon, relative_time};
 use crate::agent_pane::*;
+use crate::terminal::frame::theme_default_background;
 use crate::ui::main_view_background_opacity;
 
 struct StopResponseIcon;
@@ -246,6 +247,14 @@ impl Render for AgentPane {
         let session_loading = self.recent_sessions_mode == RecentSessionsMode::Loading;
         let transcript_has_hidden_content_below = self.transcript_has_hidden_content_below();
         let transcript_scrolled_from_top = self.transcript_has_hidden_content_above();
+        let background = if cx
+            .global::<AppSettings>()
+            .agent_pane_use_terminal_background
+        {
+            gpui::rgb(theme_default_background().rgb_u32()).into()
+        } else {
+            cx.theme().sidebar
+        };
 
         // Blank tabs expose recent sessions automatically; `/resume` can
         // request the same list after a conversation has started. A count
@@ -260,7 +269,7 @@ impl Render for AgentPane {
             .size_full()
             // The outer frame matches the window chrome. The Agent surface owns
             // its fill so an opaque main view does not color the rounded frame.
-            .bg(cx.theme().sidebar.alpha(main_view_background_opacity(cx)))
+            .bg(background.alpha(main_view_background_opacity(cx)))
             .rounded(UI_RADIUS - px(1.))
             .overflow_hidden()
             .track_focus(&self.focus)

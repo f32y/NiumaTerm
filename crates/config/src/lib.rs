@@ -606,6 +606,8 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) {
     doc["theme"] = value(theme);
     ensure_explicit_table(doc, "appearance");
     doc["appearance"]["input-style"] = value(appearance.input_style.as_str());
+    doc["appearance"]["agent-pane-use-terminal-background"] =
+        value(appearance.agent_pane_use_terminal_background);
     doc["appearance"]["command-blocks"] = value(appearance.command_blocks);
     doc["appearance"]["show-daily-token-usage"] = value(appearance.show_daily_token_usage);
     doc["appearance"]["show-git-status-on-title-bar"] =
@@ -670,6 +672,7 @@ mod tests {
     fn sample_appearance() -> AppearanceConfig {
         AppearanceConfig {
             input_style: appearance::InputStyle::Waterfall,
+            agent_pane_use_terminal_background: true,
             command_blocks: false,
             show_daily_token_usage: true,
             show_git_status_on_title_bar: true,

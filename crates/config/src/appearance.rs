@@ -76,6 +76,9 @@ fn default_transparent_main_view() -> bool {
 pub struct AppearanceConfig {
     #[serde(default, rename = "input-style")]
     pub input_style: InputStyle,
+    /// Use the terminal theme background for Agent Pane.
+    #[serde(default, rename = "agent-pane-use-terminal-background")]
+    pub agent_pane_use_terminal_background: bool,
     /// Render command blocks in the grid (separators, exit status, gutter;
     /// command-blocks-rendering).
     #[serde(default = "default_command_blocks", rename = "command-blocks")]
@@ -165,6 +168,7 @@ impl Default for AppearanceConfig {
     fn default() -> Self {
         Self {
             input_style: InputStyle::default(),
+            agent_pane_use_terminal_background: false,
             command_blocks: true,
             show_daily_token_usage: false,
             show_git_status_on_title_bar: false,

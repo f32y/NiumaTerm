@@ -7,6 +7,7 @@ fn appearance_section_defaults_when_absent() {
     let config: Config = from_str("").unwrap();
     assert_eq!(config.appearance, AppearanceConfig::default());
     assert_eq!(config.appearance.input_style, InputStyle::Waterfall);
+    assert!(!config.appearance.agent_pane_use_terminal_background);
     assert!(config.appearance.transparent_main_view);
     assert!(config.profiles.list.is_empty());
 }
