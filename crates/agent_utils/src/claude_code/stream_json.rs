@@ -406,7 +406,7 @@ impl Session {
     pub fn execute_slash_command(&mut self, name: &str, arguments: &str) -> SlashCommandOutcome {
         if ui_owns_slash_command(name) {
             return SlashCommandOutcome::Rejected {
-                message: "/rewind is handled by NiumaTerm's checkpoint picker.".to_string(),
+                message: format!("/{name} is handled by NiumaTerm."),
             };
         }
         if !self.ready || self.stdin.is_none() {
@@ -1099,9 +1099,8 @@ fn slash_command_text(name: &str, arguments: &str) -> String {
 }
 
 fn ui_owns_slash_command(name: &str) -> bool {
-    name.trim()
-        .trim_start_matches('/')
-        .eq_ignore_ascii_case("rewind")
+    let name = name.trim().trim_start_matches('/');
+    name.eq_ignore_ascii_case("resume") || name.eq_ignore_ascii_case("rewind")
 }
 
 fn claude_result_error(message: &Value) -> Option<String> {
@@ -1335,6 +1334,7 @@ mod tests {
         assert_eq!(rewind.run_policy, SlashCommandRunPolicy::IdleOnly);
         assert!(ui_owns_slash_command("rewind"));
         assert!(ui_owns_slash_command("/ReWiNd"));
+        assert!(ui_owns_slash_command("/resume"));
         assert!(!ui_owns_slash_command("compact"));
     }
 

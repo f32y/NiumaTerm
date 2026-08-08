@@ -223,7 +223,9 @@ impl AgentPane {
             status: Status::Starting,
             history: Vec::new(),
             history_pending: None,
-            history_dismissed: false,
+            recent_sessions_mode: RecentSessionsMode::Automatic,
+            recent_session_selected: 0,
+            pending_resume_replay: None,
             history_scroll: VirtualListScrollHandle::new(),
             pending_approval: None,
             settings: ThreadSettings::default(),
@@ -849,7 +851,7 @@ impl AgentPane {
 
         // The first message commits this tab to its conversation; the
         // history list is no longer offered.
-        self.history_dismissed = true;
+        self.recent_sessions_mode = RecentSessionsMode::Hidden;
 
         match outcome {
             SendOutcome::StartedTurn => {
@@ -867,14 +869,9 @@ impl AgentPane {
         true
     }
 
-    pub(super) fn reset_conversation(&mut self, cx: &mut Context<Self>) {
-        self.session = None;
+    pub(super) fn clear_conversation_presentation(&mut self) {
         self.items.clear();
-        // A fresh conversation always follows the live tail again, even if
-        // the previous transcript was scrolled up when it was discarded.
         self.scroll_transcript_to_bottom();
-        self.settings = ThreadSettings::default();
-        self.models.clear();
         self.expanded_groups.clear();
         self.expanded_turns.clear();
         self.completed_turn_seconds.clear();
@@ -884,11 +881,21 @@ impl AgentPane {
         self.working_started = None;
         self.compacting = false;
         self.context_window_usage = None;
-        self.skill_catalog = None;
-        self.skill_binding = None;
         self.queued_user_messages.clear();
         self.rewind_state = None;
         self.rewind_file_completion = None;
+        self.pending_resume_replay = None;
+    }
+
+    pub(super) fn reset_conversation(&mut self, cx: &mut Context<Self>) {
+        self.session = None;
+        // A fresh conversation always follows the live tail again, even if
+        // the previous transcript was scrolled up when it was discarded.
+        self.clear_conversation_presentation();
+        self.settings = ThreadSettings::default();
+        self.models.clear();
+        self.skill_catalog = None;
+        self.skill_binding = None;
         reset_command_runtime(
             self.kind == AgentKind::Codex,
             &mut self.pending_approval,
@@ -900,6 +907,7 @@ impl AgentPane {
             &mut self.palette_dismissed,
         );
         self.command_feedback = None;
+        self.recent_sessions_mode = RecentSessionsMode::Hidden;
 
         // History records belong to the provider and remain intact; only the
         // live backend and this tab's conversation presentation are reset.
@@ -968,6 +976,15 @@ impl AgentPane {
     pub(super) fn apply_event(&mut self, event: SessionEvent, cx: &mut Context<Self>) {
         match event {
             SessionEvent::Ready(settings) => {
+                if self.recent_sessions_mode == RecentSessionsMode::Loading
+                    && let Some(replay) = self.pending_resume_replay.take()
+                {
+                    self.clear_conversation_presentation();
+                    self.recent_sessions_mode = RecentSessionsMode::Hidden;
+                    self.command_feedback = None;
+                    self.apply_replay(replay, cx);
+                }
+
                 // Seed the settings dropdowns with the thread's effective
                 // configuration so they show real values before any change.
                 // Ready can fire again mid-session (Claude's first-turn init
@@ -1190,6 +1207,18 @@ impl AgentPane {
                 }
             }
             SessionEvent::Error { message, fatal } => {
+                if self.recent_sessions_mode == RecentSessionsMode::Loading {
+                    self.recent_sessions_mode = RecentSessionsMode::Open;
+                    self.pending_resume_replay = None;
+                    if !fatal {
+                        self.status = Status::Idle;
+                    }
+                    self.set_command_feedback(
+                        CommandFeedbackKind::Error,
+                        format!("Could not open the selected session: {message}"),
+                        cx,
+                    );
+                }
                 if fatal && matches!(self.update_suspension, Some(UpdateSuspension::Reconnecting)) {
                     self.update_suspension = Some(UpdateSuspension::Failed(message.clone()));
                 }
@@ -1229,7 +1258,14 @@ impl AgentPane {
                 }
                 cx.notify();
             }
-            SessionEvent::Replay(items) => self.apply_replay(items, cx),
+            SessionEvent::Replay(items) => {
+                if self.recent_sessions_mode == RecentSessionsMode::Loading {
+                    self.clear_conversation_presentation();
+                    self.recent_sessions_mode = RecentSessionsMode::Hidden;
+                    self.command_feedback = None;
+                }
+                self.apply_replay(items, cx);
+            }
             // No status line in the UI anymore; the live working row and the
             // Stop button carry the running state.
             SessionEvent::StatusDetail(_) => {}
@@ -1253,30 +1289,50 @@ impl AgentPane {
         cx.notify();
     }
 
-    /// Resume the picked history entry. Codex switches its live session onto
-    /// the stored thread (the response replays the transcript); Claude
-    /// replaces the untouched fresh process with one reloading the session,
-    /// and replays the transcript from the session file in parallel.
+    /// Resume the picked history entry without discarding the visible
+    /// conversation until the target confirms it can be opened.
     pub(super) fn resume_session(&mut self, index: usize, cx: &mut Context<Self>) {
         let Some(summary) = self.history.get(index) else {
             return;
         };
         let id = summary.id.clone();
 
-        self.history_dismissed = true;
+        if self.recent_sessions_mode == RecentSessionsMode::Loading {
+            return;
+        }
+
+        let previous_status = self.status;
+        self.recent_sessions_mode = RecentSessionsMode::Loading;
+        self.recent_session_selected = index;
+        self.pending_resume_replay = None;
+        self.status = Status::Starting;
         // The resumed thread's own settings are authoritative; the remembered
         // per-kind defaults must not overwrite them on the next Ready.
         self.seed_thread_defaults = false;
+        self.set_command_feedback(
+            CommandFeedbackKind::Notice,
+            "Opening recent session…".to_string(),
+            cx,
+        );
 
         match self.kind {
             AgentKind::Codex => {
                 if let Some(Backend::Codex(session)) = self.session.as_mut() {
                     session.resume_thread(&id);
+                } else {
+                    self.recent_sessions_mode = RecentSessionsMode::Open;
+                    self.status = previous_status;
+                    self.set_command_feedback(
+                        CommandFeedbackKind::Error,
+                        "Codex is not ready to open a recent session.".to_string(),
+                        cx,
+                    );
                 }
             }
             AgentKind::Claude => {
                 let cwd = self.cwd.clone();
                 let replay_id = id.clone();
+                let selected = index;
 
                 cx.spawn(async move |this, cx| {
                     let replay = cx
@@ -1284,15 +1340,23 @@ impl AgentPane {
                         .spawn(async move { sessions::load_replay(cwd.as_deref(), &replay_id) })
                         .await;
 
-                    let _ = this.update(cx, |this, cx| this.apply_replay(replay, cx));
+                    let _ = this.update(cx, |this, cx| {
+                        if this.recent_sessions_mode != RecentSessionsMode::Loading
+                            || this.recent_session_selected != selected
+                        {
+                            return;
+                        }
+
+                        if this.start_session(Some(id), cx) {
+                            this.pending_resume_replay = Some(replay);
+                        } else {
+                            this.recent_sessions_mode = RecentSessionsMode::Open;
+                        }
+                    });
                 })
                 .detach();
-
-                self.start_session(Some(id), cx);
             }
         }
-
-        cx.notify();
     }
 
     pub(super) fn start_item(&mut self, item: SessionItem, cx: &mut Context<Self>) {

@@ -25,8 +25,9 @@ use gpui::prelude::*;
 use gpui::{
     AnyElement, ClipboardItem, Context, Div, ElementId, Entity, FocusHandle, FollowMode,
     FontWeight, Hsla, ListAlignment, ListHorizontalSizingBehavior, ListSizingBehavior, ListState,
-    MouseButton, Pixels, ScrollHandle, SharedString, Stateful, Task, UniformListScrollHandle,
-    Window, div, linear_color_stop, linear_gradient, list, px, relative, rems, size, uniform_list,
+    MouseButton, Pixels, ScrollHandle, ScrollStrategy, SharedString, Stateful, Task,
+    UniformListScrollHandle, Window, div, linear_color_stop, linear_gradient, list, px, relative,
+    rems, size, uniform_list,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{
@@ -81,6 +82,26 @@ pub(crate) enum AgentPaneEvent {
     Interrupted,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum RecentSessionsMode {
+    #[default]
+    Automatic,
+    Hidden,
+    Open,
+    Loading,
+}
+
+impl RecentSessionsMode {
+    fn is_visible(self, transcript_empty: bool, rows: usize) -> bool {
+        rows > 0
+            && match self {
+                Self::Automatic => transcript_empty,
+                Self::Open => true,
+                Self::Hidden | Self::Loading => false,
+            }
+    }
+}
+
 pub(crate) struct AgentPane {
     pub(crate) focus: FocusHandle,
     agent_route: AgentRoute,
@@ -119,9 +140,13 @@ pub(crate) struct AgentPane {
     /// reserves its final height with this many placeholder rows, so the
     /// composer doesn't jump when real rows land.
     history_pending: Option<usize>,
-    /// The list is one-shot per tab: picking a session or sending the first
-    /// message hides it for the rest of the tab's life.
-    history_dismissed: bool,
+    /// Blank conversations show the list automatically; `/resume` can reopen
+    /// the same list after a conversation has started.
+    recent_sessions_mode: RecentSessionsMode,
+    recent_session_selected: usize,
+    /// Claude replay is loaded before process replacement and published only
+    /// after the resumed process confirms readiness.
+    pending_resume_replay: Option<Vec<SessionItem>>,
     history_scroll: VirtualListScrollHandle,
     /// Description of the approval request blocking the turn, shown as the
     /// card above the input; the request id lives in the session.

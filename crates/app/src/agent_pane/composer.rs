@@ -343,6 +343,7 @@ impl AgentPane {
                     true
                 }
             }
+            "resume" => self.open_recent_sessions(cx),
             "status" => {
                 self.show_status(cx);
                 true
@@ -416,7 +417,7 @@ impl AgentPane {
 
         match outcome {
             SlashCommandOutcome::Accepted => {
-                self.history_dismissed = true;
+                self.recent_sessions_mode = RecentSessionsMode::Hidden;
                 self.awaiting_command_turn = true;
                 self.set_command_feedback(
                     CommandFeedbackKind::Notice,
@@ -593,6 +594,34 @@ impl AgentPane {
         self.set_command_feedback(CommandFeedbackKind::Notice, fields.join(" · "), cx);
     }
 
+    pub(super) fn open_recent_sessions(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.is_command_busy() {
+            self.set_command_feedback(
+                CommandFeedbackKind::Error,
+                "/resume is available only while the agent is idle.".to_string(),
+                cx,
+            );
+            return false;
+        }
+
+        let rows = self.history_pending.unwrap_or(self.history.len());
+        if rows == 0 {
+            self.recent_sessions_mode = RecentSessionsMode::Hidden;
+            self.set_command_feedback(
+                CommandFeedbackKind::Notice,
+                "No recent sessions are available for this folder.".to_string(),
+                cx,
+            );
+            return true;
+        }
+
+        self.recent_sessions_mode = RecentSessionsMode::Open;
+        self.recent_session_selected = 0;
+        self.command_feedback = None;
+        cx.notify();
+        true
+    }
+
     pub(super) fn set_command_feedback(
         &mut self,
         kind: CommandFeedbackKind,
@@ -606,6 +635,7 @@ impl AgentPane {
     pub(super) fn is_command_busy(&self) -> bool {
         self.status == Status::Running
             || self.awaiting_command_turn
+            || self.recent_sessions_mode == RecentSessionsMode::Loading
             || rewind_blocks_submission(self.rewind_state.as_ref())
     }
 
@@ -937,6 +967,9 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) {
         let Some(model) = self.palette_model(cx) else {
+            if self.handle_recent_sessions_control(control, cx) {
+                return;
+            }
             cx.propagate();
             return;
         };
@@ -982,6 +1015,57 @@ impl AgentPane {
                 }
             }
         }
+    }
+
+    fn handle_recent_sessions_control(
+        &mut self,
+        control: PaletteControl,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if matches!(control, PaletteControl::Complete) || self.input.read(cx).text().len() != 0 {
+            return false;
+        }
+
+        let rows = self.history_pending.unwrap_or(self.history.len());
+        if !self
+            .recent_sessions_mode
+            .is_visible(self.items.is_empty(), rows)
+        {
+            return false;
+        }
+
+        cx.stop_propagation();
+
+        match control {
+            PaletteControl::Previous | PaletteControl::Next => {
+                let direction = match control {
+                    PaletteControl::Previous => PaletteDirection::Previous,
+                    PaletteControl::Next => PaletteDirection::Next,
+                    _ => unreachable!(),
+                };
+
+                if let Some(selected) = move_palette_selection(
+                    self.recent_session_selected,
+                    self.history.len(),
+                    direction,
+                ) {
+                    self.recent_session_selected = selected;
+                    self.history_scroll
+                        .scroll_to_item(selected, ScrollStrategy::Nearest);
+                    cx.notify();
+                }
+            }
+            PaletteControl::Activate => {
+                self.resume_session(self.recent_session_selected, cx);
+            }
+            PaletteControl::Dismiss => {
+                self.recent_sessions_mode = RecentSessionsMode::Hidden;
+                cx.notify();
+            }
+            PaletteControl::Complete => unreachable!(),
+        }
+
+        true
     }
 
     pub(super) fn activate_palette_index(
@@ -1306,22 +1390,9 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) {
         self.session = None;
-        self.items.clear();
-        self.scroll_transcript_to_bottom();
-        self.expanded_groups.clear();
-        self.expanded_turns.clear();
-        self.completed_turn_seconds.clear();
-        self.expanded_rows.clear();
-        self.virtual_transcripts.clear();
-        self.turn_seq = 0;
-        self.working_started = None;
-        self.compacting = false;
-        self.context_window_usage = None;
+        self.clear_conversation_presentation();
         self.skill_catalog = None;
         self.skill_binding = None;
-        self.queued_user_messages.clear();
-        self.rewind_state = None;
-        self.rewind_file_completion = None;
         reset_command_runtime(
             false,
             &mut self.pending_approval,
@@ -1332,7 +1403,7 @@ impl AgentPane {
             &mut self.palette_selected,
             &mut self.palette_dismissed,
         );
-        self.history_dismissed = true;
+        self.recent_sessions_mode = RecentSessionsMode::Hidden;
 
         self.apply_replay(fork.replay, cx);
         self.input.update(cx, |input, cx| {
