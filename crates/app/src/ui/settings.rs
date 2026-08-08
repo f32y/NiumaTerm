@@ -2398,6 +2398,14 @@ fn terminal_profile_card(ix: usize, count: usize) -> SettingItem {
                                     {
                                         let value = path.display().to_string();
 
+                                        let _ =
+                                            cx.update_global(|settings: &mut AppSettings, _, _| {
+                                                if let Some(profile) = settings.profiles.get_mut(ix)
+                                                {
+                                                    profile.shell = value.clone();
+                                                }
+                                            });
+
                                         let _ = input.update_in(cx, |input, window, cx| {
                                             input.set_value(value, window, cx);
                                         });
