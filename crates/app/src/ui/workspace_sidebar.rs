@@ -12,7 +12,7 @@ use gpui_component::{ActiveTheme, Icon, IconNamed, Selectable, Sizable, h_flex, 
 use nmt_agent_utils::AgentRuntimeStatus;
 
 use super::{AppSettings, NewWorkspace, Shell};
-use crate::ui::agent_usage::AgentUsageView;
+use crate::agent_pane::usage::AgentUsageView;
 use crate::ui::floating_surface;
 use crate::ui::sidebar_resize::{self, ResizeDrag};
 use crate::window::WindowRegistry;

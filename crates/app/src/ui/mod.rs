@@ -1,6 +1,6 @@
 pub(crate) use self::active_list::{ActiveList, HasId};
-pub(crate) use self::agent_pane::AgentThreadDefaults;
 pub(crate) use self::assets::AppAssets;
+pub(crate) use self::git_status::current_branch;
 pub(crate) use self::settings::{
     AppSettings, apply_ui_theme, apply_window_translucency, background_image_layer_opacity,
     surface_background_opacity, watch_themes, window_background_appearance,
@@ -12,10 +12,6 @@ pub(crate) use self::shell::{
 };
 
 mod active_list;
-mod agent_commands;
-mod agent_pane;
-pub(crate) mod agent_updates;
-mod agent_usage;
 mod assets;
 mod auto_refresh;
 mod floating_surface;

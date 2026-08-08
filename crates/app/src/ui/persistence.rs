@@ -9,9 +9,9 @@ use nmt_config::local_state::{
 use tracing::warn;
 
 use super::Shell;
-use super::agent_pane::{AgentKind, AgentPane};
 use super::settings::{AgentProfile, AppSettings, builtin_agent_profile};
 use super::shell::{TabSurface, explicit_cwd};
+use crate::agent_pane::{AgentKind, AgentPane};
 use crate::pane_tree::{PaneId, PaneNode, PaneTree};
 use crate::tabs::{TabId, TabManager};
 use crate::terminal::view::TerminalPane;

@@ -19,6 +19,7 @@ use nmt_platform::windows::ipc as platform_ipc;
 use tracing::warn;
 use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 
+mod agent_pane;
 mod cli;
 mod error;
 mod ipc;
@@ -33,15 +34,16 @@ mod utils;
 mod window;
 mod workspace;
 
+use crate::agent_pane::AgentThreadDefaults;
 use crate::cli::CliAction;
 use crate::terminal::view::{
     CopyBlockCommand, CopyBlockOutput, NextBlock, PreviousBlock, RerunBlock, SendShiftTab, SendTab,
 };
 use crate::ui::{
-    AgentThreadDefaults, AppAssets, AppSettings, CloseTab, NewAgentTab, NewRemoteTab, NewTab,
-    NewWindow, NewWorkspace, NextTab, NextWorkspace, PrevTab, PrevWorkspace, ResizePaneDown,
-    ResizePaneLeft, ResizePaneRight, ResizePaneUp, ShowSettings, SplitDown, SplitLeft, SplitRight,
-    SplitUp, ToggleSidebar,
+    AppAssets, AppSettings, CloseTab, NewAgentTab, NewRemoteTab, NewTab, NewWindow, NewWorkspace,
+    NextTab, NextWorkspace, PrevTab, PrevWorkspace, ResizePaneDown, ResizePaneLeft,
+    ResizePaneRight, ResizePaneUp, ShowSettings, SplitDown, SplitLeft, SplitRight, SplitUp,
+    ToggleSidebar,
 };
 use crate::window::{AppWindow, LastActiveWindow, ShellRegistry, WindowRegistry};
 
@@ -195,7 +197,7 @@ fn run_app(argv_url: Option<String>, testing: bool) {
 
             cx.set_global(AppSettings::load());
             let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
-            ui::agent_updates::initialize(testing, &agent_profiles, cx);
+            agent_pane::updates::initialize(testing, &agent_profiles, cx);
 
             // Bring up the remote host service if it was left enabled. Runs on
             // its own runtime thread; failures only log.
@@ -218,7 +220,7 @@ fn run_app(argv_url: Option<String>, testing: bool) {
             // deferred to when the settings dialog closes (see Shell::on_show_settings).
             cx.observe_global::<AppSettings>(|cx| {
                 let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
-                ui::agent_updates::reconcile_profiles(&agent_profiles, cx);
+                agent_pane::updates::reconcile_profiles(&agent_profiles, cx);
                 set_job_management(cx.global::<AppSettings>().manage_subprocess_job);
 
                 // Opacity changes retint the theme and switch each window
@@ -375,7 +377,7 @@ fn run_app(argv_url: Option<String>, testing: bool) {
             for initial in initials {
                 AppWindow::open(cx, initial);
             }
-            ui::agent_updates::schedule_startup_checks(cx);
+            agent_pane::updates::schedule_startup_checks(cx);
 
             // Apply CLI actions (argv + forwarded over the IPC pipe) on the
             // foreground; windows above exist before the first poll.
