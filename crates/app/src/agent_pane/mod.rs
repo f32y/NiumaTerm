@@ -54,7 +54,7 @@ use nmt_config::profile::{AgentProfile, AgentProfileKind};
 use serde_json::Value;
 use tracing::{info, warn};
 
-use self::commands::{
+use crate::agent_pane::commands::{
     PaletteCatalogEntry, PaletteDirection, claim_command_turn_start, filter_palette_catalog,
     filter_skill_catalog, is_current_session_epoch, local_commands, merge_catalog,
     move_palette_selection, next_session_epoch, parse_slash_command, prepare_skill_selection,
