@@ -18,6 +18,7 @@ use crate::{global_state::GlobalState, text::TextViewStyle};
 /// Type for code block actions generator function.
 pub(crate) type CodeBlockActionsFn =
     dyn Fn(&CodeBlock, &mut Window, &mut App) -> AnyElement + Send + Sync;
+pub(crate) type LinkClickHandlerFn = dyn Fn(&str, &mut Window, &mut App) + Send + Sync;
 
 /// A text view that can render Markdown or HTML.
 ///
@@ -46,6 +47,7 @@ pub struct TextView {
     selectable: bool,
     scrollable: bool,
     code_block_actions: Option<Arc<CodeBlockActionsFn>>,
+    link_click_handler: Option<Arc<LinkClickHandlerFn>>,
     markdown_extensions: Arc<MarkdownExtensions>,
 }
 
@@ -85,6 +87,7 @@ impl TextView {
             selectable: false,
             scrollable: false,
             code_block_actions: None,
+            link_click_handler: None,
             markdown_extensions: Arc::default(),
         }
     }
@@ -101,6 +104,7 @@ impl TextView {
             selectable: false,
             scrollable: false,
             code_block_actions: None,
+            link_click_handler: None,
             markdown_extensions: Arc::default(),
         }
     }
@@ -117,6 +121,7 @@ impl TextView {
             selectable: false,
             scrollable: false,
             code_block_actions: None,
+            link_click_handler: None,
             markdown_extensions: Arc::default(),
         }
     }
@@ -134,6 +139,7 @@ impl TextView {
             selectable: false,
             scrollable: false,
             code_block_actions: None,
+            link_click_handler: None,
             markdown_extensions: Arc::default(),
         }
     }
@@ -179,6 +185,15 @@ impl TextView {
         self.code_block_actions = Some(Arc::new(move |code_block, window, cx| {
             f(&code_block, window, cx).into_any_element()
         }));
+        self
+    }
+
+    /// Set a handler for link clicks.
+    pub fn on_link_click<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&str, &mut Window, &mut App) + Send + Sync + 'static,
+    {
+        self.link_click_handler = Some(Arc::new(handler));
         self
     }
 
@@ -293,6 +308,7 @@ impl Element for TextView {
 
         state.update(cx, |state, cx| {
             state.code_block_actions = self.code_block_actions.clone();
+            state.link_click_handler = self.link_click_handler.clone();
             state.set_markdown_extensions(self.markdown_extensions.clone(), cx);
             state.selectable = self.selectable;
             state.scrollable = self.scrollable;
@@ -417,6 +433,35 @@ mod tests {
         text_view: Entity<TextViewState>,
     }
 
+    struct LinkHandlerTextViewTestRoot {
+        text_view: Entity<TextViewState>,
+        clicked: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    }
+
+    impl LinkHandlerTextViewTestRoot {
+        fn new(
+            clicked: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+            cx: &mut Context<Self>,
+        ) -> Self {
+            let text_view =
+                cx.new(|cx| TextViewState::markdown("[open](C:/project/file.rs:12)", cx));
+            Self { text_view, clicked }
+        }
+    }
+
+    impl Render for LinkHandlerTextViewTestRoot {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            let clicked = self.clicked.clone();
+            div().w(px(160.)).child(
+                TextView::new(&self.text_view)
+                    .selectable(true)
+                    .on_link_click(move |url, _, _| {
+                        *clicked.lock().expect("clicked link lock") = Some(url.to_string());
+                    }),
+            )
+        }
+    }
+
     impl InlineImageTextViewTestRoot {
         fn new(cx: &mut Context<Self>) -> Self {
             let text_view = cx.new(|cx| {
@@ -481,6 +526,55 @@ mod tests {
         let view = TextView::markdown("plugin-test", "").plugin(DummyTextViewPlugin);
 
         assert!(view.selectable);
+    }
+
+    #[gpui::test]
+    fn custom_link_handler_receives_markdown_target(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let clicked = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let clicked_for_view = clicked.clone();
+        let (_, cx) = cx.add_window_view(move |_, cx| {
+            LinkHandlerTextViewTestRoot::new(clicked_for_view.clone(), cx)
+        });
+        let cx: &mut VisualTestContext = cx;
+
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        cx.simulate_click(point(px(10.), px(10.)), Modifiers::default());
+
+        assert_eq!(
+            clicked.lock().expect("clicked link lock").as_deref(),
+            Some("C:/project/file.rs:12")
+        );
+        assert_eq!(cx.opened_url(), None);
+    }
+
+    #[gpui::test]
+    fn markdown_link_hover_shows_tooltip(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let clicked = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let (_, cx) = cx.add_window_view(move |window, cx| {
+            let content = cx.new(|cx| LinkHandlerTextViewTestRoot::new(clicked.clone(), cx));
+            crate::Root::new(content, window, cx)
+        });
+        let cx: &mut VisualTestContext = cx;
+
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        cx.simulate_mouse_move(point(px(10.), px(10.)), None, Modifiers::default());
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(500));
+        cx.run_until_parked();
+
+        let has_tooltip = cx.update(|window, cx| {
+            crate::Root::tooltip_overlay(window, cx)
+                .is_some_and(|overlay| overlay.read(cx).has_content())
+        });
+        assert!(has_tooltip);
     }
 
     #[gpui::test]

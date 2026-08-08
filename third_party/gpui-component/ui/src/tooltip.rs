@@ -386,6 +386,28 @@ impl TooltipOverlay {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn has_content(&self) -> bool {
+        self.content.is_some()
+    }
+
+    pub(crate) fn request_text(
+        &mut self,
+        text: SharedString,
+        trigger_bounds: Bounds<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.request_show(
+            TooltipContent {
+                build: Rc::new(move |window, cx| Tooltip::new(text.clone()).build(window, cx)),
+                trigger_bounds,
+            },
+            window,
+            cx,
+        );
+    }
+
     fn next_epoch(&mut self) -> usize {
         self.epoch += 1;
         self.epoch
