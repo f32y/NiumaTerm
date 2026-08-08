@@ -1,9 +1,9 @@
 use gpui::{
     AnyView, AnyWindowHandle, App, AppContext, Bounds, Global, Styled as _, TitlebarOptions,
-    WeakEntity, WindowBounds, WindowDecorations, WindowHandle, WindowId, WindowOptions, point, px,
-    size, transparent_black,
+    WeakEntity, WindowAppearance, WindowBounds, WindowDecorations, WindowHandle, WindowId,
+    WindowOptions, point, px, size, transparent_black,
 };
-use gpui_component::Root;
+use gpui_component::{Root, Theme as ComponentTheme};
 use nmt_config::local_state::{SessionState, WindowLocalState, WindowState};
 
 use crate::ui::{self, Shell};
@@ -50,6 +50,14 @@ impl ShellRegistry {
 pub(crate) struct LastActiveWindow(pub(crate) Option<WindowId>);
 
 impl Global for LastActiveWindow {}
+
+pub(crate) fn selected_window_appearance(cx: &App) -> WindowAppearance {
+    if ComponentTheme::global(cx).is_dark() {
+        WindowAppearance::Dark
+    } else {
+        WindowAppearance::Light
+    }
+}
 
 impl WindowRegistry {
     pub(crate) fn get(&self, id: WindowId) -> Option<&AppWindow> {
@@ -118,6 +126,7 @@ impl AppWindow {
                     ..Default::default()
                 }),
                 window_background: ui::window_background_appearance(cx),
+                window_appearance_override: Some(selected_window_appearance(cx)),
                 ..Default::default()
             },
             // Wrap the shell in gpui-component's `Root` so modal/dialog layers
