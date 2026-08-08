@@ -6,7 +6,7 @@ pub(crate) const SIDE_INSET: f32 = 6.0;
 pub(crate) const TOP_INSET: f32 = 4.0;
 pub(crate) const BOTTOM_INSET: f32 = 6.0;
 
-/// The shared frame for peer workspace and main-content surfaces.
+/// Frame for the main terminal or Agent surface.
 pub(crate) fn card(cx: &App) -> Div {
     div()
         .size_full()

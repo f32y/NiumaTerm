@@ -2824,10 +2824,10 @@ impl Render for Shell {
                             window.remove_window();
                         }
                     }))
-                    // The bar spreads its children (justify_between), so the
-                    // sidebar/settings buttons and token usage share one left group.
                     .child(
                         h_flex()
+                            .w(px(self.sidebar.width - floating_surface::SIDE_INSET))
+                            .flex_none()
                             .child(
                                 div().occlude().child(
                                     Button::new("toggle-sidebar")
@@ -2853,6 +2853,17 @@ impl Render for Shell {
                                     .show_daily_token_usage
                                     .then(|| div().occlude().child(self.token_usage.clone())),
                             ),
+                    )
+                    // The container keeps the title-bar drag area. Tabs and the
+                    // new-tab button block only their own bounds.
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .flex()
+                            .items_center()
+                            .child(tab_bar),
                     )
                     .child(
                         h_flex()
@@ -2882,33 +2893,22 @@ impl Render for Shell {
                     .child(
                         div()
                             .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            // Keep the established tab strip outside the pane
-                            // card so its shape, spacing, and background remain
-                            // unchanged from the pre-hierarchy layout.
-                            .child(tab_bar)
                             .min_h_0()
+                            .min_w_0()
+                            .relative()
+                            .overflow_hidden()
+                            .px(px(floating_surface::SIDE_INSET))
+                            .pt(px(floating_surface::TOP_INSET))
+                            .pb(px(floating_surface::BOTTOM_INSET))
                             .child(
-                                div()
-                                    .flex_1()
-                                    .min_h_0()
+                                floating_surface::card(cx)
+                                    .id("main-floating-surface")
                                     .min_w_0()
                                     .relative()
-                                    .overflow_hidden()
-                                    .px(px(floating_surface::SIDE_INSET))
-                                    .pb(px(floating_surface::BOTTOM_INSET))
-                                    .child(
-                                        floating_surface::card(cx)
-                                            .id("main-floating-surface")
-                                            .min_w_0()
-                                            .relative()
-                                            .child(pane_tree)
-                                            // Notifications are anchored to the
-                                            // pane viewport inside the clipped card.
-                                            .children(notification_layer),
-                                    ),
+                                    .child(pane_tree)
+                                    // Notifications are anchored to the pane
+                                    // viewport inside the clipped card.
+                                    .children(notification_layer),
                             ),
                     )
                     .child(self.git_sidebar.clone()),
