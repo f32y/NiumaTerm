@@ -87,9 +87,10 @@ concrete before-and-after performance data. If no such validation was performed,
 omit the section instead of substituting routine tool output as boilerplate.
 
 When an AI coding agent materially contributes to the change, include an
-appropriate `Co-Authored-By` trailer at the end of the commit message. For Codex
-authored or co-authored work, use:
+appropriate `Co-Authored-By` trailer at the end of the commit message.
+
+For Codex authored or co-authored work, use:
 
 ```text
-Co-Authored-By: OpenAI Codex <noreply@openai.com>
+Co-Authored-By: <YOUR_MODEL_NAME> <noreply@openai.com>
 ```
