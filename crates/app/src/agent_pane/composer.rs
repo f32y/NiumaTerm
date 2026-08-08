@@ -1003,17 +1003,21 @@ impl AgentPane {
                 self.activate_palette_index(self.palette_selected, false, window, cx);
             }
             PaletteControl::Dismiss => {
-                if self
-                    .rewind_state
-                    .as_ref()
-                    .is_some_and(RewindState::is_picker)
-                {
-                    self.cancel_rewind_picker(cx);
-                } else {
-                    self.palette_dismissed = true;
-                    cx.notify();
-                }
+                self.dismiss_command_palette(cx);
             }
+        }
+    }
+
+    fn dismiss_command_palette(&mut self, cx: &mut Context<Self>) {
+        if self
+            .rewind_state
+            .as_ref()
+            .is_some_and(RewindState::is_picker)
+        {
+            self.cancel_rewind_picker(cx);
+        } else {
+            self.palette_dismissed = true;
+            cx.notify();
         }
     }
 
@@ -1509,6 +1513,7 @@ impl AgentPane {
         Some(
             v_flex()
                 .id("agent-slash-command-palette")
+                .on_mouse_down_out(cx.listener(|this, _, _, cx| this.dismiss_command_palette(cx)))
                 .w_full()
                 .max_h(px(9. * 48. + 36.))
                 .overflow_y_scroll()
