@@ -33,17 +33,17 @@ use nmt_platform::{
 use tracing::warn;
 use windows_sys::Win32::Foundation::HWND;
 
+use crate::agent_pane::updates::{
+    self as agent_updates, AgentUpdates, FocusedVisibleLifetime, NotificationPrimaryAction,
+    NotificationProgress, UpdateNotificationTone, UpdateNotificationView,
+};
+use crate::agent_pane::usage::AgentUsageView;
+use crate::agent_pane::{AgentKind, AgentPane, AgentPaneEvent};
 use crate::cli::CliAction;
 use crate::pane_tree::{PaneId, PaneNode, PaneTree, RemoveOutcome, SplitDirection, SplitOutcome};
 use crate::tabs::{TabId, TabManager};
 use crate::terminal::session::HostEvent;
 use crate::terminal::view::{AgentInterrupted, TerminalPane};
-use crate::ui::agent_pane::{AgentKind, AgentPane, AgentPaneEvent};
-use crate::ui::agent_updates::{
-    self, AgentUpdates, FocusedVisibleLifetime, NotificationPrimaryAction, NotificationProgress,
-    UpdateNotificationTone, UpdateNotificationView,
-};
-use crate::ui::agent_usage::AgentUsageView;
 use crate::ui::floating_surface;
 use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::git_status::{GitStatusModel, GitStatusView};

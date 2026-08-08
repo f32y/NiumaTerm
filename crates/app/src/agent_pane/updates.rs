@@ -19,12 +19,10 @@ use nmt_agent_utils::update::{
     InstallationKey, InstallationSnapshot, ProviderKind, ProviderMaintenance, UpdateCoordinator,
     UpdateError, UpdateErrorKind, UpdatePhase, UpdateProgress, VendorUpdateResult, VersionStatus,
 };
+use nmt_config::profile::{AgentProfile, AgentProfileKind};
 use semver::Version;
 
-use super::agent_pane::{
-    AgentPane, RecoveryReadiness, RecoverySnapshot, RestorationReadiness, agent_launch,
-};
-use super::settings::{AgentProfile, AgentProfileKind};
+use super::{AgentPane, RecoveryReadiness, RecoverySnapshot, RestorationReadiness, agent_launch};
 use crate::ui::Shell;
 use crate::window::ShellRegistry;
 
@@ -1119,16 +1117,12 @@ mod tests {
         let assessments = vec![
             RecoveryReadiness::Ready(RecoverySnapshot {
                 installation: installation.clone(),
-                identity: super::super::agent_pane::RecoveryIdentity::ClaudeSession(
-                    "session-a".into(),
-                ),
+                identity: super::super::RecoveryIdentity::ClaudeSession("session-a".into()),
                 profile_name: "Claude A".into(),
             }),
             RecoveryReadiness::Ready(RecoverySnapshot {
                 installation,
-                identity: super::super::agent_pane::RecoveryIdentity::ClaudeSession(
-                    "session-b".into(),
-                ),
+                identity: super::super::RecoveryIdentity::ClaudeSession("session-b".into()),
                 profile_name: "Claude B".into(),
             }),
         ];

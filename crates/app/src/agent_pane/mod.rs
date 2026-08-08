@@ -1,8 +1,7 @@
-//! Agent tab: renders an agent conversation (Codex or Claude Code) as chat
-//! bubbles instead of a terminal grid. All process and protocol handling
-//! lives in [`nmt_agent_utils::codex::app_server`] and
-//! [`nmt_agent_utils::claude_code::stream_json`]; this module only maps their
-//! shared typed events onto the transcript UI.
+pub(crate) mod updates;
+pub(super) mod usage;
+
+mod commands;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
@@ -51,18 +50,17 @@ use nmt_agent_utils::{
     normalize_body, normalize_title,
 };
 use nmt_config::local_state::AgentDefaults as StoredAgentDefaults;
+use nmt_config::profile::{AgentProfile, AgentProfileKind};
 use serde_json::Value;
 use tracing::{info, warn};
 
-use crate::ui::AppSettings;
-use crate::ui::agent_commands::{
+use self::commands::{
     PaletteCatalogEntry, PaletteDirection, claim_command_turn_start, filter_palette_catalog,
     filter_skill_catalog, is_current_session_epoch, local_commands, merge_catalog,
     move_palette_selection, next_session_epoch, parse_slash_command, prepare_skill_selection,
     reconcile_skill_binding, reset_command_runtime, resolve_choice, validate_skill_binding,
 };
-use crate::ui::git_status::current_branch;
-use crate::ui::settings::{AgentProfile, AgentProfileKind};
+use crate::ui::{AppSettings, current_branch};
 
 #[derive(Clone)]
 struct PendingSlashCommand {

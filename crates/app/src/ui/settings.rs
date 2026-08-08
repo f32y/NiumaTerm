@@ -55,6 +55,7 @@ use notify::{
 use toml::{Table as TomlTable, Value as TomlValue};
 use tracing::warn;
 
+use crate::agent_pane::updates as agent_updates;
 use crate::{PlatformHandle, remote, ui};
 
 pub const DEFAULT_SHELL: &str = r"C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe";
@@ -1326,7 +1327,7 @@ fn agent_hook_item(
 }
 
 fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPage {
-    let installations = ui::agent_updates::installations_for_profiles(agent_profiles, cx);
+    let installations = agent_updates::installations_for_profiles(agent_profiles, cx);
     let mut general = SettingGroup::new()
         .title("General")
         .item(
@@ -2580,7 +2581,7 @@ fn installation_version_text(phase: UpdatePhase, current: &str, available: &str)
 fn agent_update_check_item() -> SettingItem {
     SettingItem::render(move |options, _window, cx| {
         let profiles = cx.global::<AppSettings>().agent_profiles.clone();
-        let installations = ui::agent_updates::installations_for_profiles(&profiles, cx);
+        let installations = agent_updates::installations_for_profiles(&profiles, cx);
         let busy = installations.iter().any(|snapshot| snapshot.busy);
         let check_profiles = profiles.clone();
         let check = Button::new("agent-updates-check-all")
@@ -2588,7 +2589,7 @@ fn agent_update_check_item() -> SettingItem {
             .label(if busy { "Working…" } else { "Check" })
             .disabled(options.disabled || busy || installations.is_empty())
             .on_click(move |_, _, cx| {
-                ui::agent_updates::manual_check_profiles(&check_profiles, cx);
+                agent_updates::manual_check_profiles(&check_profiles, cx);
             });
 
         card_row(
@@ -2603,7 +2604,7 @@ fn agent_update_check_item() -> SettingItem {
 
 fn agent_update_status_item(ix: usize, title: String, key: InstallationKey) -> SettingItem {
     SettingItem::render(move |options, _window, cx| {
-        let snapshot = ui::agent_updates::installation(&key, cx);
+        let snapshot = agent_updates::installation(&key, cx);
         let (detail, busy, can_update) = snapshot.map_or_else(
             || ("Update status unavailable".to_string(), false, false),
             |snapshot| {
@@ -2677,7 +2678,7 @@ fn agent_update_status_item(ix: usize, title: String, key: InstallationKey) -> S
             .label("Update")
             .disabled(options.disabled || busy || !can_update)
             .on_click(move |_, window, cx| {
-                ui::agent_updates::request_update(update_key.clone(), window, cx);
+                agent_updates::request_update(update_key.clone(), window, cx);
             });
 
         card_row(title.clone(), detail, update, cx).into_any_element()
