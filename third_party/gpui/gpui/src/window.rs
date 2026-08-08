@@ -1325,6 +1325,7 @@ impl Window {
             is_minimizable,
             display_id,
             window_background,
+            window_appearance_override,
             app_id,
             window_min_size,
             window_decorations,
@@ -1355,6 +1356,7 @@ impl Window {
                 show,
                 display_id,
                 window_min_size,
+                window_appearance_override,
                 app_id: app_id.clone(),
                 icon,
                 #[cfg(target_os = "macos")]
@@ -2453,6 +2455,15 @@ impl Window {
     pub fn set_background_appearance(&self, background_appearance: WindowBackgroundAppearance) {
         self.platform_window
             .set_background_appearance(background_appearance);
+    }
+
+    /// Overrides the system-selected appearance for this window.
+    /// Passing `None` restores system appearance tracking where supported.
+    pub fn set_appearance_override(&mut self, appearance: Option<WindowAppearance>, cx: &mut App) {
+        self.platform_window.set_appearance_override(appearance);
+        if self.appearance != self.platform_window.appearance() {
+            self.appearance_changed(cx);
+        }
     }
 
     /// Mark the window as dirty at the platform level.

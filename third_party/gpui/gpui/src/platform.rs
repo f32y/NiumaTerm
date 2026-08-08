@@ -644,6 +644,7 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn is_hovered(&self) -> bool;
     fn background_appearance(&self) -> WindowBackgroundAppearance;
     fn set_title(&mut self, title: &str);
+    fn set_appearance_override(&self, _appearance: Option<WindowAppearance>) {}
     fn set_background_appearance(&self, background_appearance: WindowBackgroundAppearance);
     fn minimize(&self);
     fn zoom(&self);
@@ -1528,6 +1529,10 @@ pub struct WindowOptions {
     /// The appearance of the window background.
     pub window_background: WindowBackgroundAppearance,
 
+    /// An application-selected appearance. `None` follows the system setting.
+    /// Currently supported on Windows.
+    pub window_appearance_override: Option<WindowAppearance>,
+
     /// Application identifier of the window. Can by used by desktop environments to group applications together.
     pub app_id: Option<String>,
 
@@ -1599,6 +1604,8 @@ pub struct WindowParams {
 
     pub window_min_size: Option<Size<Pixels>>,
 
+    pub window_appearance_override: Option<WindowAppearance>,
+
     #[cfg(target_os = "macos")]
     pub tabbing_identifier: Option<String>,
 }
@@ -1655,6 +1662,7 @@ impl Default for WindowOptions {
             is_minimizable: true,
             display_id: None,
             window_background: WindowBackgroundAppearance::default(),
+            window_appearance_override: None,
             icon: None,
             app_id: None,
             window_min_size: None,
