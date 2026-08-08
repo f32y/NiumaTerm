@@ -178,6 +178,9 @@ pub(crate) struct AgentPane {
     palette_dismissed: bool,
     palette_scroll: ScrollHandle,
     command_feedback: Option<CommandFeedback>,
+    /// Mid-turn inputs stay near the composer until provider activity confirms
+    /// they have joined the running response.
+    queued_user_messages: VecDeque<String>,
     command_queue: VecDeque<PendingSlashCommand>,
     /// An accepted backend command starts the progress clock only after the
     /// protocol reports a real turn, not when the request is written.

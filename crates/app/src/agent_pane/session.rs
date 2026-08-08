@@ -245,6 +245,7 @@ impl AgentPane {
             palette_dismissed: false,
             palette_scroll: ScrollHandle::new(),
             command_feedback: None,
+            queued_user_messages: VecDeque::new(),
             command_queue: VecDeque::new(),
             awaiting_command_turn: false,
             rewind_state: None,
@@ -562,6 +563,7 @@ impl AgentPane {
                                 cx,
                             );
                         }
+                        this.publish_queued_user_messages(cx);
                         this.finish_working(cx);
                         this.push(
                             SessionItem::Error {
@@ -579,6 +581,7 @@ impl AgentPane {
                 self.status = Status::Exited;
                 self.awaiting_command_turn = false;
                 self.command_queue.clear();
+                self.queued_user_messages.clear();
                 self.items.push(Entry {
                     at: Local::now().format("%H:%M").to_string(),
                     turn: self.turn_seq,
@@ -619,6 +622,7 @@ impl AgentPane {
             || self.pending_approval.is_some()
             || self.awaiting_command_turn
             || !self.command_queue.is_empty()
+            || !self.queued_user_messages.is_empty()
             || self.rewind_state.is_some()
             || self.compacting
             || self
@@ -675,6 +679,7 @@ impl AgentPane {
         }
         self.command_queue.clear();
         self.awaiting_command_turn = false;
+        self.publish_queued_user_messages(cx);
         if self
             .rewind_state
             .as_ref()
@@ -846,16 +851,17 @@ impl AgentPane {
         // history list is no longer offered.
         self.history_dismissed = true;
 
-        // A steer joins the running turn (and its progress line); a fresh
-        // turn advances the counter first so its entries fold as one unit.
-        if outcome == SendOutcome::StartedTurn {
-            self.turn_seq += 1;
-        }
-
-        self.push(SessionItem::UserMessage { text: Some(text) }, cx);
-
-        if outcome == SendOutcome::StartedTurn {
-            self.start_working(cx);
+        match outcome {
+            SendOutcome::StartedTurn => {
+                self.turn_seq += 1;
+                self.push(SessionItem::UserMessage { text: Some(text) }, cx);
+                self.start_working(cx);
+            }
+            SendOutcome::Steered => {
+                self.queued_user_messages.push_back(text);
+                cx.notify();
+            }
+            SendOutcome::NotReady => unreachable!(),
         }
 
         true
@@ -880,6 +886,7 @@ impl AgentPane {
         self.context_window_usage = None;
         self.skill_catalog = None;
         self.skill_binding = None;
+        self.queued_user_messages.clear();
         self.rewind_state = None;
         self.rewind_file_completion = None;
         reset_command_runtime(
@@ -1098,6 +1105,7 @@ impl AgentPane {
                 // Compaction lives inside a turn; a flag surviving the turn
                 // would leave the indicator spinning with nothing behind it.
                 self.compacting = false;
+                self.publish_queued_user_messages(cx);
                 self.finish_working(cx);
                 self.refresh_git_branch(cx);
                 if self.status == Status::Running {
@@ -1191,6 +1199,7 @@ impl AgentPane {
                     self.status = Status::Exited;
                     self.awaiting_command_turn = false;
                     self.command_queue.clear();
+                    self.publish_queued_user_messages(cx);
                 } else if self.awaiting_command_turn {
                     self.awaiting_command_turn = false;
                 }
@@ -1287,12 +1296,30 @@ impl AgentPane {
     }
 
     pub(super) fn start_item(&mut self, item: SessionItem, cx: &mut Context<Self>) {
-        if matches!(item, SessionItem::UserMessage { .. }) {
-            // Echoes of our own turn input are already rendered locally.
+        if let SessionItem::UserMessage { text } = &item {
+            if let Some(text) = text
+                && self
+                    .queued_user_messages
+                    .front()
+                    .is_some_and(|queued| queued == text)
+            {
+                self.queued_user_messages.pop_front();
+                self.push(item, cx);
+            }
             return;
         }
 
+        if matches!(item, SessionItem::AgentMessage { .. }) {
+            self.publish_queued_user_messages(cx);
+        }
+
         self.push(item, cx);
+    }
+
+    fn publish_queued_user_messages(&mut self, cx: &mut Context<Self>) {
+        while let Some(text) = self.queued_user_messages.pop_front() {
+            self.push(SessionItem::UserMessage { text: Some(text) }, cx);
+        }
     }
 
     pub(super) fn complete_item(&mut self, item: SessionItem, cx: &mut Context<Self>) {

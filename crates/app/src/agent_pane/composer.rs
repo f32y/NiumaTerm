@@ -1319,6 +1319,7 @@ impl AgentPane {
         self.context_window_usage = None;
         self.skill_catalog = None;
         self.skill_binding = None;
+        self.queued_user_messages.clear();
         self.rewind_state = None;
         self.rewind_file_completion = None;
         reset_command_runtime(
