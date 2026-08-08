@@ -13,6 +13,18 @@ impl IconNamed for StopResponseIcon {
     }
 }
 
+fn queued_message_label(messages: &VecDeque<String>) -> Option<String> {
+    (!messages.is_empty()).then(|| {
+        let text = messages
+            .iter()
+            .map(|message| message.lines().collect::<Vec<_>>().join(" "))
+            .collect::<Vec<_>>()
+            .join(" · ");
+
+        format!("Queued message: {text}")
+    })
+}
+
 impl gpui::EventEmitter<AgentPaneEvent> for AgentPane {}
 
 impl gpui::Focusable for AgentPane {
@@ -50,6 +62,18 @@ impl Render for AgentPane {
                         .text_color(cx.theme().muted_foreground)
                         .child(feedback.message.clone()),
                 )
+        });
+        let queued_message = queued_message_label(&self.queued_user_messages).map(|label| {
+            h_flex()
+                .w_full()
+                .px_3()
+                .py_1p5()
+                .border_b_1()
+                .border_color(cx.theme().border.opacity(0.6))
+                .bg(cx.theme().muted.opacity(0.3))
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(div().min_w_0().truncate().child(label))
         });
 
         // Transcript rows, one folded/expanded section per turn (entries are
@@ -406,6 +430,8 @@ impl Render for AgentPane {
                                 .bg(cx.theme().popover)
                                 .shadow_md()
                                 .children(approval)
+                                .children(command_feedback)
+                                .children(queued_message)
                                 .child(
                                     div()
                                         .px_3()
@@ -480,7 +506,6 @@ impl Render for AgentPane {
                                                 .disabled(rewind_processing || update_suspended),
                                         ),
                                 )
-                                .children(command_feedback)
                                 .child(
                                     h_flex()
                                         .w_full()
@@ -538,6 +563,21 @@ impl Render for AgentPane {
                         })),
                 )
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn queued_message_label_keeps_order_and_flattens_lines() {
+        let messages = VecDeque::from(["first\nline".to_string(), "second".to_string()]);
+
+        assert_eq!(
+            queued_message_label(&messages).as_deref(),
+            Some("Queued message: first line · second")
+        );
     }
 }
 
