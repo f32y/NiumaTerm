@@ -1184,6 +1184,16 @@ impl AgentPane {
 
     /// Assistant reply: full-width bare markdown — no bubble, no border;
     /// alignment and surface carry the distinction.
+    fn markdown_view(
+        id: impl Into<ElementId>,
+        markdown: impl Into<SharedString>,
+        cwd: Option<String>,
+    ) -> text::TextView {
+        text::TextView::markdown(id, markdown).on_link_click(move |target, _, cx| {
+            links::open(target, cwd.as_deref().map(Path::new), cx);
+        })
+    }
+
     pub(super) fn render_agent_row(
         &self,
         index: usize,
@@ -1199,7 +1209,7 @@ impl AgentPane {
             .context_menu(Self::copy_menu(cx.entity().downgrade(), index))
             .child(
                 div().flex_1().min_w_0().px_1().child(
-                    text::TextView::markdown(("agent-md", index), text)
+                    Self::markdown_view(("agent-md", index), text, self.cwd.clone())
                         // Monospaced glyphs average roughly 0.6em wide, so
                         // 48rem yields an approximately 80-character prose
                         // measure while technical Markdown remains full-width.
@@ -1246,6 +1256,7 @@ impl AgentPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let cwd = self.cwd.clone();
         let (icon, heading, status, detail) = match &self.items[index].item {
             SessionItem::CommandExecution {
                 command,
@@ -1509,7 +1520,7 @@ impl AgentPane {
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
                                 .child(
-                                    text::TextView::markdown(("wl-md", index), markdown)
+                                    Self::markdown_view(("wl-md", index), markdown, cwd.clone())
                                         .selectable(true),
                                 ),
                         )
@@ -1683,8 +1694,12 @@ impl AgentPane {
                             .bg(cx.theme().tokens.muted)
                             .text_color(cx.theme().muted_foreground)
                             .child(
-                                text::TextView::markdown(("compaction-md", index), summary)
-                                    .selectable(true),
+                                Self::markdown_view(
+                                    ("compaction-md", index),
+                                    summary,
+                                    self.cwd.clone(),
+                                )
+                                .selectable(true),
                             ),
                     )
                     .child(
