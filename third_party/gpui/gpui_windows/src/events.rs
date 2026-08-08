@@ -1155,9 +1155,15 @@ impl WindowsWindowInner {
         {
             log::info!("System settings changed: {}", parameter_string);
             if parameter_string.as_str() == "ImmersiveColorSet" {
-                let new_appearance = system_appearance()
+                let system_appearance = system_appearance()
                     .context("unable to get system appearance when handling ImmersiveColorSet")
                     .log_err()?;
+                let new_appearance = resolve_window_appearance(
+                    system_appearance,
+                    self.state.appearance_override.get(),
+                );
+
+                configure_dwm_dark_mode(handle, new_appearance);
 
                 if new_appearance != self.state.appearance.get() {
                     self.state.appearance.set(new_appearance);
@@ -1165,7 +1171,6 @@ impl WindowsWindowInner {
 
                     callback();
                     self.state.callbacks.appearance_changed.set(Some(callback));
-                    configure_dwm_dark_mode(handle, new_appearance);
                 }
             }
         }

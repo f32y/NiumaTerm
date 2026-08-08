@@ -50,6 +50,7 @@ pub struct WindowsWindowState {
     pub fullscreen_restore_bounds: Cell<Bounds<Pixels>>,
     pub border_offset: WindowBorderOffset,
     pub appearance: Cell<WindowAppearance>,
+    pub appearance_override: Cell<Option<WindowAppearance>>,
     pub background_appearance: Cell<WindowBackgroundAppearance>,
     pub scale_factor: Cell<f32>,
     pub restore_from_minimized: Cell<Option<Box<dyn FnMut(RequestFrameOptions)>>>,
@@ -117,6 +118,7 @@ impl WindowsWindowState {
         display: WindowsDisplay,
         min_size: Option<Size<Pixels>>,
         appearance: WindowAppearance,
+        appearance_override: Option<WindowAppearance>,
         disable_direct_composition: bool,
         invalidate_devices: Arc<AtomicBool>,
         frame_pump: Arc<FramePump>,
@@ -162,6 +164,7 @@ impl WindowsWindowState {
             fullscreen_restore_bounds: Cell::new(fullscreen_restore_bounds),
             border_offset,
             appearance: Cell::new(appearance),
+            appearance_override: Cell::new(appearance_override),
             background_appearance: Cell::new(WindowBackgroundAppearance::Opaque),
             scale_factor: Cell::new(scale_factor),
             restore_from_minimized: Cell::new(restore_from_minimized),
@@ -261,6 +264,7 @@ impl WindowsWindowInner {
             context.display,
             context.min_size,
             context.appearance,
+            context.appearance_override,
             context.disable_direct_composition,
             context.invalidate_devices.clone(),
             context.frame_pump.clone(),
@@ -406,6 +410,7 @@ struct WindowCreateContext {
     main_receiver: PriorityQueueReceiver<RunnableVariant>,
     platform_window_handle: HWND,
     appearance: WindowAppearance,
+    appearance_override: Option<WindowAppearance>,
     disable_direct_composition: bool,
     directx_devices: DirectXDevices,
     invalidate_devices: Arc<AtomicBool>,
@@ -496,7 +501,9 @@ impl WindowsWindow {
         }
         .or_else(WindowsDisplay::primary_monitor)
         .context("failed to find any monitor")?;
-        let appearance = system_appearance().unwrap_or_default();
+        let system_appearance = system_appearance().unwrap_or_default();
+        let appearance_override = params.window_appearance_override;
+        let appearance = resolve_window_appearance(system_appearance, appearance_override);
         let mut context = WindowCreateContext {
             inner: None,
             handle,
@@ -513,6 +520,7 @@ impl WindowsWindow {
             main_receiver,
             platform_window_handle,
             appearance,
+            appearance_override,
             disable_direct_composition,
             directx_devices,
             invalidate_devices,
@@ -844,6 +852,20 @@ impl PlatformWindow for WindowsWindow {
         unsafe { SetWindowTextW(self.0.hwnd, &HSTRING::from(title)) }
             .inspect_err(|e| log::error!("Set title failed: {e}"))
             .ok();
+    }
+
+    fn set_appearance_override(&self, appearance_override: Option<WindowAppearance>) {
+        if self.state.appearance_override.get() == appearance_override {
+            return;
+        }
+
+        self.state.appearance_override.set(appearance_override);
+        let system_appearance = system_appearance()
+            .log_err()
+            .unwrap_or_else(|| self.state.appearance.get());
+        let appearance = resolve_window_appearance(system_appearance, appearance_override);
+        self.state.appearance.set(appearance);
+        configure_dwm_dark_mode(self.0.hwnd, appearance);
     }
 
     fn set_background_appearance(&self, background_appearance: WindowBackgroundAppearance) {
@@ -1589,6 +1611,13 @@ fn apply_background_appearance(hwnd: HWND, background_appearance: WindowBackgrou
     }
 }
 
+pub(crate) fn resolve_window_appearance(
+    system_appearance: WindowAppearance,
+    appearance_override: Option<WindowAppearance>,
+) -> WindowAppearance {
+    appearance_override.unwrap_or(system_appearance)
+}
+
 /// Returns whether the backdrop was applied, so callers can fall back to the
 /// legacy SetWindowCompositionAttribute path on builds without
 /// DWMWA_SYSTEMBACKDROP_TYPE.
@@ -1669,8 +1698,8 @@ fn set_non_rude_hwnd(hwnd: HWND, non_rude: bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::{ClickState, drop_description};
-    use gpui::{DevicePixels, MouseButton, point};
+    use super::{ClickState, drop_description, resolve_window_appearance};
+    use gpui::{DevicePixels, MouseButton, WindowAppearance, point};
     use std::time::Duration;
     use windows::Win32::UI::Shell::DROPIMAGE_COPY;
 
@@ -1685,6 +1714,22 @@ mod tests {
         assert_eq!(
             String::from_utf16_lossy(&message[..len]),
             "Paste path to file"
+        );
+    }
+
+    #[test]
+    fn application_appearance_takes_precedence_over_the_system() {
+        assert_eq!(
+            resolve_window_appearance(WindowAppearance::Light, None),
+            WindowAppearance::Light
+        );
+        assert_eq!(
+            resolve_window_appearance(WindowAppearance::Light, Some(WindowAppearance::Dark)),
+            WindowAppearance::Dark
+        );
+        assert_eq!(
+            resolve_window_appearance(WindowAppearance::Dark, Some(WindowAppearance::Light)),
+            WindowAppearance::Light
         );
     }
 
