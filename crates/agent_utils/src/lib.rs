@@ -1,27 +1,12 @@
 pub mod chat;
-pub mod claude_code {
-    mod compaction;
-    pub mod hook;
-    pub mod sessions;
-    #[cfg(target_os = "windows")]
-    pub mod stream_json;
-    mod tool_items;
-    #[cfg(target_os = "windows")]
-    pub mod usage_fetcher;
-}
+pub mod claude_code;
+pub mod codex;
 mod hook_store;
 #[cfg(target_os = "windows")]
 pub mod launcher;
 #[cfg(target_os = "windows")]
 pub mod update;
 pub mod usage;
-pub mod codex {
-    #[cfg(target_os = "windows")]
-    pub mod app_server;
-    pub mod hook;
-    #[cfg(target_os = "windows")]
-    pub mod usage_fetcher;
-}
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
