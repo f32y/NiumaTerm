@@ -558,7 +558,7 @@ impl AgentDisclosureRow {
             .items_center()
             .px(px(AGENT_DISCLOSURE_PADDING))
             .py_0p5()
-            .rounded(cx.theme().radius)
+            .rounded(UI_RADIUS)
             .aria_label(self.accessible_label)
             .when(expandable, |this| {
                 this.cursor_pointer()
@@ -1172,7 +1172,7 @@ impl AgentPane {
                     .max_w(relative(0.8))
                     .px_3()
                     .py_2()
-                    .rounded(cx.theme().radius_lg)
+                    .rounded(UI_RADIUS)
                     .bg(cx.theme().muted)
                     // Plain, not markdown: the prompt is user-authored text and
                     // must render verbatim, but stays drag-selectable.
@@ -1238,7 +1238,7 @@ impl AgentPane {
                     .max_w(relative(0.9))
                     .px_3()
                     .py_2()
-                    .rounded(cx.theme().radius_lg)
+                    .rounded(UI_RADIUS)
                     .bg(cx.theme().danger.opacity(0.15))
                     .text_color(cx.theme().danger)
                     .text_sm()
@@ -1411,7 +1411,7 @@ impl AgentPane {
                         .h(px(256.))
                         .relative()
                         .overflow_hidden()
-                        .rounded(cx.theme().radius)
+                        .rounded(UI_RADIUS)
                         .bg(cx.theme().tokens.muted)
                         .font_family(cx.theme().mono_font_family.clone())
                         .text_size(cx.theme().mono_font_size)
@@ -1690,7 +1690,7 @@ impl AgentPane {
                             .context_menu(Self::copy_menu(cx.entity().downgrade(), index))
                             .px_3()
                             .py_2()
-                            .rounded(cx.theme().radius)
+                            .rounded(UI_RADIUS)
                             .bg(cx.theme().tokens.muted)
                             .text_color(cx.theme().muted_foreground)
                             .child(

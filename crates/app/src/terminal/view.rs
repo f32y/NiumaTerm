@@ -10,8 +10,8 @@ use gpui::{
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollDelta,
     ScrollWheelEvent, Size, UTF16Selection, Window, actions, div, list, point, px, rgb, size,
 };
+use gpui_component::WindowExt as _;
 use gpui_component::notification::Notification;
-use gpui_component::{ActiveTheme, WindowExt as _};
 use nmt_agent_utils::{AgentRoute, agent_process};
 use nmt_config::local_state::TabState;
 use nmt_config::{CursorShape, active_colors};
@@ -46,7 +46,7 @@ use crate::terminal::terminal_view::{
     BlockListItem, BlockListView, TerminalView, bottom_anchor_offsets, frame_content_rows,
     live_frame_text, row_y_offset, terminal_row_at_y,
 };
-use crate::ui::{AppSettings, surface_background_opacity};
+use crate::ui::{AppSettings, UI_RADIUS, main_view_background_opacity};
 
 actions!(
     terminal,
@@ -1805,12 +1805,12 @@ impl Render for TerminalPane {
             .relative()
             // This is the terminal region's single full-bleed background;
             // cells with explicit background colors stay opaque on top.
-            .bg(rgb(theme_default_background().rgb_u32()).opacity(surface_background_opacity(cx)))
+            .bg(rgb(theme_default_background().rgb_u32()).opacity(main_view_background_opacity(cx)))
             // The shell frames each pane as a 1px-bordered rounded card; the
             // fill is rounded to the card's inner radius so its corners don't
             // paint square over the frame. The cell padding below keeps glyphs
             // clear of the rounded corners.
-            .rounded(cx.theme().radius_lg - px(1.))
+            .rounded(UI_RADIUS - px(1.))
             .text_color(rgb(theme_default_foreground().rgb_u32()))
             .font_family(metrics::font_family(cx))
             .text_size(px(metrics::font_size_px(cx)))

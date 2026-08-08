@@ -86,7 +86,7 @@ pub(super) fn scrollbar_element(
                     .top(relative(thumb_top))
                     .h(relative(thumb_height))
                     .w_full()
-                    .rounded(px(4.0))
+                    .rounded_full()
                     .bg(cx.theme().tokens.scrollbar_thumb),
             ),
     )

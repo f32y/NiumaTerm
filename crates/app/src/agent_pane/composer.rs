@@ -1386,7 +1386,7 @@ impl AgentPane {
                     .flex_none()
                     .px_3()
                     .py_1p5()
-                    .rounded(cx.theme().radius)
+                    .rounded(UI_RADIUS)
                     .when_some(background, |this, color| this.bg(color))
                     .when(disabled, |this| this.opacity(0.5))
                     .when(!disabled, |this| {
@@ -1442,7 +1442,7 @@ impl AgentPane {
                 .overflow_y_scroll()
                 .track_scroll(&self.palette_scroll)
                 .p_1()
-                .rounded(px(12.))
+                .rounded(UI_RADIUS)
                 .border_1()
                 .border_color(cx.theme().border)
                 .bg(cx.theme().popover)

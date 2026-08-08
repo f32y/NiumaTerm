@@ -13,8 +13,8 @@ use nmt_agent_utils::AgentRuntimeStatus;
 
 use super::{AppSettings, NewWorkspace, Shell};
 use crate::agent_pane::usage::AgentUsageView;
-use crate::ui::floating_surface;
 use crate::ui::sidebar_resize::{self, ResizeDrag};
+use crate::ui::{UI_RADIUS, floating_surface};
 use crate::window::WindowRegistry;
 use crate::workspace::{WorkspaceId, WorkspaceSummary};
 
@@ -154,7 +154,7 @@ impl Render for WorkspaceDragPreview {
             .py_1()
             .gap_2()
             .items_center()
-            .rounded(cx.theme().radius)
+            .rounded(UI_RADIUS)
             .overflow_hidden()
             .bg(background)
             .text_color(cx.theme().sidebar_accent_foreground)
@@ -292,7 +292,7 @@ impl Sidebar {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .rounded(px(2.0))
+                    .rounded(UI_RADIUS)
                     .bg(cx.theme().primary)
                     .text_color(cx.theme().primary_foreground)
                     .child(ws.unread_count.to_string())
