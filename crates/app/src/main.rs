@@ -45,7 +45,9 @@ use crate::ui::{
     ResizePaneRight, ResizePaneUp, ShowSettings, SplitDown, SplitLeft, SplitRight, SplitUp,
     ToggleSidebar,
 };
-use crate::window::{AppWindow, LastActiveWindow, ShellRegistry, WindowRegistry};
+use crate::window::{
+    AppWindow, LastActiveWindow, ShellRegistry, WindowRegistry, selected_window_appearance,
+};
 
 struct StartupArgs {
     url: Option<String>,
@@ -228,6 +230,7 @@ fn run_app(argv_url: Option<String>, testing: bool) {
                 ui::apply_window_translucency(cx);
 
                 let background = ui::window_background_appearance(cx);
+                let appearance = selected_window_appearance(cx);
 
                 let handles: Vec<_> = cx
                     .global::<ShellRegistry>()
@@ -238,8 +241,9 @@ fn run_app(argv_url: Option<String>, testing: bool) {
 
                 for handle in handles {
                     handle
-                        .update(cx, |_, window, _| {
-                            window.set_background_appearance(background)
+                        .update(cx, |_, window, cx| {
+                            window.set_background_appearance(background);
+                            window.set_appearance_override(Some(appearance), cx);
                         })
                         .ok();
                 }
