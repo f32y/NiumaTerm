@@ -248,9 +248,9 @@ pub(crate) fn live_item_px(history_rows: u64, live_rows: usize, cell_h: f32, pad
 /// Gutter/header accent for a frozen item, keyed off the exit code.
 fn item_accent(meta: &SegmentMeta) -> u32 {
     match meta.exit_code {
-        None => terminal::element::BLOCK_RUNNING_COLOR,
-        Some(0) => terminal::element::BLOCK_SUCCESS_COLOR,
-        Some(_) => terminal::element::BLOCK_FAILURE_COLOR,
+        None => terminal::terminal_view::BLOCK_RUNNING_COLOR,
+        Some(0) => terminal::terminal_view::BLOCK_SUCCESS_COLOR,
+        Some(_) => terminal::terminal_view::BLOCK_FAILURE_COLOR,
     }
 }
 
@@ -295,7 +295,7 @@ fn running_header(command: &str, started_at: Option<time::SystemTime>) -> Option
 fn command_header(command: &str, status: &str) -> String {
     format!(
         "{} · {status}",
-        terminal::element::truncate_command(command, 32)
+        terminal::terminal_view::truncate_command(command, 32)
     )
 }
 
@@ -315,10 +315,10 @@ pub(crate) fn live_chrome(
 
     let (accent, header) = match running {
         Some((command, started_at)) => (
-            terminal::element::BLOCK_RUNNING_COLOR,
+            terminal::terminal_view::BLOCK_RUNNING_COLOR,
             running_header(command, Some(started_at)),
         ),
-        None => (terminal::element::BLOCK_INPUT_COLOR, None),
+        None => (terminal::terminal_view::BLOCK_INPUT_COLOR, None),
     };
 
     Some(FrozenItemChrome {
@@ -813,7 +813,7 @@ pub(crate) fn shape_frozen_rows(
     cell_w: f32,
     window: &mut Window,
 ) -> Vec<ShapedLine> {
-    terminal::element::shape_lines(
+    terminal::terminal_view::shape_lines(
         rows.iter().map(|row| {
             (
                 row.shape_key.unwrap_or_else(|| row.line.text_hash()),
@@ -836,7 +836,7 @@ pub(crate) fn paint_frozen(
     cx: &mut App,
 ) {
     for row in &view.rows {
-        terminal::element::paint_line_backgrounds_at(
+        terminal::terminal_view::paint_line_backgrounds_at(
             bounds, &row.line, row.y, cell_w, cell_h, window,
         );
     }
@@ -861,7 +861,7 @@ pub(crate) fn paint_frozen(
         ));
     }
 
-    terminal::element::paint_glyph_rows(
+    terminal::terminal_view::paint_glyph_rows(
         bounds,
         view.rows
             .iter()
@@ -880,7 +880,7 @@ pub(crate) fn paint_frozen_separators(
 ) {
     for y in separators {
         window.paint_quad(fill(
-            terminal::element::block_separator_bounds(bounds, bounds.top() + px(*y), 1.0),
+            terminal::terminal_view::block_separator_bounds(bounds, bounds.top() + px(*y), 1.0),
             Rgba {
                 r: ((SEPARATOR_COLOR >> 16) & 0xff) as f32 / 255.0,
                 g: ((SEPARATOR_COLOR >> 8) & 0xff) as f32 / 255.0,
@@ -917,7 +917,7 @@ pub(crate) fn paint_frozen_chrome(
         if chrome.selected {
             window.paint_quad(fill(
                 Bounds::new(point(bounds.left(), top), size(bounds.size.width, height)),
-                rgba(terminal::element::BLOCK_SELECTED_TINT),
+                rgba(terminal::terminal_view::BLOCK_SELECTED_TINT),
             ));
         }
     }
@@ -987,7 +987,7 @@ mod tests {
         let info = HandleItemInfo {
             handle,
             rows,
-            accent: terminal::element::BLOCK_SUCCESS_COLOR,
+            accent: terminal::terminal_view::BLOCK_SUCCESS_COLOR,
             header: Some("cmd · ✓".into()),
         };
         (t, info)
@@ -1361,10 +1361,10 @@ mod tests {
         });
 
         let info1 = handle_item_info(&store.items()[0]).unwrap();
-        assert_eq!(info1.accent, terminal::element::BLOCK_SUCCESS_COLOR);
+        assert_eq!(info1.accent, terminal::terminal_view::BLOCK_SUCCESS_COLOR);
         assert_eq!(info1.header.as_deref(), Some("build · ✓ 2.0s"));
         let info2 = handle_item_info(&store.items()[1]).unwrap();
-        assert_eq!(info2.accent, terminal::element::BLOCK_FAILURE_COLOR);
+        assert_eq!(info2.accent, terminal::terminal_view::BLOCK_FAILURE_COLOR);
         assert_eq!(info2.header.as_deref(), Some("bad · ✗ 127"));
     }
 
@@ -1420,7 +1420,7 @@ mod tests {
         let running = Some(("build", time::UNIX_EPOCH));
         let chrome = live_chrome(3, 2, 10.0, running, true).unwrap();
         assert_eq!((chrome.item, chrome.top, chrome.bottom), (3, 0.0, 20.0));
-        assert_eq!(chrome.accent, terminal::element::BLOCK_RUNNING_COLOR);
+        assert_eq!(chrome.accent, terminal::terminal_view::BLOCK_RUNNING_COLOR);
         assert!(chrome.header.as_deref().unwrap().starts_with("build · ⟳ "));
         assert!(chrome.selected);
 
@@ -1431,7 +1431,7 @@ mod tests {
     fn live_chrome_marks_idle_prompt() {
         let chrome = live_chrome(2, 3, 10.0, None, true).unwrap();
         assert_eq!((chrome.item, chrome.top, chrome.bottom), (2, 0.0, 30.0));
-        assert_eq!(chrome.accent, terminal::element::BLOCK_INPUT_COLOR);
+        assert_eq!(chrome.accent, terminal::terminal_view::BLOCK_INPUT_COLOR);
         assert_eq!(chrome.header, None);
         assert!(chrome.selected);
 
@@ -1961,7 +1961,7 @@ mod layout_tests {
         let chrome =
             terminal::block_list::block_list_live_chrome(4, 2, 10.0, None, true, false).unwrap();
         assert_eq!(chrome.item, 4);
-        assert_eq!(chrome.accent, terminal::element::BLOCK_INPUT_COLOR);
+        assert_eq!(chrome.accent, terminal::terminal_view::BLOCK_INPUT_COLOR);
         assert_eq!(chrome.header, None);
         assert!(!chrome.selected);
 
@@ -1977,7 +1977,7 @@ mod layout_tests {
             top: 0.0,
             bottom: 40.0,
             header_y: 10.0,
-            accent: terminal::element::BLOCK_SUCCESS_COLOR,
+            accent: terminal::terminal_view::BLOCK_SUCCESS_COLOR,
             header: Some("build · ✓".into()),
             selected: false,
         };
