@@ -56,7 +56,7 @@ pub struct SystemConfig {
     /// When to warn before closing a pane, tab, workspace, or window.
     #[serde(default, rename = "warn-before-terminating-shell")]
     pub warn_before_terminating_shell: WarnBeforeTerminatingShell,
-    /// Ask for confirmation before closing a workspace.
+    /// Ask for confirmation before closing a workspace or Agent tab.
     #[serde(
         default = "default_bool_true",
         rename = "confirm-before-closing-workspace"

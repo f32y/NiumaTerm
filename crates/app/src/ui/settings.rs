@@ -209,8 +209,8 @@ pub struct AppSettings {
     pub manage_subprocess_job: bool,
     /// When to warn before closing a shell.
     pub warn_before_terminating_shell: WarnBeforeTerminatingShell,
-    /// Ask for confirmation before closing a workspace.
-    pub confirm_before_closing_workspace: bool,
+    /// Ask for confirmation before closing a workspace or Agent tab.
+    pub confirm_before_closing: bool,
     /// Raise the main (UI) and render thread priority to AboveNormal.
     pub prioritize_ui_threads: bool,
     /// Host this machine's local sessions for remote clients via the relay.
@@ -263,7 +263,7 @@ impl Default for AppSettings {
             restore_last_session_when_opening: true,
             manage_subprocess_job: false,
             warn_before_terminating_shell: WarnBeforeTerminatingShell::default(),
-            confirm_before_closing_workspace: true,
+            confirm_before_closing: true,
             prioritize_ui_threads: false,
             remote_host_enabled: false,
             remote_relay_url: SharedString::default(),
@@ -497,7 +497,7 @@ impl AppSettings {
             restore_last_session_when_opening: config.system.restore_last_session_when_opening,
             manage_subprocess_job: config.system.manage_subprocess_job,
             warn_before_terminating_shell: config.system.warn_before_terminating_shell,
-            confirm_before_closing_workspace: config.system.confirm_before_closing_workspace,
+            confirm_before_closing: config.system.confirm_before_closing_workspace,
             prioritize_ui_threads: config.system.prioritize_ui_threads,
             remote_host_enabled: config.remote_session.host_enabled,
             remote_relay_url: config.remote_session.relay_url.clone().into(),
@@ -705,7 +705,7 @@ impl AppSettings {
             restore_last_session_when_opening: self.restore_last_session_when_opening,
             manage_subprocess_job: self.manage_subprocess_job,
             warn_before_terminating_shell: self.warn_before_terminating_shell,
-            confirm_before_closing_workspace: self.confirm_before_closing_workspace,
+            confirm_before_closing_workspace: self.confirm_before_closing,
             prioritize_ui_threads: self.prioritize_ui_threads,
         };
 
@@ -2066,16 +2066,17 @@ pub fn settings_view(cx: &App) -> Settings {
                 .group(
                     SettingGroup::new().title("Workspace").item(
                         SettingItem::new(
-                            "Confirm before closing workspace",
+                            "Confirm before closing",
                             SettingField::switch(
-                                |cx| cx.global::<AppSettings>().confirm_before_closing_workspace,
+                                |cx| cx.global::<AppSettings>().confirm_before_closing,
                                 |value, cx| {
-                                    cx.global_mut::<AppSettings>()
-                                        .confirm_before_closing_workspace = value;
+                                    cx.global_mut::<AppSettings>().confirm_before_closing = value;
                                 },
                             ),
                         )
-                        .description("Ask for confirmation when closing a workspace."),
+                        .description(
+                            "Ask for confirmation when closing a workspace or Agent tab.",
+                        ),
                     ),
                 )
                 .group(

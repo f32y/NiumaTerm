@@ -64,6 +64,15 @@ pub(super) fn explicit_cwd(cwd: &str) -> Option<String> {
     (!cwd.is_empty() && cwd != ".").then(|| cwd.to_string())
 }
 
+fn should_confirm_tab_close(
+    is_agent: bool,
+    confirm_agent_close: bool,
+    warn: WarnBeforeTerminatingShell,
+    child_process_count: usize,
+) -> bool {
+    (is_agent && confirm_agent_close) || warn.should_warn(child_process_count)
+}
+
 const PANE_RESIZE_STEP: Pixels = px(30.0);
 
 actions!(
@@ -1437,11 +1446,17 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let count = self
+        let (count, is_agent) = self
             .workspaces
             .active_tabs()
             .find(id)
-            .map_or(0, |tab| self.close_process_count(tab.surface(), cx));
+            .map_or((0, false), |tab| {
+                let surface = tab.surface();
+                (
+                    self.close_process_count(surface, cx),
+                    matches!(surface, TabSurface::Agent(_)),
+                )
+            });
 
         if self.workspaces.active_tabs().len() == 1 {
             let ws_id = self.workspaces.active_id();
@@ -1457,6 +1472,9 @@ impl Shell {
                      Closing it will terminate them and close the workspace.",
                     Self::processes_running(count)
                 )
+            } else if is_agent {
+                "This is the last tab in this workspace. Closing it will end its agent session and close the workspace."
+                    .to_string()
             } else {
                 "This is the last tab in this workspace. Closing it also closes the workspace."
                     .to_string()
@@ -1473,14 +1491,17 @@ impl Shell {
             return;
         }
 
-        let warn = cx.global::<AppSettings>().warn_before_terminating_shell;
+        let settings = cx.global::<AppSettings>();
+        let warn = settings.warn_before_terminating_shell;
 
-        if !warn.should_warn(count) {
+        if !should_confirm_tab_close(is_agent, settings.confirm_before_closing, warn, count) {
             self.close_tab_now(id, window, cx);
             return;
         }
 
-        let description = if count > 0 {
+        let description = if is_agent {
+            "Closing the tab will end its agent session.".to_string()
+        } else if count > 0 {
             format!(
                 "{} in this tab. Closing the tab will terminate them.",
                 Self::processes_running(count)
@@ -1667,7 +1688,7 @@ impl Shell {
             return;
         }
 
-        let confirm = cx.global::<AppSettings>().confirm_before_closing_workspace;
+        let confirm = cx.global::<AppSettings>().confirm_before_closing;
 
         let count = self.workspace_process_count(id, cx);
 
@@ -2894,5 +2915,20 @@ impl Render for Shell {
             )
             .children(update_notification_layer)
             .children(dialog_layer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{WarnBeforeTerminatingShell, should_confirm_tab_close};
+
+    #[test]
+    fn agent_tab_close_honors_confirmation_setting() {
+        use WarnBeforeTerminatingShell::{Always, Disabled};
+
+        assert!(should_confirm_tab_close(true, true, Disabled, 0));
+        assert!(!should_confirm_tab_close(true, false, Disabled, 0));
+        assert!(!should_confirm_tab_close(false, true, Disabled, 0));
+        assert!(should_confirm_tab_close(false, false, Always, 0));
     }
 }
