@@ -11,18 +11,18 @@ pub use mio::{Events, Interest, Poll, Token, Waker};
 #[cfg(not(windows))]
 mod unix;
 #[cfg(not(windows))]
-use self::unix as platform;
+use crate::unix as platform;
 #[cfg(not(windows))]
-pub use self::unix::*;
+pub use crate::unix::*;
 
 #[cfg(windows)]
 pub mod windows;
 use std::io;
 
 #[cfg(windows)]
-use self::windows as platform;
+use crate::windows as platform;
 #[cfg(windows)]
-pub use self::windows::*;
+pub use crate::windows::*;
 
 pub const APP_ID: &str = "NiumaTerm";
 
