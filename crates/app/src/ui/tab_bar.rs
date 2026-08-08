@@ -434,6 +434,8 @@ impl TabStrip {
                             div()
                                 .id(("tab-agent-busy", id as usize))
                                 .aria_label("Agent busy")
+                                .relative()
+                                .left(px(4.0))
                                 .size_4()
                                 .flex_none()
                                 .flex()
