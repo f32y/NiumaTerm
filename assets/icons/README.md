@@ -1,4 +1,15 @@
-# Provider icon provenance
+# Icon provenance
+
+## Lucide
+
+`coins.svg` comes from Lucide Icons:
+
+- https://github.com/lucide-icons/lucide/blob/main/icons/coins.svg
+
+Lucide Icons is Copyright © 2026 Lucide Icons and Contributors and distributed
+under the ISC License. The required notice is retained in `LICENSE-Lucide`.
+
+## Provider icons
 
 `codex.svg` and `claude.svg` are derived from Lobe Icons' static SVG package,
 version 1.94.0:
