@@ -25,7 +25,7 @@ use super::compaction::{compaction_metadata, parse_compaction};
 use super::tool_items::{complete_tool_item, tool_item, tool_title};
 #[cfg(test)]
 use super::tool_items::{edit_diff, input_detail};
-use crate::AgentLaunch;
+use crate::LaunchConfig;
 use crate::chat::{
     ContextWindowUsage, Event, Item, ModelInfo, SendOutcome, SlashCommandArguments,
     SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
@@ -54,7 +54,7 @@ enum PendingControlOperation {
     FileRewind,
 }
 
-fn launch_model(launch: &AgentLaunch) -> Option<String> {
+fn launch_model(launch: &LaunchConfig) -> Option<String> {
     // Command environment overrides are last-value-wins, so the adapter must
     // resolve duplicate entries the same way as the spawned Claude process.
     launch
@@ -187,7 +187,7 @@ impl Session {
     /// listing for the same directory. Nothing is replayed on the wire — the
     /// UI pre-fills its transcript from the session file instead.
     pub fn spawn(
-        launch: &AgentLaunch,
+        launch: &LaunchConfig,
         cwd: Option<String>,
         resume: Option<String>,
         deliver: impl Fn(Value) + Send + 'static,
@@ -1351,13 +1351,13 @@ mod tests {
         let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/claude/fake-stream-json.cmd");
         let log = env::temp_dir().join(format!("niumaterm-fake-claude-{}.jsonl", Uuid::new_v4()));
-        let launch = AgentLaunch {
+        let launch = LaunchConfig {
             executable: fixture.to_string_lossy().into_owned(),
             env: vec![(
                 "NMT_FAKE_STREAM_LOG".to_string(),
                 log.to_string_lossy().into_owned(),
             )],
-            ..AgentLaunch::default()
+            ..LaunchConfig::default()
         };
         let (messages_tx, messages_rx) = mpsc::channel();
         let mut session = Session::spawn(
@@ -1411,13 +1411,13 @@ mod tests {
         let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/claude/fake-stream-json.cmd");
         let log = env::temp_dir().join(format!("niumaterm-resume-{}.jsonl", Uuid::new_v4()));
-        let launch = AgentLaunch {
+        let launch = LaunchConfig {
             executable: fixture.to_string_lossy().into_owned(),
             env: vec![(
                 "NMT_FAKE_STREAM_LOG".to_string(),
                 log.to_string_lossy().into_owned(),
             )],
-            ..AgentLaunch::default()
+            ..LaunchConfig::default()
         };
         let resume_id = "70000000-0000-4000-8000-000000000000".to_string();
         let session = Session::spawn(&launch, None, Some(resume_id.clone()), |_| {}, |_| {})
@@ -1689,7 +1689,7 @@ mod tests {
 
     #[test]
     fn initialize_uses_model_pinned_by_launch_environment() {
-        let launch = AgentLaunch {
+        let launch = LaunchConfig {
             executable: "claude".into(),
             env: vec![
                 ("UNRELATED".into(), "value".into()),
@@ -1698,7 +1698,7 @@ mod tests {
                     "claude-opus-4-8-v4-flash[1m]".into(),
                 ),
             ],
-            ..AgentLaunch::default()
+            ..LaunchConfig::default()
         };
 
         let model = initial_ready_model(launch_model(&launch).as_deref());

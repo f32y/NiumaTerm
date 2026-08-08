@@ -19,7 +19,7 @@ use windows_sys::Win32::System::JobObjects::{
 };
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
-use crate::AgentLaunch;
+use crate::LaunchConfig;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
 
@@ -50,7 +50,7 @@ impl fmt::Debug for ConfiguredLauncher {
 }
 
 impl ConfiguredLauncher {
-    pub fn from_launch(launch: &AgentLaunch, default_executable: &str) -> Self {
+    pub fn from_launch(launch: &LaunchConfig, default_executable: &str) -> Self {
         let executable = launch.executable.trim();
         Self {
             executable: if executable.is_empty() {

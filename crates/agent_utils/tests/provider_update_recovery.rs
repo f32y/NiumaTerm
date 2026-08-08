@@ -6,7 +6,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 use std::{env, fs};
 
-use nmt_agent_utils::AgentLaunch;
+use nmt_agent_utils::LaunchConfig;
 use nmt_agent_utils::chat::Event;
 use nmt_agent_utils::claude_code::stream_json;
 use nmt_agent_utils::codex::app_server;
@@ -152,8 +152,8 @@ impl FakeAgentFixture {
         }
     }
 
-    fn launch(&self, provider: ProviderKind, conversation_id: &str) -> AgentLaunch {
-        AgentLaunch {
+    fn launch(&self, provider: ProviderKind, conversation_id: &str) -> LaunchConfig {
+        LaunchConfig {
             executable: self.executable.display().to_string(),
             env: vec![
                 (
@@ -173,7 +173,7 @@ impl FakeAgentFixture {
                 ("NMT_FAKE_RESUME_LOG".into(), display(&self.resume_log)),
                 ("NMT_FAKE_CONVERSATION_ID".into(), conversation_id.into()),
             ],
-            ..AgentLaunch::default()
+            ..LaunchConfig::default()
         }
     }
 
@@ -204,7 +204,7 @@ fn lines(path: &Path) -> Vec<String> {
         .collect()
 }
 
-fn installation_key(provider: ProviderKind, launch: &AgentLaunch) -> InstallationKey {
+fn installation_key(provider: ProviderKind, launch: &LaunchConfig) -> InstallationKey {
     InstallationKey::derive(
         provider,
         &ConfiguredLauncher::from_launch(launch, provider.default_executable()),
@@ -215,7 +215,7 @@ fn installation_key(provider: ProviderKind, launch: &AgentLaunch) -> Installatio
 fn register_available(
     fixture: &FakeAgentFixture,
     provider: ProviderKind,
-    launch: &AgentLaunch,
+    launch: &LaunchConfig,
     maintenance: Arc<dyn ProviderMaintenance>,
 ) -> (UpdateCoordinator, InstallationKey) {
     let coordinator = fixture.coordinator();
