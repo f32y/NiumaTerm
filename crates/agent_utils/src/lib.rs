@@ -17,6 +17,7 @@ use std::{env, io, process};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
+pub use codex::ProviderConfig as CodexProviderConfig;
 use getrandom::fill;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -39,16 +40,6 @@ pub const AGENT_HOOK_TOKEN_ENV: &str = "NMT_AGENT_HOOK_TOKEN";
 pub const AGENT_HOOK_VERSION_ENV: &str = "NMT_AGENT_HOOK_VERSION";
 pub const AGENT_HOOK_EXE_ENV: &str = "NMT_AGENT_HOOK_EXE";
 pub const AGENT_TESTING_ENV: &str = "NMT_TESTING";
-
-/// A profile-scoped Codex provider injected through app-server thread config.
-/// The credential stays in the process environment named by `api_key_env`.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct CodexProviderConfig {
-    pub id: String,
-    pub name: String,
-    pub base_url: String,
-    pub api_key_env: Option<String>,
-}
 
 /// How to launch an agent CLI. Protocol-specific settings are carried here so
 /// adapters can map them onto their native environment or RPC surfaces.
