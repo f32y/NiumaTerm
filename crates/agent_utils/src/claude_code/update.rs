@@ -3,7 +3,7 @@ use std::time::Duration;
 use reqwest::blocking::{Client, Response};
 use semver::Version;
 
-use crate::launcher::{ConfiguredLauncher, run_bounded};
+use crate::launcher::{AgentCli, run_bounded};
 use crate::update::{
     DiscoverySupport, MAX_LABEL_CHARS, PROBE_LIMITS, ProviderKind, ProviderMaintenance,
     UpdateError, UpdateErrorKind, VendorUpdateResult, VersionStatus, bounded_label,
@@ -101,7 +101,7 @@ where
         ProviderKind::Claude
     }
 
-    fn probe(&self, launcher: &ConfiguredLauncher) -> Result<VersionStatus, UpdateError> {
+    fn probe(&self, launcher: &AgentCli) -> Result<VersionStatus, UpdateError> {
         let doctor = run_bounded(launcher, ["doctor"], PROBE_LIMITS);
         let mut status = match doctor {
             Ok(output) => {
@@ -164,7 +164,7 @@ where
         }
     }
 
-    fn update(&self, launcher: &ConfiguredLauncher) -> Result<VendorUpdateResult, UpdateError> {
+    fn update(&self, launcher: &AgentCli) -> Result<VendorUpdateResult, UpdateError> {
         vendor_update(launcher, ProviderKind::Claude)
     }
 }

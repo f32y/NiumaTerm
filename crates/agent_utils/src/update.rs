@@ -17,9 +17,7 @@ pub use crate::claude_code::update::{
     ClaudeMaintenance, ClaudeReleaseChannel, HttpClaudeReleaseChannel, parse_claude_doctor,
 };
 pub use crate::codex::update::{CodexMaintenance, parse_codex_doctor};
-use crate::launcher::{
-    ConfiguredLauncher, ProcessError, ProcessLimits, ProcessOutput, run_bounded,
-};
+use crate::launcher::{AgentCli, ProcessError, ProcessLimits, ProcessOutput, run_bounded};
 
 pub(crate) const PROBE_LIMITS: ProcessLimits =
     ProcessLimits::new(Duration::from_secs(30), 256 * 1024);
@@ -70,7 +68,7 @@ impl ProviderKind {
 pub struct InstallationKey(String);
 
 impl InstallationKey {
-    pub fn derive(provider: ProviderKind, launcher: &ConfiguredLauncher) -> InstallationIdentity {
+    pub fn derive(provider: ProviderKind, launcher: &AgentCli) -> InstallationIdentity {
         let resolved_launcher = launcher.resolved_executable();
         let mut digest = Sha256::new();
         digest.update(match provider {
@@ -257,18 +255,18 @@ pub struct VendorUpdateResult {
 
 pub trait ProviderMaintenance: Send + Sync {
     fn provider(&self) -> ProviderKind;
-    fn probe(&self, launcher: &ConfiguredLauncher) -> Result<VersionStatus, UpdateError>;
-    fn update(&self, launcher: &ConfiguredLauncher) -> Result<VendorUpdateResult, UpdateError>;
+    fn probe(&self, launcher: &AgentCli) -> Result<VersionStatus, UpdateError>;
+    fn update(&self, launcher: &AgentCli) -> Result<VendorUpdateResult, UpdateError>;
 }
 
-pub(crate) fn current_version_fallback(launcher: &ConfiguredLauncher) -> Option<Version> {
+pub(crate) fn current_version_fallback(launcher: &AgentCli) -> Option<Version> {
     run_bounded(launcher, ["--version"], PROBE_LIMITS)
         .ok()
         .and_then(|output| extract_version(output.stdout_for_parsing()))
 }
 
 pub(crate) fn vendor_update(
-    launcher: &ConfiguredLauncher,
+    launcher: &AgentCli,
     provider: ProviderKind,
 ) -> Result<VendorUpdateResult, UpdateError> {
     let output = run_bounded(launcher, ["update"], UPDATE_LIMITS).map_err(|error| {
@@ -384,7 +382,7 @@ struct CacheFile {
 
 struct InstallationRecord {
     identity: InstallationIdentity,
-    launcher: ConfiguredLauncher,
+    launcher: AgentCli,
     maintenance: Arc<dyn ProviderMaintenance>,
     state: InstallationUpdateState,
     last_checked: Option<DateTime<Utc>>,
@@ -430,7 +428,7 @@ impl UpdateCoordinator {
     pub fn register(
         &self,
         provider: ProviderKind,
-        launcher: ConfiguredLauncher,
+        launcher: AgentCli,
         maintenance: Arc<dyn ProviderMaintenance>,
     ) -> InstallationKey {
         debug_assert_eq!(provider, maintenance.provider());
@@ -702,7 +700,7 @@ impl UpdateCoordinator {
     fn operation_parts(
         &self,
         key: &InstallationKey,
-    ) -> Result<(ConfiguredLauncher, Arc<dyn ProviderMaintenance>), UpdateError> {
+    ) -> Result<(AgentCli, Arc<dyn ProviderMaintenance>), UpdateError> {
         let inner = self.inner.lock();
         let record = inner.records.get(key).ok_or_else(|| {
             UpdateError::new(
@@ -809,7 +807,7 @@ mod coordinator_tests {
             ProviderKind::Codex
         }
 
-        fn probe(&self, _: &ConfiguredLauncher) -> Result<VersionStatus, UpdateError> {
+        fn probe(&self, _: &AgentCli) -> Result<VersionStatus, UpdateError> {
             Ok(VersionStatus {
                 provider: ProviderKind::Codex,
                 current: Some(Version::new(1, 0, 0)),
@@ -822,7 +820,7 @@ mod coordinator_tests {
             })
         }
 
-        fn update(&self, _: &ConfiguredLauncher) -> Result<VendorUpdateResult, UpdateError> {
+        fn update(&self, _: &AgentCli) -> Result<VendorUpdateResult, UpdateError> {
             Err(UpdateError::new(
                 UpdateErrorKind::ExternalLock,
                 "provider files are locked",
@@ -835,7 +833,7 @@ mod coordinator_tests {
             self.provider
         }
 
-        fn probe(&self, _: &ConfiguredLauncher) -> Result<VersionStatus, UpdateError> {
+        fn probe(&self, _: &AgentCli) -> Result<VersionStatus, UpdateError> {
             self.probes.fetch_add(1, Ordering::SeqCst);
             Ok(VersionStatus {
                 provider: self.provider,
@@ -849,7 +847,7 @@ mod coordinator_tests {
             })
         }
 
-        fn update(&self, _: &ConfiguredLauncher) -> Result<VendorUpdateResult, UpdateError> {
+        fn update(&self, _: &AgentCli) -> Result<VendorUpdateResult, UpdateError> {
             self.updates.fetch_add(1, Ordering::SeqCst);
             Ok(VendorUpdateResult {
                 diagnostic: "updated".into(),
@@ -875,7 +873,7 @@ mod coordinator_tests {
         });
         let key = coordinator.register(
             ProviderKind::Codex,
-            ConfiguredLauncher::new("fake-codex", []),
+            AgentCli::new("fake-codex", []),
             fake.clone(),
         );
 
@@ -903,12 +901,12 @@ mod coordinator_tests {
         });
         let key = coordinator.register(
             ProviderKind::Claude,
-            ConfiguredLauncher::new("fake-claude", []),
+            AgentCli::new("fake-claude", []),
             fake.clone(),
         );
         let duplicate_key = coordinator.register(
             ProviderKind::Claude,
-            ConfiguredLauncher::new("fake-claude", []),
+            AgentCli::new("fake-claude", []),
             fake.clone(),
         );
         assert_eq!(key, duplicate_key);
@@ -945,7 +943,7 @@ mod coordinator_tests {
         });
         let key = coordinator.register(
             ProviderKind::Claude,
-            ConfiguredLauncher::new("fake-outcomes-claude", []),
+            AgentCli::new("fake-outcomes-claude", []),
             fake,
         );
         let available = coordinator.check(&key, true).unwrap();
@@ -993,7 +991,7 @@ mod coordinator_tests {
         let coordinator = UpdateCoordinator::new(path.clone());
         let key = coordinator.register(
             ProviderKind::Codex,
-            ConfiguredLauncher::new("fake-locked-codex", []),
+            AgentCli::new("fake-locked-codex", []),
             Arc::new(LockedMaintenance),
         );
         coordinator.check(&key, true).unwrap();
@@ -1022,13 +1020,10 @@ mod tests {
 
     #[test]
     fn installation_keys_dedupe_shared_launchers_and_split_update_contexts() {
-        let first =
-            ConfiguredLauncher::new("codex", [("CODEX_HOME".to_string(), "C:\\A".to_string())]);
-        let same =
-            ConfiguredLauncher::new("codex", [("CODEX_HOME".to_string(), "C:\\A".to_string())]);
-        let other_home =
-            ConfiguredLauncher::new("codex", [("CODEX_HOME".to_string(), "C:\\B".to_string())]);
-        let other_launcher = ConfiguredLauncher::new(
+        let first = AgentCli::new("codex", [("CODEX_HOME".to_string(), "C:\\A".to_string())]);
+        let same = AgentCli::new("codex", [("CODEX_HOME".to_string(), "C:\\A".to_string())]);
+        let other_home = AgentCli::new("codex", [("CODEX_HOME".to_string(), "C:\\B".to_string())]);
+        let other_launcher = AgentCli::new(
             "definitely-distinct-codex.exe",
             [("CODEX_HOME".to_string(), "C:\\A".to_string())],
         );
@@ -1090,7 +1085,7 @@ mod tests {
         ] {
             let (root, executable) = fake_launcher(name, script);
             let log = root.join("arguments.txt");
-            let launcher = ConfiguredLauncher::new(
+            let launcher = AgentCli::new(
                 executable.display().to_string(),
                 [("NMT_UPDATE_LOG".to_string(), log.display().to_string())],
             );

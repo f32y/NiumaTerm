@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::launcher::{ConfiguredLauncher, run_bounded};
+use crate::launcher::{AgentCli, run_bounded};
 use crate::update::{
     DiscoverySupport, MAX_LABEL_CHARS, PROBE_LIMITS, ProviderKind, ProviderMaintenance,
     UpdateError, UpdateErrorKind, VendorUpdateResult, VersionStatus, bounded_label,
@@ -15,7 +15,7 @@ impl ProviderMaintenance for CodexMaintenance {
         ProviderKind::Codex
     }
 
-    fn probe(&self, launcher: &ConfiguredLauncher) -> Result<VersionStatus, UpdateError> {
+    fn probe(&self, launcher: &AgentCli) -> Result<VersionStatus, UpdateError> {
         match run_bounded(launcher, ["doctor", "--json"], PROBE_LIMITS) {
             Ok(output) => match parse_codex_doctor(output.stdout_for_parsing()) {
                 Ok(status) => Ok(status),
@@ -25,7 +25,7 @@ impl ProviderMaintenance for CodexMaintenance {
         }
     }
 
-    fn update(&self, launcher: &ConfiguredLauncher) -> Result<VendorUpdateResult, UpdateError> {
+    fn update(&self, launcher: &AgentCli) -> Result<VendorUpdateResult, UpdateError> {
         vendor_update(launcher, ProviderKind::Codex)
     }
 }
@@ -90,10 +90,7 @@ pub fn parse_codex_doctor(json: &str) -> Result<VersionStatus, UpdateError> {
     })
 }
 
-fn version_fallback(
-    launcher: &ConfiguredLauncher,
-    reason: &str,
-) -> Result<VersionStatus, UpdateError> {
+fn version_fallback(launcher: &AgentCli, reason: &str) -> Result<VersionStatus, UpdateError> {
     Ok(VersionStatus {
         provider: ProviderKind::Codex,
         current: current_version_fallback(launcher),
@@ -159,7 +156,7 @@ mod tests {
     fn version_fallback_uses_the_same_configured_launcher() {
         let script = "@echo off\r\nif \"%1\"==\"--version\" (echo configured-cli 9.8.7 & exit /b 0)\r\nexit /b 7\r\n";
         let (root, executable) = fake_launcher("version fallback", script);
-        let launcher = ConfiguredLauncher::new(executable.display().to_string(), []);
+        let launcher = AgentCli::new(executable.display().to_string(), []);
 
         let status = CodexMaintenance.probe(&launcher).unwrap();
         assert_eq!(status.current, Some(Version::new(9, 8, 7)));

@@ -27,15 +27,15 @@ const POLL_INTERVAL: Duration = Duration::from_millis(20);
 /// arguments remain separate even though `cmd.exe` is used for Windows
 /// `PATHEXT` resolution of `.cmd` shims.
 #[derive(Clone, PartialEq, Eq)]
-pub struct ConfiguredLauncher {
+pub struct AgentCli {
     executable: String,
     environment: Vec<(String, String)>,
 }
 
-impl fmt::Debug for ConfiguredLauncher {
+impl fmt::Debug for AgentCli {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("ConfiguredLauncher")
+            .debug_struct("AgentCli")
             .field("executable", &self.executable)
             .field(
                 "environment_names",
@@ -49,7 +49,7 @@ impl fmt::Debug for ConfiguredLauncher {
     }
 }
 
-impl ConfiguredLauncher {
+impl AgentCli {
     pub fn from_launch(launch: &LaunchConfig, default_executable: &str) -> Self {
         let executable = launch.executable.trim();
         Self {
@@ -280,7 +280,7 @@ impl Error for ProcessError {}
 /// deadlock on a pipe; the Job Object kills the complete owned process tree on
 /// timeout or early error.
 pub fn run_bounded<I, S>(
-    launcher: &ConfiguredLauncher,
+    launcher: &AgentCli,
     arguments: I,
     limits: ProcessLimits,
 ) -> Result<ProcessOutput, ProcessError>
@@ -503,14 +503,14 @@ impl Drop for KillOnCloseJob {
 mod tests {
     use super::*;
 
-    fn cmd_launcher() -> ConfiguredLauncher {
-        ConfiguredLauncher::new("cmd.exe", [])
+    fn cmd_launcher() -> AgentCli {
+        AgentCli::new("cmd.exe", [])
     }
 
     #[test]
     fn bounded_runner_retains_suffix_and_redacts_environment_values() {
         let secret = "secret-value-for-test";
-        let launcher = ConfiguredLauncher::new(
+        let launcher = AgentCli::new(
             "cmd.exe",
             [("NMT_TEST_SECRET".to_string(), secret.to_string())],
         );
@@ -528,7 +528,7 @@ mod tests {
 
     #[test]
     fn structured_probe_parsing_precedes_diagnostic_redaction() {
-        let launcher = ConfiguredLauncher::new(
+        let launcher = AgentCli::new(
             "cmd.exe",
             [("NMT_TEST_VALUE".to_string(), "codex".to_string())],
         );

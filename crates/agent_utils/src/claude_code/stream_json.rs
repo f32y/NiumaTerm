@@ -32,7 +32,7 @@ use crate::chat::{
     ThreadSettings,
 };
 use crate::hook_store::home_dir;
-use crate::launcher::{ConfiguredLauncher, KillOnCloseJob};
+use crate::launcher::{AgentCli, KillOnCloseJob};
 
 /// Serialized values for `--permission-mode` / the `set_permission_mode` control
 /// request. `auto` is the CLI's dynamic mode (verified accepted by
@@ -194,7 +194,7 @@ impl Session {
         on_stderr: impl Fn(String) + Send + 'static,
     ) -> Result<Self, String> {
         let initial_model = launch_model(launch);
-        let launcher = ConfiguredLauncher::from_launch(launch, "claude");
+        let launcher = AgentCli::from_launch(launch, "claude");
         let executable = launcher.executable().to_string();
         let mut command = launcher.command([
             "-p",
