@@ -744,14 +744,14 @@ impl AgentPane {
 
                     (
                         format!(
-                            "Context {remaining_percent}% left · {}",
-                            compact_token_count(remaining_tokens)
+                            "{} used · {remaining_percent}% left",
+                            compact_token_count(usage.used_tokens)
                         ),
                         color,
                     )
                 }
                 _ => (
-                    format!("Context {} used", compact_token_count(usage.used_tokens)),
+                    format!("{} used", compact_token_count(usage.used_tokens)),
                     cx.theme().muted_foreground.opacity(0.72),
                 ),
             };
@@ -761,7 +761,7 @@ impl AgentPane {
                 .gap_1p5()
                 .items_center()
                 .text_color(color)
-                .child(Icon::new(IconName::Gauge).size_3())
+                .child(Icon::new(IconName::ChartPie).size_3())
                 .child(div().child(label))
         });
 
