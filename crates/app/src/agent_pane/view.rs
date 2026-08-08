@@ -314,14 +314,13 @@ impl Render for AgentPane {
                                     .ok();
                                 }
                             })
-                            // Reading or selecting transcript content should
-                            // leave Escape routed to the pane-level interrupt
-                            // handler instead of whichever control previously
-                            // held keyboard focus.
+                            // Clicking the transcript returns keyboard input to
+                            // the composer. Escape still reaches the pane-level
+                            // interrupt handler through the input.
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _, window, cx| {
-                                    window.focus(&this.focus, cx);
+                                    this.focus(window, cx);
                                 }),
                             )
                             .child(
@@ -682,27 +681,36 @@ impl AgentPane {
         // the shell), so the strip reads as a layer sliding out from behind
         // the front card. The extra bottom padding is clearance for that
         // overlap — without it the card would cover the last row.
-        div().w_full().flex().justify_center().child(
-            v_flex()
-                .w(relative(0.95))
-                .rounded_t(UI_RADIUS)
-                .border_1()
-                .border_b_0()
-                .border_color(cx.theme().border.opacity(0.6))
-                .bg(cx.theme().muted.alpha(1.0))
-                .pb(px(20.))
-                .child(
-                    div()
-                        .px_4()
-                        .pt_2()
-                        .pb_1()
-                        .text_xs()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(cx.theme().muted_foreground)
-                        .child("RECENT SESSIONS"),
-                )
-                .child(body),
-        )
+        div()
+            .w_full()
+            .flex()
+            .justify_center()
+            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                this.recent_sessions_mode = RecentSessionsMode::Hidden;
+                cx.notify();
+            }))
+            .child(
+                v_flex()
+                    .w(relative(0.95))
+                    .rounded_t(UI_RADIUS)
+                    .border_1()
+                    .border_b_0()
+                    .border_color(cx.theme().border.opacity(0.6))
+                    .bg(cx.theme().muted.alpha(1.0))
+                    .pb(px(20.))
+                    .child(
+                        div()
+                            .px_4()
+                            .pt_2()
+                            .pb_1()
+                            .text_xs()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(cx.theme().muted_foreground)
+                            .child("RECENT SESSIONS"),
+                    )
+                    .child(body),
+            )
     }
 
     /// One history row: title, branch, and relative time, in the settings
