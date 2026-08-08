@@ -18,10 +18,9 @@ pub enum TabVariant {
     Pill,
     Segmented,
     Underline,
-    /// Borderless soft-rounded tabs floating on the window chrome: resting,
-    /// hover and active states are all flat background fills driven by the
-    /// `tab.*` / `list.hover` theme tokens, radius from the theme's control
-    /// radius. Mirrors the VS Code Modern UI editor tabs.
+    /// Soft-rounded tabs floating on the window chrome: resting and hover
+    /// states use flat fills, while the selected state adds the theme's sidebar
+    /// border. Radius comes from the theme's control radius.
     Modern,
 }
 
@@ -270,6 +269,8 @@ impl TabVariant {
             TabVariant::Modern => TabStyle {
                 fg: cx.theme().tab_active_foreground,
                 bg: cx.theme().tokens.tab_active.into(),
+                borders: Edges::all(px(1.)),
+                border_color: cx.theme().sidebar_border,
                 ..Default::default()
             },
             TabVariant::Segmented => TabStyle {
