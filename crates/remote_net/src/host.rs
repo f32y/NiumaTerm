@@ -10,8 +10,8 @@ use std::{io, thread};
 use futures::stream::SplitSink;
 use futures::{SinkExt, StreamExt};
 use nmt_remote_protocol::{
-    ClientBound, Frame, Handshake, HostBound, MAX_DATA_LEN, PairingCode, SecureChannel,
-    StaticKeypair, WireSessionInfo, WireSessionOptions, WireSessionSnapshot, derive_host_id,
+    ClientBound, Frame, Handshake, HostBound, MAX_DATA_LEN, PairingCode, ProtocolSessionInfo,
+    ProtocolSessionOptions, ProtocolSessionSnapshot, SecureChannel, StaticKeypair, derive_host_id,
     new_pairing_token,
 };
 use nmt_remote_session_hub::{
@@ -534,7 +534,7 @@ fn handle_frame(
                         .hub
                         .list_sessions()
                         .into_iter()
-                        .map(to_wire_info)
+                        .map(to_protocol_info)
                         .collect();
                     reply(&ClientBound::SessionList(sessions))
                 }
@@ -545,7 +545,7 @@ fn handle_frame(
                 HostBound::Attach { session_id } => {
                     match shared.hub.attach(SessionId(session_id)) {
                         Ok(subscription) => {
-                            let snapshot = to_wire_snapshot(subscription.snapshot());
+                            let snapshot = to_protocol_snapshot(subscription.snapshot());
                             bridges.insert(
                                 session_id,
                                 SubscriptionBridge::spawn(
@@ -614,23 +614,23 @@ fn constant_time_eq(a: &[u8; 16], b: &[u8; 16]) -> bool {
         == 0
 }
 
-fn to_hub_options(wire: WireSessionOptions) -> SessionOptions {
+fn to_hub_options(request: ProtocolSessionOptions) -> SessionOptions {
     let mut options = SessionOptions::default();
-    if let Some(shell) = wire.shell {
+    if let Some(shell) = request.shell {
         options.shell = shell;
     }
-    options.working_directory = wire.working_directory;
-    if wire.cols > 0 {
-        options.cols = wire.cols;
+    options.working_directory = request.working_directory;
+    if request.cols > 0 {
+        options.cols = request.cols;
     }
-    if wire.rows > 0 {
-        options.rows = wire.rows;
+    if request.rows > 0 {
+        options.rows = request.rows;
     }
     options
 }
 
-fn to_wire_info(info: SessionInfo) -> WireSessionInfo {
-    WireSessionInfo {
+fn to_protocol_info(info: SessionInfo) -> ProtocolSessionInfo {
+    ProtocolSessionInfo {
         session_id: info.id.0,
         shell: info.shell,
         title: info.title.unwrap_or_default(),
@@ -639,8 +639,10 @@ fn to_wire_info(info: SessionInfo) -> WireSessionInfo {
     }
 }
 
-fn to_wire_snapshot(snapshot: &nmt_remote_session_hub::SessionSnapshot) -> WireSessionSnapshot {
-    WireSessionSnapshot {
+fn to_protocol_snapshot(
+    snapshot: &nmt_remote_session_hub::SessionSnapshot,
+) -> ProtocolSessionSnapshot {
+    ProtocolSessionSnapshot {
         session_id: snapshot.session_id.0,
         base_seq: snapshot.base_seq,
         vt: snapshot.vt.clone(),

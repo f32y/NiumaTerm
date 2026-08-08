@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
 use nmt_remote_protocol::{
-    ClientBound, Frame, HostBound, PairingCode, StaticKeypair, WireSessionInfo, WireSessionOptions,
-    WireSessionSnapshot,
+    ClientBound, Frame, HostBound, PairingCode, ProtocolSessionInfo, ProtocolSessionOptions,
+    ProtocolSessionSnapshot, StaticKeypair,
 };
 use tokio::runtime::Builder as RuntimeBuilder;
 use tokio::sync::mpsc;
@@ -25,11 +25,11 @@ pub enum SessionByteEvent {
 }
 
 /// Client-side handle to one attached remote session. Its receiver/senders are
-/// std (not tokio) types so the synchronous terminal PTY seam (`NetPty`) can
+/// std (not tokio) types so the synchronous terminal PTY adapter (`NetPty`) can
 /// use them directly without touching the async runtime.
 pub struct RemoteSession {
     pub session_id: u64,
-    pub snapshot: WireSessionSnapshot,
+    pub snapshot: ProtocolSessionSnapshot,
     output: std_mpsc::Receiver<SessionByteEvent>,
     commands: mpsc::UnboundedSender<Frame>,
 }
@@ -54,12 +54,12 @@ impl RemoteSession {
         });
     }
 
-    pub fn snapshot(&self) -> &WireSessionSnapshot {
+    pub fn snapshot(&self) -> &ProtocolSessionSnapshot {
         &self.snapshot
     }
 
     /// A cloneable input handle usable independently of the output receiver, so
-    /// the terminal PTY seam can own the byte stream while the UI still sends
+    /// the terminal PTY adapter can own the byte stream while the UI still sends
     /// input/resize.
     pub fn input(&self) -> RemoteInput {
         RemoteInput {
@@ -154,7 +154,7 @@ pub fn open_remote_session(
 }
 
 pub enum AttachTarget {
-    Open(WireSessionOptions),
+    Open(ProtocolSessionOptions),
     Existing(u64),
 }
 
@@ -171,7 +171,7 @@ async fn session_thread(
     host_public_key: Vec<u8>,
     device: StaticKeypair,
     target: AttachTarget,
-    ready: std_mpsc::Sender<Result<WireSessionSnapshot, NetError>>,
+    ready: std_mpsc::Sender<Result<ProtocolSessionSnapshot, NetError>>,
     output: std_mpsc::Sender<SessionByteEvent>,
     mut commands: mpsc::UnboundedReceiver<Frame>,
 ) {
@@ -236,7 +236,7 @@ async fn connect_and_attach(
     host_public_key: &[u8],
     device: &StaticKeypair,
     target: AttachTarget,
-) -> Result<(FrameChannel, WireSessionSnapshot), NetError> {
+) -> Result<(FrameChannel, ProtocolSessionSnapshot), NetError> {
     let mut channel = client_connect_ik(relay_url, host_id, host_public_key, device).await?;
 
     let session_id = match target {
@@ -274,7 +274,7 @@ async fn reconnect(
     device: &StaticKeypair,
     session_id: u64,
     commands: &mpsc::UnboundedReceiver<Frame>,
-) -> Option<(FrameChannel, WireSessionSnapshot)> {
+) -> Option<(FrameChannel, ProtocolSessionSnapshot)> {
     for attempt in 1..=RECONNECT_ATTEMPTS {
         if commands.is_closed() {
             return None; // Tab closed while we were retrying.
@@ -400,7 +400,7 @@ pub fn list_remote_sessions(
     host_id: String,
     host_public_key: Vec<u8>,
     device: StaticKeypair,
-) -> Result<Vec<WireSessionInfo>, NetError> {
+) -> Result<Vec<ProtocolSessionInfo>, NetError> {
     let (tx, rx) = std_mpsc::channel();
     thread::Builder::new()
         .name("remote-list".into())

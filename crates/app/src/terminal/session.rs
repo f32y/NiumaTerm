@@ -757,7 +757,7 @@ mod tests {
         use nmt_remote_net::{
             AttachTarget, HostConfig, HostHandle, client_connect_pair, open_remote_session,
         };
-        use nmt_remote_protocol::{StaticKeypair, WireSessionOptions, generate_keypair};
+        use nmt_remote_protocol::{ProtocolSessionOptions, StaticKeypair, generate_keypair};
 
         const RELAY: &str = "ws://127.0.0.1:8787/ws";
         const TOKEN: &str = "test-token";
@@ -799,7 +799,7 @@ mod tests {
             host_id,
             host_public,
             device,
-            AttachTarget::Open(WireSessionOptions {
+            AttachTarget::Open(ProtocolSessionOptions {
                 shell: Some("cmd.exe".into()),
                 working_directory: None,
                 cols: 100,

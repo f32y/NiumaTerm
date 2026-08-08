@@ -1,7 +1,7 @@
 //! Settings-gated auto-refresh scaffolding shared by the usage widgets.
 //!
 //! A widget holds a [`RefreshState`] and implements [`AutoRefresh`]; `start`
-//! wires the observer/timer lifecycle: refresh on the settings toggle's
+//! manages the observer and timer lifecycle: refresh on the settings toggle's
 //! off→on edge (settings fire for every change, e.g. font size, so the
 //! toggle is mirrored to detect the edge), refresh every `INTERVAL` while
 //! the toggle is on (the timer loop exits when the entity is dropped), and

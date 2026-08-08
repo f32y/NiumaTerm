@@ -155,7 +155,7 @@ mod tests {
 
     use super::*;
     use crate::hook_store::event_commands;
-    use crate::{AGENT_HOOK_PROTOCOL_VERSION, RawAgentHookEnvelope};
+    use crate::{AGENT_HOOK_PROTOCOL_VERSION, RawAgentHookMessage};
 
     #[test]
     fn claude_lifecycle_events_normalize_with_session_scoped_turns() {
@@ -182,7 +182,7 @@ mod tests {
                 "cwd": "C:\\repo",
                 "hook_event_name": hook,
             });
-            let event = RawAgentHookEnvelope {
+            let event = RawAgentHookMessage {
                 action: "claude_hook".into(),
                 version: AGENT_HOOK_PROTOCOL_VERSION,
                 token: "test-token".into(),

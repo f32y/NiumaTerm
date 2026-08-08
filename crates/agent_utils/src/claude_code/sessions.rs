@@ -414,7 +414,7 @@ fn record_text(record: &Value) -> Option<String> {
 }
 
 /// Strip the wrappers the CLI stores around prompts (injected
-/// `<system-reminder>` context, slash-command envelopes) down to what the
+/// `<system-reminder>` context, slash-command wrappers) down to what the
 /// user actually typed.
 fn clean_prompt(text: &str) -> String {
     let mut text = text.to_string();
@@ -430,7 +430,7 @@ fn clean_prompt(text: &str) -> String {
         text.replace_range(start..end + "</system-reminder>".len(), "");
     }
 
-    // Slash commands are stored as an envelope; the command message (or name)
+    // Slash commands are stored in tagged wrappers; the command message (or name)
     // is the readable form.
     for tag in ["command-message", "command-name"] {
         let open = format!("<{tag}>");
@@ -457,7 +457,7 @@ fn title_line(text: &str) -> Option<String> {
 }
 
 /// Reconstruct a session's conversation for the transcript UI. Reads the
-/// whole file (resume replays nothing on the wire, so this is the only
+/// whole file (resume replays nothing from the backend, so this is the only
 /// source); meant for a background thread.
 pub fn load_replay(cwd: Option<&str>, session_id: &str) -> Vec<Item> {
     let Some(path) = session_path(cwd, session_id) else {

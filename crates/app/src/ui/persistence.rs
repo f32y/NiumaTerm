@@ -257,7 +257,7 @@ impl Shell {
 
         // An unknown agent kind (a newer snapshot) degrades to the terminal
         // path below rather than losing the tab.
-        if let Some(kind) = state.agent.as_deref().and_then(AgentKind::from_wire) {
+        if let Some(kind) = state.agent.as_deref().and_then(AgentKind::from_id) {
             let cwd = explicit_cwd(workspaces.active_cwd());
             let profile = restored_agent_profile(
                 state.agent_profile.as_deref(),
@@ -330,7 +330,7 @@ impl Shell {
             // The profile-derived title a live pane would report, so pending
             // tabs label identically to spawned ones. Unknown agent kinds
             // materialize as terminals, so they take the profile title too.
-            let default_title = match tab_state.agent.as_deref().and_then(AgentKind::from_wire) {
+            let default_title = match tab_state.agent.as_deref().and_then(AgentKind::from_id) {
                 Some(kind) => {
                     let name = restored_agent_profile(
                         tab_state.agent_profile.as_deref(),
@@ -545,7 +545,7 @@ impl Shell {
                             // agent process and its thread die with the app);
                             // the saved kind reopens a fresh agent tab.
                             TabSurface::Agent(pane) => TabState {
-                                agent: Some(pane.read(cx).kind().wire().to_string()),
+                                agent: Some(pane.read(cx).kind().id().to_string()),
                                 agent_profile: Some(pane.read(cx).profile_name().to_string()),
                                 ..TabState::default()
                             },

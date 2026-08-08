@@ -5,7 +5,7 @@
 use std::str;
 
 use futures::channel::mpsc::UnboundedSender;
-use nmt_agent_utils::{AgentEvent, RawAgentHookEnvelope, agent_process};
+use nmt_agent_utils::{AgentEvent, RawAgentHookMessage, agent_process};
 use nmt_platform::windows::ipc::{MAX_MESSAGE_BYTES, spawn_server};
 use serde_json::{Value, from_str, from_value};
 use tracing::warn;
@@ -48,11 +48,11 @@ fn parse_message(bytes: &[u8], expected_token: &str) -> Result<IpcAction, String
     }
 
     if text.starts_with('{') {
-        let value: Value = from_str(text).map_err(|_| "invalid agent envelope")?;
+        let value: Value = from_str(text).map_err(|_| "invalid agent message")?;
 
         match value.get("action").and_then(Value::as_str) {
-            Some("codex_hook" | "claude_hook") => from_value::<RawAgentHookEnvelope>(value)
-                .map_err(|_| "invalid agent Hook envelope")?
+            Some("codex_hook" | "claude_hook") => from_value::<RawAgentHookMessage>(value)
+                .map_err(|_| "invalid agent hook message")?
                 .into_event(expected_token)
                 .map(IpcAction::Agent)
                 .ok_or_else(|| "invalid agent Hook fields".into()),

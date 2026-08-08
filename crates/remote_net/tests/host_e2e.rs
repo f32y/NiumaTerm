@@ -18,7 +18,7 @@ use nmt_remote_net::{
     list_remote_sessions, open_remote_session,
 };
 use nmt_remote_protocol::{
-    ClientBound, Frame, HostBound, StaticKeypair, WireSessionOptions, generate_keypair,
+    ClientBound, Frame, HostBound, ProtocolSessionOptions, StaticKeypair, generate_keypair,
 };
 use tokio::{task, time};
 
@@ -61,7 +61,7 @@ async fn pair_open_shell_reconnect() {
 
     // Open a shell and attach.
     channel
-        .send_control(&HostBound::Open(WireSessionOptions {
+        .send_control(&HostBound::Open(ProtocolSessionOptions {
             shell: Some("cmd.exe".into()),
             working_directory: None,
             cols: 100,
@@ -175,7 +175,7 @@ async fn client_runtime_byte_stream() {
             hid,
             hpub,
             dev,
-            AttachTarget::Open(WireSessionOptions {
+            AttachTarget::Open(ProtocolSessionOptions {
                 shell: Some("cmd.exe".into()),
                 working_directory: None,
                 cols: 100,
@@ -275,7 +275,7 @@ async fn client_runtime_resumes_after_transport_loss() {
             hid,
             hpub,
             dev,
-            AttachTarget::Open(WireSessionOptions {
+            AttachTarget::Open(ProtocolSessionOptions {
                 shell: Some("cmd.exe".into()),
                 working_directory: None,
                 cols: 100,

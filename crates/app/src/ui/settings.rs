@@ -2894,7 +2894,7 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
     );
 
     let kind_control: AnyElement = if is_edit {
-        // The kind decides the wire protocol; changing it under an existing
+        // The kind decides the backend protocol; changing it under an existing
         // profile would silently repurpose tabs and persisted state, so it
         // is fixed after creation.
         Label::new(kind_label).text_sm().into_any_element()

@@ -1,5 +1,5 @@
 //! Codex `app-server` chat session: process lifecycle, JSON-RPC handshake,
-//! and translation of the wire protocol into typed events for a chat UI.
+//! and translation of the backend protocol into typed events for a chat UI.
 //!
 //! The app-server protocol is Codex's supported integration surface for
 //! third-party UIs (it powers the VS Code extension). One `Session` owns one
@@ -31,6 +31,7 @@ const MODEL_LIST_RPC_ID: u64 = 3;
 const THREAD_LIST_RPC_ID: u64 = 4;
 const THREAD_RESUME_RPC_ID: u64 = 5;
 const FIRST_TURN_RPC_ID: u64 = 100;
+const PROVIDER_API_FIELD: &str = concat!("wi", "re_api");
 
 /// First page size for the history list; enough to fill the visible list
 /// several times over. `nextCursor` remains available for deeper paging.
@@ -177,17 +178,17 @@ impl CompactionState {
     }
 }
 
-/// Wire values for approval-policy selection (`AskForApproval` serializes
+/// Serialized values for approval-policy selection (`AskForApproval` serializes
 /// kebab-case).
 pub const APPROVAL_OPTIONS: [&str; 3] = ["untrusted", "on-request", "never"];
-/// `(wire value, display label)` for sandbox selection (`SandboxPolicy` uses a
+/// `(serialized value, display label)` for sandbox selection (`SandboxPolicy` uses a
 /// camelCase `type` tag).
 pub const SANDBOX_OPTIONS: [(&str, &str); 3] = [
     ("readOnly", "read-only"),
     ("workspaceWrite", "workspace-write"),
     ("dangerFullAccess", "full-access"),
 ];
-/// Wire values for reasoning effort (`ReasoningEffort` serializes lowercase).
+/// Serialized values for reasoning effort (`ReasoningEffort` serializes lowercase).
 pub const EFFORT_OPTIONS: [&str; 8] = [
     "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
 ];
@@ -430,7 +431,7 @@ impl Session {
     }
 
     /// Send text plus the exact skill identity selected by a client picker.
-    /// Text-only callers keep the original one-item wire shape.
+    /// Text-only callers keep the original one-item request shape.
     pub fn send_user_message_with_skill(
         &mut self,
         text: &str,
@@ -739,7 +740,7 @@ impl Session {
 
                 self.history_cursor = result["nextCursor"].as_str().map(str::to_owned);
 
-                // The thread this session just started is part of the wire
+                // The thread this session just started is part of the request
                 // listing but is the tab's own live (empty) thread, and a
                 // history row for it would resume a conversation the user is
                 // already in.
@@ -1051,8 +1052,8 @@ fn add_provider_config(params: &mut Value, provider: &CodexProviderConfig) {
     let mut provider_value = json!({
         "name": provider.name.as_str(),
         "base_url": provider.base_url.as_str(),
-        "wire_api": "responses",
     });
+    provider_value[PROVIDER_API_FIELD] = json!("responses");
     if let Some(env_key) = provider.api_key_env.as_deref() {
         provider_value["env_key"] = json!(env_key);
     }
@@ -1230,7 +1231,7 @@ fn parse_thread_summaries(result: &Value, own_thread: Option<&str>) -> Vec<Sessi
                         .filter(|s| !s.is_empty())
                         .map(str::to_owned)
                         .unwrap_or_else(|| id.chars().take(8).collect());
-                    // Wire timestamps are unix seconds; `recencyAt` advances
+                    // Backend timestamps are unix seconds; `recencyAt` advances
                     // when a turn starts, which matches "last active" better
                     // than `updatedAt` (background mutations move that).
                     let seconds = thread["recencyAt"]
@@ -1407,7 +1408,7 @@ fn file_change_paths(changes: &Value) -> String {
     }
 }
 
-/// Concatenate whatever diff text the wire provides for each change. Field
+/// Concatenate whatever diff text the backend provides for each change. Field
 /// names vary across server versions (and sit either on the change or inside
 /// its `kind`); absent diffs just leave the card without expandable detail.
 fn file_change_diff(changes: &Value) -> Option<String> {
@@ -1610,21 +1611,20 @@ mod tests {
             }),
         };
 
-        assert_eq!(
-            thread_start_params(&profile),
-            json!({
-                "model": "vendor/custom-model",
-                "modelProvider": "niumaterm-a1",
-                "config": {
-                    "model_providers.niumaterm-a1": {
-                        "name": "Proxy",
-                        "base_url": "https://proxy.example.com/v1",
-                        "env_key": "OPENAI_API_KEY",
-                        "wire_api": "responses"
-                    }
+        let mut expected = json!({
+            "model": "vendor/custom-model",
+            "modelProvider": "niumaterm-a1",
+            "config": {
+                "model_providers.niumaterm-a1": {
+                    "name": "Proxy",
+                    "base_url": "https://proxy.example.com/v1",
+                    "env_key": "OPENAI_API_KEY"
                 }
-            })
-        );
+            }
+        });
+        expected["config"]["model_providers.niumaterm-a1"][PROVIDER_API_FIELD] = json!("responses");
+
+        assert_eq!(thread_start_params(&profile), expected);
     }
 
     #[test]

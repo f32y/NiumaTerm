@@ -267,7 +267,7 @@ fn should_show_jump_to_latest(
     }
 }
 
-/// Which agent backs this pane; the persisted tab snapshot stores the wire
+/// Which agent backs this pane; the persisted tab snapshot stores the agent
 /// name so future kinds can slot in without a schema change.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AgentKind {
@@ -319,7 +319,7 @@ pub(crate) enum AgentPaneEvent {
 }
 
 impl AgentKind {
-    pub(crate) fn wire(self) -> &'static str {
+    pub(crate) fn id(self) -> &'static str {
         match self {
             AgentKind::Codex => "codex",
             AgentKind::Claude => "claude",
@@ -335,8 +335,8 @@ impl AgentKind {
 
     /// `None` for unknown kinds (a newer snapshot), which degrade to a plain
     /// terminal tab instead of losing the tab.
-    pub(crate) fn from_wire(wire: &str) -> Option<Self> {
-        match wire {
+    pub(crate) fn from_id(id: &str) -> Option<Self> {
+        match id {
             "codex" => Some(AgentKind::Codex),
             "claude" => Some(AgentKind::Claude),
             _ => None,
@@ -456,7 +456,7 @@ pub(crate) fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
     }
 }
 
-/// Last-chosen thread settings per agent profile name (agent wire name for
+/// Last-chosen thread settings per agent profile name (agent ID for
 /// entries written by older builds), seeding the dropdowns of newly opened
 /// (non-resumed) agent conversations. Loaded from local_state.toml at
 /// startup and flushed back on quit.
@@ -962,7 +962,7 @@ impl AgentPane {
     ) {
         cx.emit(AgentPaneEvent::Lifecycle(AgentEvent {
             route: self.agent_route.clone(),
-            agent: self.kind.wire().to_string(),
+            agent: self.kind.id().to_string(),
             session_id: format!("agent-tab-{}", self.session_epoch),
             turn_id: (kind != AgentEventKind::SessionStarted)
                 .then(|| format!("turn-{}", self.turn_seq)),
@@ -2782,7 +2782,8 @@ impl AgentPane {
                 // Fresh conversations seed from the remembered per-profile
                 // picks (a remembered value wins over the CLI default);
                 // resumed threads and later Ready confirmations take the
-                // wire as-is. Older local_state entries were keyed by agent
+                // backend settings as-is. Older local_state entries were
+                // keyed by agent
                 // kind, so that key still works as a fallback.
                 let seed_thread_defaults = take(&mut self.seed_thread_defaults);
                 if seed_thread_defaults
@@ -2791,7 +2792,7 @@ impl AgentPane {
                             defaults
                                 .0
                                 .get(&self.defaults_key())
-                                .or_else(|| defaults.0.get(self.kind.wire()))
+                                .or_else(|| defaults.0.get(self.kind.id()))
                         })
                 {
                     next = ThreadSettings {
@@ -3133,7 +3134,7 @@ impl AgentPane {
     /// snapshots used).
     fn defaults_key(&self) -> String {
         if self.profile.name.trim().is_empty() {
-            self.kind.wire().to_string()
+            self.kind.id().to_string()
         } else {
             self.profile.name.clone()
         }
@@ -5521,7 +5522,7 @@ impl AgentPane {
                         move |this, visible_range, _, cx| {
                             // The final page in view is the cue to fetch
                             // the next one (no-op without a cursor, and
-                            // only Codex pages over the wire).
+                            // only Codex pages from the backend).
                             if visible_range.end >= this.history.len()
                                 && let Some(Backend::Codex(session)) = this.session.as_mut()
                             {
@@ -5830,7 +5831,7 @@ impl AgentPane {
             .collect();
         // Service tiers are per model, and the catalog only lists the
         // additional tiers (e.g. "Fast") — the normal tier is implicit, so
-        // the menu carries a synthetic entry for it. Empty wire value =
+        // the menu carries a synthetic entry for it. Empty protocol value =
         // normal = explicit `serviceTier: null` on the next turn.
         let mut tier_options: Vec<(String, String)> = vec![(String::new(), "normal".to_string())];
 
@@ -5973,7 +5974,7 @@ impl AgentPane {
 
     /// One dropdown showing `icon · current value · chevron`. Every picker uses
     /// the same quiet color treatment; the model remains wider so its value is
-    /// easier to scan. Menus keep the existing wire values and setters.
+    /// easier to scan. Menus keep the existing protocol values and setters.
     fn setting_picker(
         cx: &mut Context<Self>,
         id: &'static str,
@@ -5986,13 +5987,13 @@ impl AgentPane {
     ) -> impl IntoElement + use<> {
         let pane = cx.entity();
 
-        // Show the display label of the current wire value when we know it.
+        // Show the display label of the current protocol value when we know it.
         let current_label = current
             .as_ref()
             .map(|value| {
                 options
                     .iter()
-                    .find(|(wire, _)| wire == value)
+                    .find(|(option_value, _)| option_value == value)
                     .map(|(_, label)| label.clone())
                     .unwrap_or_else(|| value.clone())
             })

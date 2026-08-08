@@ -23,7 +23,7 @@ pub struct LocalState {
     #[serde(default)]
     pub windows: Vec<WindowLocalState>,
     /// Last-chosen agent thread settings per agent profile name (older
-    /// snapshots keyed by agent wire name, which still reads as a fallback);
+    /// snapshots keyed by agent ID, which still reads as a fallback);
     /// newly opened agent tabs seed their dropdowns from these.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub agent_defaults: BTreeMap<String, AgentDefaults>,

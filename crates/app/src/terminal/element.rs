@@ -27,7 +27,7 @@ pub(crate) struct TerminalView {
     focus: FocusHandle,
     pane: Entity<TerminalPane>,
     /// FixedBottom input style: bottom-anchor the grid so the last content row
-    /// pins to the viewport floor (Warp parity, incl. interactive output).
+    /// pins to the viewport floor to match Warp, including interactive output.
     fixed_bottom: bool,
 }
 
