@@ -48,6 +48,13 @@ pub(super) fn local_commands() -> Vec<SlashCommandInfo> {
             SlashCommandRunPolicy::IdleOnly,
         ),
         command(
+            "resume",
+            "Choose a recent conversation",
+            None,
+            SlashCommandArguments::None,
+            SlashCommandRunPolicy::IdleOnly,
+        ),
+        command(
             "model",
             "Choose the model for subsequent turns",
             Some("<model>"),
@@ -363,6 +370,7 @@ pub(super) fn reset_command_runtime<A, T>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent_pane::RecentSessionsMode;
 
     #[test]
     fn replaced_session_epoch_rejects_expected_old_output_and_eof() {
@@ -411,6 +419,32 @@ mod tests {
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].source, SlashCommandSource::Local);
         assert_eq!(merged[1].name, "review");
+    }
+
+    #[test]
+    fn local_resume_replaces_the_provider_catalog_entry() {
+        let merged = merge_catalog(
+            local_commands(),
+            Vec::new(),
+            vec![info("resume", SlashCommandSource::Provider)],
+        );
+        let resume = merged
+            .iter()
+            .find(|command| command.name == "resume")
+            .unwrap();
+
+        assert_eq!(resume.source, SlashCommandSource::Local);
+        assert_eq!(resume.run_policy, SlashCommandRunPolicy::IdleOnly);
+    }
+
+    #[test]
+    fn recent_sessions_open_explicitly_after_a_conversation_starts() {
+        assert!(RecentSessionsMode::Automatic.is_visible(true, 1));
+        assert!(!RecentSessionsMode::Automatic.is_visible(false, 1));
+        assert!(RecentSessionsMode::Open.is_visible(false, 1));
+        assert!(!RecentSessionsMode::Hidden.is_visible(true, 1));
+        assert!(!RecentSessionsMode::Loading.is_visible(true, 1));
+        assert!(!RecentSessionsMode::Open.is_visible(false, 0));
     }
 
     #[test]

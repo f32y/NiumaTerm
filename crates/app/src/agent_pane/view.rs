@@ -243,14 +243,17 @@ impl Render for AgentPane {
             .rewind_state
             .as_ref()
             .is_some_and(|state| !state.is_picker());
+        let session_loading = self.recent_sessions_mode == RecentSessionsMode::Loading;
         let transcript_has_hidden_content_below = self.transcript_has_hidden_content_below();
         let transcript_scrolled_from_top = self.transcript_has_hidden_content_above();
 
-        // The history list only makes sense while the tab is a blank slate:
-        // no transcript yet and no conversation committed to. It shows as
-        // placeholders once the count pass promises rows, then as real rows.
+        // Blank tabs expose recent sessions automatically; `/resume` can
+        // request the same list after a conversation has started. A count
+        // result reserves placeholder rows until the full entries arrive.
         let history_rows = self.history_pending.unwrap_or(self.history.len());
-        let history = (self.items.is_empty() && history_rows > 0 && !self.history_dismissed)
+        let history = self
+            .recent_sessions_mode
+            .is_visible(self.items.is_empty(), history_rows)
             .then(|| self.render_history(cx));
 
         v_flex()
@@ -500,11 +503,11 @@ impl Render for AgentPane {
                                         .text_size(px(cx.global::<AppSettings>().agent_font_size
                                             as f32
                                             + 2.0))
-                                        .child(
-                                            Input::new(&self.input)
-                                                .appearance(false)
-                                                .disabled(rewind_processing || update_suspended),
-                                        ),
+                                        .child(Input::new(&self.input).appearance(false).disabled(
+                                            rewind_processing
+                                                || session_loading
+                                                || update_suspended,
+                                        )),
                                 )
                                 .child(
                                     h_flex()
@@ -539,7 +542,11 @@ impl Render for AgentPane {
                                         } else {
                                             Button::new("agent-send")
                                                 .primary()
-                                                .disabled(rewind_active || update_suspended)
+                                                .disabled(
+                                                    rewind_active
+                                                        || session_loading
+                                                        || update_suspended,
+                                                )
                                                 .size(px(32.))
                                                 .rounded_full()
                                                 .icon(IconName::ArrowUp)
@@ -682,7 +689,7 @@ impl AgentPane {
                 .border_1()
                 .border_b_0()
                 .border_color(cx.theme().border.opacity(0.6))
-                .bg(cx.theme().muted.opacity(0.55))
+                .bg(cx.theme().muted.alpha(1.0))
                 .pb(px(20.))
                 .child(
                     div()
@@ -705,6 +712,12 @@ impl AgentPane {
             return div().into_any_element();
         };
         let hover_bg = cx.theme().muted.opacity(0.4);
+        let selected = self.recent_session_selected == index
+            && matches!(
+                self.recent_sessions_mode,
+                RecentSessionsMode::Automatic | RecentSessionsMode::Open
+            )
+            && self.input.read(cx).text().len() == 0;
 
         h_flex()
             .id(("history-row", index))
@@ -715,6 +728,7 @@ impl AgentPane {
             .items_center()
             .rounded(UI_RADIUS)
             .cursor_pointer()
+            .when(selected, |this| this.bg(cx.theme().muted.opacity(0.7)))
             .hover(move |style| style.bg(hover_bg))
             .on_click(cx.listener(move |this, _, _, cx| this.resume_session(index, cx)))
             .child(

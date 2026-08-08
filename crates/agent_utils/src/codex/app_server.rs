@@ -1227,9 +1227,8 @@ fn parse_thread_summaries(result: &Value, own_thread: Option<&str>) -> Vec<Sessi
                     let title = thread["name"]
                         .as_str()
                         .or_else(|| thread["preview"].as_str())
-                        .map(str::trim)
+                        .map(|title| title.split_whitespace().collect::<Vec<_>>().join(" "))
                         .filter(|s| !s.is_empty())
-                        .map(str::to_owned)
                         .unwrap_or_else(|| id.chars().take(8).collect());
                     // Backend timestamps are unix seconds; `recencyAt` advances
                     // when a turn starts, which matches "last active" better
@@ -1717,7 +1716,7 @@ mod tests {
         let result = json!({
             "data": [
                 {"id": "thr_live", "preview": "current"},
-                {"id": "thr_a", "name": "Fix tests", "recencyAt": 1730831111,
+                {"id": "thr_a", "name": "Fix tests\nacross workspace", "recencyAt": 1730831111,
                  "gitInfo": {"branch": "dev"}},
                 {"id": "thr_b", "preview": "", "updatedAt": 1730750000}
             ],
@@ -1728,7 +1727,7 @@ mod tests {
 
         assert_eq!(summaries.len(), 2);
         assert_eq!(summaries[0].id, "thr_a");
-        assert_eq!(summaries[0].title, "Fix tests");
+        assert_eq!(summaries[0].title, "Fix tests across workspace");
         assert_eq!(summaries[0].branch.as_deref(), Some("dev"));
         assert_eq!(
             summaries[0].last_active,
