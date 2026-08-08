@@ -505,11 +505,12 @@ impl Sidebar {
         let width = self.width;
 
         // Fixed-width content; the animated wrapper below clips it so the buttons
-        // don't reflow while the sidebar slides. The sidebar surface itself is
-        // a floating card — 1px border, large radius, its own background —
-        // sitting in a gutter cut from the fixed width, so the drag/animation
-        // math keeps operating on the full `width`.
-        let card = floating_surface::card(cx)
+        // don't reflow while the sidebar slides. The transparent panel inherits
+        // the window background while the drag and animation math keeps operating
+        // on the full `width`.
+        let panel = div()
+            .size_full()
+            .overflow_hidden()
             .flex()
             .flex_col()
             .p_2()
@@ -564,18 +565,15 @@ impl Sidebar {
                     .child(agent_usage)
             }));
 
-        // Gutter floating the card inside the chrome; no right inset — the
-        // terminal column carries its own 6px gutter, which doubles as the gap
-        // between the two cards and keeps the resize handle riding the card
-        // edge. The top inset matches the tab strip's 4px inset so the card's
-        // top edge lines up with the tab pills.
+        // The terminal column's left gutter forms the gap between panels and
+        // keeps the resize handle at the panel edge, so no right inset is needed.
         let content = div()
             .w(px(width))
             .h_full()
             .pl(px(floating_surface::SIDE_INSET))
             .pt(px(floating_surface::TOP_INSET))
             .pb(px(floating_surface::BOTTOM_INSET))
-            .child(card);
+            .child(panel);
 
         let collapsed = self.collapsed;
 
