@@ -200,8 +200,7 @@ pub enum AgentRuntimeStatus {
     Idle,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AgentEventKind {
     SessionStarted,
     PromptSubmitted,
@@ -209,17 +208,6 @@ pub enum AgentEventKind {
     PermissionRequested,
     ToolFinished,
     Stopped,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AgentEventWire {
-    pub route: String,
-    pub agent: String,
-    pub session_id: String,
-    pub turn_id: Option<String>,
-    pub kind: AgentEventKind,
-    pub title: String,
-    pub body: String,
 }
 
 /// Raw stdin hook payload forwarded by the hook CLI, normalized per agent.
@@ -358,54 +346,6 @@ fn decode_powershell_command(command: &str) -> Option<String> {
     String::from_utf16(&units).ok()
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AgentEventEnvelope {
-    pub action: String,
-    pub version: u32,
-    pub token: String,
-    pub event: AgentEventWire,
-}
-
-impl AgentEventEnvelope {
-    pub fn from_event(event: AgentEvent, token: String) -> Self {
-        Self {
-            action: "agent_event".into(),
-            version: AGENT_HOOK_PROTOCOL_VERSION,
-            token,
-            event: AgentEventWire {
-                route: event.route.0,
-                agent: event.agent,
-                session_id: event.session_id,
-                turn_id: event.turn_id,
-                kind: event.kind,
-                title: event.title,
-                body: event.body,
-            },
-        }
-    }
-
-    pub fn into_event(self, expected_token: &str) -> Result<AgentEvent, AgentValidationError> {
-        if self.action != "agent_event" {
-            return Err(AgentValidationError::UnsupportedAction);
-        }
-
-        AgentEvent::validate(
-            AgentEventInput {
-                route: &self.event.route,
-                token: &self.token,
-                version: self.version,
-                agent: &self.event.agent,
-                session_id: &self.event.session_id,
-                turn_id: self.event.turn_id.as_deref(),
-                kind: self.event.kind,
-                title: &self.event.title,
-                body: &self.event.body,
-            },
-            expected_token,
-        )
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AgentOwner {
     pub agent: String,
@@ -440,7 +380,6 @@ pub struct AgentEventInput<'a> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AgentValidationError {
-    UnsupportedAction,
     InvalidRoute,
     InvalidToken,
     UnsupportedVersion,

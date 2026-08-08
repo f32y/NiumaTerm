@@ -5,7 +5,7 @@
 use std::str;
 
 use futures::channel::mpsc::UnboundedSender;
-use nmt_agent_utils::{AgentEvent, AgentEventEnvelope, RawAgentHookEnvelope, agent_process};
+use nmt_agent_utils::{AgentEvent, RawAgentHookEnvelope, agent_process};
 use nmt_platform::windows::ipc::{MAX_MESSAGE_BYTES, spawn_server};
 use serde_json::{Value, from_str, from_value};
 use tracing::warn;
@@ -51,11 +51,6 @@ fn parse_message(bytes: &[u8], expected_token: &str) -> Result<IpcAction, String
         let value: Value = from_str(text).map_err(|_| "invalid agent envelope")?;
 
         match value.get("action").and_then(Value::as_str) {
-            Some("agent_event") => from_value::<AgentEventEnvelope>(value)
-                .map_err(|_| "invalid agent envelope")?
-                .into_event(expected_token)
-                .map(IpcAction::Agent)
-                .map_err(|_| "invalid agent envelope fields".into()),
             Some("codex_hook" | "claude_hook") => from_value::<RawAgentHookEnvelope>(value)
                 .map_err(|_| "invalid agent Hook envelope")?
                 .into_event(expected_token)
@@ -75,10 +70,9 @@ mod tests {
     use std::time::Instant;
 
     use nmt_agent_utils::{
-        AGENT_HOOK_PROTOCOL_VERSION, AgentEvent, AgentEventInput, AgentEventKind, AgentMonitor,
-        AgentRoute, AgentRuntimeStatus, COMPLETION_QUIET_WINDOW,
+        AgentEventKind, AgentMonitor, AgentRoute, AgentRuntimeStatus, COMPLETION_QUIET_WINDOW,
     };
-    use serde_json::{json, to_string, to_vec};
+    use serde_json::json;
 
     use super::*;
 
@@ -108,69 +102,12 @@ mod tests {
         monitor.apply(event, now);
     }
 
-    fn agent_line(token: &str) -> String {
-        let event = AgentEvent::validate(
-            AgentEventInput {
-                route: "route",
-                token,
-                version: AGENT_HOOK_PROTOCOL_VERSION,
-                agent: "codex",
-                session_id: "session",
-                turn_id: Some("turn"),
-                kind: AgentEventKind::PromptSubmitted,
-                title: "",
-                body: "",
-            },
-            token,
-        )
-        .unwrap();
-        to_string(&AgentEventEnvelope::from_event(event, token.into())).unwrap()
-    }
-
     #[test]
-    fn parses_existing_url_and_valid_agent_envelope() {
+    fn parses_existing_url() {
         assert!(matches!(
             parse_message(b"nmt://action/activate\n", "token"),
             Ok(IpcAction::Cli(CliAction::Activate))
         ));
-        assert!(matches!(
-            parse_message(agent_line("token").as_bytes(), "token"),
-            Ok(IpcAction::Agent(_))
-        ));
-    }
-
-    #[test]
-    fn every_agent_event_kind_round_trips() {
-        for kind in [
-            AgentEventKind::SessionStarted,
-            AgentEventKind::PromptSubmitted,
-            AgentEventKind::ToolStarted,
-            AgentEventKind::PermissionRequested,
-            AgentEventKind::ToolFinished,
-            AgentEventKind::Stopped,
-        ] {
-            let turn_id = (kind != AgentEventKind::SessionStarted).then_some("turn");
-            let event = AgentEvent::validate(
-                AgentEventInput {
-                    route: "route",
-                    token: "token",
-                    version: AGENT_HOOK_PROTOCOL_VERSION,
-                    agent: "codex",
-                    session_id: "session",
-                    turn_id,
-                    kind,
-                    title: "title",
-                    body: "body",
-                },
-                "token",
-            )
-            .unwrap();
-            let line = to_vec(&AgentEventEnvelope::from_event(event, "token".into())).unwrap();
-            let Ok(IpcAction::Agent(decoded)) = parse_message(&line, "token") else {
-                panic!("event envelope should round-trip");
-            };
-            assert_eq!(decoded.kind, kind);
-        }
     }
 
     #[test]
@@ -218,15 +155,19 @@ mod tests {
 
     #[test]
     fn rejects_wrong_token_version_malformed_and_second_message() {
-        assert!(parse_message(agent_line("old").as_bytes(), "current").is_err());
-        let mut unsupported: Value = from_str(&agent_line("token")).unwrap();
+        let line = raw_codex_line("route", "UserPromptSubmit", "session", Some("turn"));
+        let mut wrong_token: Value = from_str(&line).unwrap();
+        wrong_token["token"] = "old".into();
+        assert!(parse_message(wrong_token.to_string().as_bytes(), "current").is_err());
+        let mut unsupported: Value = from_str(&line).unwrap();
         unsupported["version"] = 2.into();
         assert!(parse_message(unsupported.to_string().as_bytes(), "token").is_err());
+        assert!(parse_message(br#"{"action":"agent_event"}"#, "token").is_err());
         assert!(parse_message(b"{broken", "token").is_err());
         assert!(parse_message(&vec![b'x'; MAX_MESSAGE_BYTES + 1], "token").is_err());
         assert!(parse_message(b"nmt://action/activate\nsecond", "token").is_err());
         assert!(parse_message(b"\xff", "token").is_err());
-        assert!(parse_message(agent_line("token").as_bytes(), "token").is_ok());
+        assert!(parse_message(line.as_bytes(), "token").is_ok());
     }
 
     #[test]
