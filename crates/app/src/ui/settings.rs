@@ -212,7 +212,7 @@ pub struct AppSettings {
     pub manage_subprocess_job: bool,
     /// When to warn before closing a shell.
     pub warn_before_terminating_shell: WarnBeforeTerminatingShell,
-    /// Ask for confirmation before closing a workspace or Agent tab.
+    /// Ask for confirmation before closing a workspace, Agent tab, or window.
     pub confirm_before_closing: bool,
     /// Raise the main (UI) and render thread priority to AboveNormal.
     pub prioritize_ui_threads: bool,
@@ -2124,7 +2124,7 @@ pub fn settings_view(cx: &App) -> Settings {
                             ),
                         )
                         .description(
-                            "Ask for confirmation when closing a workspace or Agent tab.",
+                            "Ask for confirmation when closing a workspace, Agent tab, or window.",
                         ),
                     ),
                 )
