@@ -14,8 +14,9 @@ use gpui::{
 use crate::{WindowExt as _, tooltip::Tooltip};
 
 use super::{
+    LinkClickHandlerFn,
     inline::{Inline, InlineState},
-    node::LinkMark,
+    node::{LinkMark, open_link_target},
 };
 
 const IMAGE_LEN: usize = 1;
@@ -23,6 +24,7 @@ const IMAGE_LEN: usize = 1;
 pub(super) struct InlineFlow {
     id: ElementId,
     items: Vec<InlineFlowItem>,
+    link_click_handler: Option<Arc<LinkClickHandlerFn>>,
 }
 
 pub(super) enum InlineFlowItem {
@@ -100,10 +102,15 @@ enum LineFragmentKind {
 }
 
 impl InlineFlow {
-    pub(super) fn new(id: impl Into<ElementId>, items: Vec<InlineFlowItem>) -> Self {
+    pub(super) fn new(
+        id: impl Into<ElementId>,
+        items: Vec<InlineFlowItem>,
+        link_click_handler: Option<Arc<LinkClickHandlerFn>>,
+    ) -> Self {
         Self {
             id: id.into(),
             items,
+            link_click_handler,
         }
     }
 
@@ -113,6 +120,7 @@ impl InlineFlow {
         link: &Option<LinkMark>,
         title: &str,
         size: Size<Pixels>,
+        link_click_handler: Option<Arc<LinkClickHandlerFn>>,
     ) -> AnyElement {
         img(url.clone())
             .id(ix)
@@ -127,7 +135,7 @@ impl InlineFlow {
                     .on_click(move |_, window, cx| {
                         window.end_text_selection(cx);
                         cx.stop_propagation();
-                        cx.open_url(&link.url);
+                        open_link_target(&link.url, link_click_handler.as_ref(), window, cx);
                     })
             })
             .into_any_element()
@@ -254,8 +262,14 @@ impl Element for InlineFlow {
                         state.set_text(text);
                     }
 
-                    let mut element =
-                        Inline::new(elements.len(), state, links, highlights).into_any_element();
+                    let mut element = Inline::new(
+                        elements.len(),
+                        state,
+                        links,
+                        highlights,
+                        self.link_click_handler.clone(),
+                    )
+                    .into_any_element();
                     element.prepaint_as_root(
                         bounds.origin + origin,
                         size(
@@ -284,6 +298,7 @@ impl Element for InlineFlow {
                         link,
                         title.as_str(),
                         fragment_size,
+                        self.link_click_handler.clone(),
                     );
                     element.prepaint_as_root(
                         bounds.origin + origin,

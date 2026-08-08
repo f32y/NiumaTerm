@@ -13,8 +13,13 @@ use gpui::{
 };
 
 use crate::{
-    ActiveTheme, WindowExt as _, global_state::GlobalState, input::Selection,
-    text::TextViewMultiClickKind, text::node::LinkMark, text::selection::word_range_at,
+    ActiveTheme, WindowExt as _,
+    global_state::GlobalState,
+    input::Selection,
+    text::LinkClickHandlerFn,
+    text::TextViewMultiClickKind,
+    text::node::{LinkMark, open_link_target},
+    text::selection::word_range_at,
 };
 
 /// A inline element used to render a inline text and support selectable.
@@ -26,6 +31,7 @@ pub(super) struct Inline {
     links: Rc<Vec<(Range<usize>, LinkMark)>>,
     highlights: Vec<(Range<usize>, HighlightStyle)>,
     styled_text: StyledText,
+    link_click_handler: Option<Arc<LinkClickHandlerFn>>,
 
     state: Arc<Mutex<InlineState>>,
 }
@@ -33,7 +39,7 @@ pub(super) struct Inline {
 /// The inline text state, used RefCell to keep the selection state.
 #[derive(Debug, Default, PartialEq)]
 pub(crate) struct InlineState {
-    hovered_index: Option<usize>,
+    hovered_link: Option<SharedString>,
     /// The text that actually rendering, matched with selection.
     pub(super) text: SharedString,
     pub(super) selection: Option<Selection>,
@@ -52,6 +58,7 @@ impl Inline {
         state: Arc<Mutex<InlineState>>,
         links: Vec<(Range<usize>, LinkMark)>,
         highlights: Vec<(Range<usize>, HighlightStyle)>,
+        link_click_handler: Option<Arc<LinkClickHandlerFn>>,
     ) -> Self {
         let text = state
             .lock()
@@ -64,6 +71,7 @@ impl Inline {
             highlights,
             text: text.clone(),
             styled_text: StyledText::new(text),
+            link_click_handler,
             state,
         }
     }
@@ -478,23 +486,43 @@ impl Element for Inline {
             });
         }
 
-        // mouse move, update hovered link
         window.on_mouse_event({
             let hitbox = hitbox.clone();
             let text_layout = text_layout.clone();
-            let mut hovered_index = state.hovered_index;
+            let links = self.links.clone();
+            let inline_state = self.state.clone();
+
             move |event: &MouseMoveEvent, phase, window, cx| {
-                if !phase.bubble() || !hitbox.is_hovered(window) {
+                if !phase.bubble() {
                     return;
                 }
 
-                let current = hovered_index;
-                let updated = text_layout.index_for_position(event.position).ok();
-                //  notify update when hovering over different links
-                if current != updated {
-                    hovered_index = updated;
-                    cx.notify(current_view);
-                }
+                let hovered_link = if hitbox.is_hovered(window) {
+                    Self::link_for_position(&text_layout, &links, event.position)
+                        .map(|link| link.url)
+                } else {
+                    None
+                };
+                let previous_link = {
+                    let Ok(mut state) = inline_state.lock() else {
+                        return;
+                    };
+                    if state.hovered_link == hovered_link {
+                        return;
+                    }
+                    std::mem::replace(&mut state.hovered_link, hovered_link.clone())
+                };
+
+                let Some(overlay) = crate::Root::tooltip_overlay(window, cx) else {
+                    return;
+                };
+                overlay.update(cx, |overlay, cx| {
+                    if let Some(url) = hovered_link {
+                        overlay.request_text(url, hitbox.bounds, window, cx);
+                    } else if previous_link.is_some() {
+                        overlay.request_hide(window, cx);
+                    }
+                });
             }
         });
 
@@ -505,6 +533,7 @@ impl Element for Inline {
                 let text_layout = text_layout.clone();
                 let hitbox = hitbox.clone();
                 let text_view_state = GlobalState::global(cx).text_view_state().cloned();
+                let link_click_handler = self.link_click_handler.clone();
 
                 move |event: &MouseUpEvent, phase, window, cx| {
                     if !phase.bubble() || !hitbox.is_hovered(window) {
@@ -522,7 +551,7 @@ impl Element for Inline {
                     {
                         window.end_text_selection(cx);
                         cx.stop_propagation();
-                        cx.open_url(&link.url);
+                        open_link_target(&link.url, link_click_handler.as_ref(), window, cx);
                     }
                 }
             });

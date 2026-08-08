@@ -20,7 +20,7 @@ use crate::{
     input::{InputEdit, Point, RopeExt as _},
     scroll::horizontal_scroll_area,
     text::{
-        CodeBlockActionsFn, MarkdownExtensions, MarkdownNode,
+        CodeBlockActionsFn, LinkClickHandlerFn, MarkdownExtensions, MarkdownNode,
         document::NodeRenderOptions,
         inline::{Inline, InlineState},
         inline_flow::{InlineFlow, InlineFlowItem},
@@ -774,6 +774,7 @@ impl CodeBlock {
                         self.state.clone(),
                         vec![],
                         self.styles(),
+                        None,
                     ))
                     .when_some(node_cx.code_block_actions.clone(), |this, actions| {
                         this.child(
@@ -801,6 +802,7 @@ pub(crate) struct NodeContext {
     pub(crate) link_refs: HashMap<SharedString, LinkMark>,
     pub(crate) style: TextViewStyle,
     pub(crate) code_block_actions: Option<Arc<CodeBlockActionsFn>>,
+    pub(crate) link_click_handler: Option<Arc<LinkClickHandlerFn>>,
     pub(crate) markdown_extensions: Arc<MarkdownExtensions>,
 }
 
@@ -813,8 +815,20 @@ impl NodeContext {
 impl PartialEq for NodeContext {
     fn eq(&self, other: &Self) -> bool {
         self.link_refs == other.link_refs && self.style == other.style
-        // Note: code_block_actions and markdown_extensions are intentionally
-        // not compared (closures can't be compared)
+        // Callbacks and markdown extensions are intentionally not compared.
+    }
+}
+
+pub(crate) fn open_link_target(
+    url: &str,
+    handler: Option<&Arc<LinkClickHandlerFn>>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if let Some(handler) = handler {
+        handler(url, window, cx);
+    } else {
+        cx.open_url(url);
     }
 }
 
@@ -827,6 +841,7 @@ impl Paragraph {
             return InlineFlow::new(
                 span.unwrap_or_default(),
                 self.inline_flow_items(node_cx, cx),
+                node_cx.link_click_handler.clone(),
             )
             .into_any_element();
         }
@@ -854,6 +869,7 @@ impl Paragraph {
                             inline_node.state.clone(),
                             links.clone(),
                             highlights.clone(),
+                            node_cx.link_click_handler.clone(),
                         )
                         .into_any_element(),
                     );
@@ -866,6 +882,7 @@ impl Paragraph {
                         .when_some(image.width, |this, width| this.w(width))
                         .when_some(image.link.clone(), |this, link| {
                             let title = image.title();
+                            let handler = node_cx.link_click_handler.clone();
                             this.cursor_pointer()
                                 .tooltip(move |window, cx| {
                                     Tooltip::new(title.clone()).build(window, cx)
@@ -873,7 +890,7 @@ impl Paragraph {
                                 .on_click(move |_, window, cx| {
                                     window.end_text_selection(cx);
                                     cx.stop_propagation();
-                                    cx.open_url(&link.url);
+                                    open_link_target(&link.url, handler.as_ref(), window, cx);
                                 })
                         })
                         .into_any_element(),
@@ -945,8 +962,16 @@ impl Paragraph {
             if let Ok(mut state) = self.state.lock() {
                 state.set_text(text.into());
             }
-            child_nodes
-                .push(Inline::new(ix, self.state.clone(), links, highlights).into_any_element());
+            child_nodes.push(
+                Inline::new(
+                    ix,
+                    self.state.clone(),
+                    links,
+                    highlights,
+                    node_cx.link_click_handler.clone(),
+                )
+                .into_any_element(),
+            );
         }
 
         div()
