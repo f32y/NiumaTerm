@@ -70,7 +70,15 @@ fn should_confirm_tab_close(
     warn: WarnBeforeTerminatingShell,
     child_process_count: usize,
 ) -> bool {
-    (is_agent && confirm_agent_close) || warn.should_warn(child_process_count)
+    should_confirm_close(is_agent && confirm_agent_close, warn, child_process_count)
+}
+
+fn should_confirm_close(
+    confirm: bool,
+    warn: WarnBeforeTerminatingShell,
+    child_process_count: usize,
+) -> bool {
+    confirm || warn.should_warn(child_process_count)
 }
 
 const PANE_RESIZE_STEP: Pixels = px(30.0);
@@ -117,6 +125,18 @@ pub(crate) enum TabSurface {
 }
 
 impl TabSurface {
+    fn is_agent(&self) -> bool {
+        match self {
+            Self::Agent(_) => true,
+            Self::Pending(state) => state
+                .agent
+                .as_deref()
+                .and_then(AgentKind::from_id)
+                .is_some(),
+            Self::Live(_) => false,
+        }
+    }
+
     /// The live pane tree. Every activation path materializes the newly active
     /// tab before touching its surface, so active-tab code may assume `Live`.
     pub(crate) fn live(&self) -> &TerminalPaneTree {
@@ -1452,10 +1472,7 @@ impl Shell {
             .find(id)
             .map_or((0, false), |tab| {
                 let surface = tab.surface();
-                (
-                    self.close_process_count(surface, cx),
-                    matches!(surface, TabSurface::Agent(_)),
-                )
+                (self.close_process_count(surface, cx), surface.is_agent())
             });
 
         if self.workspaces.active_tabs().len() == 1 {
@@ -1810,10 +1827,9 @@ impl Shell {
         self.close_workspace_now(id, window, cx);
     }
 
-    /// True when the window may close right away. When child processes are
-    /// running in any pane of any workspace, opens a confirm dialog instead
-    /// (OK closes the window) and returns false. Reached from the titlebar X
-    /// and the OS close request (Alt+F4, taskbar).
+    /// True when the window may close right away. The explicit confirmation
+    /// setting and terminal child-process warnings share this path. Reached
+    /// from the titlebar X and the OS close request (Alt+F4, taskbar).
     pub(crate) fn confirm_window_close(
         &mut self,
         window: &mut Window,
@@ -1826,9 +1842,10 @@ impl Shell {
             .map(|tab| self.close_process_count(tab.surface(), cx))
             .sum();
 
-        let warn = cx.global::<AppSettings>().warn_before_terminating_shell;
+        let settings = cx.global::<AppSettings>();
+        let warn = settings.warn_before_terminating_shell;
 
-        if !warn.should_warn(count) {
+        if !should_confirm_close(settings.confirm_before_closing, warn, count) {
             return true;
         }
 
@@ -1838,7 +1855,7 @@ impl Shell {
                 Self::processes_running(count)
             )
         } else {
-            "Closing the window will terminate its shells.".to_string()
+            "All workspaces and tabs in this window will be closed.".to_string()
         };
 
         // `remove_window` tears the window down directly (no WM_CLOSE
@@ -2818,7 +2835,7 @@ impl Render for Shell {
                 TitleBar::new()
                     // The default X calls `remove_window()` directly (no
                     // WM_CLOSE), skipping `on_window_should_close` — so the
-                    // running-processes confirmation is handled here too.
+                    // shared close confirmation is handled here too.
                     .on_close_window(cx.listener(|this, _, window, cx| {
                         if this.confirm_window_close(window, cx) {
                             window.remove_window();
@@ -2920,7 +2937,28 @@ impl Render for Shell {
 
 #[cfg(test)]
 mod tests {
-    use super::{WarnBeforeTerminatingShell, should_confirm_tab_close};
+    use super::{
+        TabState, TabSurface, WarnBeforeTerminatingShell, should_confirm_close,
+        should_confirm_tab_close,
+    };
+
+    #[test]
+    fn restored_agent_tab_is_recognized_before_activation() {
+        let surface = TabSurface::Pending(Box::new(TabState {
+            agent: Some("codex".to_string()),
+            ..TabState::default()
+        }));
+
+        assert!(surface.is_agent());
+    }
+
+    #[test]
+    fn window_close_honors_confirmation_setting() {
+        use WarnBeforeTerminatingShell::Disabled;
+
+        assert!(should_confirm_close(true, Disabled, 0));
+        assert!(!should_confirm_close(false, Disabled, 0));
+    }
 
     #[test]
     fn agent_tab_close_honors_confirmation_setting() {
