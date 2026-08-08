@@ -70,14 +70,14 @@ EOF
 }
 
 check_no_ai_slop_marker() {
-    slop_marker='pony''tail'
-    slop=$(git diff --cached --diff-filter=ACMR -U0 | grep -nE '^\+' | grep -iw "$slop_marker" || true)
+    slop_markers='ponytail|seam|fact|parity|envelope|wire'
+    slop=$(git diff --cached --diff-filter=ACMR -U0 | grep -nE '^\+' | grep -Eiw "$slop_markers" || true)
     if [ -z "$slop" ]; then
         return 0
     fi
 
     cat >&2 <<EOF
-pre-commit: refusing to commit AI slop containing '$slop_marker'
+pre-commit: refusing to commit AI slop containing '$slop_markers'
 
 $slop
 EOF

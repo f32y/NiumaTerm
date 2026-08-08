@@ -2,6 +2,11 @@
 
 Repo-level guidance for AI coding agents working in this repository.
 
+## Basic rules
+
+- YOU ARE FORBIDDEN TO USE FOLLOWING AI SLOP WORDS: ponytail, seam, fact, parity, envelope, wire
+- Always write documents, specs, tests and comments in English.
+
 ## Testing application launches
 
 Always pass `--testing` when launching NiumaTerm for manual or automated
