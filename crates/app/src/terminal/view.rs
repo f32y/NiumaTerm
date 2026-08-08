@@ -525,9 +525,10 @@ impl TerminalPane {
             }
         }
 
-        // A left-click on a block-list gutter selects the item instead of
-        // starting a text selection.
-        if event.button == MouseButton::Left && self.block_chrome_enabled(cx) {
+        if BLOCK_GUTTER_SELECTION_ENABLED
+            && event.button == MouseButton::Left
+            && self.block_chrome_enabled(cx)
+        {
             if self.try_select_frozen_item(event.position, cx) {
                 return;
             }
@@ -1424,6 +1425,7 @@ pub(crate) const BLOCK_GUTTER_WIDTH: f32 = 4.0;
 /// Gap between the gutter strip and the text; GAP + WIDTH = PADDING_PX so the
 /// strip sits flush against the pane's left edge.
 pub(crate) const BLOCK_GUTTER_GAP: f32 = metrics::PADDING_PX - BLOCK_GUTTER_WIDTH;
+const BLOCK_GUTTER_SELECTION_ENABLED: bool = false;
 
 /// A pointer x hits the block gutter when it falls in the strip painted in the
 /// left padding, with a small tolerance into column 0.
