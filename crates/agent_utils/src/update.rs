@@ -1,4 +1,4 @@
-//! Provider-neutral discovery, update coordination, caching, and vendor-managed adapters.
+//! Provider-neutral discovery, update coordination, caching, and maintenance contracts.
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -9,21 +9,23 @@ use std::{fmt, fs};
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use parking_lot::Mutex;
-use reqwest::blocking::{Client, Response};
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
+pub use crate::claude_code::update::{
+    ClaudeMaintenance, ClaudeReleaseChannel, HttpClaudeReleaseChannel, parse_claude_doctor,
+};
+pub use crate::codex::update::{CodexMaintenance, parse_codex_doctor};
 use crate::launcher::{
     ConfiguredLauncher, ProcessError, ProcessLimits, ProcessOutput, run_bounded,
 };
 
-const PROBE_LIMITS: ProcessLimits = ProcessLimits::new(Duration::from_secs(30), 256 * 1024);
+pub(crate) const PROBE_LIMITS: ProcessLimits =
+    ProcessLimits::new(Duration::from_secs(30), 256 * 1024);
 const UPDATE_LIMITS: ProcessLimits = ProcessLimits::new(Duration::from_secs(15 * 60), 256 * 1024);
-const MAX_LABEL_CHARS: usize = 160;
+pub(crate) const MAX_LABEL_CHARS: usize = 160;
 const MAX_DIAGNOSTIC_CHARS: usize = 4_096;
-const CLAUDE_RELEASE_BASE_URL: &str = "https://downloads.claude.ai/claude-code-releases";
 
 const UPDATE_ENVIRONMENT_NAMES: [&str; 10] = [
     "PATH",
@@ -259,332 +261,13 @@ pub trait ProviderMaintenance: Send + Sync {
     fn update(&self, launcher: &ConfiguredLauncher) -> Result<VendorUpdateResult, UpdateError>;
 }
 
-#[derive(Default)]
-pub struct CodexMaintenance;
-
-impl ProviderMaintenance for CodexMaintenance {
-    fn provider(&self) -> ProviderKind {
-        ProviderKind::Codex
-    }
-
-    fn probe(&self, launcher: &ConfiguredLauncher) -> Result<VersionStatus, UpdateError> {
-        match run_bounded(launcher, ["doctor", "--json"], PROBE_LIMITS) {
-            Ok(output) => match parse_codex_doctor(output.stdout_for_parsing()) {
-                Ok(status) => Ok(status),
-                Err(doctor_error) => codex_version_fallback(launcher, doctor_error.message()),
-            },
-            Err(error) => codex_version_fallback(launcher, &error.to_string()),
-        }
-    }
-
-    fn update(&self, launcher: &ConfiguredLauncher) -> Result<VendorUpdateResult, UpdateError> {
-        vendor_update(launcher, ProviderKind::Codex)
-    }
-}
-
-pub trait ClaudeReleaseChannel: Send + Sync {
-    fn latest(&self, channel: &str) -> Result<Version, UpdateError>;
-}
-
-pub struct HttpClaudeReleaseChannel {
-    client: Client,
-    base_url: String,
-}
-
-impl HttpClaudeReleaseChannel {
-    pub fn new() -> Result<Self, UpdateError> {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(10))
-            .build()
-            .map_err(|_| {
-                UpdateError::new(
-                    UpdateErrorKind::Network,
-                    "could not initialize Claude release client",
-                )
-            })?;
-        Ok(Self {
-            client,
-            base_url: CLAUDE_RELEASE_BASE_URL.to_string(),
-        })
-    }
-
-    #[cfg(test)]
-    fn with_base_url(base_url: impl Into<String>) -> Result<Self, UpdateError> {
-        Self::new().map(|mut client| {
-            client.base_url = base_url.into();
-            client
-        })
-    }
-}
-
-impl ClaudeReleaseChannel for HttpClaudeReleaseChannel {
-    fn latest(&self, channel: &str) -> Result<Version, UpdateError> {
-        if !matches!(channel, "latest" | "stable") {
-            return Err(UpdateError::new(
-                UpdateErrorKind::Unsupported,
-                format!("Claude release channel `{channel}` is not supported"),
-            ));
-        }
-        let response = self
-            .client
-            .get(format!("{}/{channel}", self.base_url.trim_end_matches('/')))
-            .send()
-            .and_then(Response::error_for_status)
-            .map_err(|_| {
-                UpdateError::new(
-                    UpdateErrorKind::Network,
-                    "Claude release service request failed",
-                )
-            })?;
-        let content_length = response.content_length().unwrap_or(0);
-        if content_length > 256 {
-            return Err(UpdateError::new(
-                UpdateErrorKind::InvalidResponse,
-                "Claude release response exceeded the version limit",
-            ));
-        }
-        let body = response.text().map_err(|_| {
-            UpdateError::new(
-                UpdateErrorKind::InvalidResponse,
-                "could not read Claude release response",
-            )
-        })?;
-        parse_strict_version(body.trim(), "Claude release version")
-    }
-}
-
-pub struct ClaudeMaintenance<C> {
-    releases: C,
-}
-
-impl<C> ClaudeMaintenance<C> {
-    pub fn new(releases: C) -> Self {
-        Self { releases }
-    }
-}
-
-impl<C> ProviderMaintenance for ClaudeMaintenance<C>
-where
-    C: ClaudeReleaseChannel,
-{
-    fn provider(&self) -> ProviderKind {
-        ProviderKind::Claude
-    }
-
-    fn probe(&self, launcher: &ConfiguredLauncher) -> Result<VersionStatus, UpdateError> {
-        let doctor = run_bounded(launcher, ["doctor"], PROBE_LIMITS);
-        let mut status = match doctor {
-            Ok(output) => {
-                parse_claude_doctor(output.stdout_for_parsing()).unwrap_or_else(|error| {
-                    VersionStatus {
-                        provider: ProviderKind::Claude,
-                        current: None,
-                        available: None,
-                        install_method: None,
-                        channel: None,
-                        can_update: false,
-                        support: DiscoverySupport::Unsupported {
-                            reason: error.message().to_string(),
-                        },
-                        remediation: None,
-                    }
-                })
-            }
-            Err(error) => VersionStatus {
-                provider: ProviderKind::Claude,
-                current: None,
-                available: None,
-                install_method: None,
-                channel: None,
-                can_update: false,
-                support: DiscoverySupport::Unsupported {
-                    reason: bounded_label(&error.to_string(), MAX_LABEL_CHARS),
-                },
-                remediation: None,
-            },
-        };
-
-        if status.current.is_none() {
-            status.current = current_version_fallback(launcher, ProviderKind::Claude);
-        }
-
-        let Some(channel) = status.channel.as_deref() else {
-            return Ok(status);
-        };
-        if !matches!(channel, "latest" | "stable") {
-            status.support = DiscoverySupport::Unsupported {
-                reason: format!("Claude release channel `{channel}` is not supported"),
-            };
-            status.can_update = false;
-            return Ok(status);
-        }
-
-        match self.releases.latest(channel) {
-            Ok(version) => {
-                status.available = Some(version);
-                status.support = DiscoverySupport::Supported;
-                Ok(status)
-            }
-            Err(error) => {
-                status.support = DiscoverySupport::Unsupported {
-                    reason: error.message().to_string(),
-                };
-                Ok(status)
-            }
-        }
-    }
-
-    fn update(&self, launcher: &ConfiguredLauncher) -> Result<VendorUpdateResult, UpdateError> {
-        vendor_update(launcher, ProviderKind::Claude)
-    }
-}
-
-pub fn parse_codex_doctor(json: &str) -> Result<VersionStatus, UpdateError> {
-    let report: Value = serde_json::from_str(json).map_err(|_| {
-        UpdateError::new(
-            UpdateErrorKind::InvalidResponse,
-            "Codex doctor did not return valid JSON",
-        )
-    })?;
-    if report["schemaVersion"].as_u64() != Some(1) || !report["checks"].is_object() {
-        return Err(UpdateError::new(
-            UpdateErrorKind::InvalidResponse,
-            "Codex doctor returned an unsupported schema",
-        ));
-    }
-
-    let current = report["codexVersion"]
-        .as_str()
-        .map(|value| parse_strict_version(value, "Codex version"))
-        .transpose()?;
-    let updates = &report["checks"]["updates.status"];
-    let details = &updates["details"];
-    let available = detail_string(details, "latest version")
-        .map(|value| parse_strict_version(value, "Codex latest version"))
-        .transpose()?;
-    let install_method = detail_string(
-        &report["checks"]["runtime.provenance"]["details"],
-        "install method",
-    )
-    .or_else(|| {
-        detail_string(
-            &report["checks"]["installation"]["details"],
-            "install context",
-        )
-    })
-    .map(|value| bounded_label(value, MAX_LABEL_CHARS));
-    let remediation =
-        detail_string(details, "update action").map(|value| bounded_label(value, MAX_LABEL_CHARS));
-    let can_update = remediation.as_deref().is_some_and(|action| {
-        !action.to_ascii_lowercase().contains("manual")
-            && !action.to_ascii_lowercase().contains("unknown")
-    });
-    let support = if available.is_some() {
-        DiscoverySupport::Supported
-    } else {
-        DiscoverySupport::Unsupported {
-            reason: "Codex doctor did not publish an available version".to_string(),
-        }
-    };
-
-    Ok(VersionStatus {
-        provider: ProviderKind::Codex,
-        current,
-        available,
-        install_method,
-        channel: None,
-        can_update,
-        support,
-        remediation,
-    })
-}
-
-pub fn parse_claude_doctor(output: &str) -> Result<VersionStatus, UpdateError> {
-    let mut current = None;
-    let mut running_method = None;
-    let mut configured_method = None;
-    let mut channel = None;
-    let mut auto_updates = None;
-
-    for line in output.lines().take(256) {
-        let line = line.trim();
-        if let Some(value) = line.strip_prefix("Running:") {
-            let value = value.trim();
-            if let (Some(open), Some(close)) = (value.rfind('('), value.rfind(')'))
-                && open < close
-            {
-                running_method = nonempty_label(&value[..open]);
-                current = Some(parse_strict_version(
-                    value[open + 1..close].trim(),
-                    "Claude version",
-                )?);
-            }
-        } else if let Some(value) = line.strip_prefix("Config install method:") {
-            configured_method = nonempty_label(value);
-        } else if let Some(value) = line.strip_prefix("Auto-update channel:") {
-            channel = nonempty_label(value).map(|value| value.to_ascii_lowercase());
-        } else if let Some(value) = line.strip_prefix("Auto-updates:") {
-            auto_updates = nonempty_label(value).map(|value| value.to_ascii_lowercase());
-        }
-    }
-
-    if current.is_none() && running_method.is_none() && configured_method.is_none() {
-        return Err(UpdateError::new(
-            UpdateErrorKind::InvalidResponse,
-            "Claude doctor output did not contain installation metadata",
-        ));
-    }
-
-    let install_method = configured_method.or(running_method);
-    let supported_install = install_method.as_deref().is_some_and(|method| {
-        ["native", "npm", "homebrew", "brew"]
-            .iter()
-            .any(|known| method.to_ascii_lowercase().contains(known))
-    });
-    let update_configuration = auto_updates.map(|value| format!("auto-updates {value}"));
-
-    Ok(VersionStatus {
-        provider: ProviderKind::Claude,
-        current,
-        available: None,
-        install_method,
-        channel,
-        can_update: supported_install,
-        support: DiscoverySupport::Unsupported {
-            reason: "Claude release version has not been checked".to_string(),
-        },
-        remediation: update_configuration,
-    })
-}
-
-fn codex_version_fallback(
-    launcher: &ConfiguredLauncher,
-    reason: &str,
-) -> Result<VersionStatus, UpdateError> {
-    Ok(VersionStatus {
-        provider: ProviderKind::Codex,
-        current: current_version_fallback(launcher, ProviderKind::Codex),
-        available: None,
-        install_method: None,
-        channel: None,
-        can_update: false,
-        support: DiscoverySupport::Unsupported {
-            reason: bounded_label(reason, MAX_LABEL_CHARS),
-        },
-        remediation: None,
-    })
-}
-
-fn current_version_fallback(
-    launcher: &ConfiguredLauncher,
-    _provider: ProviderKind,
-) -> Option<Version> {
+pub(crate) fn current_version_fallback(launcher: &ConfiguredLauncher) -> Option<Version> {
     run_bounded(launcher, ["--version"], PROBE_LIMITS)
         .ok()
         .and_then(|output| extract_version(output.stdout_for_parsing()))
 }
 
-fn vendor_update(
+pub(crate) fn vendor_update(
     launcher: &ConfiguredLauncher,
     provider: ProviderKind,
 ) -> Result<VendorUpdateResult, UpdateError> {
@@ -631,11 +314,7 @@ fn classify_vendor_failure(provider: ProviderKind, output: &ProcessOutput) -> Up
     )
 }
 
-fn detail_string<'a>(details: &'a Value, key: &str) -> Option<&'a str> {
-    details.as_object()?.get(key)?.as_str()
-}
-
-fn parse_strict_version(value: &str, field: &str) -> Result<Version, UpdateError> {
+pub(crate) fn parse_strict_version(value: &str, field: &str) -> Result<Version, UpdateError> {
     Version::parse(value).map_err(|_| {
         UpdateError::new(
             UpdateErrorKind::InvalidResponse,
@@ -655,12 +334,7 @@ fn extract_version(output: &str) -> Option<Version> {
         .find_map(|candidate| Version::parse(candidate).ok())
 }
 
-fn nonempty_label(value: &str) -> Option<String> {
-    let value = bounded_label(value, MAX_LABEL_CHARS);
-    (!value.is_empty()).then_some(value)
-}
-
-fn bounded_label(value: &str, max_chars: usize) -> String {
+pub(crate) fn bounded_label(value: &str, max_chars: usize) -> String {
     value
         .chars()
         .map(|ch| if ch.is_control() { ' ' } else { ch })
@@ -1346,21 +1020,6 @@ mod tests {
 
     use super::*;
 
-    const CODEX_DOCTOR: &str = r#"{
-      "schemaVersion": 1,
-      "codexVersion": "0.146.0",
-      "checks": {
-        "runtime.provenance": {"details": {"install method": "npm (package C:\\\\codex)"}},
-        "installation": {"details": {"install context": "npm"}},
-        "updates.status": {"details": {
-          "latest version": "0.147.0",
-          "update action": "npm install -g @openai/codex"
-        }}
-      }
-    }"#;
-
-    const CLAUDE_DOCTOR: &str = "Claude Code doctor\n\nRunning: native (2.1.222)\nConfig install method: native\nAuto-updates: enabled\nAuto-update channel: latest\n";
-
     #[test]
     fn installation_keys_dedupe_shared_launchers_and_split_update_contexts() {
         let first =
@@ -1384,61 +1043,6 @@ mod tests {
         assert_eq!(unique.len(), 3);
         assert_eq!(identities[0].key, identities[1].key);
         assert!(!format!("{:?}", identities[0].key).contains("C:\\A"));
-    }
-
-    #[test]
-    fn codex_doctor_schema_is_validated_and_remediation_is_display_only() {
-        let status = parse_codex_doctor(CODEX_DOCTOR).unwrap();
-        assert_eq!(status.current, Some(Version::new(0, 146, 0)));
-        assert_eq!(status.available, Some(Version::new(0, 147, 0)));
-        assert!(status.update_available());
-        assert!(status.can_update);
-        assert_eq!(
-            status.remediation.as_deref(),
-            Some("npm install -g @openai/codex")
-        );
-
-        let unsupported = CODEX_DOCTOR.replacen("\"schemaVersion\": 1", "\"schemaVersion\": 2", 1);
-        assert_eq!(
-            parse_codex_doctor(&unsupported).unwrap_err().kind,
-            UpdateErrorKind::InvalidResponse
-        );
-        let invalid_version = CODEX_DOCTOR.replacen("0.147.0", "latest", 1);
-        assert!(parse_codex_doctor(&invalid_version).is_err());
-    }
-
-    #[test]
-    fn claude_doctor_parses_bounded_known_fields() {
-        let status = parse_claude_doctor(CLAUDE_DOCTOR).unwrap();
-        assert_eq!(status.current, Some(Version::new(2, 1, 222)));
-        assert_eq!(status.install_method.as_deref(), Some("native"));
-        assert_eq!(status.channel.as_deref(), Some("latest"));
-        assert!(status.can_update);
-
-        let unknown = CLAUDE_DOCTOR.replace("latest", "canary");
-        let status = parse_claude_doctor(&unknown).unwrap();
-        assert_eq!(status.channel.as_deref(), Some("canary"));
-    }
-
-    struct FakeReleases(Result<Version, UpdateError>);
-
-    impl ClaudeReleaseChannel for FakeReleases {
-        fn latest(&self, _channel: &str) -> Result<Version, UpdateError> {
-            self.0.clone()
-        }
-    }
-
-    #[test]
-    fn release_client_contract_rejects_unknown_channels_and_invalid_versions() {
-        let client = HttpClaudeReleaseChannel::with_base_url("http://127.0.0.1:9").unwrap();
-        assert_eq!(
-            client.latest("canary").unwrap_err().kind,
-            UpdateErrorKind::Unsupported
-        );
-        assert!(parse_strict_version("2.1.222", "version").is_ok());
-        assert!(parse_strict_version("v2.1.222", "version").is_err());
-        let fake = FakeReleases(Ok(Version::new(2, 1, 223)));
-        assert_eq!(fake.latest("latest").unwrap(), Version::new(2, 1, 223));
     }
 
     #[test]
@@ -1495,20 +1099,5 @@ mod tests {
             assert_eq!(fs::read_to_string(&log).unwrap().trim(), "update");
             let _ = fs::remove_dir_all(root);
         }
-    }
-
-    #[test]
-    fn version_fallback_uses_the_same_configured_launcher() {
-        let script = "@echo off\r\nif \"%1\"==\"--version\" (echo configured-cli 9.8.7 & exit /b 0)\r\nexit /b 7\r\n";
-        let (root, executable) = fake_launcher("version fallback", script);
-        let launcher = ConfiguredLauncher::new(executable.display().to_string(), []);
-
-        let status = CodexMaintenance.probe(&launcher).unwrap();
-        assert_eq!(status.current, Some(Version::new(9, 8, 7)));
-        assert!(matches!(
-            status.support,
-            DiscoverySupport::Unsupported { .. }
-        ));
-        let _ = fs::remove_dir_all(root);
     }
 }
