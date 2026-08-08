@@ -153,6 +153,7 @@ pub struct AppSettings {
     pub theme_filter: String,
     /// Parsed theme files, refreshed when the themes directory changes.
     pub themes: Vec<(String, Theme)>,
+    pub agent_pane_use_terminal_background: bool,
     pub input_style: InputStyle,
     pub cursor_shape: CursorShape,
     pub profiles: Vec<Profile>,
@@ -238,6 +239,7 @@ impl Default for AppSettings {
             theme: String::new(),
             theme_filter: String::new(),
             themes: Vec::new(),
+            agent_pane_use_terminal_background: false,
             input_style: InputStyle::Waterfall,
             cursor_shape: CursorShape::Block,
             profiles: vec![builtin_profile()],
@@ -468,6 +470,7 @@ impl AppSettings {
             },
             theme_filter: String::new(),
             themes: load_theme_choices(),
+            agent_pane_use_terminal_background: appearance.agent_pane_use_terminal_background,
             input_style: appearance.input_style,
             cursor_shape: config.cursor.shape,
             profiles,
@@ -682,6 +685,7 @@ impl AppSettings {
     pub fn save(&self) {
         let appearance = AppearanceConfig {
             input_style: self.input_style,
+            agent_pane_use_terminal_background: self.agent_pane_use_terminal_background,
             command_blocks: self.command_blocks,
             show_daily_token_usage: self.show_daily_token_usage,
             show_git_status_on_title_bar: self.show_git_status_on_title_bar,
@@ -1837,6 +1841,24 @@ pub fn settings_view(cx: &App) -> Settings {
                         .title("Theme")
                         .description(
                             "Themes are loaded from the themes directory and applied immediately.",
+                        )
+                        .item(
+                            SettingItem::new(
+                                "Make agent pane use terminal's background color",
+                                SettingField::switch(
+                                    |cx| {
+                                        cx.global::<AppSettings>()
+                                            .agent_pane_use_terminal_background
+                                    },
+                                    |value, cx| {
+                                        cx.global_mut::<AppSettings>()
+                                            .agent_pane_use_terminal_background = value;
+                                    },
+                                ),
+                            )
+                            .description(
+                                "Use the terminal theme's background color for Agent Pane.",
+                            ),
                         )
                         .item(
                             SettingItem::new(
