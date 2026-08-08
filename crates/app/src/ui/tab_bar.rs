@@ -193,9 +193,6 @@ impl TabStrip {
         // Ctrl+Shift+T still opens the default profile directly.
         let menu_shell = cx.entity();
         let new_tab = Button::new("tab-new")
-            // Empty title-bar space remains draggable; only the control blocks
-            // the drag hitbox behind it.
-            .occlude()
             .ghost()
             .px_2()
             .child("+")
@@ -273,7 +270,9 @@ impl TabStrip {
             // Overflowing tabs scroll horizontally; the handle lets the shell
             // scroll the active tab into view on switches.
             .track_scroll(&self.scroll)
-            .inline_suffix(new_tab)
+            // Empty title-bar space remains draggable; only the control blocks
+            // the drag hitbox behind it.
+            .inline_suffix(div().occlude().child(new_tab))
             .children(items.into_iter().enumerate().map(|(index, item)| {
                 let TabItem {
                     id,
