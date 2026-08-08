@@ -740,7 +740,7 @@ impl TerminalPane {
         }
 
         if let Some(anchor) = self.frozen_select_anchor {
-            // Clamp into the frozen region so a drag past the seam sticks to
+            // Clamp into the frozen region so a drag past the boundary sticks to
             // the last frozen row instead of vanishing.
             let mut pos = event.position;
 

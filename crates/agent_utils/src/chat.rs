@@ -1,6 +1,6 @@
 //! Backend-neutral vocabulary for agent chat sessions. Each agent backend
-//! (Codex app-server, Claude Code stream-json) translates its own wire
-//! protocol into these types, so the chat UI renders one transcript model
+//! (Codex app-server, Claude Code stream-json) translates its protocol into
+//! these types, so the chat UI renders one transcript model
 //! and never touches protocol strings.
 
 use std::time::SystemTime;
@@ -17,7 +17,7 @@ pub struct ThreadSettings {
     pub effort: Option<String>,
     /// `None` is the normal tier: the model catalog only lists additional
     /// tiers, so normal is expressed as an explicit `serviceTier: null`
-    /// (double-optional on the wire — null resets, absent keeps).
+    /// (double-optional in the serialized payload — null resets, absent keeps).
     pub tier: Option<String>,
 }
 
@@ -63,7 +63,7 @@ pub enum SlashCommandRunPolicy {
 /// Backend-neutral command metadata used by the composer palette.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SlashCommandInfo {
-    /// Normalized wire name without the leading slash.
+    /// Normalized protocol name without the leading slash.
     pub name: String,
     pub description: String,
     pub argument_hint: Option<String>,
@@ -94,7 +94,7 @@ pub struct SkillCatalog {
 }
 
 /// Exact provider identity selected by the UI for a structured skill input.
-/// The catalog is revalidated before this reference is sent on the wire.
+/// The catalog is revalidated before this reference is sent to the backend.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SkillReference {
     pub name: String,
@@ -178,7 +178,7 @@ pub enum Item {
         id: String,
         paths: String,
         /// Reviewable diff body when the provider exposes one (Claude:
-        /// reconstructed from the edit-tool input; Codex: wire diffs).
+        /// reconstructed from the edit-tool input; Codex: backend diffs).
         diff: Option<String>,
         status: Option<String>,
     },

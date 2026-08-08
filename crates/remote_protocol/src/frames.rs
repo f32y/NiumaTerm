@@ -191,7 +191,7 @@ fn read_u16(buf: &[u8]) -> Result<(u16, &[u8]), FrameError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ClientBound, HostBound, WireSessionOptions, WireSessionSnapshot};
+    use crate::{ClientBound, HostBound, ProtocolSessionOptions, ProtocolSessionSnapshot};
 
     #[test]
     fn data_frames_roundtrip() {
@@ -231,7 +231,7 @@ mod tests {
     fn control_messages_roundtrip() {
         let host_bound = [
             HostBound::ListSessions,
-            HostBound::Open(WireSessionOptions {
+            HostBound::Open(ProtocolSessionOptions {
                 shell: Some("pwsh.exe".into()),
                 working_directory: Some(r"C:\Workspace".into()),
                 cols: 120,
@@ -252,7 +252,7 @@ mod tests {
             assert_eq!(Frame::parse_control::<HostBound>(&payload).unwrap(), msg);
         }
 
-        let msg = ClientBound::Attached(WireSessionSnapshot {
+        let msg = ClientBound::Attached(ProtocolSessionSnapshot {
             session_id: 5,
             base_seq: 100,
             vt: b"\x1b[2J\x1b[Hprompt>".to_vec(),

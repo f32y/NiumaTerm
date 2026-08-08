@@ -316,7 +316,7 @@ fn unknown_verb_is_malformed() {
 }
 
 /// Build a colour-payload container from component byte slices.
-/// Builds the wire layout consumed by [`ColrContainer`].
+/// Builds the binary layout consumed by [`ColrContainer`].
 fn build_container(glyphs: &[&[u8]], colr: &[u8], cpal: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(&(glyphs.len() as u16).to_be_bytes());

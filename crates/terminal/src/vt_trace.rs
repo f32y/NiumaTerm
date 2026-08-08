@@ -1,6 +1,6 @@
 //! Temporary VT-state tracer for the Windows ConPTY drag-resize / scrollback bug
 //! (`.scratch/remove-crosswords/HANDOFF-resize-conpty.md`). Every resize / scroll /
-//! ConPTY-repaint seam calls [`trace`], which appends a one-line summary to
+//! Every ConPTY repaint path calls [`trace`], which appends a one-line summary to
 //! `target/logs/nmt-vt-trace.log` and writes the **entire** engine content
 //! (viewport snapshot + full screen+scrollback via the formatter) to its own file
 //! `target/logs/<seq>-<label>.txt`.
@@ -143,7 +143,7 @@ fn append_master(dir: &PathBuf, line: &str) {
 }
 
 /// Emit a trace point: one summary line to the master log + a full content dump to
-/// its own file. `label` names the seam (becomes part of the filename), `detail` is
+/// its own file. `label` names the trace source (becomes part of the filename), `detail` is
 /// free-form context (request dims, intent, rewritten bytes, …). No-op unless
 /// `NMT_VT_TRACE` is set. Safe to call with the engine lock held — touches only the
 /// engine (snapshot + formatter), never the render buffer or crosswords.

@@ -1,4 +1,4 @@
-// Glyph Protocol wire parser.
+// Glyph Protocol parser.
 //
 // Protocol framing:
 //   ESC _ 25a1 ; <verb> [ ; key=value ]* [ ; <payload> ] ESC \
@@ -87,7 +87,7 @@ const MAX_COLR_GLYPHS: u16 = 1024;
 /// `Glyf` is a single OpenType simple-glyph record, rendered in the
 /// current foreground colour.
 ///
-/// `ColrV0` and `ColrV1` share a wire container ([`ColrContainer`]) —
+/// `ColrV0` and `ColrV1` share a binary container ([`ColrContainer`]) —
 /// a length-prefixed array of simple-glyph outlines plus raw OpenType
 /// `COLR` and `CPAL` tables. The outer variant distinguishes the COLR
 /// table version the terminal should expect (v0 is layer-only, v1 is
@@ -102,7 +102,7 @@ pub enum GlyphPayload {
     ColrV1 { container: ColrContainer, upm: u16 },
 }
 
-/// Wire container for `fmt=colrv0` and `fmt=colrv1` payloads.
+/// Binary container for `fmt=colrv0` and `fmt=colrv1` payloads.
 ///
 /// Layout after base64-decode:
 /// ```text
@@ -129,7 +129,7 @@ pub struct ColrContainer {
 
 /// Three-level reply control for the `r` verb, selected with the
 /// `reply` parameter on a register request. The values mirror the
-/// wire encoding (`reply=0` / `reply=1` / `reply=2`) so dispatchers
+/// parameter encoding (`reply=0` / `reply=1` / `reply=2`) so dispatchers
 /// can skip a round of translation.
 ///
 /// Fire-and-forget bulk registrations should use [`ReplyMode::None`]
@@ -163,7 +163,7 @@ impl ReplyMode {
         matches!(self, ReplyMode::All | ReplyMode::ErrorsOnly)
     }
 
-    fn from_wire(raw: &[u8]) -> Self {
+    fn from_reply_param(raw: &[u8]) -> Self {
         match raw {
             b"0" => ReplyMode::None,
             b"2" => ReplyMode::ErrorsOnly,
@@ -175,7 +175,7 @@ impl ReplyMode {
 }
 
 /// Query status: the set of sources covering `cp`.
-/// Encoded on the wire as a comma-separated list of coverage names
+/// Encoded in the response as a comma-separated list of coverage names
 /// (`system`, `glossary`, both, or empty for no coverage).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueryStatus {
@@ -186,7 +186,7 @@ pub enum QueryStatus {
 }
 
 impl QueryStatus {
-    /// Wire form of the `status=` value: a comma-separated list of
+    /// Serialized form of the `status=` value: a comma-separated list of
     /// coverage names. `Free` returns the empty string.
     pub fn as_str(self) -> &'static str {
         match self {
@@ -198,7 +198,7 @@ impl QueryStatus {
     }
 }
 
-/// Stable register-error codes encoded on the wire.
+/// Stable register-error codes encoded in protocol responses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegisterError {
     OutOfNamespace,
@@ -209,7 +209,7 @@ pub enum RegisterError {
 }
 
 /// Error returned when the APC body is not a valid Glyph Protocol
-/// message, or when wire-level validation rejects the request before
+/// message, or when protocol validation rejects the request before
 /// it reaches the handler.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseError {
@@ -294,7 +294,7 @@ fn parse_register(rest: &[u8]) -> Result<GlyphCommand, ParseError> {
     // to the default (emit both success and failure replies).
     let reply = params
         .get("reply")
-        .map(|v| ReplyMode::from_wire(v))
+        .map(|v| ReplyMode::from_reply_param(v))
         .unwrap_or_default();
 
     // PUA check is the protocol's security contract — reject early so
@@ -368,7 +368,7 @@ fn parse_register(rest: &[u8]) -> Result<GlyphCommand, ParseError> {
 }
 
 /// Decode a `colrv0`/`colrv1` container (see [`ColrContainer`] doc for
-/// the wire layout). Validation is structural only: the OpenType COLR
+/// the binary layout). Validation is structural only: the OpenType COLR
 /// and CPAL tables are handed off to the renderer, which parses them
 /// with `ttf_parser::colr::Table` when the glyph is rasterised — that
 /// way any COLR-version-specific validation lives next to the code

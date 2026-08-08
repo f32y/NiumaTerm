@@ -15,7 +15,7 @@ use nmt_remote_net::{
     AttachTarget, HostConfig, HostHandle, RemoteSession, hex_decode, hex_encode,
     load_or_create_keypair, open_remote_session,
 };
-use nmt_remote_protocol::{PairingCode, WireSessionOptions};
+use nmt_remote_protocol::{PairingCode, ProtocolSessionOptions};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
@@ -184,7 +184,7 @@ pub fn connect_new_session(host: &KnownHost) -> Result<RemoteSession, String> {
         host.host_id.clone(),
         host_public_key,
         device,
-        AttachTarget::Open(WireSessionOptions {
+        AttachTarget::Open(ProtocolSessionOptions {
             shell: None,
             working_directory: None,
             cols: 80,

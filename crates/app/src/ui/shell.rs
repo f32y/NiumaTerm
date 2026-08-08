@@ -1516,7 +1516,7 @@ impl Shell {
     }
 
     /// Build an inline-rename input pre-filled with `current`, focused with the
-    /// current name selected, and wired so Enter or blur (clicking anywhere
+    /// current name selected, and configured so Enter or blur (clicking anywhere
     /// else) invokes `finish` with commit = true. Escape is intercepted by the
     /// hosting row, which calls `finish` with commit = false.
     fn rename_input(
@@ -2797,7 +2797,7 @@ impl Render for Shell {
                 TitleBar::new()
                     // The default X calls `remove_window()` directly (no
                     // WM_CLOSE), skipping `on_window_should_close` — so the
-                    // running-processes confirmation is wired in here too.
+                    // running-processes confirmation is handled here too.
                     .on_close_window(cx.listener(|this, _, window, cx| {
                         if this.confirm_window_close(window, cx) {
                             window.remove_window();

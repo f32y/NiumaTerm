@@ -1,5 +1,5 @@
 //! Claude Code stream-json chat session: process lifecycle, control-protocol
-//! handshake, and translation of the wire protocol into typed events for a
+//! handshake, and translation of the backend protocol into typed events for a
 //! chat UI.
 //!
 //! The protocol is the one the official Claude Agent SDK speaks to the CLI:
@@ -34,7 +34,7 @@ use crate::chat::{
 use crate::hook_store::home_dir;
 use crate::launcher::{ConfiguredLauncher, KillOnCloseJob};
 
-/// Wire values for `--permission-mode` / the `set_permission_mode` control
+/// Serialized values for `--permission-mode` / the `set_permission_mode` control
 /// request. `auto` is the CLI's dynamic mode (verified accepted by
 /// `set_permission_mode` on 2.1.222).
 pub const PERMISSION_OPTIONS: [&str; 5] = [
@@ -105,7 +105,7 @@ pub struct Session {
     /// turn-started notification — `result` is the only turn boundary).
     turn_reported: bool,
     pending_approval: Option<PendingApproval>,
-    /// Last model/permission actually applied on the wire, so settings picked
+    /// Last model/permission actually applied by the backend, so settings picked
     /// in the UI turn into `set_model` / `set_permission_mode` control
     /// requests exactly when they change.
     applied_model: Option<String>,
@@ -184,7 +184,7 @@ impl Session {
     /// With `resume`, the CLI reloads that persisted session and appends to
     /// it (same session id, same transcript file). Resume lookup is scoped to
     /// the project directory derived from `cwd`, so the id must come from a
-    /// listing for the same directory. Nothing is replayed on the wire — the
+    /// listing for the same directory. Nothing is replayed by the backend — the
     /// UI pre-fills its transcript from the session file instead.
     pub fn spawn(
         launch: &LaunchConfig,
@@ -573,7 +573,7 @@ impl Session {
         // before the message that opened this turn, so `init` reports the
         // post-change state and cannot clobber it. The model is only taken
         // before the handshake settled: `init` reports the resolved model id
-        // (e.g. `claude-opus-5[1m]`), which is not a catalog wire value, so
+        // (e.g. `claude-opus-5[1m]`), which is not a catalog value, so
         // adopting it later would break the catalog-driven picker display.
         let model = if self.ready {
             self.applied_model.clone()
@@ -1244,7 +1244,7 @@ fn approval_description(tool_name: &str, input: &Value) -> String {
     }
 }
 
-/// The model catalog from the initialize response: `value` is the wire name
+/// The model catalog from the initialize response: `value` is the protocol name
 /// (`"default"`, `"opus[1m]"`, …), `displayName` the menu label. Claude has
 /// no per-model service tiers, but each entry lists its reasoning-effort
 /// levels in `supportedEffortLevels` (absent on models without effort, e.g.
@@ -1723,7 +1723,7 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_commands_accept_both_wire_shapes_and_drop_invalid_duplicates() {
+    fn dynamic_commands_accept_both_json_shapes_and_drop_invalid_duplicates() {
         let parsed = parse_slash_commands(&json!([
             "/Review",
             {"name": "compact", "description": "Compact it", "argumentHint": "[focus]",

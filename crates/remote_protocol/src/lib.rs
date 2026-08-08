@@ -1,4 +1,4 @@
-//! Wire protocol shared by the remote-session host, remote client, and their
+//! Transport protocol shared by the remote-session host, remote client, and their
 //! tests: control/data frame codec, Noise handshake and transport wrappers,
 //! and pairing-code encoding.
 //!

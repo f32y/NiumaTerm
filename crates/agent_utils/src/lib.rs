@@ -215,7 +215,7 @@ pub enum AgentEventKind {
 /// `codex`/`claude_code` differ only in turn identity and presentation
 /// strings, and always fail open.
 #[derive(Serialize, Deserialize)]
-pub struct RawAgentHookEnvelope {
+pub struct RawAgentHookMessage {
     pub action: String,
     pub version: u32,
     pub token: String,
@@ -223,7 +223,7 @@ pub struct RawAgentHookEnvelope {
     pub payload: Value,
 }
 
-impl RawAgentHookEnvelope {
+impl RawAgentHookMessage {
     pub fn into_event(self, expected_token: &str) -> Option<AgentEvent> {
         let normalize = match self.action.as_str() {
             "codex_hook" => normalize_codex,

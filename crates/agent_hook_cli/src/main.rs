@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use nmt_agent_utils::{
     AGENT_HOOK_PROTOCOL_VERSION, AGENT_HOOK_TOKEN_ENV, AGENT_HOOK_VERSION_ENV, AGENT_ROUTE_ENV,
-    AGENT_TESTING_ENV, RawAgentHookEnvelope,
+    AGENT_TESTING_ENV, RawAgentHookMessage,
 };
 use nmt_platform::windows::ipc::{MAX_MESSAGE_BYTES, send};
 use serde_json::{Value, from_slice, to_string};
@@ -43,7 +43,7 @@ fn main() {
         return;
     };
 
-    let Ok(message) = to_string(&RawAgentHookEnvelope {
+    let Ok(message) = to_string(&RawAgentHookMessage {
         action: action.into(),
         version,
         token,

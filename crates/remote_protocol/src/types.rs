@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 /// and process-tree management stay host-local so a paired device cannot
 /// smuggle arbitrary spawn parameters past whatever the host UI allows.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct WireSessionOptions {
+pub struct ProtocolSessionOptions {
     /// `None` means the host's default shell.
     pub shell: Option<String>,
     pub working_directory: Option<String>,
@@ -14,7 +14,7 @@ pub struct WireSessionOptions {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WireSessionInfo {
+pub struct ProtocolSessionInfo {
     pub session_id: u64,
     pub shell: String,
     pub title: String,
@@ -26,7 +26,7 @@ pub struct WireSessionInfo {
 /// state. Bytes are either inside `vt` or arrive in Output frames with
 /// `seq >= base_seq` — never both, never neither.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WireSessionSnapshot {
+pub struct ProtocolSessionSnapshot {
     pub session_id: u64,
     pub base_seq: u64,
     pub vt: Vec<u8>,
@@ -38,7 +38,7 @@ pub struct WireSessionSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HostBound {
     ListSessions,
-    Open(WireSessionOptions),
+    Open(ProtocolSessionOptions),
     Attach {
         session_id: u64,
     },
@@ -58,11 +58,11 @@ pub enum HostBound {
 /// Control messages travelling host → client.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ClientBound {
-    SessionList(Vec<WireSessionInfo>),
+    SessionList(Vec<ProtocolSessionInfo>),
     Opened {
         session_id: u64,
     },
-    Attached(WireSessionSnapshot),
+    Attached(ProtocolSessionSnapshot),
     Paired,
     Error {
         session_id: Option<u64>,

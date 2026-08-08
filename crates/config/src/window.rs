@@ -179,7 +179,7 @@ pub struct Window {
     /// lines painted by tmux/Neovim keep their contrast. Flip to
     /// `true` to make TUIs see-through too.
     ///
-    /// On the wire: kebab-case `opacity-cells` under `[window]`.
+    /// Serialized as kebab-case `opacity-cells` under `[window]`.
     #[serde(rename = "opacity-cells", default = "bool::default")]
     pub opacity_cells: bool,
     #[serde(default)]
