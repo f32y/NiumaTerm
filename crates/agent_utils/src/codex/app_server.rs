@@ -20,7 +20,7 @@ pub use crate::chat::{
     SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
     ThreadSettings,
 };
-use crate::launcher::{ConfiguredLauncher, KillOnCloseJob};
+use crate::launcher::{AgentCli, KillOnCloseJob};
 use crate::{CodexProviderConfig, LaunchConfig};
 
 /// JSON-RPC ids for the fixed handshake requests; turn requests count up from
@@ -301,7 +301,7 @@ impl Session {
         on_stderr: impl Fn(String) + Send + 'static,
     ) -> Result<Self, String> {
         let thread_profile = ThreadProfile::from(launch);
-        let launcher = ConfiguredLauncher::from_launch(launch, "codex");
+        let launcher = AgentCli::from_launch(launch, "codex");
         let executable = launcher.executable().to_string();
         let mut command = launcher.command(["app-server"]);
 

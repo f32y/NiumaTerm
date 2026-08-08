@@ -13,7 +13,7 @@ use gpui::{App, Entity, Global, Window, div};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::dialog::{DialogClose, DialogFooter};
 use gpui_component::{ActiveTheme as _, WindowExt as _};
-use nmt_agent_utils::launcher::ConfiguredLauncher;
+use nmt_agent_utils::launcher::AgentCli;
 use nmt_agent_utils::update::{
     ClaudeMaintenance, CodexMaintenance, DiscoverySupport, HttpClaudeReleaseChannel,
     InstallationKey, InstallationSnapshot, ProviderKind, ProviderMaintenance, UpdateCoordinator,
@@ -41,7 +41,7 @@ impl AgentUpdates {
     fn register_profile(&self, profile: &AgentProfile) -> InstallationKey {
         let provider = provider_for_profile(profile.kind);
         let launch = agent_launch(profile);
-        let launcher = ConfiguredLauncher::from_launch(&launch, provider.default_executable());
+        let launcher = AgentCli::from_launch(&launch, provider.default_executable());
         let maintenance = match provider {
             ProviderKind::Claude => self.claude.clone(),
             ProviderKind::Codex => self.codex.clone(),
@@ -851,11 +851,11 @@ impl ProviderMaintenance for UnavailableMaintenance {
         self.provider
     }
 
-    fn probe(&self, _: &ConfiguredLauncher) -> Result<VersionStatus, UpdateError> {
+    fn probe(&self, _: &AgentCli) -> Result<VersionStatus, UpdateError> {
         Err(UpdateError::new(UpdateErrorKind::Unsupported, &self.reason))
     }
 
-    fn update(&self, _: &ConfiguredLauncher) -> Result<VendorUpdateResult, UpdateError> {
+    fn update(&self, _: &AgentCli) -> Result<VendorUpdateResult, UpdateError> {
         Err(UpdateError::new(UpdateErrorKind::Unsupported, &self.reason))
     }
 }
@@ -881,7 +881,7 @@ impl ProviderMaintenance for FakeMaintenance {
         self.provider
     }
 
-    fn probe(&self, _: &ConfiguredLauncher) -> Result<VersionStatus, UpdateError> {
+    fn probe(&self, _: &AgentCli) -> Result<VersionStatus, UpdateError> {
         let current = if self.updated.load(Ordering::SeqCst) {
             Version::new(1, 1, 0)
         } else {
@@ -899,7 +899,7 @@ impl ProviderMaintenance for FakeMaintenance {
         })
     }
 
-    fn update(&self, _: &ConfiguredLauncher) -> Result<VendorUpdateResult, UpdateError> {
+    fn update(&self, _: &AgentCli) -> Result<VendorUpdateResult, UpdateError> {
         self.updated.store(true, Ordering::SeqCst);
         Ok(VendorUpdateResult {
             diagnostic: "testing provider updated".to_string(),
@@ -915,7 +915,7 @@ mod tests {
     use super::*;
 
     fn snapshot(phase: UpdatePhase) -> InstallationSnapshot {
-        let launcher = ConfiguredLauncher::new("fake-codex", []);
+        let launcher = AgentCli::new("fake-codex", []);
         let identity = InstallationKey::derive(ProviderKind::Codex, &launcher);
         InstallationSnapshot {
             identity,
@@ -998,10 +998,8 @@ mod tests {
     fn reducer_stacks_installations_and_never_fabricates_provider_progress() {
         let first = snapshot(UpdatePhase::Updating);
         let mut second = snapshot(UpdatePhase::Available);
-        second.identity = InstallationKey::derive(
-            ProviderKind::Codex,
-            &ConfiguredLauncher::new("another-codex", []),
-        );
+        second.identity =
+            InstallationKey::derive(ProviderKind::Codex, &AgentCli::new("another-codex", []));
         second.state.versions.as_mut().unwrap().can_update = false;
 
         let first_view = notification_view(&first).unwrap();
@@ -1039,7 +1037,7 @@ mod tests {
         assert_ne!(testing_cache, update_cache_path(false));
 
         let fake = FakeMaintenance::new(ProviderKind::Claude);
-        let launcher = ConfiguredLauncher::new("this-executable-must-never-run", []);
+        let launcher = AgentCli::new("this-executable-must-never-run", []);
         assert!(fake.probe(&launcher).unwrap().update_available());
         fake.update(&launcher).unwrap();
         assert!(!fake.probe(&launcher).unwrap().update_available());
@@ -1047,16 +1045,10 @@ mod tests {
 
     #[test]
     fn mixed_installations_select_only_tabs_for_the_target_transaction() {
-        let shared = InstallationKey::derive(
-            ProviderKind::Claude,
-            &ConfiguredLauncher::new("shared-claude", []),
-        )
-        .key;
-        let unrelated = InstallationKey::derive(
-            ProviderKind::Claude,
-            &ConfiguredLauncher::new("other-claude", []),
-        )
-        .key;
+        let shared =
+            InstallationKey::derive(ProviderKind::Claude, &AgentCli::new("shared-claude", [])).key;
+        let unrelated =
+            InstallationKey::derive(ProviderKind::Claude, &AgentCli::new("other-claude", [])).key;
         let installations = vec![shared.clone(), unrelated, shared.clone()];
         assert_eq!(
             affected_installation_indices(&shared, &installations),
@@ -1066,25 +1058,16 @@ mod tests {
 
     #[test]
     fn settings_installation_rows_deduplicate_profiles_in_first_seen_order() {
-        let claude = InstallationKey::derive(
-            ProviderKind::Claude,
-            &ConfiguredLauncher::new("shared-claude", []),
-        )
-        .key;
-        let codex = InstallationKey::derive(
-            ProviderKind::Codex,
-            &ConfiguredLauncher::new("shared-codex", []),
-        )
-        .key;
+        let claude =
+            InstallationKey::derive(ProviderKind::Claude, &AgentCli::new("shared-claude", [])).key;
+        let codex =
+            InstallationKey::derive(ProviderKind::Codex, &AgentCli::new("shared-codex", [])).key;
 
         assert_eq!(
             distinct_installation_keys([claude.clone(), claude.clone(), codex.clone(), claude,]),
             vec![
-                InstallationKey::derive(
-                    ProviderKind::Claude,
-                    &ConfiguredLauncher::new("shared-claude", []),
-                )
-                .key,
+                InstallationKey::derive(ProviderKind::Claude, &AgentCli::new("shared-claude", []),)
+                    .key,
                 codex,
             ]
         );

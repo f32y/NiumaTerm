@@ -10,7 +10,7 @@ use nmt_agent_utils::LaunchConfig;
 use nmt_agent_utils::chat::Event;
 use nmt_agent_utils::claude_code::stream_json;
 use nmt_agent_utils::codex::app_server;
-use nmt_agent_utils::launcher::ConfiguredLauncher;
+use nmt_agent_utils::launcher::AgentCli;
 use nmt_agent_utils::update::{
     ClaudeMaintenance, ClaudeReleaseChannel, CodexMaintenance, InstallationKey, ProviderKind,
     ProviderMaintenance, UpdateCoordinator, UpdateError, UpdatePhase,
@@ -207,7 +207,7 @@ fn lines(path: &Path) -> Vec<String> {
 fn installation_key(provider: ProviderKind, launch: &LaunchConfig) -> InstallationKey {
     InstallationKey::derive(
         provider,
-        &ConfiguredLauncher::from_launch(launch, provider.default_executable()),
+        &AgentCli::from_launch(launch, provider.default_executable()),
     )
     .key
 }
@@ -221,7 +221,7 @@ fn register_available(
     let coordinator = fixture.coordinator();
     let key = coordinator.register(
         provider,
-        ConfiguredLauncher::from_launch(launch, provider.default_executable()),
+        AgentCli::from_launch(launch, provider.default_executable()),
         maintenance,
     );
     let status = coordinator.check(&key, true).unwrap();

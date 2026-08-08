@@ -44,7 +44,7 @@ use nmt_agent_utils::chat::{
 };
 use nmt_agent_utils::claude_code::{sessions, stream_json};
 use nmt_agent_utils::codex::app_server;
-use nmt_agent_utils::launcher::ConfiguredLauncher;
+use nmt_agent_utils::launcher::AgentCli;
 use nmt_agent_utils::update::{InstallationKey, ProviderKind};
 use nmt_agent_utils::{
     AgentEvent, AgentEventKind, AgentRoute, CodexProviderConfig, LaunchConfig, agent_process,
@@ -1173,7 +1173,7 @@ impl AgentPane {
             AgentKind::Codex => ProviderKind::Codex,
         };
         let launch = agent_launch(&self.profile);
-        let launcher = ConfiguredLauncher::from_launch(&launch, provider.default_executable());
+        let launcher = AgentCli::from_launch(&launch, provider.default_executable());
         InstallationKey::derive(provider, &launcher).key
     }
 
