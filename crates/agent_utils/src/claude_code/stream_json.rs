@@ -12,12 +12,11 @@
 //! switching into `bypassPermissions` mode).
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::io::{BufRead as _, BufReader, Write as _};
+use std::fs;
 use std::iter::once;
 use std::mem::take;
-use std::process::{Child, ChildStdin, Command, Stdio};
-use std::time::{Duration, Instant};
-use std::{fs, thread};
+use std::process::Command;
+use std::time::Duration;
 
 use serde_json::{Value, json};
 
@@ -32,7 +31,8 @@ use crate::chat::{
     ThreadSettings,
 };
 use crate::hook_store::home_dir;
-use crate::launcher::{AgentCli, KillOnCloseJob};
+use crate::launcher::AgentCli;
+use crate::subprocess::JsonLineProcess;
 
 /// Serialized values for `--permission-mode` / the `set_permission_mode` control
 /// request. `auto` is the CLI's dynamic mode (verified accepted by
@@ -91,9 +91,7 @@ struct PendingApproval {
 }
 
 pub struct Session {
-    child: Child,
-    process_job: Option<KillOnCloseJob>,
-    stdin: Option<ChildStdin>,
+    process: JsonLineProcess,
     next_request_id: u64,
     ready: bool,
     /// The CLI's session id from the `init` message; the handle a future tab
@@ -140,16 +138,6 @@ pub struct Session {
     /// 30 seconds while a long compaction proceeds, and the UI only needs the
     /// state transitions.
     compacting: bool,
-}
-
-impl Drop for Session {
-    fn drop(&mut self) {
-        // The npm `claude.cmd` shim starts a descendant process; killing only
-        // cmd.exe would strand it. Closing stdin delivers EOF, which ends the
-        // stream-json input and lets the CLI exit; the kill is belt-and-braces
-        // cleanup for the shim itself.
-        let _ = self.shutdown(Duration::from_millis(250), true);
-    }
 }
 
 impl Session {
@@ -213,10 +201,6 @@ impl Session {
         // applied after profile overrides so every NiumaTerm Claude session
         // can create checkpoints for subsequent `/rewind` operations.
         enable_file_checkpointing(&mut command);
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
 
         if let Some(session_id) = &resume {
             command.args(["--resume", session_id]);
@@ -226,37 +210,10 @@ impl Session {
             command.current_dir(cwd);
         }
 
-        let mut child = command
-            .spawn()
-            .map_err(|err| format!("could not run `{executable}`: {err}"))?;
-        let process_job = KillOnCloseJob::attach(&child).map_err(|error| {
-            let _ = child.kill();
-            let _ = child.wait();
-            error
-        })?;
-
-        let stdin = child.stdin.take().ok_or("Claude stdin unavailable")?;
-        let stdout = child.stdout.take().ok_or("Claude stdout unavailable")?;
-        let stderr = child.stderr.take().ok_or("Claude stderr unavailable")?;
-
-        thread::spawn(move || {
-            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                if let Ok(message) = serde_json::from_str::<Value>(&line) {
-                    deliver(message);
-                }
-            }
-        });
-
-        thread::spawn(move || {
-            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                on_stderr(line);
-            }
-        });
+        let process = JsonLineProcess::spawn(command, &executable, "Claude", deliver, on_stderr)?;
 
         let mut session = Self {
-            child,
-            process_job: Some(process_job),
-            stdin: Some(stdin),
+            process,
             next_request_id: 1,
             ready: false,
             // A resumed process may not emit `system/init` until its next
@@ -303,30 +260,7 @@ impl Session {
     /// descendant. Forced termination is used only after an explicit user
     /// choice to interrupt active work.
     pub fn shutdown(&mut self, timeout: Duration, force: bool) -> Result<(), String> {
-        drop(self.stdin.take());
-        let started = Instant::now();
-        loop {
-            match self.child.try_wait() {
-                Ok(Some(_)) => {
-                    self.process_job.take();
-                    return Ok(());
-                }
-                Ok(None) if started.elapsed() < timeout => {
-                    thread::sleep(Duration::from_millis(20));
-                }
-                Ok(None) if force => {
-                    self.process_job.take();
-                    self.child
-                        .wait()
-                        .map_err(|error| format!("could not wait for Claude to stop: {error}"))?;
-                    return Ok(());
-                }
-                Ok(None) => return Err("Claude did not stop before the update timeout".to_string()),
-                Err(error) => {
-                    return Err(format!("could not observe Claude process exit: {error}"));
-                }
-            }
-        }
+        self.process.shutdown(timeout, force)
     }
 
     /// Handle one message from the CLI: answers control requests and returns
@@ -368,7 +302,7 @@ impl Session {
     /// requests (model and permission mode are session state on the CLI, so
     /// they are set once per change instead of per turn).
     pub fn send_user_message(&mut self, text: &str, settings: &ThreadSettings) -> SendOutcome {
-        if self.stdin.is_none() {
+        if !self.process.has_stdin() {
             return SendOutcome::NotReady;
         }
 
@@ -409,7 +343,7 @@ impl Session {
                 message: format!("/{name} is handled by NiumaTerm."),
             };
         }
-        if !self.ready || self.stdin.is_none() {
+        if !self.ready || !self.process.has_stdin() {
             return SlashCommandOutcome::NotReady;
         }
         if self.turn_active {
@@ -434,7 +368,7 @@ impl Session {
     /// Restore files tracked by Claude to the state captured before the user
     /// message. Completion arrives asynchronously as `FileRewindCompleted`.
     pub fn rewind_files(&mut self, user_message_id: &str) -> SlashCommandOutcome {
-        if !self.ready || self.stdin.is_none() {
+        if !self.ready || !self.process.has_stdin() {
             return SlashCommandOutcome::NotReady;
         }
         if self.turn_active || self.pending_approval.is_some() {
@@ -538,13 +472,10 @@ impl Session {
         request_id
     }
 
-    /// Write one line. Failures are not surfaced here: a dead process also
-    /// closes its stdout, so the reader-side EOF is the single exit-detection
-    /// path.
+    /// Write one line; write failures stay unsurfaced because the reader-side
+    /// EOF is the single exit-detection path.
     fn send(&mut self, message: Value) {
-        if let Some(stdin) = self.stdin.as_mut() {
-            let _ = writeln!(stdin, "{message}").and_then(|_| stdin.flush());
-        }
+        self.process.write_line(&message);
     }
 
     fn process_system(&mut self, message: &Value) -> Vec<Event> {
@@ -1304,6 +1235,8 @@ fn parse_models(models: &Value, selected_model: Option<&str>) -> Vec<ModelInfo> 
 
 #[cfg(test)]
 mod tests {
+    use std::thread;
+
     use super::*;
 
     #[test]

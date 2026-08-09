@@ -3,23 +3,17 @@
 use std::cmp::Reverse;
 use std::collections::VecDeque;
 use std::error::Error;
-use std::ffi::{OsStr, OsString, c_void};
-use std::os::windows::io::AsRawHandle as _;
+use std::ffi::{OsStr, OsString};
 use std::os::windows::process::CommandExt as _;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
-use std::{env, fmt, io, mem, ptr, thread};
+use std::{env, fmt, io, thread};
 
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
-use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-    SetInformationJobObject,
-};
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use crate::LaunchConfig;
+use crate::subprocess::KillOnCloseJob;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
 
@@ -301,14 +295,7 @@ where
             launcher.executable()
         ))
     })?;
-    let job = match KillOnCloseJob::attach(&child) {
-        Ok(job) => job,
-        Err(error) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(ProcessError::Containment(error));
-        }
-    };
+    let job = KillOnCloseJob::attach_or_kill(&mut child).map_err(ProcessError::Containment)?;
 
     let stdout = child.stdout.take().expect("piped stdout");
     let stderr = child.stderr.take().expect("piped stderr");
@@ -450,53 +437,6 @@ fn redact_common_credentials(text: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-pub(crate) struct KillOnCloseJob(HANDLE);
-
-// A Job Object handle has no thread affinity. Ownership remains unique and
-// Drop closes it exactly once, so moving the session to a shutdown worker is
-// equivalent to moving any other owned Windows kernel handle.
-unsafe impl Send for KillOnCloseJob {}
-
-impl KillOnCloseJob {
-    pub(crate) fn attach(child: &Child) -> Result<Self, String> {
-        unsafe {
-            let job = CreateJobObjectW(ptr::null(), ptr::null());
-            if job.is_null() {
-                return Err(format!(
-                    "failed to create process containment job: {}",
-                    io::Error::last_os_error()
-                ));
-            }
-
-            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = mem::zeroed();
-            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            if SetInformationJobObject(
-                job,
-                JobObjectExtendedLimitInformation,
-                &raw const info as *const c_void,
-                mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            ) == 0
-            {
-                let error = io::Error::last_os_error();
-                CloseHandle(job);
-                return Err(format!("failed to configure process containment: {error}"));
-            }
-            if AssignProcessToJobObject(job, child.as_raw_handle() as HANDLE) == 0 {
-                let error = io::Error::last_os_error();
-                CloseHandle(job);
-                return Err(format!("failed to contain launcher process tree: {error}"));
-            }
-            Ok(Self(job))
-        }
-    }
-}
-
-impl Drop for KillOnCloseJob {
-    fn drop(&mut self) {
-        unsafe { CloseHandle(self.0) };
-    }
 }
 
 #[cfg(test)]
