@@ -38,8 +38,6 @@ pub(crate) const ITEM_PAD_ROWS: f32 = 1.0;
 const SEPARATOR_COLOR: u32 = 0x3b4252;
 
 pub(crate) struct BlockListState {
-    /// Bumped per in-flight tick so only the newest duration repaint fires.
-    pub tick_gen: u64,
     /// Native GPUI list state for block-split rendering.
     pub list: ListState,
     /// Last item count mirrored into `list`.
@@ -59,7 +57,6 @@ impl BlockListState {
         let list = ListState::new(1, alignment, px(240.0));
         list.set_follow_mode(FollowMode::Tail);
         Self {
-            tick_gen: 0,
             list,
             item_count: 1,
             evicted_items: 0,
@@ -258,13 +255,10 @@ fn item_accent(meta: &SegmentMeta) -> u32 {
 /// `None` without a command (nothing meaningful to show).
 fn item_header(meta: &SegmentMeta) -> Option<String> {
     let command = meta.command.as_deref()?;
-    if meta.exit_code.is_none() {
-        return running_header(command, meta.started_at);
-    }
+    let ended_at = meta.ended_at?;
     let duration = meta
         .started_at
-        .zip(meta.ended_at)
-        .and_then(|(s, e)| e.duration_since(s).ok())
+        .and_then(|started_at| ended_at.duration_since(started_at).ok())
         .map(format_duration);
 
     let status = match (meta.exit_code, duration) {
@@ -272,22 +266,9 @@ fn item_header(meta: &SegmentMeta) -> Option<String> {
         (Some(0), None) => "✓".to_string(),
         (Some(code), Some(d)) => format!("✗ {code} · {d}"),
         (Some(code), None) => format!("✗ {code}"),
-        (None, _) => unreachable!("running items returned above"),
+        (None, Some(d)) => format!("? · {d}"),
+        (None, None) => "?".to_string(),
     };
-
-    Some(command_header(command, &status))
-}
-
-fn running_header(command: &str, started_at: Option<time::SystemTime>) -> Option<String> {
-    if command.trim().is_empty() {
-        return None;
-    }
-
-    let status = started_at
-        .and_then(|started_at| time::SystemTime::now().duration_since(started_at).ok())
-        .map(format_duration)
-        .map(|duration| format!("⟳ {duration}"))
-        .unwrap_or_else(|| "⟳".to_string());
 
     Some(command_header(command, &status))
 }
@@ -299,26 +280,24 @@ fn command_header(command: &str, status: &str) -> String {
     )
 }
 
-/// Chrome of the live item: a running command (`Some((command, started_at))` —
-/// running accent + elapsed header) or the idle input region (`None` — input
-/// accent, no header). `rows == 0` → invisible.
+/// Chrome of the live item: a running command uses the running accent, while
+/// the idle input region uses the input accent. Headers appear only after the
+/// item is finished. `rows == 0` → invisible.
 pub(crate) fn live_chrome(
     item: usize,
     rows: usize,
     cell_h: f32,
-    running: Option<(&str, time::SystemTime)>,
+    running: bool,
     selected: bool,
 ) -> Option<FrozenItemChrome> {
     if rows == 0 {
         return None;
     }
 
-    let (accent, header) = match running {
-        Some((command, started_at)) => (
-            terminal::terminal_view::BLOCK_RUNNING_COLOR,
-            running_header(command, Some(started_at)),
-        ),
-        None => (terminal::terminal_view::BLOCK_INPUT_COLOR, None),
+    let accent = if running {
+        terminal::terminal_view::BLOCK_RUNNING_COLOR
+    } else {
+        terminal::terminal_view::BLOCK_INPUT_COLOR
     };
 
     Some(FrozenItemChrome {
@@ -327,7 +306,7 @@ pub(crate) fn live_chrome(
         bottom: rows as f32 * cell_h,
         header_y: 0.0,
         accent,
-        header,
+        header: None,
         selected,
     })
 }
@@ -1358,6 +1337,7 @@ mod tests {
         store.update_meta(2, |m| {
             m.command = Some("bad".into());
             m.exit_code = Some(127);
+            m.ended_at = Some(t0 + time::Duration::from_secs(2));
         });
 
         let info1 = handle_item_info(&store.items()[0]).unwrap();
@@ -1366,6 +1346,21 @@ mod tests {
         let info2 = handle_item_info(&store.items()[1]).unwrap();
         assert_eq!(info2.accent, terminal::terminal_view::BLOCK_FAILURE_COLOR);
         assert_eq!(info2.header.as_deref(), Some("bad · ✗ 127"));
+    }
+
+    #[test]
+    fn item_header_waits_for_end_time() {
+        let t0 = time::UNIX_EPOCH;
+        let mut meta = SegmentMeta {
+            command: Some("build".into()),
+            started_at: Some(t0),
+            ..SegmentMeta::default()
+        };
+
+        assert_eq!(item_header(&meta), None);
+
+        meta.ended_at = Some(t0 + time::Duration::from_secs(2));
+        assert_eq!(item_header(&meta).as_deref(), Some("build · ? · 2.0s"));
     }
 
     /// Previous/next navigation walks item tops with edge no-ops.
@@ -1416,26 +1411,25 @@ mod tests {
     }
 
     #[test]
-    fn live_chrome_marks_running_pending_item() {
-        let running = Some(("build", time::UNIX_EPOCH));
-        let chrome = live_chrome(3, 2, 10.0, running, true).unwrap();
+    fn live_chrome_hides_running_header() {
+        let chrome = live_chrome(3, 2, 10.0, true, true).unwrap();
         assert_eq!((chrome.item, chrome.top, chrome.bottom), (3, 0.0, 20.0));
         assert_eq!(chrome.accent, terminal::terminal_view::BLOCK_RUNNING_COLOR);
-        assert!(chrome.header.as_deref().unwrap().starts_with("build · ⟳ "));
+        assert_eq!(chrome.header, None);
         assert!(chrome.selected);
 
-        assert!(live_chrome(3, 0, 10.0, running, false).is_none());
+        assert!(live_chrome(3, 0, 10.0, true, false).is_none());
     }
 
     #[test]
     fn live_chrome_marks_idle_prompt() {
-        let chrome = live_chrome(2, 3, 10.0, None, true).unwrap();
+        let chrome = live_chrome(2, 3, 10.0, false, true).unwrap();
         assert_eq!((chrome.item, chrome.top, chrome.bottom), (2, 0.0, 30.0));
         assert_eq!(chrome.accent, terminal::terminal_view::BLOCK_INPUT_COLOR);
         assert_eq!(chrome.header, None);
         assert!(chrome.selected);
 
-        assert!(live_chrome(2, 0, 10.0, None, false).is_none());
+        assert!(live_chrome(2, 0, 10.0, false, false).is_none());
     }
 
     /// The live-history view positions SCREEN rows, applies the engine
@@ -1642,8 +1636,8 @@ pub(crate) fn block_list_live_chrome(
     has_open_prompt: bool,
     selected: bool,
 ) -> Option<terminal::block_list::FrozenItemChrome> {
-    let running = in_flight.map(|block| (block.command.as_str(), block.started_at));
-    if running.is_none() && !has_open_prompt {
+    let running = in_flight.is_some();
+    if !running && !has_open_prompt {
         return None;
     }
     terminal::block_list::live_chrome(live_index, live_rows, cell_h, running, selected)

@@ -1235,27 +1235,6 @@ impl TerminalPane {
         cx.notify();
     }
 
-    /// While a command runs, repaint about once a second so the running block's
-    /// elapsed time advances even with no PTY output.
-    fn schedule_block_tick(&mut self, cx: &mut Context<Self>) {
-        self.block_list.tick_gen += 1;
-
-        let generation = self.block_list.tick_gen;
-
-        cx.spawn(async move |this, cx| {
-            cx.background_executor()
-                .timer(time::Duration::from_secs(1))
-                .await;
-
-            let _ = this.update(cx, |this, cx| {
-                if this.block_list.tick_gen == generation && this.in_flight.is_some() {
-                    this.invalidate(cx);
-                }
-            });
-        })
-        .detach();
-    }
-
     /// Metadata of the selected frozen item (list mode): the command line
     /// when one is known.
     fn selected_frozen_command(&self) -> Option<String> {
@@ -1618,12 +1597,6 @@ impl Render for TerminalPane {
         let show_block_chrome = settings.command_blocks;
 
         let block_list_mode = self.block_list_mode(cx);
-
-        // The tick only repaints the running header's elapsed time; compact
-        // presentation hides headers, so skip it there.
-        if block_list_mode && show_block_chrome && self.in_flight.is_some() {
-            self.schedule_block_tick(cx);
-        }
 
         // Block-split list: native GPUI list owns visibility, clamp, resize
         // anchoring, and tail following.
