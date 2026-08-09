@@ -329,10 +329,11 @@ impl Render for AgentPane {
                                     .ok();
                                 }
                             })
-                            // Clicking the transcript returns keyboard input to
-                            // the composer. Escape still reaches the pane-level
+                            // Selectable transcript text claims focus during
+                            // mouse-down dispatch, so restore the composer on
+                            // release. Escape then reaches the pane-level
                             // interrupt handler through the input.
-                            .on_mouse_down(
+                            .on_mouse_up(
                                 MouseButton::Left,
                                 cx.listener(|this, _, window, cx| {
                                     this.focus(window, cx);
