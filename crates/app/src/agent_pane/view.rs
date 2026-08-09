@@ -38,7 +38,7 @@ impl Render for AgentPane {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let collapse = cx.global::<AppSettings>().collapse_tool_calls;
         let command_palette = self.render_command_palette(cx);
-        let command_feedback = self.command_feedback.as_ref().map(|feedback| {
+        let command_feedback = self.palette.feedback.as_ref().map(|feedback| {
             let (color, label) = match feedback.kind {
                 CommandFeedbackKind::Notice => (cx.theme().primary, "NOTICE"),
                 CommandFeedbackKind::Error => (cx.theme().danger, "ERROR"),
@@ -239,12 +239,13 @@ impl Render for AgentPane {
                     )
                 })
         });
-        let rewind_active = self.rewind_state.is_some();
+        let rewind_active = self.rewind.state.is_some();
         let rewind_processing = self
-            .rewind_state
+            .rewind
+            .state
             .as_ref()
             .is_some_and(|state| !state.is_picker());
-        let session_loading = self.recent_sessions_mode == RecentSessionsMode::Loading;
+        let session_loading = self.history_ui.mode == RecentSessionsMode::Loading;
         let transcript_has_hidden_content_below = self.transcript_has_hidden_content_below();
         let transcript_scrolled_from_top = self.transcript_has_hidden_content_above();
         let background = if cx
@@ -259,9 +260,13 @@ impl Render for AgentPane {
         // Blank tabs expose recent sessions automatically; `/resume` can
         // request the same list after a conversation has started. A count
         // result reserves placeholder rows until the full entries arrive.
-        let history_rows = self.history_pending.unwrap_or(self.history.len());
+        let history_rows = self
+            .history_ui
+            .pending
+            .unwrap_or(self.history_ui.sessions.len());
         let history = self
-            .recent_sessions_mode
+            .history_ui
+            .mode
             .is_visible(self.items.is_empty(), history_rows)
             .then(|| self.render_history(cx));
 
@@ -280,7 +285,8 @@ impl Render for AgentPane {
             // interrupt), while a running turn is interrupted directly.
             .on_action(cx.listener(|this, _: &Escape, _, cx| {
                 if this
-                    .rewind_state
+                    .rewind
+                    .state
                     .as_ref()
                     .is_some_and(RewindState::is_picker)
                 {
@@ -611,11 +617,14 @@ impl AgentPane {
     /// the real rows land; rows render through a virtual list, so hundreds
     /// of persisted sessions cost only the visible ten.
     fn render_history(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let rows = self.history_pending.unwrap_or(self.history.len());
+        let rows = self
+            .history_ui
+            .pending
+            .unwrap_or(self.history_ui.sessions.len());
         let body_height =
             px((Self::HISTORY_ROW_HEIGHT * rows as f32).min(Self::HISTORY_MAX_HEIGHT));
 
-        let body: AnyElement = if self.history_pending.is_some() {
+        let body: AnyElement = if self.history_ui.pending.is_some() {
             // Both loading and loaded bodies use the same explicit viewport
             // height. The virtual list's inferred first-frame measurement
             // must not move the composer when it replaces these placeholders.
@@ -658,7 +667,7 @@ impl AgentPane {
                             // The final page in view is the cue to fetch
                             // the next one (no-op without a cursor, and
                             // only Codex pages from the backend).
-                            if visible_range.end >= this.history.len()
+                            if visible_range.end >= this.history_ui.sessions.len()
                                 && let Some(Backend::Codex(session)) = this.session.as_mut()
                             {
                                 session.request_more_history();
@@ -669,7 +678,7 @@ impl AgentPane {
                                 .collect()
                         },
                     )
-                    .track_scroll(&self.history_scroll)
+                    .track_scroll(&self.history_ui.scroll)
                     .with_sizing_behavior(ListSizingBehavior::Infer),
                 )
                 .child(
@@ -679,7 +688,7 @@ impl AgentPane {
                         .right_0()
                         .bottom_0()
                         .w(px(16.))
-                        .child(Scrollbar::vertical(&self.history_scroll)),
+                        .child(Scrollbar::vertical(&self.history_ui.scroll)),
                 )
                 .into_any_element()
         };
@@ -696,7 +705,7 @@ impl AgentPane {
             .justify_center()
             .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
             .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                this.recent_sessions_mode = RecentSessionsMode::Hidden;
+                this.history_ui.mode = RecentSessionsMode::Hidden;
                 cx.notify();
             }))
             .child(
@@ -725,13 +734,13 @@ impl AgentPane {
     /// One history row: title, branch, and relative time, in the settings
     /// row's ghost-control idiom (small, muted, hover lifts the foreground).
     fn render_history_row(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
-        let Some(session) = self.history.get(index) else {
+        let Some(session) = self.history_ui.sessions.get(index) else {
             return div().into_any_element();
         };
         let hover_bg = cx.theme().muted.opacity(0.4);
-        let selected = self.recent_session_selected == index
+        let selected = self.history_ui.selected == index
             && matches!(
-                self.recent_sessions_mode,
+                self.history_ui.mode,
                 RecentSessionsMode::Automatic | RecentSessionsMode::Open
             )
             && self.input.read(cx).text().len() == 0;
@@ -788,14 +797,14 @@ impl AgentPane {
     }
 
     fn render_composer_status(&self, cx: &mut Context<Self>) -> AnyElement {
-        let branch = self.git_branch.clone().unwrap_or_else(|| {
-            if self.git_branch_ready {
+        let branch = self.git_branch_poll.branch.clone().unwrap_or_else(|| {
+            if self.git_branch_poll.ready {
                 "No Git branch".to_string()
             } else {
                 "Detecting branch…".to_string()
             }
         });
-        let branch_opacity = if self.git_branch.is_some() {
+        let branch_opacity = if self.git_branch_poll.branch.is_some() {
             0.72
         } else {
             0.48

@@ -173,7 +173,7 @@ pub(super) fn composer_action(status: Status) -> ComposerAction {
 
 impl AgentPane {
     pub(super) fn send_user_message(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if rewind_blocks_submission(self.rewind_state.as_ref()) {
+        if rewind_blocks_submission(self.rewind.state.as_ref()) {
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
                 "Finish or cancel the current rewind before sending a message.".to_string(),
@@ -195,12 +195,12 @@ impl AgentPane {
             return;
         }
 
-        reconcile_skill_binding(&text, &mut self.skill_binding);
+        reconcile_skill_binding(&text, &mut self.palette.skill_binding);
         let skill = if self.kind == AgentKind::Codex {
             match validate_skill_binding(
                 &text,
-                self.skill_binding.as_ref(),
-                self.skill_catalog.as_ref(),
+                self.palette.skill_binding.as_ref(),
+                self.palette.skill_catalog.as_ref(),
             ) {
                 Ok(skill) => skill,
                 Err(message) => {
@@ -213,7 +213,7 @@ impl AgentPane {
         };
 
         if self.send_text_with_skill(text, skill.as_ref(), cx) {
-            self.skill_binding = None;
+            self.palette.skill_binding = None;
             self.input
                 .update(cx, |input, cx| input.set_value("", window, cx));
         }
@@ -225,8 +225,8 @@ impl AgentPane {
         if self.submit_slash_input(&input, cx) {
             self.input
                 .update(cx, |input, cx| input.set_value("", window, cx));
-            self.palette_dismissed = false;
-            self.palette_selected = 0;
+            self.palette.dismissed = false;
+            self.palette.selected = 0;
         }
     }
 
@@ -262,7 +262,7 @@ impl AgentPane {
         // composer to `$name`; the slash input itself is never a provider
         // command or an ordinary user turn.
         if command.arguments == SlashCommandArguments::Skills {
-            let message = match self.skill_catalog.as_ref() {
+            let message = match self.palette.skill_catalog.as_ref() {
                 None => "Codex skill discovery is still loading.".to_string(),
                 Some(catalog) if catalog.skills.is_empty() && !catalog.errors.is_empty() => {
                     catalog.errors[0].clone()
@@ -371,13 +371,13 @@ impl AgentPane {
             return match policy {
                 SlashCommandRunPolicy::QueueUntilIdle => {
                     let name = command.name.clone();
-                    self.command_queue.push_back(command);
+                    self.palette.command_queue.push_back(command);
                     self.set_command_feedback(
                         CommandFeedbackKind::Queued,
                         format!(
                             "Queued /{name} ({} command{} waiting).",
-                            self.command_queue.len(),
-                            if self.command_queue.len() == 1 {
+                            self.palette.command_queue.len(),
+                            if self.palette.command_queue.len() == 1 {
                                 ""
                             } else {
                                 "s"
@@ -417,8 +417,8 @@ impl AgentPane {
 
         match outcome {
             SlashCommandOutcome::Accepted => {
-                self.recent_sessions_mode = RecentSessionsMode::Hidden;
-                self.awaiting_command_turn = true;
+                self.history_ui.mode = RecentSessionsMode::Hidden;
+                self.palette.awaiting_command_turn = true;
                 self.set_command_feedback(
                     CommandFeedbackKind::Notice,
                     format!("Starting /{}…", command.name),
@@ -456,12 +456,12 @@ impl AgentPane {
         if self.is_command_busy() {
             return;
         }
-        let Some(command) = self.command_queue.pop_front() else {
+        let Some(command) = self.palette.command_queue.pop_front() else {
             return;
         };
 
         if !self.execute_backend_command(command, cx) {
-            self.command_queue.clear();
+            self.palette.command_queue.clear();
         }
     }
 
@@ -489,11 +489,11 @@ impl AgentPane {
             return false;
         };
 
-        self.rewind_operation_seq = self.rewind_operation_seq.wrapping_add(1);
-        let operation_id = self.rewind_operation_seq;
-        self.rewind_state = Some(RewindState::Loading { operation_id });
-        self.palette_selected = 0;
-        self.palette_dismissed = false;
+        self.rewind.operation_seq = self.rewind.operation_seq.wrapping_add(1);
+        let operation_id = self.rewind.operation_seq;
+        self.rewind.state = Some(RewindState::Loading { operation_id });
+        self.palette.selected = 0;
+        self.palette.dismissed = false;
         self.set_command_feedback(
             CommandFeedbackKind::Notice,
             "Loading Claude rewind checkpoints…".to_string(),
@@ -509,7 +509,7 @@ impl AgentPane {
 
             let _ = this.update(cx, |this, cx| {
                 let is_current = matches!(
-                    &this.rewind_state,
+                    &this.rewind.state,
                     Some(RewindState::Loading {
                         operation_id: current,
                     }) if *current == operation_id
@@ -520,7 +520,7 @@ impl AgentPane {
 
                 match checkpoints {
                     Ok(checkpoints) if checkpoints.is_empty() => {
-                        this.rewind_state = None;
+                        this.rewind.state = None;
                         this.set_command_feedback(
                             CommandFeedbackKind::Error,
                             "This Claude session has no rewindable human prompts.".to_string(),
@@ -528,16 +528,16 @@ impl AgentPane {
                         );
                     }
                     Ok(checkpoints) => {
-                        this.rewind_state = Some(RewindState::SelectingCheckpoint {
+                        this.rewind.state = Some(RewindState::SelectingCheckpoint {
                             operation_id,
                             checkpoints,
                         });
-                        this.command_feedback = None;
-                        this.palette_selected = 0;
+                        this.palette.feedback = None;
+                        this.palette.selected = 0;
                         cx.notify();
                     }
                     Err(message) => {
-                        this.rewind_state = None;
+                        this.rewind.state = None;
                         this.set_command_feedback(CommandFeedbackKind::Error, message, cx);
                     }
                 }
@@ -550,12 +550,13 @@ impl AgentPane {
 
     pub(super) fn cancel_rewind_picker(&mut self, cx: &mut Context<Self>) {
         if self
-            .rewind_state
+            .rewind
+            .state
             .as_ref()
             .is_some_and(RewindState::is_picker)
         {
-            self.rewind_state = None;
-            self.palette_selected = 0;
+            self.rewind.state = None;
+            self.palette.selected = 0;
             self.set_command_feedback(
                 CommandFeedbackKind::Notice,
                 "Rewind cancelled; no files or conversation were changed.".to_string(),
@@ -587,8 +588,8 @@ impl AgentPane {
                 fields.push(format!("{name}={value}"));
             }
         }
-        if !self.command_queue.is_empty() {
-            fields.push(format!("queued={}", self.command_queue.len()));
+        if !self.palette.command_queue.is_empty() {
+            fields.push(format!("queued={}", self.palette.command_queue.len()));
         }
 
         self.set_command_feedback(CommandFeedbackKind::Notice, fields.join(" · "), cx);
@@ -604,9 +605,12 @@ impl AgentPane {
             return false;
         }
 
-        let rows = self.history_pending.unwrap_or(self.history.len());
+        let rows = self
+            .history_ui
+            .pending
+            .unwrap_or(self.history_ui.sessions.len());
         if rows == 0 {
-            self.recent_sessions_mode = RecentSessionsMode::Hidden;
+            self.history_ui.mode = RecentSessionsMode::Hidden;
             self.set_command_feedback(
                 CommandFeedbackKind::Notice,
                 "No recent sessions are available for this folder.".to_string(),
@@ -615,9 +619,9 @@ impl AgentPane {
             return true;
         }
 
-        self.recent_sessions_mode = RecentSessionsMode::Open;
-        self.recent_session_selected = 0;
-        self.command_feedback = None;
+        self.history_ui.mode = RecentSessionsMode::Open;
+        self.history_ui.selected = 0;
+        self.palette.feedback = None;
         cx.notify();
         true
     }
@@ -628,15 +632,15 @@ impl AgentPane {
         message: String,
         cx: &mut Context<Self>,
     ) {
-        self.command_feedback = Some(CommandFeedback { kind, message });
+        self.palette.feedback = Some(CommandFeedback { kind, message });
         cx.notify();
     }
 
     pub(super) fn is_command_busy(&self) -> bool {
         self.status == Status::Running
-            || self.awaiting_command_turn
-            || self.recent_sessions_mode == RecentSessionsMode::Loading
-            || rewind_blocks_submission(self.rewind_state.as_ref())
+            || self.palette.awaiting_command_turn
+            || self.history_ui.mode == RecentSessionsMode::Loading
+            || rewind_blocks_submission(self.rewind.state.as_ref())
     }
 
     pub(super) fn skill_disabled_reason(&self, skill: &SkillInfo) -> Option<String> {
@@ -663,7 +667,11 @@ impl AgentPane {
                 AgentKind::Claude => stream_json::Session::adapter_commands(),
             });
 
-        merge_catalog(local_commands(), adapter, self.provider_commands.clone())
+        merge_catalog(
+            local_commands(),
+            adapter,
+            self.palette.provider_commands.clone(),
+        )
     }
 
     pub(super) fn command_choices(&self, command: &str) -> Vec<(String, String)> {
@@ -688,10 +696,10 @@ impl AgentPane {
     }
 
     pub(super) fn palette_model(&self, cx: &Context<Self>) -> Option<PaletteModel> {
-        if let Some(state) = self.rewind_state.as_ref() {
+        if let Some(state) = self.rewind.state.as_ref() {
             return self.rewind_palette_model(state);
         }
-        if self.palette_dismissed {
+        if self.palette.dismissed {
             return None;
         }
 
@@ -706,7 +714,7 @@ impl AgentPane {
 
             if command.arguments == SlashCommandArguments::Skills {
                 let query = parsed.arguments.trim().to_ascii_lowercase();
-                let Some(skill_catalog) = self.skill_catalog.as_ref() else {
+                let Some(skill_catalog) = self.palette.skill_catalog.as_ref() else {
                     return Some(PaletteModel {
                         rows: Vec::new(),
                         note: Some("Codex skill discovery is still loading".to_string()),
@@ -779,7 +787,8 @@ impl AgentPane {
         }
 
         let skills: &[SkillInfo] = if self.kind == AgentKind::Codex {
-            self.skill_catalog
+            self.palette
+                .skill_catalog
                 .as_ref()
                 .map(|catalog| catalog.skills.as_slice())
                 .unwrap_or_default()
@@ -824,15 +833,17 @@ impl AgentPane {
             })
             .collect::<Vec<_>>();
         let note = if rows.is_empty() {
-            if self.kind == AgentKind::Codex && self.skill_catalog.is_none() {
+            if self.kind == AgentKind::Codex && self.palette.skill_catalog.is_none() {
                 Some("Codex skill discovery is still loading".to_string())
             } else if self.kind == AgentKind::Codex
                 && self
+                    .palette
                     .skill_catalog
                     .as_ref()
                     .is_some_and(|catalog| !catalog.errors.is_empty())
             {
-                self.skill_catalog
+                self.palette
+                    .skill_catalog
                     .as_ref()
                     .and_then(|catalog| catalog.errors.first().cloned())
             } else if self.kind == AgentKind::Codex {
@@ -840,12 +851,13 @@ impl AgentPane {
             } else {
                 Some("No matching commands".to_string())
             }
-        } else if self.kind == AgentKind::Claude && !self.provider_commands_ready {
+        } else if self.kind == AgentKind::Claude && !self.palette.provider_commands_ready {
             Some("Claude command discovery is still loading".to_string())
-        } else if self.kind == AgentKind::Codex && self.skill_catalog.is_none() {
+        } else if self.kind == AgentKind::Codex && self.palette.skill_catalog.is_none() {
             Some("Codex skill discovery is still loading".to_string())
         } else if self.kind == AgentKind::Codex {
-            self.skill_catalog
+            self.palette
+                .skill_catalog
                 .as_ref()
                 .and_then(|catalog| catalog.errors.first())
                 .map(|error| format!("Some skills could not be loaded: {error}"))
@@ -985,10 +997,10 @@ impl AgentPane {
                 };
 
                 if let Some(selected) =
-                    move_palette_selection(self.palette_selected, model.rows.len(), direction)
+                    move_palette_selection(self.palette.selected, model.rows.len(), direction)
                 {
-                    self.palette_selected = selected;
-                    self.palette_scroll.scroll_to_item(self.palette_selected);
+                    self.palette.selected = selected;
+                    self.palette.scroll.scroll_to_item(self.palette.selected);
                     cx.notify();
                 }
             }
@@ -996,11 +1008,11 @@ impl AgentPane {
                 if model.rows.is_empty() {
                     self.submit_current_slash(window, cx);
                 } else {
-                    self.activate_palette_index(self.palette_selected, true, window, cx);
+                    self.activate_palette_index(self.palette.selected, true, window, cx);
                 }
             }
             PaletteControl::Complete => {
-                self.activate_palette_index(self.palette_selected, false, window, cx);
+                self.activate_palette_index(self.palette.selected, false, window, cx);
             }
             PaletteControl::Dismiss => {
                 self.dismiss_command_palette(cx);
@@ -1010,13 +1022,14 @@ impl AgentPane {
 
     fn dismiss_command_palette(&mut self, cx: &mut Context<Self>) {
         if self
-            .rewind_state
+            .rewind
+            .state
             .as_ref()
             .is_some_and(RewindState::is_picker)
         {
             self.cancel_rewind_picker(cx);
         } else {
-            self.palette_dismissed = true;
+            self.palette.dismissed = true;
             cx.notify();
         }
     }
@@ -1030,11 +1043,11 @@ impl AgentPane {
             return false;
         }
 
-        let rows = self.history_pending.unwrap_or(self.history.len());
-        if !self
-            .recent_sessions_mode
-            .is_visible(self.items.is_empty(), rows)
-        {
+        let rows = self
+            .history_ui
+            .pending
+            .unwrap_or(self.history_ui.sessions.len());
+        if !self.history_ui.mode.is_visible(self.items.is_empty(), rows) {
             return false;
         }
 
@@ -1049,21 +1062,22 @@ impl AgentPane {
                 };
 
                 if let Some(selected) = move_palette_selection(
-                    self.recent_session_selected,
-                    self.history.len(),
+                    self.history_ui.selected,
+                    self.history_ui.sessions.len(),
                     direction,
                 ) {
-                    self.recent_session_selected = selected;
-                    self.history_scroll
+                    self.history_ui.selected = selected;
+                    self.history_ui
+                        .scroll
                         .scroll_to_item(selected, ScrollStrategy::Nearest);
                     cx.notify();
                 }
             }
             PaletteControl::Activate => {
-                self.resume_session(self.recent_session_selected, cx);
+                self.resume_session(self.history_ui.selected, cx);
             }
             PaletteControl::Dismiss => {
-                self.recent_sessions_mode = RecentSessionsMode::Hidden;
+                self.history_ui.mode = RecentSessionsMode::Hidden;
                 cx.notify();
             }
             PaletteControl::Complete => unreachable!(),
@@ -1118,24 +1132,24 @@ impl AgentPane {
                     input.set_value(text.clone(), window, cx);
                     input.set_selected_range(text.len()..text.len(), cx);
                 });
-                self.skill_binding = Some(binding);
-                self.palette_selected = 0;
-                self.palette_dismissed = true;
+                self.palette.skill_binding = Some(binding);
+                self.palette.selected = 0;
+                self.palette.dismissed = true;
                 cx.notify();
                 return;
             }
             PaletteAction::RewindCheckpoint(checkpoint) => {
-                let Some(operation_id) = self.rewind_state.as_ref().and_then(|state| match state {
+                let Some(operation_id) = self.rewind.state.as_ref().and_then(|state| match state {
                     RewindState::SelectingCheckpoint { operation_id, .. } => Some(*operation_id),
                     _ => None,
                 }) else {
                     return;
                 };
-                self.rewind_state = Some(RewindState::SelectingAction {
+                self.rewind.state = Some(RewindState::SelectingAction {
                     operation_id,
                     checkpoint,
                 });
-                self.palette_selected = 0;
+                self.palette.selected = 0;
                 cx.notify();
                 return;
             }
@@ -1149,7 +1163,7 @@ impl AgentPane {
             input.set_value(text.clone(), window, cx);
             input.set_selected_range(text.len()..text.len(), cx);
         });
-        self.palette_selected = 0;
+        self.palette.selected = 0;
 
         if execute && can_execute {
             self.submit_current_slash(window, cx);
@@ -1170,7 +1184,7 @@ impl AgentPane {
         }
 
         let Some((operation_id, checkpoint)) =
-            self.rewind_state.as_ref().and_then(|state| match state {
+            self.rewind.state.as_ref().and_then(|state| match state {
                 RewindState::SelectingAction {
                     operation_id,
                     checkpoint,
@@ -1235,8 +1249,8 @@ impl AgentPane {
         }
 
         let (completion_tx, completion_rx) = oneshot::channel();
-        self.rewind_file_completion = Some(completion_tx);
-        self.rewind_state = Some(RewindState::RestoringFiles { operation_id });
+        self.rewind.file_completion = Some(completion_tx);
+        self.rewind.state = Some(RewindState::RestoringFiles { operation_id });
         self.set_command_feedback(
             CommandFeedbackKind::Notice,
             if continue_with_fork {
@@ -1253,7 +1267,7 @@ impl AgentPane {
             });
 
             let _ = this.update_in(cx, |this, window, cx| {
-                let is_current = this.rewind_state.as_ref().is_some_and(|state| {
+                let is_current = this.rewind.state.as_ref().is_some_and(|state| {
                     state.has_operation(operation_id)
                         && matches!(state, RewindState::RestoringFiles { .. })
                 });
@@ -1270,7 +1284,7 @@ impl AgentPane {
                         cx,
                     ),
                     FileRestoreNext::Complete => {
-                        this.rewind_state = None;
+                        this.rewind.state = None;
                         this.set_command_feedback(
                             CommandFeedbackKind::Notice,
                             "Files restored. The conversation and session id were not changed."
@@ -1279,11 +1293,11 @@ impl AgentPane {
                         );
                     }
                     FileRestoreNext::RetryAction(message) => {
-                        this.rewind_state = Some(RewindState::SelectingAction {
+                        this.rewind.state = Some(RewindState::SelectingAction {
                             operation_id,
                             checkpoint,
                         });
-                        this.palette_selected = 0;
+                        this.palette.selected = 0;
                         this.set_command_feedback(
                             CommandFeedbackKind::Error,
                             if continue_with_fork {
@@ -1316,7 +1330,7 @@ impl AgentPane {
             .and_then(Backend::session_id)
             .map(str::to_owned)
         else {
-            self.rewind_state = Some(RewindState::SelectingAction {
+            self.rewind.state = Some(RewindState::SelectingAction {
                 operation_id,
                 checkpoint,
             });
@@ -1335,7 +1349,7 @@ impl AgentPane {
 
         let cwd = self.cwd.clone();
         let user_message_id = checkpoint.user_message_id.clone();
-        self.rewind_state = Some(RewindState::ForkingConversation { operation_id });
+        self.rewind.state = Some(RewindState::ForkingConversation { operation_id });
         self.set_command_feedback(
             CommandFeedbackKind::Notice,
             "Creating an independent Claude conversation prefix…".to_string(),
@@ -1349,7 +1363,7 @@ impl AgentPane {
             let result = fork.await;
 
             let _ = this.update_in(cx, |this, window, cx| {
-                let is_current = this.rewind_state.as_ref().is_some_and(|state| {
+                let is_current = this.rewind.state.as_ref().is_some_and(|state| {
                     state.has_operation(operation_id)
                         && matches!(state, RewindState::ForkingConversation { .. })
                 });
@@ -1366,7 +1380,7 @@ impl AgentPane {
                         cx,
                     ),
                     Err(message) => {
-                        this.rewind_state = None;
+                        this.rewind.state = None;
                         this.set_command_feedback(
                             CommandFeedbackKind::Error,
                             if files_restored {
@@ -1395,19 +1409,19 @@ impl AgentPane {
     ) {
         self.session = None;
         self.clear_conversation_presentation();
-        self.skill_catalog = None;
-        self.skill_binding = None;
+        self.palette.skill_catalog = None;
+        self.palette.skill_binding = None;
         reset_command_runtime(
             false,
             &mut self.pending_approval,
-            &mut self.provider_commands,
-            &mut self.provider_commands_ready,
-            &mut self.command_queue,
-            &mut self.awaiting_command_turn,
-            &mut self.palette_selected,
-            &mut self.palette_dismissed,
+            &mut self.palette.provider_commands,
+            &mut self.palette.provider_commands_ready,
+            &mut self.palette.command_queue,
+            &mut self.palette.awaiting_command_turn,
+            &mut self.palette.selected,
+            &mut self.palette.dismissed,
         );
-        self.recent_sessions_mode = RecentSessionsMode::Hidden;
+        self.history_ui.mode = RecentSessionsMode::Hidden;
 
         self.apply_replay(fork.replay, cx);
         self.input.update(cx, |input, cx| {
@@ -1445,7 +1459,8 @@ impl AgentPane {
     pub(super) fn render_command_palette(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let model = self.palette_model(cx)?;
         let selected = self
-            .palette_selected
+            .palette
+            .selected
             .min(model.rows.len().saturating_sub(1));
         let rows = model
             .rows
@@ -1517,7 +1532,7 @@ impl AgentPane {
                 .w_full()
                 .max_h(px(9. * 48. + 36.))
                 .overflow_y_scroll()
-                .track_scroll(&self.palette_scroll)
+                .track_scroll(&self.palette.scroll)
                 .p_1()
                 .rounded(UI_RADIUS)
                 .border_1()

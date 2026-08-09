@@ -102,6 +102,79 @@ impl RecentSessionsMode {
     }
 }
 
+/// Rewind is a local multi-step operation, not a model turn. Keeping its
+/// state separate prevents timers, transcript rows, and slash queues from
+/// treating file restoration or session forking as provider output.
+#[derive(Default)]
+struct RewindFlow {
+    state: Option<RewindState>,
+    operation_seq: u64,
+    file_completion: Option<oneshot::Sender<Result<(), String>>>,
+}
+
+/// Background-refreshed git branch of the pane's working directory.
+#[derive(Default)]
+struct GitBranchPoll {
+    branch: Option<String>,
+    ready: bool,
+    refreshing: bool,
+}
+
+/// Recent-session list shown above the composer.
+struct SessionHistoryUi {
+    /// Resumable sessions for this cwd, newest first; shown above the
+    /// composer while the transcript is empty.
+    sessions: Vec<SessionSummary>,
+    /// Set between the cheap count pass and the title-parsing pass: the list
+    /// reserves its final height with this many placeholder rows, so the
+    /// composer doesn't jump when real rows land.
+    pending: Option<usize>,
+    /// Blank conversations show the list automatically; `/resume` can reopen
+    /// the same list after a conversation has started.
+    mode: RecentSessionsMode,
+    selected: usize,
+    /// Claude replay is loaded before process replacement and published only
+    /// after the resumed process confirms readiness.
+    pending_resume_replay: Option<Vec<SessionItem>>,
+    scroll: VirtualListScrollHandle,
+}
+
+impl Default for SessionHistoryUi {
+    fn default() -> Self {
+        Self {
+            sessions: Vec::new(),
+            pending: None,
+            mode: RecentSessionsMode::Automatic,
+            selected: 0,
+            pending_resume_replay: None,
+            scroll: VirtualListScrollHandle::new(),
+        }
+    }
+}
+
+/// Slash-command palette, skill picker, and pending-command state.
+#[derive(Default)]
+struct SlashPalette {
+    /// Provider discovery is a replacement snapshot; adapter/local entries
+    /// remain available independently of whether discovery has arrived.
+    provider_commands: Vec<SlashCommandInfo>,
+    provider_commands_ready: bool,
+    /// `None` means Codex discovery is still loading. A populated catalog can
+    /// contain both usable skills and non-fatal per-file errors.
+    skill_catalog: Option<SkillCatalog>,
+    /// Exact picker identity retained while the composer keeps its `$name`
+    /// token. It is validated against `skill_catalog` before every send.
+    skill_binding: Option<SkillReference>,
+    selected: usize,
+    dismissed: bool,
+    scroll: ScrollHandle,
+    feedback: Option<CommandFeedback>,
+    command_queue: VecDeque<PendingSlashCommand>,
+    /// An accepted backend command starts the progress clock only after the
+    /// protocol reports a real turn, not when the request is written.
+    awaiting_command_turn: bool,
+}
+
 pub(crate) struct AgentPane {
     pub(crate) focus: FocusHandle,
     agent_route: AgentRoute,
@@ -133,21 +206,7 @@ pub(crate) struct AgentPane {
     /// new one or report a bogus exit.
     session_epoch: u64,
     status: Status,
-    /// Resumable sessions for this cwd, newest first; shown above the
-    /// composer while the transcript is empty.
-    history: Vec<SessionSummary>,
-    /// Set between the cheap count pass and the title-parsing pass: the list
-    /// reserves its final height with this many placeholder rows, so the
-    /// composer doesn't jump when real rows land.
-    history_pending: Option<usize>,
-    /// Blank conversations show the list automatically; `/resume` can reopen
-    /// the same list after a conversation has started.
-    recent_sessions_mode: RecentSessionsMode,
-    recent_session_selected: usize,
-    /// Claude replay is loaded before process replacement and published only
-    /// after the resumed process confirms readiness.
-    pending_resume_replay: Option<Vec<SessionItem>>,
-    history_scroll: VirtualListScrollHandle,
+    history_ui: SessionHistoryUi,
     /// Description of the approval request blocking the turn, shown as the
     /// card above the input; the request id lives in the session.
     pending_approval: Option<String>,
@@ -189,36 +248,12 @@ pub(crate) struct AgentPane {
     /// "Working for Ns" row renders at the transcript end; cleared into a
     /// permanent "Worked for Ns" fold header when the turn completes.
     working_started: Option<Instant>,
-    /// Provider discovery is a replacement snapshot; adapter/local entries
-    /// remain available independently of whether discovery has arrived.
-    provider_commands: Vec<SlashCommandInfo>,
-    provider_commands_ready: bool,
-    /// `None` means Codex discovery is still loading. A populated catalog can
-    /// contain both usable skills and non-fatal per-file errors.
-    skill_catalog: Option<SkillCatalog>,
-    /// Exact picker identity retained while the composer keeps its `$name`
-    /// token. It is validated against `skill_catalog` before every send.
-    skill_binding: Option<SkillReference>,
-    palette_selected: usize,
-    palette_dismissed: bool,
-    palette_scroll: ScrollHandle,
-    command_feedback: Option<CommandFeedback>,
+    palette: SlashPalette,
     /// Mid-turn inputs stay near the composer until provider activity confirms
     /// they have joined the running response.
     queued_user_messages: VecDeque<String>,
-    command_queue: VecDeque<PendingSlashCommand>,
-    /// An accepted backend command starts the progress clock only after the
-    /// protocol reports a real turn, not when the request is written.
-    awaiting_command_turn: bool,
-    /// Rewind is a local multi-step operation, not a model turn. Keeping its
-    /// state separate prevents timers, transcript rows, and slash queues from
-    /// treating file restoration or session forking as provider output.
-    rewind_state: Option<RewindState>,
-    rewind_operation_seq: u64,
-    rewind_file_completion: Option<oneshot::Sender<Result<(), String>>>,
-    git_branch: Option<String>,
-    git_branch_ready: bool,
-    git_branch_refreshing: bool,
+    rewind: RewindFlow,
+    git_branch_poll: GitBranchPoll,
     context_window_usage: Option<ContextWindowUsage>,
     /// The backend is compacting the conversation. Turn output pauses for the
     /// duration, so the live progress row explains the wait instead of leaving
