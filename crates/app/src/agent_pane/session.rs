@@ -182,16 +182,17 @@ impl AgentPane {
                 this.send_user_message(window, cx);
             } else if matches!(event, InputEvent::Change) {
                 let text = this.input.read(cx).text().to_string();
-                reconcile_skill_binding(&text, &mut this.skill_binding);
-                this.palette_selected = 0;
-                this.palette_dismissed = false;
+                reconcile_skill_binding(&text, &mut this.palette.skill_binding);
+                this.palette.selected = 0;
+                this.palette.dismissed = false;
                 if !matches!(
-                    this.command_feedback
+                    this.palette
+                        .feedback
                         .as_ref()
                         .map(|feedback| &feedback.kind),
                     Some(CommandFeedbackKind::Queued)
                 ) {
-                    this.command_feedback = None;
+                    this.palette.feedback = None;
                 }
                 cx.notify();
             }
@@ -221,12 +222,7 @@ impl AgentPane {
             session: None,
             session_epoch: 0,
             status: Status::Starting,
-            history: Vec::new(),
-            history_pending: None,
-            recent_sessions_mode: RecentSessionsMode::Automatic,
-            recent_session_selected: 0,
-            pending_resume_replay: None,
-            history_scroll: VirtualListScrollHandle::new(),
+            history_ui: SessionHistoryUi::default(),
             pending_approval: None,
             settings: ThreadSettings::default(),
             seed_thread_defaults: true,
@@ -239,23 +235,13 @@ impl AgentPane {
             virtual_transcripts: HashMap::new(),
             turn_seq: 0,
             working_started: None,
-            provider_commands: Vec::new(),
-            provider_commands_ready: kind == AgentKind::Codex,
-            skill_catalog: None,
-            skill_binding: None,
-            palette_selected: 0,
-            palette_dismissed: false,
-            palette_scroll: ScrollHandle::new(),
-            command_feedback: None,
+            palette: SlashPalette {
+                provider_commands_ready: kind == AgentKind::Codex,
+                ..SlashPalette::default()
+            },
             queued_user_messages: VecDeque::new(),
-            command_queue: VecDeque::new(),
-            awaiting_command_turn: false,
-            rewind_state: None,
-            rewind_operation_seq: 0,
-            rewind_file_completion: None,
-            git_branch: None,
-            git_branch_ready: false,
-            git_branch_refreshing: false,
+            rewind: RewindFlow::default(),
+            git_branch_poll: GitBranchPoll::default(),
             context_window_usage: None,
             compacting: false,
             update_suspension: None,
@@ -304,7 +290,7 @@ impl AgentPane {
 
                 let proceed = this
                     .update(cx, |this, cx| {
-                        this.history_pending = Some(count);
+                        this.history_ui.pending = Some(count);
                         cx.notify();
 
                         count > 0
@@ -330,8 +316,8 @@ impl AgentPane {
                 let sessions = load.await;
 
                 let _ = this.update(cx, |this, cx| {
-                    this.history = sessions;
-                    this.history_pending = None;
+                    this.history_ui.sessions = sessions;
+                    this.history_ui.pending = None;
                     cx.notify();
                 });
             })
@@ -346,7 +332,7 @@ impl AgentPane {
     }
 
     pub(super) fn refresh_git_branch(&mut self, cx: &mut Context<Self>) {
-        if self.git_branch_refreshing {
+        if self.git_branch_poll.refreshing {
             return;
         }
 
@@ -355,12 +341,12 @@ impl AgentPane {
                 .ok()
                 .map(|path| path.to_string_lossy().to_string())
         }) else {
-            self.git_branch = None;
-            self.git_branch_ready = true;
+            self.git_branch_poll.branch = None;
+            self.git_branch_poll.ready = true;
             return;
         };
 
-        self.git_branch_refreshing = true;
+        self.git_branch_poll.refreshing = true;
 
         let fetch = cx
             .background_executor()
@@ -370,9 +356,9 @@ impl AgentPane {
             let branch = fetch.await;
 
             this.update(cx, |this, cx| {
-                this.git_branch = branch;
-                this.git_branch_ready = true;
-                this.git_branch_refreshing = false;
+                this.git_branch_poll.branch = branch;
+                this.git_branch_poll.ready = true;
+                this.git_branch_poll.refreshing = false;
                 cx.notify();
             })
             .ok();
@@ -455,8 +441,8 @@ impl AgentPane {
         // associated with the previous backend before the new epoch can emit.
         cx.emit(AgentPaneEvent::Interrupted);
         self.session_epoch = next_session_epoch(self.session_epoch);
-        self.skill_catalog = None;
-        self.skill_binding = None;
+        self.palette.skill_catalog = None;
+        self.palette.skill_binding = None;
         let epoch = self.session_epoch;
 
         let (tx, mut rx) = mpsc::unbounded::<Value>();
@@ -556,9 +542,9 @@ impl AgentPane {
                                 "{name} exited before the conversation was restored."
                             )));
                         }
-                        this.awaiting_command_turn = false;
-                        if !this.command_queue.is_empty() {
-                            this.command_queue.clear();
+                        this.palette.awaiting_command_turn = false;
+                        if !this.palette.command_queue.is_empty() {
+                            this.palette.command_queue.clear();
                             this.set_command_feedback(
                                 CommandFeedbackKind::Error,
                                 format!("Queued commands were cancelled because {name} exited."),
@@ -581,8 +567,8 @@ impl AgentPane {
             Err(err) => {
                 cx.emit(AgentPaneEvent::Interrupted);
                 self.status = Status::Exited;
-                self.awaiting_command_turn = false;
-                self.command_queue.clear();
+                self.palette.awaiting_command_turn = false;
+                self.palette.command_queue.clear();
                 self.queued_user_messages.clear();
                 self.items.push(Entry {
                     at: Local::now().format("%H:%M").to_string(),
@@ -622,10 +608,10 @@ impl AgentPane {
         }
         if matches!(self.status, Status::Starting | Status::Running)
             || self.pending_approval.is_some()
-            || self.awaiting_command_turn
-            || !self.command_queue.is_empty()
+            || self.palette.awaiting_command_turn
+            || !self.palette.command_queue.is_empty()
             || !self.queued_user_messages.is_empty()
-            || self.rewind_state.is_some()
+            || self.rewind.state.is_some()
             || self.compacting
             || self
                 .session
@@ -679,15 +665,16 @@ impl AgentPane {
         } else {
             self.interrupt(cx);
         }
-        self.command_queue.clear();
-        self.awaiting_command_turn = false;
+        self.palette.command_queue.clear();
+        self.palette.awaiting_command_turn = false;
         self.publish_queued_user_messages(cx);
         if self
-            .rewind_state
+            .rewind
+            .state
             .as_ref()
             .is_some_and(RewindState::is_picker)
         {
-            self.rewind_state = None;
+            self.rewind.state = None;
         }
         self.compacting = false;
         self.update_suspension = Some(UpdateSuspension::Waiting);
@@ -813,7 +800,7 @@ impl AgentPane {
         skill: Option<&SkillReference>,
         cx: &mut Context<Self>,
     ) -> bool {
-        if rewind_blocks_submission(self.rewind_state.as_ref()) {
+        if rewind_blocks_submission(self.rewind.state.as_ref()) {
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
                 "Finish or cancel the current rewind before sending a message.".to_string(),
@@ -821,7 +808,7 @@ impl AgentPane {
             );
             return false;
         }
-        if self.awaiting_command_turn {
+        if self.palette.awaiting_command_turn {
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
                 "A command is starting; wait for its turn to begin.".to_string(),
@@ -851,7 +838,7 @@ impl AgentPane {
 
         // The first message commits this tab to its conversation; the
         // history list is no longer offered.
-        self.recent_sessions_mode = RecentSessionsMode::Hidden;
+        self.history_ui.mode = RecentSessionsMode::Hidden;
 
         match outcome {
             SendOutcome::StartedTurn => {
@@ -882,9 +869,9 @@ impl AgentPane {
         self.compacting = false;
         self.context_window_usage = None;
         self.queued_user_messages.clear();
-        self.rewind_state = None;
-        self.rewind_file_completion = None;
-        self.pending_resume_replay = None;
+        self.rewind.state = None;
+        self.rewind.file_completion = None;
+        self.history_ui.pending_resume_replay = None;
     }
 
     pub(super) fn reset_conversation(&mut self, cx: &mut Context<Self>) {
@@ -894,20 +881,20 @@ impl AgentPane {
         self.clear_conversation_presentation();
         self.settings = ThreadSettings::default();
         self.models.clear();
-        self.skill_catalog = None;
-        self.skill_binding = None;
+        self.palette.skill_catalog = None;
+        self.palette.skill_binding = None;
         reset_command_runtime(
             self.kind == AgentKind::Codex,
             &mut self.pending_approval,
-            &mut self.provider_commands,
-            &mut self.provider_commands_ready,
-            &mut self.command_queue,
-            &mut self.awaiting_command_turn,
-            &mut self.palette_selected,
-            &mut self.palette_dismissed,
+            &mut self.palette.provider_commands,
+            &mut self.palette.provider_commands_ready,
+            &mut self.palette.command_queue,
+            &mut self.palette.awaiting_command_turn,
+            &mut self.palette.selected,
+            &mut self.palette.dismissed,
         );
-        self.command_feedback = None;
-        self.recent_sessions_mode = RecentSessionsMode::Hidden;
+        self.palette.feedback = None;
+        self.history_ui.mode = RecentSessionsMode::Hidden;
 
         // History records belong to the provider and remain intact; only the
         // live backend and this tab's conversation presentation are reset.
@@ -976,12 +963,12 @@ impl AgentPane {
     pub(super) fn apply_event(&mut self, event: SessionEvent, cx: &mut Context<Self>) {
         match event {
             SessionEvent::Ready(settings) => {
-                if self.recent_sessions_mode == RecentSessionsMode::Loading
-                    && let Some(replay) = self.pending_resume_replay.take()
+                if self.history_ui.mode == RecentSessionsMode::Loading
+                    && let Some(replay) = self.history_ui.pending_resume_replay.take()
                 {
                     self.clear_conversation_presentation();
-                    self.recent_sessions_mode = RecentSessionsMode::Hidden;
-                    self.command_feedback = None;
+                    self.history_ui.mode = RecentSessionsMode::Hidden;
+                    self.palette.feedback = None;
                     self.apply_replay(replay, cx);
                 }
 
@@ -1060,14 +1047,14 @@ impl AgentPane {
                 cx.notify();
             }
             SessionEvent::Commands(commands) => {
-                self.provider_commands = commands;
-                self.provider_commands_ready = true;
-                self.palette_selected = 0;
+                self.palette.provider_commands = commands;
+                self.palette.provider_commands_ready = true;
+                self.palette.selected = 0;
                 cx.notify();
             }
             SessionEvent::Skills(catalog) => {
-                self.skill_catalog = Some(catalog);
-                self.palette_selected = 0;
+                self.palette.skill_catalog = Some(catalog);
+                self.palette.selected = 0;
                 cx.notify();
             }
             SessionEvent::SlashCommandResult { name, outcome } => match outcome {
@@ -1084,18 +1071,18 @@ impl AgentPane {
                         message.unwrap_or_else(|| format!("/{name} completed.")),
                         cx,
                     );
-                    if self.awaiting_command_turn && self.status != Status::Running {
-                        self.awaiting_command_turn = false;
+                    if self.palette.awaiting_command_turn && self.status != Status::Running {
+                        self.palette.awaiting_command_turn = false;
                         self.run_next_queued_command(cx);
                     }
                 }
                 SlashCommandOutcome::Rejected { message } => {
-                    self.awaiting_command_turn = false;
+                    self.palette.awaiting_command_turn = false;
                     self.set_command_feedback(CommandFeedbackKind::Error, message, cx);
                     self.run_next_queued_command(cx);
                 }
                 SlashCommandOutcome::NotReady => {
-                    self.awaiting_command_turn = false;
+                    self.palette.awaiting_command_turn = false;
                     self.set_command_feedback(
                         CommandFeedbackKind::Error,
                         format!("{} is not ready.", self.kind.display()),
@@ -1105,7 +1092,7 @@ impl AgentPane {
                 }
             },
             SessionEvent::TurnStarted => {
-                if claim_command_turn_start(&mut self.awaiting_command_turn) {
+                if claim_command_turn_start(&mut self.palette.awaiting_command_turn) {
                     self.turn_seq += 1;
                     self.start_working(cx);
                 }
@@ -1118,7 +1105,7 @@ impl AgentPane {
                     .clone()
                     .or_else(|| self.latest_agent_message().map(str::to_owned))
                     .unwrap_or_else(|| format!("{} completed the turn", self.kind.display()));
-                self.awaiting_command_turn = false;
+                self.palette.awaiting_command_turn = false;
                 // Compaction lives inside a turn; a flag surviving the turn
                 // would leave the indicator spinning with nothing behind it.
                 self.compacting = false;
@@ -1200,16 +1187,16 @@ impl AgentPane {
             }
             SessionEvent::FileRewindCompleted { error } => {
                 let result = error.map_or(Ok(()), Err);
-                if let Some(completion) = self.rewind_file_completion.take() {
+                if let Some(completion) = self.rewind.file_completion.take() {
                     let _ = completion.send(result);
                 } else {
                     warn!("received a Claude file rewind result with no pending UI operation");
                 }
             }
             SessionEvent::Error { message, fatal } => {
-                if self.recent_sessions_mode == RecentSessionsMode::Loading {
-                    self.recent_sessions_mode = RecentSessionsMode::Open;
-                    self.pending_resume_replay = None;
+                if self.history_ui.mode == RecentSessionsMode::Loading {
+                    self.history_ui.mode = RecentSessionsMode::Open;
+                    self.history_ui.pending_resume_replay = None;
                     if !fatal {
                         self.status = Status::Idle;
                     }
@@ -1222,15 +1209,15 @@ impl AgentPane {
                 if fatal && matches!(self.update_suspension, Some(UpdateSuspension::Reconnecting)) {
                     self.update_suspension = Some(UpdateSuspension::Failed(message.clone()));
                 }
-                let cancelled_queue = fatal && !self.command_queue.is_empty();
+                let cancelled_queue = fatal && !self.palette.command_queue.is_empty();
                 if fatal {
                     cx.emit(AgentPaneEvent::Interrupted);
                     self.status = Status::Exited;
-                    self.awaiting_command_turn = false;
-                    self.command_queue.clear();
+                    self.palette.awaiting_command_turn = false;
+                    self.palette.command_queue.clear();
                     self.publish_queued_user_messages(cx);
-                } else if self.awaiting_command_turn {
-                    self.awaiting_command_turn = false;
+                } else if self.palette.awaiting_command_turn {
+                    self.palette.awaiting_command_turn = false;
                 }
                 self.push(SessionItem::Error { text: message }, cx);
                 if cancelled_queue {
@@ -1249,20 +1236,21 @@ impl AgentPane {
                 // the first page again, so ids are deduplicated in place.
                 for session in sessions {
                     if !self
-                        .history
+                        .history_ui
+                        .sessions
                         .iter()
                         .any(|existing| existing.id == session.id)
                     {
-                        self.history.push(session);
+                        self.history_ui.sessions.push(session);
                     }
                 }
                 cx.notify();
             }
             SessionEvent::Replay(items) => {
-                if self.recent_sessions_mode == RecentSessionsMode::Loading {
+                if self.history_ui.mode == RecentSessionsMode::Loading {
                     self.clear_conversation_presentation();
-                    self.recent_sessions_mode = RecentSessionsMode::Hidden;
-                    self.command_feedback = None;
+                    self.history_ui.mode = RecentSessionsMode::Hidden;
+                    self.palette.feedback = None;
                 }
                 self.apply_replay(items, cx);
             }
@@ -1292,19 +1280,19 @@ impl AgentPane {
     /// Resume the picked history entry without discarding the visible
     /// conversation until the target confirms it can be opened.
     pub(super) fn resume_session(&mut self, index: usize, cx: &mut Context<Self>) {
-        let Some(summary) = self.history.get(index) else {
+        let Some(summary) = self.history_ui.sessions.get(index) else {
             return;
         };
         let id = summary.id.clone();
 
-        if self.recent_sessions_mode == RecentSessionsMode::Loading {
+        if self.history_ui.mode == RecentSessionsMode::Loading {
             return;
         }
 
         let previous_status = self.status;
-        self.recent_sessions_mode = RecentSessionsMode::Loading;
-        self.recent_session_selected = index;
-        self.pending_resume_replay = None;
+        self.history_ui.mode = RecentSessionsMode::Loading;
+        self.history_ui.selected = index;
+        self.history_ui.pending_resume_replay = None;
         self.status = Status::Starting;
         // The resumed thread's own settings are authoritative; the remembered
         // per-kind defaults must not overwrite them on the next Ready.
@@ -1320,7 +1308,7 @@ impl AgentPane {
                 if let Some(Backend::Codex(session)) = self.session.as_mut() {
                     session.resume_thread(&id);
                 } else {
-                    self.recent_sessions_mode = RecentSessionsMode::Open;
+                    self.history_ui.mode = RecentSessionsMode::Open;
                     self.status = previous_status;
                     self.set_command_feedback(
                         CommandFeedbackKind::Error,
@@ -1341,16 +1329,16 @@ impl AgentPane {
                         .await;
 
                     let _ = this.update(cx, |this, cx| {
-                        if this.recent_sessions_mode != RecentSessionsMode::Loading
-                            || this.recent_session_selected != selected
+                        if this.history_ui.mode != RecentSessionsMode::Loading
+                            || this.history_ui.selected != selected
                         {
                             return;
                         }
 
                         if this.start_session(Some(id), cx) {
-                            this.pending_resume_replay = Some(replay);
+                            this.history_ui.pending_resume_replay = Some(replay);
                         } else {
-                            this.recent_sessions_mode = RecentSessionsMode::Open;
+                            this.history_ui.mode = RecentSessionsMode::Open;
                         }
                     });
                 })
