@@ -20,8 +20,7 @@ members = [
     "crates/remote_session_hub",
     "crates/shell_extension",
     "crates/terminal",
-    "crates/themes",
-
+    
     "third_party/libghostty-vt-sys",
 
     # GPUI fork
@@ -76,7 +75,6 @@ nmt_remote_net = { path = "crates/remote_net" }
 nmt_remote_protocol = { path = "crates/remote_protocol" }
 nmt_remote_session_hub = { path = "crates/remote_session_hub" }
 nmt_terminal = { path = "crates/terminal" }
-nmt_themes = { path = "crates/themes" }
 
 # Remote session wire protocol
 base32 = "0.5"
@@ -305,7 +303,6 @@ image_rs = { package = "image", version = "0.25.10", default-features = false, f
     "bmp",
 ] }
 regex = "1.12.4"
-onig = { version = "6.5.3", default-features = false }
 bytemuck = { version = "1.25.0", default-features = false, features = ["derive"] }
 serde = { version = "1.0.228", features = ["derive", "rc"] }
 libc = "0.2.186"

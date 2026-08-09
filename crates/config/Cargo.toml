@@ -9,7 +9,6 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
-nmt_themes.workspace = true
 dirs.workspace = true
 regex.workspace = true
 serde.workspace = true
@@ -18,4 +17,3 @@ toml_edit.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-onig.workspace = true

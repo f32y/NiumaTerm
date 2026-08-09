@@ -1,3 +1,6 @@
+//! Built-in theme sources compiled into the binary so a fresh install renders
+//! with a full palette before any user theme file exists.
+
 pub struct BuiltinTheme {
     pub name: &'static str,
     pub source: &'static str,
@@ -6,19 +9,19 @@ pub struct BuiltinTheme {
 pub const THEMES: &[BuiltinTheme] = &[
     BuiltinTheme {
         name: "modern_dark",
-        source: include_str!("modern_dark.toml"),
+        source: include_str!("builtin_themes/modern_dark.toml"),
     },
     BuiltinTheme {
         name: "modern_light",
-        source: include_str!("modern_light.toml"),
+        source: include_str!("builtin_themes/modern_light.toml"),
     },
     BuiltinTheme {
         name: "modern_gray",
-        source: include_str!("modern_gray.toml"),
+        source: include_str!("builtin_themes/modern_gray.toml"),
     },
     BuiltinTheme {
         name: "ubuntu",
-        source: include_str!("ubuntu.toml"),
+        source: include_str!("builtin_themes/ubuntu.toml"),
     },
 ];
 
