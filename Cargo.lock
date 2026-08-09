@@ -285,7 +285,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -3773,7 +3773,7 @@ checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
 name = "libghostty-vt-sys"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bindgen",
  "heck",
@@ -4163,7 +4163,7 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
 name = "nmt_agent_hook_cli"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "nmt_agent_utils",
  "nmt_platform",
@@ -4172,7 +4172,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_agent_utils"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "base64",
  "chrono",
@@ -4191,7 +4191,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_config"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "dirs",
  "regex",
@@ -4203,7 +4203,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_input"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bitflags 2.13.1",
  "smol_str",
@@ -4211,7 +4211,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_platform"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "block2 0.6.2",
@@ -4235,7 +4235,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_remote_net"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "base32",
  "futures",
@@ -4256,7 +4256,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_remote_session_hub"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "nmt_config",
  "nmt_platform",
@@ -4267,7 +4267,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_shell_extension"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "percent-encoding",
  "windows 0.62.2",
@@ -4277,7 +4277,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_terminal"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "base64",
  "bitflags 2.13.1",
