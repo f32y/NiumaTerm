@@ -1,17 +1,35 @@
 #![cfg(windows)]
 
 use std::sync::Arc;
-use std::sync::atomic::AtomicU32;
 use std::thread;
 use std::time::Duration;
 
+use nmt_config::CursorShape;
 use nmt_config::colors::Colors;
-use nmt_platform::{WinsizeBuilder, create_pty};
-use nmt_terminal::event::{Msg, VoidListener, WindowId};
+use nmt_platform::{Pty, WinsizeBuilder, create_pty};
+use nmt_terminal::event::{Msg, VoidListener};
 use nmt_terminal::ghostty::GhosttyTerminal;
-use nmt_terminal::pty_pipe::PtyPipe;
-use nmt_terminal::render_buffer::RenderBuffer;
+use nmt_terminal::pty_pipe::{SessionHandles, SessionOptions, start_session};
 use parking_lot::FairMutex;
+
+fn start(pty: Pty, cols: u16, rows: u16) -> SessionHandles {
+    start_session(
+        pty,
+        VoidListener {},
+        SessionOptions {
+            cols,
+            rows,
+            route_id: 0,
+            colors: Colors::default(),
+            cursor_shape: CursorShape::default(),
+            scrollback_lines: 1000,
+            engine_blocks: false,
+            terminal_responses: true,
+            output_sink: None,
+        },
+    )
+    .expect("machine")
+}
 
 fn snapshot_text(engine: &Arc<FairMutex<GhosttyTerminal>>) -> Vec<String> {
     let mut e = engine.lock();
@@ -35,12 +53,6 @@ fn typing_past_right_edge_does_not_duplicate() {
     let cols: u16 = 80;
     let rows: u16 = 24;
 
-    let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(
-        cols as usize,
-        rows as usize,
-    )));
-    let vt_modes = Arc::new(AtomicU32::new(0));
-
     let pty = match create_pty("powershell.exe", vec![], &None, cols, rows) {
         Ok(p) => p,
         Err(e) => {
@@ -49,21 +61,9 @@ fn typing_past_right_edge_does_not_duplicate() {
         }
     };
 
-    let machine = PtyPipe::new(
-        render_buffer,
-        vt_modes,
-        pty,
-        VoidListener {},
-        WindowId::from(0),
-        0,
-        Colors::default(),
-        1000,
-        false,
-    )
-    .expect("machine");
-    let engine = machine.engine();
-    let sender = machine.channel();
-    let _io = machine.spawn();
+    let handles = start(pty, cols, rows);
+    let engine = handles.engine;
+    let sender = handles.messenger;
 
     // Let the prompt settle.
     thread::sleep(Duration::from_millis(2000));
@@ -91,9 +91,6 @@ fn typing_past_right_edge_does_not_duplicate() {
 /// the window). Mirrors `nmt_render_host_resize` -> `Msg::Resize`.
 #[test]
 fn typing_after_resize_does_not_duplicate() {
-    let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(80, 24)));
-    let vt_modes = Arc::new(AtomicU32::new(0));
-
     let pty = match create_pty("powershell.exe", vec![], &None, 80, 24) {
         Ok(p) => p,
         Err(e) => {
@@ -102,21 +99,9 @@ fn typing_after_resize_does_not_duplicate() {
         }
     };
 
-    let machine = PtyPipe::new(
-        render_buffer,
-        vt_modes,
-        pty,
-        VoidListener {},
-        WindowId::from(0),
-        0,
-        Colors::default(),
-        1000,
-        false,
-    )
-    .expect("machine");
-    let engine = machine.engine();
-    let sender = machine.channel();
-    let _io = machine.spawn();
+    let handles = start(pty, 80, 24);
+    let engine = handles.engine;
+    let sender = handles.messenger;
 
     thread::sleep(Duration::from_millis(2000));
 
@@ -152,10 +137,6 @@ fn typing_after_resize_does_not_duplicate() {
 /// and is the suspected source of the frantic-repeat bug.
 #[test]
 fn per_keystroke_typing_does_not_duplicate() {
-    let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(80, 24)));
-    let rb = Arc::clone(&render_buffer);
-    let vt_modes = Arc::new(AtomicU32::new(0));
-
     let pty = match create_pty("powershell.exe", vec![], &None, 80, 24) {
         Ok(p) => p,
         Err(e) => {
@@ -164,21 +145,10 @@ fn per_keystroke_typing_does_not_duplicate() {
         }
     };
 
-    let machine = PtyPipe::new(
-        render_buffer,
-        vt_modes,
-        pty,
-        VoidListener {},
-        WindowId::from(0),
-        0,
-        Colors::default(),
-        1000,
-        false,
-    )
-    .expect("machine");
-    let engine = machine.engine();
-    let sender = machine.channel();
-    let _io = machine.spawn();
+    let handles = start(pty, 80, 24);
+    let engine = handles.engine;
+    let sender = handles.messenger;
+    let rb = handles.render_buffer;
 
     thread::sleep(Duration::from_millis(2000));
 
@@ -225,9 +195,6 @@ fn per_keystroke_typing_does_not_duplicate() {
 /// observed in the live app for 120 typed).
 #[test]
 fn resize_then_fast_per_keystroke_does_not_duplicate() {
-    let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(80, 24)));
-    let vt_modes = Arc::new(AtomicU32::new(0));
-
     let pty = match create_pty("powershell.exe", vec![], &None, 80, 24) {
         Ok(p) => p,
         Err(e) => {
@@ -236,21 +203,9 @@ fn resize_then_fast_per_keystroke_does_not_duplicate() {
         }
     };
 
-    let machine = PtyPipe::new(
-        render_buffer,
-        vt_modes,
-        pty,
-        VoidListener {},
-        WindowId::from(0),
-        0,
-        Colors::default(),
-        1000,
-        false,
-    )
-    .expect("machine");
-    let engine = machine.engine();
-    let sender = machine.channel();
-    let _io = machine.spawn();
+    let handles = start(pty, 80, 24);
+    let engine = handles.engine;
+    let sender = handles.messenger;
 
     thread::sleep(Duration::from_millis(2000));
 

@@ -1,18 +1,17 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::{error, fmt, io, thread};
 
-use nmt_config::active_colors;
+use nmt_config::{CursorShape, active_colors};
 use nmt_platform::{
     WinsizeBuilder, create_pty_with_env, job_other_process_count, set_job_management,
 };
 use nmt_terminal::event::{EventListener, Msg, MsgSender, TerminalEvent, WindowId};
 use nmt_terminal::ghostty::GhosttyTerminal;
-use nmt_terminal::pty_pipe::PtyPipe;
-use nmt_terminal::render_buffer::RenderBuffer;
+use nmt_terminal::pty_pipe::{SessionOptions as PipeOptions, start_session};
 use parking_lot::{FairMutex, Mutex};
 
 const SUBSCRIBER_QUEUE_CAPACITY: usize = 128;
@@ -299,12 +298,6 @@ impl RemoteSessionHub {
         validate_size(options.cols, options.rows)?;
 
         let id = SessionId(self.next_session_id.fetch_add(1, Ordering::Relaxed) + 1);
-        let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(
-            options.cols as usize,
-            options.rows as usize,
-        )));
-
-        let vt_modes = Arc::new(AtomicU32::new(0));
         let stream = Arc::new(Mutex::new(StreamState::default()));
 
         let pty = {
@@ -328,42 +321,43 @@ impl RemoteSessionHub {
 
         let job_handle = pty.job_handle().map(|handle| handle as isize);
 
-        let mut pipe = PtyPipe::new(
-            render_buffer,
-            vt_modes,
+        let output_stream = Arc::clone(&stream);
+
+        let handles = start_session(
             pty,
             HubEventProxy {
                 stream: Arc::clone(&stream),
             },
-            WindowId::dummy(),
-            id.0 as usize,
-            active_colors(),
-            options.scrollback_lines,
-            false,
+            PipeOptions {
+                cols: options.cols,
+                rows: options.rows,
+                route_id: id.0 as usize,
+                colors: active_colors(),
+                cursor_shape: CursorShape::default(),
+                scrollback_lines: options.scrollback_lines,
+                engine_blocks: false,
+                // The attached frontend owns terminal identity and theme, so it
+                // must be the sole responder to DA/DSR/OSC queries. Replying
+                // here as well sends duplicate device reports and exposes the
+                // Hub process's default colors.
+                terminal_responses: false,
+                output_sink: Some(Arc::new(move |data| {
+                    output_stream.lock().publish_output(data)
+                })),
+            },
         )
         .map_err(|error| HubError::Engine(error.to_string()))?;
-
-        // The attached frontend owns terminal identity and theme, so it must be
-        // the sole responder to DA/DSR/OSC queries. Replying here as well sends
-        // duplicate device reports and exposes the Hub process's default colors.
-        pipe.set_terminal_responses_enabled(false);
-
-        let output_stream = Arc::clone(&stream);
-
-        pipe.set_output_sink(move |data| output_stream.lock().publish_output(data));
 
         let session = Arc::new(RemoteSession {
             id,
             shell: options.shell,
             title: options.starting_title,
-            messenger: pipe.channel(),
-            engine: pipe.engine(),
+            messenger: handles.messenger,
+            engine: handles.engine,
             stream,
             shutdown_sent: AtomicBool::new(false),
             job_handle,
         });
-
-        drop(pipe.spawn());
 
         self.sessions.lock().insert(id, session);
 

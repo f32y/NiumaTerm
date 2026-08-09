@@ -2,6 +2,7 @@
 //! the ConPTY-backed PTY worker so platform details stay outside the UI layer.
 
 use std::collections::{self, VecDeque};
+use std::error::Error as StdError;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::{mem, time};
@@ -10,14 +11,14 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use nmt_config::local_state::TabState;
 use nmt_config::{CursorShape, active_colors};
-use nmt_platform::{EventedPty, WinsizeBuilder, create_pty_with_env, job_other_process_count};
+use nmt_platform::{WinsizeBuilder, create_pty_with_env, job_other_process_count};
 use nmt_terminal::block_store::{BlockStore, SegmentMeta};
 use nmt_terminal::clipboard::Clipboard;
 use nmt_terminal::event::{
     BlockEvent, EventListener, Msg, MsgSender, ProgressReport, TerminalEvent, WindowId,
 };
 use nmt_terminal::ghostty::GhosttyTerminal;
-use nmt_terminal::pty_pipe::PtyPipe;
+use nmt_terminal::pty_pipe::{SessionOptions, start_session};
 use nmt_terminal::render_buffer::RenderBuffer;
 use parking_lot::{FairMutex, Mutex};
 use tracing::{debug, error};
@@ -133,20 +134,11 @@ impl TerminalSession {
         id: u64,
         wake: Option<WakeSender>,
     ) -> Result<TerminalSession, EngineError> {
-        use FairMutex;
-        use nmt_terminal::render_buffer::RenderBuffer;
-
         use crate::terminal::net_pty::NetPty;
 
         let snapshot = remote.snapshot();
         let cols = snapshot.cols.max(1);
         let rows = snapshot.rows.max(1);
-        let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(
-            cols as usize,
-            rows as usize,
-        )));
-
-        let vt_modes = Arc::new(AtomicU32::new(0));
         let events: HostEventQueue = Arc::new(Mutex::new(collections::VecDeque::new()));
         let block_store: Arc<Mutex<BlockStore>> = Arc::new(Mutex::new(BlockStore::default()));
         let generation_store: SessionGraphics = Arc::new(Mutex::new(GenerationStore::new()));
@@ -171,22 +163,28 @@ impl TerminalSession {
 
         let pty = NetPty::new(remote);
 
-        let (engine, messenger) = start_pipe(
-            Arc::clone(&render_buffer),
-            Arc::clone(&vt_modes),
+        let handles = start_session(
             pty,
             proxy,
-            id,
-            10_000,
-            CursorShape::Block,
-            engine_blocks,
-        )?;
+            SessionOptions {
+                cols,
+                rows,
+                route_id: id as usize,
+                colors: active_colors(),
+                cursor_shape: CursorShape::Block,
+                scrollback_lines: 10_000,
+                engine_blocks,
+                terminal_responses: true,
+                output_sink: None,
+            },
+        )
+        .map_err(engine_init_error)?;
 
         Ok(TerminalSession {
-            engine,
-            render_buffer,
-            vt_modes,
-            messenger,
+            engine: handles.engine,
+            render_buffer: handles.render_buffer,
+            vt_modes: handles.vt_modes,
+            messenger: handles.messenger,
             events,
             block_store,
             generation_store,
@@ -204,19 +202,9 @@ impl TerminalSession {
         id: u64,
         wake: Option<WakeSender>,
     ) -> Result<TerminalSession, EngineError> {
-        use FairMutex;
-        use nmt_terminal::render_buffer::RenderBuffer;
-
         let shell = config.shell.clone().unwrap_or_else(default_shell);
         let cols = config.cols.max(1);
         let rows = config.rows.max(1);
-        let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(
-            cols as usize,
-            rows as usize,
-        )));
-
-        let vt_modes = Arc::new(AtomicU32::new(0));
-        // Created before the PtyPipe so the listener and the session share it.
         let events: HostEventQueue = Arc::new(Mutex::new(collections::VecDeque::new()));
         let block_store: Arc<Mutex<BlockStore>> = Arc::new(Mutex::new(BlockStore::default()));
         let generation_store: SessionGraphics = Arc::new(Mutex::new(GenerationStore::new()));
@@ -258,22 +246,28 @@ impl TerminalSession {
 
         let job_handle = pty.job_handle().map(|handle| handle as isize);
 
-        let (engine, messenger) = start_pipe(
-            Arc::clone(&render_buffer),
-            Arc::clone(&vt_modes),
+        let handles = start_session(
             pty,
             proxy,
-            id,
-            config.scrollback_lines,
-            config.cursor_shape,
-            engine_blocks,
-        )?;
+            SessionOptions {
+                cols,
+                rows,
+                route_id: id as usize,
+                colors: active_colors(),
+                cursor_shape: config.cursor_shape,
+                scrollback_lines: config.scrollback_lines,
+                engine_blocks,
+                terminal_responses: true,
+                output_sink: None,
+            },
+        )
+        .map_err(engine_init_error)?;
 
         Ok(TerminalSession {
-            engine,
-            render_buffer,
-            vt_modes,
-            messenger,
+            engine: handles.engine,
+            render_buffer: handles.render_buffer,
+            vt_modes: handles.vt_modes,
+            messenger: handles.messenger,
             events,
             block_store,
             generation_store,
@@ -387,55 +381,12 @@ impl Drop for TerminalSession {
     }
 }
 
-fn start_pipe<T>(
-    render_buffer: SessionBuffer,
-    vt_modes: Arc<AtomicU32>,
-    pty: T,
-    proxy: TerminalEventProxy,
-    id: u64,
-    scrollback_lines: usize,
-    cursor_shape: CursorShape,
-    engine_blocks: bool,
-) -> Result<(SessionEngine, MsgSender), EngineError>
-where
-    T: EventedPty + Send + 'static,
-{
-    let pipe = PtyPipe::new(
-        render_buffer,
-        vt_modes,
-        pty,
-        proxy,
-        WindowId::dummy(),
-        id as usize,
-        active_colors(),
-        scrollback_lines,
-        engine_blocks,
+fn engine_init_error(error: Box<dyn StdError>) -> EngineError {
+    error!("session start failed: {error:?}");
+    EngineError::new(
+        EngineErrorCode::EngineInit,
+        format!("libghostty-vt engine init failed: {error}"),
     )
-    .map_err(|error| {
-        error!("session PtyPipe::new failed: {error:?}");
-        EngineError::new(
-            EngineErrorCode::EngineInit,
-            format!("libghostty-vt engine init failed: {error}"),
-        )
-    })?;
-
-    let engine = pipe.engine();
-
-    engine
-        .lock()
-        .set_default_cursor_shape(cursor_shape)
-        .map_err(|error| {
-            EngineError::new(
-                EngineErrorCode::EngineInit,
-                format!("failed to configure cursor shape: {error}"),
-            )
-        })?;
-
-    let messenger = pipe.channel();
-
-    drop(pipe.spawn());
-
-    Ok((engine, messenger))
 }
 
 #[derive(Clone)]

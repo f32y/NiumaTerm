@@ -13,6 +13,7 @@ use nmt_platform::{ChildEvent, EventedPty, Events, Interest, Poll, Token, Waker}
 use parking_lot::FairMutex;
 use tracing::{error, warn};
 
+use crate::ansi::CursorShape;
 use crate::event::{self, EventListener, Msg, MsgSender, TerminalEvent, WindowId};
 use crate::ghostty::{self, GhosttyTerminal, mode};
 use crate::prompt_sniffer::{PromptSniffer, SnifferMark};
@@ -633,12 +634,105 @@ impl Writing {
     }
 }
 
+/// Observer for the exact VT byte stream accepted by the engine. Runs under
+/// the engine lock so a checkpoint and its following bytes order atomically;
+/// observers must return promptly.
+pub type OutputSink = Arc<dyn Fn(Arc<[u8]>) + Send + Sync>;
+
+/// Construction settings for [`start_session`].
+pub struct SessionOptions {
+    pub cols: u16,
+    pub rows: u16,
+    /// Event route id stamped onto every event this pipe emits (multi-tab safety).
+    pub route_id: usize,
+    /// Theme palette pushed into the engine so SGR-indexed and default colors
+    /// resolve before the first PTY byte.
+    pub colors: Colors,
+    pub cursor_shape: CursorShape,
+    /// Scrollback budget in lines.
+    pub scrollback_lines: usize,
+    /// Freeze finished commands into engine blocks; `false` is the classic
+    /// single-grid fallback.
+    pub engine_blocks: bool,
+    /// Whether this pipe answers DA/DSR/OSC queries. Off for a headless host
+    /// whose attached frontend owns terminal identity and theme.
+    pub terminal_responses: bool,
+    pub output_sink: Option<OutputSink>,
+}
+
+/// Shared handles to one running terminal session, returned by [`start_session`].
+pub struct SessionHandles {
+    /// VT engine. The PTY thread and the frontend serialize through its lock.
+    pub engine: Arc<FairMutex<GhosttyTerminal>>,
+    /// Viewport copy the renderer reads; on its own lock, separate from the
+    /// engine, so paint never waits behind a parse.
+    pub render_buffer: Arc<FairMutex<RenderBuffer>>,
+    /// VT modes published by the pipe; the input path reads them lock-free.
+    pub vt_modes: Arc<AtomicU32>,
+    /// Sender for input, resize, and shutdown messages to the PTY thread.
+    pub messenger: MsgSender,
+}
+
+/// Build the engine and render buffer, configure the pipe, and start the PTY
+/// event-loop thread. The single construction entry point: callers receive
+/// every shared handle from one call instead of assembling buffers up front
+/// and extracting handles from a half-built pipe in the right order.
+pub fn start_session<T, U>(
+    pty: T,
+    event_proxy: U,
+    options: SessionOptions,
+) -> Result<SessionHandles, Box<dyn error::Error>>
+where
+    T: EventedPty + Send + 'static,
+    U: EventListener + Send + 'static,
+{
+    let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(
+        options.cols.max(1) as usize,
+        options.rows.max(1) as usize,
+    )));
+    let vt_modes = Arc::new(AtomicU32::new(0));
+
+    let mut pipe = PtyPipe::new(
+        Arc::clone(&render_buffer),
+        Arc::clone(&vt_modes),
+        pty,
+        event_proxy,
+        WindowId::dummy(),
+        options.route_id,
+        options.colors,
+        options.scrollback_lines,
+        options.engine_blocks,
+    )?;
+
+    // The pipe has not spawned yet, so the engine lock is uncontended and the
+    // cursor shape lands before the first PTY byte can be parsed.
+    pipe.ghostty
+        .lock()
+        .set_default_cursor_shape(options.cursor_shape)
+        .map_err(|error| Box::new(error) as Box<dyn error::Error>)?;
+
+    pipe.terminal_responses_enabled = options.terminal_responses;
+    pipe.output_sink = options.output_sink;
+
+    let engine = Arc::clone(&pipe.ghostty);
+    let messenger = pipe.channel();
+
+    drop(pipe.spawn());
+
+    Ok(SessionHandles {
+        engine,
+        render_buffer,
+        vt_modes,
+        messenger,
+    })
+}
+
 impl<T, U> PtyPipe<T, U>
 where
     T: EventedPty + Send + 'static,
     U: EventListener + Send + 'static,
 {
-    pub fn new(
+    pub(crate) fn new(
         render_buffer: Arc<FairMutex<RenderBuffer>>,
         vt_modes: Arc<AtomicU32>,
         pty: T,
@@ -741,26 +835,15 @@ where
         }
     }
 
-    /// Shared engine handle for frontend scrolling, selection, search, and rendering.
-    /// The PTY thread and frontend
-    /// serialize access through its lock.
-    pub fn engine(&self) -> Arc<FairMutex<GhosttyTerminal>> {
-        Arc::clone(&self.ghostty)
-    }
-
-    /// Shared content version for invalidating the frontend's deep-search corpus cache.
-    /// Bumped per PTY batch or resize; the frontend reads it lock-free.
-    pub fn content_version(&self) -> Arc<AtomicU64> {
-        Arc::clone(&self.content_version)
-    }
-
     /// Observe parsed VT output without taking ownership of the PTY loop.
-    pub fn set_output_sink(&mut self, sink: impl Fn(Arc<[u8]>) + Send + Sync + 'static) {
+    #[cfg(test)]
+    pub(crate) fn set_output_sink(&mut self, sink: impl Fn(Arc<[u8]>) + Send + Sync + 'static) {
         self.output_sink = Some(Arc::new(sink));
     }
 
     /// Choose whether VT-generated DA/DSR/OSC replies are written to this PTY.
-    pub fn set_terminal_responses_enabled(&mut self, enabled: bool) {
+    #[cfg(test)]
+    pub(crate) fn set_terminal_responses_enabled(&mut self, enabled: bool) {
         self.terminal_responses_enabled = enabled;
     }
 
@@ -1345,7 +1428,7 @@ where
         Ok(())
     }
 
-    pub fn channel(&self) -> MsgSender {
+    pub(crate) fn channel(&self) -> MsgSender {
         self.sender.clone()
     }
 
@@ -1531,7 +1614,7 @@ where
         (self, state)
     }
 
-    pub fn spawn(self) -> JoinHandle<(Self, PtyState)> {
+    pub(crate) fn spawn(self) -> JoinHandle<(Self, PtyState)> {
         Builder::new()
             .name("PTY reader".into())
             .spawn(move || self.run_event_loop())
