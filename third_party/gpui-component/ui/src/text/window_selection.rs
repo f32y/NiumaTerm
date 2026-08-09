@@ -859,12 +859,13 @@ mod tests {
     use crate::global_state::GlobalState;
     use crate::{
         Placement, Root,
+        input::{Input, InputState},
         text::{TextView, TextViewState},
     };
     use gpui::{
-        AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
-        Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, ParentElement as _, Render,
-        Styled as _, TestAppContext, VisualTestContext, Window, div, point, px,
+        AppContext as _, ClipboardItem, Context, Entity, FocusHandle, InteractiveElement as _,
+        IntoElement, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, ParentElement as _,
+        Render, Styled as _, TestAppContext, VisualTestContext, Window, div, point, px,
     };
     use std::cell::Cell;
     use std::rc::Rc;
@@ -872,9 +873,11 @@ mod tests {
 
     struct ChatTestView {
         focus_handle: FocusHandle,
+        composer: Entity<InputState>,
         first: Entity<TextViewState>,
         second: Entity<TextViewState>,
         second_selectable: bool,
+        restore_composer_on_mouse_up: bool,
         /// Top padding above the views. Bumping it shifts the whole content
         /// down, which is the layout-level equivalent of an outer container
         /// scrolling (see `selection_follows_content_when_layout_shifts`).
@@ -885,12 +888,14 @@ mod tests {
     }
 
     impl ChatTestView {
-        fn new(second_selectable: bool, cx: &mut Context<Self>) -> Self {
+        fn new(second_selectable: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
             Self {
                 focus_handle: cx.focus_handle(),
+                composer: cx.new(|cx| InputState::new(window, cx)),
                 first: cx.new(|cx| TextViewState::markdown("Hello world", cx)),
                 second: cx.new(|cx| TextViewState::markdown("Second message", cx)),
                 second_selectable,
+                restore_composer_on_mouse_up: false,
                 top_offset: px(10.),
                 mid_gap: px(0.),
             }
@@ -899,6 +904,9 @@ mod tests {
 
     impl Render for ChatTestView {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let composer = self.composer.clone();
+            let restore_composer_on_mouse_up = self.restore_composer_on_mouse_up;
+
             // `track_focus` makes the root a focusable container, so GPUI's
             // focus-on-mouse-down marks every press inside it default-prevented.
             // Selection must still start from blank space here (regression
@@ -907,6 +915,11 @@ mod tests {
             // presses never set that flag.
             div()
                 .track_focus(&self.focus_handle)
+                .on_mouse_up(MouseButton::Left, move |_, window, cx| {
+                    if restore_composer_on_mouse_up {
+                        composer.update(cx, |input, cx| input.focus(window, cx));
+                    }
+                })
                 .size_full()
                 .pt(self.top_offset)
                 .child(
@@ -933,6 +946,7 @@ mod tests {
                             GlobalState::suppress_text_selection(cx);
                         }),
                 )
+                .child(Input::new(&self.composer))
         }
     }
 
@@ -942,7 +956,7 @@ mod tests {
     ) -> (Entity<ChatTestView>, &mut VisualTestContext) {
         cx.update(crate::init);
         let (root, cx) = cx.add_window_view(|window, cx| {
-            let chat = cx.new(|cx| ChatTestView::new(second_selectable, cx));
+            let chat = cx.new(|cx| ChatTestView::new(second_selectable, window, cx));
             Root::new(chat, window, cx)
         });
         let chat = root.read_with(cx, |root, _| {
@@ -1005,6 +1019,33 @@ mod tests {
             .expect("second view text missing");
         assert!(first < second, "wrong order: {text:?}");
         assert!(text.contains('\n'), "expected newline separator: {text:?}");
+    }
+
+    #[gpui::test]
+    fn focused_composer_preserves_transcript_copy_and_paste(cx: &mut TestAppContext) {
+        let (chat, cx) = setup(true, cx);
+        chat.update(cx, |chat, cx| {
+            chat.restore_composer_on_mouse_up = true;
+            cx.notify();
+        });
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+
+        drag(cx, point(px(0.), px(15.)), point(px(300.), px(15.)));
+        assert_eq!(window_selected_text(cx).trim(), "Hello world");
+
+        cx.write_to_clipboard(ClipboardItem::new_string("old clipboard".to_string()));
+        cx.simulate_keystrokes("ctrl-c");
+        assert_eq!(
+            cx.read_from_clipboard().and_then(|item| item.text()),
+            Some("Hello world".to_string())
+        );
+
+        cx.simulate_keystrokes("ctrl-v");
+        let composer_text =
+            chat.read_with(cx, |chat, cx| chat.composer.read(cx).text().to_string());
+        assert_eq!(composer_text, "Hello world");
     }
 
     #[gpui::test]

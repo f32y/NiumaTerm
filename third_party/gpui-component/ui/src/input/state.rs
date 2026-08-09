@@ -2042,6 +2042,7 @@ impl InputState {
 
     pub(super) fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
+            cx.propagate();
             return;
         }
 
