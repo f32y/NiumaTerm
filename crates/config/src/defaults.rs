@@ -1,4 +1,4 @@
-use crate::{CursorShape, Shell, layout};
+use crate::{CursorShape, Shell};
 
 #[inline]
 pub fn default_bool_true() -> bool {
@@ -13,25 +13,6 @@ pub fn default_cursor_interval() -> u64 {
 #[inline]
 pub fn default_scrollback_history_limit() -> usize {
     10_000
-}
-
-#[inline]
-pub fn default_title_placeholder() -> Option<String> {
-    Some(String::from("▲"))
-}
-
-#[inline]
-pub fn default_title_content() -> String {
-    #[cfg(unix)]
-    return String::from("{{ TITLE || RELATIVE_PATH }}");
-
-    #[cfg(not(unix))]
-    return String::from("{{ TITLE || PROGRAM }}");
-}
-
-#[inline]
-pub fn default_margin() -> layout::Margin {
-    layout::Margin::all(2.0)
 }
 
 #[inline]
@@ -56,11 +37,6 @@ pub fn default_shell() -> Shell {
 #[inline]
 pub fn default_working_dir() -> Option<String> {
     None
-}
-
-#[inline]
-pub fn default_opacity() -> f32 {
-    1.0
 }
 
 #[inline]
@@ -95,32 +71,4 @@ pub fn default_editor() -> Shell {
             args: vec![],
         }
     }
-}
-
-#[inline]
-pub fn default_window_width() -> i32 {
-    800
-}
-
-#[inline]
-pub fn default_window_height() -> i32 {
-    490
-}
-
-#[inline]
-pub fn default_disable_ctlseqs_alt() -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        true
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        false
-    }
-}
-
-#[inline]
-pub fn default_ime_cursor_positioning() -> bool {
-    true
 }

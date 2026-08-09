@@ -1,23 +1,14 @@
 pub mod agent;
 pub mod appearance;
-pub mod bell;
-pub mod bindings;
+pub mod builtin_themes;
 pub mod colors;
 pub mod defaults;
-pub mod effects;
-pub mod hints;
-pub mod keyboard;
-pub mod layout;
 pub mod local_state;
-pub mod navigation;
 pub mod profile;
 pub mod remote_session;
 pub mod render_types;
-pub mod renderer;
 pub mod system;
 pub mod theme;
-pub mod title;
-pub mod window;
 
 use std::default::Default;
 use std::path::{Path, PathBuf};
@@ -25,11 +16,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{OnceLock, RwLock};
 use std::{env, fs, io, mem};
 
+use builtin_themes::{THEMES as BUILTIN_THEMES, get as get_builtin_theme};
 use colors::Colors;
 use dirs::home_dir;
-use nmt_themes::{THEMES as BUILTIN_THEMES, get as get_builtin_theme};
 use serde::{Deserialize, Serialize};
-use theme::{AdaptiveColors, AdaptiveTheme, AppearanceTheme, Theme, UiTheme};
+use theme::{AppearanceTheme, Theme, UiTheme};
 use toml::de::Error as TomlDeError;
 use toml::from_str as parse_toml;
 use toml_edit::{DocumentMut, Item, Table, value};
@@ -37,18 +28,9 @@ use tracing::warn;
 
 use crate::agent::AgentConfig;
 use crate::appearance::AppearanceConfig;
-use crate::bell::Bell;
-use crate::bindings::Bindings;
 use crate::defaults::*;
-use crate::hints::Hints;
-use crate::keyboard::Keyboard;
-use crate::layout::{Margin, Panel};
-use crate::navigation::Navigation;
 use crate::profile::Profile;
-use crate::renderer::Renderer;
 use crate::system::SystemConfig;
-use crate::title::Title;
-use crate::window::Window;
 
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct Shell {
@@ -81,32 +63,14 @@ impl Default for Developer {
 pub struct Config {
     #[serde(default)]
     pub cursor: CursorConfig,
-    #[serde(default = "Navigation::default")]
-    pub navigation: Navigation,
-    #[serde(default = "Window::default")]
-    pub window: Window,
     #[serde(default = "default_shell")]
     pub shell: Shell,
-    #[serde(default = "Keyboard::default")]
-    pub keyboard: Keyboard,
-    #[serde(default = "Title::default")]
-    pub title: Title,
     #[serde(default = "default_working_dir", rename = "working-dir")]
     pub working_dir: Option<String>,
     #[serde(default = "default_theme")]
     pub theme: String,
-    #[serde(
-        default = "Option::default",
-        skip_serializing,
-        rename = "adaptive-theme"
-    )]
-    pub adaptive_theme: Option<AdaptiveTheme>,
     #[serde(default = "default_editor")]
     pub editor: Shell,
-    #[serde(default = "default_margin", alias = "margin")]
-    pub margin: Margin,
-    #[serde(default = "Panel::default")]
-    pub panel: Panel,
     #[serde(default = "Vec::default", rename = "env-vars")]
     pub env_vars: Vec<String>,
     #[serde(skip)]
@@ -114,14 +78,10 @@ pub struct Config {
     /// UI theme loaded from the selected file in `themes/`.
     #[serde(skip)]
     pub ui_theme: Option<UiTheme>,
-    #[serde(default = "Option::default", skip_serializing)]
-    pub adaptive_colors: Option<AdaptiveColors>,
     #[serde(default = "Option::default", rename = "force-theme")]
     pub force_theme: Option<AppearanceTheme>,
     #[serde(default = "Developer::default")]
     pub developer: Developer,
-    #[serde(default = "Bindings::default")]
-    pub bindings: bindings::Bindings,
     #[serde(
         default = "bool::default",
         rename = "ignore-selection-foreground-color"
@@ -137,14 +97,8 @@ pub struct Config {
         alias = "hide-cursor-when-typing"
     )]
     pub hide_cursor_when_typing: bool,
-    #[serde(default = "Renderer::default")]
-    pub renderer: Renderer,
     #[serde(default = "bool::default", rename = "draw-bold-text-with-light-colors")]
     pub draw_bold_text_with_light_colors: bool,
-    #[serde(default = "Hints::default")]
-    pub hints: Hints,
-    #[serde(default = "Bell::default")]
-    pub bell: Bell,
     #[serde(default = "default_bool_true", rename = "enable-scroll-bar")]
     pub enable_scroll_bar: bool,
     #[serde(
@@ -152,8 +106,6 @@ pub struct Config {
         rename = "scrollback-history-limit"
     )]
     pub scrollback_history_limit: usize,
-    #[serde(default = "effects::Effects::default")]
-    pub effects: effects::Effects,
     /// Visual settings (settings dialog, Terminal/Appearance pages).
     #[serde(default = "appearance::AppearanceConfig::default")]
     pub appearance: appearance::AppearanceConfig,
@@ -281,33 +233,6 @@ impl Config {
                         warn!("failed to load theme: {}", theme);
                     }
 
-                    if let Some(adaptive_theme) = &decoded.adaptive_theme {
-                        let light_theme = &adaptive_theme.light;
-                        let path = theme_file_path(&tmp, light_theme);
-                        let mut adaptive_colors = AdaptiveColors {
-                            dark: None,
-                            light: None,
-                        };
-
-                        if let Ok(light_loaded_theme) = Config::load_theme(&path) {
-                            adaptive_colors.light = Some(light_loaded_theme.colors.terminal);
-                        } else {
-                            warn!("failed to load light theme: {}", light_theme);
-                        }
-
-                        let dark_theme = &adaptive_theme.dark;
-                        let path = theme_file_path(&tmp, dark_theme);
-                        if let Ok(dark_loaded_theme) = Config::load_theme(&path) {
-                            adaptive_colors.dark = Some(dark_loaded_theme.colors.terminal);
-                        } else {
-                            warn!("failed to load dark theme: {}", dark_theme);
-                        }
-
-                        if adaptive_colors.light.is_some() && adaptive_colors.dark.is_some() {
-                            decoded.adaptive_colors = Some(adaptive_colors);
-                        }
-                    }
-
                     Ok(decoded)
                 }
                 Err(err_message) => Err(format!("error parsing: {err_message:?}")),
@@ -424,34 +349,21 @@ impl Default for Config {
         Config {
             cursor: CursorConfig::default(),
             editor: default_editor(),
-            adaptive_theme: None,
-            adaptive_colors: None,
             force_theme: None,
-            bindings: Bindings::default(),
             colors: Colors::default(),
             ui_theme: None,
-            keyboard: Keyboard::default(),
-            title: Title::default(),
             developer: Developer::default(),
             env_vars: vec![],
-            navigation: Navigation::default(),
-            margin: default_margin(),
-            panel: Panel::default(),
-            renderer: Renderer::default(),
             shell: default_shell(),
             theme: default_theme(),
-            window: Window::default(),
             working_dir: default_working_dir(),
             ignore_selection_fg_color: false,
             confirm_before_quit: true,
             copy_on_select: false,
             hide_cursor_when_typing: false,
             draw_bold_text_with_light_colors: false,
-            hints: Hints::default(),
-            bell: Bell::default(),
             enable_scroll_bar: true,
             scrollback_history_limit: default_scrollback_history_limit(),
-            effects: effects::Effects::default(),
             appearance: appearance::AppearanceConfig::default(),
             profiles: profile::ProfilesConfig::default(),
             agent_profiles: profile::AgentProfilesConfig::default(),
@@ -910,13 +822,11 @@ mod tests {
         assert_eq!(result.theme, default_theme());
         assert_eq!(result.cursor.shape, default_cursor());
         assert_eq!(result.shell, default_shell());
-        assert!(!result.renderer.disable_unfocused_render);
 
         // Colors
         assert_eq!(result.colors, default_theme_colors());
         // Developer
         assert_eq!(result.developer, Developer::default());
-        assert_eq!(result.bindings, Bindings::default());
     }
 
     #[test]
@@ -941,23 +851,6 @@ mod tests {
         assert_eq!(result.colors.foreground, colors::defaults::foreground());
         assert_eq!(result.colors.tabs_active, colors::defaults::tabs_active());
         assert_eq!(result.colors.cursor, colors::defaults::cursor());
-    }
-
-    #[test]
-    fn test_change_config_renderer() {
-        let result = create_temporary_config(
-            "change-performance",
-            r#"
-            [renderer]
-            performance = "Low"
-            backend = "Cpu"
-        "#,
-        );
-
-        assert_eq!(result.renderer.backend, renderer::Backend::Cpu);
-        assert_eq!(result.theme, default_theme());
-        // Colors
-        assert_eq!(result.colors, default_theme_colors());
     }
 
     #[test]
@@ -999,61 +892,6 @@ mod tests {
         "#,
         );
         assert_eq!(result.cursor.shape, CursorShape::Beam);
-    }
-
-    #[test]
-    fn test_change_bindings() {
-        let result = create_temporary_config(
-            "change-key-bindings",
-            r#"
-            [bindings]
-            keys = [
-                { key = 'Q', with = 'super', action = 'Quit' }
-            ]
-        "#,
-        );
-
-        assert_eq!(result.theme, default_theme());
-        // Bindings
-        assert_eq!(result.bindings.keys[0].key, "Q");
-        assert_eq!(result.bindings.keys[0].with, "super");
-        assert_eq!(result.bindings.keys[0].action.to_owned(), "Quit");
-        assert!(result.bindings.keys[0].esc.to_owned().is_empty());
-    }
-
-    #[test]
-    fn test_change_style() {
-        let result = create_temporary_config(
-            "change-style",
-            r#"
-            font-size = 14.0
-            margin = [0]
-
-            [renderer]
-            performance = "Low"
-
-            [window]
-            opacity = 0.5
-            [window.background-image]
-            path = "my-image-path.png"
-
-        "#,
-        );
-
-        assert_eq!(result.margin.top, 0.0);
-        assert_eq!(result.margin.bottom, 0.0);
-        assert_eq!(result.margin.left, 0.0);
-        assert_eq!(result.margin.right, 0.0);
-        assert_eq!(result.window.opacity, 0.5);
-        assert_eq!(
-            result.window.background_image,
-            Some(render_types::ImageProperties {
-                path: String::from("my-image-path.png"),
-                ..render_types::ImageProperties::default()
-            })
-        );
-        // Colors
-        assert_eq!(result.colors, default_theme_colors());
     }
 
     #[test]
@@ -1180,24 +1018,6 @@ mod tests {
     }
 
     #[test]
-    fn test_renderer_overrides() {
-        let result = create_temporary_config(
-            "change-renderer",
-            r#"
-            [renderer]
-            disable-unfocused-render = true
-            performance = "Low"
-        "#,
-        );
-
-        // Advanced
-        assert!(result.renderer.disable_unfocused_render);
-
-        // Colors
-        assert_eq!(result.colors, default_theme_colors());
-    }
-
-    #[test]
     fn test_shell() {
         let result = create_temporary_config(
             "change-shell-and-editor",
@@ -1228,17 +1048,12 @@ mod tests {
         let result = create_temporary_config(
             "change-developer",
             r#"
-            [renderer]
-            performance = "Low"
-            backend = "Cpu"
-
             [developer]
             enable-fps-counter = true
             log-level = "INFO"
         "#,
         );
 
-        assert_eq!(result.renderer.backend, renderer::Backend::Cpu);
         // Developer
         assert_eq!(result.developer.log_level, String::from("INFO"));
         assert!(result.developer.enable_fps_counter);
@@ -1248,27 +1063,8 @@ mod tests {
     }
 
     #[test]
-    fn test_window_colorspace() {
-        let result = create_temporary_config(
-            "window-colorspace",
-            r#"
-            [window]
-            colorspace = "display-p3"
-        "#,
-        );
-
-        assert_eq!(result.window.colorspace, window::Colorspace::DisplayP3);
-    }
-
-    #[test]
     fn test_scrollback_history_limit_default() {
-        let result = create_temporary_config(
-            "scrollback-default",
-            r#"
-            [window]
-            width = 800
-        "#,
-        );
+        let result = create_temporary_config("scrollback-default", "");
         assert_eq!(result.scrollback_history_limit, 10_000);
     }
 
@@ -1282,22 +1078,5 @@ mod tests {
         "#,
         );
         assert_eq!(result.scrollback_history_limit, 0);
-    }
-
-    #[test]
-    fn test_window_colorspace_default() {
-        let result = create_temporary_config(
-            "window-colorspace-default",
-            r#"
-            [window]
-            width = 800
-            height = 600
-        "#,
-        );
-
-        // Default is sRGB on every platform — same semantics as ghostty's
-        // `window-colorspace` default. `[window] colorspace` describes how
-        // input color bytes are *interpreted*, not the surface gamut.
-        assert_eq!(result.window.colorspace, window::Colorspace::Srgb);
     }
 }
