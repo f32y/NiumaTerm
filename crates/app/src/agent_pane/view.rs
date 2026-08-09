@@ -797,18 +797,7 @@ impl AgentPane {
     }
 
     fn render_composer_status(&self, cx: &mut Context<Self>) -> AnyElement {
-        let branch = self.git_branch_poll.branch.clone().unwrap_or_else(|| {
-            if self.git_branch_poll.ready {
-                "No Git branch".to_string()
-            } else {
-                "Detecting branch…".to_string()
-            }
-        });
-        let branch_opacity = if self.git_branch_poll.branch.is_some() {
-            0.72
-        } else {
-            0.48
-        };
+        let (branch, branch_opacity) = self.git_branch_poll.presentation();
 
         let usage = self.context_window_usage.map(|usage| {
             let (label, color) = match usage.max_tokens {

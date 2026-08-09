@@ -332,7 +332,7 @@ impl AgentPane {
     }
 
     pub(super) fn refresh_git_branch(&mut self, cx: &mut Context<Self>) {
-        if self.git_branch_poll.refreshing {
+        if !self.git_branch_poll.begin_refresh() {
             return;
         }
 
@@ -341,12 +341,9 @@ impl AgentPane {
                 .ok()
                 .map(|path| path.to_string_lossy().to_string())
         }) else {
-            self.git_branch_poll.branch = None;
-            self.git_branch_poll.ready = true;
+            self.git_branch_poll.complete(None);
             return;
         };
-
-        self.git_branch_poll.refreshing = true;
 
         let fetch = cx
             .background_executor()
@@ -356,9 +353,7 @@ impl AgentPane {
             let branch = fetch.await;
 
             this.update(cx, |this, cx| {
-                this.git_branch_poll.branch = branch;
-                this.git_branch_poll.ready = true;
-                this.git_branch_poll.refreshing = false;
+                this.git_branch_poll.complete(branch);
                 cx.notify();
             })
             .ok();
