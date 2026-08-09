@@ -32,10 +32,6 @@ impl<'a> VisibleGrid<'a> {
         self.cols.saturating_sub(1)
     }
 
-    pub(crate) fn cols(&self) -> usize {
-        self.cols
-    }
-
     pub(crate) fn rows_len(&self) -> i32 {
         self.rows.len() as i32
     }

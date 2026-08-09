@@ -1,12 +1,7 @@
 use bitflags::bitflags;
 
-pub mod glyph_protocol;
 pub mod graphics;
-#[cfg(feature = "sixel")]
-pub mod iterm2_image_protocol;
 pub mod kitty_virtual;
-#[cfg(feature = "sixel")]
-pub mod sixel;
 
 // CursorShape moved to the `config` crate (it is a deserialized config value);
 // re-exported here so `nmt_terminal::ansi::CursorShape` and `crate::ansi::CursorShape`

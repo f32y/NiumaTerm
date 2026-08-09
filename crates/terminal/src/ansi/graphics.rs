@@ -7,15 +7,11 @@ use std::sync::{Arc, Weak};
 use std::thread;
 use std::{collections, mem, time};
 
-#[cfg(feature = "sixel")]
-use nmt_config::colors::ColorRgb;
 use parking_lot::Mutex;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use tracing::debug;
 
-#[cfg(feature = "sixel")]
-use crate::ansi::sixel;
 use crate::graphics::{GraphicData, GraphicId};
 use crate::terminal::grid::Dimensions;
 
@@ -177,19 +173,11 @@ pub struct Graphics {
     /// Graphics removed from the grid.
     pub texture_operations: Arc<Mutex<Vec<GraphicId>>>,
 
-    /// Shared palette for Sixel graphics.
-    #[cfg(feature = "sixel")]
-    pub sixel_shared_palette: Option<Vec<ColorRgb>>,
-
     /// Cell height in pixels.
     pub cell_height: f32,
 
     /// Cell width in pixels.
     pub cell_width: f32,
-
-    /// Current Sixel parser.
-    #[cfg(feature = "sixel")]
-    pub sixel_parser: Option<Box<sixel::Parser>>,
 
     /// Kitty graphics: Cache of transmitted images (by image_id)
     /// Allows placing the same image multiple times without re-transmission
@@ -252,12 +240,8 @@ impl Default for Graphics {
             pending: Vec::new(),
             pending_images: Vec::new(),
             texture_operations: Arc::new(Mutex::new(Vec::new())),
-            #[cfg(feature = "sixel")]
-            sixel_shared_palette: None,
             cell_height: 0.0,
             cell_width: 0.0,
-            #[cfg(feature = "sixel")]
-            sixel_parser: None,
             kitty_images: FxHashMap::default(),
             kitty_image_numbers: FxHashMap::default(),
             kitty_virtual_placements: FxHashMap::default(),
