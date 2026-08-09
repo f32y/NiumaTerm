@@ -1,10 +1,6 @@
 use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
-use nmt_remote_protocol::{
-    ClientBound, Frame, FrameError, Handshake, HostBound, NoiseError, PairingCode, SecureChannel,
-    StaticKeypair,
-};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use tokio::net::TcpStream;
@@ -14,7 +10,10 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
-use crate::{CONNECT_MODE_IK, CONNECT_MODE_PAIR};
+use crate::protocol::{
+    CONNECT_MODE_IK, CONNECT_MODE_PAIR, ClientBound, Frame, FrameError, Handshake, HostBound,
+    NoiseError, PairingCode, SecureChannel, StaticKeypair,
+};
 
 pub type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -45,10 +44,28 @@ pub enum NetError {
     Frame(#[from] FrameError),
     #[error("peer closed the connection")]
     Closed,
+    /// The peer (host or relay) violated the protocol or rejected us. Callers
+    /// treat this as permanent: the peer made a decision (bad handshake,
+    /// revoked device, killed session) that a retry cannot change.
     #[error("protocol violation: {0}")]
     Protocol(String),
+    /// A failure local to this machine (runtime or thread construction,
+    /// request building) that says nothing about the peer's state. Kept
+    /// distinct from [`NetError::Protocol`] so reconnect logic keeps retrying:
+    /// a transient local failure must not kill a resumable session.
+    #[error("local failure: {0}")]
+    Internal(String),
     #[error("timed out waiting for the remote peer")]
     Timeout,
+}
+
+impl NetError {
+    pub(crate) fn permanent_reconnect_reason(&self) -> Option<&str> {
+        match self {
+            Self::Protocol(message) => Some(message),
+            _ => None,
+        }
+    }
 }
 
 /// Every client-side network wait is bounded by this: a relay that accepts the
@@ -77,15 +94,17 @@ pub fn relay_ws_url(relay_url: &str, host_id: &str, role: &str, cid: Option<&str
 }
 
 pub async fn ws_connect(url: &str, bearer_token: Option<&str>) -> Result<WsStream, NetError> {
+    // Request construction fails on malformed local input (URL, token), not on
+    // anything the peer did, so these are Internal rather than Protocol.
     let mut request = url
         .into_client_request()
-        .map_err(|e| NetError::Protocol(e.to_string()))?;
+        .map_err(|e| NetError::Internal(e.to_string()))?;
     if let Some(token) = bearer_token {
         request.headers_mut().insert(
             "Authorization",
             format!("Bearer {token}")
                 .parse()
-                .map_err(|_| NetError::Protocol("token contains invalid header bytes".into()))?,
+                .map_err(|_| NetError::Internal("token contains invalid header bytes".into()))?,
         );
     }
     let (socket, _) = connect_async(request).await?;
@@ -226,5 +245,24 @@ async fn connect_pair(
         other => Err(NetError::Protocol(format!(
             "unexpected pairing reply: {other:?}"
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::NetError;
+
+    #[test]
+    fn only_remote_rejections_stop_reconnect_attempts() {
+        let rejection = NetError::Protocol("session was killed".into());
+        assert_eq!(
+            rejection.permanent_reconnect_reason(),
+            Some("session was killed")
+        );
+        assert_eq!(
+            NetError::Internal("runtime unavailable".into()).permanent_reconnect_reason(),
+            None
+        );
+        assert_eq!(NetError::Timeout.permanent_reconnect_reason(), None);
     }
 }

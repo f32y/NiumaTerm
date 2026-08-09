@@ -5,11 +5,11 @@
 //! `relay/`), so these are `#[ignore]` by default:
 //!
 //! ```text
-//! cargo test -p nmt_remote_protocol --test relay_integration -- --ignored
+//! cargo test -p nmt_remote_net --test relay_integration -- --ignored
 //! ```
 
 use futures::{SinkExt, StreamExt};
-use nmt_remote_protocol::{Frame, Handshake, generate_keypair};
+use nmt_remote_net::protocol::{Frame, Handshake, derive_host_id, generate_keypair};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::protocol::Message;
@@ -62,7 +62,7 @@ async fn next_json(socket: &mut Socket) -> serde_json::Value {
 async fn noise_echo_through_relay() {
     let host_keys = generate_keypair().unwrap();
     let client_keys = generate_keypair().unwrap();
-    let host_id = nmt_remote_protocol::derive_host_id(&host_keys.public);
+    let host_id = derive_host_id(&host_keys.public);
 
     // Host registers its control socket and receives the reconciliation sync.
     let mut control = connect(&format!("host_id={host_id}&role=host"), Some(TOKEN))
@@ -169,7 +169,7 @@ async fn client_rejected_when_host_offline() {
 #[ignore = "requires `wrangler dev` running in relay/ (npm run dev)"]
 async fn client_socket_cap_enforced() {
     let host_keys = generate_keypair().unwrap();
-    let host_id = nmt_remote_protocol::derive_host_id(&host_keys.public);
+    let host_id = derive_host_id(&host_keys.public);
 
     let mut control = connect(&format!("host_id={host_id}&role=host"), Some(TOKEN))
         .await
@@ -195,7 +195,7 @@ async fn client_socket_cap_enforced() {
 #[ignore = "requires `wrangler dev` running in relay/ (npm run dev)"]
 async fn buffer_overflow_closes_client() {
     let host_keys = generate_keypair().unwrap();
-    let host_id = nmt_remote_protocol::derive_host_id(&host_keys.public);
+    let host_id = derive_host_id(&host_keys.public);
 
     let mut control = connect(&format!("host_id={host_id}&role=host"), Some(TOKEN))
         .await

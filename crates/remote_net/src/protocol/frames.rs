@@ -1,6 +1,14 @@
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+/// First-byte mode prefix on a client's opening WebSocket message: Noise IK,
+/// the client is already paired. The host picks its responder pattern from
+/// this byte; everything after it is the first Noise handshake message.
+pub const CONNECT_MODE_IK: u8 = 0x01;
+/// First-byte mode prefix: Noise XX, the client wants to redeem a pairing
+/// token.
+pub const CONNECT_MODE_PAIR: u8 = 0x02;
+
 /// Upper bound for Control/Output/Input payloads. A Noise transport message
 /// caps at 65535 bytes including the 16-byte AEAD tag, so frames must stay
 /// comfortably below that; producers (the host output pump, file-sized

@@ -16,7 +16,6 @@ members = [
     "crates/input",
     "crates/platform",
     "crates/remote_net",
-    "crates/remote_protocol",
     "crates/remote_session_hub",
     "crates/shell_extension",
     "crates/terminal",
@@ -72,7 +71,6 @@ nmt_input = { path = "crates/input" }
 libghostty-vt-sys = { path = "third_party/libghostty-vt-sys" }
 nmt_platform = { path = "crates/platform" }
 nmt_remote_net = { path = "crates/remote_net" }
-nmt_remote_protocol = { path = "crates/remote_protocol" }
 nmt_remote_session_hub = { path = "crates/remote_session_hub" }
 nmt_terminal = { path = "crates/terminal" }
 

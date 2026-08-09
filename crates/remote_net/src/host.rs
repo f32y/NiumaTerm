@@ -9,11 +9,6 @@ use std::{io, thread};
 
 use futures::stream::SplitSink;
 use futures::{SinkExt, StreamExt};
-use nmt_remote_protocol::{
-    ClientBound, Frame, Handshake, HostBound, MAX_DATA_LEN, PairingCode, ProtocolSessionInfo,
-    ProtocolSessionOptions, ProtocolSessionSnapshot, SecureChannel, StaticKeypair, derive_host_id,
-    new_pairing_token,
-};
 use nmt_remote_session_hub::{
     RemoteSessionHub, SessionEvent, SessionId, SessionInfo, SessionOptions,
 };
@@ -24,10 +19,14 @@ use tokio::time;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tracing::{info, warn};
 
+use crate::protocol::{
+    CONNECT_MODE_IK, CONNECT_MODE_PAIR, ClientBound, Frame, Handshake, HostBound, MAX_DATA_LEN,
+    PairingCode, ProtocolSessionInfo, ProtocolSessionOptions, ProtocolSessionSnapshot,
+    SecureChannel, StaticKeypair, derive_host_id, new_pairing_token,
+};
 use crate::{
-    AuthorizedDevices, CONNECT_MODE_IK, CONNECT_MODE_PAIR, KeyStoreError, NetError,
-    RelayControlMessage, WsStream, hex_encode, load_or_create_keypair, next_binary, relay_ws_url,
-    ws_connect,
+    AuthorizedDevices, KeyStoreError, NetError, RelayControlMessage, WsStream, hex_encode,
+    load_or_create_keypair, next_binary, relay_ws_url, ws_connect,
 };
 
 const PAIRING_TTL: Duration = Duration::from_secs(300);
