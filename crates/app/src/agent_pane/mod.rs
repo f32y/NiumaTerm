@@ -120,6 +120,55 @@ struct GitBranchPoll {
     refreshing: bool,
 }
 
+impl GitBranchPoll {
+    fn begin_refresh(&mut self) -> bool {
+        if self.refreshing {
+            return false;
+        }
+        self.refreshing = true;
+        true
+    }
+
+    fn complete(&mut self, branch: Option<String>) {
+        self.branch = branch;
+        self.ready = true;
+        self.refreshing = false;
+    }
+
+    fn presentation(&self) -> (String, f32) {
+        let label = self.branch.clone().unwrap_or_else(|| {
+            if self.ready {
+                "No Git branch".to_string()
+            } else {
+                "Detecting branch…".to_string()
+            }
+        });
+        let opacity = if self.branch.is_some() { 0.72 } else { 0.48 };
+        (label, opacity)
+    }
+}
+
+#[cfg(test)]
+mod git_branch_poll_tests {
+    use super::GitBranchPoll;
+
+    #[test]
+    fn refresh_state_coalesces_requests_and_updates_presentation() {
+        let mut poll = GitBranchPoll::default();
+        assert_eq!(poll.presentation(), ("Detecting branch…".into(), 0.48));
+
+        assert!(poll.begin_refresh());
+        assert!(!poll.begin_refresh());
+
+        poll.complete(Some("main".into()));
+        assert_eq!(poll.presentation(), ("main".into(), 0.72));
+
+        assert!(poll.begin_refresh());
+        poll.complete(None);
+        assert_eq!(poll.presentation(), ("No Git branch".into(), 0.48));
+    }
+}
+
 /// Recent-session list shown above the composer.
 struct SessionHistoryUi {
     /// Resumable sessions for this cwd, newest first; shown above the
