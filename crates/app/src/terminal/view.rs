@@ -952,8 +952,7 @@ impl TerminalPane {
                 HostEvent::Title(_)
                 | HostEvent::Bell
                 | HostEvent::Progress(_)
-                | HostEvent::Notification { .. }
-                | HostEvent::Diagnostic(_) => {}
+                | HostEvent::Notification { .. } => {}
                 HostEvent::CommandFinished => {
                     // Finishing transfers the active SCREEN rows into an
                     // immutable block, so live selection anchors no longer

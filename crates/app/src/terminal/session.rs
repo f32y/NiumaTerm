@@ -53,8 +53,6 @@ pub enum HostEvent {
     Cwd(String),
     /// Desktop notification (OSC 9 / OSC 777).
     Notification { title: String, body: String },
-    /// Diagnostic / assistant report.
-    Diagnostic(String),
     /// Entered (`true`) or left (`false`) an interactive full-screen program.
     InteractiveState(bool),
     /// A full-screen program entered (`true`) or left (`false`) the alt-screen — a
@@ -562,7 +560,6 @@ impl EventListener for TerminalEventProxy {
             TerminalEvent::DesktopNotification { title, body } => {
                 HostEvent::Notification { title, body }
             }
-            TerminalEvent::ReportToAssistant(err) => HostEvent::Diagnostic(err.report.to_string()),
             TerminalEvent::InteractiveState(on) => HostEvent::InteractiveState(on),
             TerminalEvent::AltScreen(on) => HostEvent::AltScreen(on),
             TerminalEvent::PromptBoundaryTrusted(on) => {

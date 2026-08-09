@@ -9,7 +9,6 @@ use nmt_platform::{Waker, WinsizeBuilder};
 
 use crate::ansi::graphics::UpdateQueues;
 use crate::clipboard::ClipboardType;
-use crate::error::TerminalError;
 use crate::ghostty;
 use crate::terminal::Match;
 use crate::terminal::pos::{Direction, Pos};
@@ -191,17 +190,6 @@ pub enum TerminalEvent {
         route_id: usize,
         queues: UpdateQueues,
     },
-    /// A `q` (query) request arrived from the PTY in `route_id`. The
-    /// frontend computes the four-state status — System and/or
-    /// Glossary coverage — by consulting both `FontLibrary` (system
-    /// fonts) and the per-route glyph registry, then writes the
-    /// formatted reply back to the same pane's PTY. Asynchronous
-    /// because this crate's dispatcher does not have access
-    /// to the FontLibrary; the frontend does.
-    GlyphProtocolQuery {
-        route_id: usize,
-        cp: u32,
-    },
     Paste,
     Copy(String),
     UpdateFontSize(u8),
@@ -219,8 +207,6 @@ pub enum TerminalEvent {
     SelectNativeTabLast,
     SelectNativeTabNext,
     SelectNativeTabPrev,
-
-    ReportToAssistant(TerminalError),
 
     /// Grid has changed possibly requiring a mouse cursor shape change.
     MouseCursorDirty,
@@ -409,9 +395,6 @@ impl Debug for TerminalEvent {
             TerminalEvent::TerminalDamaged(route_id) => {
                 write!(f, "TerminalDamaged route {route_id}")
             }
-            TerminalEvent::GlyphProtocolQuery { route_id, cp } => {
-                write!(f, "GlyphProtocolQuery route {route_id} cp {cp:#x}")
-            }
             TerminalEvent::Bell => write!(f, "Bell"),
             TerminalEvent::DesktopNotification { title, body } => {
                 write!(f, "DesktopNotification({title}, {body})")
@@ -430,9 +413,6 @@ impl Debug for TerminalEvent {
             TerminalEvent::SelectNativeTabPrev => write!(f, "SelectNativeTabPrev"),
             TerminalEvent::CreateConfigEditor => write!(f, "CreateConfigEditor"),
             TerminalEvent::UpdateConfig => write!(f, "ReloadConfiguration"),
-            TerminalEvent::ReportToAssistant(error_report) => {
-                write!(f, "ReportToAssistant({})", error_report.report)
-            }
             TerminalEvent::ToggleFullScreen => write!(f, "FullScreen"),
             TerminalEvent::ToggleAppearanceTheme => write!(f, "ToggleAppearanceTheme"),
             TerminalEvent::BlinkCursor(timeout, route_id) => {
