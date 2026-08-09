@@ -1,6 +1,6 @@
 //! Visual settings persisted as the `[appearance]` section of `config.toml`.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
@@ -21,6 +21,62 @@ impl InputStyle {
     pub fn is_fixed_bottom(self) -> bool {
         matches!(self, Self::FixedBottom)
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum SmoothScrollingMode {
+    #[default]
+    All,
+    OnlyTerminal,
+    OnlyAgent,
+    Off,
+}
+
+impl SmoothScrollingMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::OnlyTerminal => "only-terminal",
+            Self::OnlyAgent => "only-agent",
+            Self::Off => "off",
+        }
+    }
+
+    pub fn from_value(value: &str) -> Self {
+        match value {
+            "only-terminal" => Self::OnlyTerminal,
+            "only-agent" => Self::OnlyAgent,
+            "off" => Self::Off,
+            _ => Self::All,
+        }
+    }
+
+    pub fn terminal_enabled(self) -> bool {
+        matches!(self, Self::All | Self::OnlyTerminal)
+    }
+
+    pub fn agent_enabled(self) -> bool {
+        matches!(self, Self::All | Self::OnlyAgent)
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum SmoothScrollingValue {
+    Mode(SmoothScrollingMode),
+    Legacy(bool),
+}
+
+fn deserialize_smooth_scrolling<'de, D>(deserializer: D) -> Result<SmoothScrollingMode, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(match SmoothScrollingValue::deserialize(deserializer)? {
+        SmoothScrollingValue::Mode(mode) => mode,
+        SmoothScrollingValue::Legacy(true) => SmoothScrollingMode::All,
+        SmoothScrollingValue::Legacy(false) => SmoothScrollingMode::Off,
+    })
 }
 
 fn default_git_status_refresh_interval() -> u64 {
@@ -138,6 +194,13 @@ pub struct AppearanceConfig {
         rename = "transparent-main-view"
     )]
     pub transparent_main_view: bool,
+    /// Select which scrolling views animate line-based mouse-wheel input.
+    #[serde(
+        default,
+        rename = "smooth-scrolling",
+        deserialize_with = "deserialize_smooth_scrolling"
+    )]
+    pub smooth_scrolling: SmoothScrollingMode,
     /// Whole-window background opacity (0.2–1.0; clamped on load).
     #[serde(default = "default_background_opacity", rename = "background-opacity")]
     pub background_opacity: f64,
@@ -183,6 +246,7 @@ impl Default for AppearanceConfig {
             monospace_only: true,
             window_transparency_enabled: default_window_transparency_enabled(),
             transparent_main_view: default_transparent_main_view(),
+            smooth_scrolling: SmoothScrollingMode::default(),
             background_opacity: default_background_opacity(),
             background_image: None,
             background_image_opacity: default_background_image_opacity(),

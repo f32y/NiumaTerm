@@ -1594,6 +1594,9 @@ impl Render for TerminalPane {
         let settings = cx.global::<AppSettings>();
         let fixed_bottom = settings.input_style.is_fixed_bottom();
         let show_block_chrome = settings.command_blocks;
+        self.block_list
+            .list
+            .set_smooth_wheel_enabled(settings.smooth_scrolling.terminal_enabled());
 
         let block_list_mode = self.block_list_mode(cx);
 

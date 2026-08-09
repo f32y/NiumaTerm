@@ -36,7 +36,7 @@ use nmt_agent_utils::claude_code::hook as claude_hook;
 use nmt_agent_utils::codex::hook as codex_hook;
 use nmt_agent_utils::update::{DiscoverySupport, InstallationKey, ProviderKind, UpdatePhase};
 use nmt_config::agent::AgentConfig;
-use nmt_config::appearance::AppearanceConfig;
+use nmt_config::appearance::{AppearanceConfig, SmoothScrollingMode};
 use nmt_config::colors::{ColorArray, Colors};
 use nmt_config::defaults::default_theme;
 use nmt_config::remote_session::RemoteSessionConfig;
@@ -193,6 +193,8 @@ pub struct AppSettings {
     pub window_transparency_enabled: bool,
     /// Allow the Terminal View and Agent Pane background to remain translucent.
     pub transparent_main_view: bool,
+    /// Select which scrolling views animate line-based mouse-wheel input.
+    pub smooth_scrolling: SmoothScrollingMode,
     /// Whole-window background opacity (0.2..=1.0) while transparency is enabled.
     pub background_opacity: f64,
     /// Local image drawn behind all window content.
@@ -260,6 +262,7 @@ impl Default for AppSettings {
             monospace_only: true,
             window_transparency_enabled: true,
             transparent_main_view: true,
+            smooth_scrolling: SmoothScrollingMode::All,
             background_opacity: 1.0,
             background_image: None,
             background_image_opacity: DEFAULT_BACKGROUND_IMAGE_OPACITY,
@@ -491,6 +494,7 @@ impl AppSettings {
             monospace_only: appearance.monospace_only,
             window_transparency_enabled: appearance.window_transparency_enabled,
             transparent_main_view: appearance.transparent_main_view,
+            smooth_scrolling: appearance.smooth_scrolling,
             background_opacity: clamp_background_opacity(appearance.background_opacity),
             background_image: appearance
                 .background_image
@@ -679,11 +683,8 @@ impl AppSettings {
             .unwrap_or_else(|| self.default_profile.clone())
     }
 
-    /// Persist the dialog-managed settings into `config.toml` (patch-style,
-    /// preserving unrelated content). Called once on dialog close. Failures are
-    /// logged, never fatal.
-    pub fn save(&self) {
-        let appearance = AppearanceConfig {
+    fn appearance_config(&self) -> AppearanceConfig {
+        AppearanceConfig {
             input_style: self.input_style,
             agent_pane_use_terminal_background: self.agent_pane_use_terminal_background,
             command_blocks: self.command_blocks,
@@ -700,10 +701,18 @@ impl AppSettings {
             monospace_only: self.monospace_only,
             window_transparency_enabled: self.window_transparency_enabled,
             transparent_main_view: self.transparent_main_view,
+            smooth_scrolling: self.smooth_scrolling,
             background_opacity: self.background_opacity,
             background_image: self.background_image.clone(),
             background_image_opacity: self.background_image_opacity,
-        };
+        }
+    }
+
+    /// Persist the dialog-managed settings into `config.toml` (patch-style,
+    /// preserving unrelated content). Called once on dialog close. Failures are
+    /// logged, never fatal.
+    pub fn save(&self) {
+        let appearance = self.appearance_config();
 
         let agent = AgentConfig {
             enable_agent_hooks: self.enable_agent_hooks,
@@ -1913,6 +1922,33 @@ pub fn settings_view(cx: &App) -> Settings {
                             )
                             .description(
                                 "Use a translucent background for Terminal View and Agent Pane.",
+                            ),
+                        )
+                        .item(
+                            SettingItem::new(
+                                "Smooth Scrolling",
+                                SettingField::dropdown(
+                                    vec![
+                                        ("all".into(), "All".into()),
+                                        ("only-terminal".into(), "Only Terminal".into()),
+                                        ("only-agent".into(), "Only Agent".into()),
+                                        ("off".into(), "Off".into()),
+                                    ],
+                                    |cx| {
+                                        cx.global::<AppSettings>()
+                                            .smooth_scrolling
+                                            .as_str()
+                                            .into()
+                                    },
+                                    |value, cx| {
+                                        cx.global_mut::<AppSettings>().smooth_scrolling =
+                                            SmoothScrollingMode::from_value(&value);
+                                    },
+                                )
+                                .default_value(SharedString::from("all")),
+                            )
+                            .description(
+                                "Choose where traditional mouse-wheel scrolling is animated.",
                             ),
                         )
                         .item(
@@ -3160,6 +3196,13 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use gpui::{
+        Context, Entity, IntoElement, ListAlignment, ListOffset, ListState, ScrollDelta,
+        ScrollWheelEvent, TestAppContext, list, point, size,
+    };
+
     use super::*;
 
     #[test]
@@ -3272,6 +3315,7 @@ mod tests {
         assert_eq!(settings.default_profile, "PowerShell");
         assert!(settings.monospace_only);
         assert!(settings.restore_last_session_when_opening);
+        assert_eq!(settings.smooth_scrolling, SmoothScrollingMode::All);
     }
 
     #[test]
@@ -3444,5 +3488,84 @@ mod tests {
         assert_eq!(settings.profiles[0].shell, DEFAULT_SHELL);
         assert_eq!(settings.profiles[0].args, "");
         assert!(settings.restore_last_session_when_opening);
+        assert_eq!(settings.smooth_scrolling, SmoothScrollingMode::All);
+    }
+
+    #[test]
+    fn smooth_scrolling_maps_to_saved_appearance() {
+        let mut settings = AppSettings::default();
+        for mode in [
+            SmoothScrollingMode::All,
+            SmoothScrollingMode::OnlyTerminal,
+            SmoothScrollingMode::OnlyAgent,
+            SmoothScrollingMode::Off,
+        ] {
+            settings.smooth_scrolling = mode;
+            assert_eq!(settings.appearance_config().smooth_scrolling, mode);
+        }
+    }
+
+    fn list_pixel_position(state: &ListState) -> f32 {
+        let offset = state.logical_scroll_top();
+        offset.item_ix as f32 * 20. + offset.offset_in_item.as_f32()
+    }
+
+    struct SettingsAwareList(ListState);
+
+    impl gpui::Render for SettingsAwareList {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            self.0.set_smooth_wheel_enabled(
+                cx.global::<AppSettings>()
+                    .smooth_scrolling
+                    .terminal_enabled(),
+            );
+            list(self.0.clone(), |_, _, _| {
+                div().h(px(20.)).w_full().into_any_element()
+            })
+            .w_full()
+            .h_full()
+        }
+    }
+
+    fn draw_settings_aware_list(
+        cx: &mut gpui::VisualTestContext,
+        view: &Entity<SettingsAwareList>,
+    ) {
+        cx.draw(point(px(0.), px(0.)), size(px(100.), px(100.)), |_, _| {
+            view.clone().into_any_element()
+        });
+    }
+
+    #[gpui::test]
+    fn smooth_scrolling_mode_updates_an_open_terminal_list(cx: &mut TestAppContext) {
+        cx.set_global(AppSettings::default());
+        let state = ListState::new(50, ListAlignment::Top, px(10.)).measure_all();
+        state.scroll_to(ListOffset {
+            item_ix: 10,
+            offset_in_item: px(0.),
+        });
+        let cx = cx.add_empty_window();
+        let view = cx.update(|_, cx| cx.new(|_| SettingsAwareList(state.clone())));
+        draw_settings_aware_list(cx, &view);
+
+        cx.simulate_event(ScrollWheelEvent {
+            position: point(px(1.), px(1.)),
+            delta: ScrollDelta::Lines(point(0., 1.)),
+            ..Default::default()
+        });
+        assert_eq!(list_pixel_position(&state), 200.);
+
+        cx.executor().advance_clock(Duration::from_millis(100));
+        draw_settings_aware_list(cx, &view);
+        let stopped_at = list_pixel_position(&state);
+        assert!(stopped_at > 150. && stopped_at < 200.);
+
+        cx.update_global::<AppSettings, _>(|settings, _| {
+            settings.smooth_scrolling = SmoothScrollingMode::OnlyAgent;
+        });
+        draw_settings_aware_list(cx, &view);
+        cx.executor().advance_clock(Duration::from_millis(400));
+        draw_settings_aware_list(cx, &view);
+        assert!((list_pixel_position(&state) - stopped_at).abs() < 0.1);
     }
 }
