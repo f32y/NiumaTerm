@@ -15,8 +15,12 @@ use crate::{
 };
 use collections::VecDeque;
 use refineable::Refineable as _;
-use std::{cell::RefCell, ops::Range, rc::Rc};
+use scheduler::Instant;
+use std::{cell::RefCell, ops::Range, rc::Rc, time::Duration};
 use sum_tree::{Bias, Dimensions, SumTree};
+
+const SMOOTH_WHEEL_LINE_PIXELS: f32 = 100. / 3.;
+const SMOOTH_WHEEL_DURATION_EPSILON: f32 = 0.01;
 
 type RenderItemFn = dyn FnMut(usize, &mut Window, &mut App) -> AnyElement + 'static;
 
@@ -73,6 +77,88 @@ struct StateInner {
     measuring_behavior: ListMeasuringBehavior,
     pending_scroll: Option<PendingScroll>,
     follow_state: FollowState,
+    smooth_wheel_enabled: bool,
+    smooth_wheel_motion: Option<SmoothWheelMotion>,
+}
+
+struct SmoothWheelMotion {
+    start_time: Instant,
+    duration: Duration,
+    start_position: f32,
+    destination: f32,
+    last_position: f32,
+    curve: SmoothWheelCurve,
+}
+
+#[derive(Clone, Copy)]
+struct SmoothWheelCurve {
+    x1: f32,
+    y1: f32,
+}
+
+impl SmoothWheelCurve {
+    fn for_motion(velocity: f32, distance: f32, duration: Duration) -> Self {
+        let slope = if distance.abs() < f32::EPSILON {
+            0.
+        } else {
+            (velocity * duration.as_secs_f32() / distance).clamp(-1000., 1000.)
+        };
+        Self {
+            x1: 0.42,
+            y1: 0.42 * slope,
+        }
+    }
+
+    fn sample(self, progress: f32) -> (f32, f32) {
+        let progress = progress.clamp(0., 1.);
+        let mut low = 0.;
+        let mut high = 1.;
+        for _ in 0..16 {
+            let parameter = (low + high) * 0.5;
+            if cubic_value(parameter, self.x1, 0.58) < progress {
+                low = parameter;
+            } else {
+                high = parameter;
+            }
+        }
+
+        let parameter = (low + high) * 0.5;
+        let value = cubic_value(parameter, self.y1, 1.);
+        let x_derivative = cubic_derivative(parameter, self.x1, 0.58);
+        let derivative = if x_derivative.abs() < f32::EPSILON {
+            0.
+        } else {
+            cubic_derivative(parameter, self.y1, 1.) / x_derivative
+        };
+        (value, derivative)
+    }
+}
+
+fn smooth_wheel_duration(distance: f32) -> Duration {
+    const RAMP_START_PX: f32 = 120.;
+    const RAMP_END_PX: f32 = 480.;
+    const MIN_FRAMES: f32 = 6.;
+    const MAX_FRAMES: f32 = 12.;
+    const FRAMES_PER_SECOND: f32 = 60.;
+
+    let slope = (MIN_FRAMES - MAX_FRAMES) / (RAMP_END_PX - RAMP_START_PX);
+    let offset = MAX_FRAMES - RAMP_START_PX * slope;
+    let frames = (offset + distance.abs() * slope).clamp(MIN_FRAMES, MAX_FRAMES);
+    Duration::from_secs_f32(frames / FRAMES_PER_SECOND)
+}
+
+fn cubic_value(parameter: f32, first: f32, second: f32) -> f32 {
+    let inverse = 1. - parameter;
+    3. * inverse * inverse * parameter * first
+        + 3. * inverse * parameter * parameter * second
+        + parameter * parameter * parameter
+}
+
+fn cubic_derivative(parameter: f32, first: f32, second: f32) -> f32 {
+    let inverse = 1. - parameter;
+    3. * inverse * inverse * first
+        + 6. * inverse * parameter * (second - first)
+        + 3. * parameter * parameter * (1. - second)
 }
 
 /// Deferred scroll adjustment applied after the scroll-top item has been remeasured.
@@ -325,6 +411,8 @@ impl ListState {
             measuring_behavior: ListMeasuringBehavior::default(),
             pending_scroll: None,
             follow_state: FollowState::default(),
+            smooth_wheel_enabled: false,
+            smooth_wheel_motion: None,
         })));
         this.splice(0..0, item_count);
         this
@@ -339,9 +427,23 @@ impl ListState {
             return;
         }
 
+        state.cancel_smooth_wheel();
         let scroll_top = state.logical_scroll_top();
         state.alignment = alignment;
         state.logical_scroll_top = Some(scroll_top);
+    }
+
+    /// Enable or disable animated scrolling for line-based wheel input.
+    pub fn set_smooth_wheel_enabled(&self, enabled: bool) {
+        let state = &mut *self.0.borrow_mut();
+        if state.smooth_wheel_enabled == enabled {
+            return;
+        }
+
+        state.smooth_wheel_enabled = enabled;
+        if !enabled {
+            state.cancel_smooth_wheel();
+        }
     }
 
     /// Set the list to measure all items in the list in the first layout phase.
@@ -363,6 +465,7 @@ impl ListState {
             state.logical_scroll_top = None;
             state.pending_scroll = None;
             state.scrollbar_drag_start_height = None;
+            state.cancel_smooth_wheel();
             state.items.summary().count
         };
 
@@ -545,6 +648,7 @@ impl ListState {
 
         let current_offset = self.logical_scroll_top();
         let state = &mut *self.0.borrow_mut();
+        state.cancel_smooth_wheel();
 
         if distance < px(0.) {
             state.follow_state.stop_following();
@@ -578,6 +682,7 @@ impl ListState {
     /// growing (e.g. during streaming).
     pub fn scroll_to_end(&self) {
         let state = &mut *self.0.borrow_mut();
+        state.cancel_smooth_wheel();
         let item_count = state.items.summary().count;
         state.pending_scroll = None;
         state.logical_scroll_top = Some(ListOffset {
@@ -592,6 +697,7 @@ impl ListState {
     /// following occurs.
     pub fn set_follow_mode(&self, mode: FollowMode) {
         let state = &mut *self.0.borrow_mut();
+        state.cancel_smooth_wheel();
 
         match mode {
             FollowMode::Normal => {
@@ -622,6 +728,7 @@ impl ListState {
     /// Scroll the list to the given offset
     pub fn scroll_to(&self, mut scroll_top: ListOffset) {
         let state = &mut *self.0.borrow_mut();
+        state.cancel_smooth_wheel();
         let item_count = state.items.summary().count;
         if scroll_top.item_ix >= item_count {
             scroll_top.item_ix = item_count;
@@ -639,6 +746,7 @@ impl ListState {
     /// Scroll the list to the given item, such that the item is fully visible.
     pub fn scroll_to_reveal_item(&self, ix: usize) {
         let state = &mut *self.0.borrow_mut();
+        state.cancel_smooth_wheel();
 
         let mut scroll_top = state.logical_scroll_top();
         let height = state
@@ -705,6 +813,7 @@ impl ListState {
     /// as items in the overdraw get measured, and help offset scroll position changes accordingly.
     pub fn scrollbar_drag_started(&self) {
         let mut state = self.0.borrow_mut();
+        state.cancel_smooth_wheel();
         state.scrollbar_drag_start_height = Some(state.items.summary().height);
     }
 
@@ -727,7 +836,9 @@ impl ListState {
 
     /// Set the offset from the scrollbar
     pub fn set_offset_from_scrollbar(&self, point: Point<Pixels>) {
-        self.0.borrow_mut().set_offset_from_scrollbar(point);
+        let state = &mut *self.0.borrow_mut();
+        state.cancel_smooth_wheel();
+        state.set_offset_from_scrollbar(point);
     }
 
     /// Returns the maximum scroll offset according to the items we have measured.
@@ -805,6 +916,10 @@ impl ListState {
 }
 
 impl StateInner {
+    fn cancel_smooth_wheel(&mut self) {
+        self.smooth_wheel_motion = None;
+    }
+
     /// Re-anchor a pending scroll adjustment from a remeasure onto a newly set
     /// scroll position, so it clamps to the remeasured item's new height on
     /// the next layout instead of reverting the scroll.
@@ -844,6 +959,19 @@ impl StateInner {
             .scrollbar_drag_start_height
             .unwrap_or_else(|| self.items.summary().height);
         (height - bounds.size.height).max(px(0.))
+    }
+
+    fn scroll_max_for_height(&self, height: Pixels) -> Pixels {
+        let padding = self.last_padding.unwrap_or_default();
+        let content_height = self
+            .scrollbar_drag_start_height
+            .unwrap_or_else(|| self.items.summary().height);
+        (content_height + padding.top + padding.bottom - height).max(px(0.))
+    }
+
+    fn pixel_scroll_top(&self, height: Pixels) -> Pixels {
+        self.scroll_top(&self.logical_scroll_top())
+            .clamp(px(0.), self.scroll_max_for_height(height))
     }
 
     fn visible_range(
@@ -887,15 +1015,15 @@ impl StateInner {
             let (start, ..) =
                 self.items
                     .find::<ListItemSummary, _>((), &Height(new_scroll_top), Bias::Right);
-            let scroll_top = ListOffset {
+            let new_logical_scroll_top = ListOffset {
                 item_ix: start.count,
                 offset_in_item: new_scroll_top - start.height,
             };
             // The user's scroll supersedes the position stashed by a
             // remeasure; re-anchor the pending adjustment so it doesn't revert
             // this scroll on the next layout.
-            self.rebase_pending_scroll(scroll_top);
-            self.logical_scroll_top = Some(scroll_top);
+            self.rebase_pending_scroll(new_logical_scroll_top);
+            self.logical_scroll_top = Some(new_logical_scroll_top);
         }
 
         if delta.y > px(0.) {
@@ -920,6 +1048,163 @@ impl StateInner {
         }
 
         cx.notify(current_view);
+    }
+
+    fn set_pixel_scroll_top(
+        &mut self,
+        new_scroll_top: Pixels,
+        height: Pixels,
+        current_view: EntityId,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let scroll_max = self.scroll_max_for_height(height);
+        let new_scroll_top = new_scroll_top.clamp(px(0.), scroll_max);
+        let (start, ..) =
+            self.items
+                .find::<ListItemSummary, _>((), &Height(new_scroll_top), Bias::Right);
+        let scroll_top = ListOffset {
+            item_ix: start.count,
+            offset_in_item: new_scroll_top - start.height,
+        };
+
+        if self.alignment == ListAlignment::Bottom && new_scroll_top == scroll_max {
+            self.pending_scroll = None;
+            self.logical_scroll_top = None;
+        } else {
+            // The user's scroll supersedes the position stashed by a
+            // remeasure; re-anchor the pending adjustment so it doesn't revert
+            // this scroll on the next layout.
+            self.rebase_pending_scroll(scroll_top);
+            self.logical_scroll_top = Some(scroll_top);
+        }
+
+        if let Some(handler) = self.scroll_handler.as_mut() {
+            let visible_range = Self::visible_range(&self.items, height, &scroll_top);
+            handler(
+                &ListScrollEvent {
+                    visible_range,
+                    count: self.items.summary().count,
+                    is_scrolled: self.logical_scroll_top.is_some(),
+                    is_following_tail: matches!(
+                        self.follow_state,
+                        FollowState::Tail { is_following: true }
+                    ),
+                },
+                window,
+                cx,
+            );
+        }
+
+        cx.notify(current_view);
+    }
+
+    fn advance_smooth_wheel(
+        &mut self,
+        now: Instant,
+        height: Pixels,
+        current_view: EntityId,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> f32 {
+        let Some(mut motion) = self.smooth_wheel_motion.take() else {
+            return 0.;
+        };
+
+        let actual_position = self.pixel_scroll_top(height).0;
+        let layout_shift = actual_position - motion.last_position;
+        motion.start_position += layout_shift;
+        motion.destination += layout_shift;
+
+        let scroll_max = self.scroll_max_for_height(height).0;
+        motion.destination = motion.destination.clamp(0., scroll_max);
+        let elapsed = now.duration_since(motion.start_time);
+        let progress = elapsed.as_secs_f32() / motion.duration.as_secs_f32();
+        let finished = progress >= 1.;
+        let (eased, derivative) = motion.curve.sample(progress);
+        let distance = motion.destination - motion.start_position;
+        let unclamped_position = motion.start_position + distance * eased;
+        let position = if finished {
+            motion.destination
+        } else {
+            unclamped_position.clamp(0., scroll_max)
+        };
+        let mut velocity = if finished {
+            0.
+        } else {
+            distance * derivative / motion.duration.as_secs_f32()
+        };
+        if (position <= 0. && velocity < 0.) || (position >= scroll_max && velocity > 0.) {
+            velocity = 0.;
+        }
+
+        self.set_pixel_scroll_top(px(position), height, current_view, window, cx);
+        motion.last_position = position;
+        if !finished && (position - motion.destination).abs() > 0.01 {
+            self.smooth_wheel_motion = Some(motion);
+            window.on_next_frame(move |_, cx| cx.notify(current_view));
+        }
+        velocity
+    }
+
+    fn start_smooth_wheel(
+        &mut self,
+        lines: Point<f32>,
+        now: Instant,
+        height: Pixels,
+        current_view: EntityId,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        if lines.y == 0. {
+            return;
+        }
+        if lines.y > 0. {
+            self.follow_state.stop_following();
+        }
+        let mut velocity = self.advance_smooth_wheel(now, height, current_view, window, cx);
+
+        let scroll_max = self.scroll_max_for_height(height).0;
+        let current = self.pixel_scroll_top(height).0;
+        if (current <= 0. && velocity < 0.) || (current >= scroll_max && velocity > 0.) {
+            velocity = 0.;
+        }
+        let prior_destination = self
+            .smooth_wheel_motion
+            .as_ref()
+            .map_or(current, |motion| motion.destination);
+        let destination =
+            (prior_destination - lines.y * SMOOTH_WHEEL_LINE_PIXELS).clamp(0., scroll_max);
+
+        if (destination - current).abs() < 0.01 {
+            self.smooth_wheel_motion = None;
+            return;
+        }
+
+        let distance = destination - current;
+        let mut duration = smooth_wheel_duration(distance).as_secs_f32();
+        if velocity.abs() >= f32::EPSILON {
+            let velocity_bound = distance / velocity * 2.5;
+            if velocity_bound >= 0. {
+                duration = duration.min(velocity_bound);
+            }
+        }
+        if duration < SMOOTH_WHEEL_DURATION_EPSILON {
+            self.set_pixel_scroll_top(px(destination), height, current_view, window, cx);
+            self.smooth_wheel_motion = None;
+            return;
+        }
+        let duration = Duration::from_secs_f32(duration);
+
+        self.smooth_wheel_motion = Some(SmoothWheelMotion {
+            start_time: now,
+            duration,
+            start_position: current,
+            destination,
+            last_position: current,
+            curve: SmoothWheelCurve::for_motion(velocity, distance, duration),
+        });
+        window.on_next_frame(move |_, cx| cx.notify(current_view));
     }
 
     fn logical_scroll_top(&self) -> ListOffset {
@@ -1498,6 +1783,16 @@ impl Element for List {
         let state = &mut *self.state.0.borrow_mut();
         state.reset = false;
 
+        if state.smooth_wheel_motion.is_some() {
+            state.advance_smooth_wheel(
+                cx.background_executor().now(),
+                bounds.size.height,
+                window.current_view(),
+                window,
+                cx,
+            );
+        }
+
         let mut style = Style::default();
         style.refine(&self.style);
 
@@ -1527,6 +1822,7 @@ impl Element for List {
             match state.prepaint_items(bounds, padding, true, &mut self.render_item, window, cx) {
                 Ok(layout) => layout,
                 Err(autoscroll_request) => {
+                    state.cancel_smooth_wheel();
                     state.logical_scroll_top = Some(autoscroll_request);
                     state
                         .prepaint_items(bounds, padding, false, &mut self.render_item, window, cx)
@@ -1563,16 +1859,24 @@ impl Element for List {
         let mut accumulated_scroll_delta = ScrollDelta::default();
         window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
             if phase == DispatchPhase::Bubble && hitbox_id.should_handle_scroll(window) {
-                accumulated_scroll_delta = accumulated_scroll_delta.coalesce(event.delta);
-                let pixel_delta = accumulated_scroll_delta.pixel_delta(px(20.));
-                list_state.0.borrow_mut().scroll(
-                    &scroll_top,
-                    height,
-                    pixel_delta,
-                    current_view,
-                    window,
-                    cx,
-                )
+                let state = &mut *list_state.0.borrow_mut();
+                if state.smooth_wheel_enabled
+                    && let ScrollDelta::Lines(lines) = event.delta
+                {
+                    state.start_smooth_wheel(
+                        lines,
+                        cx.background_executor().now(),
+                        height,
+                        current_view,
+                        window,
+                        cx,
+                    );
+                } else {
+                    state.cancel_smooth_wheel();
+                    accumulated_scroll_delta = accumulated_scroll_delta.coalesce(event.delta);
+                    let pixel_delta = accumulated_scroll_delta.pixel_delta(px(20.));
+                    state.scroll(&scroll_top, height, pixel_delta, current_view, window, cx);
+                }
             }
         });
     }
@@ -1679,6 +1983,7 @@ mod test {
     use gpui::{ScrollDelta, ScrollWheelEvent};
     use std::cell::Cell;
     use std::rc::Rc;
+    use std::time::Duration;
 
     use crate::{
         self as gpui, AppContext, Bounds, Context, Element, FollowMode, IntoElement, ListState,
@@ -1835,6 +2140,318 @@ mod test {
             .w_full()
             .h_full()
         }
+    }
+
+    fn draw_test_list(cx: &mut crate::VisualTestContext, state: &ListState, height: f32) {
+        cx.draw(
+            point(px(0.), px(0.)),
+            size(px(100.), px(height)),
+            |_, cx| cx.new(|_| TestListView(state.clone())).into_any_element(),
+        );
+    }
+
+    fn test_scroll_position(state: &ListState, height: f32) -> f32 {
+        state.0.borrow().pixel_scroll_top(px(height)).0
+    }
+
+    fn test_smooth_destination(state: &ListState) -> f32 {
+        state
+            .0
+            .borrow()
+            .smooth_wheel_motion
+            .as_ref()
+            .unwrap()
+            .destination
+    }
+
+    fn test_wheel(cx: &mut crate::VisualTestContext, delta: ScrollDelta) {
+        cx.simulate_event(ScrollWheelEvent {
+            position: point(px(1.), px(1.)),
+            delta,
+            ..Default::default()
+        });
+    }
+
+    #[gpui::test]
+    fn test_smooth_wheel_matches_chromium_distance_and_duration(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let state = ListState::new(30, crate::ListAlignment::Top, px(10.)).measure_all();
+        state.set_smooth_wheel_enabled(true);
+        draw_test_list(cx, &state, 100.);
+        state.scroll_by(px(200.));
+        draw_test_list(cx, &state, 100.);
+
+        test_wheel(cx, ScrollDelta::Lines(point(0., 1.)));
+        assert_eq!(test_scroll_position(&state, 100.), 200.);
+
+        cx.executor().advance_clock(Duration::from_millis(100));
+        draw_test_list(cx, &state, 100.);
+        let midpoint = test_scroll_position(&state, 100.);
+        assert!((midpoint - (200. - 100. / 6.)).abs() < 0.1);
+
+        cx.executor().advance_clock(Duration::from_millis(100));
+        draw_test_list(cx, &state, 100.);
+        assert!((test_scroll_position(&state, 100.) - (200. - 100. / 3.)).abs() < 0.1);
+        assert!(state.0.borrow().smooth_wheel_motion.is_none());
+
+        test_wheel(cx, ScrollDelta::Lines(point(0., -1.)));
+        cx.executor().advance_clock(Duration::from_millis(200));
+        draw_test_list(cx, &state, 100.);
+        assert_eq!(test_scroll_position(&state, 100.), 200.);
+    }
+
+    #[gpui::test]
+    fn test_smooth_wheel_accumulates_unscaled_line_distance(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let state = ListState::new(50, crate::ListAlignment::Top, px(10.)).measure_all();
+        state.set_smooth_wheel_enabled(true);
+        draw_test_list(cx, &state, 100.);
+        state.scroll_by(px(600.));
+        draw_test_list(cx, &state, 100.);
+
+        test_wheel(cx, ScrollDelta::Lines(point(0., 1.)));
+        assert!((test_smooth_destination(&state) - (600. - 100. / 3.)).abs() < 0.1);
+        test_wheel(cx, ScrollDelta::Lines(point(0., 1.)));
+        assert!((test_smooth_destination(&state) - (600. - 200. / 3.)).abs() < 0.1);
+
+        cx.executor().advance_clock(Duration::from_millis(81));
+        test_wheel(cx, ScrollDelta::Lines(point(0., 1.)));
+        assert!((test_smooth_destination(&state) - 500.).abs() < 0.1);
+
+        test_wheel(cx, ScrollDelta::Lines(point(0., -1.)));
+        assert!((test_smooth_destination(&state) - (500. + 100. / 3.)).abs() < 0.1);
+    }
+
+    #[gpui::test]
+    fn test_smooth_wheel_shortens_large_burst_duration(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let state = ListState::new(50, crate::ListAlignment::Top, px(10.)).measure_all();
+        state.set_smooth_wheel_enabled(true);
+        draw_test_list(cx, &state, 100.);
+        state.scroll_by(px(800.));
+        draw_test_list(cx, &state, 100.);
+
+        for _ in 0..8 {
+            test_wheel(cx, ScrollDelta::Lines(point(0., 1.)));
+        }
+
+        let destination = test_smooth_destination(&state);
+        assert!((destination - (800. - 800. / 3.)).abs() < 0.1);
+        assert!(
+            state
+                .0
+                .borrow()
+                .smooth_wheel_motion
+                .as_ref()
+                .unwrap()
+                .duration
+                < Duration::from_millis(200)
+        );
+
+        cx.executor().advance_clock(Duration::from_millis(200));
+        draw_test_list(cx, &state, 100.);
+        assert!((test_scroll_position(&state, 100.) - destination).abs() < 0.1);
+        assert!(state.0.borrow().smooth_wheel_motion.is_none());
+    }
+
+    #[test]
+    fn test_chromium_curve_preserves_initial_velocity() {
+        assert_eq!(super::smooth_wheel_duration(120.).as_millis(), 200);
+        assert_eq!(super::smooth_wheel_duration(300.).as_millis(), 150);
+        assert_eq!(super::smooth_wheel_duration(480.).as_millis(), 100);
+
+        let velocity = 120.;
+        let distance = 240.;
+        let duration = Duration::from_millis(160);
+        let curve = super::SmoothWheelCurve::for_motion(velocity, distance, duration);
+        let (_, derivative) = curve.sample(0.0001);
+        let sampled_velocity = distance * derivative / duration.as_secs_f32();
+        assert!((sampled_velocity - velocity).abs() < 2.);
+
+        let idle = super::SmoothWheelCurve::for_motion(0., distance, duration);
+        assert_eq!(idle.x1, 0.42);
+        assert_eq!(idle.y1, 0.);
+    }
+
+    #[gpui::test]
+    fn test_direct_input_and_positioning_cancel_smooth_wheel(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let state = ListState::new(30, crate::ListAlignment::Top, px(10.)).measure_all();
+        state.set_smooth_wheel_enabled(true);
+        draw_test_list(cx, &state, 100.);
+        state.scroll_by(px(200.));
+        draw_test_list(cx, &state, 100.);
+
+        test_wheel(cx, ScrollDelta::Lines(point(0., 1.)));
+        cx.executor().advance_clock(Duration::from_millis(100));
+        draw_test_list(cx, &state, 100.);
+        let before_pixel_input = test_scroll_position(&state, 100.);
+        test_wheel(cx, ScrollDelta::Pixels(point(px(0.), px(10.))));
+        assert!((test_scroll_position(&state, 100.) - (before_pixel_input - 10.)).abs() < 0.1);
+        assert!(state.0.borrow().smooth_wheel_motion.is_none());
+
+        test_wheel(cx, ScrollDelta::Lines(point(0., 1.)));
+        state.scroll_by(px(1.));
+        assert!(state.0.borrow().smooth_wheel_motion.is_none());
+        test_wheel(cx, ScrollDelta::Lines(point(0., 1.)));
+        state.scroll_to(crate::ListOffset::default());
+        assert!(state.0.borrow().smooth_wheel_motion.is_none());
+        test_wheel(cx, ScrollDelta::Lines(point(0., -1.)));
+        state.scroll_to_end();
+        assert!(state.0.borrow().smooth_wheel_motion.is_none());
+        test_wheel(cx, ScrollDelta::Lines(point(0., 1.)));
+        state.scroll_to_reveal_item(2);
+        assert!(state.0.borrow().smooth_wheel_motion.is_none());
+        test_wheel(cx, ScrollDelta::Lines(point(0., 1.)));
+        state.scrollbar_drag_started();
+        assert!(state.0.borrow().smooth_wheel_motion.is_none());
+        test_wheel(cx, ScrollDelta::Lines(point(0., 1.)));
+        state.set_offset_from_scrollbar(point(px(0.), px(-20.)));
+        assert!(state.0.borrow().smooth_wheel_motion.is_none());
+        test_wheel(cx, ScrollDelta::Lines(point(0., 1.)));
+        state.reset(30);
+        assert!(state.0.borrow().smooth_wheel_motion.is_none());
+    }
+
+    #[gpui::test]
+    fn test_disabling_smooth_wheel_keeps_existing_line_behavior(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let state = ListState::new(30, crate::ListAlignment::Top, px(10.)).measure_all();
+        draw_test_list(cx, &state, 100.);
+        state.scroll_by(px(200.));
+        draw_test_list(cx, &state, 100.);
+
+        test_wheel(cx, ScrollDelta::Lines(point(0., 1.)));
+        assert_eq!(test_scroll_position(&state, 100.), 180.);
+
+        state.set_smooth_wheel_enabled(true);
+        state.set_smooth_wheel_enabled(true);
+        test_wheel(cx, ScrollDelta::Lines(point(0., 1.)));
+        cx.executor().advance_clock(Duration::from_millis(100));
+        draw_test_list(cx, &state, 100.);
+        let stopped_at = test_scroll_position(&state, 100.);
+        state.set_smooth_wheel_enabled(false);
+        state.set_smooth_wheel_enabled(false);
+        cx.executor().advance_clock(Duration::from_millis(400));
+        draw_test_list(cx, &state, 100.);
+        assert!((test_scroll_position(&state, 100.) - stopped_at).abs() < 0.1);
+
+        test_wheel(cx, ScrollDelta::Lines(point(0., 1.)));
+        assert!((test_scroll_position(&state, 100.) - (stopped_at - 20.)).abs() < 0.1);
+    }
+
+    #[gpui::test]
+    fn test_smooth_wheel_stops_and_resumes_tail_follow(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let state = ListState::new(30, crate::ListAlignment::Bottom, px(10.)).measure_all();
+        state.set_follow_mode(FollowMode::Tail);
+        state.set_smooth_wheel_enabled(true);
+        draw_test_list(cx, &state, 100.);
+        assert!(state.is_following_tail());
+
+        test_wheel(cx, ScrollDelta::Lines(point(0., 1.)));
+        assert!(!state.is_following_tail());
+        cx.executor().advance_clock(Duration::from_millis(400));
+        draw_test_list(cx, &state, 100.);
+
+        test_wheel(cx, ScrollDelta::Lines(point(0., -1.)));
+        cx.executor().advance_clock(Duration::from_millis(400));
+        draw_test_list(cx, &state, 100.);
+        assert!(state.is_following_tail());
+    }
+
+    #[gpui::test]
+    fn test_smooth_wheel_clamps_to_scroll_bounds(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let state = ListState::new(30, crate::ListAlignment::Top, px(10.)).measure_all();
+        state.set_smooth_wheel_enabled(true);
+        draw_test_list(cx, &state, 100.);
+        state.scroll_by(px(20.));
+        draw_test_list(cx, &state, 100.);
+
+        test_wheel(cx, ScrollDelta::Lines(point(0., 2.)));
+        cx.executor().advance_clock(Duration::from_millis(400));
+        draw_test_list(cx, &state, 100.);
+        assert_eq!(test_scroll_position(&state, 100.), 0.);
+        assert!(state.0.borrow().smooth_wheel_motion.is_none());
+    }
+
+    #[gpui::test]
+    fn test_smooth_wheel_rebases_after_height_change(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let first_height = Rc::new(Cell::new(20.));
+        let state = ListState::new(30, crate::ListAlignment::Top, px(10.)).measure_all();
+
+        draw_variable_height_list(cx, &state, &first_height);
+        state.scroll_by(px(200.));
+        draw_variable_height_list(cx, &state, &first_height);
+        state.set_smooth_wheel_enabled(true);
+        test_wheel(cx, ScrollDelta::Lines(point(0., 1.)));
+        assert!(
+            (state
+                .0
+                .borrow()
+                .smooth_wheel_motion
+                .as_ref()
+                .unwrap()
+                .destination
+                - (200. - 100. / 3.))
+                .abs()
+                < 0.1
+        );
+
+        first_height.set(50.);
+        state.remeasure_items(0..1);
+        draw_variable_height_list(cx, &state, &first_height);
+        assert_eq!(test_scroll_position(&state, 100.), 230.);
+
+        draw_variable_height_list(cx, &state, &first_height);
+        assert_eq!(test_scroll_position(&state, 100.), 230.);
+        assert!(
+            (state
+                .0
+                .borrow()
+                .smooth_wheel_motion
+                .as_ref()
+                .unwrap()
+                .destination
+                - (230. - 100. / 3.))
+                .abs()
+                < 0.1
+        );
+    }
+
+    struct VariableHeightListView {
+        state: ListState,
+        first_height: Rc<Cell<f32>>,
+    }
+
+    impl Render for VariableHeightListView {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let first_height = self.first_height.clone();
+            list(self.state.clone(), move |ix, _, _| {
+                div()
+                    .h(px(if ix == 0 { first_height.get() } else { 20. }))
+                    .w_full()
+                    .into_any()
+            })
+            .w_full()
+            .h_full()
+        }
+    }
+
+    fn draw_variable_height_list(
+        cx: &mut crate::VisualTestContext,
+        state: &ListState,
+        first_height: &Rc<Cell<f32>>,
+    ) {
+        cx.draw(point(px(0.), px(0.)), size(px(100.), px(100.)), |_, cx| {
+            cx.new(|_| VariableHeightListView {
+                state: state.clone(),
+                first_height: first_height.clone(),
+            })
+            .into_any_element()
+        });
     }
 
     #[gpui::test]
