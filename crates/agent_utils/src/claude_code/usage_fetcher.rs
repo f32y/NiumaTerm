@@ -1,28 +1,22 @@
 //! Fetches remaining Claude Code subscription limits through OAuth with a CLI fallback.
 
-use std::ffi::{OsStr, c_void};
+use std::ffi::OsStr;
 use std::fs::File;
-use std::io::{Error, Read};
-use std::os::windows::io::AsRawHandle as _;
+use std::io::Read;
 use std::os::windows::process::CommandExt as _;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
-use std::{env, mem, ptr, thread};
+use std::{env, thread};
 
 use reqwest::StatusCode;
 use reqwest::blocking::Client;
 use serde::Deserialize;
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
-use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-    SetInformationJobObject,
-};
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use crate::hook_store::home_dir;
+use crate::subprocess::KillOnCloseJob;
 use crate::usage::UsageSnapshot;
 
 const CLI_FETCH_TIMEOUT: Duration = Duration::from_secs(15);
@@ -183,50 +177,6 @@ fn fetch_via_oauth(cancelled: &AtomicBool) -> Result<UsageSnapshot, OAuthFetchEr
     parse_oauth_usage(&bytes).map_err(OAuthFetchError::Fallback)
 }
 
-struct KillOnCloseJob(HANDLE);
-
-impl KillOnCloseJob {
-    fn attach(child: &Child) -> Result<Self, String> {
-        unsafe {
-            let job = CreateJobObjectW(ptr::null(), ptr::null());
-            if job.is_null() {
-                return Err(format!(
-                    "failed to create bounded Claude process job: {}",
-                    Error::last_os_error()
-                ));
-            }
-
-            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = mem::zeroed();
-            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-
-            let configured = SetInformationJobObject(
-                job,
-                JobObjectExtendedLimitInformation,
-                &info as *const _ as *const c_void,
-                mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            ) != 0;
-            if !configured {
-                let error = Error::last_os_error();
-                CloseHandle(job);
-                return Err(format!("failed to configure Claude process job: {error}"));
-            }
-            if AssignProcessToJobObject(job, child.as_raw_handle() as HANDLE) == 0 {
-                let error = Error::last_os_error();
-                CloseHandle(job);
-                return Err(format!("failed to bound Claude process tree: {error}"));
-            }
-
-            Ok(Self(job))
-        }
-    }
-}
-
-impl Drop for KillOnCloseJob {
-    fn drop(&mut self) {
-        unsafe { CloseHandle(self.0) };
-    }
-}
-
 pub fn fetch() -> Result<UsageSnapshot, String> {
     fetch_with_cancel(&AtomicBool::new(false))
 }
@@ -259,14 +209,7 @@ fn fetch_via_cli(cancelled: &AtomicBool) -> Result<UsageSnapshot, String> {
 
     // Closing this job handle terminates cmd.exe and the Node descendant if a
     // timeout or cancellation occurs, avoiding readers stranded on inherited pipes.
-    let job = match KillOnCloseJob::attach(&child) {
-        Ok(job) => job,
-        Err(error) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(error);
-        }
-    };
+    let job = KillOnCloseJob::attach_or_kill(&mut child)?;
     let stdout = child.stdout.take().ok_or("Claude stdout unavailable")?;
     let stderr = child.stderr.take().ok_or("Claude stderr unavailable")?;
 

@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, from_str};
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
+use crate::subprocess::KillOnCloseJob;
 use crate::usage::UsageSnapshot;
 
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
@@ -34,6 +35,12 @@ pub fn fetch() -> Result<UsageSnapshot, String> {
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()
         .map_err(|err| format!("failed to start Codex app-server: {err}"))?;
+
+    // The npm `codex.cmd` shim starts a Node descendant. Kill-on-close
+    // containment guarantees the whole tree dies on timeout or error paths;
+    // killing only cmd.exe would strand the descendant holding the output
+    // pipes, and with it the reader threads.
+    let job = KillOnCloseJob::attach_or_kill(&mut child)?;
 
     let mut stdin = child.stdin.take().ok_or("Codex stdin unavailable")?;
     let stdout = child.stdout.take().ok_or("Codex stdout unavailable")?;
@@ -114,9 +121,9 @@ pub fn fetch() -> Result<UsageSnapshot, String> {
         }
     })();
 
-    // The npm `codex.cmd` shim starts a descendant process. Closing stdin lets
-    // app-server observe EOF and exit too; killing only cmd.exe leaves the
-    // descendant holding the output pipes and would strand reader threads.
+    // Closing stdin lets app-server observe EOF and exit cleanly together
+    // with its shim; the bounded wait gives it that chance before force
+    // termination.
     drop(stdin);
 
     let cleanup_deadline = Instant::now() + Duration::from_secs(2);
@@ -125,6 +132,9 @@ pub fn fetch() -> Result<UsageSnapshot, String> {
         thread::sleep(Duration::from_millis(10));
     }
 
+    // Dropping the job terminates the shim and its descendant together, so
+    // the output pipes always close and the reader joins below cannot hang.
+    drop(job);
     let _ = child.kill();
     let _ = child.wait();
 

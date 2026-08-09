@@ -8,6 +8,8 @@ pub mod update;
 pub mod usage;
 
 mod hook_store;
+#[cfg(target_os = "windows")]
+mod subprocess;
 
 use std::collections::HashMap;
 use std::sync::OnceLock;

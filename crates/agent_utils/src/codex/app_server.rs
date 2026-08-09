@@ -6,11 +6,8 @@
 //! `codex app-server` process and one conversation thread on it.
 
 use std::collections::HashMap;
-use std::io::{BufRead as _, BufReader, Write as _};
 use std::mem::take;
-use std::process::{Child, ChildStdin, Stdio};
-use std::thread;
-use std::time::{Duration, Instant, UNIX_EPOCH};
+use std::time::{Duration, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
@@ -20,7 +17,8 @@ pub use crate::chat::{
     SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
     ThreadSettings,
 };
-use crate::launcher::{AgentCli, KillOnCloseJob};
+use crate::launcher::AgentCli;
+use crate::subprocess::JsonLineProcess;
 use crate::{CodexProviderConfig, LaunchConfig};
 
 /// JSON-RPC ids for the fixed handshake requests; turn requests count up from
@@ -194,9 +192,7 @@ pub const EFFORT_OPTIONS: [&str; 8] = [
 ];
 
 pub struct Session {
-    child: Child,
-    process_job: Option<KillOnCloseJob>,
-    stdin: Option<ChildStdin>,
+    process: JsonLineProcess,
     next_rpc_id: u64,
     thread_id: Option<String>,
     current_turn: Option<String>,
@@ -214,16 +210,6 @@ pub struct Session {
     thread_profile: ThreadProfile,
     initial_resume: Option<String>,
     suppress_resume_replay: bool,
-}
-
-impl Drop for Session {
-    fn drop(&mut self) {
-        // The npm `codex.cmd` shim starts a descendant process; killing only
-        // cmd.exe would strand it. Closing stdin delivers EOF, which
-        // app-server treats as shutdown, and the reader thread exits with the
-        // pipe. The kill is a belt-and-braces cleanup for the shim itself.
-        let _ = self.shutdown(Duration::from_millis(250), true);
-    }
 }
 
 impl Session {
@@ -305,46 +291,20 @@ impl Session {
         let executable = launcher.executable().to_string();
         let mut command = launcher.command(["app-server"]);
 
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
         if let Some(cwd) = cwd {
             command.current_dir(cwd);
         }
 
-        let mut child = command
-            .spawn()
-            .map_err(|err| format!("could not run `{executable} app-server`: {err}"))?;
-        let process_job = KillOnCloseJob::attach(&child).map_err(|error| {
-            let _ = child.kill();
-            let _ = child.wait();
-            error
-        })?;
-
-        let stdin = child.stdin.take().ok_or("Codex stdin unavailable")?;
-        let stdout = child.stdout.take().ok_or("Codex stdout unavailable")?;
-        let stderr = child.stderr.take().ok_or("Codex stderr unavailable")?;
-
-        thread::spawn(move || {
-            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                if let Ok(message) = serde_json::from_str::<Value>(&line) {
-                    deliver(message);
-                }
-            }
-        });
-
-        thread::spawn(move || {
-            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                on_stderr(line);
-            }
-        });
+        let process = JsonLineProcess::spawn(
+            command,
+            &format!("{executable} app-server"),
+            "Codex",
+            deliver,
+            on_stderr,
+        )?;
 
         let mut session = Self {
-            child,
-            process_job: Some(process_job),
-            stdin: Some(stdin),
+            process,
             next_rpc_id: FIRST_TURN_RPC_ID,
             thread_id: None,
             current_turn: None,
@@ -383,30 +343,7 @@ impl Session {
     /// Forced termination is opt-in because it can interrupt an active tool
     /// operation; dropping the Job Object affects only this session's tree.
     pub fn shutdown(&mut self, timeout: Duration, force: bool) -> Result<(), String> {
-        drop(self.stdin.take());
-        let started = Instant::now();
-        loop {
-            match self.child.try_wait() {
-                Ok(Some(_)) => {
-                    self.process_job.take();
-                    return Ok(());
-                }
-                Ok(None) if started.elapsed() < timeout => {
-                    thread::sleep(Duration::from_millis(20));
-                }
-                Ok(None) if force => {
-                    self.process_job.take();
-                    self.child
-                        .wait()
-                        .map_err(|error| format!("could not wait for Codex to stop: {error}"))?;
-                    return Ok(());
-                }
-                Ok(None) => return Err("Codex did not stop before the update timeout".to_string()),
-                Err(error) => {
-                    return Err(format!("could not observe Codex process exit: {error}"));
-                }
-            }
-        }
+        self.process.shutdown(timeout, force)
     }
 
     /// Handle one message from the server: advances the handshake, answers
@@ -604,13 +541,10 @@ impl Session {
         self.send(skills_list_request(rpc_id, force_reload));
     }
 
-    /// Write one request line. Failures are not surfaced here: a dead process
-    /// also closes its stdout, so the reader-side EOF is the single
-    /// exit-detection path.
+    /// Write one request line; write failures stay unsurfaced because the
+    /// reader-side EOF is the single exit-detection path.
     fn send(&mut self, message: Value) {
-        if let Some(stdin) = self.stdin.as_mut() {
-            let _ = writeln!(stdin, "{message}").and_then(|_| stdin.flush());
-        }
+        self.process.write_line(&message);
     }
 
     fn process_server_request(&mut self, rpc_id: u64, method: &str, message: &Value) -> Vec<Event> {
