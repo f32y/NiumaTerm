@@ -29,7 +29,6 @@ winres.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 nmt_remote_net.workspace = true
-nmt_remote_protocol.workspace = true
 anyhow.workspace = true
 base64.workspace = true
 serde.workspace = true

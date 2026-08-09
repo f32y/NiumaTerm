@@ -16,6 +16,7 @@ mod devices;
 mod host;
 #[cfg(windows)]
 mod keys;
+pub mod protocol;
 
 pub use channel::*;
 pub use client::*;
@@ -24,8 +25,4 @@ pub use devices::*;
 pub use host::*;
 #[cfg(windows)]
 pub use keys::*;
-
-/// Mode prefix: Noise IK, client is already paired.
-pub const CONNECT_MODE_IK: u8 = 0x01;
-/// Mode prefix: Noise XX, client wants to redeem a pairing token.
-pub const CONNECT_MODE_PAIR: u8 = 0x02;
+pub use protocol::*;

@@ -12,10 +12,9 @@ use std::{env, fs};
 
 use nmt_config::remote_session::RemoteSessionConfig;
 use nmt_remote_net::{
-    AttachTarget, HostConfig, HostHandle, RemoteSession, hex_decode, hex_encode,
-    load_or_create_keypair, open_remote_session,
+    AttachTarget, HostConfig, HostHandle, PairingCode, ProtocolSessionOptions, RemoteSession,
+    hex_decode, hex_encode, load_or_create_keypair, open_remote_session,
 };
-use nmt_remote_protocol::{PairingCode, ProtocolSessionOptions};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tracing::warn;

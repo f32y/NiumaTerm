@@ -1,12 +1,13 @@
 use std::path::Path;
 use std::{fs, io, ptr, slice};
 
-use nmt_remote_protocol::{StaticKeypair, generate_keypair};
 use serde::{Deserialize, Serialize};
 use windows_sys::Win32::Foundation::LocalFree;
 use windows_sys::Win32::Security::Cryptography::{
     CRYPT_INTEGER_BLOB, CryptProtectData, CryptUnprotectData,
 };
+
+use crate::protocol::{NoiseError, StaticKeypair, generate_keypair};
 
 /// On-disk identity key. The private half is a DPAPI blob bound to the
 /// current Windows user, so copying the file to another account (or reading
@@ -28,7 +29,7 @@ pub enum KeyStoreError {
     #[error("DPAPI refused the key material (wrong user context?)")]
     Dpapi,
     #[error("key generation failed: {0}")]
-    Generate(#[from] nmt_remote_protocol::NoiseError),
+    Generate(#[from] NoiseError),
 }
 
 /// Load the identity keypair at `path`, generating and persisting a fresh one

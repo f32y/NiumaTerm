@@ -3,16 +3,16 @@ use std::thread;
 use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
-use nmt_remote_protocol::{
-    ClientBound, Frame, HostBound, PairingCode, ProtocolSessionInfo, ProtocolSessionOptions,
-    ProtocolSessionSnapshot, StaticKeypair,
-};
 use tokio::runtime::Builder as RuntimeBuilder;
 use tokio::sync::mpsc;
 use tokio::time;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tracing::{info, warn};
 
+use crate::protocol::{
+    ClientBound, Frame, HostBound, PairingCode, ProtocolSessionInfo, ProtocolSessionOptions,
+    ProtocolSessionSnapshot, StaticKeypair,
+};
 use crate::{FrameChannel, NET_TIMEOUT, NetError, client_connect_ik, with_timeout};
 
 /// One remote session's byte stream as the terminal engine wants to consume
@@ -123,7 +123,7 @@ pub fn open_remote_session(
             let runtime = match RuntimeBuilder::new_current_thread().enable_all().build() {
                 Ok(rt) => rt,
                 Err(e) => {
-                    let _ = ready_tx.send(Err(NetError::Protocol(e.to_string())));
+                    let _ = ready_tx.send(Err(NetError::Internal(e.to_string())));
                     return;
                 }
             };
@@ -138,7 +138,7 @@ pub fn open_remote_session(
                 command_rx,
             ));
         })
-        .map_err(|e| NetError::Protocol(e.to_string()))?;
+        .map_err(|e| NetError::Internal(e.to_string()))?;
 
     // The thread bounds its own waits, so this only has to outlast them; a
     // hard bound here is what keeps a wedged connect from parking the caller.
@@ -293,13 +293,15 @@ async fn reconnect(
                 info!(session_id, attempt, "resumed remote session");
                 return Some(attached);
             }
-            // A host that answers with an error (session killed, device
-            // revoked) will keep answering the same way, so stop early.
-            Err(NetError::Protocol(message)) => {
-                warn!(session_id, "remote session cannot be resumed: {message}");
-                return None;
+            Err(error) => {
+                // A host rejection (session killed, device revoked) will not
+                // change on retry. Local failures and timeouts may recover.
+                if let Some(message) = error.permanent_reconnect_reason() {
+                    warn!(session_id, "remote session cannot be resumed: {message}");
+                    return None;
+                }
+                warn!(session_id, attempt, "remote resume failed: {error}");
             }
-            Err(e) => warn!(session_id, attempt, "remote resume failed: {e}"),
         }
     }
     None
@@ -379,10 +381,16 @@ pub fn pair_device(
     thread::Builder::new()
         .name("remote-pair".into())
         .spawn(move || {
-            let runtime = RuntimeBuilder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("current-thread runtime");
+            // A runtime that fails to build is a local resource problem, not a
+            // peer rejection; report it instead of panicking the worker thread
+            // (which would surface to the caller as an opaque Closed).
+            let runtime = match RuntimeBuilder::new_current_thread().enable_all().build() {
+                Ok(rt) => rt,
+                Err(e) => {
+                    let _ = tx.send(Err(NetError::Internal(e.to_string())));
+                    return;
+                }
+            };
             let result = runtime.block_on(async {
                 crate::client_connect_pair(&code, &device, &device_name)
                     .await
@@ -390,7 +398,7 @@ pub fn pair_device(
             });
             let _ = tx.send(result);
         })
-        .map_err(|e| NetError::Protocol(e.to_string()))?;
+        .map_err(|e| NetError::Internal(e.to_string()))?;
     rx.recv().map_err(|_| NetError::Closed)?
 }
 
@@ -405,26 +413,34 @@ pub fn list_remote_sessions(
     thread::Builder::new()
         .name("remote-list".into())
         .spawn(move || {
-            let runtime = RuntimeBuilder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("current-thread runtime");
+            // A runtime that fails to build is a local resource problem, not a
+            // peer rejection; report it instead of panicking the worker thread
+            // (which would surface to the caller as an opaque Closed).
+            let runtime = match RuntimeBuilder::new_current_thread().enable_all().build() {
+                Ok(rt) => rt,
+                Err(e) => {
+                    let _ = tx.send(Err(NetError::Internal(e.to_string())));
+                    return;
+                }
+            };
             let result = runtime.block_on(async {
                 let mut channel =
                     client_connect_ik(&relay_url, &host_id, &host_public_key, &device).await?;
                 channel.send_control(&HostBound::ListSessions).await?;
-                // Bound the wait so a silent host can't hang the caller.
+                // Bound the wait so a silent host can't hang the caller. A
+                // silent host is indistinguishable from a slow one, so this is
+                // Timeout (retryable), not a protocol violation.
                 match time::timeout(Duration::from_secs(10), channel.recv_control()).await {
                     Ok(Ok(ClientBound::SessionList(list))) => Ok(list),
                     Ok(Ok(other)) => Err(NetError::Protocol(format!(
                         "expected SessionList, got {other:?}"
                     ))),
                     Ok(Err(e)) => Err(e),
-                    Err(_) => Err(NetError::Protocol("host did not reply in time".into())),
+                    Err(_) => Err(NetError::Timeout),
                 }
             });
             let _ = tx.send(result);
         })
-        .map_err(|e| NetError::Protocol(e.to_string()))?;
+        .map_err(|e| NetError::Internal(e.to_string()))?;
     rx.recv().map_err(|_| NetError::Closed)?
 }

@@ -9,12 +9,15 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+base32.workspace = true
 futures.workspace = true
-nmt_remote_protocol.workspace = true
 parking_lot.workspace = true
+postcard.workspace = true
 rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+snow.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true

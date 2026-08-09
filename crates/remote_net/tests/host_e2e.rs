@@ -13,12 +13,13 @@
 use std::time::Duration;
 use std::{env, fs, process};
 
+use nmt_remote_net::protocol::{
+    ClientBound, Frame, HostBound, PairingCode, ProtocolSessionOptions, StaticKeypair,
+    generate_keypair,
+};
 use nmt_remote_net::{
     AttachTarget, HostConfig, HostHandle, SessionByteEvent, client_connect_ik, client_connect_pair,
     list_remote_sessions, open_remote_session,
-};
-use nmt_remote_protocol::{
-    ClientBound, Frame, HostBound, ProtocolSessionOptions, StaticKeypair, generate_keypair,
 };
 use tokio::{task, time};
 
@@ -341,7 +342,7 @@ async fn unpaired_device_rejected() {
     );
 
     // A wrong pairing token must be refused even over a valid XX handshake.
-    let code = nmt_remote_protocol::PairingCode {
+    let code = PairingCode {
         relay_url: RELAY.to_owned(),
         host_id: host_id.clone(),
         host_public_key: host_public.as_slice().try_into().unwrap(),

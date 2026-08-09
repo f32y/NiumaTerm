@@ -304,7 +304,6 @@ dependencies = [
  "nmt_input",
  "nmt_platform",
  "nmt_remote_net",
- "nmt_remote_protocol",
  "nmt_terminal",
  "notify",
  "parking_lot",
@@ -4238,26 +4237,10 @@ dependencies = [
 name = "nmt_remote_net"
 version = "0.1.0"
 dependencies = [
- "futures",
- "nmt_remote_protocol",
- "nmt_remote_session_hub",
- "parking_lot",
- "rand 0.10.2",
- "serde",
- "serde_json",
- "thiserror 2.0.19",
- "tokio",
- "tokio-tungstenite",
- "tracing",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "nmt_remote_protocol"
-version = "0.1.0"
-dependencies = [
  "base32",
  "futures",
+ "nmt_remote_session_hub",
+ "parking_lot",
  "postcard",
  "rand 0.10.2",
  "serde",
@@ -4267,6 +4250,8 @@ dependencies = [
  "thiserror 2.0.19",
  "tokio",
  "tokio-tungstenite",
+ "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

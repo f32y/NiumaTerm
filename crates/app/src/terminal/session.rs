@@ -703,9 +703,9 @@ mod tests {
     #[ignore = "requires `wrangler dev` running in relay/ (npm run dev)"]
     fn remote_session_renders_through_net_pty() {
         use nmt_remote_net::{
-            AttachTarget, HostConfig, HostHandle, client_connect_pair, open_remote_session,
+            AttachTarget, HostConfig, HostHandle, ProtocolSessionOptions, StaticKeypair,
+            client_connect_pair, generate_keypair, open_remote_session,
         };
-        use nmt_remote_protocol::{ProtocolSessionOptions, StaticKeypair, generate_keypair};
 
         const RELAY: &str = "ws://127.0.0.1:8787/ws";
         const TOKEN: &str = "test-token";

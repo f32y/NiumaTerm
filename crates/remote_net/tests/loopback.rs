@@ -2,7 +2,7 @@
 //! hard requirements (tampering, replay, unauthorized device) and must fail
 //! if the crypto wiring ever regresses.
 
-use nmt_remote_protocol::{
+use nmt_remote_net::protocol::{
     ClientBound, Frame, Handshake, HostBound, NoiseError, SecureChannel, generate_keypair,
     handshake_step,
 };
