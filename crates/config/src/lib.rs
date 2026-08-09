@@ -536,6 +536,7 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) {
     doc["appearance"]["monospace-only"] = value(appearance.monospace_only);
     doc["appearance"]["enable-window-transparency"] = value(appearance.window_transparency_enabled);
     doc["appearance"]["transparent-main-view"] = value(appearance.transparent_main_view);
+    doc["appearance"]["smooth-scrolling"] = value(appearance.smooth_scrolling.as_str());
     doc["appearance"]["background-opacity"] = value(appearance.background_opacity);
     if let Some(path) = &appearance.background_image {
         doc["appearance"]["background-image"] = value(path);
@@ -599,6 +600,7 @@ mod tests {
             monospace_only: false,
             window_transparency_enabled: true,
             transparent_main_view: false,
+            smooth_scrolling: appearance::SmoothScrollingMode::Off,
             background_opacity: 0.85,
             background_image: Some(r"C:\Wallpapers\background.png".to_string()),
             background_image_opacity: 0.4,
@@ -675,6 +677,7 @@ mod tests {
 
         assert!(out.contains("# my terminal config"));
         assert!(out.contains("width = 960"));
+        assert!(out.contains("smooth-scrolling = \"off\""));
 
         let config: Config = parse_toml(&out).unwrap();
         assert_eq!(config.appearance, sample_appearance());

@@ -55,4 +55,5 @@ percent-encoding.workspace = true
 raw-window-handle.workspace = true
 
 [target.'cfg(windows)'.dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
 tokio.workspace = true

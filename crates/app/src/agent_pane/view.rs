@@ -36,7 +36,10 @@ impl gpui::Focusable for AgentPane {
 
 impl Render for AgentPane {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let collapse = cx.global::<AppSettings>().collapse_tool_calls;
+        let settings = cx.global::<AppSettings>();
+        let collapse = settings.collapse_tool_calls;
+        self.transcript_list
+            .set_smooth_wheel_enabled(settings.smooth_scrolling.agent_enabled());
         let command_palette = self.render_command_palette(cx);
         let command_feedback = self.palette.feedback.as_ref().map(|feedback| {
             let (color, label) = match feedback.kind {
