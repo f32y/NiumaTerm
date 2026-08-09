@@ -125,6 +125,14 @@ pub(crate) enum TabSurface {
 }
 
 impl TabSurface {
+    pub(crate) fn agent_kind(&self, cx: &App) -> Option<AgentKind> {
+        match self {
+            Self::Agent(pane) => Some(pane.read(cx).kind()),
+            Self::Pending(state) => state.agent.as_deref().and_then(AgentKind::from_id),
+            Self::Live(_) => None,
+        }
+    }
+
     fn is_agent(&self) -> bool {
         match self {
             Self::Agent(_) => true,
@@ -2937,19 +2945,21 @@ impl Render for Shell {
 
 #[cfg(test)]
 mod tests {
+    use gpui::TestAppContext;
+
     use super::{
-        TabState, TabSurface, WarnBeforeTerminatingShell, should_confirm_close,
+        AgentKind, TabState, TabSurface, WarnBeforeTerminatingShell, should_confirm_close,
         should_confirm_tab_close,
     };
 
-    #[test]
-    fn restored_agent_tab_is_recognized_before_activation() {
+    #[gpui::test]
+    fn restored_agent_tab_keeps_kind_before_activation(cx: &mut TestAppContext) {
         let surface = TabSurface::Pending(Box::new(TabState {
             agent: Some("codex".to_string()),
             ..TabState::default()
         }));
 
-        assert!(surface.is_agent());
+        assert!(cx.update(|cx| surface.agent_kind(cx)) == Some(AgentKind::Codex));
     }
 
     #[test]
