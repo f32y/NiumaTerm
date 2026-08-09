@@ -44,7 +44,7 @@ npm run dev                                   # wrangler dev on 127.0.0.1:8787
 The Rust integration tests connect to this local instance:
 
 ```bash
-cargo test -p nmt_remote_protocol --test relay_integration -- --ignored
+cargo test -p nmt_remote_net --test relay_integration -- --ignored
 cargo test -p nmt_remote_net  --test host_e2e          -- --ignored --test-threads=1
 ```
 
