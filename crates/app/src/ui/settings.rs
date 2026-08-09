@@ -65,6 +65,8 @@ pub const DEFAULT_FONT_FAMILY: &str = "Consolas";
 pub const DEFAULT_FONT_SIZE: f64 = 14.0;
 pub const DEFAULT_LINE_HEIGHT: f64 = 1.0;
 const DEFAULT_BACKGROUND_IMAGE_OPACITY: f64 = 0.3;
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+const RELEASE_PAGE_URL: &str = "https://github.com/f32y/NiumaTerm/releases";
 
 pub const DEFAULT_UI_FONT: &str = "Segoe UI";
 
@@ -1546,6 +1548,26 @@ fn remote_session_page() -> SettingPage {
         )
 }
 
+fn about_page() -> SettingPage {
+    SettingPage::new("About").default_open(true).group(
+        SettingGroup::new()
+            .title("NiumaTerm")
+            .item(SettingItem::new(
+                "Version",
+                SettingField::render(|_, _, _| Label::new(APP_VERSION).text_sm()),
+            ))
+            .item(SettingItem::new(
+                "Releases",
+                SettingField::render(|_, _, _| {
+                    Button::new("go-to-release-page")
+                        .outline()
+                        .label("Go to Release Page")
+                        .on_click(|_, _, cx: &mut App| cx.open_url(RELEASE_PAGE_URL))
+                }),
+            )),
+    )
+}
+
 /// Start/stop/restart the background host service to match the live settings.
 /// Called on discrete events (enable toggle, dialog close), never per keystroke.
 #[cfg(windows)]
@@ -2313,6 +2335,7 @@ pub fn settings_view(cx: &App) -> Settings {
                 ),
         )
         .page(remote_session_page())
+        .page(about_page())
 }
 
 /// The Profiles page: exactly two groups — Terminal Profile and Agent
