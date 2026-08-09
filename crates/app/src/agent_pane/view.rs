@@ -804,36 +804,25 @@ impl AgentPane {
         let (branch, branch_opacity) = self.git_branch_poll.presentation();
 
         let usage = self.context_window_usage.map(|usage| {
-            let (label, color) = match usage.max_tokens {
+            let label = match usage.max_tokens {
                 Some(max_tokens) if max_tokens > 0 => {
                     let remaining_tokens = max_tokens.saturating_sub(usage.used_tokens);
                     let remaining_percent =
                         (remaining_tokens as f64 * 100.0 / max_tokens as f64).round() as u64;
-                    let color = if remaining_percent <= 10 {
-                        cx.theme().danger
-                    } else {
-                        cx.theme().muted_foreground.opacity(0.72)
-                    };
 
-                    (
-                        format!(
-                            "{} used · {remaining_percent}% left",
-                            compact_token_count(usage.used_tokens)
-                        ),
-                        color,
+                    format!(
+                        "{} used · {remaining_percent}% left",
+                        compact_token_count(usage.used_tokens)
                     )
                 }
-                _ => (
-                    format!("{} used", compact_token_count(usage.used_tokens)),
-                    cx.theme().muted_foreground.opacity(0.72),
-                ),
+                _ => format!("{} used", compact_token_count(usage.used_tokens)),
             };
 
             h_flex()
                 .flex_none()
                 .gap_1p5()
                 .items_center()
-                .text_color(color)
+                .text_color(cx.theme().muted_foreground.opacity(0.72))
                 .child(Icon::new(IconName::ChartPie).size_3())
                 .child(div().child(label))
         });
