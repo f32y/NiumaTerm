@@ -10,11 +10,13 @@ use gpui_component::input::{Input, InputState};
 use gpui_component::menu::{ContextMenuExt, DropdownMenu as _, PopupMenuItem};
 use gpui_component::progress::ProgressCircle;
 use gpui_component::tab::{Tab, TabBar, TabVariant};
-use gpui_component::{ActiveTheme, Sizable};
+use gpui_component::{ActiveTheme, Icon, Sizable};
 use nmt_terminal::event::{ProgressReport, ProgressState};
 
 use super::Shell;
 use super::shell::TabSurface;
+use crate::agent_pane::AgentKind;
+use crate::agent_pane::usage::{ClaudeIcon, CodexIcon};
 use crate::tabs::{TabId, TabManager};
 use crate::ui::{AppSettings, UI_RADIUS};
 
@@ -79,6 +81,7 @@ struct TabItem {
     label: String,
     unread: bool,
     busy: bool,
+    agent_kind: Option<AgentKind>,
     bell: bool,
     /// Restored but not yet spawned.
     pending: bool,
@@ -181,6 +184,7 @@ impl TabStrip {
                 },
                 unread: unread_tabs.contains(&tab.id()),
                 busy: busy_agent_tabs.contains(&tab.id()),
+                agent_kind: tab.surface().agent_kind(cx),
                 bell: tab.bell(),
                 pending: matches!(tab.surface(), TabSurface::Pending(_)),
                 exited: tab.exited(),
@@ -279,6 +283,7 @@ impl TabStrip {
                     label,
                     unread,
                     busy,
+                    agent_kind,
                     bell,
                     pending,
                     exited,
@@ -429,24 +434,40 @@ impl TabStrip {
                     .when(self.drag_over == Some(index), |this| {
                         this.ml(px(TAB_MAKE_WAY_PX))
                     })
-                    .when(busy, |this| {
+                    .when_some(agent_kind, |this, agent_kind| {
                         this.prefix(
                             div()
-                                .id(("tab-agent-busy", id as usize))
-                                .aria_label("Agent busy")
                                 .relative()
                                 .left(px(4.0))
-                                .size_4()
                                 .flex_none()
                                 .flex()
                                 .items_center()
-                                .justify_center()
-                                .child(
-                                    ProgressCircle::new(("tab-agent-busy-spinner", id as usize))
-                                        .small()
-                                        .loading(true)
-                                        .color(cx.theme().warning),
-                                ),
+                                .gap_1()
+                                .when(agent_kind == AgentKind::Codex, |this| {
+                                    this.child(Icon::new(CodexIcon).xsmall())
+                                })
+                                .when(agent_kind == AgentKind::Claude, |this| {
+                                    this.child(Icon::new(ClaudeIcon).xsmall())
+                                })
+                                .children(busy.then(|| {
+                                    div()
+                                        .id(("tab-agent-busy", id as usize))
+                                        .aria_label("Agent busy")
+                                        .size_4()
+                                        .flex_none()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .child(
+                                            ProgressCircle::new((
+                                                "tab-agent-busy-spinner",
+                                                id as usize,
+                                            ))
+                                            .small()
+                                            .loading(true)
+                                            .color(cx.theme().warning),
+                                        )
+                                })),
                         )
                     })
                     .child(content)
