@@ -27,6 +27,28 @@ the actual technical reason. Keep an external protocol or API reference only whe
 it is useful for interoperability, and make the comment understandable without
 opening that reference.
 
+## Module organization and imports
+
+Split source files by responsibility, and keep the production code of a file
+under roughly 800 lines. A cohesive state machine or hot loop may exceed the
+guideline; splitting one merely to satisfy a line count hides its control
+flow. Inline `#[cfg(test)]` test modules belong in their own child file
+(`#[cfg(test)] mod tests;` resolving to `<module>/tests.rs`).
+
+Multi-file modules use the directory form with `mod.rs` as the module root.
+Never keep `foo.rs` next to a `foo/` directory; when splitting an existing
+file, `git mv foo.rs foo/mod.rs` first so file history stays traceable.
+`mod.rs` declares the child modules and re-exports moved public items so
+existing import paths keep compiling.
+
+Anchor every `use` line at the crate root: `use crate::...` or an external
+crate name. `use super::...`, `use self::...`, and bare relative module
+paths are forbidden in new or edited code; import lines in files a change
+does not otherwise touch stay as they are. This rule governs import paths
+only; visibility markers such as `pub(super)` and `pub(in ...)` remain the
+correct tools. Widen visibility one step at a time (private, `pub(super)`,
+`pub(crate)`, `pub`) and never further than a real caller requires.
+
 ## Commit message conventions
 
 The repository uses hooks from `.githooks`. Do not bypass them with
