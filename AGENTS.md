@@ -60,6 +60,11 @@ The pre-commit hook enforces these commit boundaries:
 - Files under `.agents`, `.claude`, `.codex`, `.scratch`, `openspec`, `spec`,
   `docs/adr`, `docs/agents`, and `docs/superpowers` must not be committed with
   code files. Protected-path commits are rejected entirely on `main`.
+- OpenSpec change documents under `openspec/changes` must not be committed
+  until they are archived. Only paths under `openspec/changes/archive` are
+  accepted; deletions from active change directories remain allowed so archive
+  moves can remove the old paths. The hook reports
+  `pre-commit: unfinished spec documents cannot be committed`.
 - Changes under `third_party/gpui` must be committed separately from every
   other path. The same independent-commit rule applies to
   `third_party/gpui-component`.

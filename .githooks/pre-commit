@@ -35,6 +35,22 @@ EOF
     exit 1
 }
 
+check_no_incomplete_openspec_changes() {
+    incomplete_spec_files=$(git diff --cached --name-only --diff-filter=ACMR |
+        grep -E '^openspec/changes/' |
+        grep -Ev '^openspec/changes/archive/' || true)
+    if [ -z "$incomplete_spec_files" ]; then
+        return 0
+    fi
+
+    cat >&2 <<EOF
+pre-commit: unfinished spec documents cannot be committed
+
+$incomplete_spec_files
+EOF
+    exit 1
+}
+
 check_third_party_dirs_are_separate() {
     for isolated_path in third_party/gpui third_party/gpui-component; do
         isolated_files=$(printf '%s\n' "$staged_files" | grep -E "^$isolated_path/" || true)
@@ -187,6 +203,7 @@ staged_files=$(git diff --cached --name-only --diff-filter=ACMRD)
 protected_files=$(printf '%s\n' "$staged_files" | grep -E "$protected_paths" || true)
 code_files=$(collect_staged_code_files)
 
+check_no_incomplete_openspec_changes
 check_ai_docs_are_separate
 check_third_party_dirs_are_separate
 check_protected_paths_on_main
