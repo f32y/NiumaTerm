@@ -7,6 +7,22 @@ msg_file=${1:?commit message file required}
 # The C locale makes grep treat UTF-8 continuation bytes as non-printable,
 # which catches CJK text as well as smart quotes and dashes.
 body=$(sed -e '/^# ------------------------ >8/,$d' -e '/^#/d' "$msg_file")
+
+# Literal escape spellings indicate that a shell passed formatting text
+# without interpreting it, leaving a malformed commit message.
+escaped_controls=$(printf '%s\n' "$body" | grep -nE '\\[nrt]' || true)
+if [ -n "$escaped_controls" ]; then
+    cat >&2 <<EOF
+commit-msg: literal escaped control sequences are not allowed
+
+Use real line breaks or whitespace instead.
+
+Offending lines:
+$escaped_controls
+EOF
+    exit 1
+fi
+
 if printf '%s\n' "$body" | LC_ALL=C grep -nq '[^[:print:][:space:]]'; then
     offending=$(printf '%s\n' "$body" | LC_ALL=C grep -n '[^[:print:][:space:]]')
     cat >&2 <<EOF
