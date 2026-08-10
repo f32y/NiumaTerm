@@ -31,12 +31,15 @@ mod skills;
 use crate::codex::app_server::compaction::{
     CompactionState, compaction_completed, compaction_started, is_legacy_compaction_notification,
 };
-pub use crate::codex::app_server::options::{APPROVAL_OPTIONS, EFFORT_OPTIONS, SANDBOX_OPTIONS};
+pub use crate::codex::app_server::options::{
+    APPROVAL_OPTIONS, APPROVAL_REVIEWER_OPTIONS, EFFORT_OPTIONS, SANDBOX_OPTIONS,
+};
 use crate::codex::app_server::protocol::{
     codex_command_request, codex_command_response, codex_user_input, delta_event,
     file_change_paths, initial_thread_request, parse_context_window_usage, parse_item,
     parse_models, parse_thread_settings, parse_thread_summaries, resumed_thread_events,
     skills_list_request, stringify_command, thread_list_params, thread_resume_params,
+    turn_start_params,
 };
 #[cfg(test)]
 use crate::codex::app_server::protocol::{parse_replay, thread_start_params};
@@ -312,25 +315,7 @@ impl Session {
             return SendOutcome::Steered;
         }
 
-        let mut params = json!({
-            "threadId": thread_id,
-            "input": input,
-        });
-
-        if let Some(model) = &settings.model {
-            params["model"] = json!(model);
-        }
-        if let Some(approval) = &settings.approval {
-            params["approvalPolicy"] = json!(approval);
-        }
-        if let Some(sandbox) = &settings.sandbox {
-            params["sandboxPolicy"] = json!({"type": sandbox});
-        }
-        if let Some(effort) = &settings.effort {
-            params["effort"] = json!(effort);
-        }
-        // Always sent: an explicit null resets to the normal tier.
-        params["serviceTier"] = json!(settings.tier);
+        let params = turn_start_params(&thread_id, input, settings);
 
         self.send(json!({
             "jsonrpc": "2.0",

@@ -3,6 +3,33 @@ use crate::agent_pane::session::{Status, UpdateSuspension};
 use crate::agent_pane::transcript::hidden;
 use crate::agent_pane::*;
 
+pub(super) fn overlay_remembered_settings(
+    mut next: ThreadSettings,
+    stored: Option<&ThreadSettings>,
+    seed_all: bool,
+    seed_approval_reviewer: bool,
+) -> ThreadSettings {
+    if seed_all && let Some(stored) = stored {
+        next = ThreadSettings {
+            model: stored.model.clone().or(next.model),
+            approval: stored.approval.clone().or(next.approval),
+            approvals_reviewer: stored
+                .approvals_reviewer
+                .clone()
+                .or(next.approvals_reviewer),
+            sandbox: stored.sandbox.clone().or(next.sandbox),
+            effort: stored.effort.clone().or(next.effort),
+            tier: stored.tier.clone().or(next.tier),
+        };
+    }
+    if seed_approval_reviewer
+        && let Some(reviewer) = stored.and_then(|stored| stored.approvals_reviewer.clone())
+    {
+        next.approvals_reviewer = Some(reviewer);
+    }
+    next
+}
+
 impl AgentPane {
     /// Apply one typed session event to the transcript and status line.
     pub(in crate::agent_pane) fn apply_event(
@@ -32,28 +59,28 @@ impl AgentPane {
 
                 // Fresh conversations seed from the remembered per-profile
                 // picks (a remembered value wins over the CLI default);
-                // resumed threads and later Ready confirmations take the
-                // backend settings as-is. Older local_state entries were
-                // keyed by agent
-                // kind, so that key still works as a fallback.
+                // resumed threads retain their backend settings except for
+                // the locally chosen Codex approval reviewer. Older
+                // local_state entries were keyed by agent kind, so that key
+                // still works as a fallback.
                 let seed_thread_defaults = take(&mut self.seed_thread_defaults);
-                if seed_thread_defaults
-                    && let Some(stored) =
+                let seed_approval_reviewer = take(&mut self.seed_approval_reviewer);
+                let stored = (seed_thread_defaults || seed_approval_reviewer)
+                    .then(|| {
                         cx.try_global::<AgentThreadDefaults>().and_then(|defaults| {
                             defaults
                                 .0
                                 .get(&self.defaults_key())
                                 .or_else(|| defaults.0.get(self.kind.id()))
                         })
-                {
-                    next = ThreadSettings {
-                        model: stored.model.clone().or(next.model),
-                        approval: stored.approval.clone().or(next.approval),
-                        sandbox: stored.sandbox.clone().or(next.sandbox),
-                        effort: stored.effort.clone().or(next.effort),
-                        tier: stored.tier.clone().or(next.tier),
-                    };
-                }
+                    })
+                    .flatten();
+                next = overlay_remembered_settings(
+                    next,
+                    stored,
+                    seed_thread_defaults,
+                    seed_approval_reviewer,
+                );
 
                 // A profile model is the startup default and therefore beats
                 // remembered per-profile picker state for a fresh thread.
@@ -67,6 +94,7 @@ impl AgentPane {
                     next = ThreadSettings {
                         model: restored.model.or(next.model),
                         approval: restored.approval.or(next.approval),
+                        approvals_reviewer: restored.approvals_reviewer.or(next.approvals_reviewer),
                         sandbox: restored.sandbox.or(next.sandbox),
                         effort: restored.effort.or(next.effort),
                         tier: restored.tier.or(next.tier),

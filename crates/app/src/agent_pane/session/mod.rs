@@ -1,5 +1,7 @@
 mod backend;
 mod events;
+#[cfg(test)]
+mod tests;
 mod update_recovery;
 
 use crate::agent_pane::composer::{
@@ -92,6 +94,7 @@ impl AgentPane {
             pending_approval: None,
             settings: ThreadSettings::default(),
             seed_thread_defaults: true,
+            seed_approval_reviewer: false,
             restore_thread_settings_on_ready: None,
             models: Vec::new(),
             expanded_groups: HashSet::new(),
@@ -299,6 +302,8 @@ impl AgentPane {
         let cwd = self.cwd.clone();
 
         self.seed_thread_defaults = !preserve_thread_settings && recovery.is_none();
+        self.seed_approval_reviewer =
+            !preserve_thread_settings && recovery.is_some() && kind == AgentKind::Codex;
         self.restore_thread_settings_on_ready =
             preserve_thread_settings.then(|| self.settings.clone());
 
@@ -717,9 +722,10 @@ impl AgentPane {
         self.history_ui.selected = index;
         self.history_ui.pending_resume_replay = None;
         self.status = Status::Starting;
-        // The resumed thread's own settings are authoritative; the remembered
-        // per-kind defaults must not overwrite them on the next Ready.
+        // Keep the resumed thread's stored controls except for the reviewer,
+        // which is a local preference shared across this Codex profile.
         self.seed_thread_defaults = false;
+        self.seed_approval_reviewer = self.kind == AgentKind::Codex;
         self.set_command_feedback(
             CommandFeedbackKind::Notice,
             "Opening recent session…".to_string(),

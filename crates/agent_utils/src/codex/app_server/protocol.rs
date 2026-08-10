@@ -194,10 +194,38 @@ pub(super) fn parse_thread_settings(result: &Value) -> ThreadSettings {
     ThreadSettings {
         model: result["model"].as_str().map(str::to_owned),
         approval: result["approvalPolicy"].as_str().map(str::to_owned),
+        approvals_reviewer: result["approvalsReviewer"].as_str().map(str::to_owned),
         sandbox: result["sandbox"]["type"].as_str().map(str::to_owned),
         effort: result["reasoningEffort"].as_str().map(str::to_owned),
         tier: result["serviceTier"].as_str().map(str::to_owned),
     }
+}
+
+pub(super) fn turn_start_params(thread_id: &str, input: Value, settings: &ThreadSettings) -> Value {
+    let mut params = json!({
+        "threadId": thread_id,
+        "input": input,
+    });
+
+    if let Some(model) = &settings.model {
+        params["model"] = json!(model);
+    }
+    if let Some(approval) = &settings.approval {
+        params["approvalPolicy"] = json!(approval);
+    }
+    if let Some(reviewer) = &settings.approvals_reviewer {
+        params["approvalsReviewer"] = json!(reviewer);
+    }
+    if let Some(sandbox) = &settings.sandbox {
+        params["sandboxPolicy"] = json!({"type": sandbox});
+    }
+    if let Some(effort) = &settings.effort {
+        params["effort"] = json!(effort);
+    }
+    // An explicit null changes a previously selected service tier back to normal.
+    params["serviceTier"] = json!(settings.tier);
+
+    params
 }
 
 pub(super) fn resumed_thread_events(result: &Value, suppress_replay: bool) -> Vec<Event> {

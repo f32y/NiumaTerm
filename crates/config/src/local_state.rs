@@ -38,6 +38,8 @@ pub struct AgentDefaults {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approval: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approvals_reviewer: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
@@ -259,6 +261,7 @@ mod tests {
                 AgentDefaults {
                     model: Some("opus".to_string()),
                     approval: Some("acceptEdits".to_string()),
+                    approvals_reviewer: None,
                     sandbox: None,
                     effort: Some("high".to_string()),
                     tier: None,
@@ -387,6 +390,7 @@ mod tests {
                 "codex".to_string(),
                 AgentDefaults {
                     model: Some("gpt-5.6-codex".to_string()),
+                    approvals_reviewer: Some("auto_review".to_string()),
                     effort: Some("high".to_string()),
                     ..AgentDefaults::default()
                 },

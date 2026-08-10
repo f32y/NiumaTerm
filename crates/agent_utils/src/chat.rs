@@ -8,11 +8,13 @@ use std::time::SystemTime;
 /// Thread settings a chat UI lets the user pick. Field meanings are
 /// per-backend: Codex sends them as overrides on every `turn/start`;
 /// Claude stores its permission mode in `approval` and applies changes via
-/// control requests before the next message (`sandbox` and `tier` unused).
+/// control requests before the next message (`approvals_reviewer`, `sandbox`,
+/// and `tier` unused).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ThreadSettings {
     pub model: Option<String>,
     pub approval: Option<String>,
+    pub approvals_reviewer: Option<String>,
     pub sandbox: Option<String>,
     pub effort: Option<String>,
     /// `None` is the normal tier: the model catalog only lists additional
