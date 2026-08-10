@@ -80,12 +80,15 @@ pub(in crate::agent_pane) fn entry_fingerprint(item: &SessionItem, detail_expand
         SessionItem::Error { text } => (text.len(), 0, 0),
         SessionItem::CommandExecution {
             command,
+            purpose,
             aggregated_output,
             status,
             exit_code,
             ..
         } => (
-            command.len() + aggregated_output.as_ref().map_or(0, String::len),
+            command.len()
+                + purpose.as_ref().map_or(0, String::len)
+                + aggregated_output.as_ref().map_or(0, String::len),
             status.as_ref().map_or(0, String::len),
             exit_code.map_or(0, |code| (code as u64) ^ (1 << 20)),
         ),

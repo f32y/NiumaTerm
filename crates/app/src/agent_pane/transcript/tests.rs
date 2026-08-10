@@ -6,10 +6,11 @@ mod prompt_truncation_tests {
     use crate::agent_pane::transcript::{
         AGENT_DISCLOSURE_DETAIL_INSET, AGENT_DISCLOSURE_GAP, AGENT_DISCLOSURE_PADDING,
         AGENT_DISCLOSURE_SLOT, AgentKind, COMMAND_EXECUTION_HEADING, Status, TurnSummary,
-        VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES, command_execution_detail, compaction_accounting,
-        compaction_label, compaction_row_is_expandable, entry_copy_text, interrupted_status_label,
-        is_work_row, should_show_jump_to_latest, should_virtualize_transcript, transcript_segments,
-        truncated_user_prompt, turn_summary, worked_status_label, working_status_label,
+        VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES, command_execution_detail, command_execution_heading,
+        compaction_accounting, compaction_label, compaction_row_is_expandable, entry_copy_text,
+        interrupted_status_label, is_work_row, should_show_jump_to_latest,
+        should_virtualize_transcript, transcript_segments, truncated_user_prompt, turn_summary,
+        worked_status_label, working_status_label,
     };
 
     #[test]
@@ -137,6 +138,11 @@ mod prompt_truncation_tests {
     #[test]
     fn command_tool_moves_the_full_command_and_output_into_detail() {
         assert_eq!(COMMAND_EXECUTION_HEADING, "Run Command");
+        assert_eq!(
+            command_execution_heading(Some("Inspect repository status")),
+            "Inspect repository status"
+        );
+        assert_eq!(command_execution_heading(Some("  ")), "Run Command");
         assert_eq!(
             command_execution_detail("cargo test --workspace", Some("running 42 tests\nok")),
             "$ cargo test --workspace\n\nrunning 42 tests\nok"

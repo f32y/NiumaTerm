@@ -402,6 +402,7 @@ pub(super) fn parse_item(item: &Value) -> Option<Item> {
         "commandExecution" => Item::CommandExecution {
             id,
             command: stringify_command(&item["command"]),
+            purpose: command_purpose(&item["commandActions"]),
             aggregated_output: item["aggregatedOutput"].as_str().map(str::to_owned),
             status,
             exit_code: item["exitCode"].as_i64(),
@@ -426,6 +427,45 @@ pub(super) fn parse_item(item: &Value) -> Option<Item> {
     };
 
     Some(parsed)
+}
+
+/// Convert Codex's parsed command actions into the short labels used by its
+/// own UI. Any unknown action disables the label because a partial summary can
+/// misrepresent a compound shell command.
+pub(super) fn command_purpose(actions: &Value) -> Option<String> {
+    let actions = actions.as_array().filter(|actions| !actions.is_empty())?;
+    let mut labels = Vec::with_capacity(actions.len());
+
+    for action in actions {
+        let label = match action["type"].as_str()? {
+            "read" => format!("Read {}", nonempty_string(action, "name")?),
+            "listFiles" => format!(
+                "List {}",
+                nonempty_string(action, "path").or_else(|| nonempty_string(action, "command"))?
+            ),
+            "search" => {
+                let query = nonempty_string(action, "query");
+                let path = nonempty_string(action, "path");
+                match (query, path) {
+                    (Some(query), Some(path)) => format!("Search {query} in {path}"),
+                    (Some(query), None) => format!("Search {query}"),
+                    _ => format!("Search {}", nonempty_string(action, "command")?),
+                }
+            }
+            "unknown" => return None,
+            _ => return None,
+        };
+
+        if !labels.contains(&label) {
+            labels.push(label);
+        }
+    }
+
+    Some(labels.join(" · "))
+}
+
+fn nonempty_string<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
+    value[key].as_str().filter(|text| !text.trim().is_empty())
 }
 
 /// Best-effort result payload of a generic tool item. Field names vary by

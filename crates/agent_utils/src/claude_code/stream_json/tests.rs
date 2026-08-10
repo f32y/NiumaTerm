@@ -324,13 +324,21 @@ fn edit_diff_prefixes_old_and_new_lines() {
 
 #[test]
 fn bash_and_file_tools_map_to_dedicated_cards() {
-    let bash = tool_item("t1", "Bash", &json!({"command": "cargo check"}));
+    let bash = tool_item(
+        "t1",
+        "Bash",
+        &json!({
+            "command": "cargo check",
+            "description": "Check the workspace"
+        }),
+    );
 
     assert_eq!(
         bash,
         Item::CommandExecution {
             id: "t1".into(),
             command: "cargo check".into(),
+            purpose: Some("Check the workspace".into()),
             aggregated_output: None,
             status: Some("inProgress".into()),
             exit_code: None,

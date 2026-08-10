@@ -17,6 +17,10 @@ pub(super) fn tool_item(id: &str, name: &str, input: &Value) -> Item {
         "Bash" => Item::CommandExecution {
             id,
             command: input["command"].as_str().unwrap_or_default().to_string(),
+            purpose: input["description"]
+                .as_str()
+                .filter(|description| !description.trim().is_empty())
+                .map(str::to_owned),
             aggregated_output: None,
             status,
             exit_code: None,
@@ -49,9 +53,15 @@ pub(super) fn complete_tool_item(started: Item, result: &Value) -> Item {
     let output = tool_result_text(&result["content"]);
 
     match started {
-        Item::CommandExecution { id, command, .. } => Item::CommandExecution {
+        Item::CommandExecution {
             id,
             command,
+            purpose,
+            ..
+        } => Item::CommandExecution {
+            id,
+            command,
+            purpose,
             aggregated_output: Some(output),
             status,
             exit_code: None,
