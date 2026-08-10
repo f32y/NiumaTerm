@@ -89,6 +89,22 @@ struct TabItem {
     progress: Option<ProgressReport>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AgentTabIndicator {
+    Busy,
+    Ready,
+}
+
+fn agent_tab_indicator(busy: bool, unread: bool) -> Option<AgentTabIndicator> {
+    if busy {
+        Some(AgentTabIndicator::Busy)
+    } else if unread {
+        Some(AgentTabIndicator::Ready)
+    } else {
+        None
+    }
+}
+
 fn progress_bar_width(tab_width: Pixels) -> Pixels {
     (tab_width - UI_RADIUS * 2.0).max(Pixels::ZERO)
 }
@@ -398,7 +414,7 @@ impl TabStrip {
                         // Unread-notification dot: a filled accent
                         // circle instead of a text bullet, so it stays
                         // visible against the muted inactive-tab text.
-                        .children(unread.then(|| {
+                        .children((unread && agent_kind.is_none()).then(|| {
                             div()
                                 .flex_none()
                                 .size(px(6.0))
@@ -439,6 +455,7 @@ impl TabStrip {
                         )
                     })
                     .when_some(agent_kind, |this, agent_kind| {
+                        let indicator = agent_tab_indicator(busy, unread);
                         this.prefix(
                             div()
                                 .relative()
@@ -453,25 +470,36 @@ impl TabStrip {
                                 .when(agent_kind == AgentKind::Claude, |this| {
                                     this.child(Icon::new(ClaudeIcon).xsmall())
                                 })
-                                .children(busy.then(|| {
-                                    div()
-                                        .id(("tab-agent-busy", id as usize))
-                                        .aria_label("Agent busy")
-                                        .size_4()
-                                        .flex_none()
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .child(
-                                            ProgressCircle::new((
-                                                "tab-agent-busy-spinner",
-                                                id as usize,
-                                            ))
-                                            .small()
-                                            .loading(true)
-                                            .color(cx.theme().warning),
-                                        )
-                                })),
+                                .when_some(indicator, |this, indicator| {
+                                    this.child(
+                                        div()
+                                            .id(("tab-agent-indicator", id as usize))
+                                            .aria_label(match indicator {
+                                                AgentTabIndicator::Busy => "Agent busy",
+                                                AgentTabIndicator::Ready => "Agent ready",
+                                            })
+                                            .size_4()
+                                            .flex_none()
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .child(match indicator {
+                                                AgentTabIndicator::Busy => ProgressCircle::new((
+                                                    "tab-agent-busy-spinner",
+                                                    id as usize,
+                                                ))
+                                                .small()
+                                                .loading(true)
+                                                .color(cx.theme().warning)
+                                                .into_any_element(),
+                                                AgentTabIndicator::Ready => div()
+                                                    .size(px(6.0))
+                                                    .rounded_full()
+                                                    .bg(cx.theme().primary)
+                                                    .into_any_element(),
+                                            }),
+                                    )
+                                }),
                         )
                     })
                     .child(content)
@@ -553,5 +581,18 @@ mod tests {
 
         assert_eq!(bar_width, px(134.0));
         assert_eq!(tab_width - UI_RADIUS - bar_width, UI_RADIUS);
+    }
+
+    #[test]
+    fn busy_indicator_takes_precedence_over_ready() {
+        assert_eq!(
+            agent_tab_indicator(true, true),
+            Some(AgentTabIndicator::Busy)
+        );
+        assert_eq!(
+            agent_tab_indicator(false, true),
+            Some(AgentTabIndicator::Ready)
+        );
+        assert_eq!(agent_tab_indicator(false, false), None);
     }
 }
