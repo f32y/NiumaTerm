@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-use std::collections::VecDeque;
 use std::io::{self, ErrorKind, Read, Write};
 use std::sync::atomic::{AtomicU32, AtomicU64};
 use std::sync::{self, Arc, mpsc};
@@ -13,14 +11,16 @@ use nmt_platform::{ChildEvent, EventedPty, Events, Interest, Poll, Token, Waker}
 use parking_lot::FairMutex;
 use tracing::{error, warn};
 
-use crate::ansi::CursorShape;
 use crate::event::{self, EventListener, Msg, MsgSender, TerminalEvent, WindowId};
 use crate::ghostty::{self, GhosttyTerminal, mode};
-use crate::prompt_sniffer::{PromptSniffer, SnifferMark};
+use crate::prompt_sniffer::PromptSniffer;
 use crate::render_buffer::RenderBuffer;
 use crate::{ansi, terminal, vt_trace};
 
 mod conpty_realign;
+mod marks;
+mod session;
+mod write_queue;
 
 #[cfg(test)]
 use crate::pty_pipe::conpty_realign::max_cup_row_col;
@@ -28,6 +28,9 @@ use crate::pty_pipe::conpty_realign::{
     is_conpty_resize_echo_input, is_conpty_resize_repaint, rewrite_conpty_resize_echo_cup_rows,
     su_realign_count,
 };
+use crate::pty_pipe::marks::{apply_sniffer_mark, engine_blocks_live_list};
+pub use crate::pty_pipe::session::{OutputSink, SessionHandles, SessionOptions, start_session};
+pub use crate::pty_pipe::write_queue::PtyState;
 
 /// Reserved `Poll` token for the loop's `Waker`. PTY source tokens start above it.
 const WAKER_TOKEN: Token = Token(0);
@@ -35,140 +38,6 @@ const WAKER_TOKEN: Token = Token(0);
 const READ_BUFFER_SIZE: usize = 0x10_0000;
 /// Max bytes to read from the PTY while the terminal is locked.
 const MAX_LOCKED_READ: usize = u16::MAX as usize;
-const BLOCK_BOUNDARY_CLEAR: &[u8] = b"\x1b[2J\x1b[3J\x1b[H";
-
-/// Engine-blocks mode: the engine's live finished-block list, oldest first,
-/// with current row counts — the payload of
-/// [`crate::event::BlockEvent::EngineBlocksSync`]. Cheap FFI walk; called
-/// under the engine lock on the PTY thread after finish/resize.
-fn engine_blocks_live_list(engine: &GhosttyTerminal) -> Vec<(ghostty::BlockHandle, usize)> {
-    let count = engine.block_count();
-
-    let mut live = Vec::with_capacity(count);
-
-    for index in 0..count {
-        if let Some(handle) = engine.block_at(index) {
-            live.push((handle, engine.block_row_count(handle).unwrap_or(0)));
-        }
-    }
-
-    live
-}
-
-/// Apply a recognized OSC 133 mark before any later PTY bytes reach the engine.
-/// Launch cwd, block finalization, and clear handling depend on engine state at
-/// this exact stream position.
-fn apply_sniffer_mark(
-    engine_cell: &cell::RefCell<&mut GhosttyTerminal>,
-    launch_cwd: &mut Option<Option<path::PathBuf>>,
-    mark_seq: &mut u64,
-    event_proxy: &impl EventListener,
-    window_id: WindowId,
-    engine_blocks: bool,
-    mut mark: SnifferMark<'_>,
-) {
-    engine_cell.borrow_mut().write_vt(mark.bytes);
-
-    if mark.prompt_started && mark.trusted {
-        // The block IS the segment: only the sequence
-        // number is registered here, for metadata
-        // marriage at the eventual finish.
-        *mark_seq += 1;
-        event_proxy.send_event(TerminalEvent::PromptStarted, window_id);
-    }
-
-    if let Some(report) = mark.progress.take() {
-        event_proxy.send_event(TerminalEvent::ProgressReport(report), window_id);
-    }
-
-    if let Some(mut start) = mark.command_started.take() {
-        // ;C — latch the launch cwd while the engine still
-        // holds THIS prompt's OSC 7, and surface the in-flight block.
-        let cwd = engine_cell.borrow().current_directory();
-
-        start.seq = *mark_seq;
-        start.cwd = cwd.clone();
-
-        *launch_cwd = Some(cwd);
-
-        event_proxy.send_event(TerminalEvent::CommandStarted(start), window_id);
-    }
-
-    if let Some(mut cmd) = mark.command_finished.take() {
-        // ;D — attach the launch metadata.
-        let cwd = launch_cwd.take().unwrap_or(None);
-
-        cmd.seq = *mark_seq;
-        cmd.cwd = cwd;
-
-        let in_alt_screen = engine_cell.borrow().mode(mode::ALT_SCREEN);
-
-        if mark.trusted && !in_alt_screen && engine_blocks {
-            // Engine-blocks mode freezes
-            // the command into a finished engine block
-            // (O(1)) and hands the HANDLE to the store —
-            // rendering reads the block via `BlockRef`;
-            // nothing is materialized. Budget eviction may
-            // fire inside finish_block, so the same batch
-            // carries the live list for the store to prune
-            // against. Clearing the boundary gives ConPTY's
-            // cursor model a fresh grid for the next command.
-            let mut engine = engine_cell.borrow_mut();
-
-            let events = match engine.finish_block() {
-                Ok(Some(handle)) => {
-                    let rows = engine.block_row_count(handle).unwrap_or(0);
-
-                    vec![
-                        event::BlockEvent::EngineBlock {
-                            seq: *mark_seq,
-                            handle,
-                            rows,
-                        },
-                        event::BlockEvent::EngineBlocksSync(engine_blocks_live_list(&engine)),
-                    ]
-                }
-                // Empty command: no block, no segment.
-                Ok(None) => Vec::new(),
-                Err(err) => {
-                    warn!("finish_block failed: {err:?}");
-                    Vec::new()
-                }
-            };
-
-            if !events.is_empty() {
-                event_proxy.send_event(TerminalEvent::BlockBatch(events), window_id);
-            }
-
-            engine.write_vt(BLOCK_BOUNDARY_CLEAR);
-        }
-
-        // Classic mode keeps one continuous grid:
-        // no finish, no boundary clear — plain single
-        // grid; only the metadata event fires.
-        event_proxy.send_event(TerminalEvent::CommandFinished(cmd), window_id);
-    }
-
-    if mark.history_cleared && mark.trusted && engine_blocks {
-        // ;K — the Clear-Host wrapper announces a user
-        // A trusted clear drops every finished engine
-        // block and wipe the active grid (the shell's
-        // own clear follows through ConPTY).
-        let in_alt_screen = engine_cell.borrow().mode(mode::ALT_SCREEN);
-
-        if !in_alt_screen {
-            engine_cell.borrow_mut().write_vt(BLOCK_BOUNDARY_CLEAR);
-
-            engine_cell.borrow_mut().clear_blocks();
-
-            event_proxy.send_event(
-                TerminalEvent::BlockBatch(vec![event::BlockEvent::HistoryCleared]),
-                window_id,
-            );
-        }
-    }
-}
-
 /// Min interval between full-viewport `snapshot()` + render-buffer readbacks
 /// while PTY input is saturated (a batch hit `MAX_LOCKED_READ` with more data
 /// pending). The readback is a constant-cost per-cell FFI walk (~1ms at 220×55)
@@ -354,164 +223,6 @@ fn scrollback_bytes(lines: usize, cols: u16) -> usize {
     lines
         .saturating_mul(cols as usize)
         .saturating_mul(BYTES_PER_CELL)
-}
-
-#[derive(Default)]
-pub struct PtyState {
-    write_list: VecDeque<Cow<'static, [u8]>>,
-    writing: Option<Writing>,
-}
-
-impl PtyState {
-    #[inline]
-    fn ensure_next(&mut self) {
-        if self.writing.is_none() {
-            self.goto_next();
-        }
-    }
-
-    #[inline]
-    fn goto_next(&mut self) {
-        self.writing = self.write_list.pop_front().map(Writing::new);
-    }
-
-    #[inline]
-    fn take_current(&mut self) -> Option<Writing> {
-        self.writing.take()
-    }
-
-    #[inline]
-    fn needs_write(&self) -> bool {
-        self.writing.is_some() || !self.write_list.is_empty()
-    }
-
-    #[inline]
-    fn set_current(&mut self, new: Option<Writing>) {
-        self.writing = new;
-    }
-}
-
-struct Writing {
-    source: Cow<'static, [u8]>,
-    written: usize,
-}
-
-impl Writing {
-    #[inline]
-    fn new(c: Cow<'static, [u8]>) -> Writing {
-        Writing {
-            source: c,
-            written: 0,
-        }
-    }
-
-    #[inline]
-    fn advance(&mut self, n: usize) {
-        self.written += n;
-    }
-
-    #[inline]
-    fn remaining_bytes(&self) -> &[u8] {
-        &self.source[self.written..]
-    }
-
-    #[inline]
-    fn finished(&self) -> bool {
-        self.written >= self.source.len()
-    }
-}
-
-/// Observer for the exact VT byte stream accepted by the engine. Runs under
-/// the engine lock so a checkpoint and its following bytes order atomically;
-/// observers must return promptly.
-pub type OutputSink = Arc<dyn Fn(Arc<[u8]>) + Send + Sync>;
-
-/// Construction settings for [`start_session`].
-pub struct SessionOptions {
-    pub cols: u16,
-    pub rows: u16,
-    /// Event route id stamped onto every event this pipe emits (multi-tab safety).
-    pub route_id: usize,
-    /// Theme palette pushed into the engine so SGR-indexed and default colors
-    /// resolve before the first PTY byte.
-    pub colors: Colors,
-    pub cursor_shape: CursorShape,
-    /// Scrollback budget in lines.
-    pub scrollback_lines: usize,
-    /// Freeze finished commands into engine blocks; `false` is the classic
-    /// single-grid fallback.
-    pub engine_blocks: bool,
-    /// Whether this pipe answers DA/DSR/OSC queries. Off for a headless host
-    /// whose attached frontend owns terminal identity and theme.
-    pub terminal_responses: bool,
-    pub output_sink: Option<OutputSink>,
-}
-
-/// Shared handles to one running terminal session, returned by [`start_session`].
-pub struct SessionHandles {
-    /// VT engine. The PTY thread and the frontend serialize through its lock.
-    pub engine: Arc<FairMutex<GhosttyTerminal>>,
-    /// Viewport copy the renderer reads; on its own lock, separate from the
-    /// engine, so paint never waits behind a parse.
-    pub render_buffer: Arc<FairMutex<RenderBuffer>>,
-    /// VT modes published by the pipe; the input path reads them lock-free.
-    pub vt_modes: Arc<AtomicU32>,
-    /// Sender for input, resize, and shutdown messages to the PTY thread.
-    pub messenger: MsgSender,
-}
-
-/// Build the engine and render buffer, configure the pipe, and start the PTY
-/// event-loop thread. The single construction entry point: callers receive
-/// every shared handle from one call instead of assembling buffers up front
-/// and extracting handles from a half-built pipe in the right order.
-pub fn start_session<T, U>(
-    pty: T,
-    event_proxy: U,
-    options: SessionOptions,
-) -> Result<SessionHandles, Box<dyn error::Error>>
-where
-    T: EventedPty + Send + 'static,
-    U: EventListener + Send + 'static,
-{
-    let render_buffer = Arc::new(FairMutex::new(RenderBuffer::new(
-        options.cols.max(1) as usize,
-        options.rows.max(1) as usize,
-    )));
-    let vt_modes = Arc::new(AtomicU32::new(0));
-
-    let mut pipe = PtyPipe::new(
-        Arc::clone(&render_buffer),
-        Arc::clone(&vt_modes),
-        pty,
-        event_proxy,
-        WindowId::dummy(),
-        options.route_id,
-        options.colors,
-        options.scrollback_lines,
-        options.engine_blocks,
-    )?;
-
-    // The pipe has not spawned yet, so the engine lock is uncontended and the
-    // cursor shape lands before the first PTY byte can be parsed.
-    pipe.ghostty
-        .lock()
-        .set_default_cursor_shape(options.cursor_shape)
-        .map_err(|error| Box::new(error) as Box<dyn error::Error>)?;
-
-    pipe.terminal_responses_enabled = options.terminal_responses;
-    pipe.output_sink = options.output_sink;
-
-    let engine = Arc::clone(&pipe.ghostty);
-    let messenger = pipe.channel();
-
-    drop(pipe.spawn());
-
-    Ok(SessionHandles {
-        engine,
-        render_buffer,
-        vt_modes,
-        messenger,
-    })
 }
 
 impl<T, U> PtyPipe<T, U>
