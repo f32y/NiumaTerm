@@ -558,17 +558,6 @@ fn scrollback_bytes(lines: usize, cols: u16) -> usize {
         .saturating_mul(BYTES_PER_CELL)
 }
 
-pub(crate) fn pwd_to_path(pwd: &str) -> path::PathBuf {
-    if let Some(rest) = pwd.strip_prefix("file://") {
-        // rest = "host/path"; the path starts at the first '/'.
-        if let Some(slash) = rest.find('/') {
-            return path::PathBuf::from(&rest[slash..]);
-        }
-    }
-
-    path::PathBuf::from(pwd)
-}
-
 #[derive(Default)]
 pub struct PtyState {
     write_list: VecDeque<Cow<'static, [u8]>>,
