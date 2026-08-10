@@ -4,7 +4,7 @@ Repo-level guidance for AI coding agents working in this repository.
 
 ## Basic rules
 
-- YOU ARE FORBIDDEN TO USE FOLLOWING AI SLOP WORDS: ponytail, seam, fact, parity, envelope, wire
+- YOU ARE FORBIDDEN TO USE FOLLOWING AI SLOP WORDS: ponytail, seam, fact, parity, envelope, wire, contract
 - Always write documents, specs, tests and comments in English.
 
 ## Testing application launches

@@ -70,7 +70,7 @@ EOF
 }
 
 check_no_ai_slop_marker() {
-    slop_markers='ponytail|seam|fact|parity|envelope|wire'
+    slop_markers='ponytail|seam|fact|parity|envelope|wire|contract'
     slop=$(git diff --cached --diff-filter=ACMR -U0 | grep -nE '^\+' | grep -Eiw "$slop_markers" || true)
     if [ -z "$slop" ]; then
         return 0
