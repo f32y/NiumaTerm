@@ -1,14 +1,12 @@
 use crate::agent_pane::transcript::disclosure_row::{
     AGENT_DISCLOSURE_DETAIL_INSET, AGENT_TEXT_MEASURE_REMS, AgentDisclosureRow,
 };
-use crate::agent_pane::transcript::format::{
-    COMMAND_EXECUTION_HEADING, interrupted_status_label, worked_status_label,
-};
+use crate::agent_pane::transcript::format::{interrupted_status_label, worked_status_label};
 use crate::agent_pane::transcript::{
-    code_transcript_format, command_execution_detail, compact_token_count, compaction_accounting,
-    compaction_label, compaction_row_is_expandable, entry_copy_text, fenced_code_block_as,
-    is_work_row, should_virtualize_transcript, strip_read_gutter, truncated_user_prompt,
-    working_label,
+    code_transcript_format, command_execution_detail, command_execution_heading,
+    compact_token_count, compaction_accounting, compaction_label, compaction_row_is_expandable,
+    entry_copy_text, fenced_code_block_as, is_work_row, should_virtualize_transcript,
+    strip_read_gutter, truncated_user_prompt, working_label,
 };
 use crate::agent_pane::*;
 
@@ -311,6 +309,7 @@ impl AgentPane {
         let (icon, heading, status, detail) = match &self.items[index].item {
             SessionItem::CommandExecution {
                 command,
+                purpose,
                 aggregated_output,
                 status,
                 exit_code,
@@ -326,7 +325,7 @@ impl AgentPane {
 
                 (
                     IconName::SquareTerminal,
-                    COMMAND_EXECUTION_HEADING.to_string(),
+                    command_execution_heading(purpose.as_deref()).to_string(),
                     Some(state.to_string()),
                     Some(Cow::Owned(detail)),
                 )

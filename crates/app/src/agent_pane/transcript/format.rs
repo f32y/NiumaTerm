@@ -158,6 +158,12 @@ pub(in crate::agent_pane) fn file_extension_lang(path: &str) -> String {
 
 pub(super) const COMMAND_EXECUTION_HEADING: &str = "Run Command";
 
+pub(in crate::agent_pane) fn command_execution_heading(purpose: Option<&str>) -> &str {
+    purpose
+        .filter(|purpose| !purpose.trim().is_empty())
+        .unwrap_or(COMMAND_EXECUTION_HEADING)
+}
+
 pub(in crate::agent_pane) fn command_execution_detail(
     command: &str,
     aggregated_output: Option<&str>,

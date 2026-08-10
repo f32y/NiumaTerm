@@ -458,7 +458,7 @@ fn replay_keeps_dialogue_and_preserves_tool_details() {
         serde_json::json!({"type": "assistant", "message": {"content": [
             {"type": "thinking", "thinking": "checking files"},
             {"type": "tool_use", "id": "t1", "name": "Bash",
-             "input": {"command": "cargo check"}},
+             "input": {"command": "cargo check", "description": "Check the workspace"}},
             {"type": "tool_use", "id": "t2", "name": "Read",
              "input": {"file_path": "src/lib.rs"}}]}}),
         serde_json::json!({"type": "user",
@@ -490,6 +490,7 @@ fn replay_keeps_dialogue_and_preserves_tool_details() {
             Item::CommandExecution {
                 id: "t1".into(),
                 command: "cargo check".into(),
+                purpose: Some("Check the workspace".into()),
                 aggregated_output: Some("ok".into()),
                 status: Some("completed".into()),
                 exit_code: None,

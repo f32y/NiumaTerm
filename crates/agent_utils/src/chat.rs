@@ -170,6 +170,9 @@ pub enum Item {
     CommandExecution {
         id: String,
         command: String,
+        /// Short explanation shown in the collapsed work row. Backends leave
+        /// this absent when they cannot describe the command reliably.
+        purpose: Option<String>,
         aggregated_output: Option<String>,
         status: Option<String>,
         exit_code: Option<i64>,
@@ -254,18 +257,25 @@ impl Item {
             }
             (
                 Self::CommandExecution {
+                    purpose,
                     aggregated_output,
                     status,
                     exit_code,
                     ..
                 },
                 Self::CommandExecution {
+                    purpose: completed_purpose,
                     aggregated_output: completed_output,
                     status: completed_status,
                     exit_code: completed_exit,
                     ..
                 },
             ) => {
+                if purpose.is_none()
+                    && let Some(completed_purpose) = completed_purpose
+                {
+                    *purpose = Some(completed_purpose.clone());
+                }
                 if let Some(completed_output) = completed_output {
                     *aggregated_output = Some(completed_output.clone());
                 }
@@ -477,6 +487,7 @@ mod tests {
         let mut command = Item::CommandExecution {
             id: "command-1".into(),
             command: "cargo test".into(),
+            purpose: Some("Run focused tests".into()),
             aggregated_output: Some("streamed output".into()),
             status: Some("inProgress".into()),
             exit_code: None,
@@ -484,6 +495,7 @@ mod tests {
         let completed = Item::CommandExecution {
             id: "command-1".into(),
             command: "cargo test".into(),
+            purpose: None,
             aggregated_output: None,
             status: Some("completed".into()),
             exit_code: Some(0),
@@ -495,6 +507,7 @@ mod tests {
             Item::CommandExecution {
                 id: "command-1".into(),
                 command: "cargo test".into(),
+                purpose: Some("Run focused tests".into()),
                 aggregated_output: Some("streamed output".into()),
                 status: Some("completed".into()),
                 exit_code: Some(0),

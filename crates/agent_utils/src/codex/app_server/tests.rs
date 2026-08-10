@@ -1,3 +1,4 @@
+use crate::codex::app_server::protocol::command_purpose;
 use crate::codex::app_server::*;
 
 #[test]
@@ -392,6 +393,7 @@ fn resumed_turns_replay_dialogue_and_preserve_activity_details() {
             {"id": "i1", "type": "userMessage",
              "content": [{"type": "text", "text": "question"}]},
             {"id": "i2", "type": "commandExecution", "command": "ls",
+             "commandActions": [{"type": "listFiles", "command": "ls", "path": "."}],
              "aggregatedOutput": "file.txt", "status": "completed", "exitCode": 0},
             {"id": "i3", "type": "reasoning", "summary": ["checked files"]},
             {"id": "i4", "type": "mcpToolCall", "server": "s", "tool": "t",
@@ -412,6 +414,7 @@ fn resumed_turns_replay_dialogue_and_preserve_activity_details() {
             Item::CommandExecution {
                 id: "i2".into(),
                 command: "ls".into(),
+                purpose: Some("List .".into()),
                 aggregated_output: Some("file.txt".into()),
                 status: Some("completed".into()),
                 exit_code: Some(0),
@@ -458,6 +461,29 @@ fn unknown_items_become_titled_tool_cards() {
             output: None,
             status: Some("inProgress".into()),
         })
+    );
+}
+
+#[test]
+fn command_actions_become_compact_purpose_labels() {
+    let actions = json!([
+        {"type": "search", "command": "rg main src", "query": "main", "path": "src"},
+        {"type": "read", "command": "Get-Content src/main.rs", "name": "src/main.rs",
+         "path": "C:\\work\\src\\main.rs"},
+        {"type": "read", "command": "Get-Content src/main.rs", "name": "src/main.rs",
+         "path": "C:\\work\\src\\main.rs"}
+    ]);
+
+    assert_eq!(
+        command_purpose(&actions).as_deref(),
+        Some("Search main in src · Read src/main.rs")
+    );
+    assert_eq!(
+        command_purpose(&json!([
+            {"type": "read", "command": "Get-Content a", "name": "a", "path": "a"},
+            {"type": "unknown", "command": "cargo check"}
+        ])),
+        None
     );
 }
 
