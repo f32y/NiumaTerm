@@ -7,6 +7,7 @@ pub(crate) mod links;
 pub(crate) mod metrics;
 #[cfg(windows)]
 pub(crate) mod net_pty;
+pub(crate) mod paint_text;
 pub(crate) mod scrollbar;
 pub(crate) mod session;
 pub(crate) mod surface;
