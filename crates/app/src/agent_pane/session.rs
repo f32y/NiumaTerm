@@ -1,5 +1,8 @@
-use crate::agent_pane::composer::{CommandFeedbackKind, rewind_blocks_submission};
+use crate::agent_pane::composer::{
+    CommandFeedbackKind, restored_input_after_interruption, rewind_blocks_submission,
+};
 use crate::agent_pane::profile::{ANTHROPIC_MODEL_ENV, launch_env_value};
+use crate::agent_pane::transcript::hidden;
 use crate::agent_pane::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -231,10 +234,12 @@ impl AgentPane {
             expanded_groups: HashSet::new(),
             expanded_turns: HashSet::new(),
             completed_turn_seconds: HashMap::new(),
+            interrupted_turns: HashSet::new(),
             expanded_rows: HashSet::new(),
             virtual_transcripts: HashMap::new(),
             turn_seq: 0,
             working_started: None,
+            unanswered_prompt: None,
             palette: SlashPalette {
                 provider_commands_ready: kind == AgentKind::Codex,
                 ..SlashPalette::default()
@@ -786,13 +791,23 @@ impl AgentPane {
     /// also used for UI-generated messages such as the `/effort` command.
     /// Returns false when the session isn't ready yet.
     pub(super) fn send_text(&mut self, text: String, cx: &mut Context<Self>) -> bool {
-        self.send_text_with_skill(text, None, cx)
+        self.send_text_inner(text, None, false, cx)
     }
 
     pub(super) fn send_text_with_skill(
         &mut self,
         text: String,
         skill: Option<&SkillReference>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.send_text_inner(text, skill, true, cx)
+    }
+
+    fn send_text_inner(
+        &mut self,
+        text: String,
+        skill: Option<&SkillReference>,
+        restore_on_interrupt: bool,
         cx: &mut Context<Self>,
     ) -> bool {
         if rewind_blocks_submission(self.rewind.state.as_ref()) {
@@ -838,7 +853,13 @@ impl AgentPane {
         match outcome {
             SendOutcome::StartedTurn => {
                 self.turn_seq += 1;
+                let unanswered_prompt = restore_on_interrupt.then(|| UnansweredPrompt {
+                    turn: self.turn_seq,
+                    text: text.clone(),
+                    skill: skill.cloned(),
+                });
                 self.push(SessionItem::UserMessage { text: Some(text) }, cx);
+                self.unanswered_prompt = unanswered_prompt;
                 self.start_working(cx);
             }
             SendOutcome::Steered => {
@@ -857,10 +878,12 @@ impl AgentPane {
         self.expanded_groups.clear();
         self.expanded_turns.clear();
         self.completed_turn_seconds.clear();
+        self.interrupted_turns.clear();
         self.expanded_rows.clear();
         self.virtual_transcripts.clear();
         self.turn_seq = 0;
         self.working_started = None;
+        self.unanswered_prompt = None;
         self.compacting = false;
         self.context_window_usage = None;
         self.queued_user_messages.clear();
@@ -928,10 +951,46 @@ impl AgentPane {
     /// shared item stream.
     pub(super) fn finish_working(&mut self, cx: &mut Context<Self>) {
         if let Some(started) = self.working_started.take() {
-            self.completed_turn_seconds
-                .insert(self.turn_seq, started.elapsed().as_secs());
+            if !self.interrupted_turns.contains(&self.turn_seq) {
+                self.completed_turn_seconds
+                    .insert(self.turn_seq, started.elapsed().as_secs());
+            }
             cx.notify();
         }
+    }
+
+    fn note_visible_agent_output(&mut self) {
+        if self
+            .unanswered_prompt
+            .as_ref()
+            .is_some_and(|prompt| prompt.turn == self.turn_seq)
+        {
+            self.unanswered_prompt = None;
+        }
+    }
+
+    pub(super) fn interrupt_from_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(prompt) = self
+            .unanswered_prompt
+            .take()
+            .filter(|prompt| prompt.turn == self.turn_seq && self.working_started.is_some())
+        {
+            self.working_started = None;
+            self.completed_turn_seconds.remove(&prompt.turn);
+            self.interrupted_turns.insert(prompt.turn);
+            self.compacting = false;
+
+            let current = self.input.read(cx).text().to_string();
+            let restored = restored_input_after_interruption(&prompt.text, &current);
+            let cursor = restored.len();
+            self.input.update(cx, |input, cx| {
+                input.set_value(restored, window, cx);
+                input.set_selected_range(cursor..cursor, cx);
+            });
+            self.palette.skill_binding = prompt.skill;
+        }
+
+        self.interrupt(cx);
     }
 
     pub(super) fn interrupt(&mut self, cx: &mut Context<Self>) {
@@ -1096,11 +1155,13 @@ impl AgentPane {
                 cx.notify();
             }
             SessionEvent::TurnCompleted { error } => {
+                let interrupted_before_output = self.interrupted_turns.contains(&self.turn_seq);
                 let completion_body = error
                     .clone()
                     .or_else(|| self.latest_agent_message().map(str::to_owned))
                     .unwrap_or_else(|| format!("{} completed the turn", self.kind.display()));
                 self.palette.awaiting_command_turn = false;
+                self.unanswered_prompt = None;
                 // Compaction lives inside a turn; a flag surviving the turn
                 // would leave the indicator spinning with nothing behind it.
                 self.compacting = false;
@@ -1110,7 +1171,9 @@ impl AgentPane {
                 if self.status == Status::Running {
                     self.status = Status::Idle;
                 }
-                if let Some(text) = error {
+                if let Some(text) = error
+                    && !interrupted_before_output
+                {
                     self.push(SessionItem::Error { text }, cx);
                 }
                 self.emit_lifecycle(
@@ -1127,6 +1190,7 @@ impl AgentPane {
                 cx.notify();
             }
             SessionEvent::CompactionStarted => {
+                self.note_visible_agent_output();
                 self.compacting = true;
                 cx.notify();
             }
@@ -1143,29 +1207,39 @@ impl AgentPane {
             SessionEvent::ItemStarted(item) => self.start_item(item, cx),
             SessionEvent::ItemCompleted(item) => self.complete_item(item, cx),
             SessionEvent::AgentMessageDelta { item_id, delta } => {
-                self.append_delta(&item_id, &delta, |item| match item {
+                let visible = self.append_delta(&item_id, &delta, |item| match item {
                     SessionItem::AgentMessage { text, .. } => Some(text),
                     _ => None,
                 });
+                if visible {
+                    self.note_visible_agent_output();
+                }
                 cx.notify();
             }
             SessionEvent::ReasoningSummaryDelta { item_id, delta } => {
-                self.append_delta(&item_id, &delta, |item| match item {
+                let visible = self.append_delta(&item_id, &delta, |item| match item {
                     SessionItem::Reasoning { summary, .. } => Some(summary),
                     _ => None,
                 });
+                if visible {
+                    self.note_visible_agent_output();
+                }
                 cx.notify();
             }
             SessionEvent::CommandOutputDelta { item_id, delta } => {
-                self.append_delta(&item_id, &delta, |item| match item {
+                let visible = self.append_delta(&item_id, &delta, |item| match item {
                     SessionItem::CommandExecution {
                         aggregated_output, ..
                     } => Some(aggregated_output),
                     _ => None,
                 });
+                if visible {
+                    self.note_visible_agent_output();
+                }
                 cx.notify();
             }
             SessionEvent::ApprovalRequested { description } => {
+                self.note_visible_agent_output();
                 self.emit_lifecycle(
                     AgentEventKind::PermissionRequested,
                     &format!("{} needs input", self.kind.display()),
@@ -1189,6 +1263,7 @@ impl AgentPane {
                 }
             }
             SessionEvent::Error { message, fatal } => {
+                self.note_visible_agent_output();
                 if self.history_ui.mode == RecentSessionsMode::Loading {
                     self.history_ui.mode = RecentSessionsMode::Open;
                     self.history_ui.pending_resume_replay = None;
@@ -1208,6 +1283,7 @@ impl AgentPane {
                 if fatal {
                     cx.emit(AgentPaneEvent::Interrupted);
                     self.status = Status::Exited;
+                    self.unanswered_prompt = None;
                     self.palette.awaiting_command_turn = false;
                     self.palette.command_queue.clear();
                     self.publish_queued_user_messages(cx);
@@ -1356,6 +1432,10 @@ impl AgentPane {
             return;
         }
 
+        if !hidden(&item) {
+            self.note_visible_agent_output();
+        }
+
         if matches!(item, SessionItem::AgentMessage { .. }) {
             self.publish_queued_user_messages(cx);
         }
@@ -1389,6 +1469,10 @@ impl AgentPane {
             if entry.item.merge_completed(&item) {
                 break;
             }
+        }
+
+        if !hidden(&item) {
+            self.note_visible_agent_output();
         }
 
         cx.notify();
@@ -1438,14 +1522,17 @@ impl AgentPane {
         item_id: &str,
         delta: &str,
         select: fn(&mut SessionItem) -> Option<&mut Option<String>>,
-    ) {
+    ) -> bool {
         for entry in &mut self.items {
             if entry.item.id() == Some(item_id)
                 && let Some(text) = select(&mut entry.item)
             {
-                text.get_or_insert_default().push_str(delta);
-                break;
+                let text = text.get_or_insert_default();
+                text.push_str(delta);
+                return !text.trim().is_empty();
             }
         }
+
+        false
     }
 }

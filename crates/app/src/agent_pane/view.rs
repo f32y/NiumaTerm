@@ -287,7 +287,7 @@ impl Render for AgentPane {
             // consume it (inline completion, IME), and transcript clicks focus
             // the pane below. A pending approval is cancelled (deny +
             // interrupt), while a running turn is interrupted directly.
-            .on_action(cx.listener(|this, _: &Escape, _, cx| {
+            .on_action(cx.listener(|this, _: &Escape, window, cx| {
                 if this
                     .rewind
                     .state
@@ -298,7 +298,7 @@ impl Render for AgentPane {
                 } else if this.pending_approval.is_some() {
                     this.respond_approval("cancel", cx);
                 } else if this.status == Status::Running {
-                    this.interrupt(cx);
+                    this.interrupt_from_ui(window, cx);
                 }
             }))
             // The agent tab is a terminal surface stand-in, so it overrides the
@@ -553,11 +553,9 @@ impl Render for AgentPane {
                                                 .icon(StopResponseIcon)
                                                 .tooltip("Stop response")
                                                 .aria_label("Stop response")
-                                                .on_click(
-                                                    cx.listener(|this, _, _, cx| {
-                                                        this.interrupt(cx)
-                                                    }),
-                                                )
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    this.interrupt_from_ui(window, cx)
+                                                }))
                                         } else {
                                             Button::new("agent-send")
                                                 .primary()
