@@ -330,13 +330,59 @@ pub struct SessionSummary {
     pub last_active: SystemTime,
 }
 
-/// Latest active context-window usage for one agent thread. Providers expose
-/// richer token accounting, but the composer only needs the live context size
-/// and its model limit to communicate how much working capacity remains.
+/// Token accounting from one provider reporting scope. The total is
+/// authoritative; optional categories describe parts of that total and stay
+/// absent when a protocol does not expose them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TokenUsageBreakdown {
+    pub total_tokens: u64,
+    pub input_tokens: Option<u64>,
+    pub cache_read_input_tokens: Option<u64>,
+    pub cache_write_input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub reasoning_output_tokens: Option<u64>,
+}
+
+impl TokenUsageBreakdown {
+    /// A compaction boundary can report the replacement size without enough
+    /// information to attribute tokens to categories.
+    pub const fn total_only(total_tokens: u64) -> Self {
+        Self {
+            total_tokens,
+            input_tokens: None,
+            cache_read_input_tokens: None,
+            cache_write_input_tokens: None,
+            output_tokens: None,
+            reasoning_output_tokens: None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContextUsageScope {
+    Thread,
+    LastTurn,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ScopedTokenUsage {
+    pub scope: ContextUsageScope,
+    pub breakdown: TokenUsageBreakdown,
+}
+
+/// Latest replacement snapshot of active context usage and any cumulative
+/// accounting that the same provider update can identify precisely.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ContextWindowUsage {
-    pub used_tokens: u64,
+    pub current: TokenUsageBreakdown,
+    pub cumulative: Option<ScopedTokenUsage>,
     pub max_tokens: Option<u64>,
+}
+
+impl ContextWindowUsage {
+    pub const fn used_tokens(self) -> u64 {
+        self.current.total_tokens
+    }
 }
 
 /// What a chat UI needs to react to, in transcript order.

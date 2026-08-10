@@ -12,10 +12,10 @@ use std::time::{Duration, UNIX_EPOCH};
 use serde_json::{Value, json};
 
 pub use crate::chat::{
-    Compaction, CompactionTrigger, ContextWindowUsage, Event, Item, ModelInfo, SendOutcome,
-    SessionSummary, SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments,
-    SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
-    ThreadSettings,
+    Compaction, CompactionTrigger, ContextUsageScope, ContextWindowUsage, Event, Item, ModelInfo,
+    ScopedTokenUsage, SendOutcome, SessionSummary, SkillCatalog, SkillInfo, SkillReference,
+    SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy,
+    SlashCommandSource, ThreadSettings, TokenUsageBreakdown,
 };
 use crate::launcher::AgentCli;
 use crate::subprocess::JsonLineProcess;
@@ -130,7 +130,7 @@ impl CompactionState {
         self.active = Some(ActiveCompaction {
             id: id.to_string(),
             trigger,
-            pre_tokens: self.latest_usage.map(|usage| usage.used_tokens),
+            pre_tokens: self.latest_usage.map(ContextWindowUsage::used_tokens),
         });
 
         true
@@ -151,7 +151,7 @@ impl CompactionState {
         };
         let post_tokens = pre_tokens.and_then(|pre_tokens| {
             self.latest_usage
-                .map(|usage| usage.used_tokens)
+                .map(ContextWindowUsage::used_tokens)
                 .filter(|post_tokens| *post_tokens < pre_tokens)
         });
 
@@ -838,16 +838,33 @@ fn compaction_completed(state: &mut CompactionState, item: &Value) -> Vec<Event>
 }
 
 fn parse_context_window_usage(value: &Value) -> Option<ContextWindowUsage> {
-    let used_tokens = value["last"]["totalTokens"].as_u64()?;
-    if used_tokens == 0 {
+    let current = parse_token_usage_breakdown(&value["last"])?;
+    if current.total_tokens == 0 {
         return None;
     }
 
     Some(ContextWindowUsage {
-        used_tokens,
+        current,
+        cumulative: parse_token_usage_breakdown(&value["total"]).map(|breakdown| {
+            ScopedTokenUsage {
+                scope: ContextUsageScope::Thread,
+                breakdown,
+            }
+        }),
         max_tokens: value["modelContextWindow"]
             .as_u64()
             .filter(|value| *value > 0),
+    })
+}
+
+fn parse_token_usage_breakdown(value: &Value) -> Option<TokenUsageBreakdown> {
+    Some(TokenUsageBreakdown {
+        total_tokens: value["totalTokens"].as_u64()?,
+        input_tokens: value["inputTokens"].as_u64(),
+        cache_read_input_tokens: value["cachedInputTokens"].as_u64(),
+        cache_write_input_tokens: value["cacheWriteInputTokens"].as_u64(),
+        output_tokens: value["outputTokens"].as_u64(),
+        reasoning_output_tokens: value["reasoningOutputTokens"].as_u64(),
     })
 }
 
@@ -1388,6 +1405,87 @@ fn tool_title(item: &Value) -> String {
 mod tests {
     use super::*;
 
+    fn context_usage(used_tokens: u64, max_tokens: Option<u64>) -> ContextWindowUsage {
+        ContextWindowUsage {
+            current: TokenUsageBreakdown::total_only(used_tokens),
+            cumulative: None,
+            max_tokens,
+        }
+    }
+
+    #[test]
+    fn context_usage_preserves_current_and_thread_breakdowns() {
+        let usage = parse_context_window_usage(&json!({
+            "last": {
+                "totalTokens": 41_000,
+                "inputTokens": 38_000,
+                "cachedInputTokens": 27_000,
+                "cacheWriteInputTokens": 2_000,
+                "outputTokens": 3_000,
+                "reasoningOutputTokens": 1_200
+            },
+            "total": {
+                "totalTokens": 180_000,
+                "inputTokens": 167_000,
+                "cachedInputTokens": 120_000,
+                "cacheWriteInputTokens": 8_000,
+                "outputTokens": 13_000,
+                "reasoningOutputTokens": 5_000
+            },
+            "modelContextWindow": 258_400
+        }))
+        .expect("complete Codex token usage should parse");
+
+        assert_eq!(
+            usage,
+            ContextWindowUsage {
+                current: TokenUsageBreakdown {
+                    total_tokens: 41_000,
+                    input_tokens: Some(38_000),
+                    cache_read_input_tokens: Some(27_000),
+                    cache_write_input_tokens: Some(2_000),
+                    output_tokens: Some(3_000),
+                    reasoning_output_tokens: Some(1_200),
+                },
+                cumulative: Some(ScopedTokenUsage {
+                    scope: ContextUsageScope::Thread,
+                    breakdown: TokenUsageBreakdown {
+                        total_tokens: 180_000,
+                        input_tokens: Some(167_000),
+                        cache_read_input_tokens: Some(120_000),
+                        cache_write_input_tokens: Some(8_000),
+                        output_tokens: Some(13_000),
+                        reasoning_output_tokens: Some(5_000),
+                    },
+                }),
+                max_tokens: Some(258_400),
+            }
+        );
+    }
+
+    #[test]
+    fn context_usage_accepts_older_sparse_breakdowns() {
+        let usage = parse_context_window_usage(&json!({
+            "last": {"totalTokens": 9_000, "inputTokens": 8_500},
+            "total": {"totalTokens": 21_000},
+            "modelContextWindow": null
+        }))
+        .expect("sparse Codex token usage should parse");
+
+        assert_eq!(usage.current.total_tokens, 9_000);
+        assert_eq!(usage.current.input_tokens, Some(8_500));
+        assert_eq!(usage.current.cache_write_input_tokens, None);
+        assert_eq!(
+            usage.cumulative.map(|scoped| scoped.breakdown),
+            Some(TokenUsageBreakdown::total_only(21_000))
+        );
+        assert_eq!(usage.max_tokens, None);
+        assert_eq!(
+            parse_context_window_usage(&json!({"last": {"totalTokens": 0}})),
+            None
+        );
+    }
+
     #[test]
     fn skill_list_requests_and_refresh_state_coalesce_invalidations() {
         assert_eq!(
@@ -1791,10 +1889,7 @@ mod tests {
     #[test]
     fn automatic_compaction_reports_progress_and_reclaimed_context() {
         let mut state = CompactionState::default();
-        state.update_usage(ContextWindowUsage {
-            used_tokens: 230_000,
-            max_tokens: Some(258_400),
-        });
+        state.update_usage(context_usage(230_000, Some(258_400)));
 
         assert_eq!(
             compaction_started(
@@ -1804,10 +1899,7 @@ mod tests {
             vec![Event::CompactionStarted]
         );
 
-        state.update_usage(ContextWindowUsage {
-            used_tokens: 17_000,
-            max_tokens: Some(258_400),
-        });
+        state.update_usage(context_usage(17_000, Some(258_400)));
 
         assert_eq!(
             compaction_completed(
@@ -1832,18 +1924,12 @@ mod tests {
     #[test]
     fn compaction_omits_a_post_count_without_an_observed_drop() {
         let mut state = CompactionState::default();
-        state.update_usage(ContextWindowUsage {
-            used_tokens: 90_000,
-            max_tokens: None,
-        });
+        state.update_usage(context_usage(90_000, None));
         compaction_started(
             &mut state,
             &json!({"id": "compact-1", "type": "contextCompaction"}),
         );
-        state.update_usage(ContextWindowUsage {
-            used_tokens: 95_000,
-            max_tokens: None,
-        });
+        state.update_usage(context_usage(95_000, None));
 
         let events = compaction_completed(
             &mut state,

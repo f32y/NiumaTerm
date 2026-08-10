@@ -3,6 +3,7 @@ pub(super) mod usage;
 
 mod commands;
 mod composer;
+mod context_usage;
 mod links;
 mod profile;
 mod session;
