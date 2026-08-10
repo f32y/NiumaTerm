@@ -59,8 +59,16 @@ fn window_transparency_controls_opacity_and_blur() {
     assert_eq!(clamp_background_opacity(0.65), 0.65);
     assert_eq!(clamp_background_opacity(2.0), 1.0);
     assert_eq!(clamp_background_opacity(f64::NAN), 1.0);
-    assert_eq!(effective_background_opacity(false, 0.65), 1.0);
-    assert_eq!(effective_background_opacity(true, 0.65), 0.65);
+    // Off keeps the window fully opaque regardless of the slider value.
+    assert_eq!(effective_background_opacity(WindowBackdrop::Off, 0.65), 1.0);
+    assert_eq!(
+        effective_background_opacity(WindowBackdrop::Mica, 0.65),
+        0.65
+    );
+    assert_eq!(
+        effective_background_opacity(WindowBackdrop::Acrylic, 0.65),
+        0.65
+    );
     assert_eq!(effective_main_view_background_opacity(false, 0.65), 1.0);
     assert_eq!(effective_main_view_background_opacity(true, 0.65), 0.65);
     assert_eq!(clamp_background_image_opacity(-1.0), 0.0);
@@ -77,13 +85,30 @@ fn window_transparency_controls_opacity_and_blur() {
     let image = effective_background_image_layer_opacity(0.65, 0.3);
     assert!((surface + (1.0 - surface) * image - 0.65).abs() < 1e-12);
     assert_eq!(
-        window_background_appearance_for(true),
+        window_background_appearance_for(WindowBackdrop::Acrylic),
         WindowBackgroundAppearance::Blurred
     );
     assert_eq!(
-        window_background_appearance_for(false),
+        window_background_appearance_for(WindowBackdrop::Mica),
+        WindowBackgroundAppearance::MicaBackdrop
+    );
+    assert_eq!(
+        window_background_appearance_for(WindowBackdrop::Off),
         WindowBackgroundAppearance::Opaque
     );
+}
+
+#[test]
+fn window_backdrop_value_roundtrip() {
+    for backdrop in [
+        WindowBackdrop::Mica,
+        WindowBackdrop::Acrylic,
+        WindowBackdrop::Off,
+    ] {
+        assert_eq!(WindowBackdrop::from_value(backdrop.as_str()), backdrop);
+    }
+    // Unknown values fall back to the default mode.
+    assert_eq!(WindowBackdrop::from_value("bogus"), WindowBackdrop::Acrylic);
 }
 
 #[test]
@@ -112,6 +137,7 @@ fn load_falls_back_to_default_profile() {
     // profile resolves to that profile's name.
     let settings = AppSettings::load();
     assert_eq!(settings.input_style, InputStyle::Waterfall);
+    assert_eq!(settings.window_backdrop, WindowBackdrop::Acrylic);
     assert_eq!(settings.profiles.len(), 1);
     assert_eq!(settings.default_profile, settings.profiles[0].name);
     assert_eq!(settings.default_profile, "PowerShell");
@@ -286,6 +312,7 @@ fn default_agent_profile_entry_resolves_by_name() {
 fn defaults_have_one_powershell_profile() {
     let settings = AppSettings::default();
     assert_eq!(settings.input_style, InputStyle::Waterfall);
+    assert_eq!(settings.window_backdrop, WindowBackdrop::Acrylic);
     assert_eq!(settings.profiles.len(), 1);
     assert_eq!(settings.profiles[0].shell, DEFAULT_SHELL);
     assert_eq!(settings.profiles[0].args, "");

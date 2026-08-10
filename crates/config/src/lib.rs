@@ -534,7 +534,7 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) {
     doc["appearance"]["agent-font-family"] = value(&appearance.agent_font_family);
     doc["appearance"]["agent-font-size"] = value(appearance.agent_font_size);
     doc["appearance"]["monospace-only"] = value(appearance.monospace_only);
-    doc["appearance"]["enable-window-transparency"] = value(appearance.window_transparency_enabled);
+    doc["appearance"]["enable-window-transparency"] = value(appearance.window_backdrop.as_str());
     doc["appearance"]["transparent-main-view"] = value(appearance.transparent_main_view);
     doc["appearance"]["smooth-scrolling"] = value(appearance.smooth_scrolling.as_str());
     doc["appearance"]["background-opacity"] = value(appearance.background_opacity);
@@ -598,7 +598,7 @@ mod tests {
             agent_font_family: "Cascadia Code".to_string(),
             agent_font_size: 15.0,
             monospace_only: false,
-            window_transparency_enabled: true,
+            window_backdrop: appearance::WindowBackdrop::Acrylic,
             transparent_main_view: false,
             smooth_scrolling: appearance::SmoothScrollingMode::Off,
             background_opacity: 0.85,

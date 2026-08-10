@@ -79,6 +79,58 @@ where
     })
 }
 
+/// The window backdrop material. The opacity slider applies in every mode;
+/// the mode only selects what shows through translucent content.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum WindowBackdrop {
+    /// Windows 11 Mica material: a static tint, no blur of the content behind.
+    Mica,
+    /// Blur the content behind the window (Acrylic).
+    #[default]
+    Acrylic,
+    /// No material; translucent content shows the desktop directly.
+    Off,
+}
+
+impl WindowBackdrop {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Mica => "mica",
+            Self::Acrylic => "acrylic",
+            Self::Off => "off",
+        }
+    }
+
+    pub fn from_value(value: &str) -> Self {
+        match value {
+            "mica" => Self::Mica,
+            "off" => Self::Off,
+            _ => Self::Acrylic,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum WindowBackdropValue {
+    Mode(WindowBackdrop),
+    Legacy(bool),
+}
+
+fn deserialize_window_backdrop<'de, D>(deserializer: D) -> Result<WindowBackdrop, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(match WindowBackdropValue::deserialize(deserializer)? {
+        WindowBackdropValue::Mode(mode) => mode,
+        // Legacy `enable-window-transparency` boolean: on kept the acrylic
+        // + opacity behavior, off was fully opaque.
+        WindowBackdropValue::Legacy(true) => WindowBackdrop::Acrylic,
+        WindowBackdropValue::Legacy(false) => WindowBackdrop::Off,
+    })
+}
+
 fn default_git_status_refresh_interval() -> u64 {
     30
 }
@@ -119,8 +171,8 @@ fn default_background_image_opacity() -> f64 {
     0.3
 }
 
-fn default_window_transparency_enabled() -> bool {
-    true
+fn default_window_backdrop() -> WindowBackdrop {
+    WindowBackdrop::Acrylic
 }
 
 fn default_transparent_main_view() -> bool {
@@ -181,13 +233,15 @@ pub struct AppearanceConfig {
     /// Whether terminal font pickers only show monospace fonts.
     #[serde(default = "default_monospace_only", rename = "monospace-only")]
     pub monospace_only: bool,
-    /// Allow the window to use an alpha-capable render target and acrylic
-    /// backdrop. Defaults on so existing opacity configurations keep working.
+    /// Window backdrop material. Acrylic is the default so existing opacity
+    /// configurations keep working; legacy booleans deserialize as `true` →
+    /// Acrylic and `false` → Off.
     #[serde(
-        default = "default_window_transparency_enabled",
-        rename = "enable-window-transparency"
+        default = "default_window_backdrop",
+        rename = "enable-window-transparency",
+        deserialize_with = "deserialize_window_backdrop"
     )]
-    pub window_transparency_enabled: bool,
+    pub window_backdrop: WindowBackdrop,
     /// Allow the Terminal View and Agent Pane background to show content behind it.
     #[serde(
         default = "default_transparent_main_view",
@@ -244,7 +298,7 @@ impl Default for AppearanceConfig {
             agent_font_family: default_agent_font_family(),
             agent_font_size: default_agent_font_size(),
             monospace_only: true,
-            window_transparency_enabled: default_window_transparency_enabled(),
+            window_backdrop: default_window_backdrop(),
             transparent_main_view: default_transparent_main_view(),
             smooth_scrolling: SmoothScrollingMode::default(),
             background_opacity: default_background_opacity(),
