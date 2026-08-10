@@ -1,3 +1,6 @@
+mod actions;
+mod tab_surface;
+
 use std::rc::Rc;
 use std::{collections, path, thread, time};
 
@@ -6,7 +9,7 @@ use gpui::prelude::*;
 use gpui::{
     Anchor, AnyElement, App, Axis, Context, Entity, FocusHandle, Focusable, MouseDownEvent,
     ObjectFit, PathPromptOptions, Pixels, Render, SharedString, Task, Window, WindowBounds,
-    WindowId, actions, div, img, px,
+    WindowId, div, img, px,
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::dialog::{DialogAction, DialogButtonProps, DialogClose, DialogFooter};
@@ -25,7 +28,9 @@ use nmt_agent_utils::{
     exact_window_is_active, request_native_delivery,
 };
 use nmt_config::get;
-use nmt_config::local_state::{TabState, WindowState};
+#[cfg(test)]
+use nmt_config::local_state::TabState;
+use nmt_config::local_state::WindowState;
 use nmt_config::system::WarnBeforeTerminatingShell;
 use nmt_platform::{
     NativeNotification, remove_notification, show_notification, system_notification_enabled,
@@ -48,6 +53,13 @@ use crate::ui::floating_surface;
 use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::git_status::{GitStatusModel, GitStatusView};
 use crate::ui::settings::{AgentProfile, AppSettings, settings_view};
+pub(crate) use crate::ui::shell::actions::{
+    CloseTab, NewAgentTab, NewRemoteTab, NewTab, NewWindow, NewWorkspace, NextTab, NextWorkspace,
+    PrevTab, PrevWorkspace, ResizePaneDown, ResizePaneLeft, ResizePaneRight, ResizePaneUp,
+    ShowSettings, SplitDown, SplitLeft, SplitRight, SplitUp, ToggleGitSidebar, ToggleSidebar,
+};
+#[allow(unused_imports)]
+pub(crate) use crate::ui::shell::tab_surface::{TabSurface, TerminalPaneTree};
 use crate::ui::tab_bar::TabStrip;
 use crate::ui::token_usage::TokenUsageView;
 use crate::ui::workspace_sidebar::{self, Sidebar};
@@ -82,116 +94,6 @@ fn should_confirm_close(
 }
 
 const PANE_RESIZE_STEP: Pixels = px(30.0);
-
-actions!(
-    NiumaTerm,
-    [
-        NewTab,
-        CloseTab,
-        NextTab,
-        PrevTab,
-        NewWorkspace,
-        NextWorkspace,
-        PrevWorkspace,
-        NewWindow,
-        SplitUp,
-        SplitDown,
-        SplitLeft,
-        SplitRight,
-        ResizePaneUp,
-        ResizePaneDown,
-        ResizePaneLeft,
-        ResizePaneRight,
-        ToggleSidebar,
-        ToggleGitSidebar,
-        ShowSettings,
-        NewRemoteTab,
-        NewAgentTab,
-    ]
-);
-
-pub(crate) type TerminalPaneTree = PaneTree<Entity<TerminalPane>, Entity<ResizableState>>;
-
-/// A tab's surface. Restored tabs start `Pending` — the saved snapshot with no
-/// shell process behind it — and become `Live` (spawning their shells) the
-/// first time they are activated, so startup only pays for the visible tab.
-pub(crate) enum TabSurface {
-    Pending(Box<TabState>),
-    Live(TerminalPaneTree),
-    /// An agent conversation rendered as chat bubbles instead of a terminal
-    /// grid. It owns an agent route but no terminal panes or child-process
-    /// accounting exposed through `tree()`.
-    Agent(Entity<AgentPane>),
-}
-
-impl TabSurface {
-    pub(crate) fn agent_kind(&self, cx: &App) -> Option<AgentKind> {
-        match self {
-            Self::Agent(pane) => Some(pane.read(cx).kind()),
-            Self::Pending(state) => state.agent.as_deref().and_then(AgentKind::from_id),
-            Self::Live(_) => None,
-        }
-    }
-
-    fn is_agent(&self) -> bool {
-        match self {
-            Self::Agent(_) => true,
-            Self::Pending(state) => state
-                .agent
-                .as_deref()
-                .and_then(AgentKind::from_id)
-                .is_some(),
-            Self::Live(_) => false,
-        }
-    }
-
-    /// The live pane tree. Every activation path materializes the newly active
-    /// tab before touching its surface, so active-tab code may assume `Live`.
-    pub(crate) fn live(&self) -> &TerminalPaneTree {
-        match self {
-            TabSurface::Live(tree) => tree,
-            _ => unreachable!("active tab surface is always live"),
-        }
-    }
-
-    pub(crate) fn live_mut(&mut self) -> &mut TerminalPaneTree {
-        match self {
-            TabSurface::Live(tree) => tree,
-            _ => unreachable!("active tab surface is always live"),
-        }
-    }
-
-    pub(crate) fn tree(&self) -> Option<&TerminalPaneTree> {
-        match self {
-            TabSurface::Live(tree) => Some(tree),
-            _ => None,
-        }
-    }
-
-    fn tree_mut(&mut self) -> Option<&mut TerminalPaneTree> {
-        match self {
-            TabSurface::Live(tree) => Some(tree),
-            _ => None,
-        }
-    }
-
-    fn agent(&self) -> Option<&Entity<AgentPane>> {
-        match self {
-            TabSurface::Agent(pane) => Some(pane),
-            _ => None,
-        }
-    }
-
-    /// Live leaves. A pending tab has none — it owns no panes and no
-    /// processes, which is exactly what route/process sweeps should see.
-    pub(crate) fn leaves(&self) -> Vec<(PaneId, &Entity<TerminalPane>)> {
-        self.tree().map(|tree| tree.leaves()).unwrap_or_default()
-    }
-
-    pub(crate) fn contains(&self, id: PaneId) -> bool {
-        self.tree().is_some_and(|tree| tree.contains(id))
-    }
-}
 
 struct AgentRouteLocation {
     workspace_id: WorkspaceId,
