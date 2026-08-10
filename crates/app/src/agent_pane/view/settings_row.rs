@@ -107,9 +107,9 @@ impl AgentPane {
         row
     }
 
-    /// Codex settings: model, approval policy, sandbox, reasoning effort, and
-    /// service tier. Values are thread settings sent as overrides on the next
-    /// `turn/start`.
+    /// Codex settings: model, approval policy, approval reviewer, sandbox,
+    /// reasoning effort, and service tier. Values are thread settings sent as
+    /// overrides on the next `turn/start`.
     fn render_codex_settings_row(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let model_options: Vec<(String, String)> = self
             .models
@@ -130,6 +130,10 @@ impl AgentPane {
                 .unwrap_or_default(),
         );
         let approval_options: Vec<(String, String)> = app_server::APPROVAL_OPTIONS
+            .iter()
+            .map(|v| (v.to_string(), v.to_string()))
+            .collect();
+        let reviewer_options: Vec<(String, String)> = app_server::APPROVAL_REVIEWER_OPTIONS
             .iter()
             .map(|v| (v.to_string(), v.to_string()))
             .collect();
@@ -195,6 +199,20 @@ impl AgentPane {
             },
         )
         .into_any_element();
+        let reviewer = Self::setting_picker(
+            cx,
+            "agent-approval-reviewer",
+            "approval reviewer",
+            IconName::User,
+            self.settings.approvals_reviewer.clone(),
+            reviewer_options,
+            false,
+            |this, value, cx| {
+                this.settings.approvals_reviewer = Some(value);
+                this.remember_thread_defaults(cx);
+            },
+        )
+        .into_any_element();
         let effort = Self::setting_picker(
             cx,
             "agent-effort",
@@ -232,7 +250,7 @@ impl AgentPane {
             .child(Self::settings_group("Model", vec![model], cx))
             .child(Self::settings_group(
                 "Execution policy",
-                vec![approval, sandbox],
+                vec![approval, reviewer, sandbox],
                 cx,
             ))
             .child(Self::settings_group(

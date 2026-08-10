@@ -274,6 +274,9 @@ pub(crate) struct AgentPane {
     /// defaults onto the backend's reported configuration. True for fresh
     /// conversations; resumed threads keep their own stored settings.
     seed_thread_defaults: bool,
+    /// Whether the next resumed Codex thread should take the locally remembered
+    /// approval reviewer while preserving its other stored settings.
+    seed_approval_reviewer: bool,
     /// A rewind starts a new backend identity but keeps the user's current
     /// thread controls. The first Ready payload describes process defaults,
     /// so these values are overlaid once instead of being replaced by them.

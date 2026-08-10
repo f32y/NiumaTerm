@@ -140,8 +140,9 @@ pub(crate) fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
 
 /// Last-chosen thread settings per agent profile name (agent ID for
 /// entries written by older builds), seeding the dropdowns of newly opened
-/// (non-resumed) agent conversations. Loaded from local_state.toml at
-/// startup, saved after user changes, and included in the final quit snapshot.
+/// conversations and the reviewer of resumed Codex threads. Loaded from
+/// local_state.toml at startup, saved after user changes, and included in the
+/// final quit snapshot.
 #[derive(Default)]
 pub(crate) struct AgentThreadDefaults(pub(crate) HashMap<String, ThreadSettings>);
 
@@ -158,6 +159,7 @@ impl AgentThreadDefaults {
                         ThreadSettings {
                             model: d.model.clone(),
                             approval: d.approval.clone(),
+                            approvals_reviewer: d.approvals_reviewer.clone(),
                             sandbox: d.sandbox.clone(),
                             effort: d.effort.clone(),
                             tier: d.tier.clone(),
@@ -177,6 +179,7 @@ impl AgentThreadDefaults {
                     StoredAgentDefaults {
                         model: s.model.clone(),
                         approval: s.approval.clone(),
+                        approvals_reviewer: s.approvals_reviewer.clone(),
                         sandbox: s.sandbox.clone(),
                         effort: s.effort.clone(),
                         tier: s.tier.clone(),

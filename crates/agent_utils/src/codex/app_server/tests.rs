@@ -1,4 +1,4 @@
-use crate::codex::app_server::protocol::command_purpose;
+use crate::codex::app_server::protocol::{command_purpose, turn_start_params};
 use crate::codex::app_server::*;
 
 #[test]
@@ -248,6 +248,36 @@ fn model_catalog_keeps_visible_models_and_their_tiers() {
 }
 
 #[test]
+fn turn_start_sends_the_selected_approval_reviewer() {
+    let settings = ThreadSettings {
+        model: Some("gpt-5.6-codex".into()),
+        approval: Some("on-request".into()),
+        approvals_reviewer: Some("auto_review".into()),
+        sandbox: Some("workspaceWrite".into()),
+        effort: Some("high".into()),
+        tier: None,
+    };
+
+    assert_eq!(
+        turn_start_params(
+            "thr_123",
+            json!([{"type": "text", "text": "continue"}]),
+            &settings
+        ),
+        json!({
+            "threadId": "thr_123",
+            "input": [{"type": "text", "text": "continue"}],
+            "model": "gpt-5.6-codex",
+            "approvalPolicy": "on-request",
+            "approvalsReviewer": "auto_review",
+            "sandboxPolicy": {"type": "workspaceWrite"},
+            "effort": "high",
+            "serviceTier": null
+        })
+    );
+}
+
+#[test]
 fn thread_start_injects_profile_model_and_provider_without_a_secret() {
     let profile = ThreadProfile {
         model: Some("vendor/custom-model".into()),
@@ -295,12 +325,17 @@ fn in_place_resume_suppresses_transcript_replay_but_still_becomes_ready() {
             "id": "thr_retained",
             "turns": [{"items": [{"type": "userMessage", "content": [{"type": "text", "text": "already visible"}]}]}]
         },
-        "model": "gpt-5"
+        "model": "gpt-5",
+        "approvalsReviewer": "auto_review"
     });
     let suppressed = resumed_thread_events(&result, true);
-    assert_eq!(suppressed.len(), 1);
-    assert!(
-        matches!(&suppressed[0], Event::Ready(settings) if settings.model.as_deref() == Some("gpt-5"))
+    assert_eq!(
+        suppressed,
+        vec![Event::Ready(ThreadSettings {
+            model: Some("gpt-5".into()),
+            approvals_reviewer: Some("auto_review".into()),
+            ..ThreadSettings::default()
+        })]
     );
 
     let normal = resumed_thread_events(&result, false);
