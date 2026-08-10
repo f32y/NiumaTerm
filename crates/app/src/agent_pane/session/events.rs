@@ -3,29 +3,30 @@ use crate::agent_pane::session::{Status, UpdateSuspension};
 use crate::agent_pane::transcript::hidden;
 use crate::agent_pane::*;
 
-pub(super) fn overlay_remembered_settings(
+pub(super) fn resolve_ready_settings(
     mut next: ThreadSettings,
-    stored: Option<&ThreadSettings>,
-    seed_all: bool,
-    seed_approval_reviewer: bool,
+    local: Option<&ThreadSettings>,
+    use_all_local: bool,
+    use_local_reviewer: bool,
+    startup_model: Option<&str>,
 ) -> ThreadSettings {
-    if seed_all && let Some(stored) = stored {
+    if use_all_local && let Some(local) = local {
         next = ThreadSettings {
-            model: stored.model.clone().or(next.model),
-            approval: stored.approval.clone().or(next.approval),
-            approvals_reviewer: stored
-                .approvals_reviewer
-                .clone()
-                .or(next.approvals_reviewer),
-            sandbox: stored.sandbox.clone().or(next.sandbox),
-            effort: stored.effort.clone().or(next.effort),
-            tier: stored.tier.clone().or(next.tier),
+            model: local.model.clone().or(next.model),
+            approval: local.approval.clone().or(next.approval),
+            approvals_reviewer: local.approvals_reviewer.clone().or(next.approvals_reviewer),
+            sandbox: local.sandbox.clone().or(next.sandbox),
+            effort: local.effort.clone().or(next.effort),
+            tier: local.tier.clone().or(next.tier),
         };
     }
-    if seed_approval_reviewer
-        && let Some(reviewer) = stored.and_then(|stored| stored.approvals_reviewer.clone())
+    if use_local_reviewer
+        && let Some(reviewer) = local.and_then(|local| local.approvals_reviewer.clone())
     {
         next.approvals_reviewer = Some(reviewer);
+    }
+    if let Some(model) = startup_model {
+        next.model = Some(model.to_string());
     }
     next
 }
@@ -54,15 +55,13 @@ impl AgentPane {
                 // confirms the permission mode); a payload without effort
                 // keeps the user's pick — Claude never reports effort, so
                 // None there means "unknown", never "reset".
-                let effort = settings.effort.clone().or(self.settings.effort.take());
+                let effort = settings.effort.clone().or(self.settings.effort.clone());
                 let mut next = ThreadSettings { effort, ..settings };
 
-                // Fresh conversations seed from the remembered per-profile
-                // picks (a remembered value wins over the CLI default);
-                // resumed threads retain their backend settings except for
-                // the locally chosen Codex approval reviewer. Older
-                // local_state entries were keyed by agent kind, so that key
-                // still works as a fallback.
+                // Fresh conversations and resumed Claude conversations seed
+                // all remembered picks. Claude emits another Ready during
+                // first-turn initialization, so later confirmations preserve
+                // the current controls instead of restoring CLI defaults.
                 let seed_thread_defaults = take(&mut self.seed_thread_defaults);
                 let seed_approval_reviewer = take(&mut self.seed_approval_reviewer);
                 let stored = (seed_thread_defaults || seed_approval_reviewer)
@@ -75,30 +74,23 @@ impl AgentPane {
                         })
                     })
                     .flatten();
-                next = overlay_remembered_settings(
+                let preserve_current = self.kind == AgentKind::Claude && !seed_thread_defaults;
+                let local = if preserve_current {
+                    Some(&self.settings)
+                } else {
+                    stored
+                };
+                let startup_model = seed_thread_defaults.then(|| self.profile_model()).flatten();
+                next = resolve_ready_settings(
                     next,
-                    stored,
-                    seed_thread_defaults,
+                    local,
+                    seed_thread_defaults || preserve_current,
                     seed_approval_reviewer,
+                    startup_model.as_deref(),
                 );
 
-                // A profile model is the startup default and therefore beats
-                // remembered per-profile picker state for a fresh thread.
-                // Later Ready events report live model changes and must pass
-                // through unchanged.
-                if seed_thread_defaults && let Some(model) = self.profile_model() {
-                    next.model = Some(model);
-                }
-
                 if let Some(restored) = self.restore_thread_settings_on_ready.take() {
-                    next = ThreadSettings {
-                        model: restored.model.or(next.model),
-                        approval: restored.approval.or(next.approval),
-                        approvals_reviewer: restored.approvals_reviewer.or(next.approvals_reviewer),
-                        sandbox: restored.sandbox.or(next.sandbox),
-                        effort: restored.effort.or(next.effort),
-                        tier: restored.tier.or(next.tier),
-                    };
+                    next = resolve_ready_settings(next, Some(&restored), true, false, None);
                 }
 
                 self.settings = next;
