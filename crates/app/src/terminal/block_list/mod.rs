@@ -26,6 +26,10 @@ use crate::terminal::frame::{
     theme_selection_background,
 };
 use crate::terminal::session::InFlightBlock;
+use crate::terminal::theme::{
+    BLOCK_FAILURE_COLOR, BLOCK_GUTTER_GAP, BLOCK_GUTTER_WIDTH, BLOCK_INPUT_COLOR,
+    BLOCK_RUNNING_COLOR, BLOCK_SELECTED_TINT, BLOCK_SUCCESS_COLOR, SEPARATOR_COLOR,
+};
 use crate::ui::AppSettings;
 
 /// Blank rows above and below each item's content: one full cell row on each
@@ -34,9 +38,6 @@ use crate::ui::AppSettings;
 /// (Command Blocks off) passes `pad_rows = 0.0` through the geometry
 /// functions instead, packing rows contiguously like a classic grid.
 pub(crate) const ITEM_PAD_ROWS: f32 = 1.0;
-/// 1px separator rule inside the gap.
-const SEPARATOR_COLOR: u32 = 0x3b4252;
-
 pub(crate) struct BlockListState {
     /// Native GPUI list state for block-split rendering.
     pub list: ListState,
@@ -245,9 +246,9 @@ pub(crate) fn live_item_px(history_rows: u64, live_rows: usize, cell_h: f32, pad
 /// Gutter/header accent for a frozen item, keyed off the exit code.
 fn item_accent(meta: &SegmentMeta) -> u32 {
     match meta.exit_code {
-        None => terminal::terminal_view::BLOCK_RUNNING_COLOR,
-        Some(0) => terminal::terminal_view::BLOCK_SUCCESS_COLOR,
-        Some(_) => terminal::terminal_view::BLOCK_FAILURE_COLOR,
+        None => BLOCK_RUNNING_COLOR,
+        Some(0) => BLOCK_SUCCESS_COLOR,
+        Some(_) => BLOCK_FAILURE_COLOR,
     }
 }
 
@@ -295,9 +296,9 @@ pub(crate) fn live_chrome(
     }
 
     let accent = if running {
-        terminal::terminal_view::BLOCK_RUNNING_COLOR
+        BLOCK_RUNNING_COLOR
     } else {
-        terminal::terminal_view::BLOCK_INPUT_COLOR
+        BLOCK_INPUT_COLOR
     };
 
     Some(FrozenItemChrome {
@@ -884,11 +885,10 @@ pub(crate) fn paint_frozen_chrome(
         window.paint_quad(fill(
             Bounds::new(
                 point(
-                    bounds.left()
-                        - px(terminal::view::BLOCK_GUTTER_GAP + terminal::view::BLOCK_GUTTER_WIDTH),
+                    bounds.left() - px(BLOCK_GUTTER_GAP + BLOCK_GUTTER_WIDTH),
                     top,
                 ),
-                size(px(terminal::view::BLOCK_GUTTER_WIDTH), height),
+                size(px(BLOCK_GUTTER_WIDTH), height),
             ),
             rgba((chrome.accent << 8) | gutter_alpha),
         ));
@@ -896,7 +896,7 @@ pub(crate) fn paint_frozen_chrome(
         if chrome.selected {
             window.paint_quad(fill(
                 Bounds::new(point(bounds.left(), top), size(bounds.size.width, height)),
-                rgba(terminal::terminal_view::BLOCK_SELECTED_TINT),
+                rgba(BLOCK_SELECTED_TINT),
             ));
         }
     }

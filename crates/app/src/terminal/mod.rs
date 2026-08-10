@@ -11,6 +11,7 @@ pub(crate) mod scrollbar;
 pub(crate) mod session;
 pub(crate) mod surface;
 pub(crate) mod terminal_view;
+pub(crate) mod theme;
 pub(crate) mod view;
 #[cfg(test)]
 mod vtebench_repro;

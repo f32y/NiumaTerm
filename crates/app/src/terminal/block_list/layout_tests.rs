@@ -194,7 +194,7 @@ fn block_list_live_chrome_marks_idle_open_prompt() {
     let chrome =
         terminal::block_list::block_list_live_chrome(4, 2, 10.0, None, true, false).unwrap();
     assert_eq!(chrome.item, 4);
-    assert_eq!(chrome.accent, terminal::terminal_view::BLOCK_INPUT_COLOR);
+    assert_eq!(chrome.accent, terminal::theme::BLOCK_INPUT_COLOR);
     assert_eq!(chrome.header, None);
     assert!(!chrome.selected);
 
@@ -208,7 +208,7 @@ fn frozen_chrome_offset_moves_header_with_item() {
         top: 0.0,
         bottom: 40.0,
         header_y: 10.0,
-        accent: terminal::terminal_view::BLOCK_SUCCESS_COLOR,
+        accent: terminal::theme::BLOCK_SUCCESS_COLOR,
         header: Some("build · ✓".into()),
         selected: false,
     };

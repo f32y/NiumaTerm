@@ -46,6 +46,7 @@ use crate::terminal::terminal_view::{
     BlockListItem, BlockListView, TerminalView, bottom_anchor_offsets, frame_content_rows,
     live_frame_text, row_y_offset, terminal_row_at_y,
 };
+use crate::terminal::theme::{BLOCK_GUTTER_GAP, BLOCK_GUTTER_WIDTH};
 use crate::ui::{AppSettings, UI_RADIUS, main_view_background_opacity};
 
 actions!(
@@ -1397,12 +1398,6 @@ impl TerminalPane {
     }
 }
 
-/// Width of the block gutter hit band / strip, in px left of the content origin
-/// (inside the pane's padding).
-pub(crate) const BLOCK_GUTTER_WIDTH: f32 = 4.0;
-/// Gap between the gutter strip and the text; GAP + WIDTH = PADDING_PX so the
-/// strip sits flush against the pane's left edge.
-pub(crate) const BLOCK_GUTTER_GAP: f32 = metrics::PADDING_PX - BLOCK_GUTTER_WIDTH;
 const BLOCK_GUTTER_SELECTION_ENABLED: bool = false;
 
 /// A pointer x hits the block gutter when it falls in the strip painted in the

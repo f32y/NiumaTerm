@@ -723,12 +723,6 @@ pub(crate) fn terminal_row_at_y(y: f32, cell_height: f32, offsets: &[f32]) -> u1
     offsets.len().saturating_sub(1) as u16
 }
 
-pub(crate) const BLOCK_SUCCESS_COLOR: u32 = 0xa3be8c;
-pub(crate) const BLOCK_FAILURE_COLOR: u32 = 0xbf616a;
-pub(crate) const BLOCK_RUNNING_COLOR: u32 = 0x88c0d0;
-pub(crate) const BLOCK_INPUT_COLOR: u32 = 0xebcb8b;
-pub(crate) const BLOCK_SELECTED_TINT: u32 = 0xffffff0d;
-
 pub(crate) fn block_separator_bounds(
     bounds: Bounds<Pixels>,
     y: Pixels,
