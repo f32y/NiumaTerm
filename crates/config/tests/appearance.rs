@@ -1,5 +1,5 @@
 use nmt_config::Config;
-use nmt_config::appearance::{AppearanceConfig, InputStyle, SmoothScrollingMode};
+use nmt_config::appearance::{AppearanceConfig, InputStyle, SmoothScrollingMode, WindowBackdrop};
 use toml::from_str;
 
 #[test]
@@ -42,6 +42,34 @@ fn smooth_scrolling_defaults_and_accepts_modes_and_legacy_values() {
         legacy_off.appearance.smooth_scrolling,
         SmoothScrollingMode::Off
     );
+}
+
+#[test]
+fn window_backdrop_defaults_and_accepts_modes_and_legacy_values() {
+    let missing: Config = from_str("").unwrap();
+    assert_eq!(missing.appearance.window_backdrop, WindowBackdrop::Acrylic);
+
+    for (value, expected) in [
+        ("mica", WindowBackdrop::Mica),
+        ("acrylic", WindowBackdrop::Acrylic),
+        ("off", WindowBackdrop::Off),
+    ] {
+        let config: Config = from_str(&format!(
+            "[appearance]\nenable-window-transparency = \"{value}\"\n"
+        ))
+        .unwrap();
+        assert_eq!(config.appearance.window_backdrop, expected);
+    }
+
+    // Legacy boolean values: on preserved the acrylic behavior, off was opaque.
+    let legacy_on: Config = from_str("[appearance]\nenable-window-transparency = true\n").unwrap();
+    assert_eq!(
+        legacy_on.appearance.window_backdrop,
+        WindowBackdrop::Acrylic
+    );
+    let legacy_off: Config =
+        from_str("[appearance]\nenable-window-transparency = false\n").unwrap();
+    assert_eq!(legacy_off.appearance.window_backdrop, WindowBackdrop::Off);
 }
 
 #[test]

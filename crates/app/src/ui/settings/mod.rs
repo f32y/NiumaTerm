@@ -85,7 +85,7 @@ pub(crate) use crate::ui::settings::remote_session_page::reconcile_remote_host;
 use crate::ui::settings::remote_session_page::remote_session_page;
 pub(crate) use crate::ui::settings::state::builtin_agent_profile;
 pub use crate::ui::settings::state::{
-    AgentProfile, AgentProfileKind, AppSettings, EnvVar, InputStyle, Profile,
+    AgentProfile, AgentProfileKind, AppSettings, EnvVar, InputStyle, Profile, WindowBackdrop,
 };
 #[cfg(test)]
 use crate::ui::settings::state::{
@@ -120,7 +120,7 @@ pub const MAX_TAB_WIDTH: f64 = DEFAULT_TAB_WIDTH * 3.0;
 pub fn settings_view(cx: &App) -> Settings {
     let profiles = cx.global::<AppSettings>().profiles.clone();
     let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
-    let transparency_enabled = cx.global::<AppSettings>().window_transparency_enabled;
+    let backdrop = cx.global::<AppSettings>().window_backdrop;
     let background_image_enabled = cx.global::<AppSettings>().background_image.is_some();
     let shell_integration_mismatched = shell_integration_dll_mismatched();
 
@@ -140,10 +140,7 @@ pub fn settings_view(cx: &App) -> Settings {
         // whole category top to bottom.
         .single_group_pages(true)
         .page(terminal_page())
-        .page(appearance_page(
-            transparency_enabled,
-            background_image_enabled,
-        ))
+        .page(appearance_page(backdrop, background_image_enabled))
         .page(profiles_page(&profiles, &agent_profiles))
         .page(agent_page(&agent_profiles, cx))
         .page(system_page(shell_integration_mismatched))

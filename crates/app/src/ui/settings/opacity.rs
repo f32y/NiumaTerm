@@ -1,9 +1,14 @@
 use gpui::{App, WindowBackgroundAppearance};
 
-use crate::ui::settings::state::AppSettings;
+use crate::ui::settings::state::{AppSettings, WindowBackdrop};
 
-pub(super) fn effective_background_opacity(transparency_enabled: bool, opacity: f64) -> f64 {
-    if transparency_enabled { opacity } else { 1.0 }
+pub(super) fn effective_background_opacity(backdrop: WindowBackdrop, opacity: f64) -> f64 {
+    match backdrop {
+        // Off keeps the window fully opaque; the slider applies in the two
+        // translucent modes.
+        WindowBackdrop::Acrylic | WindowBackdrop::Mica => opacity,
+        WindowBackdrop::Off => 1.0,
+    }
 }
 
 pub(super) fn effective_surface_background_opacity(
@@ -17,10 +22,7 @@ pub(crate) fn surface_background_opacity(cx: &App) -> f32 {
     let settings = cx.global::<AppSettings>();
 
     effective_surface_background_opacity(
-        effective_background_opacity(
-            settings.window_transparency_enabled,
-            settings.background_opacity,
-        ),
+        effective_background_opacity(settings.window_backdrop, settings.background_opacity),
         settings
             .background_image
             .as_ref()
@@ -60,25 +62,22 @@ pub(crate) fn background_image_layer_opacity(cx: &App) -> f32 {
     let settings = cx.global::<AppSettings>();
 
     effective_background_image_layer_opacity(
-        effective_background_opacity(
-            settings.window_transparency_enabled,
-            settings.background_opacity,
-        ),
+        effective_background_opacity(settings.window_backdrop, settings.background_opacity),
         settings.background_image_opacity,
     ) as f32
 }
 
 pub(super) fn window_background_appearance_for(
-    transparency_enabled: bool,
+    backdrop: WindowBackdrop,
 ) -> WindowBackgroundAppearance {
-    if transparency_enabled {
-        WindowBackgroundAppearance::Blurred
-    } else {
-        WindowBackgroundAppearance::Opaque
+    match backdrop {
+        WindowBackdrop::Acrylic => WindowBackgroundAppearance::Blurred,
+        WindowBackdrop::Mica => WindowBackgroundAppearance::MicaBackdrop,
+        WindowBackdrop::Off => WindowBackgroundAppearance::Opaque,
     }
 }
 
-/// Select acrylic composition only while the alpha-capable target is enabled.
+/// Select the DWM backdrop material for the configured mode.
 pub(crate) fn window_background_appearance(cx: &App) -> WindowBackgroundAppearance {
-    window_background_appearance_for(cx.global::<AppSettings>().window_transparency_enabled)
+    window_background_appearance_for(cx.global::<AppSettings>().window_backdrop)
 }

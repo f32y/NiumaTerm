@@ -1,7 +1,7 @@
 use crate::ui::settings::*;
 
 pub(super) fn appearance_page(
-    transparency_enabled: bool,
+    backdrop: WindowBackdrop,
     background_image_enabled: bool,
 ) -> SettingPage {
     SettingPage::new("Appearance")
@@ -48,16 +48,24 @@ pub(super) fn appearance_page(
                 .title("Window")
                 .item(
                     SettingItem::new(
-                        "Enable Window Transparency",
-                        SettingField::switch(
-                            |cx| cx.global::<AppSettings>().window_transparency_enabled,
+                        "Window Backdrop",
+                        SettingField::dropdown(
+                            vec![
+                                ("mica".into(), "Mica".into()),
+                                ("acrylic".into(), "Acrylic".into()),
+                                ("off".into(), "Off".into()),
+                            ],
+                            |cx| cx.global::<AppSettings>().window_backdrop.as_str().into(),
                             |value, cx| {
-                                cx.global_mut::<AppSettings>().window_transparency_enabled = value;
+                                cx.global_mut::<AppSettings>().window_backdrop =
+                                    WindowBackdrop::from_value(&value);
                             },
-                        ),
+                        )
+                        .default_value(SharedString::from("acrylic")),
                     )
                     .description(
-                        "Use an acrylic backdrop and preserve window alpha for live transparency.",
+                        "Window backdrop material. Acrylic blurs the content behind the window; \
+                         Mica is a static Windows 11 tint; Off keeps the window opaque.",
                     ),
                 )
                 .item(
@@ -94,8 +102,10 @@ pub(super) fn appearance_page(
                 )
                 .item(
                     SettingItem::new("Background Opacity", background_opacity_field())
-                        .description("Whole-window opacity while window transparency is enabled.")
-                        .disabled(!transparency_enabled),
+                        .description(
+                            "Whole-window opacity while a translucent backdrop is selected.",
+                        )
+                        .disabled(backdrop == WindowBackdrop::Off),
                 )
                 .item(
                     SettingItem::new("Background Image", background_image_field())

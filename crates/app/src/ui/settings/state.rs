@@ -1,7 +1,7 @@
 use gpui::{Global, SharedString};
 use nmt_config::agent::AgentConfig;
-pub use nmt_config::appearance::InputStyle;
 use nmt_config::appearance::{AppearanceConfig, SmoothScrollingMode};
+pub use nmt_config::appearance::{InputStyle, WindowBackdrop};
 use nmt_config::defaults::default_theme;
 pub use nmt_config::profile::{AgentProfile, AgentProfileKind, EnvVar, Profile};
 use nmt_config::remote_session::RemoteSessionConfig;
@@ -65,8 +65,9 @@ pub struct AppSettings {
     pub tab_width: f64,
     /// Filter the settings font picker to monospace fonts.
     pub monospace_only: bool,
-    /// Whether windows use an alpha-capable render target and acrylic backdrop.
-    pub window_transparency_enabled: bool,
+    /// Window backdrop material: Mica, Acrylic, or Off (see
+    /// [`WindowBackdrop`]). Only Off forces an opaque window.
+    pub window_backdrop: WindowBackdrop,
     /// Allow the Terminal View and Agent Pane background to remain translucent.
     pub transparent_main_view: bool,
     /// Select which scrolling views animate line-based mouse-wheel input.
@@ -136,7 +137,7 @@ impl Default for AppSettings {
             agent_font_size: DEFAULT_FONT_SIZE,
             tab_width: DEFAULT_TAB_WIDTH,
             monospace_only: true,
-            window_transparency_enabled: true,
+            window_backdrop: WindowBackdrop::Acrylic,
             transparent_main_view: true,
             smooth_scrolling: SmoothScrollingMode::All,
             background_opacity: 1.0,
@@ -373,7 +374,7 @@ impl AppSettings {
             agent_font_size: clamp_terminal_font_size(appearance.agent_font_size),
             tab_width: clamp_tab_width(appearance.tab_width),
             monospace_only: appearance.monospace_only,
-            window_transparency_enabled: appearance.window_transparency_enabled,
+            window_backdrop: appearance.window_backdrop,
             transparent_main_view: appearance.transparent_main_view,
             smooth_scrolling: appearance.smooth_scrolling,
             background_opacity: clamp_background_opacity(appearance.background_opacity),
@@ -580,7 +581,7 @@ impl AppSettings {
             agent_font_family: self.agent_font_family.to_string(),
             agent_font_size: self.agent_font_size,
             monospace_only: self.monospace_only,
-            window_transparency_enabled: self.window_transparency_enabled,
+            window_backdrop: self.window_backdrop,
             transparent_main_view: self.transparent_main_view,
             smooth_scrolling: self.smooth_scrolling,
             background_opacity: self.background_opacity,
