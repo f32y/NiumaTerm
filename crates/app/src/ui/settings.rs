@@ -1777,6 +1777,505 @@ fn remote_client_status(_cx: &mut App) -> Div {
     v_flex()
 }
 
+fn terminal_page() -> SettingPage {
+    SettingPage::new("Terminal").default_open(true).group(
+        SettingGroup::new()
+            .title("Input")
+            .item(
+                SettingItem::new(
+                    "Input Style",
+                    SettingField::dropdown(
+                        vec![
+                            (
+                                InputStyle::Waterfall.as_str().into(),
+                                input_style_label(InputStyle::Waterfall).into(),
+                            ),
+                            (
+                                InputStyle::FixedBottom.as_str().into(),
+                                input_style_label(InputStyle::FixedBottom).into(),
+                            ),
+                        ],
+                        |cx| cx.global::<AppSettings>().input_style.as_str().into(),
+                        |value, cx| {
+                            cx.global_mut::<AppSettings>().input_style =
+                                input_style_from_value(&value);
+                        },
+                    )
+                    .default_value(SharedString::from(InputStyle::Waterfall.as_str())),
+                )
+                .description("How the prompt input is presented."),
+            )
+            .item(
+                SettingItem::new(
+                    "Cursor Shape",
+                    SettingField::dropdown(
+                        vec![
+                            ("block".into(), "Block".into()),
+                            ("line".into(), "Line".into()),
+                            ("underline".into(), "Underline".into()),
+                        ],
+                        |cx| cx.global::<AppSettings>().cursor_shape.as_str().into(),
+                        |value, cx| {
+                            cx.global_mut::<AppSettings>().cursor_shape =
+                                cursor_shape_from_value(&value);
+                        },
+                    )
+                    .default_value(SharedString::from("block")),
+                )
+                .description("Default cursor shape used by newly opened terminals."),
+            )
+            .item(
+                SettingItem::new(
+                    "Command Blocks",
+                    SettingField::switch(
+                        |cx| cx.global::<AppSettings>().command_blocks,
+                        |value, cx| {
+                            cx.global_mut::<AppSettings>().command_blocks = value;
+                        },
+                    ),
+                )
+                .description(
+                    "Group each command's output into a block with a separator, \
+                                 exit status, and duration. Off: outputs run together like a \
+                                 classic terminal.",
+                ),
+            ),
+    )
+}
+
+fn appearance_page(transparency_enabled: bool, background_image_enabled: bool) -> SettingPage {
+    SettingPage::new("Appearance")
+        .default_open(true)
+        .group(
+            SettingGroup::new()
+                .title("Theme")
+                .description("Themes are loaded from the themes directory and applied immediately.")
+                .item(
+                    SettingItem::new(
+                        "Make agent pane use terminal's background color",
+                        SettingField::switch(
+                            |cx| {
+                                cx.global::<AppSettings>()
+                                    .agent_pane_use_terminal_background
+                            },
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>()
+                                    .agent_pane_use_terminal_background = value;
+                            },
+                        ),
+                    )
+                    .description("Use the terminal theme's background color for Agent Pane."),
+                )
+                .item(
+                    SettingItem::new(
+                        "Search",
+                        SettingField::input(
+                            |cx| cx.global::<AppSettings>().theme_filter.clone().into(),
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().theme_filter = value.to_string();
+                            },
+                        ),
+                    )
+                    .description("Filter themes by file name or UI theme name."),
+                )
+                .item(
+                    SettingItem::render(|_, _, cx| theme_list(cx))
+                        .keywords(["theme", "colors", "palette"]),
+                ),
+        )
+        .group(
+            SettingGroup::new()
+                .title("Window")
+                .item(
+                    SettingItem::new(
+                        "Enable Window Transparency",
+                        SettingField::switch(
+                            |cx| cx.global::<AppSettings>().window_transparency_enabled,
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().window_transparency_enabled = value;
+                            },
+                        ),
+                    )
+                    .description(
+                        "Use an acrylic backdrop and preserve window alpha for live transparency.",
+                    ),
+                )
+                .item(
+                    SettingItem::new(
+                        "Transparent Main View",
+                        SettingField::switch(
+                            |cx| cx.global::<AppSettings>().transparent_main_view,
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().transparent_main_view = value;
+                            },
+                        ),
+                    )
+                    .description("Use a translucent background for Terminal View and Agent Pane."),
+                )
+                .item(
+                    SettingItem::new(
+                        "Smooth Scrolling",
+                        SettingField::dropdown(
+                            vec![
+                                ("all".into(), "All".into()),
+                                ("only-terminal".into(), "Only Terminal".into()),
+                                ("only-agent".into(), "Only Agent".into()),
+                                ("off".into(), "Off".into()),
+                            ],
+                            |cx| cx.global::<AppSettings>().smooth_scrolling.as_str().into(),
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().smooth_scrolling =
+                                    SmoothScrollingMode::from_value(&value);
+                            },
+                        )
+                        .default_value(SharedString::from("all")),
+                    )
+                    .description("Choose where traditional mouse-wheel scrolling is animated."),
+                )
+                .item(
+                    SettingItem::new("Background Opacity", background_opacity_field())
+                        .description("Whole-window opacity while window transparency is enabled.")
+                        .disabled(!transparency_enabled),
+                )
+                .item(
+                    SettingItem::new("Background Image", background_image_field())
+                        .description("Local image stretched to cover the whole window."),
+                )
+                .item(
+                    SettingItem::new("Background Image Opacity", background_image_opacity_field())
+                        .description("How strongly the image shows through window surfaces.")
+                        .disabled(!background_image_enabled),
+                ),
+        )
+        .group(
+            SettingGroup::new()
+                .title("Font")
+                .item(
+                    SettingItem::new(
+                        "UI Font",
+                        ui::font_picker::font_family_field(ui::font_picker::FontTarget::Ui),
+                    )
+                    .description("Font for the app chrome (titlebar, sidebar, tabs, dialogs)."),
+                )
+                .item(
+                    SettingItem::new(
+                        "Terminal Font",
+                        ui::font_picker::font_family_field(ui::font_picker::FontTarget::Terminal),
+                    )
+                    .description("Font used by the terminal view."),
+                )
+                .item(
+                    SettingItem::new(
+                        "Terminal Font Size",
+                        SettingField::number_input(
+                            NumberFieldOptions {
+                                min: 6.0,
+                                max: 72.0,
+                                step: 0.1,
+                            },
+                            |cx| cx.global::<AppSettings>().terminal_font_size,
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().terminal_font_size = value;
+                            },
+                        ),
+                    )
+                    .description("Font size in pixels."),
+                )
+                .item(
+                    SettingItem::new(
+                        "Terminal Line Height",
+                        SettingField::number_input(
+                            NumberFieldOptions {
+                                min: 0.8,
+                                max: 3.0,
+                                step: 0.1,
+                            },
+                            |cx| cx.global::<AppSettings>().terminal_line_height,
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().terminal_line_height = value;
+                            },
+                        ),
+                    )
+                    .description("Line height as a multiplier on font size."),
+                )
+                .item(
+                    SettingItem::new(
+                        "Agent Font",
+                        ui::font_picker::font_family_field(ui::font_picker::FontTarget::Agent),
+                    )
+                    .description("Font used by agent (chat) tabs."),
+                )
+                .item(
+                    SettingItem::new(
+                        "Agent Font Size",
+                        SettingField::number_input(
+                            NumberFieldOptions {
+                                min: 6.0,
+                                max: 72.0,
+                                step: 0.1,
+                            },
+                            |cx| cx.global::<AppSettings>().agent_font_size,
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().agent_font_size = value;
+                            },
+                        ),
+                    )
+                    .description("Font size in pixels."),
+                )
+                .item(
+                    SettingItem::new(
+                        "Show monospace fonts only",
+                        SettingField::switch(
+                            |cx| cx.global::<AppSettings>().monospace_only,
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().monospace_only = value;
+                            },
+                        ),
+                    )
+                    .description("Filter the font list to fixed-width fonts."),
+                ),
+        )
+        .group(
+            SettingGroup::new().title("Tab Bar").item(
+                SettingItem::new(
+                    "Tab Width",
+                    SettingField::number_input(
+                        NumberFieldOptions {
+                            min: DEFAULT_TAB_WIDTH,
+                            max: MAX_TAB_WIDTH,
+                            step: 1.0,
+                        },
+                        |cx| cx.global::<AppSettings>().tab_width,
+                        |value, cx| {
+                            cx.global_mut::<AppSettings>().tab_width = clamp_tab_width(value);
+                        },
+                    ),
+                )
+                .description("Fixed tab width in pixels; long titles are clipped."),
+            ),
+        )
+        .group(
+            SettingGroup::new()
+                .title("Title Bar")
+                .item(
+                    SettingItem::new(
+                        "Show daily token usage",
+                        SettingField::switch(
+                            |cx| cx.global::<AppSettings>().show_daily_token_usage,
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().show_daily_token_usage = value;
+                            },
+                        ),
+                    )
+                    .description(
+                        "Show today's ccusage token totals in the titlebar, \
+                             refreshed every 60 seconds (click to refresh now).",
+                    ),
+                )
+                .item(
+                    SettingItem::new(
+                        "Show Git Status on Title Bar",
+                        SettingField::switch(
+                            |cx| cx.global::<AppSettings>().show_git_status_on_title_bar,
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().show_git_status_on_title_bar = value;
+                            },
+                        ),
+                    )
+                    .description(
+                        "Show the active repository's +added -removed line \
+                             counts in the titlebar.",
+                    ),
+                )
+                .item(
+                    SettingItem::new(
+                        "Git Status Refresh Interval",
+                        SettingField::dropdown(
+                            vec![
+                                ("10".into(), "10s".into()),
+                                ("15".into(), "15s".into()),
+                                ("30".into(), "30s".into()),
+                                ("60".into(), "60s".into()),
+                            ],
+                            |cx| {
+                                cx.global::<AppSettings>()
+                                    .git_status_refresh_interval
+                                    .to_string()
+                                    .into()
+                            },
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().git_status_refresh_interval =
+                                    clamp_git_interval(value.parse().unwrap_or(30));
+                            },
+                        )
+                        .default_value(SharedString::from("30")),
+                    )
+                    .description("How often the git status is re-read."),
+                ),
+        )
+}
+
+fn system_page(shell_integration_mismatched: bool) -> SettingPage {
+    SettingPage::new("System")
+                    .default_open(true)
+                    .group(
+                        SettingGroup::new().title("Session").item(
+                            SettingItem::new(
+                                "Restore last session when opening",
+                                SettingField::switch(
+                                    |cx| cx.global::<AppSettings>().restore_last_session_when_opening,
+                                    |value, cx| {
+                                        cx.global_mut::<AppSettings>()
+                                            .restore_last_session_when_opening = value;
+                                    },
+                                ),
+                            )
+                            .description("Reopen saved workspaces and tabs on startup."),
+                        ),
+                    )
+                    .group(
+                        SettingGroup::new().title("Workspace").item(
+                            SettingItem::new(
+                                "Confirm before closing",
+                                SettingField::switch(
+                                    |cx| cx.global::<AppSettings>().confirm_before_closing,
+                                    |value, cx| {
+                                        cx.global_mut::<AppSettings>().confirm_before_closing = value;
+                                    },
+                                ),
+                            )
+                            .description(
+                                "Ask for confirmation when closing a workspace, Agent tab, or window.",
+                            ),
+                        ),
+                    )
+                    .group(
+                        SettingGroup::new()
+                            .title("Process")
+                            .item(
+                                SettingItem::new(
+                                    "Manage subprocess by Windows Job API",
+                                    SettingField::switch(
+                                        |cx| cx.global::<AppSettings>().manage_subprocess_job,
+                                        |value, cx| {
+                                            cx.global_mut::<AppSettings>().manage_subprocess_job =
+                                                value;
+                                        },
+                                    ),
+                                )
+                                .description(
+                                    "Closing a tab kills the shell's entire process tree. \
+                             Applies to newly opened tabs.",
+                                ),
+                            )
+                            .item(
+                                SettingItem::new(
+                                    "Warn before terminating shell",
+                                    SettingField::dropdown(
+                                        vec![
+                                            ("disabled".into(), "Disabled".into()),
+                                            (
+                                                "when-child-processes-running".into(),
+                                                "When child processes running".into(),
+                                            ),
+                                            ("always".into(), "Always".into()),
+                                        ],
+                                        |cx| {
+                                            cx.global::<AppSettings>()
+                                                .warn_before_terminating_shell
+                                                .as_str()
+                                                .into()
+                                        },
+                                        |value, cx| {
+                                            cx.global_mut::<AppSettings>()
+                                                .warn_before_terminating_shell =
+                                                WarnBeforeTerminatingShell::from_value(&value);
+                                        },
+                                    )
+                                    .default_value(SharedString::from(
+                                        WarnBeforeTerminatingShell::WhenChildProcessesRunning.as_str(),
+                                    )),
+                                )
+                                .description(
+                                    "Choose when closing a shell asks for confirmation. Detecting \
+                             child processes requires Job management.",
+                                ),
+                            ),
+                    )
+                    .group(
+                        SettingGroup::new()
+                            .title("Windows")
+                            .item(
+                                SettingItem::new(
+                                    if shell_integration_mismatched {
+                                        "Enable Windows Context Menu  ⚠"
+                                    } else {
+                                        "Enable Windows Context Menu"
+                                    },
+                                    SettingField::switch(
+                                        |_| is_shell_integration_registered(),
+                                        |value, _| {
+                                            let result = if value {
+                                                register_shell_integration()
+                                            } else {
+                                                unregister_shell_integration()
+                                            };
+
+                                            if let Err(err) = result {
+                                                warn!(
+                                                    "failed to toggle Windows context menu: {err:#}"
+                                                );
+                                            }
+                                        },
+                                    ),
+                                )
+                                .description(if shell_integration_mismatched {
+                                    "The registered shell extension does not point to the DLL beside the current NiumaTerm executable."
+                                } else {
+                                    "Add NiumaTerm actions to File Explorer directory menus."
+                                }),
+                            )
+                            .item(
+                                SettingItem::new(
+                                    "Enable System Notification",
+                                    SettingField::switch(
+                                        |_| system_notification_enabled(),
+                                        |value, _| {
+                                            if let Err(err) =
+                                                set_system_notification_enabled(value)
+                                            {
+                                                warn!(
+                                                    "failed to toggle system notifications: {err:#}"
+                                                );
+                                            }
+                                        },
+                                    ),
+                                )
+                                .description(
+                                    "Show Windows notifications for terminal and agent events.",
+                                ),
+                            ),
+                    )
+                    .group(
+                        SettingGroup::new().title("Performance").item(
+                            SettingItem::new(
+                                "Prioritize UI threads",
+                                SettingField::switch(
+                                    |cx| cx.global::<AppSettings>().prioritize_ui_threads,
+                                    |value, cx| {
+                                        cx.global_mut::<AppSettings>().prioritize_ui_threads = value;
+
+                                        cx.global::<PlatformHandle>()
+                                            .0
+                                            .set_ui_thread_priority(value);
+                                    },
+                                ),
+                            )
+                            .description("Raise the main and render thread priority to AboveNormal."),
+                        ),
+                    )
+}
+
 pub fn settings_view(cx: &App) -> Settings {
     let profiles = cx.global::<AppSettings>().profiles.clone();
     let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
@@ -1799,541 +2298,14 @@ pub fn settings_view(cx: &App) -> Settings {
         // Each subcategory is its own page; the alternative scrolls the
         // whole category top to bottom.
         .single_group_pages(true)
-        .page(
-            SettingPage::new("Terminal").default_open(true).group(
-                SettingGroup::new()
-                    .title("Input")
-                    .item(
-                        SettingItem::new(
-                            "Input Style",
-                            SettingField::dropdown(
-                                vec![
-                                    (
-                                        InputStyle::Waterfall.as_str().into(),
-                                        input_style_label(InputStyle::Waterfall).into(),
-                                    ),
-                                    (
-                                        InputStyle::FixedBottom.as_str().into(),
-                                        input_style_label(InputStyle::FixedBottom).into(),
-                                    ),
-                                ],
-                                |cx| cx.global::<AppSettings>().input_style.as_str().into(),
-                                |value, cx| {
-                                    cx.global_mut::<AppSettings>().input_style =
-                                        input_style_from_value(&value);
-                                },
-                            )
-                            .default_value(SharedString::from(InputStyle::Waterfall.as_str())),
-                        )
-                        .description("How the prompt input is presented."),
-                    )
-                    .item(
-                        SettingItem::new(
-                            "Cursor Shape",
-                            SettingField::dropdown(
-                                vec![
-                                    ("block".into(), "Block".into()),
-                                    ("line".into(), "Line".into()),
-                                    ("underline".into(), "Underline".into()),
-                                ],
-                                |cx| cx.global::<AppSettings>().cursor_shape.as_str().into(),
-                                |value, cx| {
-                                    cx.global_mut::<AppSettings>().cursor_shape =
-                                        cursor_shape_from_value(&value);
-                                },
-                            )
-                            .default_value(SharedString::from("block")),
-                        )
-                        .description("Default cursor shape used by newly opened terminals."),
-                    )
-                    .item(
-                        SettingItem::new(
-                            "Command Blocks",
-                            SettingField::switch(
-                                |cx| cx.global::<AppSettings>().command_blocks,
-                                |value, cx| {
-                                    cx.global_mut::<AppSettings>().command_blocks = value;
-                                },
-                            ),
-                        )
-                        .description(
-                            "Group each command's output into a block with a separator, \
-                             exit status, and duration. Off: outputs run together like a \
-                             classic terminal.",
-                        ),
-                    ),
-            ),
-        )
-        .page(
-            SettingPage::new("Appearance")
-                .default_open(true)
-                .group(
-                    SettingGroup::new()
-                        .title("Theme")
-                        .description(
-                            "Themes are loaded from the themes directory and applied immediately.",
-                        )
-                        .item(
-                            SettingItem::new(
-                                "Make agent pane use terminal's background color",
-                                SettingField::switch(
-                                    |cx| {
-                                        cx.global::<AppSettings>()
-                                            .agent_pane_use_terminal_background
-                                    },
-                                    |value, cx| {
-                                        cx.global_mut::<AppSettings>()
-                                            .agent_pane_use_terminal_background = value;
-                                    },
-                                ),
-                            )
-                            .description(
-                                "Use the terminal theme's background color for Agent Pane.",
-                            ),
-                        )
-                        .item(
-                            SettingItem::new(
-                                "Search",
-                                SettingField::input(
-                                    |cx| {
-                                        cx.global::<AppSettings>().theme_filter.clone().into()
-                                    },
-                                    |value, cx| {
-                                        cx.global_mut::<AppSettings>().theme_filter =
-                                            value.to_string();
-                                    },
-                                ),
-                            )
-                            .description("Filter themes by file name or UI theme name."),
-                        )
-                        .item(SettingItem::render(|_, _, cx| theme_list(cx)).keywords([
-                            "theme",
-                            "colors",
-                            "palette",
-                        ])),
-                )
-                .group(
-                    SettingGroup::new()
-                        .title("Window")
-                        .item(
-                            SettingItem::new(
-                                "Enable Window Transparency",
-                                SettingField::switch(
-                                    |cx| {
-                                        cx.global::<AppSettings>().window_transparency_enabled
-                                    },
-                                    |value, cx| {
-                                        cx.global_mut::<AppSettings>()
-                                            .window_transparency_enabled = value;
-                                    },
-                                ),
-                            )
-                            .description(
-                                "Use an acrylic backdrop and preserve window alpha for live transparency.",
-                            ),
-                        )
-                        .item(
-                            SettingItem::new(
-                                "Transparent Main View",
-                                SettingField::switch(
-                                    |cx| cx.global::<AppSettings>().transparent_main_view,
-                                    |value, cx| {
-                                        cx.global_mut::<AppSettings>().transparent_main_view = value;
-                                    },
-                                ),
-                            )
-                            .description(
-                                "Use a translucent background for Terminal View and Agent Pane.",
-                            ),
-                        )
-                        .item(
-                            SettingItem::new(
-                                "Smooth Scrolling",
-                                SettingField::dropdown(
-                                    vec![
-                                        ("all".into(), "All".into()),
-                                        ("only-terminal".into(), "Only Terminal".into()),
-                                        ("only-agent".into(), "Only Agent".into()),
-                                        ("off".into(), "Off".into()),
-                                    ],
-                                    |cx| {
-                                        cx.global::<AppSettings>()
-                                            .smooth_scrolling
-                                            .as_str()
-                                            .into()
-                                    },
-                                    |value, cx| {
-                                        cx.global_mut::<AppSettings>().smooth_scrolling =
-                                            SmoothScrollingMode::from_value(&value);
-                                    },
-                                )
-                                .default_value(SharedString::from("all")),
-                            )
-                            .description(
-                                "Choose where traditional mouse-wheel scrolling is animated.",
-                            ),
-                        )
-                        .item(
-                            SettingItem::new("Background Opacity", background_opacity_field())
-                                .description(
-                                    "Whole-window opacity while window transparency is enabled.",
-                                )
-                                .disabled(!transparency_enabled),
-                        )
-                        .item(
-                            SettingItem::new("Background Image", background_image_field())
-                                .description("Local image stretched to cover the whole window."),
-                        )
-                        .item(
-                            SettingItem::new(
-                                "Background Image Opacity",
-                                background_image_opacity_field(),
-                            )
-                            .description("How strongly the image shows through window surfaces.")
-                            .disabled(!background_image_enabled),
-                        ),
-                )
-                .group(
-                    SettingGroup::new()
-                        .title("Font")
-                        .item(
-                            SettingItem::new(
-                                "UI Font",
-                                ui::font_picker::font_family_field(
-                                    ui::font_picker::FontTarget::Ui,
-                                ),
-                            )
-                            .description(
-                                "Font for the app chrome (titlebar, sidebar, tabs, dialogs).",
-                            ),
-                        )
-                        .item(
-                            SettingItem::new(
-                                "Terminal Font",
-                                ui::font_picker::font_family_field(
-                                    ui::font_picker::FontTarget::Terminal,
-                                ),
-                            )
-                            .description("Font used by the terminal view."),
-                        )
-                        .item(
-                            SettingItem::new(
-                                "Terminal Font Size",
-                                SettingField::number_input(
-                                    NumberFieldOptions {
-                                        min: 6.0,
-                                        max: 72.0,
-                                        step: 0.1,
-                                    },
-                                    |cx| cx.global::<AppSettings>().terminal_font_size,
-                                    |value, cx| {
-                                        cx.global_mut::<AppSettings>().terminal_font_size = value;
-                                    },
-                                ),
-                            )
-                            .description("Font size in pixels."),
-                        )
-                        .item(
-                            SettingItem::new(
-                                "Terminal Line Height",
-                                SettingField::number_input(
-                                    NumberFieldOptions {
-                                        min: 0.8,
-                                        max: 3.0,
-                                        step: 0.1,
-                                    },
-                                    |cx| cx.global::<AppSettings>().terminal_line_height,
-                                    |value, cx| {
-                                        cx.global_mut::<AppSettings>().terminal_line_height = value;
-                                    },
-                                ),
-                            )
-                            .description("Line height as a multiplier on font size."),
-                        )
-                        .item(
-                            SettingItem::new(
-                                "Agent Font",
-                                ui::font_picker::font_family_field(
-                                    ui::font_picker::FontTarget::Agent,
-                                ),
-                            )
-                            .description("Font used by agent (chat) tabs."),
-                        )
-                        .item(
-                            SettingItem::new(
-                                "Agent Font Size",
-                                SettingField::number_input(
-                                    NumberFieldOptions {
-                                        min: 6.0,
-                                        max: 72.0,
-                                        step: 0.1,
-                                    },
-                                    |cx| cx.global::<AppSettings>().agent_font_size,
-                                    |value, cx| {
-                                        cx.global_mut::<AppSettings>().agent_font_size = value;
-                                    },
-                                ),
-                            )
-                            .description("Font size in pixels."),
-                        )
-                        .item(
-                            SettingItem::new(
-                                "Show monospace fonts only",
-                                SettingField::switch(
-                                    |cx| cx.global::<AppSettings>().monospace_only,
-                                    |value, cx| {
-                                        cx.global_mut::<AppSettings>().monospace_only = value;
-                                    },
-                                ),
-                            )
-                            .description("Filter the font list to fixed-width fonts."),
-                        ),
-                )
-                .group(
-                    SettingGroup::new().title("Tab Bar").item(
-                        SettingItem::new(
-                            "Tab Width",
-                            SettingField::number_input(
-                                NumberFieldOptions {
-                                    min: DEFAULT_TAB_WIDTH,
-                                    max: MAX_TAB_WIDTH,
-                                    step: 1.0,
-                                },
-                                |cx| cx.global::<AppSettings>().tab_width,
-                                |value, cx| {
-                                    cx.global_mut::<AppSettings>().tab_width =
-                                        clamp_tab_width(value);
-                                },
-                            ),
-                        )
-                        .description("Fixed tab width in pixels; long titles are clipped."),
-                    ),
-                )
-                .group(
-                    SettingGroup::new()
-                        .title("Title Bar")
-                        .item(
-                            SettingItem::new(
-                                "Show daily token usage",
-                                SettingField::switch(
-                                    |cx| cx.global::<AppSettings>().show_daily_token_usage,
-                                    |value, cx| {
-                                        cx.global_mut::<AppSettings>().show_daily_token_usage =
-                                            value;
-                                    },
-                                ),
-                            )
-                            .description(
-                                "Show today's ccusage token totals in the titlebar, \
-                         refreshed every 60 seconds (click to refresh now).",
-                            ),
-                        )
-                        .item(
-                            SettingItem::new(
-                                "Show Git Status on Title Bar",
-                                SettingField::switch(
-                                    |cx| cx.global::<AppSettings>().show_git_status_on_title_bar,
-                                    |value, cx| {
-                                        cx.global_mut::<AppSettings>()
-                                            .show_git_status_on_title_bar = value;
-                                    },
-                                ),
-                            )
-                            .description(
-                                "Show the active repository's +added -removed line \
-                         counts in the titlebar.",
-                            ),
-                        )
-                        .item(
-                            SettingItem::new(
-                                "Git Status Refresh Interval",
-                                SettingField::dropdown(
-                                    vec![
-                                        ("10".into(), "10s".into()),
-                                        ("15".into(), "15s".into()),
-                                        ("30".into(), "30s".into()),
-                                        ("60".into(), "60s".into()),
-                                    ],
-                                    |cx| {
-                                        cx.global::<AppSettings>()
-                                            .git_status_refresh_interval
-                                            .to_string()
-                                            .into()
-                                    },
-                                    |value, cx| {
-                                        cx.global_mut::<AppSettings>()
-                                            .git_status_refresh_interval =
-                                            clamp_git_interval(value.parse().unwrap_or(30));
-                                    },
-                                )
-                                .default_value(SharedString::from("30")),
-                            )
-                            .description("How often the git status is re-read."),
-                        ),
-                ),
-        )
+        .page(terminal_page())
+        .page(appearance_page(
+            transparency_enabled,
+            background_image_enabled,
+        ))
         .page(profiles_page(&profiles, &agent_profiles))
         .page(agent_page(&agent_profiles, cx))
-        .page(
-            SettingPage::new("System")
-                .default_open(true)
-                .group(
-                    SettingGroup::new().title("Session").item(
-                        SettingItem::new(
-                            "Restore last session when opening",
-                            SettingField::switch(
-                                |cx| cx.global::<AppSettings>().restore_last_session_when_opening,
-                                |value, cx| {
-                                    cx.global_mut::<AppSettings>()
-                                        .restore_last_session_when_opening = value;
-                                },
-                            ),
-                        )
-                        .description("Reopen saved workspaces and tabs on startup."),
-                    ),
-                )
-                .group(
-                    SettingGroup::new().title("Workspace").item(
-                        SettingItem::new(
-                            "Confirm before closing",
-                            SettingField::switch(
-                                |cx| cx.global::<AppSettings>().confirm_before_closing,
-                                |value, cx| {
-                                    cx.global_mut::<AppSettings>().confirm_before_closing = value;
-                                },
-                            ),
-                        )
-                        .description(
-                            "Ask for confirmation when closing a workspace, Agent tab, or window.",
-                        ),
-                    ),
-                )
-                .group(
-                    SettingGroup::new()
-                        .title("Process")
-                        .item(
-                            SettingItem::new(
-                                "Manage subprocess by Windows Job API",
-                                SettingField::switch(
-                                    |cx| cx.global::<AppSettings>().manage_subprocess_job,
-                                    |value, cx| {
-                                        cx.global_mut::<AppSettings>().manage_subprocess_job =
-                                            value;
-                                    },
-                                ),
-                            )
-                            .description(
-                                "Closing a tab kills the shell's entire process tree. \
-                         Applies to newly opened tabs.",
-                            ),
-                        )
-                        .item(
-                            SettingItem::new(
-                                "Warn before terminating shell",
-                                SettingField::dropdown(
-                                    vec![
-                                        ("disabled".into(), "Disabled".into()),
-                                        (
-                                            "when-child-processes-running".into(),
-                                            "When child processes running".into(),
-                                        ),
-                                        ("always".into(), "Always".into()),
-                                    ],
-                                    |cx| {
-                                        cx.global::<AppSettings>()
-                                            .warn_before_terminating_shell
-                                            .as_str()
-                                            .into()
-                                    },
-                                    |value, cx| {
-                                        cx.global_mut::<AppSettings>()
-                                            .warn_before_terminating_shell =
-                                            WarnBeforeTerminatingShell::from_value(&value);
-                                    },
-                                )
-                                .default_value(SharedString::from(
-                                    WarnBeforeTerminatingShell::WhenChildProcessesRunning.as_str(),
-                                )),
-                            )
-                            .description(
-                                "Choose when closing a shell asks for confirmation. Detecting \
-                         child processes requires Job management.",
-                            ),
-                        ),
-                )
-                .group(
-                    SettingGroup::new()
-                        .title("Windows")
-                        .item(
-                            SettingItem::new(
-                                if shell_integration_mismatched {
-                                    "Enable Windows Context Menu  ⚠"
-                                } else {
-                                    "Enable Windows Context Menu"
-                                },
-                                SettingField::switch(
-                                    |_| is_shell_integration_registered(),
-                                    |value, _| {
-                                        let result = if value {
-                                            register_shell_integration()
-                                        } else {
-                                            unregister_shell_integration()
-                                        };
-
-                                        if let Err(err) = result {
-                                            warn!(
-                                                "failed to toggle Windows context menu: {err:#}"
-                                            );
-                                        }
-                                    },
-                                ),
-                            )
-                            .description(if shell_integration_mismatched {
-                                "The registered shell extension does not point to the DLL beside the current NiumaTerm executable."
-                            } else {
-                                "Add NiumaTerm actions to File Explorer directory menus."
-                            }),
-                        )
-                        .item(
-                            SettingItem::new(
-                                "Enable System Notification",
-                                SettingField::switch(
-                                    |_| system_notification_enabled(),
-                                    |value, _| {
-                                        if let Err(err) =
-                                            set_system_notification_enabled(value)
-                                        {
-                                            warn!(
-                                                "failed to toggle system notifications: {err:#}"
-                                            );
-                                        }
-                                    },
-                                ),
-                            )
-                            .description(
-                                "Show Windows notifications for terminal and agent events.",
-                            ),
-                        ),
-                )
-                .group(
-                    SettingGroup::new().title("Performance").item(
-                        SettingItem::new(
-                            "Prioritize UI threads",
-                            SettingField::switch(
-                                |cx| cx.global::<AppSettings>().prioritize_ui_threads,
-                                |value, cx| {
-                                    cx.global_mut::<AppSettings>().prioritize_ui_threads = value;
-
-                                    cx.global::<PlatformHandle>()
-                                        .0
-                                        .set_ui_thread_priority(value);
-                                },
-                            ),
-                        )
-                        .description("Raise the main and render thread priority to AboveNormal."),
-                    ),
-                ),
-        )
+        .page(system_page(shell_integration_mismatched))
         .page(remote_session_page())
         .page(about_page())
 }
