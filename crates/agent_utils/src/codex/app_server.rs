@@ -191,6 +191,37 @@ pub const EFFORT_OPTIONS: [&str; 8] = [
     "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
 ];
 
+#[derive(Default)]
+struct TurnOutputUsage {
+    latest_total: Option<u64>,
+    baseline: Option<u64>,
+}
+
+impl TurnOutputUsage {
+    fn begin_turn(&mut self) {
+        self.baseline = self.latest_total;
+    }
+
+    fn finish_turn(&mut self) {
+        self.baseline = None;
+    }
+
+    fn observe(&mut self, total: u64, last: u64, active: bool) -> Option<u64> {
+        self.latest_total = Some(total);
+        if !active {
+            return None;
+        }
+
+        let inferred_baseline = total.saturating_sub(last);
+        let baseline = self.baseline.get_or_insert(inferred_baseline);
+        if total < *baseline {
+            *baseline = inferred_baseline;
+        }
+
+        Some(total.saturating_sub(*baseline))
+    }
+}
+
 pub struct Session {
     process: JsonLineProcess,
     next_rpc_id: u64,
@@ -205,6 +236,7 @@ pub struct Session {
     pending_commands: HashMap<u64, String>,
     skill_refresh: SkillRefreshState,
     compaction: CompactionState,
+    turn_output_usage: TurnOutputUsage,
     /// Profile-level model/provider overrides reused for thread start, history
     /// filtering, and resume. Provider credentials remain only in process env.
     thread_profile: ThreadProfile,
@@ -313,6 +345,7 @@ impl Session {
             pending_commands: HashMap::new(),
             skill_refresh: SkillRefreshState::default(),
             compaction: CompactionState::default(),
+            turn_output_usage: TurnOutputUsage::default(),
             thread_profile,
             initial_resume,
             suppress_resume_replay,
@@ -709,11 +742,13 @@ impl Session {
             }
             "turn/started" => {
                 self.current_turn = params["turn"]["id"].as_str().map(str::to_owned);
+                self.turn_output_usage.begin_turn();
 
                 vec![Event::TurnStarted]
             }
             "turn/completed" => {
                 self.current_turn = None;
+                self.turn_output_usage.finish_turn();
 
                 let error = (params["turn"]["status"].as_str() == Some("failed"))
                     .then(|| params["turn"]["error"]["message"].as_str())
@@ -729,7 +764,20 @@ impl Session {
                 };
 
                 self.compaction.update_usage(usage);
-                vec![Event::ContextWindowUpdated(usage)]
+                let active = params["turnId"]
+                    .as_str()
+                    .is_some_and(|turn_id| self.current_turn.as_deref() == Some(turn_id));
+                let turn_output_tokens = usage
+                    .cumulative
+                    .and_then(|usage| usage.breakdown.output_tokens)
+                    .zip(usage.current.output_tokens)
+                    .and_then(|(total, last)| self.turn_output_usage.observe(total, last, active));
+
+                let mut events = vec![Event::ContextWindowUpdated(usage)];
+                if let Some(output_tokens) = turn_output_tokens {
+                    events.push(Event::TurnOutputTokensUpdated(output_tokens));
+                }
+                events
             }
             "item/started" => {
                 let item = &params["item"];
@@ -1404,6 +1452,27 @@ fn tool_title(item: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn turn_output_usage_tracks_growth_across_model_responses() {
+        let mut usage = TurnOutputUsage::default();
+
+        assert_eq!(usage.observe(80, 10, false), None);
+        usage.begin_turn();
+        assert_eq!(usage.observe(87, 7, true), Some(7));
+        assert_eq!(usage.observe(92, 5, true), Some(12));
+        usage.finish_turn();
+        assert_eq!(usage.observe(100, 8, false), None);
+    }
+
+    #[test]
+    fn turn_output_usage_infers_a_new_thread_baseline() {
+        let mut usage = TurnOutputUsage::default();
+
+        usage.begin_turn();
+        assert_eq!(usage.observe(7, 7, true), Some(7));
+        assert_eq!(usage.observe(12, 5, true), Some(12));
+    }
 
     fn context_usage(used_tokens: u64, max_tokens: Option<u64>) -> ContextWindowUsage {
         ContextWindowUsage {

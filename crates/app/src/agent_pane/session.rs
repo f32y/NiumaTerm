@@ -234,11 +234,13 @@ impl AgentPane {
             expanded_groups: HashSet::new(),
             expanded_turns: HashSet::new(),
             completed_turn_seconds: HashMap::new(),
+            completed_turn_output_tokens: HashMap::new(),
             interrupted_turns: HashSet::new(),
             expanded_rows: HashSet::new(),
             virtual_transcripts: HashMap::new(),
             turn_seq: 0,
             working_started: None,
+            working_output_tokens: None,
             unanswered_prompt: None,
             palette: SlashPalette {
                 provider_commands_ready: kind == AgentKind::Codex,
@@ -878,11 +880,13 @@ impl AgentPane {
         self.expanded_groups.clear();
         self.expanded_turns.clear();
         self.completed_turn_seconds.clear();
+        self.completed_turn_output_tokens.clear();
         self.interrupted_turns.clear();
         self.expanded_rows.clear();
         self.virtual_transcripts.clear();
         self.turn_seq = 0;
         self.working_started = None;
+        self.working_output_tokens = None;
         self.unanswered_prompt = None;
         self.compacting = false;
         self.context_window_usage = None;
@@ -923,6 +927,7 @@ impl AgentPane {
     /// progress row; the ticker stops itself once `finish_working` clears it.
     pub(super) fn start_working(&mut self, cx: &mut Context<Self>) {
         self.working_started = Some(Instant::now());
+        self.working_output_tokens = None;
         cx.notify();
 
         cx.spawn(async move |this, cx| {
@@ -946,14 +951,19 @@ impl AgentPane {
         .detach();
     }
 
-    /// Settle the current turn's duration for its fold header. Duration is UI
-    /// state rather than provider transcript content, so it stays outside the
-    /// shared item stream.
+    /// Settle the current turn's duration and exact output usage for its status
+    /// row. These values are UI state rather than provider transcript content,
+    /// so they stay outside the shared item stream.
     pub(super) fn finish_working(&mut self, cx: &mut Context<Self>) {
+        let output_tokens = self.working_output_tokens.take();
         if let Some(started) = self.working_started.take() {
             if !self.interrupted_turns.contains(&self.turn_seq) {
                 self.completed_turn_seconds
                     .insert(self.turn_seq, started.elapsed().as_secs());
+            }
+            if let Some(output_tokens) = output_tokens {
+                self.completed_turn_output_tokens
+                    .insert(self.turn_seq, output_tokens);
             }
             cx.notify();
         }
@@ -970,14 +980,16 @@ impl AgentPane {
     }
 
     pub(super) fn interrupt_from_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let interrupted_turn = self.working_started.is_some().then_some(self.turn_seq);
         if let Some(prompt) = self
             .unanswered_prompt
             .take()
             .filter(|prompt| prompt.turn == self.turn_seq && self.working_started.is_some())
         {
             self.working_started = None;
+            self.working_output_tokens = None;
             self.completed_turn_seconds.remove(&prompt.turn);
-            self.interrupted_turns.insert(prompt.turn);
+            self.completed_turn_output_tokens.remove(&prompt.turn);
             self.compacting = false;
 
             let current = self.input.read(cx).text().to_string();
@@ -988,6 +1000,9 @@ impl AgentPane {
                 input.set_selected_range(cursor..cursor, cx);
             });
             self.palette.skill_binding = prompt.skill;
+        }
+        if let Some(turn) = interrupted_turn {
+            self.interrupted_turns.insert(turn);
         }
 
         self.interrupt(cx);
@@ -1155,7 +1170,7 @@ impl AgentPane {
                 cx.notify();
             }
             SessionEvent::TurnCompleted { error } => {
-                let interrupted_before_output = self.interrupted_turns.contains(&self.turn_seq);
+                let interrupted_by_user = self.interrupted_turns.contains(&self.turn_seq);
                 let completion_body = error
                     .clone()
                     .or_else(|| self.latest_agent_message().map(str::to_owned))
@@ -1172,7 +1187,7 @@ impl AgentPane {
                     self.status = Status::Idle;
                 }
                 if let Some(text) = error
-                    && !interrupted_before_output
+                    && !interrupted_by_user
                 {
                     self.push(SessionItem::Error { text }, cx);
                 }
@@ -1184,6 +1199,12 @@ impl AgentPane {
                 );
                 self.run_next_queued_command(cx);
                 cx.notify();
+            }
+            SessionEvent::TurnOutputTokensUpdated(output_tokens) => {
+                if self.working_started.is_some() {
+                    self.working_output_tokens = Some(output_tokens);
+                    cx.notify();
+                }
             }
             SessionEvent::ContextWindowUpdated(usage) => {
                 self.context_window_usage = Some(usage);

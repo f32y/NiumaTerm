@@ -90,6 +90,36 @@ struct PendingApproval {
     suggestions: Option<Value>,
 }
 
+#[derive(Default)]
+struct TurnOutputUsage {
+    completed_responses: u64,
+    current_response: Option<u64>,
+}
+
+impl TurnOutputUsage {
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    fn start_response(&mut self, output_tokens: u64) -> u64 {
+        self.completed_responses = self
+            .completed_responses
+            .saturating_add(self.current_response.take().unwrap_or(0));
+        self.current_response = Some(output_tokens);
+        self.total()
+    }
+
+    fn update_response(&mut self, output_tokens: u64) -> u64 {
+        self.current_response = Some(output_tokens);
+        self.total()
+    }
+
+    fn total(&self) -> u64 {
+        self.completed_responses
+            .saturating_add(self.current_response.unwrap_or(0))
+    }
+}
+
 pub struct Session {
     process: JsonLineProcess,
     next_request_id: u64,
@@ -134,6 +164,7 @@ pub struct Session {
     context_usage: Option<TokenUsageBreakdown>,
     last_turn_usage: Option<TokenUsageBreakdown>,
     context_window: Option<u64>,
+    turn_output_usage: TurnOutputUsage,
     /// A compaction is running. Tracked because the CLI re-announces it every
     /// 30 seconds while a long compaction proceeds, and the UI only needs the
     /// state transitions.
@@ -237,6 +268,7 @@ impl Session {
             context_usage: None,
             last_turn_usage: None,
             context_window: None,
+            turn_output_usage: TurnOutputUsage::default(),
             compacting: false,
         };
 
@@ -329,6 +361,7 @@ impl Session {
         } else {
             self.turn_active = true;
             self.turn_reported = false;
+            self.turn_output_usage.reset();
 
             SendOutcome::StartedTurn
         }
@@ -360,6 +393,7 @@ impl Session {
         }));
         self.turn_active = true;
         self.turn_reported = false;
+        self.turn_output_usage.reset();
         self.active_slash_command = Some(name.to_string());
 
         SlashCommandOutcome::Accepted
@@ -589,21 +623,40 @@ impl Session {
                 self.open_thinkings.clear();
 
                 self.context_usage = parse_claude_usage(&event["message"]["usage"]);
+                let turn_output_tokens = self.turn_output_usage.start_response(
+                    self.context_usage
+                        .and_then(|usage| usage.output_tokens)
+                        .unwrap_or(0),
+                );
 
-                self.context_window_usage()
+                let mut events = self
+                    .context_window_usage()
                     .map(Event::ContextWindowUpdated)
                     .into_iter()
-                    .collect()
+                    .collect::<Vec<_>>();
+                events.push(Event::TurnOutputTokensUpdated(turn_output_tokens));
+
+                events
             }
             Some("message_delta") => {
-                if let Some(output_tokens) = event["usage"]["output_tokens"].as_u64() {
-                    update_claude_output(&mut self.context_usage, output_tokens);
-                }
+                let turn_output_tokens =
+                    event["usage"]["output_tokens"]
+                        .as_u64()
+                        .map(|output_tokens| {
+                            update_claude_output(&mut self.context_usage, output_tokens);
+                            self.turn_output_usage.update_response(output_tokens)
+                        });
 
-                self.context_window_usage()
+                let mut events = self
+                    .context_window_usage()
                     .map(Event::ContextWindowUpdated)
                     .into_iter()
-                    .collect()
+                    .collect::<Vec<_>>();
+                if let Some(output_tokens) = turn_output_tokens {
+                    events.push(Event::TurnOutputTokensUpdated(output_tokens));
+                }
+
+                events
             }
             Some("content_block_start") => {
                 let Some(index) = index else {
@@ -681,6 +734,11 @@ impl Session {
             self.context_usage = Some(usage);
             if let Some(snapshot) = self.context_window_usage() {
                 events.push(Event::ContextWindowUpdated(snapshot));
+            }
+            if let Some(output_tokens) = usage.output_tokens {
+                events.push(Event::TurnOutputTokensUpdated(
+                    self.turn_output_usage.update_response(output_tokens),
+                ));
             }
         }
 
@@ -794,6 +852,9 @@ impl Session {
 
         if let Some(usage) = self.context_window_usage() {
             events.push(Event::ContextWindowUpdated(usage));
+        }
+        if let Some(output_tokens) = self.last_turn_usage.and_then(|usage| usage.output_tokens) {
+            events.push(Event::TurnOutputTokensUpdated(output_tokens));
         }
 
         events.push(Event::TurnCompleted { error });
@@ -1285,6 +1346,19 @@ mod tests {
     use std::thread;
 
     use super::*;
+
+    #[test]
+    fn turn_output_usage_accumulates_model_responses() {
+        let mut usage = TurnOutputUsage::default();
+
+        assert_eq!(usage.start_response(0), 0);
+        assert_eq!(usage.update_response(120), 120);
+        assert_eq!(usage.start_response(0), 120);
+        assert_eq!(usage.update_response(35), 155);
+
+        usage.reset();
+        assert_eq!(usage.update_response(9), 9);
+    }
 
     #[test]
     fn claude_usage_normalizes_cache_categories_into_total_input() {
