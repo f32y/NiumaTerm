@@ -92,5 +92,5 @@ appropriate `Co-Authored-By` trailer at the end of the commit message.
 For Codex authored or co-authored work, use:
 
 ```text
-Co-Authored-By: <YOUR_MODEL_NAME> <noreply@openai.com>
+Co-Authored-By: <MODEL_NAME_WITH_MAJOR_MINOR_VERSION> <noreply@openai.com>
 ```
