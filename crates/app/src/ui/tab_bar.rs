@@ -10,7 +10,7 @@ use gpui_component::input::{Input, InputState};
 use gpui_component::menu::{ContextMenuExt, DropdownMenu as _, PopupMenuItem};
 use gpui_component::progress::ProgressCircle;
 use gpui_component::tab::{Tab, TabBar, TabVariant};
-use gpui_component::{ActiveTheme, Icon, Sizable};
+use gpui_component::{ActiveTheme, Icon, IconName, Sizable};
 use nmt_terminal::event::{ProgressReport, ProgressState};
 
 use super::Shell;
@@ -89,9 +89,9 @@ struct TabItem {
     progress: Option<ProgressReport>,
 }
 
-/// Progress bar along the bottom edge of a tab, driven by OSC 9;4. Sits inside
-/// the tab's padding box, so it spans the label rather than the full pill.
-fn progress_bar(report: ProgressReport, cx: &App) -> AnyElement {
+/// Progress bar along the bottom edge of a tab, driven by OSC 9;4. The track is
+/// anchored at the tab's right edge so the fill spans the entire pill width.
+fn progress_bar(report: ProgressReport, tab_width: f32, cx: &App) -> AnyElement {
     let percent = |default: u8| report.progress.unwrap_or(default) as f32 / 100.0;
 
     let (color, fraction) = match report.state {
@@ -110,11 +110,16 @@ fn progress_bar(report: ProgressReport, cx: &App) -> AnyElement {
     div()
         .absolute()
         .bottom_0()
-        .left_0()
+        .right_0()
+        .w(px(tab_width))
         .h(px(2.0))
-        .w(relative(fraction))
-        .rounded_full()
-        .bg(color)
+        .child(
+            div()
+                .h_full()
+                .w(relative(fraction))
+                .rounded_full()
+                .bg(color),
+        )
         .into_any_element()
 }
 
@@ -321,7 +326,8 @@ impl TabStrip {
                                 .w(px(1.0))
                                 .bg(cx.theme().border.opacity(0.45)),
                         )
-                    });
+                    })
+                    .children(progress.map(|report| progress_bar(report, tab_width, cx)));
 
                 // Inline rename: the label swaps for an input. The mouse-down
                 // stopper keeps clicks in the input from activating the tab
@@ -386,9 +392,6 @@ impl TabStrip {
                             )
                         })
                         .gap_1()
-                        // Anchors the progress bar to this tab's bottom
-                        // edge.
-                        .relative()
                         // Restored-but-not-yet-spawned tabs render
                         // faded, the same "sleeping tab" cue browsers
                         // use for discarded tabs. Fading costs no width,
@@ -421,7 +424,6 @@ impl TabStrip {
                                 .rounded_full()
                                 .bg(cx.theme().warning)
                         }))
-                        .children(progress.map(|report| progress_bar(report, cx)))
                         .into_any_element()
                 };
                 let drag_label: SharedString = label.into();
@@ -433,6 +435,17 @@ impl TabStrip {
                     // pointer.
                     .when(self.drag_over == Some(index), |this| {
                         this.ml(px(TAB_MAKE_WAY_PX))
+                    })
+                    .when(agent_kind.is_none(), |this| {
+                        this.prefix(
+                            div()
+                                .relative()
+                                .left(px(8.0))
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .child(Icon::new(IconName::SquareTerminal).xsmall()),
+                        )
                     })
                     .when_some(agent_kind, |this, agent_kind| {
                         this.prefix(
