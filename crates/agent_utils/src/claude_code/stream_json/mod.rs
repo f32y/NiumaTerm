@@ -11,28 +11,50 @@
 //! `--allow-dangerously-skip-permissions` present — that flag only unlocks
 //! switching into `bypassPermissions` mode).
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
+#[cfg(test)]
 use std::fs;
-use std::iter::once;
-use std::mem::take;
+#[cfg(test)]
 use std::process::Command;
 use std::time::Duration;
 
+use control::{
+    PendingApproval, PendingControlOperation, fail_pending_control_operations,
+    resolve_pending_control_operation,
+};
+#[cfg(test)]
+use launch::{ANTHROPIC_MODEL_ENV, FILE_CHECKPOINTING_ENV};
+use launch::{
+    configured_permission_mode, enable_file_checkpointing, file_rewind_request,
+    initial_ready_model, launch_model,
+};
+#[cfg(test)]
+use parse::parse_slash_commands;
+use parse::{
+    approval_description, claude_context_window, claude_result_error, compaction_progress,
+    context_window_usage, initialize_command_catalog, legacy_command_catalog, parse_claude_usage,
+    parse_models, slash_command_text, ui_owns_slash_command, update_claude_output,
+};
 use serde_json::{Value, json};
 
 use super::compaction::{compaction_metadata, parse_compaction};
-use super::tool_items::{complete_tool_item, tool_item, tool_title};
+use super::tool_items::{complete_tool_item, tool_item};
 #[cfg(test)]
 use super::tool_items::{edit_diff, input_detail};
 use crate::LaunchConfig;
+#[cfg(test)]
+use crate::chat::ContextUsageScope;
 use crate::chat::{
-    ContextUsageScope, ContextWindowUsage, Event, Item, ModelInfo, ScopedTokenUsage, SendOutcome,
-    SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy,
-    SlashCommandSource, ThreadSettings, TokenUsageBreakdown,
+    ContextWindowUsage, Event, Item, SendOutcome, SlashCommandArguments, SlashCommandInfo,
+    SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
+    TokenUsageBreakdown,
 };
-use crate::hook_store::home_dir;
 use crate::launcher::AgentCli;
 use crate::subprocess::JsonLineProcess;
+
+mod control;
+mod launch;
+mod parse;
 
 /// Serialized values for `--permission-mode` / the `set_permission_mode` control
 /// request. `auto` is the CLI's dynamic mode (verified accepted by
@@ -46,49 +68,6 @@ pub const PERMISSION_OPTIONS: [&str; 5] = [
 ];
 
 const INIT_REQUEST_ID: &str = "nmt-init";
-const ANTHROPIC_MODEL_ENV: &str = "ANTHROPIC_MODEL";
-const FILE_CHECKPOINTING_ENV: &str = "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING";
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PendingControlOperation {
-    FileRewind,
-}
-
-fn launch_model(launch: &LaunchConfig) -> Option<String> {
-    // Command environment overrides are last-value-wins, so the adapter must
-    // resolve duplicate entries the same way as the spawned Claude process.
-    launch
-        .env
-        .iter()
-        .rev()
-        .find(|(name, _)| name.trim().eq_ignore_ascii_case(ANTHROPIC_MODEL_ENV))
-        .map(|(_, value)| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
-fn initial_ready_model(model: Option<&str>) -> String {
-    model.unwrap_or("default").to_string()
-}
-
-fn enable_file_checkpointing(command: &mut Command) {
-    command.env(FILE_CHECKPOINTING_ENV, "true");
-}
-
-fn file_rewind_request(user_message_id: &str) -> Value {
-    json!({
-        "subtype": "rewind_files",
-        "user_message_id": user_message_id,
-    })
-}
-
-/// A `can_use_tool` control request awaiting the user's decision. The original
-/// input is kept because an allow response must echo it as `updatedInput`, and
-/// the CLI's permission suggestions back the "always allow" decision.
-struct PendingApproval {
-    request_id: String,
-    input: Value,
-    suggestions: Option<Value>,
-}
 
 #[derive(Default)]
 struct TurnOutputUsage {
@@ -985,360 +964,6 @@ impl Session {
             self.context_window,
         )
     }
-}
-
-fn resolve_pending_control_operation(
-    pending: &mut HashMap<String, PendingControlOperation>,
-    response: &Value,
-) -> Option<Event> {
-    let request_id = response["request_id"].as_str()?;
-    let operation = pending.remove(request_id)?;
-    let error = match response["subtype"].as_str() {
-        Some("success") => None,
-        Some("error") => Some(
-            response["error"]
-                .as_str()
-                .unwrap_or("unknown Claude control error")
-                .to_string(),
-        ),
-        _ => Some("Claude returned a malformed file restore response.".to_string()),
-    };
-
-    match operation {
-        PendingControlOperation::FileRewind => Some(Event::FileRewindCompleted { error }),
-    }
-}
-
-fn fail_pending_control_operations(
-    pending: &mut HashMap<String, PendingControlOperation>,
-    message: &str,
-) -> Vec<Event> {
-    let operations = take(pending);
-
-    operations
-        .into_values()
-        .map(|operation| match operation {
-            PendingControlOperation::FileRewind => Event::FileRewindCompleted {
-                error: Some(message.to_string()),
-            },
-        })
-        .collect()
-}
-
-fn parse_claude_usage(usage: &Value) -> Option<TokenUsageBreakdown> {
-    let direct_input = usage["input_tokens"].as_u64();
-    let cache_write_input_tokens = usage["cache_creation_input_tokens"].as_u64();
-    let cache_read_input_tokens = usage["cache_read_input_tokens"].as_u64();
-    let output_tokens = usage["output_tokens"].as_u64();
-    let input_tokens = [
-        direct_input,
-        cache_write_input_tokens,
-        cache_read_input_tokens,
-    ]
-    .into_iter()
-    .flatten()
-    .fold(0_u64, u64::saturating_add);
-    let total_tokens = input_tokens.saturating_add(output_tokens.unwrap_or(0));
-
-    (total_tokens > 0).then_some(TokenUsageBreakdown {
-        total_tokens,
-        input_tokens: (direct_input.is_some()
-            || cache_write_input_tokens.is_some()
-            || cache_read_input_tokens.is_some())
-        .then_some(input_tokens),
-        cache_read_input_tokens,
-        cache_write_input_tokens,
-        output_tokens,
-        reasoning_output_tokens: None,
-    })
-}
-
-fn update_claude_output(usage: &mut Option<TokenUsageBreakdown>, output_tokens: u64) {
-    let Some(usage) = usage else {
-        return;
-    };
-    usage.output_tokens = Some(output_tokens);
-    usage.total_tokens = usage
-        .input_tokens
-        .unwrap_or(0)
-        .saturating_add(output_tokens);
-}
-
-fn context_window_usage(
-    current: Option<TokenUsageBreakdown>,
-    last_turn: Option<TokenUsageBreakdown>,
-    max_tokens: Option<u64>,
-) -> Option<ContextWindowUsage> {
-    let current = current.filter(|usage| usage.total_tokens > 0)?;
-
-    Some(ContextWindowUsage {
-        current,
-        cumulative: last_turn.map(|breakdown| ScopedTokenUsage {
-            scope: ContextUsageScope::LastTurn,
-            breakdown,
-        }),
-        max_tokens,
-    })
-}
-
-/// Translate a `system/status` message into compaction progress events.
-///
-/// The subtype multiplexes unrelated notifications — a per-request `requesting`
-/// marker, permission-mode echoes, and compaction — so each transition is
-/// recognized by its own field rather than by `status` alone. `compact_result`
-/// appears only on a compaction's final message, and `requesting` also fires for
-/// the summarization call that compaction itself makes, which would otherwise
-/// look like the end of it. `compacting` is re-announced roughly every 30
-/// seconds while a long compaction runs, so `active` suppresses the repeats.
-fn compaction_progress(active: &mut bool, message: &Value) -> Vec<Event> {
-    if let Some(result) = message["compact_result"].as_str() {
-        *active = false;
-
-        return vec![Event::CompactionFinished {
-            error: (result != "success").then(|| {
-                message["compact_error"]
-                    .as_str()
-                    .unwrap_or("Compacting the conversation failed.")
-                    .to_string()
-            }),
-        }];
-    }
-
-    if message["status"].as_str() == Some("compacting") && !*active {
-        *active = true;
-
-        return vec![Event::CompactionStarted];
-    }
-
-    Vec::new()
-}
-
-fn claude_context_window(model_usage: &Value) -> Option<u64> {
-    model_usage
-        .as_object()?
-        .values()
-        .filter_map(|usage| {
-            usage["contextWindow"]
-                .as_u64()
-                .or_else(|| usage["context_window"].as_u64())
-                .filter(|value| *value > 0)
-        })
-        .max()
-}
-
-fn slash_command_text(name: &str, arguments: &str) -> String {
-    let name = name.trim().trim_start_matches('/');
-    let arguments = arguments.trim();
-
-    if arguments.is_empty() {
-        format!("/{name}")
-    } else {
-        format!("/{name} {arguments}")
-    }
-}
-
-fn ui_owns_slash_command(name: &str) -> bool {
-    let name = name.trim().trim_start_matches('/');
-    name.eq_ignore_ascii_case("resume") || name.eq_ignore_ascii_case("rewind")
-}
-
-fn claude_result_error(message: &Value) -> Option<String> {
-    if !message["is_error"].as_bool().unwrap_or(false)
-        && message["subtype"].as_str() == Some("success")
-    {
-        return None;
-    }
-
-    // Startup failures (e.g. a `--resume` id whose transcript is gone) put
-    // their reason in `errors`, not `result`.
-    Some(
-        message["result"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .or_else(|| message["errors"][0].as_str().filter(|s| !s.is_empty()))
-            .unwrap_or_else(|| message["subtype"].as_str().unwrap_or("turn failed"))
-            .to_string(),
-    )
-}
-
-/// Prefer the current structured initialize field while accepting the older
-/// control-response spelling. The boolean tells first-turn handling whether
-/// a later string-only catalog is allowed to replace this result.
-fn initialize_command_catalog(response: &Value) -> Option<(Vec<SlashCommandInfo>, bool)> {
-    if !response["commands"].is_null() {
-        Some((parse_slash_commands(&response["commands"]), true))
-    } else if !response["slash_commands"].is_null() {
-        Some((parse_slash_commands(&response["slash_commands"]), false))
-    } else {
-        None
-    }
-}
-
-fn legacy_command_catalog(
-    structured_commands_published: bool,
-    commands: &Value,
-) -> Option<Vec<SlashCommandInfo>> {
-    (!structured_commands_published).then(|| parse_slash_commands(commands))
-}
-
-/// Claude versions have emitted both string entries and richer objects. The
-/// parser accepts both and expands aliases while enforcing the single-token
-/// names the composer can address. A new event is a complete replacement.
-fn parse_slash_commands(commands: &Value) -> Vec<SlashCommandInfo> {
-    let mut seen = HashSet::new();
-    let mut parsed = Vec::new();
-
-    for entry in commands.as_array().into_iter().flatten() {
-        let Some(raw_name) = entry
-            .as_str()
-            .or_else(|| entry["name"].as_str())
-            .or_else(|| entry["command"].as_str())
-        else {
-            continue;
-        };
-        let canonical = raw_name.trim().trim_start_matches('/').to_ascii_lowercase();
-        let argument_hint = entry["argumentHint"]
-            .as_str()
-            .or_else(|| entry["argument_hint"].as_str())
-            .filter(|value| !value.is_empty())
-            .map(str::to_owned);
-        let description = entry["description"]
-            .as_str()
-            .filter(|value| !value.is_empty())
-            .map(str::to_owned)
-            .unwrap_or_else(|| format!("Run Claude's /{canonical} command"));
-        let aliases = entry["aliases"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str);
-
-        for raw_name in once(raw_name).chain(aliases) {
-            let name = raw_name.trim().trim_start_matches('/').to_ascii_lowercase();
-
-            if name.is_empty()
-                || name.chars().any(char::is_whitespace)
-                || !seen.insert(name.clone())
-            {
-                continue;
-            }
-
-            parsed.push(SlashCommandInfo {
-                name,
-                description: description.clone(),
-                arguments: if argument_hint.is_some() {
-                    SlashCommandArguments::Freeform
-                } else {
-                    SlashCommandArguments::None
-                },
-                argument_hint: argument_hint.clone(),
-                source: SlashCommandSource::Provider,
-                run_policy: SlashCommandRunPolicy::QueueUntilIdle,
-            });
-        }
-    }
-
-    parsed
-}
-
-/// The permission mode the CLI will start in, from `~/.claude/settings.json`
-/// (`permissions.defaultMode`). The protocol has no way to query the mode
-/// before the first turn, so this mirrors the CLI's own config resolution;
-/// project-level overrides are not consulted (rare, and the first turn's
-/// `init` message corrects any mismatch).
-fn configured_permission_mode() -> Option<String> {
-    let path = home_dir()?.join(".claude").join("settings.json");
-    let settings: Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
-
-    settings["permissions"]["defaultMode"]
-        .as_str()
-        .map(str::to_owned)
-}
-
-/// Human-readable summary of a `can_use_tool` request for the approval card.
-fn approval_description(tool_name: &str, input: &Value) -> String {
-    match tool_name {
-        "Bash" => format!(
-            "Run command: `{}`",
-            input["command"].as_str().unwrap_or_default()
-        ),
-        "Edit" | "Write" | "NotebookEdit" => format!(
-            "Edit file: {}",
-            input["file_path"].as_str().unwrap_or("(unknown file)")
-        ),
-        "ExitPlanMode" => format!(
-            "Approve Claude's plan:\n\n{}",
-            input["plan"].as_str().unwrap_or_default()
-        ),
-        _ => {
-            let detail = tool_title(input);
-
-            if detail.is_empty() {
-                tool_name.to_string()
-            } else {
-                format!("{tool_name}: {detail}")
-            }
-        }
-    }
-}
-
-/// The model catalog from the initialize response: `value` is the protocol name
-/// (`"default"`, `"opus[1m]"`, …), `displayName` the menu label. Claude has
-/// no per-model service tiers, but each entry lists its reasoning-effort
-/// levels in `supportedEffortLevels` (absent on models without effort, e.g.
-/// Haiku).
-fn parse_models(models: &Value, selected_model: Option<&str>) -> Vec<ModelInfo> {
-    let mut parsed: Vec<ModelInfo> = models
-        .as_array()
-        .map(|list| {
-            list.iter()
-                .filter_map(|entry| {
-                    let model = entry["value"].as_str()?.to_string();
-                    let display = entry["displayName"]
-                        .as_str()
-                        .filter(|s| !s.is_empty())
-                        .unwrap_or(&model)
-                        .to_string();
-                    let efforts = entry["supportedEffortLevels"]
-                        .as_array()
-                        .map(|levels| {
-                            levels
-                                .iter()
-                                .filter_map(|v| v.as_str().map(str::to_owned))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-
-                    Some(ModelInfo {
-                        model,
-                        display,
-                        tiers: Vec::new(),
-                        default_tier: None,
-                        efforts,
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    if let Some(model) = selected_model
-        .map(str::trim)
-        .filter(|model| !model.is_empty())
-        && !parsed.iter().any(|entry| entry.model == model)
-    {
-        parsed.insert(
-            0,
-            ModelInfo {
-                model: model.to_string(),
-                display: model.to_string(),
-                tiers: Vec::new(),
-                default_tier: None,
-                efforts: Vec::new(),
-            },
-        );
-    }
-
-    parsed
 }
 
 #[cfg(test)]
