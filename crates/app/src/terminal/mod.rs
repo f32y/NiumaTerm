@@ -3,6 +3,7 @@ pub(crate) mod dirty;
 pub(crate) mod frame;
 pub(crate) mod graphics;
 pub(crate) mod input;
+pub(crate) mod layout;
 pub(crate) mod links;
 pub(crate) mod metrics;
 #[cfg(windows)]
