@@ -26,9 +26,9 @@ use super::tool_items::{complete_tool_item, tool_item, tool_title};
 use super::tool_items::{edit_diff, input_detail};
 use crate::LaunchConfig;
 use crate::chat::{
-    ContextWindowUsage, Event, Item, ModelInfo, SendOutcome, SlashCommandArguments,
-    SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
-    ThreadSettings,
+    ContextUsageScope, ContextWindowUsage, Event, Item, ModelInfo, ScopedTokenUsage, SendOutcome,
+    SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy,
+    SlashCommandSource, ThreadSettings, TokenUsageBreakdown,
 };
 use crate::hook_store::home_dir;
 use crate::launcher::AgentCli;
@@ -131,8 +131,8 @@ pub struct Session {
     /// The most recent assistant message's input/output accounting represents
     /// the live context, unlike result-level totals which may sum retries and
     /// tool-loop iterations.
-    context_input_tokens: u64,
-    context_output_tokens: u64,
+    context_usage: Option<TokenUsageBreakdown>,
+    last_turn_usage: Option<TokenUsageBreakdown>,
     context_window: Option<u64>,
     /// A compaction is running. Tracked because the CLI re-announces it every
     /// 30 seconds while a long compaction proceeds, and the UI only needs the
@@ -234,8 +234,8 @@ impl Session {
             active_slash_command: None,
             pending_control_operations: HashMap::new(),
             structured_commands_published: false,
-            context_input_tokens: 0,
-            context_output_tokens: 0,
+            context_usage: None,
+            last_turn_usage: None,
             context_window: None,
             compacting: false,
         };
@@ -562,8 +562,7 @@ impl Session {
         // pre-compaction total until the next assistant message reports usage,
         // which is exactly when the boundary row claims space was reclaimed.
         if let Some(post_tokens) = post_tokens {
-            self.context_input_tokens = post_tokens;
-            self.context_output_tokens = 0;
+            self.context_usage = Some(TokenUsageBreakdown::total_only(post_tokens));
 
             if let Some(usage) = self.context_window_usage() {
                 events.push(Event::ContextWindowUpdated(usage));
@@ -589,9 +588,7 @@ impl Session {
                 self.open_texts.clear();
                 self.open_thinkings.clear();
 
-                let usage = &event["message"]["usage"];
-                self.context_input_tokens = claude_input_tokens(usage);
-                self.context_output_tokens = usage["output_tokens"].as_u64().unwrap_or(0);
+                self.context_usage = parse_claude_usage(&event["message"]["usage"]);
 
                 self.context_window_usage()
                     .map(Event::ContextWindowUpdated)
@@ -600,7 +597,7 @@ impl Session {
             }
             Some("message_delta") => {
                 if let Some(output_tokens) = event["usage"]["output_tokens"].as_u64() {
-                    self.context_output_tokens = output_tokens;
+                    update_claude_output(&mut self.context_usage, output_tokens);
                 }
 
                 self.context_window_usage()
@@ -679,6 +676,13 @@ impl Session {
             return Vec::new();
         };
         let mut events = Vec::new();
+
+        if let Some(usage) = parse_claude_usage(&message["message"]["usage"]) {
+            self.context_usage = Some(usage);
+            if let Some(snapshot) = self.context_window_usage() {
+                events.push(Event::ContextWindowUpdated(snapshot));
+            }
+        }
 
         for block in blocks {
             match block["type"].as_str() {
@@ -786,6 +790,7 @@ impl Session {
         if let Some(max_tokens) = claude_context_window(&message["modelUsage"]) {
             self.context_window = Some(max_tokens);
         }
+        self.last_turn_usage = parse_claude_usage(&message["usage"]);
 
         if let Some(usage) = self.context_window_usage() {
             events.push(Event::ContextWindowUpdated(usage));
@@ -913,14 +918,11 @@ impl Session {
     }
 
     fn context_window_usage(&self) -> Option<ContextWindowUsage> {
-        let used_tokens = self
-            .context_input_tokens
-            .saturating_add(self.context_output_tokens);
-
-        (used_tokens > 0).then_some(ContextWindowUsage {
-            used_tokens,
-            max_tokens: self.context_window,
-        })
+        context_window_usage(
+            self.context_usage,
+            self.last_turn_usage,
+            self.context_window,
+        )
     }
 }
 
@@ -962,15 +964,60 @@ fn fail_pending_control_operations(
         .collect()
 }
 
-fn claude_input_tokens(usage: &Value) -> u64 {
-    [
-        "input_tokens",
-        "cache_creation_input_tokens",
-        "cache_read_input_tokens",
+fn parse_claude_usage(usage: &Value) -> Option<TokenUsageBreakdown> {
+    let direct_input = usage["input_tokens"].as_u64();
+    let cache_write_input_tokens = usage["cache_creation_input_tokens"].as_u64();
+    let cache_read_input_tokens = usage["cache_read_input_tokens"].as_u64();
+    let output_tokens = usage["output_tokens"].as_u64();
+    let input_tokens = [
+        direct_input,
+        cache_write_input_tokens,
+        cache_read_input_tokens,
     ]
     .into_iter()
-    .map(|field| usage[field].as_u64().unwrap_or(0))
-    .sum()
+    .flatten()
+    .fold(0_u64, u64::saturating_add);
+    let total_tokens = input_tokens.saturating_add(output_tokens.unwrap_or(0));
+
+    (total_tokens > 0).then_some(TokenUsageBreakdown {
+        total_tokens,
+        input_tokens: (direct_input.is_some()
+            || cache_write_input_tokens.is_some()
+            || cache_read_input_tokens.is_some())
+        .then_some(input_tokens),
+        cache_read_input_tokens,
+        cache_write_input_tokens,
+        output_tokens,
+        reasoning_output_tokens: None,
+    })
+}
+
+fn update_claude_output(usage: &mut Option<TokenUsageBreakdown>, output_tokens: u64) {
+    let Some(usage) = usage else {
+        return;
+    };
+    usage.output_tokens = Some(output_tokens);
+    usage.total_tokens = usage
+        .input_tokens
+        .unwrap_or(0)
+        .saturating_add(output_tokens);
+}
+
+fn context_window_usage(
+    current: Option<TokenUsageBreakdown>,
+    last_turn: Option<TokenUsageBreakdown>,
+    max_tokens: Option<u64>,
+) -> Option<ContextWindowUsage> {
+    let current = current.filter(|usage| usage.total_tokens > 0)?;
+
+    Some(ContextWindowUsage {
+        current,
+        cumulative: last_turn.map(|breakdown| ScopedTokenUsage {
+            scope: ContextUsageScope::LastTurn,
+            breakdown,
+        }),
+        max_tokens,
+    })
 }
 
 /// Translate a `system/status` message into compaction progress events.
@@ -1238,6 +1285,79 @@ mod tests {
     use std::thread;
 
     use super::*;
+
+    #[test]
+    fn claude_usage_normalizes_cache_categories_into_total_input() {
+        let usage = parse_claude_usage(&json!({
+            "input_tokens": 8_500,
+            "cache_creation_input_tokens": 5_000,
+            "cache_read_input_tokens": 2_000,
+            "output_tokens": 1_200
+        }))
+        .expect("Claude token usage should parse");
+
+        assert_eq!(
+            usage,
+            TokenUsageBreakdown {
+                total_tokens: 16_700,
+                input_tokens: Some(15_500),
+                cache_read_input_tokens: Some(2_000),
+                cache_write_input_tokens: Some(5_000),
+                output_tokens: Some(1_200),
+                reasoning_output_tokens: None,
+            }
+        );
+    }
+
+    #[test]
+    fn claude_context_updates_output_and_labels_last_turn_usage() {
+        let mut current = parse_claude_usage(&json!({
+            "input_tokens": 9_000,
+            "cache_creation_input_tokens": null,
+            "cache_read_input_tokens": 1_000,
+            "output_tokens": 0
+        }));
+        update_claude_output(&mut current, 750);
+        let last_turn = parse_claude_usage(&json!({
+            "input_tokens": 20_000,
+            "cache_creation_input_tokens": 4_000,
+            "cache_read_input_tokens": 11_000,
+            "output_tokens": 2_000
+        }));
+
+        let snapshot = context_window_usage(current, last_turn, Some(200_000))
+            .expect("current Claude usage should produce a context snapshot");
+
+        assert_eq!(snapshot.current.total_tokens, 10_750);
+        assert_eq!(snapshot.current.output_tokens, Some(750));
+        assert_eq!(snapshot.max_tokens, Some(200_000));
+        assert_eq!(
+            snapshot.cumulative.map(|usage| usage.scope),
+            Some(ContextUsageScope::LastTurn)
+        );
+        assert_eq!(
+            snapshot
+                .cumulative
+                .map(|usage| usage.breakdown.total_tokens),
+            Some(37_000)
+        );
+    }
+
+    #[test]
+    fn post_compaction_total_clears_category_detail() {
+        let snapshot = context_window_usage(
+            Some(TokenUsageBreakdown::total_only(17_000)),
+            None,
+            Some(200_000),
+        )
+        .expect("post-compaction total should remain visible");
+
+        assert_eq!(snapshot.current.total_tokens, 17_000);
+        assert_eq!(snapshot.current.input_tokens, None);
+        assert_eq!(snapshot.current.cache_read_input_tokens, None);
+        assert_eq!(snapshot.current.output_tokens, None);
+        assert_eq!(snapshot.cumulative, None);
+    }
 
     #[test]
     fn every_claude_process_enables_sdk_file_checkpointing() {
