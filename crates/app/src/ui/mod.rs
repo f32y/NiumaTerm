@@ -15,6 +15,7 @@ pub(crate) use crate::ui::shell::{
     PrevTab, PrevWorkspace, ResizePaneDown, ResizePaneLeft, ResizePaneRight, ResizePaneUp, Shell,
     ShowSettings, SplitDown, SplitLeft, SplitRight, SplitUp, TabSurface, ToggleSidebar,
 };
+pub(crate) use crate::ui::working_indicator::WorkingIndicator;
 
 mod active_list;
 mod assets;
@@ -29,4 +30,5 @@ mod shell;
 mod sidebar_resize;
 mod tab_bar;
 mod token_usage;
+mod working_indicator;
 mod workspace_sidebar;

@@ -74,7 +74,7 @@ pub(crate) use crate::agent_pane::session::{
     RecoveryIdentity, RecoveryReadiness, RecoverySnapshot, RestorationReadiness,
 };
 use crate::agent_pane::transcript::{Entry, RowSpec, VirtualTranscriptState};
-use crate::ui::{AppSettings, UI_RADIUS, current_branch};
+use crate::ui::{AppSettings, UI_RADIUS, WorkingIndicator, current_branch};
 
 #[derive(Clone)]
 pub(crate) enum AgentPaneEvent {
