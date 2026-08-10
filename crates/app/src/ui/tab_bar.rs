@@ -312,25 +312,12 @@ impl TabStrip {
                         cx.stop_propagation();
                         this.request_close_tab(TabId(id), window, cx);
                     }));
-                // The divider shares the suffix's fixed space so adding visual
-                // separation never reduces the room available to the title.
                 let suffix = div()
                     .relative()
                     .h_full()
                     .flex()
                     .items_center()
                     .child(close)
-                    .when(index + 1 < tab_count, |this| {
-                        this.child(
-                            div()
-                                .absolute()
-                                .right_0()
-                                .top(px(7.0))
-                                .bottom(px(7.0))
-                                .w(px(1.0))
-                                .bg(cx.theme().border.opacity(0.45)),
-                        )
-                    })
                     .children(progress.map(|report| progress_bar(report, tab_width, cx)));
 
                 // Inline rename: the label swaps for an input. The mouse-down
