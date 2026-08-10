@@ -13,3 +13,4 @@ pub mod terminal;
 pub mod vt_trace;
 
 mod prompt_sniffer;
+mod pwd;

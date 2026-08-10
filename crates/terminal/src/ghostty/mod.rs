@@ -64,8 +64,9 @@ use libghostty_vt_sys::{
 use nmt_config::colors::{ColorRgb, Colors};
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::pwd::pwd_to_path;
 use crate::render_buffer::RenderBuffer;
-use crate::{ansi, clipboard, graphics, pty_pipe, terminal};
+use crate::{ansi, clipboard, graphics, terminal};
 
 pub type Result<T> = result::Result<T, Error>;
 
@@ -818,7 +819,7 @@ impl GhosttyTerminal {
         if pwd.is_empty() {
             None
         } else {
-            Some(pty_pipe::pwd_to_path(&pwd))
+            Some(pwd_to_path(&pwd))
         }
     }
 
@@ -1180,7 +1181,7 @@ impl GhosttyTerminal {
     }
 
     /// Probe: whether any visible row carries a PROMPT semantic tag (command-blocks-
-    /// rendering — mark-forwarding regression checks in pty_pipe tests).
+    /// rendering — mark-forwarding regression checks in terminal pipeline tests).
     #[cfg(test)]
     pub(crate) fn has_prompt_tagged_row(&mut self) -> bool {
         self.row_semantic_prompts()
