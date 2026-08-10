@@ -1,16 +1,15 @@
-use std::{array, mem, os, path, ptr, slice, str, sync, time};
+#[cfg(test)]
+use std::sync;
+use std::{array, mem, os, path, ptr, slice, time};
 
-use image_rs::load_from_memory;
 /// Engine handle of a finished command block (per-block grid). Plain value
 /// type; lookup is by id, `generation` is the data version for cache keys.
 pub use libghostty_vt_sys::BlockHandle;
 #[cfg(test)]
 use libghostty_vt_sys::ghostty_row_get;
 use libghostty_vt_sys::{
-    Allocator as VtAllocator, BlockFormatOptions as VtBlockFormatOptions, BlockRef as VtBlockRef,
-    Cell as VtCell, CellContentTag as VtCellContentTag, CellData as VtCellData,
-    CellWide as VtCellWide, ClipboardLocation as VtClipboardLocation,
-    ClipboardWrite as VtClipboardWrite, ClipboardWriteResult as VtClipboardWriteResult,
+    BlockFormatOptions as VtBlockFormatOptions, BlockRef as VtBlockRef, Cell as VtCell,
+    CellContentTag as VtCellContentTag, CellData as VtCellData, CellWide as VtCellWide,
     ColorPaletteIndex as VtColorPaletteIndex, ColorRgb as VtColorRgb, Formatter as VtFormatter,
     FormatterFormat as VtFormatterFormat, FormatterTerminalExtra as VtFormatterTerminalExtra,
     FormatterTerminalOptions as VtFormatterTerminalOptions, GridRef as VtGridRef,
@@ -29,37 +28,37 @@ use libghostty_vt_sys::{
     RenderStateRowOption as VtRenderStateRowOption, Result as VtResult, Row as VtRow,
     RowData as VtRowData, RowSemanticPrompt as VtRowSemanticPrompt, Selection as VtSelection,
     String as VtString, Style as VtStyle, StyleColor as VtStyleColor,
-    StyleColorTag as VtStyleColorTag, SysImage as VtSysImage, SysOption as VtSysOption,
-    Terminal as VtTerminal, TerminalCursorStyle as VtTerminalCursorStyle,
-    TerminalData as VtTerminalData, TerminalOption as VtTerminalOption,
-    TerminalOptions as VtTerminalOptions, TerminalScrollViewport as VtTerminalScrollViewport,
+    StyleColorTag as VtStyleColorTag, Terminal as VtTerminal,
+    TerminalCursorStyle as VtTerminalCursorStyle, TerminalData as VtTerminalData,
+    TerminalOption as VtTerminalOption, TerminalOptions as VtTerminalOptions,
+    TerminalScrollViewport as VtTerminalScrollViewport,
     TerminalScrollViewportTag as VtTerminalScrollViewportTag,
     TerminalScrollViewportValue as VtTerminalScrollViewportValue,
-    TerminalScrollbar as VtTerminalScrollbar, ghostty_alloc, ghostty_block_ref_bytes,
-    ghostty_block_ref_cols, ghostty_block_ref_format_alloc, ghostty_block_ref_grid_ref,
-    ghostty_block_ref_handle, ghostty_block_ref_kitty_graphics, ghostty_block_ref_placement_pos,
-    ghostty_block_ref_release, ghostty_block_ref_row_count, ghostty_cell_get,
-    ghostty_cell_get_multi, ghostty_formatter_format_alloc, ghostty_formatter_free,
-    ghostty_formatter_terminal_new, ghostty_free, ghostty_grid_ref_cell,
-    ghostty_grid_ref_graphemes, ghostty_grid_ref_hyperlink_uri, ghostty_grid_ref_row,
-    ghostty_grid_ref_style, ghostty_kitty_graphics_get, ghostty_kitty_graphics_image,
-    ghostty_kitty_graphics_image_get, ghostty_kitty_graphics_placement_get,
-    ghostty_kitty_graphics_placement_grid_size, ghostty_kitty_graphics_placement_iterator_free,
-    ghostty_kitty_graphics_placement_iterator_new, ghostty_kitty_graphics_placement_next,
-    ghostty_kitty_graphics_placement_pixel_size, ghostty_kitty_graphics_placement_source_rect,
-    ghostty_kitty_graphics_placement_viewport_pos, ghostty_render_state_free,
-    ghostty_render_state_get, ghostty_render_state_new, ghostty_render_state_row_get,
-    ghostty_render_state_row_iterator_free, ghostty_render_state_row_iterator_new,
-    ghostty_render_state_row_iterator_next, ghostty_render_state_row_set, ghostty_render_state_set,
-    ghostty_render_state_update, ghostty_row_get_multi, ghostty_sys_set,
-    ghostty_terminal_block_acquire, ghostty_terminal_block_at, ghostty_terminal_block_bytes,
-    ghostty_terminal_block_cols, ghostty_terminal_block_count, ghostty_terminal_block_grid_ref,
-    ghostty_terminal_block_row_count, ghostty_terminal_blocks_bytes, ghostty_terminal_clear_blocks,
-    ghostty_terminal_finish_block, ghostty_terminal_free, ghostty_terminal_get,
-    ghostty_terminal_grid_ref, ghostty_terminal_mode_get, ghostty_terminal_new,
-    ghostty_terminal_point_from_grid_ref, ghostty_terminal_reflow_block,
-    ghostty_terminal_remove_block, ghostty_terminal_resize, ghostty_terminal_scroll_viewport,
-    ghostty_terminal_set, ghostty_terminal_vt_write, sized as vt_sized,
+    TerminalScrollbar as VtTerminalScrollbar, ghostty_block_ref_bytes, ghostty_block_ref_cols,
+    ghostty_block_ref_format_alloc, ghostty_block_ref_grid_ref, ghostty_block_ref_handle,
+    ghostty_block_ref_kitty_graphics, ghostty_block_ref_placement_pos, ghostty_block_ref_release,
+    ghostty_block_ref_row_count, ghostty_cell_get, ghostty_cell_get_multi,
+    ghostty_formatter_format_alloc, ghostty_formatter_free, ghostty_formatter_terminal_new,
+    ghostty_free, ghostty_grid_ref_cell, ghostty_grid_ref_graphemes,
+    ghostty_grid_ref_hyperlink_uri, ghostty_grid_ref_row, ghostty_grid_ref_style,
+    ghostty_kitty_graphics_get, ghostty_kitty_graphics_image, ghostty_kitty_graphics_image_get,
+    ghostty_kitty_graphics_placement_get, ghostty_kitty_graphics_placement_grid_size,
+    ghostty_kitty_graphics_placement_iterator_free, ghostty_kitty_graphics_placement_iterator_new,
+    ghostty_kitty_graphics_placement_next, ghostty_kitty_graphics_placement_pixel_size,
+    ghostty_kitty_graphics_placement_source_rect, ghostty_kitty_graphics_placement_viewport_pos,
+    ghostty_render_state_free, ghostty_render_state_get, ghostty_render_state_new,
+    ghostty_render_state_row_get, ghostty_render_state_row_iterator_free,
+    ghostty_render_state_row_iterator_new, ghostty_render_state_row_iterator_next,
+    ghostty_render_state_row_set, ghostty_render_state_set, ghostty_render_state_update,
+    ghostty_row_get_multi, ghostty_terminal_block_acquire, ghostty_terminal_block_at,
+    ghostty_terminal_block_bytes, ghostty_terminal_block_cols, ghostty_terminal_block_count,
+    ghostty_terminal_block_grid_ref, ghostty_terminal_block_row_count,
+    ghostty_terminal_blocks_bytes, ghostty_terminal_clear_blocks, ghostty_terminal_finish_block,
+    ghostty_terminal_free, ghostty_terminal_get, ghostty_terminal_grid_ref,
+    ghostty_terminal_mode_get, ghostty_terminal_new, ghostty_terminal_point_from_grid_ref,
+    ghostty_terminal_reflow_block, ghostty_terminal_remove_block, ghostty_terminal_resize,
+    ghostty_terminal_scroll_viewport, ghostty_terminal_set, ghostty_terminal_vt_write,
+    sized as vt_sized,
 };
 #[cfg(test)]
 use nmt_config::colors::ColorRgb;
@@ -70,9 +69,14 @@ use crate::pwd::pwd_to_path;
 use crate::render_buffer::RenderBuffer;
 use crate::{ansi, clipboard, graphics, terminal};
 
+mod callbacks;
 mod error;
 mod types;
 
+use crate::ghostty::callbacks::{
+    Callbacks, KITTY_IMAGE_STORAGE_LIMIT_BYTES, bell_cb, clipboard_write_cb, register_png_decoder,
+    write_pty_cb,
+};
 pub use crate::ghostty::error::{Error, Result};
 use crate::ghostty::types::color_from_vt;
 pub use crate::ghostty::types::{
@@ -87,180 +91,6 @@ pub use crate::ghostty::types::{RowCell, ScreenRowRead};
 /// Values mirror Ghostty's `ModeTag` (packed `u16`): a DEC private mode uses its
 /// raw number; an ANSI mode sets bit 15. See Ghostty `src/terminal/modes.zig`.
 pub mod mode;
-
-/// State the terminal's synchronous callbacks write into during `write_vt`.
-/// Owned behind a `Box` so its address is stable for the FFI userdata pointer.
-#[derive(Default)]
-struct Callbacks {
-    /// Bytes the terminal wants written back to the PTY (DSR/DA/etc.).
-    pty_writes: Vec<u8>,
-    /// Number of BEL characters received since last drained.
-    bell_count: u32,
-    /// Owned text copied from clipboard requests before the FFI callback returns.
-    clipboard_writes: Vec<(clipboard::ClipboardType, String)>,
-}
-
-unsafe extern "C" fn write_pty_cb(
-    _terminal: VtTerminal,
-    userdata: *mut os::raw::c_void,
-    data: *const u8,
-    len: usize,
-) {
-    if userdata.is_null() || data.is_null() || len == 0 {
-        return;
-    }
-
-    let cb = unsafe { &mut *(userdata as *mut Callbacks) };
-
-    cb.pty_writes
-        .extend_from_slice(unsafe { slice::from_raw_parts(data, len) });
-}
-
-unsafe extern "C" fn bell_cb(_terminal: VtTerminal, userdata: *mut os::raw::c_void) {
-    if userdata.is_null() {
-        return;
-    }
-
-    let cb = unsafe { &mut *(userdata as *mut Callbacks) };
-
-    cb.bell_count = cb.bell_count.saturating_add(1);
-}
-
-unsafe fn vt_string_bytes(value: &VtString) -> Option<&[u8]> {
-    if value.len == 0 {
-        return Some(&[]);
-    }
-
-    if value.ptr.is_null() {
-        return None;
-    }
-
-    Some(unsafe { slice::from_raw_parts(value.ptr, value.len) })
-}
-
-unsafe extern "C" fn clipboard_write_cb(
-    _terminal: VtTerminal,
-    userdata: *mut os::raw::c_void,
-    write: *const VtClipboardWrite,
-) -> VtClipboardWriteResult::Type {
-    use crate::clipboard::ClipboardType;
-
-    if userdata.is_null() || write.is_null() {
-        return VtClipboardWriteResult::INVALID_DATA;
-    }
-
-    let size = unsafe { write.cast::<usize>().read() };
-
-    if size < mem::size_of::<VtClipboardWrite>() {
-        return VtClipboardWriteResult::INVALID_DATA;
-    }
-
-    let write = unsafe { &*write };
-
-    let ty = match write.location {
-        VtClipboardLocation::STANDARD => ClipboardType::Clipboard,
-        VtClipboardLocation::SELECTION | VtClipboardLocation::PRIMARY => ClipboardType::Selection,
-        _ => return VtClipboardWriteResult::UNSUPPORTED,
-    };
-
-    let cb = unsafe { &mut *(userdata as *mut Callbacks) };
-
-    if write.contents_len == 0 {
-        cb.clipboard_writes.push((ty, String::new()));
-
-        return VtClipboardWriteResult::SUCCESS;
-    }
-
-    if write.contents.is_null() {
-        return VtClipboardWriteResult::INVALID_DATA;
-    }
-
-    let contents = unsafe { slice::from_raw_parts(write.contents, write.contents_len) };
-
-    for content in contents {
-        let Some(mime) = (unsafe { vt_string_bytes(&content.mime) }) else {
-            return VtClipboardWriteResult::INVALID_DATA;
-        };
-
-        if mime != b"text/plain" && !mime.starts_with(b"text/plain;") {
-            continue;
-        }
-
-        let Some(data) = (unsafe { vt_string_bytes(&content.data) }) else {
-            return VtClipboardWriteResult::INVALID_DATA;
-        };
-
-        let Ok(text) = str::from_utf8(data) else {
-            return VtClipboardWriteResult::INVALID_DATA;
-        };
-
-        cb.clipboard_writes.push((ty, text.to_owned()));
-
-        return VtClipboardWriteResult::SUCCESS;
-    }
-
-    VtClipboardWriteResult::UNSUPPORTED
-}
-
-/// PNG decode hook for the engine's kitty graphics protocol. The
-/// `.lib` artifact ships no PNG decoder, so without this `f=100` transmissions are
-/// rejected. Decodes via `image_rs` to RGBA and returns the buffer allocated with
-/// the engine's own allocator (so the engine frees it).
-unsafe extern "C" fn decode_png_cb(
-    _userdata: *mut os::raw::c_void,
-    allocator: *const VtAllocator,
-    data: *const u8,
-    data_len: usize,
-    out: *mut VtSysImage,
-) -> bool {
-    if data.is_null() || out.is_null() {
-        return false;
-    }
-
-    let bytes = unsafe { slice::from_raw_parts(data, data_len) };
-
-    let img = match load_from_memory(bytes) {
-        Ok(img) => img.to_rgba8(),
-        Err(_) => return false,
-    };
-
-    let (w, h) = (img.width(), img.height());
-
-    let rgba = img.into_raw();
-
-    let buf = unsafe { ghostty_alloc(allocator, rgba.len()) };
-
-    if buf.is_null() {
-        return false;
-    }
-
-    unsafe {
-        ptr::copy_nonoverlapping(rgba.as_ptr(), buf, rgba.len());
-        (*out).width = w;
-        (*out).height = h;
-        (*out).data = buf;
-        (*out).data_len = rgba.len();
-    }
-
-    true
-}
-
-/// Register the process-global PNG decode hook once.
-fn register_png_decoder() {
-    static ONCE: sync::Once = sync::Once::new();
-
-    ONCE.call_once(|| unsafe {
-        ghostty_sys_set(
-            VtSysOption::GHOSTTY_SYS_OPT_DECODE_PNG,
-            decode_png_cb as *const os::raw::c_void,
-        );
-    });
-}
-
-/// Kitty image storage limit. The `.lib` default is 10 MB — small
-/// enough to evict real images; 64 MB holds typical multi-image use with a bounded
-/// resident footprint (~2–3× at saturation). Future `graphics` config knob.
-const KITTY_IMAGE_STORAGE_LIMIT_BYTES: u64 = 64 * 1024 * 1024;
 
 pub struct GhosttyTerminal {
     terminal: VtTerminal,
