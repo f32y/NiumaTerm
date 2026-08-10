@@ -27,9 +27,32 @@ pub(super) fn should_show_jump_to_latest(
     }
 }
 
-/// The live turn-duration label.
-pub(super) fn working_label(started: Instant) -> String {
-    format!("Working for {}s", started.elapsed().as_secs())
+/// The live turn-duration and generated-token label.
+pub(super) fn working_label(started: Instant, output_tokens: Option<u64>) -> String {
+    working_status_label(started.elapsed().as_secs(), output_tokens)
+}
+
+fn working_status_label(seconds: u64, output_tokens: Option<u64>) -> String {
+    timed_token_label("Working", seconds, output_tokens)
+}
+
+fn worked_status_label(seconds: u64, output_tokens: Option<u64>) -> String {
+    timed_token_label("Worked", seconds, output_tokens)
+}
+
+fn interrupted_status_label(output_tokens: Option<u64>) -> String {
+    match output_tokens {
+        Some(tokens) => format!("Interrupted · {} tokens", compact_token_count(tokens)),
+        None => "Interrupted".to_string(),
+    }
+}
+
+fn timed_token_label(verb: &str, seconds: u64, output_tokens: Option<u64>) -> String {
+    let duration = format!("{verb} for {seconds}s");
+    match output_tokens {
+        Some(tokens) => format!("{duration} · {} tokens", compact_token_count(tokens)),
+        None => duration,
+    }
 }
 
 /// Work-log rows: the single-line tool/thinking entries that participate in
@@ -635,10 +658,12 @@ pub(super) enum RowSpec {
     FoldHeader {
         turn: u64,
         seconds: u64,
+        output_tokens: Option<u64>,
         folded: bool,
     },
     Interrupted {
         turn: u64,
+        output_tokens: Option<u64>,
     },
     RunToggle {
         run_start: usize,
@@ -831,7 +856,10 @@ impl AgentPane {
         ) {
             Some(TurnSummary::Interrupted) => {
                 self.stream_specs(start, end, &|_| false, collapse, rows);
-                rows.push(RowSpec::Interrupted { turn });
+                rows.push(RowSpec::Interrupted {
+                    turn,
+                    output_tokens: self.completed_turn_output_tokens.get(&turn).copied(),
+                });
                 return;
             }
             Some(TurnSummary::Worked(seconds)) => seconds,
@@ -860,6 +888,7 @@ impl AgentPane {
         rows.push(RowSpec::FoldHeader {
             turn,
             seconds,
+            output_tokens: self.completed_turn_output_tokens.get(&turn).copied(),
             folded,
         });
 
@@ -1008,9 +1037,12 @@ impl AgentPane {
             RowSpec::FoldHeader {
                 turn,
                 seconds,
+                output_tokens,
                 folded,
-            } => self.render_fold_header(turn, seconds, folded, cx),
-            RowSpec::Interrupted { .. } => self.render_interrupted_row(cx),
+            } => self.render_fold_header(turn, seconds, output_tokens, folded, cx),
+            RowSpec::Interrupted { output_tokens, .. } => {
+                self.render_interrupted_row(output_tokens, cx)
+            }
             RowSpec::RunToggle {
                 run_start,
                 tool_count,
@@ -1061,7 +1093,7 @@ impl AgentPane {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground.opacity(0.55))
-                        .child(working_label(started)),
+                        .child(working_label(started, self.working_output_tokens)),
                 )
                 .into_any_element();
         }
@@ -1076,7 +1108,7 @@ impl AgentPane {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground.opacity(0.7))
-                    .child(working_label(started)),
+                    .child(working_label(started, self.working_output_tokens)),
             )
             .into_any_element()
     }
@@ -1749,10 +1781,11 @@ impl AgentPane {
         &self,
         turn: u64,
         seconds: u64,
+        output_tokens: Option<u64>,
         folded: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let label = format!("Worked for {seconds}s");
+        let label = worked_status_label(seconds, output_tokens);
 
         v_flex()
             .w_full()
@@ -1776,7 +1809,11 @@ impl AgentPane {
             .into_any_element()
     }
 
-    pub(super) fn render_interrupted_row(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_interrupted_row(
+        &self,
+        output_tokens: Option<u64>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         v_flex()
             .w_full()
             .gap_1()
@@ -1785,7 +1822,7 @@ impl AgentPane {
                     .px_1()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground.opacity(0.7))
-                    .child("Interrupted"),
+                    .child(interrupted_status_label(output_tokens)),
             )
             .child(div().w_full().h(px(1.)).bg(cx.theme().border.opacity(0.6)))
             .into_any_element()
@@ -1832,9 +1869,9 @@ mod prompt_truncation_tests {
         AGENT_DISCLOSURE_DETAIL_INSET, AGENT_DISCLOSURE_GAP, AGENT_DISCLOSURE_PADDING,
         AGENT_DISCLOSURE_SLOT, AgentKind, COMMAND_EXECUTION_HEADING, Status, TurnSummary,
         VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES, command_execution_detail, compaction_accounting,
-        compaction_label, compaction_row_is_expandable, entry_copy_text, is_work_row,
-        should_show_jump_to_latest, should_virtualize_transcript, transcript_segments,
-        truncated_user_prompt, turn_summary,
+        compaction_label, compaction_row_is_expandable, entry_copy_text, interrupted_status_label,
+        is_work_row, should_show_jump_to_latest, should_virtualize_transcript, transcript_segments,
+        truncated_user_prompt, turn_summary, worked_status_label, working_status_label,
     };
     use crate::agent_pane::composer::{ComposerAction, composer_action};
 
@@ -1859,6 +1896,33 @@ mod prompt_truncation_tests {
         assert_eq!(turn_summary(true, Some(12)), Some(TurnSummary::Interrupted));
         assert_eq!(turn_summary(false, Some(12)), Some(TurnSummary::Worked(12)));
         assert_eq!(turn_summary(false, None), None);
+    }
+
+    #[test]
+    fn working_status_adds_compact_live_output_tokens() {
+        assert_eq!(working_status_label(4, None), "Working for 4s");
+        assert_eq!(
+            working_status_label(12, Some(1_250)),
+            "Working for 12s · 1.2k tokens"
+        );
+    }
+
+    #[test]
+    fn worked_status_keeps_the_final_output_tokens() {
+        assert_eq!(worked_status_label(8, None), "Worked for 8s");
+        assert_eq!(
+            worked_status_label(21, Some(12_400)),
+            "Worked for 21s · 12k tokens"
+        );
+    }
+
+    #[test]
+    fn interrupted_status_only_adds_available_output_tokens() {
+        assert_eq!(interrupted_status_label(None), "Interrupted");
+        assert_eq!(
+            interrupted_status_label(Some(1_250)),
+            "Interrupted · 1.2k tokens"
+        );
     }
 
     #[test]

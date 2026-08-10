@@ -290,8 +290,11 @@ pub(crate) struct AgentPane {
     /// Settled turn durations drive fold headers without masquerading as
     /// provider transcript items.
     completed_turn_seconds: HashMap<u64, u64>,
-    /// Turns stopped before any visible provider activity use a status row
-    /// instead of an elapsed-time disclosure.
+    /// Final provider-reported output tokens for settled turns, keyed by the
+    /// same local turn id as the duration used by the fold header.
+    completed_turn_output_tokens: HashMap<u64, u64>,
+    /// User-stopped turns use a status row instead of an elapsed-time
+    /// disclosure, whether or not provider activity was already visible.
     interrupted_turns: HashSet<u64>,
     /// Work-log rows whose detail (command output, reasoning text) is
     /// expanded, keyed by transcript index.
@@ -305,8 +308,11 @@ pub(crate) struct AgentPane {
     turn_seq: u64,
     /// Start time of the running turn. While set, a ticking "Working for Ns"
     /// row renders at the transcript end; completion records its elapsed time,
-    /// while an early interruption replaces it with a status row.
+    /// while a user interruption replaces it with a status row.
     working_started: Option<Instant>,
+    /// Output tokens reported for the running turn. Provider adapters combine
+    /// multi-response turns before updating this replacement value.
+    working_output_tokens: Option<u64>,
     /// The active prompt remains recoverable until provider activity becomes
     /// visible, allowing an immediate stop to return it to the composer.
     unanswered_prompt: Option<UnansweredPrompt>,

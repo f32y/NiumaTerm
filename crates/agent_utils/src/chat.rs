@@ -406,6 +406,8 @@ pub enum Event {
     TurnCompleted {
         error: Option<String>,
     },
+    /// Replacement output-token count for the active turn.
+    TurnOutputTokensUpdated(u64),
     /// Replacement snapshot of the current thread's active context window.
     ContextWindowUpdated(ContextWindowUsage),
     /// The backend started rewriting the conversation to reclaim context. Turn
