@@ -25,6 +25,9 @@ use crate::terminal::frame::{
     LineBuilder, StyleRun, TerminalCell, TerminalColor, TerminalLine, theme_default_foreground,
     theme_selection_background,
 };
+use crate::terminal::paint_text::{
+    block_separator_bounds, paint_glyph_rows, paint_line_backgrounds_at, shape_lines,
+};
 use crate::terminal::session::InFlightBlock;
 use crate::terminal::theme::{
     BLOCK_FAILURE_COLOR, BLOCK_GUTTER_GAP, BLOCK_GUTTER_WIDTH, BLOCK_INPUT_COLOR,
@@ -793,7 +796,7 @@ pub(crate) fn shape_frozen_rows(
     cell_w: f32,
     window: &mut Window,
 ) -> Vec<ShapedLine> {
-    terminal::terminal_view::shape_lines(
+    shape_lines(
         rows.iter().map(|row| {
             (
                 row.shape_key.unwrap_or_else(|| row.line.text_hash()),
@@ -816,9 +819,7 @@ pub(crate) fn paint_frozen(
     cx: &mut App,
 ) {
     for row in &view.rows {
-        terminal::terminal_view::paint_line_backgrounds_at(
-            bounds, &row.line, row.y, cell_w, cell_h, window,
-        );
+        paint_line_backgrounds_at(bounds, &row.line, row.y, cell_w, cell_h, window);
     }
 
     // Selection tint under the glyphs (over the cell backgrounds).
@@ -841,7 +842,7 @@ pub(crate) fn paint_frozen(
         ));
     }
 
-    terminal::terminal_view::paint_glyph_rows(
+    paint_glyph_rows(
         bounds,
         view.rows
             .iter()
@@ -860,7 +861,7 @@ pub(crate) fn paint_frozen_separators(
 ) {
     for y in separators {
         window.paint_quad(fill(
-            terminal::terminal_view::block_separator_bounds(bounds, bounds.top() + px(*y), 1.0),
+            block_separator_bounds(bounds, bounds.top() + px(*y), 1.0),
             Rgba {
                 r: ((SEPARATOR_COLOR >> 16) & 0xff) as f32 / 255.0,
                 g: ((SEPARATOR_COLOR >> 8) & 0xff) as f32 / 255.0,
