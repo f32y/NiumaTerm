@@ -3,33 +3,38 @@
 //! dialog closes (see `Shell::on_show_settings`). Field edits mutate the global
 //! live for preview; only closing the dialog persists them.
 
+mod card;
+mod fields;
 mod opacity;
 mod state;
 mod theme;
 
 use std::{io, path};
 
+use card::{card_row, card_text_input};
+use fields::{background_image_field, background_image_opacity_field, background_opacity_field};
+#[cfg(test)]
+use gpui::AppContext as _;
 #[cfg(test)]
 use gpui::WindowBackgroundAppearance;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, AppContext as _, ClipboardItem, Div, Entity, FileDialogFilter, Global,
-    IntoElement as _, ParentElement as _, PathPromptOptions, SharedString, StyleRefinement,
-    Styled as _, Subscription, Window, div, px, relative,
+    AnyElement, App, ClipboardItem, Div, FileDialogFilter, Global, IntoElement as _,
+    ParentElement as _, PathPromptOptions, SharedString, StyleRefinement, Styled as _, Window, div,
+    px, relative,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::dialog::{DialogClose, DialogFooter};
 use gpui_component::group_box::{GroupBox, GroupBoxVariants as _};
-use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::input::Input;
 use gpui_component::label::Label;
 use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::setting::{
     NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage, Settings,
 };
-use gpui_component::slider::{Slider, SliderEvent, SliderState};
 use gpui_component::switch::Switch;
 use gpui_component::{
-    ActiveTheme as _, AxisExt as _, Disableable as _, Sizable as _, WindowExt as _, h_flex, v_flex,
+    ActiveTheme as _, Disableable as _, Sizable as _, WindowExt as _, h_flex, v_flex,
 };
 use nmt_agent_utils::HookInstallStatus;
 use nmt_agent_utils::claude_code::hook as claude_hook;
@@ -59,8 +64,9 @@ pub(crate) use state::builtin_agent_profile;
 pub use state::{AgentProfile, AgentProfileKind, AppSettings, EnvVar, InputStyle, Profile};
 #[cfg(test)]
 use state::{
-    DEFAULT_BACKGROUND_IMAGE_OPACITY, clamp_terminal_font_size, clamp_terminal_line_height,
-    terminal_font_or_default, ui_font_or_default,
+    DEFAULT_BACKGROUND_IMAGE_OPACITY, clamp_background_image_opacity, clamp_background_opacity,
+    clamp_terminal_font_size, clamp_terminal_line_height, terminal_font_or_default,
+    ui_font_or_default,
 };
 #[allow(unused_imports)]
 pub use state::{
@@ -68,8 +74,8 @@ pub use state::{
     DEFAULT_UI_FONT,
 };
 use state::{
-    agent_kind_label, clamp_background_image_opacity, clamp_background_opacity, clamp_git_interval,
-    clamp_tab_width, cursor_shape_from_value, input_style_from_value, input_style_label,
+    agent_kind_label, clamp_git_interval, clamp_tab_width, cursor_shape_from_value,
+    input_style_from_value, input_style_label,
 };
 #[cfg(test)]
 use theme::tab_background_opacity;
@@ -96,250 +102,6 @@ struct AgentProfileDraft {
 }
 
 impl Global for AgentProfileDraft {}
-
-/// Persistent input state for a text field inside a profile card, created
-/// via `window.use_keyed_state` so it survives the per-frame settings-view
-/// rebuild. The subscription writes edits back into the `AppSettings` global.
-struct CardInputState {
-    input: Entity<InputState>,
-    _subscription: Subscription,
-}
-
-/// A window-keyed text input bound to a value in the `AppSettings` global.
-/// `apply` receives the new text on every change. When the backing value
-/// changes underneath a reused key (e.g. a profile removal shifts indices),
-/// the sync below rewrites the input to match.
-fn card_text_input(
-    key: String,
-    value: SharedString,
-    masked: bool,
-    apply: impl Fn(String, &mut App) + 'static,
-    window: &mut Window,
-    cx: &mut App,
-) -> Entity<InputState> {
-    let state = window.use_keyed_state(SharedString::from(key), cx, {
-        let value = value.clone();
-
-        move |window, cx| {
-            let input = cx.new(|cx| {
-                InputState::new(window, cx)
-                    .masked(masked)
-                    .default_value(value)
-            });
-
-            let _subscription = cx.subscribe(&input, move |_, input, event, cx| {
-                if matches!(event, InputEvent::Change) {
-                    let value = input.read(cx).value().to_string();
-                    apply(value, cx);
-                }
-            });
-
-            CardInputState {
-                input,
-                _subscription,
-            }
-        }
-    });
-
-    let input = state.read(cx).input.clone();
-
-    if input.read(cx).value() != value {
-        input.update(cx, |input, cx| {
-            input.set_value(value.clone(), window, cx);
-        });
-    }
-
-    input
-}
-
-#[derive(Clone, Copy)]
-enum OpacityTarget {
-    Window,
-    Image,
-}
-
-impl OpacityTarget {
-    fn value(self, settings: &AppSettings) -> f64 {
-        match self {
-            Self::Window => settings.background_opacity,
-            Self::Image => settings.background_image_opacity,
-        }
-    }
-
-    fn min(self) -> f32 {
-        match self {
-            Self::Window => 0.2,
-            Self::Image => 0.0,
-        }
-    }
-
-    fn set(self, value: f64, settings: &mut AppSettings) {
-        match self {
-            Self::Window => settings.background_opacity = clamp_background_opacity(value),
-            Self::Image => {
-                settings.background_image_opacity = clamp_background_image_opacity(value)
-            }
-        }
-    }
-}
-
-/// Both opacity fields share persistent slider entities because the settings
-/// view and its field closures are rebuilt every render.
-struct OpacitySliderState {
-    window: Entity<SliderState>,
-    image: Entity<SliderState>,
-    _subscriptions: [Subscription; 2],
-}
-
-impl Global for OpacitySliderState {}
-
-fn opacity_slider_field(target: OpacityTarget) -> SettingField<SharedString> {
-    SettingField::render(move |options, window, cx| {
-        if !cx.has_global::<OpacitySliderState>() {
-            let make_slider = |target: OpacityTarget, cx: &mut App| {
-                let value = target.value(cx.global::<AppSettings>()) as f32;
-                let slider = cx.new(|_| {
-                    SliderState::new()
-                        .min(target.min())
-                        .max(1.0)
-                        .step(0.05)
-                        .default_value(value)
-                });
-
-                let subscription = cx.subscribe(&slider, move |_, event: &SliderEvent, cx| {
-                    let (SliderEvent::Change(value) | SliderEvent::Release(value)) = event;
-                    target.set(value.end() as f64, cx.global_mut::<AppSettings>());
-                });
-
-                (slider, subscription)
-            };
-
-            let (window_slider, window_subscription) = make_slider(OpacityTarget::Window, cx);
-            let (image_slider, image_subscription) = make_slider(OpacityTarget::Image, cx);
-
-            cx.set_global(OpacitySliderState {
-                window: window_slider,
-                image: image_slider,
-                _subscriptions: [window_subscription, image_subscription],
-            });
-        }
-
-        let sliders = cx.global::<OpacitySliderState>();
-        let slider = match target {
-            OpacityTarget::Window => &sliders.window,
-            OpacityTarget::Image => &sliders.image,
-        }
-        .clone();
-
-        let current = target.value(cx.global::<AppSettings>()) as f32;
-
-        if (slider.read(cx).value().end() - current).abs() > 0.001 {
-            slider.update(cx, |state, cx| state.set_value(current, window, cx));
-        }
-
-        h_flex()
-            // The setting row's field slot is auto-sized, so a percentage
-            // width resolves to the content width (zero for the slider bar)
-            // and the whole control collapses; horizontal layout needs a
-            // fixed width, like NumberField's `w_32`.
-            .map(|this| {
-                if options.layout.is_horizontal() {
-                    this.w_56()
-                } else {
-                    this.w_full()
-                }
-            })
-            .gap_2()
-            // The thumb (16px, centered on the track position) overhangs the
-            // track by 8px at either end; pad so it stays inside the setting
-            // row's overflow_hidden instead of being clipped at min/max.
-            //
-            // Thumb color: the dark theme leaves `slider.thumb` unset and its
-            // `primary_foreground` fallback (neutral-900) vanishes against the
-            // neutral-950 panel, so use `primary`, which contrasts with the
-            // panel in both modes.
-            .child(
-                div().flex_1().px_2().child(
-                    Slider::new(&slider)
-                        .disabled(options.disabled)
-                        .text_color(cx.theme().primary),
-                ),
-            )
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .child(SharedString::from(format!("{current:.2}"))),
-            )
-    })
-}
-
-fn background_opacity_field() -> SettingField<SharedString> {
-    opacity_slider_field(OpacityTarget::Window)
-}
-
-fn background_image_opacity_field() -> SettingField<SharedString> {
-    opacity_slider_field(OpacityTarget::Image)
-}
-
-fn background_image_field() -> SettingField<SharedString> {
-    SettingField::render(|options, _window, cx| {
-        let path = cx.global::<AppSettings>().background_image.clone();
-        let label = SharedString::from(path.clone().unwrap_or_else(|| "None".to_string()));
-
-        h_flex()
-            .map(|this| {
-                if options.layout.is_horizontal() {
-                    this.w_64()
-                } else {
-                    this.w_full()
-                }
-            })
-            .gap_2()
-            .child(div().flex_1().min_w_0().truncate().child(label))
-            .child(
-                Button::new("background-image-browse")
-                    .outline()
-                    .label("Browse")
-                    .disabled(options.disabled)
-                    .on_click(|_, window, cx| {
-                        let rx = cx.prompt_for_paths(PathPromptOptions {
-                            files: true,
-                            directories: false,
-                            multiple: false,
-                            prompt: Some("Select background image".into()),
-                            file_types: vec![FileDialogFilter {
-                                name: "Images".into(),
-                                extensions: ["png", "jpg", "jpeg", "webp", "bmp"]
-                                    .into_iter()
-                                    .map(Into::into)
-                                    .collect(),
-                            }],
-                        });
-                        window
-                            .spawn(cx, async move |cx| {
-                                if let Ok(Ok(Some(paths))) = rx.await
-                                    && let Some(path) = paths.first()
-                                {
-                                    let path = path.display().to_string();
-                                    let _ = cx.update_global(|settings: &mut AppSettings, _, _| {
-                                        settings.background_image = Some(path);
-                                    });
-                                }
-                            })
-                            .detach();
-                    }),
-            )
-            .children(path.is_some().then(|| {
-                Button::new("background-image-clear")
-                    .outline()
-                    .label("Clear")
-                    .disabled(options.disabled)
-                    .on_click(|_, _, cx: &mut App| {
-                        cx.global_mut::<AppSettings>().background_image = None;
-                    })
-            }))
-    })
-}
 
 fn agent_hook_item(
     name: &'static str,
@@ -1328,36 +1090,6 @@ fn profiles_page(profiles: &[Profile], agent_profiles: &[AgentProfile]) -> Setti
         .default_open(true)
         .group(terminal_profiles_group(profiles))
         .group(agent_profiles_group(agent_profiles))
-}
-
-/// One labeled row inside a profile card: title and muted description on the
-/// left, the control on the right (mirrors `SettingItem`'s horizontal
-/// layout so cards read like regular setting rows).
-fn card_row(
-    title: impl Into<SharedString>,
-    description: impl Into<SharedString>,
-    control: impl gpui::IntoElement,
-    cx: &App,
-) -> Div {
-    h_flex()
-        .w_full()
-        .justify_between()
-        .items_start()
-        .gap_3()
-        .child(
-            v_flex()
-                .flex_1()
-                .max_w_3_5()
-                .gap_1()
-                .child(Label::new(title.into()).text_sm())
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(description.into()),
-                ),
-        )
-        .child(control.into_any_element())
 }
 
 fn terminal_profiles_group(profiles: &[Profile]) -> SettingGroup {
