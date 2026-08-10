@@ -3,13 +3,15 @@
 
 #![cfg(windows)]
 
-use nmt_platform::{create_pty, job_other_process_count, set_job_management};
+use nmt_platform::{
+    create_managed_pty_with_env, create_pty, job_other_process_count, set_job_management,
+};
 use windows_sys::Win32::System::JobObjects::IsProcessInJob;
 
 // One test fn: the toggle is process-global, so parallel test threads would
 // race on it.
 #[test]
-fn job_management_toggle_controls_shell_job() {
+fn job_management_toggle_and_managed_pty_control_shell_job() {
     // Off (default): no job.
     let pty = create_pty("cmd.exe", Vec::new(), &None, 80, 24).expect("failed to create ConPTY");
     assert!(pty.job_handle().is_none());
@@ -28,4 +30,20 @@ fn job_management_toggle_controls_shell_job() {
     // A fresh shell has no descendants: the job holds exactly one process.
     assert_eq!(job_other_process_count(job as isize), 0);
     // Dropping the Pty closes the job (KILL_ON_JOB_CLOSE reaps the tree).
+    drop(pty);
+
+    let pty = create_managed_pty_with_env(
+        "cmd.exe",
+        Vec::new(),
+        &None,
+        80,
+        24,
+        &[],
+        Some("managed test"),
+    )
+    .expect("failed to create managed ConPTY");
+    assert!(
+        pty.job_handle().is_some(),
+        "managed PTY must own its process tree when the global setting is off"
+    );
 }

@@ -4177,6 +4177,7 @@ dependencies = [
  "base64",
  "chrono",
  "getrandom 0.4.3",
+ "nmt_platform",
  "parking_lot",
  "reqwest",
  "semver",

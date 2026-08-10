@@ -71,6 +71,58 @@ pub fn create_pty_with_env(
     environment_overrides: &[(String, String)],
     starting_title: Option<&str>,
 ) -> Result<Pty, io::Error> {
+    create_pty_with_management(
+        shell,
+        args,
+        working_directory,
+        columns,
+        rows,
+        environment_overrides,
+        starting_title,
+        crate::job_management(),
+    )
+}
+
+/// Create a ConPTY whose entire child process tree is terminated when the PTY
+/// is dropped. Background probes need deterministic cleanup regardless of the
+/// user setting that controls process-tree management for ordinary terminals.
+pub fn create_managed_pty_with_env(
+    shell: &str,
+    args: Vec<String>,
+    working_directory: &Option<String>,
+    columns: u16,
+    rows: u16,
+    environment_overrides: &[(String, String)],
+    starting_title: Option<&str>,
+) -> Result<Pty, io::Error> {
+    let pty = create_pty_with_management(
+        shell,
+        args,
+        working_directory,
+        columns,
+        rows,
+        environment_overrides,
+        starting_title,
+        true,
+    )?;
+    if pty.job_handle().is_none() {
+        return Err(io::Error::other(
+            "managed ConPTY could not create its process-tree job",
+        ));
+    }
+    Ok(pty)
+}
+
+fn create_pty_with_management(
+    shell: &str,
+    args: Vec<String>,
+    working_directory: &Option<String>,
+    columns: u16,
+    rows: u16,
+    environment_overrides: &[(String, String)],
+    starting_title: Option<&str>,
+    manage_process_tree: bool,
+) -> Result<Pty, io::Error> {
     let exec = command_line(shell, &args);
     conpty::new(
         &exec,
@@ -79,6 +131,7 @@ pub fn create_pty_with_env(
         rows,
         environment_overrides,
         starting_title,
+        manage_process_tree,
     )
 }
 
