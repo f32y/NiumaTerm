@@ -2,7 +2,7 @@ use std::collections;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Context, DragMoveEvent, Entity, KeyDownEvent, MouseButton, Render,
+    AnyElement, App, Context, DragMoveEvent, Entity, KeyDownEvent, MouseButton, Pixels, Render,
     ScrollHandle, SharedString, Window, div, px, relative,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
@@ -89,8 +89,12 @@ struct TabItem {
     progress: Option<ProgressReport>,
 }
 
-/// Progress bar along the bottom edge of a tab, driven by OSC 9;4. The track is
-/// anchored at the tab's right edge so the fill spans the entire pill width.
+fn progress_bar_width(tab_width: Pixels) -> Pixels {
+    (tab_width - UI_RADIUS * 2.0).max(Pixels::ZERO)
+}
+
+/// Progress bar along the bottom edge of a tab, driven by OSC 9;4. One corner
+/// radius of space at each side keeps the track on the straight bottom edge.
 fn progress_bar(report: ProgressReport, tab_width: f32, cx: &App) -> AnyElement {
     let percent = |default: u8| report.progress.unwrap_or(default) as f32 / 100.0;
 
@@ -110,8 +114,8 @@ fn progress_bar(report: ProgressReport, tab_width: f32, cx: &App) -> AnyElement 
     div()
         .absolute()
         .bottom_0()
-        .right_0()
-        .w(px(tab_width))
+        .right(UI_RADIUS)
+        .w(progress_bar_width(px(tab_width)))
         .h(px(2.0))
         .child(
             div()
@@ -548,5 +552,19 @@ impl TabStrip {
             }))
             .child(bar)
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn progress_bar_stops_at_rounded_tab_edges() {
+        let tab_width = px(150.0);
+        let bar_width = progress_bar_width(tab_width);
+
+        assert_eq!(bar_width, px(134.0));
+        assert_eq!(tab_width - UI_RADIUS - bar_width, UI_RADIUS);
     }
 }
