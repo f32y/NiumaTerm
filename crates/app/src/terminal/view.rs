@@ -33,6 +33,9 @@ use crate::terminal::block_list::{
     shift_selected_item_for_eviction,
 };
 use crate::terminal::dirty::DirtyState;
+use crate::terminal::layout::{
+    bottom_anchor_offsets, frame_content_rows, live_frame_text, row_y_offset, terminal_row_at_y,
+};
 use crate::terminal::links::LinkHit;
 use crate::terminal::scrollbar::{
     SCROLLBAR_LINGER, scrollbar_element, scrollbar_offset_for_thumb, scrollbar_opacity,
@@ -42,10 +45,7 @@ use crate::terminal::surface::{
     SurfaceCell, SurfaceCellSide, SurfaceMouseButton, SurfaceMouseEventKind, SurfaceScreenCell,
     TerminalKeyAction as SurfaceKeyAction, TerminalKeyResult as SurfaceKeyResult,
 };
-use crate::terminal::terminal_view::{
-    BlockListItem, BlockListView, TerminalView, bottom_anchor_offsets, frame_content_rows,
-    live_frame_text, row_y_offset, terminal_row_at_y,
-};
+use crate::terminal::terminal_view::{BlockListItem, BlockListView, TerminalView};
 use crate::terminal::theme::{BLOCK_GUTTER_GAP, BLOCK_GUTTER_WIDTH};
 use crate::ui::{AppSettings, UI_RADIUS, main_view_background_opacity};
 

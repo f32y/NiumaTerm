@@ -25,6 +25,7 @@ use crate::terminal::frame::{
     LineBuilder, StyleRun, TerminalCell, TerminalColor, TerminalLine, theme_default_foreground,
     theme_selection_background,
 };
+use crate::terminal::layout::truncate_command;
 use crate::terminal::paint_text::{
     block_separator_bounds, paint_glyph_rows, paint_line_backgrounds_at, shape_lines,
 };
@@ -278,10 +279,7 @@ fn item_header(meta: &SegmentMeta) -> Option<String> {
 }
 
 fn command_header(command: &str, status: &str) -> String {
-    format!(
-        "{} · {status}",
-        terminal::terminal_view::truncate_command(command, 32)
-    )
+    format!("{} · {status}", truncate_command(command, 32))
 }
 
 /// Chrome of the live item: a running command uses the running accent, while
