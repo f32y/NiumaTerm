@@ -24,10 +24,10 @@ use windows_sys::Win32::System::Threading::{
 use windows_sys::core::{HRESULT, PWSTR};
 use windows_sys::{s, w};
 
+use crate::Winsize;
 use crate::windows::child::ChildExitWatcher;
 use crate::windows::pipes::{EventedAnonRead, EventedAnonWrite};
 use crate::windows::{Pty, cmdline, win32_string};
-use crate::{Winsize, job_management};
 
 /// Load the pseudoconsole API from conpty.dll if possible, otherwise use the
 /// standard Windows API.
@@ -161,9 +161,9 @@ pub fn new(
     rows: u16,
     environment_overrides: &[(String, String)],
     starting_title: Option<&str>,
+    manage_process_tree: bool,
 ) -> Result<Pty> {
     let api = ConptyApi::new();
-    let use_job = job_management();
     let mut pty_handle: HPCON = 0;
 
     // Passing 0 as the size parameter allows the "system default" buffer
@@ -294,7 +294,7 @@ pub fn new(
             false as i32,
             // Suspended start when job management is on: the shell must be in
             // the job before it can spawn children, or an early child escapes.
-            if use_job {
+            if manage_process_tree {
                 EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED
             } else {
                 EXTENDED_STARTUPINFO_PRESENT
@@ -310,7 +310,7 @@ pub fn new(
         }
     }
 
-    let job = if use_job {
+    let job = if manage_process_tree {
         let job = unsafe { create_kill_on_close_job(proc_info.hProcess) };
 
         // The shell was created suspended; resume it whether or not the job

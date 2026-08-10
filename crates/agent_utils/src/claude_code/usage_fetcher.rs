@@ -1,33 +1,47 @@
-//! Fetches remaining Claude Code subscription limits through OAuth with a CLI fallback.
+//! Fetches remaining Claude Code subscription limits through OAuth with an
+//! interactive Claude usage-panel fallback.
 
 use std::ffi::OsStr;
 use std::fs::File;
-use std::io::Read;
-use std::os::windows::process::CommandExt as _;
+use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use std::{env, thread};
 
+use nmt_platform::{ChildEvent, EventedPty as _, ProcessReadWrite as _};
 use reqwest::StatusCode;
 use reqwest::blocking::Client;
 use serde::Deserialize;
-use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use crate::hook_store::home_dir;
-use crate::subprocess::KillOnCloseJob;
 use crate::usage::UsageSnapshot;
 
-const CLI_FETCH_TIMEOUT: Duration = Duration::from_secs(15);
 const OAUTH_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
-const POLL_INTERVAL: Duration = Duration::from_millis(25);
+const CLI_FETCH_TIMEOUT: Duration = Duration::from_secs(25);
+const CLI_STARTUP_DELAY: Duration = Duration::from_secs(2);
+const CLI_SETTLE_DELAY: Duration = Duration::from_secs(2);
+const CLI_ENTER_INTERVAL: Duration = Duration::from_millis(800);
+const CLI_POLL_INTERVAL: Duration = Duration::from_millis(25);
 const MAX_OUTPUT_BYTES: u64 = 128 * 1024;
+const MAX_CLI_OUTPUT_BYTES: usize = 100 * 1024;
 const MAX_CREDENTIALS_BYTES: u64 = 128 * 1024;
 const OAUTH_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 const OAUTH_BETA_HEADER: &str = "oauth-2025-04-20";
 const CLAUDE_CODE_USER_AGENT: &str = "claude-code/2.1.0";
 const CANCELLED_ERROR: &str = "Claude usage request cancelled";
+const CLI_STOP_MARKERS: &[&str] = &[
+    "current week (all models)",
+    "current week (opus)",
+    "current week (sonnet only)",
+    "current week (sonnet)",
+    "weekly limits",
+    "weekly limit",
+    "weekly usage",
+    "7-day",
+    "current session",
+    "failed to load usage data",
+];
 
 #[derive(Debug)]
 enum OAuthFetchError {
@@ -95,10 +109,7 @@ fn read_oauth_token() -> Result<String, String> {
 }
 
 fn oauth_status_allows_cli_fallback(status: StatusCode) -> bool {
-    !matches!(
-        status,
-        StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN | StatusCode::TOO_MANY_REQUESTS
-    )
+    status == StatusCode::UNAUTHORIZED || status.is_server_error()
 }
 
 fn parse_oauth_usage(bytes: &[u8]) -> Result<UsageSnapshot, String> {
@@ -154,9 +165,6 @@ fn fetch_via_oauth(cancelled: &AtomicBool) -> Result<UsageSnapshot, OAuthFetchEr
             "Claude OAuth usage request returned HTTP {}",
             status.as_u16()
         );
-        // Authentication, authorization, and rate-limit responses are already
-        // authoritative provider answers. Starting Claude would issue another
-        // provider request and could hide the account state reported here.
         return Err(if oauth_status_allows_cli_fallback(status) {
             OAuthFetchError::Fallback(message)
         } else {
@@ -189,136 +197,231 @@ pub fn fetch_with_cancel(cancelled: &AtomicBool) -> Result<UsageSnapshot, String
             Ok(usage) => Ok(usage),
             Err(cli_error) if cli_error == CANCELLED_ERROR => Err(cli_error),
             Err(cli_error) => Err(format!(
-                "Claude OAuth usage unavailable: {oauth_error}; CLI fallback failed: {cli_error}"
+                "Claude OAuth usage unavailable: {oauth_error}; interactive CLI fallback failed: {cli_error}"
             )),
         },
     }
 }
 
 fn fetch_via_cli(cancelled: &AtomicBool) -> Result<UsageSnapshot, String> {
-    // Claude is installed as `claude.cmd` on Windows. cmd.exe is only the shim
-    // resolver; every logical CLI argument remains a distinct Command argument.
-    let mut child = Command::new("cmd.exe")
-        .args(["/D", "/C", "claude", "-p", "/usage"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn()
-        .map_err(|err| format!("could not run `claude -p \"/usage\"`: {err}"))?;
+    if cancelled.load(Ordering::Relaxed) {
+        return Err(CANCELLED_ERROR.to_string());
+    }
 
-    // Closing this job handle terminates cmd.exe and the Node descendant if a
-    // timeout or cancellation occurs, avoiding readers stranded on inherited pipes.
-    let job = KillOnCloseJob::attach_or_kill(&mut child)?;
-    let stdout = child.stdout.take().ok_or("Claude stdout unavailable")?;
-    let stderr = child.stderr.take().ok_or("Claude stderr unavailable")?;
+    let working_directory = Some(env::temp_dir().to_string_lossy().into_owned());
+    let environment_overrides = vec![("TERM".to_string(), "xterm-256color".to_string())];
+    // A real terminal is required because current Claude versions render
+    // subscription limits only through the interactive `/usage` panel.
+    let mut pty = nmt_platform::create_managed_pty_with_env(
+        "cmd.exe",
+        vec!["/D".to_string(), "/C".to_string(), "claude".to_string()],
+        &working_directory,
+        120,
+        40,
+        &environment_overrides,
+        Some("Claude Usage"),
+    )
+    .map_err(|err| format!("could not start interactive Claude usage session: {err}"))?;
 
-    let stdout_reader = thread::spawn(move || read_bounded(stdout));
-    let stderr_reader = thread::spawn(move || read_bounded(stderr));
-    let deadline = Instant::now() + CLI_FETCH_TIMEOUT;
+    let started_at = Instant::now();
+    let deadline = started_at + CLI_FETCH_TIMEOUT;
+    let mut output = Vec::new();
+    let mut usage_sent = false;
+    let mut trust_accepted = false;
+    let mut palette_confirmed = false;
+    let mut next_enter_at = None;
+    let mut settle_at = None;
 
-    let status = loop {
+    loop {
         if cancelled.load(Ordering::Relaxed) {
-            let _ = child.kill();
-            break Err(CANCELLED_ERROR.to_string());
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            break Err("Claude usage request timed out".to_string());
+            return Err(CANCELLED_ERROR.to_string());
         }
 
-        match child.try_wait() {
-            Ok(Some(status)) => break Ok(status),
-            Ok(None) => thread::sleep(POLL_INTERVAL),
-            Err(err) => break Err(format!("failed to wait for Claude usage output: {err}")),
+        let pipe_closed = drain_pty_output(&mut pty, &mut output)?;
+        let now = Instant::now();
+
+        if !usage_sent && now.duration_since(started_at) >= CLI_STARTUP_DELAY {
+            write_pty(&mut pty, b"/usage\r", "Claude usage command")?;
+            usage_sent = true;
+            next_enter_at = Some(now + CLI_ENTER_INTERVAL);
         }
-    };
 
-    if status.is_err() {
-        drop(job);
+        let clean = strip_terminal_sequences(&String::from_utf8_lossy(&output));
+        let lower = clean.to_ascii_lowercase();
+
+        if !trust_accepted
+            && ["do you trust", "trust the files", "safety check"]
+                .iter()
+                .any(|prompt| lower.contains(prompt))
+        {
+            write_pty(&mut pty, b"y\r", "Claude trust prompt response")?;
+            trust_accepted = true;
+        }
+
+        if usage_sent
+            && !palette_confirmed
+            && (lower.contains("show plan") || lower.contains("usage limits"))
+        {
+            write_pty(&mut pty, b"\r", "Claude usage palette response")?;
+            palette_confirmed = true;
+        }
+
+        if usage_sent
+            && settle_at.is_none()
+            && CLI_STOP_MARKERS.iter().any(|marker| lower.contains(marker))
+        {
+            settle_at = Some(now + CLI_SETTLE_DELAY);
+        }
+
+        if let Some(next_enter) = next_enter_at
+            && now >= next_enter
+            && settle_at.is_none()
+        {
+            write_pty(&mut pty, b"\r", "Claude usage panel advance")?;
+            next_enter_at = Some(now + CLI_ENTER_INTERVAL);
+        }
+
+        if settle_at.is_some_and(|settle| now >= settle) {
+            return parse_output(&clean);
+        }
+
+        if pipe_closed || matches!(pty.next_child_event(), Some(ChildEvent::Exited)) {
+            return parse_output(&clean)
+                .map_err(|_| "Claude exited before the usage panel rendered".to_string());
+        }
+
+        if now >= deadline {
+            return parse_output(&clean)
+                .map_err(|_| "Claude usage panel did not render before timeout".to_string());
+        }
+
+        thread::sleep(CLI_POLL_INTERVAL);
     }
-    let _ = child.wait();
-
-    let stdout = stdout_reader
-        .join()
-        .map_err(|_| "Claude stdout reader failed".to_string())??;
-    let stderr = stderr_reader
-        .join()
-        .map_err(|_| "Claude stderr reader failed".to_string())??;
-    let status = status?;
-
-    map_process_output(status, &stdout, &stderr)
 }
 
-fn read_bounded(reader: impl Read) -> Result<Vec<u8>, String> {
-    read_bounded_bytes(reader, MAX_OUTPUT_BYTES, "Claude usage output")
+fn drain_pty_output(pty: &mut nmt_platform::Pty, output: &mut Vec<u8>) -> Result<bool, String> {
+    let mut buffer = [0u8; 8 * 1024];
+    loop {
+        match pty.reader().read(&mut buffer) {
+            Ok(0) => return Ok(false),
+            Ok(read) => append_bounded(output, &buffer[..read], MAX_CLI_OUTPUT_BYTES),
+            Err(err) if err.kind() == ErrorKind::BrokenPipe => return Ok(true),
+            Err(err) => return Err(format!("failed to read Claude usage panel: {err}")),
+        }
+    }
 }
 
-fn read_bounded_bytes(
-    mut reader: impl Read,
-    max_bytes: u64,
-    description: &str,
-) -> Result<Vec<u8>, String> {
-    let mut bytes = Vec::new();
-    reader
-        .by_ref()
-        .take(max_bytes + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|err| format!("failed to read {description}: {err}"))?;
-
-    if bytes.len() as u64 > max_bytes {
-        return Err(format!("{description} exceeded {max_bytes} bytes"));
+fn append_bounded(output: &mut Vec<u8>, bytes: &[u8], max_bytes: usize) {
+    if bytes.len() >= max_bytes {
+        output.clear();
+        output.extend_from_slice(&bytes[bytes.len() - max_bytes..]);
+        return;
     }
 
-    Ok(bytes)
+    let overflow = output
+        .len()
+        .saturating_add(bytes.len())
+        .saturating_sub(max_bytes);
+    if overflow > 0 {
+        output.drain(..overflow);
+    }
+    output.extend_from_slice(bytes);
 }
 
-fn map_process_output(
-    status: ExitStatus,
-    stdout: &[u8],
-    _stderr: &[u8],
-) -> Result<UsageSnapshot, String> {
-    if !status.success() {
-        // The CLI's stderr is bounded and drained to prevent process stalls,
-        // but it is not surfaced because provider diagnostics may echo paths,
-        // prompts, or account data. The exit status is sufficient for logs.
-        return Err(format!("Claude usage command exited with {status}"));
-    }
-
-    parse_output(&String::from_utf8_lossy(stdout))
+fn write_pty(pty: &mut nmt_platform::Pty, bytes: &[u8], description: &str) -> Result<(), String> {
+    pty.writer()
+        .write_all(bytes)
+        .map_err(|err| format!("failed to write {description}: {err}"))
 }
 
 pub fn parse_output(output: &str) -> Result<UsageSnapshot, String> {
     let normalized = strip_terminal_sequences(&output.replace("\r\n", "\n").replace('\r', "\n"));
-    let mut usage = UsageSnapshot::default();
-
-    for line in normalized.lines() {
-        if let Some(remaining) = parse_used_percent(line, "Current session:") {
-            usage.five_hour_remaining = Some(remaining);
-        } else if let Some(remaining) = parse_used_percent(line, "Current week (all models):") {
-            usage.weekly_remaining = Some(remaining);
-        }
-    }
+    let lines: Vec<&str> = normalized.lines().collect();
+    let usage = UsageSnapshot {
+        five_hour_remaining: extract_remaining_after_label(&lines, is_session_label),
+        weekly_remaining: extract_remaining_after_label(&lines, is_weekly_label),
+    };
 
     if usage.is_unavailable() {
-        Err("Claude usage output did not include subscription limits".to_string())
+        Err("Claude usage panel did not include subscription limits".to_string())
     } else {
         Ok(usage)
     }
 }
 
-fn parse_used_percent(line: &str, label: &str) -> Option<u8> {
-    let rest = line.strip_prefix(label)?.trim_start();
-    let token = rest.split_whitespace().next()?;
-    let value_text = token.strip_suffix('%')?;
-    if value_text.is_empty() || !value_text.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
+fn extract_remaining_after_label(lines: &[&str], matches_label: fn(&str) -> bool) -> Option<u8> {
+    for (index, line) in lines.iter().enumerate() {
+        if !matches_label(line) {
+            continue;
+        }
+
+        for (offset, candidate) in lines[index..lines.len().min(index + 12)].iter().enumerate() {
+            if offset > 0 && is_section_label(candidate) {
+                break;
+            }
+            if let Some(remaining) = parse_remaining_percentage(candidate) {
+                return Some(remaining);
+            }
+        }
     }
-    let value = value_text.parse::<u8>().ok()?;
-    if value > 100 || !rest[token.len()..].starts_with(" used") {
-        return None;
+    None
+}
+
+fn parse_remaining_percentage(line: &str) -> Option<u8> {
+    let lower = line.to_ascii_lowercase();
+    for (percent_index, _) in lower.match_indices('%') {
+        let prefix = &lower[..percent_index];
+        let number_start = prefix
+            .bytes()
+            .rposition(|byte| !byte.is_ascii_digit() && byte != b'.')
+            .map_or(0, |index| index + 1);
+        let Ok(value) = prefix[number_start..].parse::<f64>() else {
+            continue;
+        };
+        if !value.is_finite() || !(0.0..=100.0).contains(&value) {
+            continue;
+        }
+
+        let Some(word) = lower[percent_index + 1..]
+            .split(|ch: char| !ch.is_ascii_alphabetic())
+            .find(|word| !word.is_empty())
+        else {
+            continue;
+        };
+        let remaining = match word {
+            "used" | "consumed" => 100.0 - value,
+            "left" | "remaining" | "available" => value,
+            _ => continue,
+        };
+        return Some(remaining.round() as u8);
     }
-    Some(100 - value)
+    None
+}
+
+fn is_session_label(line: &str) -> bool {
+    line.to_ascii_lowercase().contains("current session")
+}
+
+fn is_weekly_label(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    !lower.contains("fable")
+        && (lower.contains("current week")
+            || lower.contains("weekly limit")
+            || lower.contains("weekly usage")
+            || lower.contains("weekly rate limit")
+            || lower.contains("7-day")
+            || lower.contains("7 day"))
+}
+
+fn is_section_label(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    is_session_label(&lower)
+        || is_weekly_label(&lower)
+        || (lower.contains("fable")
+            && (lower.trim() == "fable"
+                || lower.contains("week")
+                || lower.contains("7-day")
+                || lower.contains("7 day")))
 }
 
 fn strip_terminal_sequences(input: &str) -> String {
@@ -360,13 +463,28 @@ fn strip_terminal_sequences(input: &str) -> String {
     output
 }
 
+fn read_bounded_bytes(
+    mut reader: impl Read,
+    max_bytes: u64,
+    description: &str,
+) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    reader
+        .by_ref()
+        .take(max_bytes + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|err| format!("failed to read {description}: {err}"))?;
+
+    if bytes.len() as u64 > max_bytes {
+        return Err(format!("{description} exceeded {max_bytes} bytes"));
+    }
+
+    Ok(bytes)
+}
+
 #[cfg(test)]
 mod tests {
-    use std::os::windows::process::ExitStatusExt as _;
-
     use super::*;
-
-    const SUPPLIED_OUTPUT: &str = "You are currently using your subscription to power your Claude Code usage\r\n\r\nCurrent session: 97% used · resets Aug 6, 7:30pm (Asia/Shanghai)\r\nCurrent week (all models): 17% used · resets Aug 12, 1pm (Asia/Shanghai)\r\nCurrent week (Fable): 32% used · resets Aug 12, 1pm (Asia/Shanghai)\r\n\r\nLast 24h · 369 requests · 8 sessions\r\n  83% of your usage was at >150k context\r\n";
 
     #[test]
     fn credentials_path_prefers_an_explicit_claude_config_dir() {
@@ -419,23 +537,23 @@ mod tests {
     }
 
     #[test]
-    fn auth_and_rate_limit_statuses_do_not_allow_cli_fallback() {
-        for status in [
-            StatusCode::UNAUTHORIZED,
-            StatusCode::FORBIDDEN,
-            StatusCode::TOO_MANY_REQUESTS,
-        ] {
-            assert!(!oauth_status_allows_cli_fallback(status));
-        }
-        for status in [StatusCode::BAD_REQUEST, StatusCode::INTERNAL_SERVER_ERROR] {
-            assert!(oauth_status_allows_cli_fallback(status));
-        }
+    fn oauth_fallback_is_limited_to_recoverable_statuses() {
+        assert!(oauth_status_allows_cli_fallback(StatusCode::UNAUTHORIZED));
+        assert!(oauth_status_allows_cli_fallback(
+            StatusCode::INTERNAL_SERVER_ERROR
+        ));
+        assert!(!oauth_status_allows_cli_fallback(StatusCode::FORBIDDEN));
+        assert!(!oauth_status_allows_cli_fallback(
+            StatusCode::TOO_MANY_REQUESTS
+        ));
+        assert!(!oauth_status_allows_cli_fallback(StatusCode::NOT_FOUND));
     }
 
     #[test]
-    fn parses_supplied_output_as_remaining_percentages() {
+    fn parses_interactive_usage_panel_with_split_labels_and_values() {
+        let output = "\u{1b}[32mCurrent session\u{1b}[0m\r\n████ 97% used\r\nCurrent week (all models)\r\n17% consumed\r\nCurrent week (Fable)\r\n32% used\r\n";
         assert_eq!(
-            parse_output(SUPPLIED_OUTPUT).unwrap(),
+            parse_output(output).unwrap(),
             UsageSnapshot {
                 five_hour_remaining: Some(3),
                 weekly_remaining: Some(83),
@@ -444,35 +562,21 @@ mod tests {
     }
 
     #[test]
-    fn keeps_a_valid_window_and_rejects_unrelated_percentages() {
-        let output = "\u{1b}[32mCurrent session:\u{1b}[0m 40% used\nCurrent week (all models): unavailable\n83% of your usage was at >150k context\n";
+    fn accepts_remaining_wording_and_weekly_label_variants() {
+        let output = "Current session: 62% left\nWeekly limits\n41.6% available\n";
         assert_eq!(
             parse_output(output).unwrap(),
             UsageSnapshot {
-                five_hour_remaining: Some(60),
-                weekly_remaining: None,
+                five_hour_remaining: Some(62),
+                weekly_remaining: Some(42),
             }
         );
     }
 
     #[test]
-    fn rejects_malformed_and_unrelated_output() {
-        assert!(
-            parse_output("Current session: 101% used\nCurrent week (Fable): 20% used").is_err()
-        );
-        assert!(parse_output("Current session: 20% remaining\n64% came from subagents").is_err());
-    }
-
-    #[test]
-    fn maps_cli_failure_without_attempting_to_parse_stdout() {
-        let error = map_process_output(
-            ExitStatus::from_raw(1),
-            b"Current session: 10% used",
-            b"claude command failed",
-        )
-        .unwrap_err();
-
-        assert!(error.contains("Claude usage command exited"));
-        assert!(!error.contains("claude command failed"));
+    fn keeps_cli_output_bounded_to_the_newest_bytes() {
+        let mut output = b"old".to_vec();
+        append_bounded(&mut output, b"-new-data", 8);
+        assert_eq!(output, b"new-data");
     }
 }
