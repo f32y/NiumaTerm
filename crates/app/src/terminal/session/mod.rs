@@ -3,34 +3,32 @@
 
 use std::collections::{self, VecDeque};
 use std::error::Error as StdError;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
-use std::sync::{Arc, LazyLock};
-use std::{mem, time};
+use std::time;
 
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD;
-use nmt_config::local_state::TabState;
 use nmt_config::{CursorShape, active_colors};
 use nmt_platform::{WinsizeBuilder, create_pty_with_env, job_other_process_count};
-use nmt_terminal::block_store::{BlockStore, SegmentMeta};
-use nmt_terminal::clipboard::Clipboard;
-use nmt_terminal::event::{
-    BlockEvent, EventListener, Msg, MsgSender, ProgressReport, TerminalEvent, WindowId,
-};
+use nmt_terminal::block_store::BlockStore;
+use nmt_terminal::event::{Msg, MsgSender, ProgressReport};
 use nmt_terminal::ghostty::GhosttyTerminal;
 use nmt_terminal::pty_pipe::{SessionOptions, start_session};
 use nmt_terminal::render_buffer::RenderBuffer;
 use parking_lot::{FairMutex, Mutex};
-use tracing::{debug, error};
+use tracing::error;
 
 use crate::error::{EngineError, EngineErrorCode};
 use crate::terminal;
 use crate::terminal::graphics::GenerationStore;
-use crate::terminal::wake::{Wake, WakeSender};
-use crate::utils::POWERSHELL_INTEGRATION;
+use crate::terminal::wake::WakeSender;
 
-static ENCODED_POWERSHELL_INTEGRATION: LazyLock<String> =
-    LazyLock::new(|| encode_powershell_command(POWERSHELL_INTEGRATION));
+mod config;
+mod proxy;
+
+use config::default_shell;
+
+pub use crate::terminal::session::config::TerminalSessionConfig;
+pub use crate::terminal::session::proxy::TerminalEventProxy;
 
 pub(crate) type SessionGraphics = Arc<Mutex<GenerationStore>>;
 
@@ -148,18 +146,18 @@ impl TerminalSession {
         let frozen_images: terminal::graphics::FrozenImageCache = Default::default();
 
         let engine_blocks = false;
-        let proxy = TerminalEventProxy {
-            events: Arc::clone(&events),
-            block_store: Arc::clone(&block_store),
-            generation_store: Arc::clone(&generation_store),
-            live_image_count: Arc::clone(&live_image_count),
-            staged_blocks: Arc::new(Mutex::new(Vec::new())),
-            in_flight: Arc::clone(&in_flight),
-            open_prompt: Arc::clone(&open_prompt),
-            frozen_images: Arc::clone(&frozen_images),
+        let proxy = TerminalEventProxy::new(
+            Arc::clone(&events),
+            Arc::clone(&block_store),
+            Arc::clone(&generation_store),
+            Arc::clone(&live_image_count),
+            Arc::new(Mutex::new(Vec::new())),
+            Arc::clone(&in_flight),
+            Arc::clone(&open_prompt),
+            Arc::clone(&frozen_images),
             id,
             wake,
-        };
+        );
 
         let pty = NetPty::new(remote);
 
@@ -214,18 +212,18 @@ impl TerminalSession {
         let frozen_images: terminal::graphics::FrozenImageCache = Default::default();
 
         let engine_blocks = config.engine_blocks;
-        let proxy = TerminalEventProxy {
-            events: Arc::clone(&events),
-            block_store: Arc::clone(&block_store),
-            generation_store: Arc::clone(&generation_store),
-            live_image_count: Arc::clone(&live_image_count),
-            staged_blocks: Arc::new(Mutex::new(Vec::new())),
-            in_flight: Arc::clone(&in_flight),
-            open_prompt: Arc::clone(&open_prompt),
-            frozen_images: Arc::clone(&frozen_images),
+        let proxy = TerminalEventProxy::new(
+            Arc::clone(&events),
+            Arc::clone(&block_store),
+            Arc::clone(&generation_store),
+            Arc::clone(&live_image_count),
+            Arc::new(Mutex::new(Vec::new())),
+            Arc::clone(&in_flight),
+            Arc::clone(&open_prompt),
+            Arc::clone(&frozen_images),
             id,
             wake,
-        };
+        );
 
         let pty = create_pty_with_env(
             &shell,
@@ -359,22 +357,6 @@ impl TerminalSession {
     }
 }
 
-pub(crate) fn default_shell() -> String {
-    "powershell.exe".to_string()
-}
-
-/// Whether a configured shell is PowerShell (the only shell we have an OSC 133
-/// integration script for). `None` resolves to the PowerShell default.
-pub(crate) fn shell_is_powershell(shell: Option<&str>) -> bool {
-    match shell {
-        Some(s) => {
-            let lower = s.to_ascii_lowercase();
-            lower.contains("powershell") || lower.contains("pwsh")
-        }
-        None => true,
-    }
-}
-
 impl Drop for TerminalSession {
     fn drop(&mut self) {
         let _ = self.messenger.send(Msg::Shutdown);
@@ -387,287 +369,6 @@ fn engine_init_error(error: Box<dyn StdError>) -> EngineError {
         EngineErrorCode::EngineInit,
         format!("libghostty-vt engine init failed: {error}"),
     )
-}
-
-#[derive(Clone)]
-pub struct TerminalEventProxy {
-    events: HostEventQueue,
-    /// Frozen block-split history (engine-block handles + command
-    /// metadata); shared with `TerminalSession`. Fed on the PTY thread.
-    block_store: Arc<Mutex<BlockStore>>,
-    /// Live Kitty image generations keyed by image ID; shared with the session
-    /// and pane. `UpdateGraphics` installs/removes generations here.
-    generation_store: SessionGraphics,
-    /// Lock-free mirror of the live generation count (shared with the session), kept
-    /// in sync whenever `UpdateGraphics` installs or removes generations.
-    live_image_count: Arc<AtomicUsize>,
-    /// The current PTY read's block events, staged until that read's damage
-    /// wake so image generations install before frozen slices bind.
-    /// Bounded to one read cycle; flushed or discarded on damage/shutdown.
-    staged_blocks: Arc<Mutex<Vec<BlockEvent>>>,
-    /// The in-flight command; set at CommandStarted, cleared by
-    /// CommandFinished / trust loss / exit.
-    in_flight: Arc<Mutex<Option<InFlightBlock>>>,
-    open_prompt: Arc<Mutex<bool>>,
-    /// Frozen Kitty generation cache, pruned on the same batches that feed
-    /// the block store (evicted blocks drop their cached images).
-    frozen_images: terminal::graphics::FrozenImageCache,
-    /// Source surface id, stamped onto every wake so the shell can route by tab.
-    id: u64,
-    /// Render-wakeup sender; `None` for sessions/tests without a live shell.
-    wake: Option<WakeSender>,
-}
-
-impl TerminalEventProxy {
-    fn signal(&self, kind: Wake) {
-        if let Some(tx) = &self.wake {
-            tx.send(kind);
-        }
-    }
-
-    /// Flush the current read's staged block events into the block store.
-    /// Called on the read's damage wake so items land together with the
-    /// render they belong to. Empty in steady state.
-    fn flush_staged_blocks(&self) {
-        let batch = mem::take(&mut *self.staged_blocks.lock());
-        if batch.is_empty() {
-            return;
-        }
-        terminal::graphics::prune_frozen_images(&self.frozen_images, &batch);
-        self.block_store.lock().apply(batch);
-    }
-}
-
-impl EventListener for TerminalEventProxy {
-    fn event(&self) -> (Option<TerminalEvent>, bool) {
-        (None, false)
-    }
-
-    fn send_event(&self, event: TerminalEvent, _id: WindowId) {
-        // Content damage drives a render with no chrome rebuild. This is the read's
-        // final wake: image generations have already installed (UpdateGraphics runs
-        // before this), so flush the staged block events before the UI
-        // wakes.
-        if matches!(
-            event,
-            TerminalEvent::TerminalDamaged(_) | TerminalEvent::Render
-        ) {
-            self.flush_staged_blocks();
-            self.signal(Wake::Content(self.id));
-
-            return;
-        }
-
-        // Decoded Kitty pixels: install/replace live generations and drop removed
-        // ones, then wake for a lazy visible upload. Route-scoped so a cross-session
-        // event is ignored.
-        if let TerminalEvent::UpdateGraphics { route_id, queues } = event {
-            if route_id != self.id as usize {
-                return;
-            }
-
-            let mut store = self.generation_store.lock();
-
-            for (image_id, data) in queues.pending_images {
-                store.install(image_id, data);
-            }
-
-            for gid in queues.remove_queue {
-                store.remove(gid.0 as u32);
-            }
-
-            // Publish the live count lock-free so the render path can skip the store.
-            self.live_image_count.store(store.len(), Ordering::Relaxed);
-
-            drop(store);
-
-            self.signal(Wake::Content(self.id));
-
-            return;
-        }
-        let host = match event {
-            TerminalEvent::Title(t) | TerminalEvent::TitleWithSubtitle(t, _) => HostEvent::Title(t),
-            TerminalEvent::ResetTitle => HostEvent::Title(String::new()),
-            TerminalEvent::Bell => HostEvent::Bell,
-            TerminalEvent::ProgressReport(report) => HostEvent::Progress(report),
-            TerminalEvent::ClipboardStore(ty, text) => {
-                let mut clipboard = Clipboard::default();
-
-                clipboard.set(ty, text);
-
-                return;
-            }
-            TerminalEvent::CloseTerminal(_) => {
-                // The shell died: no ;D is coming for a running command, and any
-                // half-staged block batch for the interrupted read is discarded.
-                *self.in_flight.lock() = None;
-
-                *self.open_prompt.lock() = false;
-
-                self.staged_blocks.lock().clear();
-
-                HostEvent::Exit
-            }
-            TerminalEvent::DesktopNotification { title, body } => {
-                HostEvent::Notification { title, body }
-            }
-            TerminalEvent::InteractiveState(on) => HostEvent::InteractiveState(on),
-            TerminalEvent::AltScreen(on) => HostEvent::AltScreen(on),
-            TerminalEvent::PromptBoundaryTrusted(on) => {
-                if !on {
-                    // Trust lost mid-command (nested shell, malformed stream): the
-                    // running block's lifecycle can no longer complete.
-                    *self.in_flight.lock() = None;
-                    *self.open_prompt.lock() = false;
-                }
-
-                HostEvent::PromptBoundaryTrusted(on)
-            }
-            TerminalEvent::PromptStarted => {
-                *self.open_prompt.lock() = true;
-
-                HostEvent::PromptStarted
-            }
-            TerminalEvent::BlockBatch(batch) => {
-                // Stage this read's block events; they flush to the store on the
-                // read's damage wake, after `UpdateGraphics` installs the generations
-                // its slices bind to. No chrome/content wake here.
-                self.staged_blocks.lock().extend(batch);
-
-                return;
-            }
-            TerminalEvent::CommandStarted(cmd) => {
-                *self.open_prompt.lock() = false;
-
-                // Marry the command metadata to its block item; the
-                // segment materializes later, when its rows scroll out.
-                self.block_store
-                    .lock()
-                    .update_meta(cmd.seq, |m: &mut SegmentMeta| {
-                        m.command = Some(cmd.command.clone());
-                        m.cwd = cmd.cwd.as_ref().map(|p| p.to_string_lossy().into_owned());
-                        m.started_at = Some(cmd.started_at);
-                    });
-
-                let block = InFlightBlock {
-                    command: cmd.command,
-                    started_at: cmd.started_at,
-                };
-
-                *self.in_flight.lock() = Some(block);
-
-                HostEvent::CommandStarted
-            }
-            TerminalEvent::CommandFinished(cmd) => {
-                *self.in_flight.lock() = None;
-
-                self.block_store
-                    .lock()
-                    .update_meta(cmd.seq, |m: &mut SegmentMeta| {
-                        m.exit_code = cmd.exit_code;
-                        m.ended_at = Some(cmd.ended_at);
-                    });
-
-                debug!(
-                    command = %cmd.command,
-                    exit_code = ?cmd.exit_code,
-                    "command block metadata recorded"
-                );
-
-                HostEvent::CommandFinished
-            }
-            _ => return,
-        };
-
-        self.events.lock().push_back(host);
-
-        // A user-visible event changes chrome (tab title, status, attention).
-        self.signal(Wake::Chrome(self.id));
-    }
-}
-
-/// Local terminal session configuration. `None` and empty fields fall back to
-/// defaults (`shell` → `powershell.exe`).
-#[derive(Debug, Clone)]
-pub struct TerminalSessionConfig {
-    pub shell: Option<String>,
-    pub args: Vec<String>,
-    pub working_dir: Option<String>,
-    pub starting_title: Option<String>,
-    pub cols: u16,
-    pub rows: u16,
-    /// Default cursor shape until the running program selects one with DECSCUSR.
-    pub cursor_shape: CursorShape,
-    /// Scrollback budget in lines; converted to the engine's byte budget.
-    pub scrollback_lines: usize,
-    /// Engine-blocks mode is the default because completed commands can freeze
-    /// into engine-side blocks at each trusted `;D`; rendering reads
-    /// them through `BlockRef` handles. `false` is the internal classic-grid
-    /// fallback: no freezing, no boundary clears, no block events, intact
-    /// scrollback. The GPUI app keeps this enabled and toggles block chrome only.
-    pub engine_blocks: bool,
-    /// Child-only values merged into the shell's inherited Windows environment.
-    /// Runtime metadata is deliberately excluded from persisted tab state.
-    pub environment_overrides: Vec<(String, String)>,
-}
-
-impl TerminalSessionConfig {
-    pub(crate) fn restorable_tab_state(&self) -> TabState {
-        TabState {
-            name: None,
-            user_named: false,
-            shell: self.shell.clone(),
-            args: self.args.clone(),
-            cwd: self.working_dir.clone(),
-            agent: None,
-            agent_profile: None,
-            panes: None,
-        }
-    }
-
-    /// Augment a session config so a PowerShell shell evaluates the bundled OSC 133
-    /// integration at startup. Only applied to a PowerShell shell with no caller-supplied
-    /// args, so explicit args (and non-PowerShell shells) are left untouched.
-    pub(crate) fn with_shell_integration(mut self: TerminalSessionConfig) -> TerminalSessionConfig {
-        if !self.has_trusted_prompt_integration() {
-            return self;
-        }
-
-        self.args = vec![
-            "-NoExit".to_string(),
-            "-EncodedCommand".to_string(),
-            (*ENCODED_POWERSHELL_INTEGRATION).clone(),
-        ];
-
-        self
-    }
-
-    pub(crate) fn has_trusted_prompt_integration(&self) -> bool {
-        self.args.is_empty() && shell_is_powershell(self.shell.as_deref())
-    }
-}
-
-fn encode_powershell_command(script: &str) -> String {
-    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
-
-    STANDARD.encode(bytes)
-}
-
-impl Default for TerminalSessionConfig {
-    fn default() -> Self {
-        TerminalSessionConfig {
-            shell: None,
-            args: Vec::new(),
-            working_dir: None,
-            starting_title: None,
-            cols: 80,
-            rows: 24,
-            cursor_shape: CursorShape::Block,
-            scrollback_lines: 10_000,
-            engine_blocks: true,
-            environment_overrides: Vec::new(),
-        }
-    }
 }
 
 #[cfg(test)]

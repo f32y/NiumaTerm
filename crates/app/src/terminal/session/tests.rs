@@ -202,18 +202,18 @@ fn host_events_map_from_terminal_events() {
     use nmt_terminal::event::{EventListener, TerminalEvent, WindowId};
 
     let events: HostEventQueue = Arc::new(Mutex::new(collections::VecDeque::new()));
-    let listener = TerminalEventProxy {
-        events: Arc::clone(&events),
-        block_store: Arc::new(Mutex::new(BlockStore::default())),
-        in_flight: Arc::new(Mutex::new(None)),
-        open_prompt: Arc::new(Mutex::new(false)),
-        generation_store: Arc::new(Mutex::new(terminal::graphics::GenerationStore::new())),
-        staged_blocks: Arc::new(Mutex::new(Vec::new())),
-        frozen_images: Default::default(),
-        live_image_count: Arc::new(sync::atomic::AtomicUsize::new(0)),
-        id: 1,
-        wake: None,
-    };
+    let listener = TerminalEventProxy::new(
+        Arc::clone(&events),
+        Arc::new(Mutex::new(BlockStore::default())),
+        Arc::new(Mutex::new(terminal::graphics::GenerationStore::new())),
+        Arc::new(sync::atomic::AtomicUsize::new(0)),
+        Arc::new(Mutex::new(Vec::new())),
+        Arc::new(Mutex::new(None)),
+        Arc::new(Mutex::new(false)),
+        Default::default(),
+        1,
+        None,
+    );
     let wid = WindowId::dummy();
 
     listener.send_event(TerminalEvent::Title("t".into()), wid);
@@ -247,18 +247,18 @@ fn osc_notification_drains_into_shared_exact_notification_lifecycle() {
     use nmt_terminal::event::{EventListener, TerminalEvent, WindowId};
 
     let events: HostEventQueue = Arc::new(Mutex::new(collections::VecDeque::new()));
-    let listener = TerminalEventProxy {
-        events: Arc::clone(&events),
-        block_store: Arc::new(Mutex::new(BlockStore::default())),
-        in_flight: Arc::new(Mutex::new(None)),
-        open_prompt: Arc::new(Mutex::new(false)),
-        generation_store: Arc::new(Mutex::new(terminal::graphics::GenerationStore::new())),
-        staged_blocks: Arc::new(Mutex::new(Vec::new())),
-        frozen_images: Default::default(),
-        live_image_count: Arc::new(sync::atomic::AtomicUsize::new(0)),
-        id: 1,
-        wake: None,
-    };
+    let listener = TerminalEventProxy::new(
+        Arc::clone(&events),
+        Arc::new(Mutex::new(BlockStore::default())),
+        Arc::new(Mutex::new(terminal::graphics::GenerationStore::new())),
+        Arc::new(sync::atomic::AtomicUsize::new(0)),
+        Arc::new(Mutex::new(Vec::new())),
+        Arc::new(Mutex::new(None)),
+        Arc::new(Mutex::new(false)),
+        Default::default(),
+        1,
+        None,
+    );
     listener.send_event(
         TerminalEvent::DesktopNotification {
             title: "T".repeat(300),
@@ -323,18 +323,18 @@ fn in_flight_block_lifecycle() {
     let events: HostEventQueue = Arc::new(Mutex::new(collections::VecDeque::new()));
     let in_flight = Arc::new(Mutex::new(None));
     let open_prompt = Arc::new(Mutex::new(false));
-    let proxy = TerminalEventProxy {
-        events: Arc::clone(&events),
-        block_store: Arc::new(Mutex::new(BlockStore::default())),
-        in_flight: Arc::clone(&in_flight),
-        open_prompt: Arc::clone(&open_prompt),
-        generation_store: Arc::new(Mutex::new(terminal::graphics::GenerationStore::new())),
-        staged_blocks: Arc::new(Mutex::new(Vec::new())),
-        frozen_images: Default::default(),
-        live_image_count: Arc::new(sync::atomic::AtomicUsize::new(0)),
-        id: 1,
-        wake: None,
-    };
+    let proxy = TerminalEventProxy::new(
+        Arc::clone(&events),
+        Arc::new(Mutex::new(BlockStore::default())),
+        Arc::new(Mutex::new(terminal::graphics::GenerationStore::new())),
+        Arc::new(sync::atomic::AtomicUsize::new(0)),
+        Arc::new(Mutex::new(Vec::new())),
+        Arc::clone(&in_flight),
+        Arc::clone(&open_prompt),
+        Default::default(),
+        1,
+        None,
+    );
     let wid = WindowId::dummy();
 
     proxy.send_event(TerminalEvent::PromptStarted, wid);
@@ -394,18 +394,18 @@ fn block_batches_and_seq_metadata_reach_the_block_store() {
     use nmt_terminal::ghostty::BlockHandle;
 
     let store = Arc::new(Mutex::new(BlockStore::default()));
-    let proxy = TerminalEventProxy {
-        events: Arc::new(Mutex::new(collections::VecDeque::new())),
-        block_store: Arc::clone(&store),
-        in_flight: Arc::new(Mutex::new(None)),
-        open_prompt: Arc::new(Mutex::new(false)),
-        generation_store: Arc::new(Mutex::new(terminal::graphics::GenerationStore::new())),
-        staged_blocks: Arc::new(Mutex::new(Vec::new())),
-        frozen_images: Default::default(),
-        live_image_count: Arc::new(sync::atomic::AtomicUsize::new(0)),
-        id: 1,
-        wake: None,
-    };
+    let proxy = TerminalEventProxy::new(
+        Arc::new(Mutex::new(collections::VecDeque::new())),
+        Arc::clone(&store),
+        Arc::new(Mutex::new(terminal::graphics::GenerationStore::new())),
+        Arc::new(sync::atomic::AtomicUsize::new(0)),
+        Arc::new(Mutex::new(Vec::new())),
+        Arc::new(Mutex::new(None)),
+        Arc::new(Mutex::new(false)),
+        Default::default(),
+        1,
+        None,
+    );
     let wid = WindowId::dummy();
     let now = SystemTime::now();
 
@@ -471,20 +471,20 @@ fn graphics_proxy(id: u64) -> (TerminalEventProxy, GraphicsProbes) {
     let staged_blocks = Arc::new(Mutex::new(Vec::new()));
     let wakes = Arc::new(Mutex::new(Vec::new()));
     let wakes_for_sender = Arc::clone(&wakes);
-    let proxy = TerminalEventProxy {
-        events: Arc::clone(&events),
-        block_store: Arc::clone(&block_store),
-        generation_store: Arc::clone(&generation_store),
-        staged_blocks: Arc::clone(&staged_blocks),
-        frozen_images: Default::default(),
-        live_image_count: Arc::new(sync::atomic::AtomicUsize::new(0)),
-        in_flight: Arc::new(Mutex::new(None)),
-        open_prompt: Arc::new(Mutex::new(false)),
+    let proxy = TerminalEventProxy::new(
+        Arc::clone(&events),
+        Arc::clone(&block_store),
+        Arc::clone(&generation_store),
+        Arc::new(sync::atomic::AtomicUsize::new(0)),
+        Arc::clone(&staged_blocks),
+        Arc::new(Mutex::new(None)),
+        Arc::new(Mutex::new(false)),
+        Default::default(),
         id,
-        wake: Some(WakeSender::from_fn(move |w| {
+        Some(WakeSender::from_fn(move |w| {
             wakes_for_sender.lock().push(w)
         })),
-    };
+    );
     (
         proxy,
         GraphicsProbes {
