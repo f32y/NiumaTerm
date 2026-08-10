@@ -301,7 +301,8 @@ impl AgentPane {
         let name = kind.display();
         let cwd = self.cwd.clone();
 
-        self.seed_thread_defaults = !preserve_thread_settings && recovery.is_none();
+        self.seed_thread_defaults =
+            !preserve_thread_settings && (recovery.is_none() || kind == AgentKind::Claude);
         self.seed_approval_reviewer =
             !preserve_thread_settings && recovery.is_some() && kind == AgentKind::Codex;
         self.restore_thread_settings_on_ready =
@@ -722,9 +723,9 @@ impl AgentPane {
         self.history_ui.selected = index;
         self.history_ui.pending_resume_replay = None;
         self.status = Status::Starting;
-        // Keep the resumed thread's stored controls except for the reviewer,
-        // which is a local preference shared across this Codex profile.
-        self.seed_thread_defaults = false;
+        // Claude controls remain local profile preferences. Codex resumes the
+        // thread controls reported by the backend except for its reviewer.
+        self.seed_thread_defaults = self.kind == AgentKind::Claude;
         self.seed_approval_reviewer = self.kind == AgentKind::Codex;
         self.set_command_feedback(
             CommandFeedbackKind::Notice,

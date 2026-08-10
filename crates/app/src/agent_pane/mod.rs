@@ -270,9 +270,9 @@ pub(crate) struct AgentPane {
     /// changed via the dropdowns under the input; sent as overrides on every
     /// turn start (idempotent when unchanged).
     settings: ThreadSettings,
-    /// Whether the next `Ready` should overlay the remembered per-kind
-    /// defaults onto the backend's reported configuration. True for fresh
-    /// conversations; resumed threads keep their own stored settings.
+    /// Whether the next `Ready` should overlay all remembered settings. True
+    /// for fresh conversations and resumed Claude conversations; later Claude
+    /// confirmations keep the values currently selected under the input.
     seed_thread_defaults: bool,
     /// Whether the next resumed Codex thread should take the locally remembered
     /// approval reviewer while preserving its other stored settings.
