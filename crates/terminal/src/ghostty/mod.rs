@@ -1,4 +1,4 @@
-use std::{array, error, fmt, mem, ops, os, path, ptr, result, slice, str, sync, time};
+use std::{array, mem, os, path, ptr, slice, str, sync, time};
 
 use image_rs::load_from_memory;
 /// Engine handle of a finished command block (per-block grid). Plain value
@@ -28,9 +28,9 @@ use libghostty_vt_sys::{
     RenderStateRowIterator as VtRenderStateRowIterator,
     RenderStateRowOption as VtRenderStateRowOption, Result as VtResult, Row as VtRow,
     RowData as VtRowData, RowSemanticPrompt as VtRowSemanticPrompt, Selection as VtSelection,
-    SgrUnderline as VtSgrUnderline, String as VtString, Style as VtStyle,
-    StyleColor as VtStyleColor, StyleColorTag as VtStyleColorTag, SysImage as VtSysImage,
-    SysOption as VtSysOption, Terminal as VtTerminal, TerminalCursorStyle as VtTerminalCursorStyle,
+    String as VtString, Style as VtStyle, StyleColor as VtStyleColor,
+    StyleColorTag as VtStyleColorTag, SysImage as VtSysImage, SysOption as VtSysOption,
+    Terminal as VtTerminal, TerminalCursorStyle as VtTerminalCursorStyle,
     TerminalData as VtTerminalData, TerminalOption as VtTerminalOption,
     TerminalOptions as VtTerminalOptions, TerminalScrollViewport as VtTerminalScrollViewport,
     TerminalScrollViewportTag as VtTerminalScrollViewportTag,
@@ -39,8 +39,8 @@ use libghostty_vt_sys::{
     ghostty_block_ref_cols, ghostty_block_ref_format_alloc, ghostty_block_ref_grid_ref,
     ghostty_block_ref_handle, ghostty_block_ref_kitty_graphics, ghostty_block_ref_placement_pos,
     ghostty_block_ref_release, ghostty_block_ref_row_count, ghostty_cell_get,
-    ghostty_cell_get_multi, ghostty_color_rgb_get, ghostty_formatter_format_alloc,
-    ghostty_formatter_free, ghostty_formatter_terminal_new, ghostty_free, ghostty_grid_ref_cell,
+    ghostty_cell_get_multi, ghostty_formatter_format_alloc, ghostty_formatter_free,
+    ghostty_formatter_terminal_new, ghostty_free, ghostty_grid_ref_cell,
     ghostty_grid_ref_graphemes, ghostty_grid_ref_hyperlink_uri, ghostty_grid_ref_row,
     ghostty_grid_ref_style, ghostty_kitty_graphics_get, ghostty_kitty_graphics_image,
     ghostty_kitty_graphics_image_get, ghostty_kitty_graphics_placement_get,
@@ -61,385 +61,32 @@ use libghostty_vt_sys::{
     ghostty_terminal_remove_block, ghostty_terminal_resize, ghostty_terminal_scroll_viewport,
     ghostty_terminal_set, ghostty_terminal_vt_write, sized as vt_sized,
 };
-use nmt_config::colors::{ColorRgb, Colors};
+#[cfg(test)]
+use nmt_config::colors::ColorRgb;
+use nmt_config::colors::Colors;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::pwd::pwd_to_path;
 use crate::render_buffer::RenderBuffer;
 use crate::{ansi, clipboard, graphics, terminal};
 
-pub type Result<T> = result::Result<T, Error>;
+mod error;
+mod types;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Error {
-    OutOfMemory,
-    InvalidValue,
-    OutOfSpace,
-    NoValue,
-    Unknown(i32),
-}
-
-impl Error {
-    fn from_code(code: VtResult::Type) -> Result<()> {
-        match code {
-            VtResult::SUCCESS => Ok(()),
-            VtResult::OUT_OF_MEMORY => Err(Self::OutOfMemory),
-            VtResult::INVALID_VALUE => Err(Self::InvalidValue),
-            VtResult::OUT_OF_SPACE => Err(Self::OutOfSpace),
-            VtResult::NO_VALUE => Err(Self::NoValue),
-            other => Err(Self::Unknown(other)),
-        }
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::OutOfMemory => f.write_str("libghostty-vt allocation failed"),
-            Self::InvalidValue => {
-                f.write_str("libghostty-vt received or returned an invalid value")
-            }
-            Self::OutOfSpace => f.write_str("buffer is too small for libghostty-vt output"),
-            Self::NoValue => f.write_str("libghostty-vt value is absent"),
-            Self::Unknown(code) => write!(f, "unknown libghostty-vt result code {code}"),
-        }
-    }
-}
-
-impl error::Error for Error {}
-
-/// Alias of the workspace-wide RGB type; `VtColorRgb` is the FFI handle,
-/// this is the decoded byte triple.
-pub type Color = ColorRgb;
-
-/// Decode an FFI color handle into its byte triple. A free function because
-/// `Color` lives in `nmt_config` and `VtColorRgb` in the sys crate, so a
-/// `From` impl would violate the orphan rule.
-fn color_from_vt(value: VtColorRgb) -> Color {
-    let mut r = 0;
-    let mut g = 0;
-    let mut b = 0;
-
-    unsafe {
-        // ghostty 53bd14f: the accessor takes the color by const pointer.
-        ghostty_color_rgb_get(&value, &mut r, &mut g, &mut b);
-    }
-
-    Color { r, g, b }
-}
-
-/// Style flags for a cell. `fg`/`bg` are `None` when the cell uses the
-/// terminal default color (the caller resolves the default).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct SnapshotStyle {
-    pub fg: Option<Color>,
-    pub bg: Option<Color>,
-    pub bold: bool,
-    pub italic: bool,
-    pub faint: bool,
-    pub blink: bool,
-    pub inverse: bool,
-    pub invisible: bool,
-    pub strikethrough: bool,
-    pub overline: bool,
-    pub underline: Underline,
-    pub underline_color: Option<Color>,
-}
-
-/// Underline style, mirroring `VtSgrUnderline::*`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Underline {
-    #[default]
-    None,
-    Single,
-    Double,
-    Curly,
-    Dotted,
-    Dashed,
-}
-
-impl From<VtSgrUnderline::Type> for Underline {
-    fn from(value: VtSgrUnderline::Type) -> Self {
-        match value {
-            v if v == VtSgrUnderline::SINGLE => Self::Single,
-            v if v == VtSgrUnderline::DOUBLE => Self::Double,
-            v if v == VtSgrUnderline::CURLY => Self::Curly,
-            v if v == VtSgrUnderline::DOTTED => Self::Dotted,
-            v if v == VtSgrUnderline::DASHED => Self::Dashed,
-            _ => Self::None,
-        }
-    }
-}
-
-/// Width classification of a cell, mirroring `VtCellWide::*`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum CellWide {
-    #[default]
-    Narrow,
-    /// First cell of a double-width character.
-    Wide,
-    /// Second cell of a double-width character (no glyph).
-    SpacerTail,
-    /// Padding before a wide char at a soft-wrap boundary (no glyph).
-    SpacerHead,
-}
-
-impl From<i32> for CellWide {
-    fn from(value: i32) -> Self {
-        match value {
-            v if v == VtCellWide::WIDE => Self::Wide,
-            v if v == VtCellWide::SPACER_TAIL => Self::SpacerTail,
-            v if v == VtCellWide::SPACER_HEAD => Self::SpacerHead,
-            _ => Self::Narrow,
-        }
-    }
-}
-
-/// The engine's resolved 256-color palette, fetched once per lock hold and
-/// threaded through batch row reads (see `read_screen_row_visit`).
-pub type Palette = [VtColorRgb; 256];
-
-/// Cell text with inline storage for short content. Almost every cell is a
-/// single codepoint (≤4 UTF-8 bytes); heap-allocating a `String` per cell was
-/// the dominant harvest cost (61 ns/cell, 91% of PTY time under scroll floods).
-/// Content up to 22 bytes — every single codepoint and all common grapheme
-/// clusters — stays inline; longer clusters (rare ZWJ chains) spill to heap.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CellText(CellTextRepr);
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum CellTextRepr {
-    Inline { len: u8, buf: [u8; 22] },
-    Heap(String),
-}
-
-impl CellText {
-    pub fn from_char(c: char) -> Self {
-        let mut buf = [0u8; 22];
-        let len = c.encode_utf8(&mut buf).len() as u8;
-        CellText(CellTextRepr::Inline { len, buf })
-    }
-
-    pub fn as_str(&self) -> &str {
-        match &self.0 {
-            // Invariant: constructors only store valid UTF-8 prefixes.
-            CellTextRepr::Inline { len, buf } => unsafe {
-                str::from_utf8_unchecked(&buf[..*len as usize])
-            },
-            CellTextRepr::Heap(s) => s,
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        match &self.0 {
-            CellTextRepr::Inline { len, .. } => *len == 0,
-            CellTextRepr::Heap(s) => s.is_empty(),
-        }
-    }
-}
-
-impl Default for CellText {
-    fn default() -> Self {
-        CellText(CellTextRepr::Inline {
-            len: 0,
-            buf: [0; 22],
-        })
-    }
-}
-
-impl From<&str> for CellText {
-    fn from(s: &str) -> Self {
-        if s.len() <= 22 {
-            let mut buf = [0u8; 22];
-            buf[..s.len()].copy_from_slice(s.as_bytes());
-            CellText(CellTextRepr::Inline {
-                len: s.len() as u8,
-                buf,
-            })
-        } else {
-            CellText(CellTextRepr::Heap(s.to_string()))
-        }
-    }
-}
-
-impl From<String> for CellText {
-    fn from(s: String) -> Self {
-        if s.len() <= 22 {
-            CellText::from(s.as_str())
-        } else {
-            CellText(CellTextRepr::Heap(s))
-        }
-    }
-}
-
-impl ops::Deref for CellText {
-    type Target = str;
-    fn deref(&self) -> &str {
-        self.as_str()
-    }
-}
-
-/// One sparse cell of a [`ScreenRowRead`], with inline [`CellText`] instead of
-/// a per-cell `String`.
-/// Test-only: production reads visit cells in place (`read_screen_row_visit`).
+pub use crate::ghostty::error::{Error, Result};
+use crate::ghostty::types::color_from_vt;
+pub use crate::ghostty::types::{
+    CellText, CellWide, Color, Palette, PlacementScreenPos, ScreenRowMeta, ScrollbarInfo,
+    SnapshotColors, SnapshotCursor, SnapshotPlacement, SnapshotStyle, Underline,
+};
 #[cfg(test)]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RowCell {
-    pub x: u16,
-    /// Grapheme cluster for the cell. Empty for blank cells.
-    pub text: CellText,
-    pub wide: CellWide,
-    pub style: SnapshotStyle,
-}
-
-/// Row-level results of a [`GhosttyTerminal::read_screen_row_visit`] walk —
-/// everything about the row that is not a per-cell callback.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ScreenRowMeta {
-    /// This row soft-wraps into the next one (logical-line join point).
-    pub wrapped: bool,
-    /// OSC 133 `;A` tag: this row starts a prompt (harvest attribution anchor).
-    pub prompt_start: bool,
-    /// This row holds a kitty unicode placeholder.
-    pub virtual_placeholder: bool,
-    /// OSC 8 spans: `(start_col, end_col_inclusive, uri)`.
-    pub hyperlinks: Vec<(u16, u16, String)>,
-}
-
-/// A materialized styled row read — test-only convenience over the visitor.
-/// `cells` follows the snapshot convention: sparse (blank default cells are
-/// skipped), ascending `x`, with `y` fixed at 0 (row-local).
-#[cfg(test)]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ScreenRowRead {
-    pub cells: Vec<RowCell>,
-    /// This row soft-wraps into the next one (logical-line join point).
-    pub wrapped: bool,
-    /// OSC 133 `;A` tag: this row starts a prompt (harvest attribution anchor).
-    pub prompt_start: bool,
-    /// OSC 8 spans: `(start_col, end_col_inclusive, uri)`.
-    pub hyperlinks: Vec<(u16, u16, String)>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SnapshotCursor {
-    pub x: u16,
-    pub y: u16,
-    /// `true` when the cursor should be shown — DECTCEM on **and** within the
-    /// viewport (render-state `CURSOR_VISIBLE` ∧ `CURSOR_VIEWPORT_HAS_VALUE`).
-    pub visible: bool,
-    /// DECSCUSR shape from the render-state `CURSOR_VISUAL_STYLE`.
-    pub shape: ansi::CursorShape,
-    /// Modes-based blink from the render-state `CURSOR_BLINKING`.
-    pub blinking: bool,
-}
-
-/// The terminal's effective default colors from the render state:
-/// `fg`/`bg` (OSC 10/11, always present) and `cursor` (OSC 12, only when set).
-/// These become the `term_colors` OSC-override layer over the config palette.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct SnapshotColors {
-    pub fg: ColorRgb,
-    pub bg: ColorRgb,
-    pub cursor: Option<ColorRgb>,
-    /// The **effective** window background (terminal-level `COLOR_BACKGROUND`): an
-    /// OSC 11 override, or the config default pushed at init, or `None` when no bg
-    /// is set at all. The renderer compares it to the config default to tell an OSC
-    /// 11 override from a reset/default and keep config opacity/image.
-    pub bg_override: Option<ColorRgb>,
-}
-
-/// A kitty-graphics placement captured from the engine. Positions are
-/// **viewport-relative** (`placement_viewport_pos` already did scroll/cull), so the
-/// renderer uses them directly — no `dest_row − (history_size − display_offset)`.
-/// Virtual placements (unicode placeholders) carry only `image_id`/`is_virtual`
-/// (the engine returns no position for them); terminal positions those from the
-/// placeholder cells instead.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SnapshotPlacement {
-    pub image_id: u32,
-    /// Kitty placement ID. Distinguishes multiple placements of one image; needed
-    /// to associate virtual-placeholder runs with the right placement.
-    pub placement_id: u32,
-    pub is_virtual: bool,
-    /// Viewport-relative top-left. `row` may be negative (scrolled partly above).
-    pub viewport_col: i32,
-    pub viewport_row: i32,
-    /// Rendered pixel size of the placement.
-    pub pixel_width: u32,
-    pub pixel_height: u32,
-    /// Grid cells the placement spans.
-    pub grid_cols: u32,
-    pub grid_rows: u32,
-    /// Sub-cell pixel offsets (kitty `X=`/`Y=`).
-    pub cell_x_offset: u32,
-    pub cell_y_offset: u32,
-    /// Resolved source rectangle in image pixels (kitty `x=`/`y=`/`w=`/`h=`).
-    pub source_x: u32,
-    pub source_y: u32,
-    pub source_width: u32,
-    pub source_height: u32,
-    pub z: i32,
-}
-
-/// Geometry of one non-virtual kitty placement in absolute rows.
-/// For frozen blocks ([`GhosttyTerminal::block_placements`]) the rows are
-/// block-relative — the same row space `BlockRef::read_row_visit` reads.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PlacementScreenPos {
-    pub image_id: u32,
-    pub placement_id: u32,
-    /// Absolute SCREEN column/row of the placement's top-left pin.
-    pub screen_col: u32,
-    pub screen_row: u32,
-    pub grid_cols: u32,
-    pub grid_rows: u32,
-    pub source_x: u32,
-    pub source_y: u32,
-    pub source_width: u32,
-    pub source_height: u32,
-    pub z: i32,
-}
-
-/// Engine scrollbar geometry (a terminal-side `Eq` mirror of the FFI
-/// `TerminalScrollbar`): `total` scrollable rows, `offset` of the viewport top in
-/// that area (top-anchored, `0..total-len`), `len` visible rows.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ScrollbarInfo {
-    pub total: u64,
-    pub offset: u64,
-    pub len: u64,
-}
+pub use crate::ghostty::types::{RowCell, ScreenRowRead};
 
 /// VT mode identifiers for [`GhosttyTerminal::mode`].
 ///
 /// Values mirror Ghostty's `ModeTag` (packed `u16`): a DEC private mode uses its
 /// raw number; an ANSI mode sets bit 15. See Ghostty `src/terminal/modes.zig`.
-pub mod mode {
-    /// DECCKM — application cursor keys.
-    pub const CURSOR_KEYS: u16 = 1;
-    /// IRM — insert/replace (ANSI mode 4).
-    pub const INSERT: u16 = 4 | 0x8000;
-    /// DECAWM — autowrap / line wrap.
-    pub const WRAPAROUND: u16 = 7;
-    /// DECTCEM — cursor visible.
-    pub const CURSOR_VISIBLE: u16 = 25;
-    /// DECKPAM — application keypad.
-    pub const KEYPAD_KEYS: u16 = 66;
-    pub const MOUSE_NORMAL: u16 = 1000;
-    pub const MOUSE_BUTTON: u16 = 1002;
-    pub const MOUSE_ANY: u16 = 1003;
-    pub const FOCUS_EVENT: u16 = 1004;
-    pub const MOUSE_UTF8: u16 = 1005;
-    pub const MOUSE_SGR: u16 = 1006;
-    pub const MOUSE_ALTERNATE_SCROLL: u16 = 1007;
-    pub const MOUSE_URXVT: u16 = 1015;
-    pub const MOUSE_SGR_PIXELS: u16 = 1016;
-    pub const ALT_SCREEN: u16 = 1049;
-    pub const BRACKETED_PASTE: u16 = 2004;
-    /// DEC synchronized output keeps a TUI frame private until its matching reset.
-    pub const SYNC_OUTPUT: u16 = 2026;
-}
+pub mod mode;
 
 /// State the terminal's synchronous callbacks write into during `write_vt`.
 /// Owned behind a `Box` so its address is stable for the FFI userdata pointer.
