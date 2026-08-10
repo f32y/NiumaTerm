@@ -21,8 +21,8 @@ use notify::{
 use toml::{Table as TomlTable, Value as TomlValue};
 use tracing::warn;
 
-use super::opacity::surface_background_opacity;
-use super::state::AppSettings;
+use crate::ui::settings::opacity::surface_background_opacity;
+use crate::ui::settings::state::AppSettings;
 use crate::ui::{UI_BORDER_OPACITY, UI_RADIUS};
 
 /// Apply the UI half of a terminal theme, falling back to the built-in dark

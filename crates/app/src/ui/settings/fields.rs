@@ -8,7 +8,9 @@ use gpui_component::setting::SettingField;
 use gpui_component::slider::{Slider, SliderEvent, SliderState};
 use gpui_component::{ActiveTheme as _, AxisExt as _, Disableable as _, h_flex};
 
-use super::state::{AppSettings, clamp_background_image_opacity, clamp_background_opacity};
+use crate::ui::settings::state::{
+    AppSettings, clamp_background_image_opacity, clamp_background_opacity,
+};
 
 #[derive(Clone, Copy)]
 enum OpacityTarget {
