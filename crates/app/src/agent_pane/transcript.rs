@@ -1042,12 +1042,7 @@ impl AgentPane {
             .gap_2()
             .items_center()
             .px_1()
-            .child(h_flex().gap_1().children((0..3).map(|i| {
-                div()
-                    .size(px(4.))
-                    .rounded_full()
-                    .bg(cx.theme().muted_foreground.opacity(0.85 - 0.28 * i as f32))
-            })))
+            .child(WorkingIndicator::new(cx.theme().muted_foreground))
             .child(
                 div()
                     .text_xs()
