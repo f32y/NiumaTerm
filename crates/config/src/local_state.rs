@@ -206,6 +206,26 @@ pub fn save(state: &LocalState) -> io::Result<()> {
     save_to(&local_state_file_path(), state)
 }
 
+/// Replace the agent defaults without replacing window state that may have
+/// been written by a different application instance.
+pub fn save_agent_defaults(agent_defaults: &BTreeMap<String, AgentDefaults>) -> io::Result<()> {
+    save_agent_defaults_to(&local_state_file_path(), agent_defaults)
+}
+
+fn save_agent_defaults_to(
+    path: &Path,
+    agent_defaults: &BTreeMap<String, AgentDefaults>,
+) -> io::Result<()> {
+    let mut state = match fs::read_to_string(path) {
+        Ok(content) => parse_toml(&content)
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => LocalState::default(),
+        Err(err) => return Err(err),
+    };
+    state.agent_defaults.clone_from(agent_defaults);
+    save_to(path, &state)
+}
+
 fn save_to(path: &Path, state: &LocalState) -> io::Result<()> {
     let content = serialize_toml(state)
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
@@ -323,6 +343,61 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         fs::write(&path, "not [ valid").unwrap();
         assert!(try_load_from(&path).is_err());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn save_agent_defaults_updates_only_agent_defaults() {
+        let dir = env::temp_dir().join("NiumaTerm-local-state-agent-defaults-test");
+        let _ = fs::remove_dir_all(&dir);
+        let path = dir.join("local_state.toml");
+        let initial = LocalState {
+            windows: vec![WindowLocalState {
+                window: Some(WindowState {
+                    x: 10.0,
+                    y: 20.0,
+                    width: 900.0,
+                    height: 600.0,
+                    maximized: false,
+                }),
+                session: None,
+                sidebar_width: Some(240.0),
+            }],
+            agent_defaults: BTreeMap::from([(
+                "claude".to_string(),
+                AgentDefaults {
+                    model: Some("sonnet".to_string()),
+                    ..AgentDefaults::default()
+                },
+            )]),
+        };
+        save_to(&path, &initial).unwrap();
+
+        let defaults = BTreeMap::from([
+            (
+                "claude".to_string(),
+                AgentDefaults {
+                    model: Some("opus".to_string()),
+                    approval: Some("acceptEdits".to_string()),
+                    ..AgentDefaults::default()
+                },
+            ),
+            (
+                "codex".to_string(),
+                AgentDefaults {
+                    model: Some("gpt-5.6-codex".to_string()),
+                    effort: Some("high".to_string()),
+                    ..AgentDefaults::default()
+                },
+            ),
+        ]);
+
+        save_agent_defaults_to(&path, &defaults).unwrap();
+
+        let saved = try_load_from(&path).unwrap();
+        assert_eq!(saved.windows, initial.windows);
+        assert_eq!(saved.agent_defaults, defaults);
 
         let _ = fs::remove_dir_all(&dir);
     }

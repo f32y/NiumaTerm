@@ -1420,9 +1420,17 @@ impl AgentPane {
     /// conversations launched from this profile. Called after every
     /// user-driven settings change (dropdowns and slash commands).
     pub(super) fn remember_thread_defaults(&self, cx: &mut Context<Self>) {
-        cx.default_global::<AgentThreadDefaults>()
-            .0
-            .insert(self.defaults_key(), self.settings.clone());
+        let stored = {
+            let defaults = cx.default_global::<AgentThreadDefaults>();
+            defaults
+                .0
+                .insert(self.defaults_key(), self.settings.clone());
+            defaults.to_local_state()
+        };
+
+        if let Err(err) = local_state::save_agent_defaults(&stored) {
+            warn!("failed to save agent defaults to local_state.toml: {err}");
+        }
     }
 
     pub(super) fn append_delta(
