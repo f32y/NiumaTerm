@@ -27,7 +27,7 @@ fn finished_block(vt: &[u8], cols: u16, rows: u16) -> (GhosttyTerminal, HandleIt
     let info = HandleItemInfo {
         handle,
         rows,
-        accent: terminal::terminal_view::BLOCK_SUCCESS_COLOR,
+        accent: terminal::theme::BLOCK_SUCCESS_COLOR,
         header: Some("cmd · ✓".into()),
     };
     (t, info)
@@ -402,10 +402,10 @@ fn chrome_keys_off_metadata() {
     });
 
     let info1 = handle_item_info(&store.items()[0]).unwrap();
-    assert_eq!(info1.accent, terminal::terminal_view::BLOCK_SUCCESS_COLOR);
+    assert_eq!(info1.accent, terminal::theme::BLOCK_SUCCESS_COLOR);
     assert_eq!(info1.header.as_deref(), Some("build · ✓ 2.0s"));
     let info2 = handle_item_info(&store.items()[1]).unwrap();
-    assert_eq!(info2.accent, terminal::terminal_view::BLOCK_FAILURE_COLOR);
+    assert_eq!(info2.accent, terminal::theme::BLOCK_FAILURE_COLOR);
     assert_eq!(info2.header.as_deref(), Some("bad · ✗ 127"));
 }
 
@@ -475,7 +475,7 @@ fn nav_item_top_walks_items() {
 fn live_chrome_hides_running_header() {
     let chrome = live_chrome(3, 2, 10.0, true, true).unwrap();
     assert_eq!((chrome.item, chrome.top, chrome.bottom), (3, 0.0, 20.0));
-    assert_eq!(chrome.accent, terminal::terminal_view::BLOCK_RUNNING_COLOR);
+    assert_eq!(chrome.accent, terminal::theme::BLOCK_RUNNING_COLOR);
     assert_eq!(chrome.header, None);
     assert!(chrome.selected);
 
@@ -486,7 +486,7 @@ fn live_chrome_hides_running_header() {
 fn live_chrome_marks_idle_prompt() {
     let chrome = live_chrome(2, 3, 10.0, false, true).unwrap();
     assert_eq!((chrome.item, chrome.top, chrome.bottom), (2, 0.0, 30.0));
-    assert_eq!(chrome.accent, terminal::terminal_view::BLOCK_INPUT_COLOR);
+    assert_eq!(chrome.accent, terminal::theme::BLOCK_INPUT_COLOR);
     assert_eq!(chrome.header, None);
     assert!(chrome.selected);
 
