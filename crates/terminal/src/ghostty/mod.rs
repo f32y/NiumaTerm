@@ -6,38 +6,28 @@ use std::{array, mem, os, path, ptr, slice};
 /// type; lookup is by id, `generation` is the data version for cache keys.
 pub use libghostty_vt_sys::BlockHandle;
 use libghostty_vt_sys::{
-    ColorRgb as VtColorRgb, Formatter as VtFormatter, FormatterFormat as VtFormatterFormat,
-    FormatterTerminalExtra as VtFormatterTerminalExtra,
-    FormatterTerminalOptions as VtFormatterTerminalOptions, GridRef as VtGridRef,
-    KITTY_KEY_DISAMBIGUATE, KITTY_KEY_REPORT_ALL, KITTY_KEY_REPORT_ALTERNATES,
-    KITTY_KEY_REPORT_ASSOCIATED, KITTY_KEY_REPORT_EVENTS, KittyGraphics as VtKittyGraphics,
+    ColorRgb as VtColorRgb, GridRef as VtGridRef, KITTY_KEY_DISAMBIGUATE, KITTY_KEY_REPORT_ALL,
+    KITTY_KEY_REPORT_ALTERNATES, KITTY_KEY_REPORT_ASSOCIATED, KITTY_KEY_REPORT_EVENTS,
+    KittyGraphics as VtKittyGraphics,
     KittyGraphicsPlacementIterator as VtKittyGraphicsPlacementIterator,
     PointCoordinate as VtPointCoordinate, PointTag as VtPointTag, RenderState as VtRenderState,
-    RenderStateCursorVisualStyle as VtRenderStateCursorVisualStyle,
-    RenderStateData as VtRenderStateData, RenderStateDirty as VtRenderStateDirty,
-    RenderStateOption as VtRenderStateOption, RenderStateRowData as VtRenderStateRowData,
-    RenderStateRowIterator as VtRenderStateRowIterator,
-    RenderStateRowOption as VtRenderStateRowOption, Result as VtResult, Selection as VtSelection,
-    String as VtString, Terminal as VtTerminal, TerminalCursorStyle as VtTerminalCursorStyle,
+    RenderStateRowIterator as VtRenderStateRowIterator, Result as VtResult, String as VtString,
+    Terminal as VtTerminal, TerminalCursorStyle as VtTerminalCursorStyle,
     TerminalData as VtTerminalData, TerminalOption as VtTerminalOption,
     TerminalOptions as VtTerminalOptions, TerminalScrollViewport as VtTerminalScrollViewport,
     TerminalScrollViewportTag as VtTerminalScrollViewportTag,
     TerminalScrollViewportValue as VtTerminalScrollViewportValue,
-    TerminalScrollbar as VtTerminalScrollbar, ghostty_formatter_format_alloc,
-    ghostty_formatter_free, ghostty_formatter_terminal_new, ghostty_free,
-    ghostty_kitty_graphics_image, ghostty_kitty_graphics_placement_iterator_free,
-    ghostty_kitty_graphics_placement_iterator_new, ghostty_render_state_free,
-    ghostty_render_state_get, ghostty_render_state_new, ghostty_render_state_row_get,
-    ghostty_render_state_row_iterator_free, ghostty_render_state_row_iterator_new,
-    ghostty_render_state_row_iterator_next, ghostty_render_state_row_set, ghostty_render_state_set,
-    ghostty_render_state_update, ghostty_terminal_free, ghostty_terminal_get,
+    TerminalScrollbar as VtTerminalScrollbar, ghostty_kitty_graphics_image,
+    ghostty_kitty_graphics_placement_iterator_free, ghostty_kitty_graphics_placement_iterator_new,
+    ghostty_render_state_free, ghostty_render_state_new, ghostty_render_state_row_iterator_free,
+    ghostty_render_state_row_iterator_new, ghostty_terminal_free, ghostty_terminal_get,
     ghostty_terminal_mode_get, ghostty_terminal_new, ghostty_terminal_point_from_grid_ref,
     ghostty_terminal_resize, ghostty_terminal_scroll_viewport, ghostty_terminal_set,
-    ghostty_terminal_vt_write, sized as vt_sized,
+    ghostty_terminal_vt_write,
 };
 #[cfg(test)]
 use libghostty_vt_sys::{
-    Row as VtRow, RowData as VtRowData, RowSemanticPrompt as VtRowSemanticPrompt, ghostty_row_get,
+    RowSemanticPrompt as VtRowSemanticPrompt, Selection as VtSelection, sized as vt_sized,
 };
 #[cfg(test)]
 use nmt_config::colors::ColorRgb;
@@ -47,14 +37,17 @@ use rustc_hash::FxHashMap;
 #[cfg(test)]
 use crate::graphics;
 use crate::pwd::pwd_to_path;
+#[cfg(test)]
 use crate::render_buffer::RenderBuffer;
 use crate::{ansi, clipboard, terminal};
 
 mod block;
 mod callbacks;
 mod error;
+mod format;
 mod grid_read;
 mod kitty;
+mod render_state;
 mod types;
 
 pub use crate::ghostty::block::{AcquiredBlock, BlockRef};
@@ -641,191 +634,6 @@ impl GhosttyTerminal {
         );
     }
 
-    /// Probe: whether any visible row carries a PROMPT semantic tag (command-blocks-
-    /// rendering — mark-forwarding regression checks in terminal pipeline tests).
-    #[cfg(test)]
-    pub(crate) fn has_prompt_tagged_row(&mut self) -> bool {
-        self.row_semantic_prompts()
-            .map(|tags| tags.iter().any(|&t| t == VtRowSemanticPrompt::PROMPT))
-            .unwrap_or(false)
-    }
-
-    /// Probe the engine's `SEMANTIC_PROMPT` tag per visible row. This verifies that
-    /// headless parsing preserves OSC 133 metadata used by command-block rendering.
-    #[cfg(test)]
-    fn row_semantic_prompts(&mut self) -> Result<Vec<VtRowSemanticPrompt::Type>> {
-        Error::from_code(unsafe { ghostty_render_state_update(self.render_state, self.terminal) })?;
-
-        Error::from_code(unsafe {
-            ghostty_render_state_get(
-                self.render_state,
-                VtRenderStateData::ROW_ITERATOR,
-                (&mut self.row_iter as *mut VtRenderStateRowIterator).cast(),
-            )
-        })?;
-
-        let mut out = Vec::with_capacity(self.rows as usize);
-
-        while unsafe { ghostty_render_state_row_iterator_next(self.row_iter) } {
-            let mut tag: VtRowSemanticPrompt::Type = VtRowSemanticPrompt::NONE;
-            let mut raw_row: VtRow = 0;
-
-            if unsafe {
-                ghostty_render_state_row_get(
-                    self.row_iter,
-                    VtRenderStateRowData::RAW,
-                    (&mut raw_row as *mut VtRow).cast(),
-                )
-            } == VtResult::SUCCESS
-            {
-                let _ = unsafe {
-                    ghostty_row_get(
-                        raw_row,
-                        VtRowData::SEMANTIC_PROMPT,
-                        (&mut tag as *mut VtRowSemanticPrompt::Type).cast(),
-                    )
-                };
-            }
-
-            out.push(tag);
-        }
-
-        Ok(out)
-    }
-
-    /// Populate a reusable render buffer from the full visible viewport.
-    pub fn snapshot_into(&mut self, buffer: &mut RenderBuffer) -> Result<()> {
-        Error::from_code(unsafe { ghostty_render_state_update(self.render_state, self.terminal) })?;
-
-        self.consume_render_damage()?;
-
-        let cursor = self.cursor().unwrap_or(SnapshotCursor {
-            x: 0,
-            y: 0,
-            visible: false,
-            shape: ansi::CursorShape::Block,
-            blinking: false,
-        });
-
-        let palette = self.color_palette();
-
-        buffer.begin_capture(self.cols as usize, self.rows as usize);
-
-        // A transient row lookup failure blanks only that row; publishing the
-        // remaining viewport is safer than withholding an otherwise valid frame.
-        for y in 0..self.rows {
-            let meta = self
-                .grid_ref_at(VtPointTag::VIEWPORT, 0, y as u32)
-                .and_then(|grid_ref| {
-                    Self::visit_row_cells(grid_ref, self.cols, &palette, |x, text, wide, style| {
-                        buffer.write_cell(x as usize, y as usize, text.as_str(), wide, &style);
-                    })
-                })
-                .unwrap_or_default();
-
-            buffer.write_row_meta(y as usize, meta.wrapped, meta.virtual_placeholder);
-        }
-
-        let colors = self.colors();
-        let placements = self.placements();
-        let scrollbar = self.scrollbar();
-
-        buffer.finish_capture(cursor, colors, placements, scrollbar, &self.row_versions);
-
-        Ok(())
-    }
-
-    /// Transfer Ghostty's transient render damage into persistent row versions.
-    /// Both damage layers must be cleared after consumption; otherwise every
-    /// later capture would repeat the first dirty update indefinitely.
-    fn consume_render_damage(&mut self) -> Result<()> {
-        let mut dirty: VtRenderStateDirty::Type = VtRenderStateDirty::FALSE;
-
-        Error::from_code(unsafe {
-            ghostty_render_state_get(
-                self.render_state,
-                VtRenderStateData::DIRTY,
-                (&mut dirty as *mut VtRenderStateDirty::Type).cast(),
-            )
-        })?;
-
-        let rows = self.rows as usize;
-        let dimensions_changed = self.row_versions.len() != rows;
-
-        if dirty == VtRenderStateDirty::FALSE && !dimensions_changed {
-            return Ok(());
-        }
-
-        self.content_revision = self.content_revision.wrapping_add(1);
-
-        let revision = self.content_revision;
-
-        self.row_versions.resize(rows, revision);
-
-        let full = dimensions_changed || dirty != VtRenderStateDirty::PARTIAL;
-        if full {
-            self.row_versions.fill(revision);
-        }
-
-        Error::from_code(unsafe {
-            ghostty_render_state_get(
-                self.render_state,
-                VtRenderStateData::ROW_ITERATOR,
-                (&mut self.row_iter as *mut VtRenderStateRowIterator).cast(),
-            )
-        })?;
-
-        let clean = false;
-        let mut row = 0usize;
-
-        while unsafe { ghostty_render_state_row_iterator_next(self.row_iter) } {
-            let mut row_dirty = false;
-
-            Error::from_code(unsafe {
-                ghostty_render_state_row_get(
-                    self.row_iter,
-                    VtRenderStateRowData::DIRTY,
-                    (&mut row_dirty as *mut bool).cast(),
-                )
-            })?;
-
-            if !full && row_dirty {
-                if let Some(version) = self.row_versions.get_mut(row) {
-                    *version = revision;
-                }
-            }
-
-            Error::from_code(unsafe {
-                ghostty_render_state_row_set(
-                    self.row_iter,
-                    VtRenderStateRowOption::DIRTY,
-                    (&clean as *const bool).cast(),
-                )
-            })?;
-
-            row += 1;
-        }
-
-        let clean = VtRenderStateDirty::FALSE;
-
-        Error::from_code(unsafe {
-            ghostty_render_state_set(
-                self.render_state,
-                VtRenderStateOption::DIRTY,
-                (&clean as *const VtRenderStateDirty::Type).cast(),
-            )
-        })
-    }
-
-    /// Allocate and populate an owned render buffer for diagnostics and tests.
-    pub fn snapshot(&mut self) -> Result<RenderBuffer> {
-        let mut buffer = RenderBuffer::new(self.cols as usize, self.rows as usize);
-
-        self.snapshot_into(&mut buffer)?;
-
-        Ok(buffer)
-    }
-
     /// The engine's current 256-color palette (OSC 4 overrides applied). Used to
     /// resolve palette-tagged style colors into concrete RGB at read time — by
     /// the harvester (once per batch) and by app-side `BlockRef` readers (once
@@ -865,100 +673,6 @@ impl GhosttyTerminal {
                 Ok(None)
             }
         }
-    }
-
-    /// Export terminal text via the engine formatter. `selection = None`
-    /// formats the whole screen + scrollback; otherwise only the selection range.
-    /// `unwrap` rejoins soft-wrapped lines (no inserted newline at a wrap point);
-    /// `trim` drops trailing blanks. Used for selection-to-string and the search
-    /// corpus.
-    pub fn format_text(
-        &mut self,
-        selection: Option<&VtSelection>,
-        unwrap: bool,
-        trim: bool,
-    ) -> Result<String> {
-        self.format_terminal(VtFormatterFormat::PLAIN, selection, unwrap, trim)
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-    }
-
-    /// Export the complete terminal state as a VT stream. Replaying the returned
-    /// bytes reconstructs the current screen, styles, modes, palette, and cursor,
-    /// which lets a newly attached client start from a consistent checkpoint.
-    pub fn format_vt_state(&mut self) -> Result<Vec<u8>> {
-        self.format_terminal(VtFormatterFormat::VT, None, false, false)
-    }
-
-    fn format_terminal(
-        &mut self,
-        emit: VtFormatterFormat::Type,
-        selection: Option<&VtSelection>,
-        unwrap: bool,
-        trim: bool,
-    ) -> Result<Vec<u8>> {
-        let mut opts = vt_sized!(VtFormatterTerminalOptions);
-
-        opts.emit = emit;
-        opts.unwrap = unwrap;
-        opts.trim = trim;
-        opts.extra = vt_sized!(VtFormatterTerminalExtra);
-        opts.selection = selection
-            .map(|s| s as *const VtSelection)
-            .unwrap_or(ptr::null());
-
-        let mut formatter: VtFormatter = ptr::null_mut();
-
-        Error::from_code(unsafe {
-            ghostty_formatter_terminal_new(ptr::null(), &mut formatter, self.terminal, opts)
-        })?;
-
-        let mut out_ptr: *mut u8 = ptr::null_mut();
-        let mut out_len: usize = 0;
-
-        let res = Error::from_code(unsafe {
-            ghostty_formatter_format_alloc(formatter, ptr::null(), &mut out_ptr, &mut out_len)
-        });
-
-        let bytes = res.map(|_| {
-            if out_ptr.is_null() || out_len == 0 {
-                Vec::new()
-            } else {
-                let bytes = unsafe { slice::from_raw_parts(out_ptr, out_len) };
-                bytes.to_vec()
-            }
-        });
-
-        if !out_ptr.is_null() {
-            unsafe { ghostty_free(ptr::null(), out_ptr, out_len) };
-        }
-
-        unsafe { ghostty_formatter_free(formatter) };
-
-        bytes
-    }
-
-    /// Selection-to-string for a SCREEN-coordinate range (inclusive endpoints).
-    /// Used when the selection reaches past the viewport into scrollback:
-    /// the O(scrollback) endpoint resolve is one-shot on copy, and the extract is
-    /// O(selection).
-    pub fn format_screen_range(
-        &mut self,
-        start: (u16, u32),
-        end: (u16, u32),
-        rectangle: bool,
-        unwrap: bool,
-        trim: bool,
-    ) -> Result<String> {
-        let start_ref = self.grid_ref_at(VtPointTag::SCREEN, start.0, start.1)?;
-        let end_ref = self.grid_ref_at(VtPointTag::SCREEN, end.0, end.1)?;
-
-        let mut sel = vt_sized!(VtSelection);
-
-        sel.start = start_ref;
-        sel.end = end_ref;
-        sel.rectangle = rectangle;
-
-        self.format_text(Some(&sel), unwrap, trim)
     }
 
     /// Scroll the viewport by `delta` rows (negative = up into scrollback).
@@ -1010,170 +724,6 @@ impl GhosttyTerminal {
         };
 
         unsafe { ghostty_terminal_scroll_viewport(self.terminal, behavior) };
-    }
-
-    fn cursor(&self) -> Result<SnapshotCursor> {
-        let mut visible = false;
-
-        Error::from_code(unsafe {
-            ghostty_render_state_get(
-                self.render_state,
-                VtRenderStateData::CURSOR_VISIBLE,
-                (&mut visible as *mut bool).cast(),
-            )
-        })?;
-
-        // DECSCUSR shape and modes-based blink come from the render state.
-        let mut style: VtRenderStateCursorVisualStyle::Type = VtRenderStateCursorVisualStyle::BLOCK;
-
-        let _ = unsafe {
-            ghostty_render_state_get(
-                self.render_state,
-                VtRenderStateData::CURSOR_VISUAL_STYLE,
-                (&mut style as *mut VtRenderStateCursorVisualStyle::Type).cast(),
-            )
-        };
-
-        let shape = match style {
-            VtRenderStateCursorVisualStyle::BAR => ansi::CursorShape::Beam,
-            VtRenderStateCursorVisualStyle::UNDERLINE => ansi::CursorShape::Underline,
-            // BLOCK and BLOCK_HOLLOW → Block (terminal renders hollow from focus state).
-            _ => ansi::CursorShape::Block,
-        };
-
-        let mut blinking = false;
-
-        let _ = unsafe {
-            ghostty_render_state_get(
-                self.render_state,
-                VtRenderStateData::CURSOR_BLINKING,
-                (&mut blinking as *mut bool).cast(),
-            )
-        };
-
-        let mut has_viewport = false;
-
-        Error::from_code(unsafe {
-            ghostty_render_state_get(
-                self.render_state,
-                VtRenderStateData::CURSOR_VIEWPORT_HAS_VALUE,
-                (&mut has_viewport as *mut bool).cast(),
-            )
-        })?;
-
-        if !has_viewport {
-            return Ok(SnapshotCursor {
-                x: 0,
-                y: 0,
-                visible: false,
-                shape,
-                blinking,
-            });
-        }
-
-        let mut x = 0u16;
-        let mut y = 0u16;
-
-        Error::from_code(unsafe {
-            ghostty_render_state_get(
-                self.render_state,
-                VtRenderStateData::CURSOR_VIEWPORT_X,
-                (&mut x as *mut u16).cast(),
-            )
-        })?;
-
-        Error::from_code(unsafe {
-            ghostty_render_state_get(
-                self.render_state,
-                VtRenderStateData::CURSOR_VIEWPORT_Y,
-                (&mut y as *mut u16).cast(),
-            )
-        })?;
-
-        Ok(SnapshotCursor {
-            x,
-            y,
-            visible,
-            shape,
-            blinking,
-        })
-    }
-
-    /// Effective default colors from the render-state.
-    fn colors(&self) -> SnapshotColors {
-        use nmt_config::colors::ColorRgb;
-
-        let read = |data: VtRenderStateData::Type| -> Option<ColorRgb> {
-            let mut c = VtColorRgb::default();
-
-            match unsafe {
-                ghostty_render_state_get(
-                    self.render_state,
-                    data,
-                    (&mut c as *mut VtColorRgb).cast(),
-                )
-            } {
-                VtResult::SUCCESS => Some(ColorRgb {
-                    r: c.r,
-                    g: c.g,
-                    b: c.b,
-                }),
-                _ => None,
-            }
-        };
-
-        let fg = read(VtRenderStateData::COLOR_FOREGROUND).unwrap_or_default();
-        let bg = read(VtRenderStateData::COLOR_BACKGROUND).unwrap_or_default();
-
-        let mut has_cursor = false;
-
-        let _ = unsafe {
-            ghostty_render_state_get(
-                self.render_state,
-                VtRenderStateData::COLOR_CURSOR_HAS_VALUE,
-                (&mut has_cursor as *mut bool).cast(),
-            )
-        };
-
-        let cursor = if has_cursor {
-            read(VtRenderStateData::COLOR_CURSOR)
-        } else {
-            None
-        };
-
-        // Detect OSC 11 overrides by comparing the effective background
-        // (override OR default) to the engine's *default* (ignoring OSC). Both come
-        // from the engine, so there's no config↔u8 conversion mismatch. An override
-        // is active iff they differ; `bg_override` is then `Some(effective)`.
-        let read_term = |data: VtTerminalData::Type| -> Option<ColorRgb> {
-            let mut c = VtColorRgb::default();
-
-            match unsafe {
-                ghostty_terminal_get(self.terminal, data, (&mut c as *mut VtColorRgb).cast())
-            } {
-                VtResult::SUCCESS => Some(ColorRgb {
-                    r: c.r,
-                    g: c.g,
-                    b: c.b,
-                }),
-                _ => None,
-            }
-        };
-
-        let bg_effective = read_term(VtTerminalData::COLOR_BACKGROUND);
-        let bg_default = read_term(VtTerminalData::COLOR_BACKGROUND_DEFAULT);
-        let bg_override = if bg_effective != bg_default {
-            bg_effective
-        } else {
-            None
-        };
-
-        SnapshotColors {
-            fg,
-            bg,
-            cursor,
-            bg_override,
-        }
     }
 }
 
