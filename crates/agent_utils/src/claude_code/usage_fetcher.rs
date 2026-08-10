@@ -13,9 +13,13 @@ use nmt_platform::{ChildEvent, EventedPty as _, ProcessReadWrite as _};
 use reqwest::StatusCode;
 use reqwest::blocking::Client;
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::hook_store::home_dir;
-use crate::usage::UsageSnapshot;
+use crate::usage::{
+    FIVE_HOUR_WINDOW_MINUTES, UsageSnapshot, UsageWindow, WEEKLY_WINDOW_MINUTES,
+    parse_timestamp_millis,
+};
 
 const OAUTH_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 const CLI_FETCH_TIMEOUT: Duration = Duration::from_secs(25);
@@ -65,12 +69,16 @@ struct ClaudeOauthCredentials {
 struct OAuthUsageResponse {
     five_hour: Option<OAuthUsageWindow>,
     seven_day: Option<OAuthUsageWindow>,
+    fable_weekly: Option<OAuthUsageWindow>,
+    fable_seven_day: Option<OAuthUsageWindow>,
+    seven_day_fable: Option<OAuthUsageWindow>,
 }
 
 #[derive(Deserialize)]
 struct OAuthUsageWindow {
     utilization: Option<f64>,
     used_percentage: Option<f64>,
+    resets_at: Option<Value>,
 }
 
 fn oauth_credentials_path() -> Option<PathBuf> {
@@ -116,8 +124,17 @@ fn parse_oauth_usage(bytes: &[u8]) -> Result<UsageSnapshot, String> {
     let response: OAuthUsageResponse = serde_json::from_slice(bytes)
         .map_err(|_| "Claude OAuth usage response was not valid JSON".to_string())?;
     let usage = UsageSnapshot {
-        five_hour_remaining: remaining_percentage(response.five_hour.as_ref()),
-        weekly_remaining: remaining_percentage(response.seven_day.as_ref()),
+        five_hour: oauth_window(response.five_hour.as_ref(), FIVE_HOUR_WINDOW_MINUTES),
+        weekly: oauth_window(response.seven_day.as_ref(), WEEKLY_WINDOW_MINUTES),
+        fable_weekly: oauth_window(
+            response
+                .fable_weekly
+                .as_ref()
+                .or(response.fable_seven_day.as_ref())
+                .or(response.seven_day_fable.as_ref()),
+            WEEKLY_WINDOW_MINUTES,
+        ),
+        ..UsageSnapshot::default()
     };
 
     if usage.is_unavailable() {
@@ -125,6 +142,13 @@ fn parse_oauth_usage(bytes: &[u8]) -> Result<UsageSnapshot, String> {
     } else {
         Ok(usage)
     }
+}
+
+fn oauth_window(window: Option<&OAuthUsageWindow>, window_minutes: u32) -> Option<UsageWindow> {
+    let window = window?;
+    let mut usage = UsageWindow::new(remaining_percentage(Some(window))?, window_minutes);
+    usage.resets_at = window.resets_at.as_ref().and_then(parse_timestamp_millis);
+    Some(usage)
 }
 
 fn remaining_percentage(window: Option<&OAuthUsageWindow>) -> Option<u8> {
@@ -190,7 +214,7 @@ pub fn fetch() -> Result<UsageSnapshot, String> {
 }
 
 pub fn fetch_with_cancel(cancelled: &AtomicBool) -> Result<UsageSnapshot, String> {
-    match fetch_via_oauth(cancelled) {
+    let result = match fetch_via_oauth(cancelled) {
         Ok(usage) => Ok(usage),
         Err(OAuthFetchError::Final(error)) => Err(error),
         Err(OAuthFetchError::Fallback(oauth_error)) => match fetch_via_cli(cancelled) {
@@ -200,7 +224,9 @@ pub fn fetch_with_cancel(cancelled: &AtomicBool) -> Result<UsageSnapshot, String
                 "Claude OAuth usage unavailable: {oauth_error}; interactive CLI fallback failed: {cli_error}"
             )),
         },
-    }
+    };
+
+    result.map(UsageSnapshot::with_updated_now)
 }
 
 fn fetch_via_cli(cancelled: &AtomicBool) -> Result<UsageSnapshot, String> {
@@ -338,8 +364,10 @@ pub fn parse_output(output: &str) -> Result<UsageSnapshot, String> {
     let normalized = strip_terminal_sequences(&output.replace("\r\n", "\n").replace('\r', "\n"));
     let lines: Vec<&str> = normalized.lines().collect();
     let usage = UsageSnapshot {
-        five_hour_remaining: extract_remaining_after_label(&lines, is_session_label),
-        weekly_remaining: extract_remaining_after_label(&lines, is_weekly_label),
+        five_hour: cli_window(&lines, is_session_label, FIVE_HOUR_WINDOW_MINUTES),
+        weekly: cli_window(&lines, is_weekly_label, WEEKLY_WINDOW_MINUTES),
+        fable_weekly: cli_window(&lines, is_fable_label, WEEKLY_WINDOW_MINUTES),
+        ..UsageSnapshot::default()
     };
 
     if usage.is_unavailable() {
@@ -347,6 +375,19 @@ pub fn parse_output(output: &str) -> Result<UsageSnapshot, String> {
     } else {
         Ok(usage)
     }
+}
+
+fn cli_window(
+    lines: &[&str],
+    matches_label: fn(&str) -> bool,
+    window_minutes: u32,
+) -> Option<UsageWindow> {
+    let mut usage = UsageWindow::new(
+        extract_remaining_after_label(lines, matches_label)?,
+        window_minutes,
+    );
+    usage.reset_description = extract_reset_description_after_label(lines, matches_label);
+    Some(usage)
 }
 
 fn extract_remaining_after_label(lines: &[&str], matches_label: fn(&str) -> bool) -> Option<u8> {
@@ -361,6 +402,32 @@ fn extract_remaining_after_label(lines: &[&str], matches_label: fn(&str) -> bool
             }
             if let Some(remaining) = parse_remaining_percentage(candidate) {
                 return Some(remaining);
+            }
+        }
+    }
+    None
+}
+
+fn extract_reset_description_after_label(
+    lines: &[&str],
+    matches_label: fn(&str) -> bool,
+) -> Option<String> {
+    for (index, line) in lines.iter().enumerate() {
+        if !matches_label(line) {
+            continue;
+        }
+
+        for (offset, candidate) in lines[index..lines.len().min(index + 12)].iter().enumerate() {
+            if offset > 0 && is_section_label(candidate) {
+                break;
+            }
+            let lower = candidate.to_ascii_lowercase();
+            let Some(reset_index) = lower.find("reset") else {
+                continue;
+            };
+            let description = candidate[reset_index..].trim();
+            if !description.is_empty() {
+                return Some(description.to_string());
             }
         }
     }
@@ -413,15 +480,19 @@ fn is_weekly_label(line: &str) -> bool {
             || lower.contains("7 day"))
 }
 
+fn is_fable_label(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    lower.contains("fable")
+        && (lower.trim() == "fable"
+            || lower.contains("current week")
+            || lower.contains("weekly")
+            || lower.contains("7-day")
+            || lower.contains("7 day"))
+}
+
 fn is_section_label(line: &str) -> bool {
     let lower = line.to_ascii_lowercase();
-    is_session_label(&lower)
-        || is_weekly_label(&lower)
-        || (lower.contains("fable")
-            && (lower.trim() == "fable"
-                || lower.contains("week")
-                || lower.contains("7-day")
-                || lower.contains("7 day")))
+    is_session_label(&lower) || is_weekly_label(&lower) || is_fable_label(&lower)
 }
 
 fn strip_terminal_sequences(input: &str) -> String {
@@ -522,18 +593,31 @@ mod tests {
             )
             .unwrap(),
             UsageSnapshot {
-                five_hour_remaining: Some(88),
-                weekly_remaining: Some(66),
+                five_hour: Some(UsageWindow::new(88, FIVE_HOUR_WINDOW_MINUTES)),
+                weekly: Some(UsageWindow::new(66, WEEKLY_WINDOW_MINUTES)),
+                ..UsageSnapshot::default()
             }
         );
         assert_eq!(
             parse_oauth_usage(br#"{"five_hour":{"utilization":120}}"#).unwrap(),
             UsageSnapshot {
-                five_hour_remaining: Some(0),
-                weekly_remaining: None,
+                five_hour: Some(UsageWindow::new(0, FIVE_HOUR_WINDOW_MINUTES)),
+                ..UsageSnapshot::default()
             }
         );
-        assert!(parse_oauth_usage(br#"{"fable_weekly":{"utilization":12}}"#).is_err());
+        assert_eq!(
+            parse_oauth_usage(br#"{"fable_seven_day":{"utilization":12,"resets_at":1770000000}}"#)
+                .unwrap(),
+            UsageSnapshot {
+                fable_weekly: Some(UsageWindow {
+                    remaining_percentage: 88,
+                    window_minutes: WEEKLY_WINDOW_MINUTES,
+                    resets_at: Some(1_770_000_000_000),
+                    reset_description: None,
+                }),
+                ..UsageSnapshot::default()
+            }
+        );
     }
 
     #[test]
@@ -555,8 +639,10 @@ mod tests {
         assert_eq!(
             parse_output(output).unwrap(),
             UsageSnapshot {
-                five_hour_remaining: Some(3),
-                weekly_remaining: Some(83),
+                five_hour: Some(UsageWindow::new(3, FIVE_HOUR_WINDOW_MINUTES)),
+                weekly: Some(UsageWindow::new(83, WEEKLY_WINDOW_MINUTES)),
+                fable_weekly: Some(UsageWindow::new(68, WEEKLY_WINDOW_MINUTES)),
+                ..UsageSnapshot::default()
             }
         );
     }
@@ -567,9 +653,25 @@ mod tests {
         assert_eq!(
             parse_output(output).unwrap(),
             UsageSnapshot {
-                five_hour_remaining: Some(62),
-                weekly_remaining: Some(42),
+                five_hour: Some(UsageWindow::new(62, FIVE_HOUR_WINDOW_MINUTES)),
+                weekly: Some(UsageWindow::new(42, WEEKLY_WINDOW_MINUTES)),
+                ..UsageSnapshot::default()
             }
+        );
+    }
+
+    #[test]
+    fn keeps_cli_reset_descriptions_with_their_windows() {
+        let output = "Current session\n62% left\nResets in 2h 5m\nCurrent week (all models)\n42% left\nResets Tue 9:00 AM\n";
+        let usage = parse_output(output).unwrap();
+
+        assert_eq!(
+            usage.five_hour.unwrap().reset_description.as_deref(),
+            Some("Resets in 2h 5m")
+        );
+        assert_eq!(
+            usage.weekly.unwrap().reset_description.as_deref(),
+            Some("Resets Tue 9:00 AM")
         );
     }
 

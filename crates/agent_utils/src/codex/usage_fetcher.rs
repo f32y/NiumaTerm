@@ -11,7 +11,10 @@ use serde_json::{Value, from_str};
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use crate::subprocess::KillOnCloseJob;
-use crate::usage::UsageSnapshot;
+use crate::usage::{
+    FIVE_HOUR_WINDOW_MINUTES, UsageResetCredits, UsageSnapshot, UsageWindow, WEEKLY_WINDOW_MINUTES,
+    parse_timestamp_millis,
+};
 
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -119,7 +122,8 @@ pub fn fetch() -> Result<UsageSnapshot, String> {
                 _ => {}
             }
         }
-    })();
+    })()
+    .map(UsageSnapshot::with_updated_now);
 
     // Closing stdin lets app-server observe EOF and exit cleanly together
     // with its shim; the bounded wait gives it that chance before force
@@ -162,19 +166,29 @@ fn parse_rate_limits(message: &Value) -> Result<UsageSnapshot, String> {
 
     let limits = &message["result"]["rateLimits"];
 
-    let left = |duration_mins| {
+    let window_for_duration = |duration_mins: u32| {
         ["primary", "secondary"].into_iter().find_map(|name| {
             let window = &limits[name];
-            (window["windowDurationMins"].as_u64() == Some(duration_mins))
-                .then(|| window["usedPercent"].as_f64())
-                .flatten()
-                .map(|used| (100.0 - used).clamp(0.0, 100.0).round() as u8)
+            if window["windowDurationMins"].as_u64() != Some(u64::from(duration_mins)) {
+                return None;
+            }
+
+            let used = window["usedPercent"].as_f64()?;
+            let mut usage = UsageWindow::new(
+                (100.0 - used).clamp(0.0, 100.0).round() as u8,
+                duration_mins,
+            );
+            usage.resets_at = parse_timestamp_millis(&window["resetsAt"]);
+            Some(usage)
         })
     };
 
     let usage = UsageSnapshot {
-        five_hour_remaining: left(5 * 60),
-        weekly_remaining: left(7 * 24 * 60),
+        five_hour: window_for_duration(FIVE_HOUR_WINDOW_MINUTES),
+        weekly: window_for_duration(WEEKLY_WINDOW_MINUTES),
+        plan_type: limits["planType"].as_str().map(str::to_owned),
+        reset_credits: parse_reset_credits(&message["result"]["rateLimitResetCredits"]),
+        ..UsageSnapshot::default()
     };
 
     if usage.is_unavailable() {
@@ -182,6 +196,24 @@ fn parse_rate_limits(message: &Value) -> Result<UsageSnapshot, String> {
     }
 
     Ok(usage)
+}
+
+fn parse_reset_credits(value: &Value) -> Option<UsageResetCredits> {
+    let available_count = value["availableCount"].as_u64()?;
+    let next_expires_at = parse_timestamp_millis(&value["nextExpiresAt"]).or_else(|| {
+        value["credits"].as_array().and_then(|credits| {
+            credits
+                .iter()
+                .filter(|credit| credit["status"].as_str() == Some("available"))
+                .filter_map(|credit| parse_timestamp_millis(&credit["expiresAt"]))
+                .min()
+        })
+    });
+
+    Some(UsageResetCredits {
+        available_count,
+        next_expires_at,
+    })
 }
 
 #[cfg(test)]
@@ -204,8 +236,9 @@ mod tests {
         assert_eq!(
             parse_rate_limits(&response).unwrap(),
             UsageSnapshot {
-                five_hour_remaining: Some(32),
-                weekly_remaining: Some(88),
+                five_hour: Some(UsageWindow::new(32, FIVE_HOUR_WINDOW_MINUTES)),
+                weekly: Some(UsageWindow::new(88, WEEKLY_WINDOW_MINUTES)),
+                ..UsageSnapshot::default()
             }
         );
     }
@@ -229,9 +262,44 @@ mod tests {
         assert_eq!(
             parse_rate_limits(&response).unwrap(),
             UsageSnapshot {
-                five_hour_remaining: None,
-                weekly_remaining: Some(88),
+                weekly: Some(UsageWindow::new(88, WEEKLY_WINDOW_MINUTES)),
+                ..UsageSnapshot::default()
             }
+        );
+    }
+
+    #[test]
+    fn keeps_reset_plan_and_reset_credit_metadata() {
+        let response = json!({
+            "id": 2,
+            "result": {
+                "rateLimits": {
+                    "planType": "plus",
+                    "primary": {
+                        "usedPercent": 25,
+                        "windowDurationMins": 300,
+                        "resetsAt": 1_770_000_000
+                    }
+                },
+                "rateLimitResetCredits": {
+                    "availableCount": 2,
+                    "credits": [
+                        { "status": "spent", "expiresAt": 1_770_000_010 },
+                        { "status": "available", "expiresAt": "2026-02-02T02:40:00Z" }
+                    ]
+                }
+            }
+        });
+
+        let usage = parse_rate_limits(&response).unwrap();
+        assert_eq!(usage.plan_type.as_deref(), Some("plus"));
+        assert_eq!(usage.five_hour.unwrap().resets_at, Some(1_770_000_000_000));
+        assert_eq!(
+            usage.reset_credits,
+            Some(UsageResetCredits {
+                available_count: 2,
+                next_expires_at: Some(1_770_000_000_000),
+            })
         );
     }
 }
