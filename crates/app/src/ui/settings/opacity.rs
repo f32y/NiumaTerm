@@ -1,6 +1,6 @@
 use gpui::{App, WindowBackgroundAppearance};
 
-use super::state::AppSettings;
+use crate::ui::settings::state::AppSettings;
 
 pub(super) fn effective_background_opacity(transparency_enabled: bool, opacity: f64) -> f64 {
     if transparency_enabled { opacity } else { 1.0 }

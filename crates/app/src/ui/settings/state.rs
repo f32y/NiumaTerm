@@ -10,8 +10,8 @@ use nmt_config::theme::Theme;
 use nmt_config::{CursorShape, SettingsPatch, get, save_settings};
 use tracing::warn;
 
-use super::MAX_TAB_WIDTH;
-use super::theme::load_theme_choices;
+use crate::ui::settings::MAX_TAB_WIDTH;
+use crate::ui::settings::theme::load_theme_choices;
 
 pub const DEFAULT_SHELL: &str = r"C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe";
 pub const DEFAULT_FONT_FAMILY: &str = "Consolas";
