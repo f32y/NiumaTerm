@@ -121,6 +121,12 @@ struct GitBranchPoll {
     refreshing: bool,
 }
 
+struct UnansweredPrompt {
+    turn: u64,
+    text: String,
+    skill: Option<SkillReference>,
+}
+
 impl GitBranchPoll {
     fn begin_refresh(&mut self) -> bool {
         if self.refreshing {
@@ -284,6 +290,9 @@ pub(crate) struct AgentPane {
     /// Settled turn durations drive fold headers without masquerading as
     /// provider transcript items.
     completed_turn_seconds: HashMap<u64, u64>,
+    /// Turns stopped before any visible provider activity use a status row
+    /// instead of an elapsed-time disclosure.
+    interrupted_turns: HashSet<u64>,
     /// Work-log rows whose detail (command output, reasoning text) is
     /// expanded, keyed by transcript index.
     expanded_rows: HashSet<usize>,
@@ -294,10 +303,13 @@ pub(crate) struct AgentPane {
     /// Monotonic turn counter; entries are tagged with the turn they arrived
     /// in so a settled turn can fold as one unit.
     turn_seq: u64,
-    /// Start time of the running turn. While set, a ticking
-    /// "Working for Ns" row renders at the transcript end; cleared into a
-    /// permanent "Worked for Ns" fold header when the turn completes.
+    /// Start time of the running turn. While set, a ticking "Working for Ns"
+    /// row renders at the transcript end; completion records its elapsed time,
+    /// while an early interruption replaces it with a status row.
     working_started: Option<Instant>,
+    /// The active prompt remains recoverable until provider activity becomes
+    /// visible, allowing an immediate stop to return it to the composer.
+    unanswered_prompt: Option<UnansweredPrompt>,
     palette: SlashPalette,
     /// Mid-turn inputs stay near the composer until provider activity confirms
     /// they have joined the running response.

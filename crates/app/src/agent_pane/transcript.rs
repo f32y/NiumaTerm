@@ -637,6 +637,9 @@ pub(super) enum RowSpec {
         seconds: u64,
         folded: bool,
     },
+    Interrupted {
+        turn: u64,
+    },
     RunToggle {
         run_start: usize,
         tool_count: usize,
@@ -648,6 +651,20 @@ pub(super) enum RowSpec {
     Working {
         compacting: bool,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum TurnSummary {
+    Worked(u64),
+    Interrupted,
+}
+
+pub(super) fn turn_summary(interrupted: bool, seconds: Option<u64>) -> Option<TurnSummary> {
+    if interrupted {
+        Some(TurnSummary::Interrupted)
+    } else {
+        seconds.map(TurnSummary::Worked)
+    }
 }
 
 /// Height-relevant signature of a transcript entry. Lengths and small fields
@@ -808,10 +825,21 @@ impl AgentPane {
         collapse: bool,
         rows: &mut Vec<RowSpec>,
     ) {
-        let Some(&seconds) = self.completed_turn_seconds.get(&turn) else {
-            // Running (or pre-thread) turn: plain chronological stream.
-            self.stream_specs(start, end, &|_| false, collapse, rows);
-            return;
+        let seconds = match turn_summary(
+            self.interrupted_turns.contains(&turn),
+            self.completed_turn_seconds.get(&turn).copied(),
+        ) {
+            Some(TurnSummary::Interrupted) => {
+                self.stream_specs(start, end, &|_| false, collapse, rows);
+                rows.push(RowSpec::Interrupted { turn });
+                return;
+            }
+            Some(TurnSummary::Worked(seconds)) => seconds,
+            None => {
+                // Running (or pre-thread) turn: plain chronological stream.
+                self.stream_specs(start, end, &|_| false, collapse, rows);
+                return;
+            }
         };
 
         let folded = !self.expanded_turns.contains(&turn);
@@ -982,6 +1010,7 @@ impl AgentPane {
                 seconds,
                 folded,
             } => self.render_fold_header(turn, seconds, folded, cx),
+            RowSpec::Interrupted { .. } => self.render_interrupted_row(cx),
             RowSpec::RunToggle {
                 run_start,
                 tool_count,
@@ -1747,6 +1776,21 @@ impl AgentPane {
             .into_any_element()
     }
 
+    pub(super) fn render_interrupted_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        v_flex()
+            .w_full()
+            .gap_1()
+            .child(
+                div()
+                    .px_1()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground.opacity(0.7))
+                    .child("Interrupted"),
+            )
+            .child(div().w_full().h(px(1.)).bg(cx.theme().border.opacity(0.6)))
+            .into_any_element()
+    }
+
     /// The "+N tool calls" / "Show fewer tool calls" toggle for a work run.
     pub(super) fn render_run_toggle(
         &self,
@@ -1786,11 +1830,11 @@ mod prompt_truncation_tests {
 
     use super::{
         AGENT_DISCLOSURE_DETAIL_INSET, AGENT_DISCLOSURE_GAP, AGENT_DISCLOSURE_PADDING,
-        AGENT_DISCLOSURE_SLOT, AgentKind, COMMAND_EXECUTION_HEADING, Status,
+        AGENT_DISCLOSURE_SLOT, AgentKind, COMMAND_EXECUTION_HEADING, Status, TurnSummary,
         VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES, command_execution_detail, compaction_accounting,
         compaction_label, compaction_row_is_expandable, entry_copy_text, is_work_row,
         should_show_jump_to_latest, should_virtualize_transcript, transcript_segments,
-        truncated_user_prompt,
+        truncated_user_prompt, turn_summary,
     };
     use crate::agent_pane::composer::{ComposerAction, composer_action};
 
@@ -1808,6 +1852,13 @@ mod prompt_truncation_tests {
         for status in [Status::Starting, Status::Idle, Status::Exited] {
             assert_eq!(composer_action(status), ComposerAction::Send);
         }
+    }
+
+    #[test]
+    fn interruption_replaces_the_elapsed_turn_summary() {
+        assert_eq!(turn_summary(true, Some(12)), Some(TurnSummary::Interrupted));
+        assert_eq!(turn_summary(false, Some(12)), Some(TurnSummary::Worked(12)));
+        assert_eq!(turn_summary(false, None), None);
     }
 
     #[test]

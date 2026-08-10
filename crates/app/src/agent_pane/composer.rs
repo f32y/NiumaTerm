@@ -171,6 +171,14 @@ pub(super) fn composer_action(status: Status) -> ComposerAction {
     }
 }
 
+pub(super) fn restored_input_after_interruption(submitted: &str, current: &str) -> String {
+    if current.trim().is_empty() || current == submitted {
+        submitted.to_string()
+    } else {
+        format!("{submitted}\n\n{current}")
+    }
+}
+
 impl AgentPane {
     pub(super) fn send_user_message(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if rewind_blocks_submission(self.rewind.state.as_ref()) {
@@ -1551,8 +1559,8 @@ mod rewind_state_tests {
     use nmt_agent_utils::chat::SlashCommandRunPolicy;
 
     use super::{
-        FileRestoreNext, RewindState, app_server, file_restore_next, rewind_blocks_submission,
-        sessions, stream_json,
+        FileRestoreNext, RewindState, app_server, file_restore_next,
+        restored_input_after_interruption, rewind_blocks_submission, sessions, stream_json,
     };
 
     fn checkpoint() -> sessions::ClaudeCheckpoint {
@@ -1621,6 +1629,22 @@ mod rewind_state_tests {
             app_server::Session::adapter_commands()
                 .iter()
                 .all(|command| command.name != "rewind")
+        );
+    }
+
+    #[test]
+    fn interrupted_prompt_returns_without_discarding_a_new_draft() {
+        assert_eq!(
+            restored_input_after_interruption("original prompt", ""),
+            "original prompt"
+        );
+        assert_eq!(
+            restored_input_after_interruption("original prompt", "new draft"),
+            "original prompt\n\nnew draft"
+        );
+        assert_eq!(
+            restored_input_after_interruption("original prompt", "original prompt"),
+            "original prompt"
         );
     }
 }
