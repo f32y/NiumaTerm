@@ -290,7 +290,7 @@ impl Render for AgentPane {
                                         // turn runs.
                                         .child(if running {
                                             Button::new("agent-send")
-                                                .danger()
+                                                .secondary()
                                                 .size(px(32.))
                                                 .rounded_full()
                                                 .icon(StopResponseIcon)
@@ -301,7 +301,7 @@ impl Render for AgentPane {
                                                 }))
                                         } else {
                                             Button::new("agent-send")
-                                                .primary()
+                                                .secondary()
                                                 .disabled(
                                                     rewind_active
                                                         || session_loading
