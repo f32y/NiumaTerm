@@ -6,20 +6,28 @@ Define a readable and consistent visual hierarchy for Agent transcripts and comp
 
 ## Requirements
 
-### Requirement: Readable prose and full-width technical content
-The Agent transcript SHALL constrain natural-language prose to a readable measure of approximately 70-90 configured Agent-font characters when the pane is wide enough. Code blocks, tables, diffs, command output, and tool output SHALL remain eligible to use the full transcript width. Content SHALL shrink to the available width without forcing pane-level horizontal overflow when the pane is narrower than the preferred prose measure.
+### Requirement: Readable line measures
+The Agent transcript SHALL constrain an assistant reply to a readable measure of approximately 80 configured Agent-font characters, and a user prompt to approximately 50, when the pane is wide enough. A block that paints its own surface, such as a code block or a table, SHALL be held to the measure of the text it sits among, so its background does not extend past that text; content wider than the measure SHALL overflow within the block rather than widen it. Content SHALL shrink to the available width without forcing pane-level horizontal overflow when the pane is narrower than the preferred measure.
 
 #### Scenario: Long prose on a wide pane
 - **WHEN** an assistant reply contains a long natural-language paragraph and the pane is wider than the preferred reading measure
-- **THEN** the paragraph wraps within approximately 70-90 configured Agent-font characters and does not span the full pane width
+- **THEN** the paragraph wraps within approximately 80 configured Agent-font characters and does not span the full pane width
+
+#### Scenario: A prompt beside a reply
+- **WHEN** a user prompt long enough to wrap appears above an assistant reply
+- **THEN** the prompt wraps within approximately 50 configured Agent-font characters, so its surface reads as an aside rather than spanning the transcript
 
 #### Scenario: Wide technical block
-- **WHEN** the same reply contains a code block, table, diff, command output, or tool output wider than the prose measure
-- **THEN** that technical block can use the available transcript width and any required overflow is handled within the block rather than by widening the transcript pane
+- **WHEN** an assistant reply contains a code block, table, diff, command output, or tool output wider than the reading measure
+- **THEN** its background stops at the same measure as the prose around it, and the content that does not fit overflows within the block rather than widening it or the transcript pane
+
+#### Scenario: Short technical block
+- **WHEN** a code block's content is narrower than the reading measure
+- **THEN** its background still spans the measure rather than shrinking to the width of its longest line
 
 #### Scenario: Narrow pane
-- **WHEN** the Agent pane is narrower than the preferred prose measure
-- **THEN** prose uses the available width with normal wrapping and remains readable without pane-level horizontal scrolling
+- **WHEN** the Agent pane is narrower than the preferred measure
+- **THEN** content uses the available width with normal wrapping and remains readable without pane-level horizontal scrolling
 
 ### Requirement: Consistent disclosure rows
 Turn-duration disclosures, collapsed tool-run disclosures, and expandable work rows SHALL use one chevron-first geometry with consistent height, indentation, muted foreground treatment, hover target, and expanded-content rail. Rows without expandable detail SHALL preserve alignment without displaying a misleading expansion control. These rules SHALL apply to every agent conversation the application renders, including a child agent's conversation shown outside the Agent pane.
