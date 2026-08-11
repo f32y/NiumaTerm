@@ -2,8 +2,8 @@ use std::collections;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Context, DragMoveEvent, Entity, KeyDownEvent, MouseButton, Pixels, Render,
-    ScrollHandle, SharedString, Window, div, px, relative,
+    AnyElement, App, Context, DragMoveEvent, Entity, IsZero as _, KeyDownEvent, MouseButton,
+    Pixels, Render, ScrollHandle, SharedString, Window, div, px, relative,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputState};
@@ -434,8 +434,28 @@ impl TabStrip {
                         .into_any_element()
                 };
                 let drag_label: SharedString = label.into();
+                // `occlude` keeps the platform from treating the tab as
+                // title-bar drag area, so clicks and the wheel reach the
+                // client instead of starting a window move. That same
+                // blocking hides the strip's scroll container from the hit
+                // test, so the wheel is forwarded to its scroll handle here;
+                // prepaint clamps the offset to the scrollable range.
+                let scroll = self.scroll.clone();
                 Tab::new()
                     .occlude()
+                    .on_scroll_wheel(move |event, window, _| {
+                        let delta = event.delta.pixel_delta(window.line_height());
+                        let step = if delta.x.is_zero() { delta.y } else { delta.x };
+
+                        if step.is_zero() {
+                            return;
+                        }
+
+                        let mut offset = scroll.offset();
+                        offset.x += step;
+                        scroll.set_offset(offset);
+                        window.refresh();
+                    })
                     .w(px(tab_width))
                     // Make way for the dragged tab: the hovered tab
                     // slides right, opening an insertion gap at the
