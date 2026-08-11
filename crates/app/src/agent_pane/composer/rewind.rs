@@ -200,11 +200,12 @@ impl AgentPane {
         {
             self.rewind.state = None;
             self.palette.selected = 0;
-            self.set_command_feedback(
-                CommandFeedbackKind::Notice,
-                "Rewind cancelled; no files or conversation were changed.".to_string(),
-                cx,
-            );
+            // Cancelling is the user's own no-op, so an acknowledgement tells
+            // them nothing they do not already know. Dropping the message also
+            // retires the non-transient "Loading checkpoints…" status, which
+            // otherwise outlives the picker it described.
+            self.palette.feedback = None;
+            cx.notify();
         }
     }
 
