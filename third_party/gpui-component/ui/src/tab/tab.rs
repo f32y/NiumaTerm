@@ -163,9 +163,15 @@ impl TabVariant {
                 bg: cx.theme().transparent.into(),
                 ..Default::default()
             },
+            // Modern's selected state draws a 1px outline. Reserve that width
+            // in the other states with a transparent border so the pill's
+            // content does not shift a pixel when a tab is activated (gpui
+            // sizes are border-box, so a border shrinks the content box).
             TabVariant::Modern => TabStyle {
                 fg: cx.theme().tab_foreground,
                 bg: cx.theme().tokens.tab.into(),
+                borders: Edges::all(px(1.)),
+                border_color: gpui::transparent_white(),
                 ..Default::default()
             },
             TabVariant::Segmented => TabStyle {
@@ -215,6 +221,8 @@ impl TabVariant {
             TabVariant::Modern => TabStyle {
                 fg: cx.theme().tab_active_foreground,
                 bg: cx.theme().tokens.list_hover.into(),
+                borders: Edges::all(px(1.)),
+                border_color: gpui::transparent_white(),
                 ..Default::default()
             },
             TabVariant::Segmented => TabStyle {
@@ -341,6 +349,8 @@ impl TabVariant {
                 } else {
                     cx.theme().transparent.into()
                 },
+                borders: Edges::all(px(1.)),
+                border_color: gpui::transparent_white(),
                 ..Default::default()
             },
             TabVariant::Segmented => TabStyle {
@@ -846,6 +856,7 @@ impl RenderOnce for Tab {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::Theme;
 
     #[gpui::test]
     fn a11y_label_defaults_to_visible_label(_cx: &mut gpui::TestAppContext) {
@@ -859,5 +870,21 @@ mod tests {
         let tab = Tab::new().label("Acct").aria_label("Account settings");
 
         assert_eq!(tab.a11y_label(), Some("Account settings".into()));
+    }
+
+    #[gpui::test]
+    fn modern_variant_reserves_border_space_in_every_state(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            cx.set_global(Theme::default());
+            let variant = TabVariant::Modern;
+
+            // Selected draws a 1px outline; the other states must reserve the
+            // same border so activating a tab does not shift its content.
+            let selected = variant.selected(cx).borders;
+            assert_eq!(variant.normal(cx).borders, selected);
+            assert_eq!(variant.hovered(false, cx).borders, selected);
+            assert_eq!(variant.disabled(true, cx).borders, selected);
+            assert_eq!(variant.disabled(false, cx).borders, selected);
+        });
     }
 }
