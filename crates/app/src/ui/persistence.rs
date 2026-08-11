@@ -16,7 +16,7 @@ use crate::pane_tree::{PaneId, PaneNode, PaneTree};
 use crate::tabs::{TabId, TabManager};
 use crate::terminal::view::TerminalPane;
 use crate::window::WindowRegistry;
-use crate::workspace::{DEFAULT_WORKSPACE_NAME, WorkspaceId, WorkspaceManager};
+use crate::workspace::{DEFAULT_WORKSPACE_NAME, WorkspaceId, WorkspaceKind, WorkspaceManager};
 
 /// A pane that runs the current default profile's exact command is saved with
 /// `shell = None` — "follow the default profile" — so later profile changes apply
@@ -252,7 +252,7 @@ impl Shell {
     ) -> bool {
         let state = match workspaces.active_tabs().active() {
             TabSurface::Pending(state) => (**state).clone(),
-            TabSurface::Live(_) | TabSurface::Agent(_) => return false,
+            TabSurface::Live(_) | TabSurface::Agent(_) | TabSurface::Settings => return false,
         };
 
         // An unknown agent kind (a newer snapshot) degrades to the terminal
@@ -509,6 +509,12 @@ impl Shell {
                 continue;
             }
 
+            // The settings entry is a view of the configuration file, not
+            // work to come back to, so it is never restored.
+            if workspace.kind == WorkspaceKind::Settings {
+                continue;
+            }
+
             let Some(tabs) = self.workspaces.tabs_of(workspace.id) else {
                 continue;
             };
@@ -549,6 +555,10 @@ impl Shell {
                                 agent_profile: Some(pane.read(cx).profile_name().to_string()),
                                 ..TabState::default()
                             },
+                            // Only the settings workspace holds this surface,
+                            // and that workspace is skipped above; the arm
+                            // exists so the match stays exhaustive.
+                            TabSurface::Settings => TabState::default(),
                         };
                         normalize_saved_launch(&mut state, &default_profile);
                         state.name = tab.user_title().map(str::to_owned);
