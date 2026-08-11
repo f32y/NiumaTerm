@@ -477,6 +477,24 @@ fn initialize_model_catalog_keeps_a_selected_custom_model() {
 }
 
 #[test]
+fn custom_endpoint_model_inherits_effort_levels_from_remapped_alias() {
+    let parsed = parse_models(
+        &json!([
+            {"value": "deepseek-v4-flash", "displayName": "deepseek-v4-flash"},
+            {"value": "opus", "displayName": "deepseek-v4-flash",
+             "supportedEffortLevels": ["low", "medium", "high", "xhigh", "max"]}
+        ]),
+        Some("deepseek-v4-flash"),
+    );
+
+    assert_eq!(parsed[0].model, "deepseek-v4-flash");
+    assert_eq!(
+        parsed[0].efforts,
+        vec!["low", "medium", "high", "xhigh", "max"]
+    );
+}
+
+#[test]
 fn initialize_uses_model_pinned_by_launch_environment() {
     let launch = LaunchConfig {
         executable: "claude".into(),

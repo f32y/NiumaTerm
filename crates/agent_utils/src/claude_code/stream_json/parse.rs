@@ -334,6 +334,29 @@ pub(super) fn parse_models(models: &Value, selected_model: Option<&str>) -> Vec<
         );
     }
 
+    // A custom endpoint's discovered model lists no supportedEffortLevels,
+    // while the built-in aliases remapped to it (ANTHROPIC_DEFAULT_* env
+    // rewriting their display names) keep the standard set. Inherit from
+    // such a sibling so the effort picker appears for the resolved model;
+    // a model that genuinely lacks effort (e.g. Haiku) has no sibling and
+    // stays pickerless.
+    for i in 0..parsed.len() {
+        if !parsed[i].efforts.is_empty() {
+            continue;
+        }
+        if let Some(efforts) = parsed
+            .iter()
+            .find(|other| {
+                other.model != parsed[i].model
+                    && other.display == parsed[i].display
+                    && !other.efforts.is_empty()
+            })
+            .map(|sibling| sibling.efforts.clone())
+        {
+            parsed[i].efforts = efforts;
+        }
+    }
+
     parsed
 }
 
