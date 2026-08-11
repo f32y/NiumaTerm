@@ -7,7 +7,7 @@ Provide a reliable read-only `Background Tasks` view of Codex and Claude Code ch
 ## Requirements
 
 ### Requirement: Offer a title-bar Background Tasks button
-The system SHALL place a button labeled `Background Tasks` at the upper-right of the application title bar. The button SHALL be enabled when the active pane is a Codex Agent tab with a started or restored thread or a Claude Code Agent tab with a started or restored session. Activating the enabled button SHALL open a right-side view scoped to that parent session. The button SHALL be disabled when the active pane has no supported parent session.
+The system SHALL place a button labeled `Background Tasks` at the upper-right of the application title bar. Activating it SHALL open the right-side view. When the active pane is a Codex Agent tab with a started or restored thread, or a Claude Code Agent tab with a started or restored session, the view SHALL be scoped to that parent session; otherwise the view SHALL report that there is no agent session to show. The button SHALL remain available in every case, and SHALL NOT carry a task count or an activity indicator.
 
 #### Scenario: Open the view for a Codex thread
 - **WHEN** the active Codex Agent tab has a parent thread ID and the user clicks the title-bar `Background Tasks` button
@@ -19,7 +19,11 @@ The system SHALL place a button labeled `Background Tasks` at the upper-right of
 
 #### Scenario: Active pane has no supported parent session
 - **WHEN** the active pane is a terminal, an unsupported Agent provider, or an Agent tab that has not established its provider session ID
-- **THEN** the title-bar `Background Tasks` button is disabled and no task data from another tab is shown
+- **THEN** the view opens and reports that there is no agent session, and no task data from another tab is shown
+
+#### Scenario: The active pane stops being a supported session while the view is open
+- **WHEN** the view is open and the user activates a pane with no supported provider session
+- **THEN** the right-side area stays open reporting that there is no agent session, rather than closing
 
 ### Requirement: Share one right-side area
 Git and `Background Tasks` SHALL select the same resizable right-side area. Selecting either view SHALL replace the other view without opening a second right-side column, and both views SHALL use the same current width and resize behavior.
@@ -31,21 +35,6 @@ Git and `Background Tasks` SHALL select the same resizable right-side area. Sele
 #### Scenario: Switch back to Git
 - **WHEN** `Background Tasks` is visible and the user selects Git
 - **THEN** Git replaces `Background Tasks` at the current right-side width
-
-### Requirement: Signal active and unseen task activity
-The title-bar `Background Tasks` button SHALL show the number of active tasks for the selected parent session when the count is nonzero. It SHALL show an unseen-activity indicator when a task is created or changes lifecycle state while the view is closed. Opening the view SHALL mark the current activity for that parent session as seen without changing another session's seen state.
-
-#### Scenario: Active tasks are present
-- **WHEN** two child agents are active in the selected parent session
-- **THEN** the title-bar `Background Tasks` button shows an active count of two
-
-#### Scenario: A task changes while the view is closed
-- **WHEN** the `Background Tasks` view is closed and a known task completes
-- **THEN** the title-bar button shows an unseen-activity indicator until the user opens the view for that parent session
-
-#### Scenario: Switch between parent sessions
-- **WHEN** activity has been seen for one parent session and the user switches to another session with unseen activity
-- **THEN** the title-bar button reflects the unseen state of the newly selected session
 
 ### Requirement: Limit the initial view to child-agent work
 The initial `Background Tasks` view SHALL include Codex descendants created as subagents and Claude Code Task or Agent child work. It SHALL NOT include background shell commands, preview servers, workflows, monitors, scheduled work, or other non-agent background activity.
