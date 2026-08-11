@@ -151,6 +151,44 @@ pub(super) fn legacy_command_catalog(
     (!structured_commands_published).then(|| parse_slash_commands(commands))
 }
 
+/// Commands that belong to the CLI's own terminal session rather than to the
+/// conversation. Each either reports state this application already shows, or
+/// changes settings its controls own; running one from the palette leaves the
+/// visible controls describing something that is no longer true.
+const HOST_OWNED_COMMANDS: [&str; 10] = [
+    // Reported by the context card, which reads the same measurement.
+    "context",
+    // Owned by the thread-setting controls under the composer.
+    "model",
+    "effort",
+    "fast",
+    "autocompact",
+    // Owned by the tab: a new conversation, and the tab's title.
+    "clear",
+    "rename",
+    // Address the CLI's host terminal and its own configuration, neither of
+    // which this application is.
+    "color",
+    "heapdump",
+    "config",
+];
+
+/// Whether a discovered command is worth offering. The catalog includes the
+/// CLI's own internal entries and ones it has retired but still lists, neither
+/// of which a user can act on usefully.
+fn is_offerable_command(name: &str, description: &str) -> bool {
+    // A leading underscore marks an entry the CLI drives itself.
+    if name.starts_with('_') {
+        return false;
+    }
+    if HOST_OWNED_COMMANDS.contains(&name) {
+        return false;
+    }
+
+    let description = description.trim_start();
+    !description.starts_with("(removed)") && !description.starts_with("Renamed to")
+}
+
 /// Claude versions have emitted both string entries and richer objects. The
 /// parser accepts both and expands aliases while enforcing the single-token
 /// names the composer can address. A new event is a complete replacement.
@@ -188,6 +226,7 @@ pub(super) fn parse_slash_commands(commands: &Value) -> Vec<SlashCommandInfo> {
 
             if name.is_empty()
                 || name.chars().any(char::is_whitespace)
+                || !is_offerable_command(&name, &description)
                 || !seen.insert(name.clone())
             {
                 continue;
