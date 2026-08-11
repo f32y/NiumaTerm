@@ -3,6 +3,7 @@ pub mod hook;
 pub mod sessions;
 #[cfg(target_os = "windows")]
 pub mod stream_json;
+pub(crate) mod tasks;
 mod tool_items;
 #[cfg(target_os = "windows")]
 pub mod update;

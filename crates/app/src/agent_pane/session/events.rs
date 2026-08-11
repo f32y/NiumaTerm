@@ -109,6 +109,9 @@ impl AgentPane {
                 if matches!(self.update_suspension, Some(UpdateSuspension::Reconnecting)) {
                     self.update_suspension = None;
                 }
+                // The session id is known by now, so child agents that ran
+                // before this tab opened can be rebuilt from history.
+                self.restore_background_tasks(cx);
                 cx.notify();
             }
             SessionEvent::Models(models) => {
@@ -336,6 +339,13 @@ impl AgentPane {
                         self.history_ui.sessions.push(session);
                     }
                 }
+                cx.notify();
+            }
+            SessionEvent::BackgroundTasks(snapshot) => {
+                // Child lifecycle is reduced by the adapter, so this replaces
+                // the pane's copy without touching the composer, transcript,
+                // approval, queued commands, or running state.
+                self.background_tasks = Some(snapshot);
                 cx.notify();
             }
             SessionEvent::Replay(items) => {

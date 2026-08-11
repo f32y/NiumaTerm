@@ -1,6 +1,90 @@
+use nmt_agent_utils::background_task::{
+    BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskRegistry,
+    BackgroundTaskSnapshot, BackgroundTaskState, BackgroundTaskUpdate,
+};
 use nmt_agent_utils::chat::ThreadSettings;
 
 use crate::agent_pane::session::events::resolve_ready_settings;
+use crate::agent_pane::session::scoped_background_tasks;
+
+fn snapshot_for(parent: BackgroundTaskKey) -> BackgroundTaskSnapshot {
+    let mut registry = BackgroundTaskRegistry::new(parent);
+    registry.apply(
+        BackgroundTaskKey::codex("child-1"),
+        BackgroundTaskUpdate::state(BackgroundTaskState::Working),
+    );
+    registry.snapshot()
+}
+
+#[test]
+fn a_snapshot_is_shown_only_for_the_session_it_describes() {
+    let codex = BackgroundTaskKey::codex("thread-a");
+    let snapshot = snapshot_for(codex.clone());
+
+    assert!(scoped_background_tasks(Some(&codex), Some(&snapshot)).is_some());
+    assert!(
+        scoped_background_tasks(Some(&BackgroundTaskKey::codex("thread-b")), Some(&snapshot))
+            .is_none()
+    );
+    assert!(
+        scoped_background_tasks(
+            Some(&BackgroundTaskKey::claude_code("thread-a")),
+            Some(&snapshot)
+        )
+        .is_none(),
+        "a Claude session must not adopt a Codex thread's rows"
+    );
+    assert!(
+        scoped_background_tasks(None, Some(&snapshot)).is_none(),
+        "an unsupported or not-yet-started pane shows no rows"
+    );
+}
+
+#[test]
+fn a_later_snapshot_replaces_the_previous_one_and_carries_its_activity() {
+    let parent = BackgroundTaskKey::claude_code("session-1");
+    let mut registry = BackgroundTaskRegistry::new(parent.clone());
+    registry.apply(
+        BackgroundTaskKey::claude_code("task-1"),
+        BackgroundTaskUpdate::state(BackgroundTaskState::Working),
+    );
+    let first = registry.snapshot();
+
+    registry.apply(
+        BackgroundTaskKey::claude_code("task-1"),
+        BackgroundTaskUpdate::state(BackgroundTaskState::Done),
+    );
+    let second = registry.snapshot();
+
+    assert_eq!(first.active_count(), 1);
+    assert_eq!(second.active_count(), 0);
+    assert!(second.activity > first.activity);
+    assert_eq!(
+        scoped_background_tasks(Some(&parent), Some(&second)),
+        Some(&second)
+    );
+}
+
+#[test]
+fn a_failed_refresh_reports_unavailable_without_dropping_known_rows() {
+    let parent = BackgroundTaskKey::codex("thread-a");
+    let mut registry = BackgroundTaskRegistry::new(parent);
+    registry.apply(
+        BackgroundTaskKey::codex("child-1"),
+        BackgroundTaskUpdate::state(BackgroundTaskState::Working),
+    );
+    registry.set_discovery(BackgroundTaskDiscoveryState::Unavailable {
+        message: "thread/list failed".into(),
+    });
+
+    let snapshot = registry.snapshot();
+    assert_eq!(snapshot.tasks.len(), 1);
+    assert_eq!(snapshot.active_count(), 1);
+    assert!(matches!(
+        snapshot.discovery,
+        BackgroundTaskDiscoveryState::Unavailable { .. }
+    ));
+}
 
 #[test]
 fn resumed_codex_thread_uses_only_the_locally_remembered_reviewer() {

@@ -65,6 +65,18 @@ impl Backend {
         }
     }
 
+    /// Ask the provider for fresher child-agent data. Adapters guard against
+    /// overlapping requests themselves, so opening the panel repeatedly cannot
+    /// queue duplicate discovery passes.
+    pub(in crate::agent_pane) fn refresh_background_tasks(&mut self) {
+        match self {
+            Backend::Codex(session) => session.refresh_background_tasks(),
+            // Claude Code rebuilds tasks from session history rather than a
+            // provider query, so there is nothing to re-request live.
+            Backend::Claude(_) => {}
+        }
+    }
+
     pub(in crate::agent_pane) fn session_id(&self) -> Option<&str> {
         match self {
             Backend::Claude(session) => session.session_id(),

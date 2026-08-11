@@ -1,3 +1,6 @@
+use gpui_component::Disableable as _;
+
+use crate::ui::background_tasks::{self, PANEL_TITLE};
 use crate::ui::shell::*;
 
 impl Shell {
@@ -21,6 +24,7 @@ impl Shell {
             .on_action(cx.listener(Self::on_resize_pane_right))
             .on_action(cx.listener(Self::on_toggle_sidebar))
             .on_action(cx.listener(Self::on_toggle_git_sidebar))
+            .on_action(cx.listener(Self::on_toggle_background_tasks))
             .on_action(cx.listener(Self::on_show_settings))
             .on_action(cx.listener(Self::on_new_remote_tab))
             .on_action(cx.listener(Self::on_new_agent_tab))
@@ -91,6 +95,11 @@ impl Shell {
                 h_flex()
                     .child(div().occlude().child(self.git_status.clone()))
                     .child(
+                        div()
+                            .occlude()
+                            .child(self.render_background_tasks_button(cx)),
+                    )
+                    .child(
                         div().occlude().child(
                             Button::new("toggle-git-sidebar")
                                 .ghost()
@@ -101,6 +110,60 @@ impl Shell {
                         ),
                     ),
             )
+    }
+
+    /// Upper-right `Background Tasks` control. It carries the active child
+    /// count and an unseen-activity dot for the current parent session, and is
+    /// disabled when the active pane has no supported provider session.
+    fn render_background_tasks_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let snapshot = self
+            .active_agent()
+            .and_then(|pane| pane.read(cx).background_tasks().cloned());
+        let parent = self.active_task_parent(cx);
+        let seen = parent
+            .as_ref()
+            .and_then(|parent| self.seen_task_activity.get(parent))
+            .copied();
+        let count = background_tasks::title_bar_label(snapshot.as_ref());
+        // The indicator is suppressed while the view is open, because opening
+        // it is what marks the current activity as seen.
+        let unseen = !self
+            .right_panel
+            .read(cx)
+            .shows(RightPanelKind::BackgroundTasks)
+            && background_tasks::has_unseen_activity(snapshot.as_ref(), seen);
+        let aria_label = match (&count, unseen) {
+            (Some(count), true) => format!("{PANEL_TITLE}: {count} active, new activity"),
+            (Some(count), false) => format!("{PANEL_TITLE}: {count} active"),
+            (None, true) => format!("{PANEL_TITLE}: new activity"),
+            (None, false) => PANEL_TITLE.to_string(),
+        };
+
+        div()
+            .relative()
+            .child(
+                Button::new("toggle-background-tasks")
+                    .ghost()
+                    .icon(IconName::Bot)
+                    .when_some(count, Button::label)
+                    .aria_label(aria_label)
+                    .tooltip(PANEL_TITLE)
+                    .disabled(parent.is_none())
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.on_toggle_background_tasks(&ToggleBackgroundTasks, window, cx)
+                    })),
+            )
+            .when(unseen, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .top(px(4.0))
+                        .right(px(4.0))
+                        .size(px(6.0))
+                        .rounded_full()
+                        .bg(cx.theme().primary),
+                )
+            })
     }
 }
 
@@ -151,6 +214,7 @@ impl Render for Shell {
         // Any workspace/tab switch re-renders the shell, so this render-time
         // compare-and-set catches every switch path.
         self.sync_git_target(cx);
+        self.sync_task_panel_target(cx);
 
         // The sidebar is always mounted so it can animate its width open/closed.
         let summaries = self.projected_workspace_summaries(cx);
@@ -257,7 +321,7 @@ impl Render for Shell {
                                     .children(notification_layer),
                             ),
                     )
-                    .child(self.git_sidebar.clone()),
+                    .child(self.right_panel.clone()),
             )
             .children(update_notification_layer)
             .children(dialog_layer)

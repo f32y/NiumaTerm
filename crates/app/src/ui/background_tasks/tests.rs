@@ -1,0 +1,278 @@
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use nmt_agent_utils::background_task::{
+    BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskRegistry,
+    BackgroundTaskSnapshot, BackgroundTaskState, BackgroundTaskUpdate,
+};
+
+use crate::ui::background_tasks::{
+    COMPACT_FINISHED_ROWS, COMPACT_RUNNING_ROWS, duration_label, finished_heading, finished_rows,
+    has_unseen_activity, row_detail, row_timing, running_heading, running_rows,
+    section_control_label, title_bar_label, visible_rows,
+};
+
+fn at(seconds: u64) -> SystemTime {
+    UNIX_EPOCH + Duration::from_secs(seconds)
+}
+
+struct Builder(BackgroundTaskRegistry);
+
+impl Builder {
+    fn codex() -> Self {
+        Self(BackgroundTaskRegistry::new(BackgroundTaskKey::codex(
+            "thr_parent",
+        )))
+    }
+
+    fn claude() -> Self {
+        Self(BackgroundTaskRegistry::new(BackgroundTaskKey::claude_code(
+            "sess-1",
+        )))
+    }
+
+    fn task(mut self, key: BackgroundTaskKey, update: BackgroundTaskUpdate) -> Self {
+        self.0.apply(key, update);
+        self
+    }
+
+    fn discovery(mut self, discovery: BackgroundTaskDiscoveryState) -> Self {
+        self.0.set_discovery(discovery);
+        self
+    }
+
+    fn build(self) -> BackgroundTaskSnapshot {
+        self.0.snapshot()
+    }
+}
+
+fn running(name: &str, started: Option<u64>) -> BackgroundTaskUpdate {
+    BackgroundTaskUpdate {
+        state: Some(BackgroundTaskState::Working),
+        display_name: Some(name.to_owned()),
+        started_at: started.map(at),
+        ..BackgroundTaskUpdate::default()
+    }
+}
+
+fn finished(state: BackgroundTaskState, completed: Option<u64>) -> BackgroundTaskUpdate {
+    BackgroundTaskUpdate {
+        state: Some(state),
+        completed_at: completed.map(at),
+        ..BackgroundTaskUpdate::default()
+    }
+}
+
+#[test]
+fn mixed_states_group_into_running_and_finished_with_their_counts() {
+    let snapshot = Builder::codex()
+        .task(BackgroundTaskKey::codex("a"), running("worker", Some(100)))
+        .task(
+            BackgroundTaskKey::codex("b"),
+            BackgroundTaskUpdate::state(BackgroundTaskState::NeedsInput),
+        )
+        .task(
+            BackgroundTaskKey::codex("c"),
+            finished(BackgroundTaskState::Done, Some(300)),
+        )
+        .task(
+            BackgroundTaskKey::codex("d"),
+            finished(BackgroundTaskState::Failed, Some(400)),
+        )
+        .build();
+
+    assert_eq!(running_rows(&snapshot).len(), 2);
+    assert_eq!(finished_rows(&snapshot).len(), 2);
+    assert_eq!(running_heading(&snapshot), "Running · 2 · 1 need input");
+    assert_eq!(finished_heading(&snapshot), "Finished · 2");
+
+    // Failed and Stopped keep their own labels rather than a shared one.
+    let labels: Vec<_> = finished_rows(&snapshot)
+        .iter()
+        .map(|task| task.state.label())
+        .collect();
+    assert!(labels.contains(&"Failed"));
+    assert!(labels.contains(&"Done"));
+}
+
+#[test]
+fn running_rows_lead_with_the_earliest_start_and_finished_with_the_latest_end() {
+    let snapshot = Builder::codex()
+        .task(BackgroundTaskKey::codex("late"), running("late", Some(300)))
+        .task(
+            BackgroundTaskKey::codex("early"),
+            running("early", Some(100)),
+        )
+        .task(
+            BackgroundTaskKey::codex("untimed"),
+            running("untimed", None),
+        )
+        .task(
+            BackgroundTaskKey::codex("old"),
+            finished(BackgroundTaskState::Done, Some(500)),
+        )
+        .task(
+            BackgroundTaskKey::codex("new"),
+            finished(BackgroundTaskState::Stopped, Some(900)),
+        )
+        .build();
+
+    let running: Vec<_> = running_rows(&snapshot)
+        .iter()
+        .map(|task| task.key.id.clone())
+        .collect();
+    assert_eq!(running, ["early", "late", "untimed"]);
+
+    let finished: Vec<_> = finished_rows(&snapshot)
+        .iter()
+        .map(|task| task.key.id.clone())
+        .collect();
+    assert_eq!(finished, ["new", "old"]);
+}
+
+#[test]
+fn both_providers_render_from_the_same_snapshot_shape() {
+    let claude = Builder::claude()
+        .task(
+            BackgroundTaskKey::claude_code("toolu_1"),
+            running("Review the diff", Some(100)),
+        )
+        .build();
+
+    let rows = running_rows(&claude);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].key.provider.label(), "Claude Code");
+    assert_eq!(rows[0].display_label(), "Review the diff");
+}
+
+#[test]
+fn a_row_without_optional_metadata_still_reads_as_an_entry() {
+    let snapshot = Builder::codex()
+        .task(
+            BackgroundTaskKey::codex("thr_01H9ZQF4"),
+            BackgroundTaskUpdate::state(BackgroundTaskState::Working),
+        )
+        .build();
+
+    let task = &running_rows(&snapshot)[0];
+    assert_eq!(task.display_label(), "Agent 01H9ZQF4");
+    assert_eq!(row_detail(task), "No description reported");
+    assert_eq!(row_timing(task, at(200)), None);
+}
+
+#[test]
+fn active_rows_show_elapsed_time_and_terminal_rows_show_a_relative_end() {
+    let snapshot = Builder::codex()
+        .task(BackgroundTaskKey::codex("a"), running("worker", Some(100)))
+        .task(
+            BackgroundTaskKey::codex("b"),
+            finished(BackgroundTaskState::Done, Some(500)),
+        )
+        .build();
+
+    assert_eq!(
+        row_timing(&running_rows(&snapshot)[0], at(190)),
+        Some("1m".to_string())
+    );
+    assert_eq!(
+        row_timing(&finished_rows(&snapshot)[0], at(560)),
+        Some("1m ago".to_string())
+    );
+
+    assert_eq!(duration_label(at(105), at(100)), "5s");
+    assert_eq!(duration_label(at(7300), at(100)), "2h");
+    assert_eq!(duration_label(at(200_000), at(100)), "2d");
+}
+
+#[test]
+fn compact_sections_hide_the_tail_behind_a_control() {
+    assert_eq!(visible_rows(9, COMPACT_RUNNING_ROWS, false), 4);
+    assert_eq!(visible_rows(9, COMPACT_RUNNING_ROWS, true), 9);
+    assert_eq!(visible_rows(3, COMPACT_RUNNING_ROWS, false), 3);
+    assert_eq!(visible_rows(25, COMPACT_FINISHED_ROWS, false), 10);
+
+    assert_eq!(
+        section_control_label(5, false).as_deref(),
+        Some("Show 5 more")
+    );
+    assert_eq!(section_control_label(0, false), None);
+    assert_eq!(
+        section_control_label(0, true).as_deref(),
+        Some("Show fewer")
+    );
+}
+
+#[test]
+fn the_title_bar_button_reports_the_active_count_only_when_it_is_nonzero() {
+    let idle = Builder::codex()
+        .task(
+            BackgroundTaskKey::codex("a"),
+            finished(BackgroundTaskState::Done, Some(100)),
+        )
+        .build();
+    assert_eq!(title_bar_label(Some(&idle)), None);
+    assert_eq!(title_bar_label(None), None);
+
+    let busy = Builder::codex()
+        .task(BackgroundTaskKey::codex("a"), running("a", None))
+        .task(BackgroundTaskKey::codex("b"), running("b", None))
+        .build();
+    assert_eq!(title_bar_label(Some(&busy)).as_deref(), Some("2"));
+}
+
+#[test]
+fn unseen_activity_is_tracked_per_parent_session() {
+    let snapshot = Builder::codex()
+        .task(BackgroundTaskKey::codex("a"), running("a", None))
+        .build();
+
+    assert!(has_unseen_activity(Some(&snapshot), None));
+    assert!(!has_unseen_activity(
+        Some(&snapshot),
+        Some(snapshot.activity)
+    ));
+    // Another session's seen ordinal never suppresses this one.
+    assert!(has_unseen_activity(Some(&snapshot), Some(0)));
+    assert!(!has_unseen_activity(None, None));
+}
+
+#[test]
+fn a_metadata_only_update_does_not_reraise_the_unseen_indicator() {
+    let mut registry = BackgroundTaskRegistry::new(BackgroundTaskKey::codex("thr_parent"));
+    registry.apply(BackgroundTaskKey::codex("a"), running("a", None));
+    let seen = registry.snapshot().activity;
+
+    registry.apply(
+        BackgroundTaskKey::codex("a"),
+        BackgroundTaskUpdate {
+            status: Some("still reading".into()),
+            ..BackgroundTaskUpdate::default()
+        },
+    );
+    assert!(!has_unseen_activity(Some(&registry.snapshot()), Some(seen)));
+
+    registry.apply(
+        BackgroundTaskKey::codex("a"),
+        BackgroundTaskUpdate::state(BackgroundTaskState::Done),
+    );
+    assert!(has_unseen_activity(Some(&registry.snapshot()), Some(seen)));
+}
+
+#[test]
+fn a_failed_restoration_with_no_rows_is_distinguishable_from_an_empty_session() {
+    let unavailable = Builder::codex()
+        .discovery(BackgroundTaskDiscoveryState::Unavailable {
+            message: "thread/list failed".into(),
+        })
+        .build();
+    assert!(unavailable.tasks.is_empty());
+    assert!(matches!(
+        unavailable.discovery,
+        BackgroundTaskDiscoveryState::Unavailable { .. }
+    ));
+
+    let empty = Builder::codex()
+        .discovery(BackgroundTaskDiscoveryState::Ready)
+        .build();
+    assert!(empty.tasks.is_empty());
+    assert_eq!(empty.discovery, BackgroundTaskDiscoveryState::Ready);
+}

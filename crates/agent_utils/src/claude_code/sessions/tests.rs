@@ -1,3 +1,4 @@
+use crate::background_task::BackgroundTaskState;
 use crate::chat::CompactionTrigger;
 use crate::claude_code::sessions::*;
 
@@ -533,4 +534,217 @@ fn replay_preserves_api_error_semantics() {
             text: "You've hit your session limit · resets 3:20pm (Asia/Shanghai)".into()
         }]
     );
+}
+
+fn task_history_lines(records: &[Value]) -> String {
+    records
+        .iter()
+        .map(Value::to_string)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn assistant_launch(uuid: &str, parent: Option<&str>, tool_use_id: &str) -> Value {
+    serde_json::json!({
+        "type": "assistant",
+        "uuid": uuid,
+        "parentUuid": parent,
+        "timestamp": "2026-08-10T12:00:00Z",
+        "message": {"role": "assistant", "content": [{
+            "type": "tool_use",
+            "id": tool_use_id,
+            "name": "Task",
+            "input": {
+                "description": "Review the diff",
+                "prompt": "Read the changed files",
+                "subagent_type": "code-reviewer",
+            },
+        }]},
+    })
+}
+
+fn tool_result_record(uuid: &str, parent: &str, tool_use_id: &str, is_error: bool) -> Value {
+    serde_json::json!({
+        "type": "user",
+        "uuid": uuid,
+        "parentUuid": parent,
+        "timestamp": "2026-08-10T12:05:00Z",
+        "message": {"role": "user", "content": [{
+            "type": "tool_result",
+            "tool_use_id": tool_use_id,
+            "is_error": is_error,
+            "content": "done",
+        }]},
+    })
+}
+
+#[test]
+fn task_history_restores_completed_and_failed_children() {
+    let lines = task_history_lines(&[
+        serde_json::json!({"type": "user", "uuid": "u1", "parentUuid": null,
+            "message": {"role": "user", "content": [{"type": "text", "text": "start"}]}}),
+        assistant_launch("a1", Some("u1"), "toolu_ok"),
+        tool_result_record("r1", "a1", "toolu_ok", false),
+        assistant_launch("a2", Some("r1"), "toolu_bad"),
+        tool_result_record("r2", "a2", "toolu_bad", true),
+    ]);
+
+    let tasks = parse_task_history(lines.as_bytes());
+
+    assert_eq!(tasks.len(), 2);
+    assert_eq!(tasks[0].id, "toolu_ok");
+    assert_eq!(tasks[0].update.state, Some(BackgroundTaskState::Done));
+    assert_eq!(
+        tasks[0].update.display_name.as_deref(),
+        Some("Review the diff")
+    );
+    assert_eq!(tasks[0].update.agent_type.as_deref(), Some("code-reviewer"));
+    assert!(tasks[0].update.started_at.is_some());
+    assert!(tasks[0].update.completed_at.is_some());
+    assert_eq!(tasks[1].id, "toolu_bad");
+    assert_eq!(tasks[1].update.state, Some(BackgroundTaskState::Failed));
+}
+
+#[test]
+fn task_history_enriches_only_linked_sidechains() {
+    let lines = task_history_lines(&[
+        assistant_launch("a1", None, "toolu_known"),
+        serde_json::json!({
+            "type": "assistant",
+            "uuid": "s1",
+            "parentUuid": "a1",
+            "isSidechain": true,
+            "parent_tool_use_id": "toolu_known",
+            "timestamp": "2026-08-10T12:02:00Z",
+            "message": {"role": "assistant", "content": [{"type": "text", "text": "read   src/lib.rs"}]},
+        }),
+        serde_json::json!({
+            "type": "assistant",
+            "uuid": "s2",
+            "parentUuid": null,
+            "isSidechain": true,
+            "parent_tool_use_id": "toolu_abandoned",
+            "message": {"role": "assistant", "content": [{"type": "text", "text": "orphan"}]},
+        }),
+        tool_result_record("r1", "a1", "toolu_known", false),
+    ]);
+
+    let tasks = parse_task_history(lines.as_bytes());
+
+    assert_eq!(tasks.len(), 1, "an unlinked sidechain never creates a row");
+    assert_eq!(tasks[0].update.status.as_deref(), Some("read src/lib.rs"));
+    assert_eq!(
+        tasks[0].update.last_preview.as_deref(),
+        Some("read src/lib.rs")
+    );
+}
+
+#[test]
+fn task_history_keeps_rows_that_lack_optional_metadata() {
+    let lines = task_history_lines(&[serde_json::json!({
+        "type": "assistant",
+        "uuid": "a1",
+        "parentUuid": null,
+        "message": {"role": "assistant", "content": [{
+            "type": "tool_use", "id": "toolu_bare", "name": "Task", "input": {},
+        }]},
+    })]);
+
+    let tasks = parse_task_history(lines.as_bytes());
+
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].id, "toolu_bare");
+    assert_eq!(tasks[0].update.state, Some(BackgroundTaskState::Starting));
+    assert!(tasks[0].update.display_name.is_none());
+    assert!(tasks[0].update.objective.is_none());
+    assert!(tasks[0].update.started_at.is_none());
+}
+
+#[test]
+fn task_history_applies_recognized_lifecycle_records() {
+    let lines = task_history_lines(&[
+        assistant_launch("a1", None, "toolu_1"),
+        serde_json::json!({
+            "type": "system",
+            "subtype": "task_progress",
+            "uuid": "l1",
+            "parentUuid": "a1",
+            "tool_use_id": "toolu_1",
+            "task_type": "local_agent",
+            "last_tool_name": "Grep",
+            "timestamp": "2026-08-10T12:03:00Z",
+        }),
+    ]);
+
+    let tasks = parse_task_history(lines.as_bytes());
+
+    assert_eq!(tasks[0].update.state, Some(BackgroundTaskState::Working));
+    assert_eq!(tasks[0].update.status.as_deref(), Some("Grep"));
+}
+
+#[test]
+fn task_history_ignores_lifecycle_records_for_non_agent_work() {
+    let lines = task_history_lines(&[
+        assistant_launch("a1", None, "toolu_1"),
+        serde_json::json!({
+            "type": "system",
+            "subtype": "task_notification",
+            "uuid": "l1",
+            "parentUuid": "a1",
+            "tool_use_id": "toolu_1",
+            "task_type": "local_bash",
+            "status": "stopped",
+        }),
+    ]);
+
+    let tasks = parse_task_history(lines.as_bytes());
+
+    assert_eq!(
+        tasks[0].update.state,
+        Some(BackgroundTaskState::Starting),
+        "a background shell's record must not move a child agent's row"
+    );
+}
+
+#[test]
+fn task_history_reads_a_killed_task_from_its_update_patch() {
+    let lines = task_history_lines(&[
+        assistant_launch("a1", None, "toolu_1"),
+        serde_json::json!({
+            "type": "system",
+            "subtype": "task_updated",
+            "uuid": "l1",
+            "parentUuid": "a1",
+            "tool_use_id": "toolu_1",
+            "patch": {"status": "killed"},
+            "timestamp": "2026-08-10T12:04:00Z",
+        }),
+    ]);
+
+    let tasks = parse_task_history(lines.as_bytes());
+
+    assert_eq!(tasks[0].update.state, Some(BackgroundTaskState::Stopped));
+    assert!(tasks[0].update.completed_at.is_some());
+}
+
+#[test]
+fn an_interrupted_history_stops_children_the_next_process_never_confirmed() {
+    let lines = task_history_lines(&[
+        assistant_launch("a1", None, "toolu_1"),
+        serde_json::json!({"type": "system", "subtype": "init", "uuid": "i1", "parentUuid": "a1"}),
+    ]);
+
+    let tasks = parse_task_history(lines.as_bytes());
+
+    assert_eq!(tasks[0].update.state, Some(BackgroundTaskState::Stopped));
+}
+
+#[test]
+fn a_session_with_no_transcript_yet_restores_nothing_instead_of_failing() {
+    // A conversation whose first turn has not written records yet has no file
+    // on disk. Reporting that as a failure would show the panel as unavailable
+    // for every brand-new session.
+    let restored = load_task_history(Some("Z:/definitely/not/a/project"), "missing-session");
+
+    assert_eq!(restored, Ok(Vec::new()));
 }

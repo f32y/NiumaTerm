@@ -24,6 +24,20 @@ pub(super) enum Status {
     Exited,
 }
 
+/// Show a task snapshot only against the parent session it was produced for.
+/// Provider adapters publish snapshots asynchronously, so a snapshot can still
+/// be held when the pane has already moved to another session or has no
+/// session id yet; in both cases the view must render nothing rather than
+/// another conversation's children.
+fn scoped_background_tasks<'a>(
+    parent: Option<&BackgroundTaskKey>,
+    snapshot: Option<&'a BackgroundTaskSnapshot>,
+) -> Option<&'a BackgroundTaskSnapshot> {
+    let parent = parent?;
+    let snapshot = snapshot?;
+    (&snapshot.parent_session == parent).then_some(snapshot)
+}
+
 impl AgentPane {
     pub(crate) fn new(
         profile: AgentProfile,
@@ -119,6 +133,8 @@ impl AgentPane {
             compacting: false,
             update_suspension: None,
             last_recovery_snapshot: None,
+            restored_task_session: None,
+            background_tasks: None,
         };
 
         this.start_session(None, cx);
@@ -572,6 +588,83 @@ impl AgentPane {
         self.rewind.state = None;
         self.rewind.file_completion = None;
         self.history_ui.pending_resume_replay = None;
+        // Child rows belong to the conversation being replaced; keeping them
+        // would show another parent session's tasks until the new adapter
+        // publishes its first snapshot.
+        self.background_tasks = None;
+    }
+
+    /// Rebuild Claude child agents from the session's persisted history. The
+    /// read runs on a background thread and its failure never blocks the
+    /// parent transcript or composer.
+    pub(in crate::agent_pane) fn restore_background_tasks(&mut self, cx: &mut Context<Self>) {
+        let Some(Backend::Claude(session)) = self.session.as_ref() else {
+            return;
+        };
+        let Some(session_id) = session.session_id().map(str::to_owned) else {
+            return;
+        };
+        if self.restored_task_session.as_deref() == Some(session_id.as_str()) {
+            return;
+        }
+        self.restored_task_session = Some(session_id.clone());
+
+        let Some(Backend::Claude(session)) = self.session.as_mut() else {
+            return;
+        };
+        // Captured before the read starts so live updates that land while it
+        // runs keep their newer state.
+        let starting_sequence = session.begin_task_restoration();
+        let cwd = self.cwd.clone();
+        let epoch = self.session_epoch;
+
+        cx.spawn(async move |this, cx| {
+            let restored = cx
+                .background_executor()
+                .spawn(async move { sessions::load_task_history(cwd.as_deref(), &session_id) })
+                .await;
+
+            let _ = this.update(cx, |this, cx| {
+                if this.session_epoch != epoch {
+                    return;
+                }
+                let Some(Backend::Claude(session)) = this.session.as_mut() else {
+                    return;
+                };
+                for event in session.finish_task_restoration(restored, starting_sequence) {
+                    this.apply_event(event, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Opening the `Background Tasks` view asks the provider for fresher data.
+    pub(crate) fn refresh_background_tasks(&mut self) {
+        if let Some(session) = self.session.as_mut() {
+            session.refresh_background_tasks();
+        }
+    }
+
+    /// Provider-qualified identity of the parent session child tasks belong to.
+    /// `None` until the backend reports a thread or session id, which is what
+    /// disables the title-bar `Background Tasks` button.
+    pub(crate) fn background_task_parent(&self) -> Option<BackgroundTaskKey> {
+        match self.session.as_ref()?.recovery_identity()? {
+            RecoveryIdentity::CodexThread(id) => Some(BackgroundTaskKey::codex(id)),
+            RecoveryIdentity::ClaudeSession(id) => Some(BackgroundTaskKey::claude_code(id)),
+            RecoveryIdentity::NewConversation => None,
+        }
+    }
+
+    /// The latest snapshot, only while it still describes the session the pane
+    /// currently holds. A snapshot left over from a replaced session is hidden
+    /// rather than shown against the new parent.
+    pub(crate) fn background_tasks(&self) -> Option<&BackgroundTaskSnapshot> {
+        scoped_background_tasks(
+            self.background_task_parent().as_ref(),
+            self.background_tasks.as_ref(),
+        )
     }
 
     pub(super) fn reset_conversation(&mut self, cx: &mut Context<Self>) {

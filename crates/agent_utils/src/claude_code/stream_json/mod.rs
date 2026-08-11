@@ -49,6 +49,8 @@ use crate::chat::{
     SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
     TokenUsageBreakdown,
 };
+use crate::claude_code::sessions::RestoredTask;
+use crate::claude_code::tasks::ClaudeTasks;
 use crate::launcher::AgentCli;
 use crate::subprocess::JsonLineProcess;
 
@@ -148,6 +150,9 @@ pub struct Session {
     /// 30 seconds while a long compaction proceeds, and the UI only needs the
     /// state transitions.
     compacting: bool,
+    /// Child-agent state reduced from Task launches, lifecycle records, and
+    /// linked sidechain traffic for the `Background Tasks` view.
+    tasks: ClaudeTasks,
 }
 
 impl Session {
@@ -249,6 +254,7 @@ impl Session {
             context_window: None,
             turn_output_usage: TurnOutputUsage::default(),
             compacting: false,
+            tasks: ClaudeTasks::default(),
         };
 
         session.send(json!({
@@ -279,6 +285,11 @@ impl Session {
     pub fn process(&mut self, message: Value) -> Vec<Event> {
         let mut events = Vec::new();
 
+        // Child reduction runs before parent handling because the parent path
+        // drops linked sidechain records to keep child text out of the
+        // transcript; the child state would otherwise be lost with them.
+        let tasks_changed = self.tasks.observe(&message);
+
         // First sign of life after a send: the turn is actually running.
         if self.turn_active && !self.turn_reported {
             self.turn_reported = true;
@@ -304,6 +315,10 @@ impl Session {
                 }
             }
             _ => {}
+        }
+
+        if tasks_changed && let Some(snapshot) = self.tasks.snapshot() {
+            events.push(Event::BackgroundTasks(snapshot));
         }
 
         events
@@ -408,6 +423,29 @@ impl Session {
 
     /// Resolve operations that can no longer receive a control response after
     /// stdout closes. The pane calls this before reporting the process exit.
+    /// Start rebuilding child agents from this session's persisted history.
+    /// The returned order counter must be passed back to
+    /// [`Session::finish_task_restoration`] so a slow read cannot overwrite
+    /// live updates that landed while it was running.
+    pub fn begin_task_restoration(&mut self) -> u64 {
+        self.tasks.begin_restoration()
+    }
+
+    pub fn finish_task_restoration(
+        &mut self,
+        restored: Result<Vec<RestoredTask>, String>,
+        starting_sequence: u64,
+    ) -> Vec<Event> {
+        if !self.tasks.finish_restoration(restored, starting_sequence) {
+            return Vec::new();
+        }
+        self.tasks
+            .snapshot()
+            .map(Event::BackgroundTasks)
+            .into_iter()
+            .collect()
+    }
+
     pub fn process_exit(&mut self) -> Vec<Event> {
         fail_pending_control_operations(
             &mut self.pending_control_operations,

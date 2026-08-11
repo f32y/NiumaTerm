@@ -5,6 +5,8 @@
 
 use std::time::SystemTime;
 
+use crate::background_task::BackgroundTaskSnapshot;
+
 /// Thread settings a chat UI lets the user pick. Field meanings are
 /// per-backend: Codex sends them as overrides on every `turn/start`;
 /// Claude stores its permission mode in `approval` and applies changes via
@@ -457,6 +459,10 @@ pub enum Event {
     },
     /// The pending approval was answered or cleared by turn lifecycle.
     ApprovalResolved,
+    /// Replacement snapshot of the child agents this session spawned. Child
+    /// lifecycle is reduced by the adapter, so this never affects the parent
+    /// transcript, turn state, or approvals.
+    BackgroundTasks(BackgroundTaskSnapshot),
     /// Resumable sessions for the tab's working directory, newest first.
     History(Vec<SessionSummary>),
     /// Reconstructed transcript of a resumed session, to pre-fill the UI.
