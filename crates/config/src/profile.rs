@@ -91,6 +91,12 @@ pub struct AgentProfile {
     /// this to its native configuration surface.
     #[serde(default)]
     pub model: String,
+    /// Reasoning effort forced on every conversation this profile starts.
+    /// Empty leaves the choice to the remembered thread settings and whatever
+    /// the agent reports, which is what the pickers showed before this field
+    /// existed.
+    #[serde(default)]
+    pub effort: String,
     #[serde(default, rename = "use-custom-endpoint")]
     pub use_custom_endpoint: bool,
     #[serde(default, rename = "api-base-url")]
@@ -139,6 +145,7 @@ pub(crate) fn patch_agent_document(
         table["kind"] = value(profile.kind.as_str());
         table["executable"] = value(&profile.executable);
         table["model"] = value(&profile.model);
+        table["effort"] = value(&profile.effort);
         table["use-custom-endpoint"] = value(profile.use_custom_endpoint);
         table["api-base-url"] = value(&profile.api_base_url);
         table["api-key"] = value(&profile.api_key);

@@ -641,6 +641,7 @@ mod tests {
             kind: profile::AgentProfileKind::ClaudeCode,
             executable: "claude".to_string(),
             model: "claude-opus-4-8".to_string(),
+            effort: "high".to_string(),
             use_custom_endpoint: true,
             api_base_url: "https://proxy.example.com".to_string(),
             api_key: "sk-test".to_string(),

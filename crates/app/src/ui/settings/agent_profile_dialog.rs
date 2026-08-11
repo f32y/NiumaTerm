@@ -1,5 +1,10 @@
 use crate::ui::settings::*;
 
+/// Reasoning-effort choices a profile can pin. `default` is stored as an
+/// empty string, which is also what a profile written before this field
+/// existed carries, so both mean "leave the effort to the agent".
+const PROFILE_EFFORT_OPTIONS: [&str; 6] = ["default", "low", "medium", "high", "xhigh", "max"];
+
 /// Which half of an environment-variable row is open for editing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum EnvField {
@@ -410,6 +415,42 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
             .into_any_element()
     };
 
+    // An empty stored effort and the literal `default` are the same state;
+    // both mean the profile pins nothing.
+    let selected_effort = if profile.effort.trim().is_empty() {
+        PROFILE_EFFORT_OPTIONS[0].to_string()
+    } else {
+        profile.effort.trim().to_string()
+    };
+    let effort_control = Button::new("agent-profile-dialog-effort")
+        .outline()
+        .w_64()
+        .label(selected_effort.clone())
+        .dropdown_caret(true)
+        .dropdown_menu(move |menu, _, _| {
+            let selected = selected_effort.clone();
+
+            PROFILE_EFFORT_OPTIONS.iter().fold(menu, |menu, option| {
+                let option = *option;
+
+                menu.item(
+                    PopupMenuItem::new(option)
+                        .checked(option == selected)
+                        .on_click(move |_, _, cx: &mut App| {
+                            // `default` is the absence of a choice, so it is
+                            // stored empty rather than as a level the agent
+                            // would be asked to honor.
+                            cx.global_mut::<AgentProfileDraft>().profile.effort =
+                                if option == PROFILE_EFFORT_OPTIONS[0] {
+                                    String::new()
+                                } else {
+                                    option.to_string()
+                                };
+                        }),
+                )
+            })
+        });
+
     let endpoint_switch = Switch::new("agent-profile-dialog-endpoint")
         .checked(endpoint_on)
         .on_click(|checked: &bool, _, cx: &mut App| {
@@ -478,6 +519,13 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
                 }
             },
             Input::new(&model_input).w_64(),
+            cx,
+        ))
+        .child(card_row(
+            "Effort",
+            "Reasoning effort forced on every conversation this profile starts. \
+             `default` leaves it to the agent and the last remembered pick.",
+            effort_control,
             cx,
         ))
         .child(card_row(

@@ -134,8 +134,19 @@ pub(crate) fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
         executable: profile.executable.trim().to_string(),
         env,
         model,
+        effort: profile_effort(profile),
         provider: codex_provider,
     }
+}
+
+/// The reasoning effort this profile pins, or `None` when it leaves the choice
+/// to the remembered pick and the agent. The literal `default` is accepted
+/// alongside an empty field because that word is the picker's own label for
+/// "no choice".
+pub(crate) fn profile_effort(profile: &AgentProfile) -> Option<String> {
+    let effort = profile.effort.trim();
+
+    (!effort.is_empty() && effort != "default").then(|| effort.to_string())
 }
 
 /// Last-chosen thread settings per agent profile name (agent ID for
@@ -217,6 +228,29 @@ mod agent_profile_launch_tests {
             Some("claude-env-override")
         );
         assert!(launch.provider.is_none());
+    }
+
+    #[test]
+    fn a_pinned_effort_reaches_the_launch_and_default_leaves_it_unset() {
+        let pinned = AgentProfile {
+            executable: "claude".into(),
+            effort: "xhigh".into(),
+            ..AgentProfile::default()
+        };
+
+        assert_eq!(agent_launch(&pinned).effort.as_deref(), Some("xhigh"));
+
+        // The picker's own word for "no choice" and a profile written before
+        // the field existed are the same state.
+        for unset in ["", "default", "  "] {
+            let profile = AgentProfile {
+                executable: "claude".into(),
+                effort: unset.into(),
+                ..AgentProfile::default()
+            };
+
+            assert_eq!(agent_launch(&profile).effort, None);
+        }
     }
 
     #[test]
