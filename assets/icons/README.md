@@ -2,9 +2,8 @@
 
 ## Lucide
 
-`coins.svg` comes from Lucide Icons:
-
 - https://github.com/lucide-icons/lucide/blob/main/icons/coins.svg
+- https://github.com/lucide-icons/lucide/blob/main/icons/trash-2.svg
 
 Lucide Icons is Copyright © 2026 Lucide Icons and Contributors and distributed
 under the ISC License. The required notice is retained in `LICENSE-Lucide`.

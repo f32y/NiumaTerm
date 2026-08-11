@@ -1,5 +1,12 @@
 use crate::ui::settings::*;
 
+/// Which half of an environment-variable row is open for editing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EnvField {
+    Name,
+    Value,
+}
+
 /// Draft edited in the agent-profile dialog: `target` is the list index in
 /// edit mode, `None` while adding. Inputs write here; only Save commits the
 /// draft into `AppSettings`, so Cancel is a plain close.
@@ -7,6 +14,10 @@ use crate::ui::settings::*;
 struct AgentProfileDraft {
     target: Option<usize>,
     profile: AgentProfile,
+    /// Environment-variable cell currently open for editing. The table shows
+    /// plain text until a cell is double-clicked, so only one input exists at
+    /// a time and the rows stay readable.
+    editing_env: Option<(usize, EnvField)>,
 }
 
 impl Global for AgentProfileDraft {}
@@ -29,7 +40,11 @@ pub(super) fn open_agent_profile_dialog(target: Option<usize>, window: &mut Wind
             ..builtin_agent_profile(AgentProfileKind::ClaudeCode)
         },
     };
-    cx.set_global(AgentProfileDraft { target, profile });
+    cx.set_global(AgentProfileDraft {
+        target,
+        profile,
+        editing_env: None,
+    });
 
     window.open_dialog(cx, move |dialog, window, _| {
         let title = if target.is_some() {
@@ -38,60 +53,28 @@ pub(super) fn open_agent_profile_dialog(target: Option<usize>, window: &mut Wind
             "Add Agent Profile"
         };
         let settings_height = window.viewport_size().height;
-        let dialog_height = settings_height * 0.6;
+        let dialog_height = settings_height * 0.72;
         let dialog_top = (settings_height - dialog_height) * 0.5;
 
-        let mut footer = DialogFooter::new()
-            .child(DialogClose::new().child(Button::new("agent-profile-cancel").label("Cancel")));
-
-        if let Some(ix) = target {
-            footer = footer.child(
-                Button::new("agent-profile-delete")
-                    .danger()
-                    .label("Delete")
-                    .on_click(move |_, window, cx: &mut App| {
-                        let name = cx.global::<AgentProfileDraft>().profile.name.clone();
-                        let subject = if name.is_empty() {
-                            "this profile".to_string()
-                        } else {
-                            format!("profile \"{name}\"")
-                        };
-
-                        window.open_alert_dialog(cx, move |alert, _, _| {
-                            alert
-                                .confirm()
-                                .title("Delete Agent Profile")
-                                .description(format!("Delete {subject}? This cannot be undone."))
-                                .on_ok(move |_, window, cx| {
-                                    cx.global_mut::<AppSettings>().remove_agent_profile(ix);
-                                    // Pop the confirm and the edit dialog
-                                    // explicitly, then return false so the
-                                    // alert's own close path does not pop a
-                                    // third dialog (the settings one).
-                                    window.close_dialog(cx);
-                                    window.close_dialog(cx);
-                                    false
-                                })
-                        });
+        // Deleting lives in the profile list's own row control, so this
+        // dialog stays an editor: everything in it is reversible by cancelling.
+        let footer = DialogFooter::new()
+            .child(DialogClose::new().child(Button::new("agent-profile-cancel").label("Cancel")))
+            .child(
+                Button::new("agent-profile-save")
+                    .primary()
+                    .label("Save")
+                    .on_click(|_, window, cx: &mut App| {
+                        save_agent_profile_draft(cx);
+                        window.close_dialog(cx);
                     }),
             );
-        }
-
-        footer = footer.child(
-            Button::new("agent-profile-save")
-                .primary()
-                .label("Save")
-                .on_click(|_, window, cx: &mut App| {
-                    save_agent_profile_draft(cx);
-                    window.close_dialog(cx);
-                }),
-        );
 
         dialog
             .title(title)
             .overlay_closable(false)
             .margin_top(dialog_top)
-            .w(px(560.))
+            .w(px(672.))
             .h(dialog_height)
             .content(|content, window, cx| {
                 content.overflow_hidden().child(
@@ -112,6 +95,10 @@ pub(super) fn open_agent_profile_dialog(target: Option<usize>, window: &mut Wind
 fn save_agent_profile_draft(cx: &mut App) {
     let target = cx.global::<AgentProfileDraft>().target;
     let mut profile = cx.global::<AgentProfileDraft>().profile.clone();
+
+    // A variable with no name cannot be exported, and an entry the user added
+    // but never filled in would otherwise persist as noise in config.toml.
+    profile.env.retain(|var| !var.name.trim().is_empty());
 
     let settings = cx.global_mut::<AppSettings>();
     profile.name = settings.unique_agent_profile_name(&profile.name, profile.kind, target);
@@ -162,6 +149,188 @@ fn kind_choice_button(
         }
         draft.profile.kind = kind;
     })
+}
+
+/// One editable cell of the environment-variable table. It shows plain text
+/// until double-clicked, then swaps in an input that writes straight into the
+/// draft; leaving the field closes the editor, so there is nothing to commit.
+fn env_cell(
+    row: usize,
+    field: EnvField,
+    text: &str,
+    placeholder: &'static str,
+    editing: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let key = match field {
+        EnvField::Name => "name",
+        EnvField::Value => "value",
+    };
+
+    if editing {
+        let input = card_text_input(
+            format!("agent-profile-dialog-env-{row}-{key}"),
+            text.to_string().into(),
+            false,
+            move |value, cx| {
+                if let Some(var) = cx
+                    .global_mut::<AgentProfileDraft>()
+                    .profile
+                    .env
+                    .get_mut(row)
+                {
+                    match field {
+                        EnvField::Name => var.name = value,
+                        EnvField::Value => var.value = value,
+                    }
+                }
+            },
+            window,
+            cx,
+        );
+
+        // Enter and clicking away end the edit. The value is already in the
+        // draft, so closing the editor is all that is left to do. The
+        // subscription is held in its own keyed slot, which lives exactly as
+        // long as this cell is the one being edited.
+        window.use_keyed_state(
+            SharedString::from(format!("agent-profile-dialog-env-{row}-{key}-close")),
+            cx,
+            |_, cx| {
+                cx.subscribe(&input, |_, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Blur | InputEvent::PressEnter { .. }) {
+                        cx.global_mut::<AgentProfileDraft>().editing_env = None;
+                    }
+                })
+            },
+        );
+
+        // The cell is rendered because the user just asked to edit it, so the
+        // caret belongs here without a second click.
+        input.update(cx, |input, cx| input.focus(window, cx));
+
+        return div()
+            .flex_1()
+            .min_w_0()
+            .child(
+                Input::new(&input)
+                    .xsmall()
+                    .appearance(false)
+                    .p_0()
+                    .text_sm(),
+            )
+            .into_any_element();
+    }
+
+    let empty = text.trim().is_empty();
+    let label = if empty {
+        placeholder.to_string()
+    } else {
+        text.to_string()
+    };
+
+    div()
+        .id(("env-cell", row * 2 + field as usize))
+        .flex_1()
+        .min_w_0()
+        .truncate()
+        .text_sm()
+        .when(empty, |this| {
+            this.text_color(cx.theme().muted_foreground.opacity(0.6))
+        })
+        .child(label)
+        .on_click(move |event, _, cx: &mut App| {
+            if event.click_count() == 2 {
+                cx.global_mut::<AgentProfileDraft>().editing_env = Some((row, field));
+            }
+        })
+        .into_any_element()
+}
+
+/// The environment variables of the draft as a Name / Value / Operation
+/// table, matching the agent-profile table on the Profiles page.
+fn env_var_table(env: &[EnvVar], window: &mut Window, cx: &mut App) -> AnyElement {
+    let editing = cx.global::<AgentProfileDraft>().editing_env;
+
+    let mut table = table_frame(cx).child(
+        table_header(cx)
+            .child(div().flex_1().min_w_0().child("Name"))
+            .child(div().flex_1().min_w_0().child("Value"))
+            .child(
+                div()
+                    .w(ENV_OPERATION_COLUMN)
+                    .flex_none()
+                    .text_right()
+                    .child("Operation"),
+            ),
+    );
+
+    if env.is_empty() {
+        return table
+            .child(
+                table_row(false, cx)
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("No variables yet."),
+            )
+            .into_any_element();
+    }
+
+    for (row, var) in env.iter().enumerate() {
+        let ruled = row + 1 < env.len();
+
+        table = table.child(
+            table_row(ruled, cx)
+                .child(env_cell(
+                    row,
+                    EnvField::Name,
+                    &var.name,
+                    "Name",
+                    editing == Some((row, EnvField::Name)),
+                    window,
+                    cx,
+                ))
+                .child(env_cell(
+                    row,
+                    EnvField::Value,
+                    &var.value,
+                    "Value",
+                    editing == Some((row, EnvField::Value)),
+                    window,
+                    cx,
+                ))
+                .child(
+                    h_flex()
+                        .w(ENV_OPERATION_COLUMN)
+                        .flex_none()
+                        .justify_end()
+                        .child(
+                            // Removing a row the user can still cancel out of
+                            // by closing the dialog needs no confirmation.
+                            Button::new(SharedString::from(format!(
+                                "agent-profile-dialog-env-remove-{row}"
+                            )))
+                            .ghost()
+                            .with_size(TABLE_OPERATION_BUTTON)
+                            .icon(TrashIcon)
+                            .aria_label("Delete")
+                            .tooltip("Delete")
+                            .on_click(move |_, _, cx: &mut App| {
+                                let draft = cx.global_mut::<AgentProfileDraft>();
+                                if row < draft.profile.env.len() {
+                                    draft.profile.env.remove(row);
+                                }
+                                // Indices shift under the editor, so the open
+                                // cell would follow the wrong variable.
+                                draft.editing_env = None;
+                            }),
+                        ),
+                ),
+        );
+    }
+
+    table.into_any_element()
 }
 
 fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
@@ -249,66 +418,6 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
                 .use_custom_endpoint = *checked;
         });
 
-    let mut env_rows = v_flex().w_full().gap_2();
-    for (row, var) in profile.env.iter().enumerate() {
-        let env_name_input = card_text_input(
-            format!("agent-profile-dialog-env-{row}-name"),
-            var.name.clone().into(),
-            false,
-            move |value, cx| {
-                if let Some(var) = cx
-                    .global_mut::<AgentProfileDraft>()
-                    .profile
-                    .env
-                    .get_mut(row)
-                {
-                    var.name = value;
-                }
-            },
-            window,
-            cx,
-        );
-
-        let env_value_input = card_text_input(
-            format!("agent-profile-dialog-env-{row}-value"),
-            var.value.clone().into(),
-            false,
-            move |value, cx| {
-                if let Some(var) = cx
-                    .global_mut::<AgentProfileDraft>()
-                    .profile
-                    .env
-                    .get_mut(row)
-                {
-                    var.value = value;
-                }
-            },
-            window,
-            cx,
-        );
-
-        env_rows = env_rows.child(
-            h_flex()
-                .w_full()
-                .gap_2()
-                .child(Input::new(&env_name_input).flex_1())
-                .child(Input::new(&env_value_input).flex_1())
-                .child(
-                    Button::new(SharedString::from(format!(
-                        "agent-profile-dialog-env-remove-{row}"
-                    )))
-                    .outline()
-                    .label("Remove")
-                    .on_click(move |_, _, cx: &mut App| {
-                        let env = &mut cx.global_mut::<AgentProfileDraft>().profile.env;
-                        if row < env.len() {
-                            env.remove(row);
-                        }
-                    }),
-                ),
-        );
-    }
-
     let env_section = v_flex()
         .w_full()
         .gap_2()
@@ -317,9 +426,12 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
             div()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .child("Extra environment variables applied to the agent process."),
+                .child(
+                    "Extra environment variables applied to the agent process. \
+                     Double-click a cell to edit it.",
+                ),
         )
-        .child(env_rows)
+        .child(env_var_table(&profile.env, window, cx))
         .child(
             h_flex().child(
                 Button::new("agent-profile-dialog-env-add")

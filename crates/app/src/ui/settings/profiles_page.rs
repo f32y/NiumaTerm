@@ -268,7 +268,7 @@ fn agent_profiles_group(agent_profiles: &[AgentProfile]) -> SettingGroup {
         })
         .collect();
 
-    let mut group = SettingGroup::new()
+    let group = SettingGroup::new()
         .title("Agent Profile")
         .description("Launch profiles for agent tabs (Claude Code and Codex).")
         .item(
@@ -304,27 +304,7 @@ fn agent_profiles_group(agent_profiles: &[AgentProfile]) -> SettingGroup {
             .description("Create a new agent profile."),
         );
 
-    for (ix, profile) in agent_profiles.iter().enumerate() {
-        let label = if profile.name.is_empty() {
-            format!("Agent Profile {}", ix + 1)
-        } else {
-            profile.name.clone()
-        };
-
-        group = group.item(
-            SettingItem::new(
-                label,
-                SettingField::render(move |_, _, _| {
-                    Button::new(("agent-profile-edit", ix))
-                        .outline()
-                        .label("Edit")
-                        .on_click(move |_, window, cx: &mut App| {
-                            open_agent_profile_dialog(Some(ix), window, cx);
-                        })
-                }),
-            )
-            .description(agent_kind_label(profile.kind)),
-        );
-    }
-    group
+    group.item(SettingItem::render(|_, window, cx| {
+        agent_profile_list(window, cx)
+    }))
 }
