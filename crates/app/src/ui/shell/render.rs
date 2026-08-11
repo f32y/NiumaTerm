@@ -1,6 +1,11 @@
 use crate::ui::background_tasks::PANEL_TITLE;
 use crate::ui::shell::*;
 
+/// Width the tab strip keeps once the title bar runs out of room: about one
+/// truncated tab plus the new-tab button, so the strip stays visible and its
+/// horizontal scroll stays reachable at the window's minimum width.
+pub(super) const TAB_STRIP_MIN_WIDTH: f32 = 120.0;
+
 impl Shell {
     fn bind_actions(element: Div, cx: &mut Context<Self>) -> Div {
         element
@@ -50,8 +55,14 @@ impl Shell {
             }))
             .child(
                 h_flex()
+                    // Sized to the sidebar column so these controls line up
+                    // with it, but shrinkable and clipped: on a narrow window
+                    // the alignment is worth less than keeping the window
+                    // controls on screen, so this block gives up width before
+                    // anything to its right does.
                     .w(px(self.sidebar.width - floating_surface::SIDE_INSET))
-                    .flex_none()
+                    .min_w_0()
+                    .overflow_hidden()
                     .child(
                         div().occlude().child(
                             Button::new("toggle-sidebar")
@@ -83,7 +94,12 @@ impl Shell {
             .child(
                 div()
                     .flex_1()
-                    .min_w_0()
+                    // A floor rather than `min_w_0`: without it flexbox drains
+                    // this zero-basis column to nothing before squeezing its
+                    // neighbours, and a zero-width strip cannot be scrolled
+                    // back into view. The strip's own horizontal scroll takes
+                    // over once the tabs no longer fit this width.
+                    .min_w(px(TAB_STRIP_MIN_WIDTH))
                     .h_full()
                     .flex()
                     .items_center()
@@ -91,6 +107,10 @@ impl Shell {
             )
             .child(
                 h_flex()
+                    // The window controls sit to the right of this group, so
+                    // any width it concedes would be reclaimed by the tab
+                    // strip and push them off the window.
+                    .flex_none()
                     .child(div().occlude().child(self.git_status.clone()))
                     .child(
                         div()

@@ -76,6 +76,13 @@ impl WindowRegistry {
     }
 }
 
+/// Narrower than this the title bar cannot hold the tab strip alongside the
+/// window controls, and shorter than this a terminal pane stops showing a
+/// usable number of rows. Enforced by the platform through WM_GETMINMAXINFO,
+/// so it also bounds interactive resize, not just the initial geometry.
+pub(crate) const MIN_WINDOW_WIDTH: f32 = 640.0;
+const MIN_WINDOW_HEIGHT: f32 = 400.0;
+
 impl AppWindow {
     /// Startup state from one persisted window entry. `restore_session: false`
     /// discards the saved session; the caller persists that cleanup.
@@ -105,7 +112,17 @@ impl AppWindow {
     pub(crate) fn open(cx: &mut App, initial: AppWindow) -> WindowHandle<Root> {
         let window_bounds = match &initial.bounds {
             Some(w) => {
-                let bounds = Bounds::new(point(px(w.x), px(w.y)), size(px(w.width), px(w.height)));
+                // WM_GETMINMAXINFO bounds interactive resize only, so geometry
+                // saved by an older build (or edited by hand) is clamped here
+                // as well; otherwise the window would restore below its
+                // minimum and stay there until the user resized it.
+                let bounds = Bounds::new(
+                    point(px(w.x), px(w.y)),
+                    size(
+                        px(w.width.max(MIN_WINDOW_WIDTH)),
+                        px(w.height.max(MIN_WINDOW_HEIGHT)),
+                    ),
+                );
                 if w.maximized {
                     WindowBounds::Maximized(bounds)
                 } else {
@@ -127,6 +144,7 @@ impl AppWindow {
                 }),
                 window_background: ui::window_background_appearance(cx),
                 window_appearance_override: Some(selected_window_appearance(cx)),
+                window_min_size: Some(size(px(MIN_WINDOW_WIDTH), px(MIN_WINDOW_HEIGHT))),
                 ..Default::default()
             },
             // Wrap the shell in gpui-component's `Root` so modal/dialog layers

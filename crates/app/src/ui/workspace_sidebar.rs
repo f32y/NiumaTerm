@@ -27,7 +27,7 @@ pub(super) const SIDEBAR_WIDTH: f32 = 180.0;
 pub(super) const RESIZE_HANDLE: &str = "workspace-sidebar-resize";
 
 pub(super) const MIN_WIDTH: f32 = 140.0;
-pub(super) const MAX_WIDTH: f32 = 480.0;
+pub(crate) const MAX_WIDTH: f32 = 480.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WorkspaceStatusVisual {
