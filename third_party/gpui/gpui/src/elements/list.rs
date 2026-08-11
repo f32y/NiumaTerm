@@ -1455,8 +1455,13 @@ impl StateInner {
 
         // If follow_tail mode is on but the user scrolled away
         // (is_following is false), check whether the current scroll
-        // position has returned to the bottom.
-        if self.follow_state.has_stopped_following() {
+        // position has returned to the bottom. An active smooth wheel
+        // motion places intermediate frames within a fraction of the
+        // destination, so resuming here would snap the list back to the
+        // tail before a short scroll away from it has visibly begun;
+        // the motion's final frame settles the position, and the check
+        // runs on the frame after it ends.
+        if self.follow_state.has_stopped_following() && self.smooth_wheel_motion.is_none() {
             let padding = self.last_padding.unwrap_or_default();
             let total_height = self.items.summary().height + padding.top + padding.bottom;
             let scroll_offset = self.scroll_top(&scroll_top);
@@ -2358,6 +2363,31 @@ mod test {
         cx.executor().advance_clock(Duration::from_millis(400));
         draw_test_list(cx, &state, 100.);
         assert!(state.is_following_tail());
+    }
+
+    #[gpui::test]
+    fn test_smooth_wheel_from_tail_stays_scrolled_for_a_small_input(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let state = ListState::new(30, crate::ListAlignment::Bottom, px(10.)).measure_all();
+        state.set_follow_mode(FollowMode::Tail);
+        state.set_smooth_wheel_enabled(true);
+        draw_test_list(cx, &state, 100.);
+        assert!(state.is_following_tail());
+
+        // One line-unit wheel up from the very bottom.
+        test_wheel(cx, ScrollDelta::Lines(point(0., 1.)));
+        assert!(!state.is_following_tail());
+
+        // Let the animation run frame by frame, as in a live window.
+        for _ in 0..40 {
+            cx.executor().advance_clock(Duration::from_millis(16));
+            draw_test_list(cx, &state, 100.);
+        }
+
+        // The list must have settled one line above the bottom (30 20px items
+        // give scroll_max 500) and stayed there instead of snapping back.
+        assert!(!state.is_following_tail());
+        assert!((test_scroll_position(&state, 100.) - (500. - 100. / 3.)).abs() < 0.1);
     }
 
     #[gpui::test]
