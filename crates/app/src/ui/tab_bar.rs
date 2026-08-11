@@ -334,13 +334,16 @@ impl TabStrip {
                         .collect();
                     let item_shell = menu_shell.clone();
 
-                    menu = menu.item(PopupMenuItem::new(profile.name.clone()).on_click(
-                        move |_, window, cx| {
-                            let launch = (Some(shell_cmd.clone()), args.clone());
-                            item_shell
-                                .update(cx, |this, cx| this.open_profile_tab(launch, window, cx));
-                        },
-                    ));
+                    menu = menu.item(
+                        PopupMenuItem::new(profile.name.clone())
+                            .icon(tab_icon(None))
+                            .on_click(move |_, window, cx| {
+                                let launch = (Some(shell_cmd.clone()), args.clone());
+                                item_shell.update(cx, |this, cx| {
+                                    this.open_profile_tab(launch, window, cx)
+                                });
+                            }),
+                    );
                 }
 
                 let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
@@ -359,10 +362,16 @@ impl TabStrip {
                     };
                     let item_shell = menu_shell.clone();
 
-                    menu = menu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| {
-                        let profile = profile.clone();
-                        item_shell.update(cx, |this, cx| this.open_agent_tab(profile, window, cx));
-                    }));
+                    menu = menu.item(
+                        PopupMenuItem::new(label)
+                            .icon(tab_icon(Some(AgentKind::from_profile(profile.kind))))
+                            .on_click(move |_, window, cx| {
+                                let profile = profile.clone();
+                                item_shell.update(cx, |this, cx| {
+                                    this.open_agent_tab(profile, window, cx)
+                                });
+                            }),
+                    );
                 }
 
                 menu
