@@ -7,8 +7,7 @@ use nmt_agent_utils::background_task::{
 
 use crate::ui::background_tasks::{
     COMPACT_FINISHED_ROWS, COMPACT_RUNNING_ROWS, duration_label, finished_heading, finished_rows,
-    has_unseen_activity, row_detail, row_timing, running_heading, running_rows,
-    section_control_label, title_bar_label, visible_rows,
+    row_detail, row_timing, running_heading, running_rows, section_control_label, visible_rows,
 };
 
 fn at(seconds: u64) -> SystemTime {
@@ -199,62 +198,6 @@ fn compact_sections_hide_the_tail_behind_a_control() {
         section_control_label(0, true).as_deref(),
         Some("Show fewer")
     );
-}
-
-#[test]
-fn the_title_bar_button_reports_the_active_count_only_when_it_is_nonzero() {
-    let idle = Builder::codex()
-        .task(
-            BackgroundTaskKey::codex("a"),
-            finished(BackgroundTaskState::Done, Some(100)),
-        )
-        .build();
-    assert_eq!(title_bar_label(Some(&idle)), None);
-    assert_eq!(title_bar_label(None), None);
-
-    let busy = Builder::codex()
-        .task(BackgroundTaskKey::codex("a"), running("a", None))
-        .task(BackgroundTaskKey::codex("b"), running("b", None))
-        .build();
-    assert_eq!(title_bar_label(Some(&busy)).as_deref(), Some("2"));
-}
-
-#[test]
-fn unseen_activity_is_tracked_per_parent_session() {
-    let snapshot = Builder::codex()
-        .task(BackgroundTaskKey::codex("a"), running("a", None))
-        .build();
-
-    assert!(has_unseen_activity(Some(&snapshot), None));
-    assert!(!has_unseen_activity(
-        Some(&snapshot),
-        Some(snapshot.activity)
-    ));
-    // Another session's seen ordinal never suppresses this one.
-    assert!(has_unseen_activity(Some(&snapshot), Some(0)));
-    assert!(!has_unseen_activity(None, None));
-}
-
-#[test]
-fn a_metadata_only_update_does_not_reraise_the_unseen_indicator() {
-    let mut registry = BackgroundTaskRegistry::new(BackgroundTaskKey::codex("thr_parent"));
-    registry.apply(BackgroundTaskKey::codex("a"), running("a", None));
-    let seen = registry.snapshot().activity;
-
-    registry.apply(
-        BackgroundTaskKey::codex("a"),
-        BackgroundTaskUpdate {
-            status: Some("still reading".into()),
-            ..BackgroundTaskUpdate::default()
-        },
-    );
-    assert!(!has_unseen_activity(Some(&registry.snapshot()), Some(seen)));
-
-    registry.apply(
-        BackgroundTaskKey::codex("a"),
-        BackgroundTaskUpdate::state(BackgroundTaskState::Done),
-    );
-    assert!(has_unseen_activity(Some(&registry.snapshot()), Some(seen)));
 }
 
 #[test]

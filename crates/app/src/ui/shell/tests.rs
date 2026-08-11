@@ -56,19 +56,3 @@ fn git_and_background_tasks_share_one_right_side_area() {
     assert!(!selection.shows(RightPanelKind::BackgroundTasks));
     assert!(!selection.shows(RightPanelKind::Git));
 }
-
-/// A pane that stops being a supported provider session must not leave another
-/// conversation's rows on screen, and must not disturb Git.
-#[test]
-fn background_tasks_closes_without_affecting_git() {
-    use crate::ui::right_panel::{RightPanelKind, RightPanelSelection};
-
-    let mut selection = RightPanelSelection::new();
-    selection.select(RightPanelKind::BackgroundTasks);
-    assert!(selection.close_if_showing(RightPanelKind::BackgroundTasks));
-    assert!(!selection.shows(RightPanelKind::BackgroundTasks));
-
-    selection.select(RightPanelKind::Git);
-    assert!(!selection.close_if_showing(RightPanelKind::BackgroundTasks));
-    assert!(selection.shows(RightPanelKind::Git));
-}

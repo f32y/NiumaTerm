@@ -533,22 +533,6 @@ fn finished_heading(snapshot: &BackgroundTaskSnapshot) -> String {
     format!("Finished · {}", snapshot.terminal_count())
 }
 
-/// Label for the title-bar button. The count is shown only when nonzero so an
-/// idle session keeps the chrome quiet.
-pub(crate) fn title_bar_label(snapshot: Option<&BackgroundTaskSnapshot>) -> Option<String> {
-    let active = snapshot?.active_count();
-    (active > 0).then(|| active.to_string())
-}
-
-/// Whether the current session has lifecycle activity the user has not opened
-/// the view for yet.
-pub(crate) fn has_unseen_activity(
-    snapshot: Option<&BackgroundTaskSnapshot>,
-    seen_activity: Option<u64>,
-) -> bool {
-    snapshot.is_some_and(|snapshot| snapshot.activity > seen_activity.unwrap_or(0))
-}
-
 impl Render for BackgroundTasksView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let settings = cx.global::<AppSettings>();

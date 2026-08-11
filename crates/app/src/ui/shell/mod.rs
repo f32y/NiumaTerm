@@ -33,7 +33,6 @@ use gpui_component::resizable::{
 use gpui_component::{
     ActiveTheme, Icon, IconName, IconNamed, Root, TitleBar, WindowExt, h_flex, v_flex,
 };
-use nmt_agent_utils::background_task::BackgroundTaskKey;
 use nmt_agent_utils::update::{ProviderKind, UpdatePhase};
 use nmt_agent_utils::{
     AgentEvent, AgentMonitor, AgentNotification, AgentRoute, AgentRuntimeStatus, agent_process,
@@ -134,10 +133,6 @@ pub(crate) struct Shell {
     /// The single right-side area, shared by Git and `Background Tasks`;
     /// always mounted so close can animate.
     right_panel: Entity<RightPanel>,
-    /// Highest task activity ordinal the user has already seen, per parent
-    /// session. Kept per session so opening one tab's view cannot hide new
-    /// activity in another tab.
-    seen_task_activity: collections::HashMap<BackgroundTaskKey, u64>,
     /// Stable entities let each installation's card replace content in place
     /// without entering the transient Root notification lifecycle.
     update_notifications: collections::HashMap<String, Entity<Notification>>,
@@ -293,7 +288,6 @@ impl Shell {
                 cx.new(|_| RightPanel::new(git, tasks))
             },
             git_model,
-            seen_task_activity: collections::HashMap::new(),
             update_notifications: collections::HashMap::new(),
             update_notification_views: collections::HashMap::new(),
             update_terminal_elapsed: collections::HashMap::new(),
@@ -348,21 +342,12 @@ impl Shell {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // The view is scoped to one parent session, so a pane without a
-        // started or restored provider session has nothing to open.
-        let Some(parent) = self.active_task_parent(cx) else {
-            return;
-        };
         let open = self.right_panel.update(cx, |panel, cx| {
             panel.select(RightPanelKind::BackgroundTasks, cx)
         });
 
         if open {
             self.sync_task_panel_target(cx);
-            // Opening marks only this session's activity as seen.
-            if let Some(activity) = self.active_task_activity(cx) {
-                self.seen_task_activity.insert(parent, activity);
-            }
             // Asking for fresher data happens on the open edge, not on every
             // render, so a visible panel does not re-query the provider each
             // frame. The adapter still ignores overlapping requests.
@@ -378,29 +363,14 @@ impl Shell {
         cx.notify();
     }
 
-    /// Provider-qualified parent session of the active pane, or `None` when it
-    /// is a terminal, an unsupported provider, or an Agent tab whose session id
-    /// is not established yet.
-    fn active_task_parent(&self, cx: &App) -> Option<BackgroundTaskKey> {
-        self.active_agent()?.read(cx).background_task_parent()
-    }
-
-    fn active_task_activity(&self, cx: &App) -> Option<u64> {
-        Some(self.active_agent()?.read(cx).background_tasks()?.activity)
-    }
-
-    /// Point the view at the active Agent pane and close it when that pane
-    /// stopped being a supported provider session.
+    /// Point the view at the active Agent pane. A pane with no supported
+    /// provider session clears the target rather than closing the view: the
+    /// panel reports that there is nothing to show, which keeps the right-side
+    /// area from vanishing while the user moves between tabs.
     fn sync_task_panel_target(&mut self, cx: &mut Context<Self>) {
         let target = self
             .active_agent()
             .filter(|pane| pane.read(cx).background_task_parent().is_some());
-
-        if target.is_none() {
-            self.right_panel.update(cx, |panel, cx| {
-                panel.close_if_showing(RightPanelKind::BackgroundTasks, cx)
-            });
-        }
 
         let handle = target.map(|pane| pane.downgrade());
         let tasks = self.right_panel.read(cx).tasks().clone();

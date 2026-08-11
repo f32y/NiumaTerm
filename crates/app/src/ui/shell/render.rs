@@ -1,6 +1,4 @@
-use gpui_component::Disableable as _;
-
-use crate::ui::background_tasks::{self, PANEL_TITLE};
+use crate::ui::background_tasks::PANEL_TITLE;
 use crate::ui::shell::*;
 
 impl Shell {
@@ -112,58 +110,19 @@ impl Shell {
             )
     }
 
-    /// Upper-right `Background Tasks` control. It carries the active child
-    /// count and an unseen-activity dot for the current parent session, and is
-    /// disabled when the active pane has no supported provider session.
+    /// Upper-right `Background Tasks` control. Always available: a session
+    /// with no children, and a pane that is not an agent at all, are states
+    /// the view reports for itself, so a disabled control would hide the
+    /// answer rather than give it.
     fn render_background_tasks_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let snapshot = self
-            .active_agent()
-            .and_then(|pane| pane.read(cx).background_tasks().cloned());
-        let parent = self.active_task_parent(cx);
-        let seen = parent
-            .as_ref()
-            .and_then(|parent| self.seen_task_activity.get(parent))
-            .copied();
-        let count = background_tasks::title_bar_label(snapshot.as_ref());
-        // The indicator is suppressed while the view is open, because opening
-        // it is what marks the current activity as seen.
-        let unseen = !self
-            .right_panel
-            .read(cx)
-            .shows(RightPanelKind::BackgroundTasks)
-            && background_tasks::has_unseen_activity(snapshot.as_ref(), seen);
-        let aria_label = match (&count, unseen) {
-            (Some(count), true) => format!("{PANEL_TITLE}: {count} active, new activity"),
-            (Some(count), false) => format!("{PANEL_TITLE}: {count} active"),
-            (None, true) => format!("{PANEL_TITLE}: new activity"),
-            (None, false) => PANEL_TITLE.to_string(),
-        };
-
-        div()
-            .relative()
-            .child(
-                Button::new("toggle-background-tasks")
-                    .ghost()
-                    .icon(IconName::Bot)
-                    .when_some(count, Button::label)
-                    .aria_label(aria_label)
-                    .tooltip(PANEL_TITLE)
-                    .disabled(parent.is_none())
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.on_toggle_background_tasks(&ToggleBackgroundTasks, window, cx)
-                    })),
-            )
-            .when(unseen, |this| {
-                this.child(
-                    div()
-                        .absolute()
-                        .top(px(4.0))
-                        .right(px(4.0))
-                        .size(px(6.0))
-                        .rounded_full()
-                        .bg(cx.theme().primary),
-                )
-            })
+        Button::new("toggle-background-tasks")
+            .ghost()
+            .icon(IconName::Bot)
+            .aria_label(PANEL_TITLE)
+            .tooltip(PANEL_TITLE)
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.on_toggle_background_tasks(&ToggleBackgroundTasks, window, cx)
+            }))
     }
 }
 
