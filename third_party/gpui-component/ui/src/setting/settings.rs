@@ -41,6 +41,7 @@ pub struct Settings {
     default_selected_index: SelectIndex,
     header_style: StyleRefinement,
     single_group_pages: bool,
+    state: Option<Entity<SettingsState>>,
 }
 
 impl Settings {
@@ -57,7 +58,20 @@ impl Settings {
             default_selected_index: SelectIndex::default(),
             header_style: StyleRefinement::default(),
             single_group_pages: false,
+            state: None,
         }
+    }
+
+    /// Render against a state the caller owns instead of the element state
+    /// keyed by this view's id. Element state lives only while the view is
+    /// rendered on consecutive frames, so a view that unmounts loses its
+    /// selected page and search query; an owned state survives that. The
+    /// caller is responsible for observing the state so selection changes
+    /// repaint, and [`Settings::select`] addresses element state rather than
+    /// this one.
+    pub fn state(mut self, state: Entity<SettingsState>) -> Self {
+        self.state = Some(state);
+        self
     }
 
     /// Display one group at a time per page instead of scrolling through all
@@ -297,7 +311,11 @@ impl Sizable for Settings {
     }
 }
 
-pub(super) struct SettingsState {
+/// Selected page, deferred scroll target, and search query of one settings
+/// view. [`Settings`] keeps this in element state by default, which lasts only
+/// as long as the view is rendered on consecutive frames; [`SettingsState::owned`]
+/// hands the caller an entity that outlives unmounting.
+pub struct SettingsState {
     pub(super) selected_index: SelectIndex,
     /// If set, defer scrolling to this group index after rendering (classic
     /// scroll-through layout only).
@@ -306,6 +324,14 @@ pub(super) struct SettingsState {
 }
 
 impl SettingsState {
+    /// Build a state the caller owns, for a settings view that unmounts and
+    /// remounts (a view behind a tab, or one switched away from) and should
+    /// come back showing the page and query the user left it on. Pass it to
+    /// [`Settings::state`], and observe it to repaint on selection changes.
+    pub fn owned(default_selected: SelectIndex, window: &mut Window, cx: &mut App) -> Entity<Self> {
+        cx.new(|cx| Self::new(default_selected, window, cx))
+    }
+
     fn new(default_selected: SelectIndex, window: &mut Window, cx: &mut App) -> Self {
         let search_input = cx.new(|cx| {
             InputState::new(window, cx)
@@ -341,8 +367,10 @@ pub struct SelectIndex {
 
 impl RenderOnce for Settings {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let state = window.use_keyed_state(self.id.clone(), cx, |window, cx| {
-            SettingsState::new(self.default_selected_index, window, cx)
+        let state = self.state.clone().unwrap_or_else(|| {
+            window.use_keyed_state(self.id.clone(), cx, |window, cx| {
+                SettingsState::new(self.default_selected_index, window, cx)
+            })
         });
 
         let query = state.read(cx).search_input.read(cx).value();
