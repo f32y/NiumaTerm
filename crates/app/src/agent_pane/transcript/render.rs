@@ -1,5 +1,6 @@
 use crate::agent_pane::transcript::disclosure_row::{
     AGENT_DISCLOSURE_DETAIL_INSET, AGENT_TEXT_MEASURE_REMS, AgentDisclosureRow,
+    USER_TEXT_MEASURE_REMS,
 };
 use crate::agent_pane::transcript::format::{interrupted_status_label, worked_status_label};
 use crate::agent_pane::transcript::{
@@ -218,7 +219,10 @@ impl TranscriptView {
             .child(self.hover_stamp(index, cx))
             .child(
                 div()
-                    .max_w(relative(0.8))
+                    // The bubble tracks its text rather than the pane, so a
+                    // long prompt wraps at the prompt measure instead of
+                    // stretching a tinted block across the transcript.
+                    .max_w(rems(USER_TEXT_MEASURE_REMS))
                     .px_3()
                     .py_2()
                     .rounded(UI_RADIUS)
@@ -233,6 +237,28 @@ impl TranscriptView {
 
     /// Assistant reply: full-width bare markdown — no bubble, no border;
     /// alignment and surface carry the distinction.
+    /// Presentation for assistant Markdown. Prose wraps at the reading
+    /// measure, and the blocks that paint their own surface are held to the
+    /// same width: a code block or table left full-width would run its
+    /// background past the text above it, so the tint would mark a column the
+    /// reader is not reading along.
+    fn agent_text_style() -> TextViewStyle {
+        let measure = rems(AGENT_TEXT_MEASURE_REMS);
+        // Only the ceiling is set: these blocks keep their own width behaviour
+        // below it, so a short snippet still fills the measure rather than
+        // shrinking to a box the width of its longest line.
+        let bounded = || {
+            let mut style = StyleRefinement::default();
+            style.max_size.width = Some(measure.into());
+            style
+        };
+
+        TextViewStyle::default()
+            .prose_max_width(measure)
+            .code_block(bounded())
+            .table(bounded())
+    }
+
     fn markdown_view(
         id: impl Into<ElementId>,
         markdown: impl Into<SharedString>,
@@ -259,12 +285,7 @@ impl TranscriptView {
             .child(
                 div().flex_1().min_w_0().px_1().child(
                     Self::markdown_view(("agent-md", index), text, self.cwd.clone())
-                        // Monospaced glyphs average roughly 0.6em wide, so
-                        // 48rem yields an approximately 80-character prose
-                        // measure while technical Markdown remains full-width.
-                        .style(
-                            TextViewStyle::default().prose_max_width(rems(AGENT_TEXT_MEASURE_REMS)),
-                        )
+                        .style(Self::agent_text_style())
                         .selectable(true),
                 ),
             )

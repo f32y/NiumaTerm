@@ -6,7 +6,14 @@ pub(super) const AGENT_DISCLOSURE_GAP: f32 = 4.0;
 pub(super) const AGENT_DISCLOSURE_PADDING: f32 = 4.0;
 pub(super) const AGENT_DISCLOSURE_DETAIL_INSET: f32 =
     AGENT_DISCLOSURE_PADDING + AGENT_DISCLOSURE_SLOT * 2.0 + AGENT_DISCLOSURE_GAP * 2.0;
+/// Monospaced glyphs average roughly 0.6em wide, so a rem measure is about
+/// 1.67 characters. 48rem gives assistant output an 80-character line.
 pub(super) const AGENT_TEXT_MEASURE_REMS: f32 = 48.0;
+
+/// A prompt is the user's own words read back, and it sits in a tinted bubble
+/// against the right edge. A shorter line keeps that block from spanning the
+/// pane and reads as an aside to the reply beside it: 30rem is 50 characters.
+pub(super) const USER_TEXT_MEASURE_REMS: f32 = 30.0;
 
 /// Shared geometry for expandable transcript rows. Empty chevron, type-icon,
 /// and trailing slots keep labels aligned by default; summary toggles can omit
