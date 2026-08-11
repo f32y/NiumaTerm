@@ -1,4 +1,4 @@
-use std::collections;
+use std::{cell, collections, rc};
 
 use gpui::prelude::*;
 use gpui::{
@@ -10,7 +10,7 @@ use gpui_component::input::{Input, InputState};
 use gpui_component::menu::{ContextMenuExt, DropdownMenu as _, PopupMenuItem};
 use gpui_component::progress::ProgressCircle;
 use gpui_component::tab::{Tab, TabBar, TabVariant};
-use gpui_component::{ActiveTheme, Icon, IconName, Sizable};
+use gpui_component::{ActiveTheme, ElementExt as _, Icon, IconName, Sizable};
 use nmt_terminal::event::{ProgressReport, ProgressState};
 
 use super::Shell;
@@ -69,10 +69,88 @@ pub(super) struct TabStrip {
     /// another tab — clearing on exit would oscillate, because opening the gap
     /// moves the hovered tab out from under the pointer.
     drag_over: Option<usize>,
+    /// Strip width recorded during the previous prepaint, which is what
+    /// `Auto Size` divides between the tabs. Held in a cell because the
+    /// measurement arrives from a prepaint callback, long after `render` has
+    /// given up its borrow.
+    measured_width: rc::Rc<cell::Cell<f32>>,
 }
 
 /// How far a tab slides to open the insertion gap while a drag hovers it.
 const TAB_MAKE_WAY_PX: f32 = 32.0;
+
+/// Narrowest a tab gets under `Auto Size`: one glyph slot centered in the
+/// pill's content padding, plus the gap and borders the tab draws around it
+/// (2 borders + 32 padding + 16 slot + 4 gap).
+const MIN_AUTO_TAB_WIDTH: f32 = 54.0;
+
+/// Below this a tab can no longer stand the leading icon, the pill's content
+/// padding and the close control side by side (2 + 12 + 4 + 32 + 4 + 16), so
+/// it collapses to the single glyph slot.
+const COMPACT_TAB_WIDTH: f32 = 70.0;
+
+/// Below this the title has under four characters of room left over from the
+/// icon, the padding and the close control, which renders as an ellipsis and
+/// little else, so the tab spends the width on the two controls instead.
+const FULL_TAB_WIDTH: f32 = 100.0;
+
+/// What a tab still has room to draw. The close control outranks the tab
+/// icon, which outranks the title: a tab nobody can close is worse than a tab
+/// nobody can identify at a glance.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TabDensity {
+    /// Icon, title, and the close control on hover.
+    Full,
+    /// Icon and the close control on hover; the title is dropped.
+    Compact,
+    /// A single glyph slot, shared by the icon and the close control.
+    IconOnly,
+}
+
+fn tab_density(tab_width: f32) -> TabDensity {
+    if tab_width >= FULL_TAB_WIDTH {
+        TabDensity::Full
+    } else if tab_width >= COMPACT_TAB_WIDTH {
+        TabDensity::Compact
+    } else {
+        TabDensity::IconOnly
+    }
+}
+
+/// Gap the tab bar leaves between neighbouring pills, and around the whole
+/// strip. `TabVariant::Modern` fixes both at 4px, and the tab widths have to
+/// be reduced by that much to keep the row from overflowing.
+const TAB_GAP: f32 = 4.0;
+const TAB_BAR_PADDING: f32 = TAB_GAP * 2.0;
+
+/// Room held back for the trailing new-tab button, which shares the row with
+/// the tabs.
+const NEW_TAB_BUTTON_WIDTH: f32 = 28.0;
+
+/// Width one tab takes under `Auto Size`. Tabs hold `configured` while the row
+/// has room and then shrink together, never past the point where the leading
+/// icon would be clipped. Below that the row overflows and the strip's
+/// horizontal scroll takes over.
+fn auto_tab_width(strip_width: f32, tab_count: usize, configured: f32) -> f32 {
+    let floor = MIN_AUTO_TAB_WIDTH.min(configured);
+
+    // A strip that has never been laid out reports no width. Starting from the
+    // configured width keeps the first frame at full size rather than flashing
+    // every tab down to the floor and back.
+    if tab_count == 0 || strip_width <= 0.0 {
+        return configured;
+    }
+
+    // One gap per tab: between neighbours, plus one before the new-tab button.
+    let reserved = TAB_BAR_PADDING + NEW_TAB_BUTTON_WIDTH + TAB_GAP * tab_count as f32;
+    let share = (strip_width - reserved) / tab_count as f32;
+
+    if share.is_finite() {
+        share.clamp(floor, configured)
+    } else {
+        configured
+    }
+}
 
 /// One tab's render inputs, snapshotted out of the manager before the closure
 /// borrows the shell.
@@ -103,6 +181,17 @@ fn agent_tab_indicator(busy: bool, unread: bool) -> Option<AgentTabIndicator> {
     } else {
         None
     }
+}
+
+/// The glyph a tab leads with: the agent's own mark on an agent tab, a
+/// terminal mark otherwise.
+fn tab_icon(agent_kind: Option<AgentKind>) -> Icon {
+    match agent_kind {
+        Some(AgentKind::Codex) => Icon::new(CodexIcon),
+        Some(AgentKind::Claude) => Icon::new(ClaudeIcon),
+        None => Icon::new(IconName::SquareTerminal),
+    }
+    .xsmall()
 }
 
 fn progress_bar_width(tab_width: Pixels) -> Pixels {
@@ -150,6 +239,7 @@ impl TabStrip {
             last_active: None,
             reveal_retry: false,
             drag_over: None,
+            measured_width: rc::Rc::new(cell::Cell::new(0.0)),
         }
     }
 
@@ -282,9 +372,19 @@ impl TabStrip {
         let closeable = tab_count > 1;
         let shell = cx.entity();
 
-        // Fixed width from the Appearance setting; long titles clip inside
-        // the tab's own overflow_hidden.
-        let tab_width = cx.global::<AppSettings>().tab_width as f32;
+        // Width from the Appearance setting; long titles clip inside the tab's
+        // own overflow_hidden. Auto Size treats that value as the upper bound
+        // and divides the strip between the tabs instead.
+        let settings = cx.global::<AppSettings>();
+        let configured_width = settings.tab_width as f32;
+        let auto_size = settings.tab_auto_size;
+        let tab_width = if auto_size {
+            auto_tab_width(self.measured_width.get(), tab_count, configured_width)
+        } else {
+            configured_width
+        };
+        let density = tab_density(tab_width);
+        let icon_only = density == TabDensity::IconOnly;
 
         let bar = TabBar::new("shell-tabs")
             // Soft-rounded pills floating on the chrome (VS Code Modern UI
@@ -314,26 +414,51 @@ impl TabStrip {
                     exited,
                     progress,
                 } = item;
-                // `×` suffix closes this tab; `stop_propagation` keeps the click
-                // from also activating the tab (the TabBar's on_click). Shown
-                // only while the tab is hovered (visibility keeps its width, so
-                // the tab doesn't reflow).
+                // `×` closes this tab; `stop_propagation` keeps the click from
+                // also activating the tab (the TabBar's on_click). Shown only
+                // while the tab is hovered (visibility keeps its width, so the
+                // tab doesn't reflow) - except on the active tab once only one
+                // glyph fits, where the control has to stay up because the
+                // hover state it would otherwise wait for is already the one
+                // the tab is in.
+                let close_pinned = icon_only && index == active_idx;
                 let close = div()
                     .id(("tab-close", id as usize))
-                    .px_1()
-                    .invisible()
-                    .group_hover("shell-tab", |this| this.visible())
+                    .when(!icon_only, |this| this.px_1())
+                    // In the glyph slot the control *is* the slot: covering it
+                    // keeps the click target as large as the icon it hides,
+                    // instead of shrinking to the width of the `×` itself.
+                    .when(icon_only, |this| {
+                        this.absolute()
+                            .inset_0()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                    })
+                    .when(!close_pinned, |this| {
+                        this.invisible()
+                            .group_hover("shell-tab", |this| this.visible())
+                    })
                     .child("×")
                     .on_click(cx.listener(move |this, _, window, cx| {
                         cx.stop_propagation();
                         this.request_close_tab(TabId(id), window, cx);
-                    }));
+                    }))
+                    .into_any_element();
+
+                // A tab down to one glyph hands that slot to the close control
+                // on hover; wider tabs keep it at the trailing edge.
+                let (slot_close, suffix_close) = if icon_only {
+                    (Some(close), None)
+                } else {
+                    (None, Some(close))
+                };
                 let suffix = div()
                     .relative()
                     .h_full()
                     .flex()
                     .items_center()
-                    .child(close)
+                    .children(suffix_close)
                     .children(progress.map(|report| progress_bar(report, tab_width, cx)));
 
                 // Inline rename: the label swaps for an input. The mouse-down
@@ -410,27 +535,65 @@ impl TabStrip {
                         // characters of a fixed-width tab on state that
                         // a color carries for free.
                         .when(exited, |this| this.text_color(cx.theme().danger))
-                        .child(div().truncate().child(label.clone()))
-                        // Unread-notification dot: a filled accent
-                        // circle instead of a text bullet, so it stays
-                        // visible against the muted inactive-tab text.
-                        .children((unread && agent_kind.is_none()).then(|| {
-                            div()
-                                .flex_none()
-                                .size(px(6.0))
-                                .rounded_full()
-                                .bg(cx.theme().primary)
-                        }))
-                        // Bell dot, in the warning color so it reads
-                        // apart from the unread dot when a tab has
-                        // both.
-                        .children(bell.then(|| {
-                            div()
-                                .flex_none()
-                                .size(px(6.0))
-                                .rounded_full()
-                                .bg(cx.theme().warning)
-                        }))
+                        .map(|this| {
+                            if icon_only {
+                                // One glyph, two states stacked in the same
+                                // slot: the tab's icon at rest, the close
+                                // control while the pointer is on the tab. The
+                                // slot is sized for the click target rather
+                                // than the 12px glyph, and the pill's own
+                                // padding frames it on both sides.
+                                return this.child(
+                                    div()
+                                        .relative()
+                                        .flex_none()
+                                        .size_4()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .when(close_pinned, |this| this.invisible())
+                                                .when(!close_pinned, |this| {
+                                                    this.group_hover("shell-tab", |this| {
+                                                        this.invisible()
+                                                    })
+                                                })
+                                                .child(tab_icon(agent_kind)),
+                                        )
+                                        .children(slot_close),
+                                );
+                            }
+
+                            // A title with only a few characters of room left
+                            // renders as an ellipsis and little else, so the
+                            // narrower tab spends that width on the icon and
+                            // the close control instead.
+                            this.when(density == TabDensity::Full, |this| {
+                                this.child(div().truncate().child(label.clone()))
+                            })
+                            // Unread-notification dot: a filled accent
+                            // circle instead of a text bullet, so it stays
+                            // visible against the muted inactive-tab text.
+                            .children((unread && agent_kind.is_none()).then(|| {
+                                div()
+                                    .flex_none()
+                                    .size(px(6.0))
+                                    .rounded_full()
+                                    .bg(cx.theme().primary)
+                            }))
+                            // Bell dot, in the warning color so it reads
+                            // apart from the unread dot when a tab has
+                            // both.
+                            .children(bell.then(|| {
+                                div()
+                                    .flex_none()
+                                    .size(px(6.0))
+                                    .rounded_full()
+                                    .bg(cx.theme().warning)
+                            }))
+                        })
                         .into_any_element()
                 };
                 let drag_label: SharedString = label.into();
@@ -463,7 +626,7 @@ impl TabStrip {
                     .when(self.drag_over == Some(index), |this| {
                         this.ml(px(TAB_MAKE_WAY_PX))
                     })
-                    .when(agent_kind.is_none(), |this| {
+                    .when(agent_kind.is_none() && !icon_only, |this| {
                         this.prefix(
                             div()
                                 .relative()
@@ -471,10 +634,10 @@ impl TabStrip {
                                 .flex_none()
                                 .flex()
                                 .items_center()
-                                .child(Icon::new(IconName::SquareTerminal).xsmall()),
+                                .child(tab_icon(None)),
                         )
                     })
-                    .when_some(agent_kind, |this, agent_kind| {
+                    .when_some(agent_kind.filter(|_| !icon_only), |this, agent_kind| {
                         let indicator = agent_tab_indicator(busy, unread);
                         this.prefix(
                             div()
@@ -484,12 +647,7 @@ impl TabStrip {
                                 .flex()
                                 .items_center()
                                 .gap_1()
-                                .when(agent_kind == AgentKind::Codex, |this| {
-                                    this.child(Icon::new(CodexIcon).xsmall())
-                                })
-                                .when(agent_kind == AgentKind::Claude, |this| {
-                                    this.child(Icon::new(ClaudeIcon).xsmall())
-                                })
+                                .child(tab_icon(Some(agent_kind)))
                                 .when_some(indicator, |this, indicator| {
                                     this.child(
                                         div()
@@ -572,10 +730,29 @@ impl TabStrip {
         // Fallback drop target for the whole strip: a drop released over the
         // make-way gap (a margin, outside every tab's hitbox) still lands on
         // the tracked insertion position instead of silently ending the drag.
+        let measured_width = self.measured_width.clone();
+        let measured_shell = shell.clone();
+
         div()
             .id("tab-strip-drop")
             .w_full()
             .min_w_0()
+            // Auto Size needs the width the strip actually got, which layout
+            // only settles after this render. Recording it and asking for one
+            // more render converges in a single extra frame, and the equality
+            // guard keeps that from repeating every frame.
+            .when(auto_size, |this| {
+                this.on_prepaint(move |bounds, _, cx| {
+                    let width = f32::from(bounds.size.width);
+
+                    if measured_width.get() != width {
+                        measured_width.set(width);
+                        // `Window::refresh` is a no-op mid-draw, so the redraw
+                        // is requested through the shell entity instead.
+                        measured_shell.update(cx, |_, cx| cx.notify());
+                    }
+                })
+            })
             .on_drop(cx.listener(|this, drag: &TabDrag, window, cx| {
                 if let Some(to) = this.tab_strip.drag_over.take() {
                     this.workspaces.active_tabs_mut().reorder(drag.from, to);
@@ -601,6 +778,60 @@ mod tests {
 
         assert_eq!(bar_width, px(134.0));
         assert_eq!(tab_width - UI_RADIUS - bar_width, UI_RADIUS);
+    }
+
+    /// Auto Size holds the configured width while the row has room, shares the
+    /// row once it does not, and stops at the width that still shows the
+    /// leading icon. It also has to survive a strip that has not been measured
+    /// yet, which is every tab strip on its first frame.
+    #[test]
+    fn auto_size_shares_the_strip_between_tabs() {
+        let configured = 120.0;
+        let width = |strip: f32, count: usize| auto_tab_width(strip, count, configured);
+
+        // Room to spare: no reason to shrink below what the user asked for.
+        assert_eq!(width(1200.0, 2), configured);
+
+        // Crowded: the tabs split what is left after the new-tab button, the
+        // bar padding, and one gap each.
+        let crowded = width(800.0, 8);
+        assert!(
+            crowded < configured,
+            "{crowded} should be under {configured}"
+        );
+        assert!(crowded > MIN_AUTO_TAB_WIDTH);
+        assert!(
+            (crowded * 8.0 + TAB_GAP * 8.0 + TAB_BAR_PADDING + NEW_TAB_BUTTON_WIDTH - 800.0).abs()
+                < 0.001,
+            "the tabs and their gaps should consume the strip exactly",
+        );
+
+        // Past the floor the row overflows instead, and the strip scrolls.
+        assert_eq!(width(800.0, 40), MIN_AUTO_TAB_WIDTH);
+
+        // Before the first layout, and with nothing to lay out.
+        assert_eq!(width(0.0, 8), configured);
+        assert_eq!(width(1200.0, 0), configured);
+
+        // A configured width under the floor is still an upper bound; Auto Size
+        // never widens a tab past the setting.
+        assert_eq!(auto_tab_width(800.0, 40, 30.0), 30.0);
+    }
+
+    /// The close control is the one thing a tab must never lose: the title
+    /// goes first, then the leading icon gives up its slot on hover.
+    #[test]
+    fn a_shrinking_tab_gives_up_the_title_first() {
+        assert_eq!(tab_density(120.0), TabDensity::Full);
+        assert_eq!(tab_density(FULL_TAB_WIDTH), TabDensity::Full);
+        assert_eq!(tab_density(FULL_TAB_WIDTH - 1.0), TabDensity::Compact);
+        assert_eq!(tab_density(COMPACT_TAB_WIDTH), TabDensity::Compact);
+        assert_eq!(tab_density(COMPACT_TAB_WIDTH - 1.0), TabDensity::IconOnly);
+
+        // Every width Auto Size can produce still has a glyph slot for the
+        // close control to take over.
+        assert!(MIN_AUTO_TAB_WIDTH < COMPACT_TAB_WIDTH);
+        assert_eq!(tab_density(MIN_AUTO_TAB_WIDTH), TabDensity::IconOnly);
     }
 
     #[test]
