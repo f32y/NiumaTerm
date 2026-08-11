@@ -782,7 +782,11 @@ impl RenderOnce for Tab {
             .aria_selected(self.selected)
             .relative()
             .flex()
-            .flex_wrap()
+            // A tab is a single clipped row: prefix, content, suffix. Wrapping
+            // would push the content onto lines the fixed tab height cuts off,
+            // leaving a narrow tab showing only its prefix icon pinned to the
+            // top-left corner instead of a centered row.
+            .flex_nowrap()
             .gap_1()
             .items_center()
             .flex_shrink_0()
