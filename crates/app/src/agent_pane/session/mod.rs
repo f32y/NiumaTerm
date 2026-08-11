@@ -311,6 +311,13 @@ impl AgentPane {
             self.settings.model = Some(model);
         }
 
+        // A pinned effort reaches the backend through the launch, so the
+        // picker shows it from the first frame rather than the level the
+        // agent would otherwise have used.
+        if !preserve_thread_settings && let Some(effort) = self.profile_effort() {
+            self.settings.effort = Some(effort);
+        }
+
         let kind = self.kind;
         let name = kind.display();
         let cwd = self.cwd.clone();
@@ -899,6 +906,13 @@ impl AgentPane {
             AgentKind::Claude => launch_env_value(&launch, ANTHROPIC_MODEL_ENV),
             AgentKind::Codex => launch.model,
         }
+    }
+
+    /// The reasoning effort this pane's profile pins. Claude receives it as a
+    /// launch flag and Codex as a thread-start parameter; the picker shows it
+    /// either way.
+    pub(super) fn profile_effort(&self) -> Option<String> {
+        agent_launch(&self.profile).effort
     }
 
     /// Remember the pane's current thread settings as the defaults for future

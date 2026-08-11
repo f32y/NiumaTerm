@@ -3,12 +3,17 @@ use crate::agent_pane::session::{Status, UpdateSuspension};
 use crate::agent_pane::transcript::hidden;
 use crate::agent_pane::*;
 
+/// Fold the thread's reported settings together with what the pane
+/// remembered. `startup_model` and `startup_effort` come from the launch
+/// profile and are applied last, so a profile that pins one of them wins over
+/// both the remembered pick and whatever the agent reported.
 pub(super) fn resolve_ready_settings(
     mut next: ThreadSettings,
     local: Option<&ThreadSettings>,
     use_all_local: bool,
     use_local_reviewer: bool,
     startup_model: Option<&str>,
+    startup_effort: Option<&str>,
 ) -> ThreadSettings {
     if use_all_local && let Some(local) = local {
         next = ThreadSettings {
@@ -27,6 +32,9 @@ pub(super) fn resolve_ready_settings(
     }
     if let Some(model) = startup_model {
         next.model = Some(model.to_string());
+    }
+    if let Some(effort) = startup_effort {
+        next.effort = Some(effort.to_string());
     }
     next
 }
@@ -81,16 +89,20 @@ impl AgentPane {
                     stored
                 };
                 let startup_model = seed_thread_defaults.then(|| self.profile_model()).flatten();
+                let startup_effort = seed_thread_defaults
+                    .then(|| self.profile_effort())
+                    .flatten();
                 next = resolve_ready_settings(
                     next,
                     local,
                     seed_thread_defaults || preserve_current,
                     seed_approval_reviewer,
                     startup_model.as_deref(),
+                    startup_effort.as_deref(),
                 );
 
                 if let Some(restored) = self.restore_thread_settings_on_ready.take() {
-                    next = resolve_ready_settings(next, Some(&restored), true, false, None);
+                    next = resolve_ready_settings(next, Some(&restored), true, false, None, None);
                 }
 
                 self.settings = next;

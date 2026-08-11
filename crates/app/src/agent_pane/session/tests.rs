@@ -106,7 +106,7 @@ fn resumed_codex_thread_uses_only_the_locally_remembered_reviewer() {
     };
 
     assert_eq!(
-        resolve_ready_settings(backend, Some(&stored), false, true, None),
+        resolve_ready_settings(backend, Some(&stored), false, true, None, None),
         ThreadSettings {
             model: Some("thread-model".into()),
             approval: Some("never".into()),
@@ -138,13 +138,46 @@ fn claude_profile_and_local_settings_survive_later_ready_events() {
         true,
         false,
         Some("profile-model"),
+        None,
     );
 
     assert_eq!(initial.model.as_deref(), Some("profile-model"));
     assert_eq!(initial.approval.as_deref(), Some("auto"));
     assert_eq!(initial.effort.as_deref(), Some("high"));
     assert_eq!(
-        resolve_ready_settings(backend, Some(&initial), true, false, None),
+        resolve_ready_settings(backend, Some(&initial), true, false, None, None),
         initial
     );
+}
+
+#[test]
+fn a_pinned_profile_effort_outranks_the_thread_and_the_remembered_pick() {
+    let backend = ThreadSettings {
+        effort: Some("low".into()),
+        ..ThreadSettings::default()
+    };
+    let local = ThreadSettings {
+        effort: Some("medium".into()),
+        ..ThreadSettings::default()
+    };
+
+    let resolved = resolve_ready_settings(backend, Some(&local), true, false, None, Some("max"));
+
+    assert_eq!(resolved.effort.as_deref(), Some("max"));
+}
+
+#[test]
+fn no_pinned_effort_leaves_the_remembered_pick_in_place() {
+    let backend = ThreadSettings {
+        effort: Some("low".into()),
+        ..ThreadSettings::default()
+    };
+    let local = ThreadSettings {
+        effort: Some("medium".into()),
+        ..ThreadSettings::default()
+    };
+
+    let resolved = resolve_ready_settings(backend, Some(&local), true, false, None, None);
+
+    assert_eq!(resolved.effort.as_deref(), Some("medium"));
 }

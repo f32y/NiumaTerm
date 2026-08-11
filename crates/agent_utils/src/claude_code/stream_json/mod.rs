@@ -223,6 +223,13 @@ impl Session {
         // can create checkpoints for subsequent `/rewind` operations.
         enable_file_checkpointing(&mut command);
 
+        // The CLI takes effort as a launch flag; its `/effort` command is the
+        // only other way in, and that costs a visible turn on every new
+        // conversation.
+        if let Some(effort) = &launch.effort {
+            command.args(["--effort", effort]);
+        }
+
         if let Some(session_id) = &resume {
             command.args(["--resume", session_id]);
         }

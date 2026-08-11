@@ -47,6 +47,10 @@ pub use crate::process::{
 pub struct LaunchConfig {
     pub executable: String,
     pub model: Option<String>,
+    /// Reasoning effort the profile pins for every conversation it starts.
+    /// `None` leaves the level to the agent and the remembered thread
+    /// settings. Each adapter maps it to its own surface.
+    pub effort: Option<String>,
     pub provider: Option<CodexProviderConfig>,
     pub env: Vec<(String, String)>,
 }
