@@ -806,3 +806,35 @@ fn adapter_commands_declare_the_arguments_the_cli_accepts() {
     assert!(ui_owns_slash_command("rewind"));
     assert_eq!(rewind.arguments, SlashCommandArguments::None);
 }
+
+/// The catalog mixes commands worth offering with the CLI's own internal
+/// entries, ones it has retired but still lists, and ones that drive its host
+/// terminal session. Only the first group can be acted on from this palette.
+#[test]
+fn the_catalog_drops_internal_retired_and_host_owned_commands() {
+    let parsed = parse_slash_commands(&json!([
+        {"name": "caveman", "description": "A skill"},
+        {"name": "compact", "description": "Free up context"},
+        {"name": "__remote-workflow", "description": "Run the delivered workflow"},
+        {"name": "agents", "description": "(removed) Ask Claude to manage subagents"},
+        {"name": "extra-usage", "description": "Renamed to /usage-credits"},
+        {"name": "context", "description": "Show current context usage"},
+        {"name": "model", "description": "Set the AI model for Claude Code"},
+        {"name": "clear", "description": "Start a new session with empty context"},
+        {"name": "heapdump", "description": "Dump the JS heap to ~/Desktop"},
+        {"name": "config", "description": "Set a setting by key"},
+    ]));
+
+    let names: Vec<&str> = parsed.iter().map(|command| command.name.as_str()).collect();
+    assert_eq!(names, ["caveman", "compact"]);
+}
+
+#[test]
+fn a_retired_marker_only_counts_at_the_start_of_a_description() {
+    // A command that merely mentions the words still belongs in the palette.
+    let parsed = parse_slash_commands(&json!([
+        {"name": "notes", "description": "Explain why a command was (removed) upstream"},
+    ]));
+
+    assert_eq!(parsed.len(), 1);
+}
