@@ -302,6 +302,12 @@ impl RenderOnce for TitleBar {
                         .justify_between()
                         .flex_shrink_0()
                         .flex_1()
+                        // `min-width: auto` on a flex item resolves to its
+                        // content's max-content width, which no amount of
+                        // shrinking inside the bar can reduce. Without this
+                        // the bar overflows a narrow title bar and carries
+                        // the window controls past the right window edge.
+                        .min_w_0()
                         .when(!is_web, |this| {
                             this.window_control_area(WindowControlArea::Drag)
                                 .when(window.is_fullscreen(), |this| this.pl_3())
