@@ -399,9 +399,9 @@ impl Render for TranscriptView {
                             Button::new("agent-jump-to-bottom")
                                 .outline()
                                 .small()
-                                .rounded_full()
+                                .rounded(UI_RADIUS)
                                 .icon(IconName::ArrowDown)
-                                .tooltip("Jump to latest")
+                                .label("Scroll to Bottom")
                                 .shadow_md()
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.scroll_to_bottom();
