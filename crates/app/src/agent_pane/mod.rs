@@ -104,6 +104,14 @@ impl RecentSessionsMode {
                 Self::Hidden | Self::Loading => false,
             }
     }
+
+    /// An outside click dismisses only an explicit `/resume` list. The
+    /// automatic list on a blank tab is that tab's default surface, so a
+    /// click on the empty pane keeps it open; hiding it there would strand
+    /// the tab with no way back except `/resume`.
+    fn dismisses_on_outside_click(self) -> bool {
+        !matches!(self, Self::Automatic)
+    }
 }
 
 /// Rewind is a local multi-step operation, not a model turn. Keeping its

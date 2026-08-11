@@ -448,6 +448,12 @@ mod tests {
     }
 
     #[test]
+    fn blank_tab_history_stays_open_on_outside_click() {
+        assert!(!RecentSessionsMode::Automatic.dismisses_on_outside_click());
+        assert!(RecentSessionsMode::Open.dismisses_on_outside_click());
+    }
+
+    #[test]
     fn filter_orders_exact_prefix_then_substring_stably() {
         let catalog = vec![
             info("preview", SlashCommandSource::Provider),

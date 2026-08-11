@@ -122,8 +122,10 @@ impl AgentPane {
             .justify_center()
             .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
             .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                this.history_ui.mode = RecentSessionsMode::Hidden;
-                cx.notify();
+                if this.history_ui.mode.dismisses_on_outside_click() {
+                    this.history_ui.mode = RecentSessionsMode::Hidden;
+                    cx.notify();
+                }
             }))
             .child(
                 v_flex()
