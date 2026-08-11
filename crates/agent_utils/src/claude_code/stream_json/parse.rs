@@ -196,11 +196,12 @@ pub(super) fn parse_slash_commands(commands: &Value) -> Vec<SlashCommandInfo> {
             parsed.push(SlashCommandInfo {
                 name,
                 description: description.clone(),
-                arguments: if argument_hint.is_some() {
-                    SlashCommandArguments::Freeform
-                } else {
-                    SlashCommandArguments::None
-                },
+                // The catalog advertises a hint when it has one and says
+                // nothing otherwise; it never states that a command refuses
+                // arguments. Skills and prompt commands routinely carry no
+                // hint yet take free-form input, so treating a missing hint as
+                // a refusal rejects them before the CLI ever sees them.
+                arguments: SlashCommandArguments::Freeform,
                 argument_hint: argument_hint.clone(),
                 source: SlashCommandSource::Provider,
                 run_policy: SlashCommandRunPolicy::QueueUntilIdle,
