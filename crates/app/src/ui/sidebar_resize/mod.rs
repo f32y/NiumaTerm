@@ -8,8 +8,23 @@ use gpui::{AnyElement, App, Context, Pixels, Window, div, px};
 use gpui_component::ActiveTheme as _;
 use gpui_component::animation::Transition;
 
+/// Identifies which handle a resize gesture came from.
+///
+/// Drag-move events are delivered to every listener registered for a drag
+/// type, matched on the type alone and without any bounds test, so each
+/// resizable column receives the other's gestures too. Carrying the handle's
+/// id lets a listener recognize gestures that are not its own; without it one
+/// drag resizes every column that listens.
 #[derive(Clone)]
-pub(crate) struct ResizeDrag;
+pub(crate) struct ResizeDrag {
+    handle: &'static str,
+}
+
+impl ResizeDrag {
+    pub(crate) fn is_from(&self, handle: &str) -> bool {
+        self.handle == handle
+    }
+}
 
 impl Render for ResizeDrag {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
@@ -20,7 +35,8 @@ impl Render for ResizeDrag {
 /// The 5px column-resize handle riding a sidebar edge (`pin_left` picks which
 /// edge). Dragging starts an (invisible) gpui drag; the sidebar's wrapper
 /// listens for `DragMoveEvent<ResizeDrag>` window-level move events and turns
-/// the pointer x into a new width.
+/// the pointer x into a new width. `id` must be unique per resizable column,
+/// because it is what each listener matches its own gestures by.
 pub(crate) fn resize_handle(id: &'static str, pin_left: bool, cx: &App) -> impl IntoElement {
     let handle = div()
         .id(id)
@@ -31,7 +47,7 @@ pub(crate) fn resize_handle(id: &'static str, pin_left: bool, cx: &App) -> impl 
         .cursor_col_resize()
         .occlude()
         .hover(|this| this.bg(cx.theme().drag_border))
-        .on_drag(ResizeDrag, |drag, _, _, cx| {
+        .on_drag(ResizeDrag { handle: id }, |drag, _, _, cx| {
             cx.stop_propagation();
             cx.new(|_| drag.clone())
         });
@@ -71,3 +87,6 @@ pub(crate) fn slide_width<E: IntoElement + Styled + 'static>(
         .apply(wrapper, (id, open as usize))
         .into_any_element()
 }
+
+#[cfg(test)]
+mod tests;

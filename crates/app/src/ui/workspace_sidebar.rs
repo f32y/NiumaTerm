@@ -22,6 +22,10 @@ use crate::workspace::{WorkspaceId, WorkspaceSummary};
 /// drag the right edge to resize.
 pub(super) const SIDEBAR_WIDTH: f32 = 180.0;
 /// Drag limits: keep the workspace list readable and leave room for the terminal.
+/// Handle id for this column's resize grip. Every resizable column receives
+/// every other column's drag-move events, so this is what distinguishes them.
+pub(super) const RESIZE_HANDLE: &str = "workspace-sidebar-resize";
+
 pub(super) const MIN_WIDTH: f32 = 140.0;
 pub(super) const MAX_WIDTH: f32 = 480.0;
 
@@ -578,8 +582,8 @@ impl Sidebar {
         let collapsed = self.collapsed;
 
         // Not rendered while collapsed, so the collapsed sidebar can't resize.
-        let resize_handle = (!collapsed)
-            .then(|| sidebar_resize::resize_handle("workspace-sidebar-resize", false, cx));
+        let resize_handle =
+            (!collapsed).then(|| sidebar_resize::resize_handle(RESIZE_HANDLE, false, cx));
 
         let wrapper = div()
             .h_full()
@@ -587,6 +591,12 @@ impl Sidebar {
             .relative()
             .overflow_hidden()
             .on_drag_move(cx.listener(|this, e: &DragMoveEvent<ResizeDrag>, _, cx| {
+                // The panel on the other side drags the same type, and these
+                // events carry no bounds test, so a gesture that did not start
+                // here would otherwise resize this column too.
+                if !e.drag(cx).is_from(RESIZE_HANDLE) {
+                    return;
+                }
                 // The sidebar's left edge is pinned, so the new width is the
                 // pointer x minus the left edge, clamped to the drag limits.
                 let width = (e.event.position.x - e.bounds.left())

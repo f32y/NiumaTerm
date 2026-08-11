@@ -11,6 +11,10 @@ use crate::ui::background_tasks::BackgroundTasksView;
 use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::sidebar_resize::{self, ResizeDrag};
 
+/// Handle id for this column's resize grip. Every resizable column receives
+/// every other column's drag-move events, so this is what distinguishes them.
+pub(super) const RESIZE_HANDLE: &str = "right-panel-resize";
+
 const PANEL_WIDTH: f32 = 360.0;
 /// Drag limits: keep the panel usable and leave room for the terminal.
 const MIN_WIDTH: f32 = 240.0;
@@ -166,6 +170,12 @@ impl Render for RightPanel {
             .relative()
             .overflow_hidden()
             .on_drag_move(cx.listener(|this, e: &DragMoveEvent<ResizeDrag>, _, cx| {
+                // The sidebar on the other side drags the same type, and these
+                // events carry no bounds test, so a gesture that did not start
+                // here would otherwise resize this column too.
+                if !e.drag(cx).is_from(RESIZE_HANDLE) {
+                    return;
+                }
                 // The panel's right edge is pinned to the window edge, so
                 // the new width is right edge minus pointer x.
                 let width = (e.bounds.right() - e.event.position.x)
@@ -180,7 +190,7 @@ impl Render for RightPanel {
                 }
             }))
             .child(content)
-            .children(open.then(|| sidebar_resize::resize_handle("right-panel-resize", true, cx)));
+            .children(open.then(|| sidebar_resize::resize_handle(RESIZE_HANDLE, true, cx)));
 
         // Keep the entity mounted at width zero while closed so it can render
         // the closing frames instead of disappearing in the toggle render.
