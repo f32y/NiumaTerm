@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::thread;
 
 use crate::claude_code::stream_json::*;
@@ -581,4 +582,192 @@ fn provider_command_text_is_not_an_ordinary_prompt_shape() {
         claude_result_error(&json!({"subtype": "success", "is_error": false})),
         None
     );
+}
+
+#[test]
+fn a_context_usage_response_becomes_a_composition_breakdown() {
+    let response = json!({
+        "request_id": "nmt-3",
+        "subtype": "success",
+        "response": {
+            "categories": [
+                {"name": "System prompt", "tokens": 3_200, "color": "#aabbcc"},
+                {"name": "Messages", "tokens": 41_000, "color": "#ddeeff"},
+                {"name": "Free space", "tokens": 0, "color": "#101010"},
+                {"name": "Reserved", "tokens": 900, "color": "#202020", "isDeferred": true},
+            ],
+            "totalTokens": 45_100,
+            "maxTokens": 155_000,
+            "rawMaxTokens": 200_000,
+            "autoCompactThreshold": 140_000,
+        },
+    });
+
+    let mut pending = HashMap::from([(
+        "nmt-3".to_string(),
+        PendingControlOperation::ContextComposition,
+    )]);
+    let event = resolve_pending_control_operation(&mut pending, &response);
+
+    let Some(Event::ContextCompositionUpdated(composition)) = event else {
+        panic!("expected a composition update, got {event:?}");
+    };
+    assert_eq!(composition.used_tokens, 45_100);
+    assert_eq!(composition.max_tokens, Some(155_000));
+    assert_eq!(
+        composition.raw_max_tokens,
+        Some(200_000),
+        "the model's own window is distinct from the one compaction leaves"
+    );
+    assert_eq!(composition.auto_compact_threshold, Some(140_000));
+    assert_eq!(composition.segments.len(), 4);
+    assert!(composition.segments[3].deferred);
+    assert!(pending.is_empty(), "the request is no longer outstanding");
+}
+
+#[test]
+fn a_failed_context_usage_request_leaves_the_previous_breakdown_alone() {
+    let response = json!({
+        "request_id": "nmt-3",
+        "subtype": "error",
+        "error": "context usage unavailable",
+    });
+
+    let mut pending = HashMap::from([(
+        "nmt-3".to_string(),
+        PendingControlOperation::ContextComposition,
+    )]);
+
+    // Nothing is waiting on this, and the accounting beside it is still
+    // accurate, so a failure reports nothing rather than blanking the card.
+    assert!(resolve_pending_control_operation(&mut pending, &response).is_none());
+    assert!(pending.is_empty());
+}
+
+#[test]
+fn a_composition_without_categories_is_not_published() {
+    let response = json!({
+        "request_id": "nmt-3",
+        "subtype": "success",
+        "response": {"totalTokens": 100, "categories": []},
+    });
+
+    let mut pending = HashMap::from([(
+        "nmt-3".to_string(),
+        PendingControlOperation::ContextComposition,
+    )]);
+
+    assert!(resolve_pending_control_operation(&mut pending, &response).is_none());
+}
+
+/// A resumed conversation replays nothing through the protocol, so no
+/// assistant message has reported usage. Without the breakdown standing in,
+/// the context indicator would stay hidden until the user sent a message.
+#[test]
+fn a_restored_window_is_filled_from_the_breakdown() {
+    let composition = ContextComposition {
+        segments: Vec::new(),
+        used_tokens: 41_000,
+        max_tokens: Some(155_000),
+        raw_max_tokens: None,
+        auto_compact_threshold: None,
+    };
+
+    let filled = window_from_composition(None, &composition).expect("the window is unknown");
+    assert_eq!(filled.total_tokens, 41_000);
+}
+
+#[test]
+fn live_accounting_is_never_replaced_by_the_breakdown() {
+    let live = TokenUsageBreakdown {
+        total_tokens: 12_345,
+        input_tokens: Some(10_000),
+        cache_read_input_tokens: Some(2_000),
+        cache_write_input_tokens: None,
+        output_tokens: Some(345),
+        reasoning_output_tokens: None,
+    };
+    let composition = ContextComposition {
+        segments: Vec::new(),
+        used_tokens: 41_000,
+        max_tokens: Some(155_000),
+        raw_max_tokens: None,
+        auto_compact_threshold: None,
+    };
+
+    assert!(
+        window_from_composition(Some(live), &composition).is_none(),
+        "a coarse total must not overwrite the per-category accounting"
+    );
+}
+
+#[test]
+fn an_empty_breakdown_reports_no_window() {
+    let composition = ContextComposition {
+        segments: Vec::new(),
+        used_tokens: 0,
+        max_tokens: Some(155_000),
+        raw_max_tokens: None,
+        auto_compact_threshold: None,
+    };
+
+    assert!(window_from_composition(None, &composition).is_none());
+}
+
+/// A resumed conversation reaches readiness through the initialize control
+/// response, because the CLI withholds `system/init` until its next model
+/// turn. If the breakdown were only requested from that later message, a
+/// restored session would show no context until the user spoke.
+#[cfg(windows)]
+#[test]
+fn a_resumed_session_asks_for_its_context_before_the_first_turn() {
+    use std::env;
+    use std::path::Path;
+
+    use uuid::Uuid;
+
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude/fake-stream-json.cmd");
+    let log = env::temp_dir().join(format!("niumaterm-fake-resume-{}.jsonl", Uuid::new_v4()));
+    let launch = LaunchConfig {
+        executable: fixture.to_string_lossy().into_owned(),
+        env: vec![(
+            "NMT_FAKE_STREAM_LOG".to_string(),
+            log.to_string_lossy().into_owned(),
+        )],
+        ..LaunchConfig::default()
+    };
+    let mut session = Session::spawn(
+        &launch,
+        None,
+        Some("70000000-0000-4000-8000-000000000000".to_string()),
+        |_| {},
+        |_| {},
+    )
+    .expect("fake resumed Claude process starts");
+
+    // The response a resumed process answers the handshake with; no
+    // `system/init` has arrived and none will until a turn starts.
+    let events = session.process(json!({
+        "type": "control_response",
+        "response": {
+            "request_id": INIT_REQUEST_ID,
+            "subtype": "success",
+            "response": {"models": []},
+        },
+    }));
+
+    assert!(events.iter().any(|event| matches!(event, Event::Ready(_))));
+    // The request is recorded only once it has been written, so an
+    // outstanding operation is what proves the session asked.
+    assert!(
+        session
+            .pending_control_operations
+            .values()
+            .any(|operation| *operation == PendingControlOperation::ContextComposition),
+        "a restored session must ask how full its window is"
+    );
+
+    drop(session);
+    let _ = fs::remove_file(log);
 }

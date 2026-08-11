@@ -45,9 +45,9 @@ use crate::LaunchConfig;
 #[cfg(test)]
 use crate::chat::ContextUsageScope;
 use crate::chat::{
-    ContextWindowUsage, Event, Item, SendOutcome, SlashCommandArguments, SlashCommandInfo,
-    SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
-    TokenUsageBreakdown,
+    ContextComposition, ContextWindowUsage, Event, Item, SendOutcome, SlashCommandArguments,
+    SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
+    ThreadSettings, TokenUsageBreakdown,
 };
 use crate::claude_code::sessions::RestoredTask;
 use crate::claude_code::tasks::ClaudeTasks;
@@ -400,6 +400,28 @@ impl Session {
 
     /// Restore files tracked by Claude to the state captured before the user
     /// message. Completion arrives asynchronously as `FileRewindCompleted`.
+    /// Ask the CLI how the context window is currently filled. This is a local
+    /// computation rather than a model call, so it is cheap enough to refresh
+    /// whenever the conversation grows; the answer arrives as an event.
+    pub fn request_context_composition(&mut self) {
+        if !self.ready || !self.process.has_stdin() {
+            return;
+        }
+        // One outstanding request is enough: a second would answer with the
+        // same breakdown the first is already about to deliver.
+        if self
+            .pending_control_operations
+            .values()
+            .any(|operation| *operation == PendingControlOperation::ContextComposition)
+        {
+            return;
+        }
+
+        let request_id = self.send_control(json!({"subtype": "get_context_usage"}));
+        self.pending_control_operations
+            .insert(request_id, PendingControlOperation::ContextComposition);
+    }
+
     pub fn rewind_files(&mut self, user_message_id: &str) -> SlashCommandOutcome {
         if !self.ready || !self.process.has_stdin() {
             return SlashCommandOutcome::NotReady;
@@ -594,6 +616,12 @@ impl Session {
         ) {
             events.push(Event::Commands(commands));
         }
+
+        // The window grew with whatever this turn loaded, so the breakdown is
+        // refreshed here too. A resumed conversation is covered earlier, at the
+        // initialize response, because the CLI withholds this message until a
+        // model turn actually starts.
+        self.request_context_composition();
 
         events
     }
@@ -888,6 +916,10 @@ impl Session {
 
         events.push(Event::TurnCompleted { error });
 
+        // The window only changes as the conversation grows, so a settled turn
+        // is the point where a fresh breakdown is worth asking for.
+        self.request_context_composition();
+
         events
     }
 
@@ -952,6 +984,19 @@ impl Session {
         if let Some(event) =
             resolve_pending_control_operation(&mut self.pending_control_operations, response)
         {
+            // Before any assistant message reports usage there is nothing else
+            // describing how full the window is, so the breakdown's own totals
+            // stand in. Live accounting is richer, so it is never replaced.
+            if let Event::ContextCompositionUpdated(composition) = &event
+                && let Some(filled) = window_from_composition(self.context_usage, composition)
+            {
+                self.context_usage = Some(filled);
+                self.context_window = self.context_window.or(composition.max_tokens);
+
+                if let Some(usage) = self.context_window_usage() {
+                    return vec![Event::ContextWindowUpdated(usage), event];
+                }
+            }
             return vec![event];
         }
 
@@ -1001,6 +1046,12 @@ impl Session {
                 events.push(Event::Commands(commands));
             }
 
+            // This is the only readiness a resumed conversation reaches before
+            // the user speaks: the CLI withholds `system/init` until its next
+            // model turn. Asking here is what fills the context indicator for
+            // a session restored from history.
+            self.request_context_composition();
+
             return events;
         }
 
@@ -1014,6 +1065,17 @@ impl Session {
             self.context_window,
         )
     }
+}
+
+/// Whether a context breakdown should stand in for the window's own
+/// accounting. Live accounting names each category, so it is always the better
+/// answer; the breakdown only fills the gap before any has arrived.
+fn window_from_composition(
+    live: Option<TokenUsageBreakdown>,
+    composition: &ContextComposition,
+) -> Option<TokenUsageBreakdown> {
+    (live.is_none() && composition.used_tokens > 0)
+        .then(|| TokenUsageBreakdown::total_only(composition.used_tokens))
 }
 
 #[cfg(test)]

@@ -162,7 +162,9 @@ impl AgentPane {
     ) -> AnyElement {
         let (branch, branch_opacity) = self.git_branch_poll.presentation();
 
-        let usage = self.context_window_usage.map(ContextUsageIndicator::new);
+        let usage = self
+            .context_window_usage
+            .map(|usage| ContextUsageIndicator::new(usage, self.context_composition.clone()));
 
         v_flex()
             .w(relative(0.95))
