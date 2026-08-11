@@ -7,8 +7,8 @@ mod prompt_truncation_tests {
         AGENT_DISCLOSURE_DETAIL_INSET, AGENT_DISCLOSURE_GAP, AGENT_DISCLOSURE_PADDING,
         AGENT_DISCLOSURE_SLOT, AgentKind, COMMAND_EXECUTION_HEADING, Status, TurnSummary,
         VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES, command_execution_detail, command_execution_heading,
-        compaction_accounting, compaction_label, compaction_row_is_expandable, entry_copy_text,
-        interrupted_status_label, is_work_row, should_show_jump_to_latest,
+        compaction_accounting, compaction_label, compaction_row_is_expandable, elapsed_label,
+        entry_copy_text, interrupted_status_label, is_work_row, should_show_jump_to_latest,
         should_virtualize_transcript, transcript_segments, truncated_user_prompt, turn_summary,
         worked_status_label, working_status_label,
     };
@@ -42,6 +42,25 @@ mod prompt_truncation_tests {
         assert_eq!(
             working_status_label(12, Some(1_250)),
             "Working for 12s · 1.2k tokens"
+        );
+    }
+
+    #[test]
+    fn elapsed_time_reads_as_a_duration_rather_than_a_seconds_count() {
+        assert_eq!(elapsed_label(0), "0s");
+        assert_eq!(elapsed_label(45), "45s");
+        assert_eq!(elapsed_label(125), "2mins 5s");
+        assert_eq!(elapsed_label(3_721), "1hrs 2mins 1s");
+        assert_eq!(elapsed_label(90_061), "1days 1hrs 1mins 1s");
+
+        // Once a larger unit appears the smaller ones stay, so a ticking label
+        // keeps its shape instead of shifting as each unit rolls over.
+        assert_eq!(elapsed_label(3_605), "1hrs 0mins 5s");
+        assert_eq!(elapsed_label(86_400), "1days 0hrs 0mins 0s");
+
+        assert_eq!(
+            worked_status_label(3_721, Some(12_400)),
+            "Worked for 1hrs 2mins 1s · 12k tokens"
         );
     }
 
