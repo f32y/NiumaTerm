@@ -401,6 +401,37 @@ impl ContextWindowUsage {
     }
 }
 
+/// One labelled part of what currently fills the context window, such as the
+/// system prompt, the tool definitions, or the conversation itself.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContextSegment {
+    pub label: String,
+    pub tokens: u64,
+    /// Colour the provider suggests for this segment, as it writes it. Kept as
+    /// the provider's own string because a UI may prefer its theme instead.
+    pub color: Option<String>,
+    /// The segment is reserved rather than occupied: counted against the
+    /// window, but holding no conversation content yet.
+    pub deferred: bool,
+}
+
+/// How the context window is currently filled, as opposed to how tokens were
+/// billed. A provider that only reports accounting never publishes this, so
+/// its absence is a normal state rather than a failure.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContextComposition {
+    pub segments: Vec<ContextSegment>,
+    pub used_tokens: u64,
+    /// Window the provider measures against. This can be smaller than the
+    /// model's own window when the provider reserves room to compact.
+    pub max_tokens: Option<u64>,
+    /// The model's window before any such reserve, when the provider
+    /// distinguishes the two.
+    pub raw_max_tokens: Option<u64>,
+    /// Where automatic compaction takes over, when the provider reports it.
+    pub auto_compact_threshold: Option<u64>,
+}
+
 /// What a chat UI needs to react to, in transcript order.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
@@ -426,6 +457,9 @@ pub enum Event {
     TurnOutputTokensUpdated(u64),
     /// Replacement snapshot of the current thread's active context window.
     ContextWindowUpdated(ContextWindowUsage),
+    /// Replacement breakdown of what fills that window. Reported only by
+    /// providers that measure their own context composition.
+    ContextCompositionUpdated(ContextComposition),
     /// The backend started rewriting the conversation to reclaim context. Turn
     /// output stops until it finishes, so this drives a progress indicator; the
     /// finished boundary arrives separately as [`Item::Compaction`].

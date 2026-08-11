@@ -359,6 +359,10 @@ impl AgentPane {
                 }
                 cx.notify();
             }
+            SessionEvent::ContextCompositionUpdated(composition) => {
+                self.context_composition = Some(composition);
+                cx.notify();
+            }
             SessionEvent::BackgroundTaskTranscript { key, update } => {
                 // A child's conversation is view content only: it never
                 // reaches the parent transcript, composer, or turn state.

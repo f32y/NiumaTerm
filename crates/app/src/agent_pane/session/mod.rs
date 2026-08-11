@@ -111,6 +111,7 @@ impl AgentPane {
             rewind: RewindFlow::default(),
             git_branch_poll: GitBranchPoll::default(),
             context_window_usage: None,
+            context_composition: None,
             update_suspension: None,
             last_recovery_snapshot: None,
             restored_task_session: None,
@@ -573,6 +574,7 @@ impl AgentPane {
         self.turn_seq = 0;
         self.unanswered_prompt = None;
         self.context_window_usage = None;
+        self.context_composition = None;
         self.queued_user_messages.clear();
         self.rewind.state = None;
         self.rewind.file_completion = None;

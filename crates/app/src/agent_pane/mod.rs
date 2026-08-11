@@ -47,10 +47,10 @@ use nmt_agent_utils::background_task::{
     BackgroundTaskKey, BackgroundTaskProvider, BackgroundTaskSnapshot, BackgroundTaskTranscript,
 };
 use nmt_agent_utils::chat::{
-    Compaction, CompactionTrigger, ContextWindowUsage, Event as SessionEvent, Item as SessionItem,
-    ModelInfo, SendOutcome, SessionSummary, SkillCatalog, SkillInfo, SkillReference,
-    SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy,
-    SlashCommandSource, ThreadSettings,
+    Compaction, CompactionTrigger, ContextComposition, ContextWindowUsage, Event as SessionEvent,
+    Item as SessionItem, ModelInfo, SendOutcome, SessionSummary, SkillCatalog, SkillInfo,
+    SkillReference, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
+    SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
 };
 use nmt_agent_utils::claude_code::{sessions, stream_json};
 use nmt_agent_utils::codex::app_server;
@@ -291,6 +291,9 @@ pub(crate) struct AgentPane {
     rewind: RewindFlow,
     git_branch_poll: GitBranchPoll,
     context_window_usage: Option<ContextWindowUsage>,
+    /// How that window is currently filled, when the provider measures it.
+    /// Codex reports only accounting, so this stays empty there.
+    context_composition: Option<ContextComposition>,
     /// Process replacement for a provider update is pane state rather than a
     /// terminal exit. Keeping it separate retains transcript and composer
     /// contents while preventing input from reaching a missing backend.
