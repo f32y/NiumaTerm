@@ -21,11 +21,41 @@ pub(super) struct PendingSlashCommand {
     arguments: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum CommandFeedbackKind {
     Notice,
+    /// Information the user asked to see, or work still under way. Neither is
+    /// an acknowledgement of something already done, so both hold until a
+    /// newer message replaces them.
+    Status,
     Error,
     Queued,
+}
+
+/// How long an acknowledgement stays before retiring itself. Long enough to
+/// read after a glance away, short enough that it does not outlive the command
+/// it describes.
+const FEEDBACK_LIFETIME: Duration = Duration::from_secs(6);
+
+/// Whether a message still describes the situation. A queued message counts
+/// the command queue, and several paths empty that queue without going through
+/// the palette -- a failed spawn, an update stopping active work, a
+/// conversation reset. Deciding this where the message is shown keeps a future
+/// path from reintroducing a count of commands that are no longer waiting.
+fn feedback_is_current(kind: CommandFeedbackKind, queue_is_empty: bool) -> bool {
+    !(kind == CommandFeedbackKind::Queued && queue_is_empty)
+}
+
+/// Whether a message is a passing acknowledgement rather than something the
+/// user still has to act on. An error stays until it is read, and a queued
+/// list describes work still waiting rather than work already accepted.
+fn feedback_is_transient(kind: CommandFeedbackKind) -> bool {
+    match kind {
+        CommandFeedbackKind::Notice => true,
+        CommandFeedbackKind::Status | CommandFeedbackKind::Error | CommandFeedbackKind::Queued => {
+            false
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -377,7 +407,9 @@ impl AgentPane {
             fields.push(format!("queued={}", self.palette.command_queue.len()));
         }
 
-        self.set_command_feedback(CommandFeedbackKind::Notice, fields.join(" · "), cx);
+        // Answering /status is information the user asked for, so it holds
+        // rather than fading out from under them.
+        self.set_command_feedback(CommandFeedbackKind::Status, fields.join(" · "), cx);
     }
 
     pub(super) fn set_command_feedback(
@@ -386,8 +418,36 @@ impl AgentPane {
         message: String,
         cx: &mut Context<Self>,
     ) {
+        self.palette.feedback_seq += 1;
+        let seq = self.palette.feedback_seq;
         self.palette.feedback = Some(CommandFeedback { kind, message });
         cx.notify();
+
+        if !feedback_is_transient(kind) {
+            return;
+        }
+
+        // A notice acknowledges a request before anything visible happens. A
+        // command that then runs a whole turn fills the transcript with its
+        // real answer, and the acknowledgement above the composer becomes a
+        // line the user cannot dismiss, because only typing clears it.
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(FEEDBACK_LIFETIME).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.palette.feedback_seq == seq {
+                    this.palette.feedback = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// The message worth showing right now, if any.
+    pub(in crate::agent_pane) fn visible_command_feedback(&self) -> Option<&CommandFeedback> {
+        self.palette.feedback.as_ref().filter(|feedback| {
+            feedback_is_current(feedback.kind, self.palette.command_queue.is_empty())
+        })
     }
 
     pub(super) fn is_command_busy(&self) -> bool {

@@ -228,6 +228,9 @@ struct SlashPalette {
     dismissed: bool,
     scroll: ScrollHandle,
     feedback: Option<CommandFeedback>,
+    /// Order of the latest feedback shown. A delayed dismissal compares
+    /// against it so it can only retire the message it was started for.
+    feedback_seq: u64,
     command_queue: VecDeque<PendingSlashCommand>,
     /// An accepted backend command starts the progress clock only after the
     /// protocol reports a real turn, not when the request is written.
