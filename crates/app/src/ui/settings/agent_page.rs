@@ -50,20 +50,6 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
         .title("General")
         .item(
             SettingItem::new(
-                "Enable Agent Hooks",
-                SettingField::switch(
-                    |cx| cx.global::<AppSettings>().enable_agent_hooks,
-                    |value, cx| {
-                        cx.global_mut::<AppSettings>().enable_agent_hooks = value;
-                    },
-                ),
-            )
-            .description(
-                "Process new lifecycle events from installed Agent Hooks. This does not change their installation state.",
-            ),
-        )
-        .item(
-            SettingItem::new(
                 "Show Agent Usage",
                 SettingField::switch(
                     |cx| cx.global::<AppSettings>().show_agent_usage,
@@ -114,7 +100,21 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
         .group(general)
         .group(
             SettingGroup::new()
-                .title("Installed Agents")
+                .title("Agent Hooks")
+                .item(
+                    SettingItem::new(
+                        "Enable Agent Hooks",
+                        SettingField::switch(
+                            |cx| cx.global::<AppSettings>().enable_agent_hooks,
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().enable_agent_hooks = value;
+                            },
+                        ),
+                    )
+                    .description(
+                        "Process new lifecycle events from installed Agent Hooks. This does not change their installation state.",
+                    ),
+                )
                 .item(agent_hook_item(
                     "Claude Code",
                     claude_hook::settings_path(),
