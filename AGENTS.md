@@ -113,11 +113,14 @@ automated functional or regression test that directly covers it, or collecting
 concrete before-and-after performance data. If no such validation was performed,
 omit the section instead of substituting routine tool output as boilerplate.
 
-When an AI coding agent materially contributes to the change, include an
-appropriate `Co-Authored-By` trailer at the end of the commit message.
-
-For Codex authored or co-authored work, use:
+When an AI coding agent materially contributes to the change, end the
+commit message with a `Co-Authored-By` trailer naming the model that
+performed the work. Write the model ID the agent reports from its runtime,
+followed by a noreply address on the model vendor's domain:
 
 ```text
-Co-Authored-By: <MODEL_NAME_WITH_MAJOR_MINOR_VERSION> <noreply@openai.com>
+Co-Authored-By: <MODEL_ID> <noreply@<vendor>.com>
 ```
+
+Anthropic models use `noreply@anthropic.com` (e.g.
+`claude-opus-5 <noreply@anthropic.com>`), Codex uses `noreply@openai.com`.

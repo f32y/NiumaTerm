@@ -34,6 +34,28 @@ EOF
     exit 1
 fi
 
+# A present Co-Authored-By trailer must name the model that did the work
+# (AGENTS.md), so the credit records the actual model ID instead of a vendor
+# or human label. Model IDs are lowercase and versioned, so the name part
+# must contain a '-' or '.' separator (e.g. deepseek-v4-flash); a bare label
+# like "Claude" or "Codex" does not pass.
+coauthor_pattern='^Co-Authored-By: [a-z0-9][a-z0-9._-]*[-.][a-z0-9._-]* <noreply@[a-z0-9][a-z0-9.-]*\.[a-z]{2,}>$'
+bad_coauthors=$(printf '%s\n' "$body" | grep -E '^Co-Authored-By:' | grep -Ev "$coauthor_pattern" || true)
+if [ -n "$bad_coauthors" ]; then
+    cat >&2 <<EOF
+commit-msg: Co-Authored-By must name the model ID
+
+Expected:
+  Co-Authored-By: <MODEL_ID> <noreply@<vendor>.com>
+Example:
+  Co-Authored-By: deepseek-v4-flash <noreply@deepseek.com>
+
+Offending lines:
+$bad_coauthors
+EOF
+    exit 1
+fi
+
 subject=$(sed -n '/^#/!{/./{p;q;}}' "$msg_file")
 pattern='^(feat|fix|refactor|docs|perf|test|chore|build|ci|style|revert|lint)(\([a-z0-9_.-]+\))?: [a-z0-9].*$'
 
