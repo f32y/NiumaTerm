@@ -138,7 +138,7 @@ impl AgentPane {
         self.palette.selected = 0;
         self.palette.dismissed = false;
         self.set_command_feedback(
-            CommandFeedbackKind::Notice,
+            CommandFeedbackKind::Status,
             "Loading Claude rewind checkpoints…".to_string(),
             cx,
         );
@@ -395,7 +395,7 @@ impl AgentPane {
         self.rewind.file_completion = Some(completion_tx);
         self.rewind.state = Some(RewindState::RestoringFiles { operation_id });
         self.set_command_feedback(
-            CommandFeedbackKind::Notice,
+            CommandFeedbackKind::Status,
             if continue_with_fork {
                 "Restoring Claude files before creating the conversation fork…".to_string()
             } else {
@@ -494,7 +494,7 @@ impl AgentPane {
         let user_message_id = checkpoint.user_message_id.clone();
         self.rewind.state = Some(RewindState::ForkingConversation { operation_id });
         self.set_command_feedback(
-            CommandFeedbackKind::Notice,
+            CommandFeedbackKind::Status,
             "Creating an independent Claude conversation prefix…".to_string(),
             cx,
         );

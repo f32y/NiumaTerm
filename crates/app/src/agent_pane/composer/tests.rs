@@ -1,7 +1,8 @@
 use nmt_agent_utils::chat::SlashCommandRunPolicy;
 
 use crate::agent_pane::composer::{
-    FileRestoreNext, RewindState, app_server, file_restore_next, restored_input_after_interruption,
+    CommandFeedbackKind, FileRestoreNext, RewindState, app_server, feedback_is_current,
+    feedback_is_transient, file_restore_next, restored_input_after_interruption,
     rewind_blocks_submission, sessions, stream_json,
 };
 
@@ -88,4 +89,67 @@ fn interrupted_prompt_returns_without_discarding_a_new_draft() {
         restored_input_after_interruption("original prompt", "original prompt"),
         "original prompt"
     );
+}
+
+/// A notice acknowledges a request before anything visible happens. Once the
+/// command has run a whole turn, the transcript carries the real answer and
+/// the acknowledgement is a line the user cannot dismiss, because only typing
+/// clears it. Errors and the queued list are not acknowledgements.
+#[test]
+fn only_acknowledgements_retire_themselves() {
+    assert!(feedback_is_transient(CommandFeedbackKind::Notice));
+    assert!(!feedback_is_transient(CommandFeedbackKind::Error));
+    assert!(!feedback_is_transient(CommandFeedbackKind::Queued));
+}
+
+/// A queued message counts commands still waiting. Several paths empty that
+/// queue without going through the palette -- a failed spawn, an update
+/// stopping active work, a conversation reset -- so the count has to retire
+/// with the queue rather than wait for something to overwrite it.
+#[test]
+fn a_queued_message_does_not_outlive_its_queue() {
+    assert!(feedback_is_current(CommandFeedbackKind::Queued, false));
+    assert!(!feedback_is_current(CommandFeedbackKind::Queued, true));
+
+    // The other kinds describe the command, not the queue, so an empty queue
+    // says nothing about whether they still apply.
+    assert!(feedback_is_current(CommandFeedbackKind::Error, true));
+    assert!(feedback_is_current(CommandFeedbackKind::Notice, true));
+}
+
+/// Every message retires by one of three routes: it fades on its own, it
+/// retires with what it describes, or it holds deliberately until something
+/// replaces it. A kind belonging to none of them would sit above the composer
+/// until the user happened to type, which is the bug this guards.
+#[test]
+fn every_message_kind_has_a_way_to_retire() {
+    for kind in [
+        CommandFeedbackKind::Notice,
+        CommandFeedbackKind::Status,
+        CommandFeedbackKind::Error,
+        CommandFeedbackKind::Queued,
+    ] {
+        let fades_on_its_own = feedback_is_transient(kind);
+        let retires_with_its_queue = !feedback_is_current(kind, /*queue_is_empty*/ true);
+        let holds_until_replaced = matches!(
+            kind,
+            CommandFeedbackKind::Status | CommandFeedbackKind::Error
+        );
+
+        assert!(
+            fades_on_its_own || retires_with_its_queue || holds_until_replaced,
+            "a message kind with no way to retire was added"
+        );
+    }
+}
+
+/// Information the user asked for, and work still under way, must not fade
+/// out from under them the way an acknowledgement does.
+#[test]
+fn requested_information_and_progress_hold() {
+    assert!(!feedback_is_transient(CommandFeedbackKind::Status));
+    assert!(feedback_is_current(
+        CommandFeedbackKind::Status,
+        /*queue_is_empty*/ true
+    ));
 }
