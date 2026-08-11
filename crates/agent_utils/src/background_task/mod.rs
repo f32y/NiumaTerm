@@ -6,6 +6,13 @@
 use std::collections::HashMap;
 use std::time::SystemTime;
 
+mod transcript;
+
+pub use crate::background_task::transcript::{
+    BackgroundTaskTranscript, BackgroundTaskTranscriptState, BackgroundTaskTranscriptUpdate,
+    MAX_TRANSCRIPT_ITEMS,
+};
+
 /// Which agent backend owns a task. Two providers can emit the same local id
 /// string, so every identity in this module is qualified by the provider.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]

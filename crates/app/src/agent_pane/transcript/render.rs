@@ -10,7 +10,7 @@ use crate::agent_pane::transcript::{
 };
 use crate::agent_pane::*;
 
-impl AgentPane {
+impl TranscriptView {
     /// Build the element for one visible row. Row indices come from the list
     /// element during layout/paint, resolved through the spec snapshot taken
     /// in the current render pass.

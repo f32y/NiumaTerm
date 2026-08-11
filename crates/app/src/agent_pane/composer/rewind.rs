@@ -551,7 +551,7 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) {
         self.session = None;
-        self.clear_conversation_presentation();
+        self.clear_conversation_presentation(cx);
         self.palette.skill_catalog = None;
         self.palette.skill_binding = None;
         reset_command_runtime(

@@ -52,6 +52,17 @@ pub fn load_checkpoints(
 }
 
 pub(super) fn parse_replay(reader: impl BufRead) -> Vec<Item> {
+    parse_transcript(reader, /*sidechain*/ false)
+}
+
+/// A child agent's own file holds nothing but sidechain records, so replaying
+/// it keeps exactly the records the parent conversation drops. Both go through
+/// one parser, which is what makes a child read identically to its parent.
+pub(super) fn parse_child_replay(reader: impl BufRead) -> Vec<Item> {
+    parse_transcript(reader, /*sidechain*/ true)
+}
+
+fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<Item> {
     let transcript = TranscriptIndex::read(reader);
 
     if let Some(parent) = &transcript.broken_parent {
@@ -73,7 +84,8 @@ pub(super) fn parse_replay(reader: impl BufRead) -> Vec<Item> {
     let mut open_compaction: Option<usize> = None;
 
     for record in transcript.active_records() {
-        if record["isSidechain"].as_bool() == Some(true) || record["isMeta"].as_bool() == Some(true)
+        if record["isSidechain"].as_bool().unwrap_or(false) != sidechain
+            || record["isMeta"].as_bool() == Some(true)
         {
             continue;
         }

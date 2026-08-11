@@ -5,7 +5,9 @@
 
 use std::time::SystemTime;
 
-use crate::background_task::BackgroundTaskSnapshot;
+use crate::background_task::{
+    BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscriptUpdate,
+};
 
 /// Thread settings a chat UI lets the user pick. Field meanings are
 /// per-backend: Codex sends them as overrides on every `turn/start`;
@@ -463,6 +465,13 @@ pub enum Event {
     /// lifecycle is reduced by the adapter, so this never affects the parent
     /// transcript, turn state, or approvals.
     BackgroundTasks(BackgroundTaskSnapshot),
+    /// One child's own conversation, in the same items the parent transcript
+    /// uses. Delivered separately from the summary snapshot because a child's
+    /// content is only worth carrying once someone is reading it.
+    BackgroundTaskTranscript {
+        key: BackgroundTaskKey,
+        update: BackgroundTaskTranscriptUpdate,
+    },
     /// Resumable sessions for the tab's working directory, newest first.
     History(Vec<SessionSummary>),
     /// Reconstructed transcript of a resumed session, to pre-fill the UI.

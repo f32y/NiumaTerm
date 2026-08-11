@@ -1,6 +1,7 @@
 use serde_json::{Value, json};
 
 use crate::background_task::{BackgroundTaskKey, BackgroundTaskRefs, BackgroundTaskState};
+use crate::chat::Item;
 use crate::claude_code::tasks::ClaudeTasks;
 
 const SESSION: &str = "sess-1";
@@ -459,4 +460,103 @@ fn switching_to_another_session_drops_the_previous_rows() {
         snapshot.parent_session,
         BackgroundTaskKey::claude_code("sess-2")
     );
+}
+
+#[test]
+fn linked_activity_becomes_the_childs_own_conversation() {
+    let mut tasks = reducer();
+    tasks.observe(&launch("toolu_1"));
+    tasks.take_transcripts();
+
+    tasks.observe(&json!({
+        "type": "assistant",
+        "session_id": SESSION,
+        "parent_tool_use_id": "toolu_1",
+        "uuid": "u-1",
+        "message": {"content": [
+            {"type": "thinking", "id": "th-1", "thinking": "planning the review"},
+            {"type": "text", "id": "tx-1", "text": "found three issues"},
+            {"type": "tool_use", "id": "tu-1", "name": "Read", "input": {"file_path": "src/lib.rs"}},
+        ]},
+    }));
+
+    let published = tasks.take_transcripts();
+    assert_eq!(published.len(), 1);
+    let (key, update) = &published[0];
+    assert_eq!(*key, BackgroundTaskKey::claude_code("toolu_1"));
+    assert!(
+        !update.replace,
+        "live activity extends rather than replaces"
+    );
+    // The same item kinds the parent conversation renders, so a child reads
+    // identically rather than through a second presentation.
+    assert!(matches!(update.items[0], Item::Reasoning { .. }));
+    assert!(matches!(update.items[1], Item::AgentMessage { .. }));
+    assert!(matches!(update.items[2], Item::Other { .. }));
+}
+
+#[test]
+fn a_child_tool_result_completes_the_call_it_answers() {
+    let mut tasks = reducer();
+    tasks.observe(&launch("toolu_1"));
+    tasks.observe(&json!({
+        "type": "assistant",
+        "session_id": SESSION,
+        "parent_tool_use_id": "toolu_1",
+        "message": {"content": [
+            {"type": "tool_use", "id": "tu-1", "name": "Read", "input": {"file_path": "src/lib.rs"}},
+        ]},
+    }));
+    tasks.take_transcripts();
+
+    tasks.observe(&json!({
+        "type": "user",
+        "session_id": SESSION,
+        "parent_tool_use_id": "toolu_1",
+        "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "tu-1", "content": "fn main() {}"},
+        ]},
+    }));
+
+    let published = tasks.take_transcripts();
+    assert_eq!(published.len(), 1);
+    let items = &published[0].1.items;
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0].id(),
+        Some("tu-1"),
+        "the result completes the started call instead of adding a row"
+    );
+}
+
+#[test]
+fn unlinked_sidechain_activity_publishes_no_conversation() {
+    let mut tasks = reducer();
+    tasks.observe(&launch("toolu_1"));
+    tasks.take_transcripts();
+
+    tasks.observe(&json!({
+        "type": "assistant",
+        "session_id": SESSION,
+        "parent_tool_use_id": "toolu_unknown",
+        "message": {"content": [{"type": "text", "id": "t1", "text": "orphan"}]},
+    }));
+
+    assert!(tasks.take_transcripts().is_empty());
+}
+
+#[test]
+fn switching_sessions_drops_pending_child_conversations() {
+    let mut tasks = reducer();
+    tasks.observe(&launch("toolu_1"));
+    tasks.observe(&json!({
+        "type": "assistant",
+        "session_id": SESSION,
+        "parent_tool_use_id": "toolu_1",
+        "message": {"content": [{"type": "text", "id": "t1", "text": "work"}]},
+    }));
+
+    tasks.observe(&json!({"type": "system", "subtype": "init", "session_id": "sess-2"}));
+
+    assert!(tasks.take_transcripts().is_empty());
 }

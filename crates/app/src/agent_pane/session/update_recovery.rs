@@ -45,7 +45,7 @@ impl AgentPane {
     /// Assess both quiescence and recoverability before any related backend
     /// is stopped. A blank tab needs no provider identity because restarting
     /// it as another blank conversation loses no conversation state.
-    pub(crate) fn recovery_readiness(&self) -> RecoveryReadiness {
+    pub(crate) fn recovery_readiness(&self, cx: &App) -> RecoveryReadiness {
         if self
             .update_suspension
             .as_ref()
@@ -62,7 +62,7 @@ impl AgentPane {
             || !self.palette.command_queue.is_empty()
             || !self.queued_user_messages.is_empty()
             || self.rewind.state.is_some()
-            || self.compacting
+            || self.transcript.read(cx).is_compacting()
             || self
                 .session
                 .as_ref()
@@ -74,11 +74,11 @@ impl AgentPane {
             ));
         }
 
-        self.recovery_identity_snapshot()
+        self.recovery_identity_snapshot(cx)
     }
 
-    pub(crate) fn recovery_identity_snapshot(&self) -> RecoveryReadiness {
-        let identity = if self.items.is_empty() {
+    pub(crate) fn recovery_identity_snapshot(&self, cx: &App) -> RecoveryReadiness {
+        let identity = if self.transcript.read(cx).is_empty() {
             RecoveryIdentity::NewConversation
         } else if let Some(identity) = self.session.as_ref().and_then(Backend::recovery_identity) {
             identity
@@ -126,7 +126,8 @@ impl AgentPane {
         {
             self.rewind.state = None;
         }
-        self.compacting = false;
+        self.transcript
+            .update(cx, |transcript, cx| transcript.set_compacting(false, cx));
         self.update_suspension = Some(UpdateSuspension::Waiting);
         cx.notify();
     }

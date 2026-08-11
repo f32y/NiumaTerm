@@ -1,5 +1,5 @@
-use crate::background_task::BackgroundTaskState;
-use crate::chat::CompactionTrigger;
+use crate::background_task::{BackgroundTaskState, BackgroundTaskTranscript};
+use crate::chat::{CompactionTrigger, Item};
 use crate::claude_code::sessions::*;
 
 const ACTIVE_CHAIN_FIXTURE: &str =
@@ -747,4 +747,254 @@ fn a_session_with_no_transcript_yet_restores_nothing_instead_of_failing() {
     let restored = load_task_history(Some("Z:/definitely/not/a/project"), "missing-session");
 
     assert_eq!(restored, Ok(Vec::new()));
+}
+
+#[test]
+fn task_history_rebuilds_a_childs_own_conversation_from_linked_sidechains() {
+    let lines = task_history_lines(&[
+        assistant_launch("a1", None, "toolu_1"),
+        serde_json::json!({
+            "type": "assistant",
+            "uuid": "s1",
+            "parentUuid": "a1",
+            "isSidechain": true,
+            "parent_tool_use_id": "toolu_1",
+            "message": {"role": "assistant", "content": [
+                {"type": "thinking", "id": "th-1", "thinking": "planning"},
+                {"type": "tool_use", "id": "tu-1", "name": "Read", "input": {"file_path": "src/lib.rs"}},
+            ]},
+        }),
+        serde_json::json!({
+            "type": "user",
+            "uuid": "s2",
+            "parentUuid": "s1",
+            "isSidechain": true,
+            "parent_tool_use_id": "toolu_1",
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "tu-1", "content": "fn main() {}"},
+            ]},
+        }),
+        serde_json::json!({
+            "type": "assistant",
+            "uuid": "s3",
+            "parentUuid": "s2",
+            "isSidechain": true,
+            "parent_tool_use_id": "toolu_1",
+            "message": {"role": "assistant", "content": [
+                {"type": "text", "id": "tx-1", "text": "no issues found"},
+            ]},
+        }),
+        tool_result_record("r1", "a1", "toolu_1", false),
+    ]);
+
+    let tasks = parse_task_history(lines.as_bytes());
+
+    assert_eq!(tasks.len(), 1);
+
+    // Assert on the accumulated conversation rather than the raw records: a
+    // tool result carries its call's id, and folding it into that row is what
+    // the accumulator does for both live and restored content.
+    let mut transcript = BackgroundTaskTranscript::default();
+    assert!(transcript.restore(tasks[0].items.clone()));
+
+    let ids: Vec<_> = transcript.items().iter().map(Item::id).collect();
+    assert_eq!(ids, [Some("th-1"), Some("tu-1"), Some("tx-1")]);
+    assert!(
+        matches!(transcript.items()[0], Item::Reasoning { .. }),
+        "the child's work uses the same row kinds as the parent conversation"
+    );
+}
+
+#[test]
+fn an_unlinked_sidechain_contributes_no_child_conversation() {
+    let lines = task_history_lines(&[
+        assistant_launch("a1", None, "toolu_known"),
+        serde_json::json!({
+            "type": "assistant",
+            "uuid": "s1",
+            "parentUuid": null,
+            "isSidechain": true,
+            "parent_tool_use_id": "toolu_abandoned",
+            "message": {"role": "assistant", "content": [
+                {"type": "text", "id": "tx-9", "text": "orphan branch"},
+            ]},
+        }),
+        tool_result_record("r1", "a1", "toolu_known", false),
+    ]);
+
+    let tasks = parse_task_history(lines.as_bytes());
+
+    assert_eq!(tasks.len(), 1);
+    assert!(
+        tasks[0].items.is_empty(),
+        "a branch no selected launch claims is not this child's conversation"
+    );
+}
+
+/// Claude persists a child agent beside the parent transcript rather than
+/// inside it: `<session-id>/subagents/agent-<id>.jsonl` holds the conversation
+/// and `agent-<id>.meta.json` names the tool call that launched it. The parent
+/// file contains no sidechain records at all, so a scan of it finds nothing.
+#[test]
+fn a_child_conversation_is_read_from_its_own_file_and_linked_by_metadata() {
+    use std::fs;
+
+    let root = env::temp_dir().join(format!("nmt-subagent-history-{}", Uuid::new_v4()));
+    let session_id = "sess-abc";
+    let subagents = root.join(session_id).join("subagents");
+    fs::create_dir_all(&subagents).unwrap();
+
+    fs::write(
+        root.join(format!("{session_id}.jsonl")),
+        task_history_lines(&[
+            assistant_launch("a1", None, "toolu_1"),
+            tool_result_record("r1", "a1", "toolu_1", false),
+        ]),
+    )
+    .unwrap();
+    fs::write(
+        subagents.join("agent-abc123.meta.json"),
+        serde_json::json!({
+            "agentType": "Explore",
+            "description": "Explore popup options",
+            "toolUseId": "toolu_1",
+            "spawnDepth": 1,
+        })
+        .to_string(),
+    )
+    .unwrap();
+    // Every record in a child's own file is a sidechain record.
+    fs::write(
+        subagents.join("agent-abc123.jsonl"),
+        task_history_lines(&[serde_json::json!({
+            "type": "assistant",
+            "uuid": "c1",
+            "parentUuid": null,
+            "isSidechain": true,
+            "message": {"role": "assistant", "content": [
+                {"type": "text", "text": "found the popup component"},
+            ]},
+        })]),
+    )
+    .unwrap();
+
+    let tasks = load_task_history_at(&root, session_id).expect("history is readable");
+
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(
+        tasks[0].items.len(),
+        1,
+        "the child's conversation comes from its own file"
+    );
+    assert_eq!(
+        tasks[0].update.agent_type.as_deref(),
+        Some("code-reviewer"),
+        "the launch that started the child describes it better than the file"
+    );
+    assert_eq!(
+        tasks[0].update.depth,
+        Some(1),
+        "spawn depth is only recorded beside the conversation"
+    );
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn a_child_conversation_with_no_matching_launch_is_left_alone() {
+    use std::fs;
+
+    let root = env::temp_dir().join(format!("nmt-subagent-history-{}", Uuid::new_v4()));
+    let session_id = "sess-abc";
+    let subagents = root.join(session_id).join("subagents");
+    fs::create_dir_all(&subagents).unwrap();
+
+    fs::write(
+        root.join(format!("{session_id}.jsonl")),
+        task_history_lines(&[assistant_launch("a1", None, "toolu_1")]),
+    )
+    .unwrap();
+    fs::write(
+        subagents.join("agent-other.meta.json"),
+        serde_json::json!({"toolUseId": "toolu_from_another_branch"}).to_string(),
+    )
+    .unwrap();
+
+    let tasks = load_task_history_at(&root, session_id).expect("history is readable");
+
+    assert_eq!(tasks.len(), 1);
+    assert!(
+        tasks[0].items.is_empty(),
+        "a conversation whose launch is not in this history is not this child's"
+    );
+
+    fs::remove_dir_all(&root).ok();
+}
+
+/// The CLI injects background-agent status back into the conversation as a
+/// synthesized `user` turn. It is addressed to the model, not written by the
+/// person, so replaying it as a prompt shows content they never typed.
+#[test]
+fn task_notifications_are_not_replayed_as_user_prompts() {
+    let notification = "<task-notification>\n<task-id>af51619832c5b38f5</task-id>\n\
+                        <tool-use-id>toolu_01WjVSCJychqyGiWnTbV9jRg</tool-use-id>\n\
+                        <status>completed</status>\n</task-notification>";
+    let lines = task_history_lines(&[
+        serde_json::json!({
+            "type": "user",
+            "uuid": "u1",
+            "parentUuid": null,
+            "isSidechain": false,
+            "origin": {"kind": "human"},
+            "message": {"role": "user", "content": "review the diff"},
+        }),
+        serde_json::json!({
+            "type": "user",
+            "uuid": "u2",
+            "parentUuid": "u1",
+            "isSidechain": false,
+            "origin": {"kind": "task-notification"},
+            "promptSource": "system",
+            "message": {"role": "user", "content": notification},
+        }),
+    ]);
+
+    let items = parse_replay(lines.as_bytes());
+
+    assert_eq!(
+        items,
+        vec![Item::UserMessage {
+            text: Some("review the diff".into())
+        }]
+    );
+}
+
+#[test]
+fn a_task_notification_without_an_origin_is_still_not_a_prompt() {
+    // Older CLI versions recorded no origin, so the block itself is the marker.
+    let lines = task_history_lines(&[serde_json::json!({
+        "type": "user",
+        "uuid": "u1",
+        "parentUuid": null,
+        "isSidechain": false,
+        "message": {"role": "user", "content": "<task-notification>\n<status>completed</status>\n</task-notification>"},
+    })]);
+
+    assert!(parse_replay(lines.as_bytes()).is_empty());
+}
+
+#[test]
+fn an_ordinary_prompt_mentioning_a_notification_is_still_a_prompt() {
+    // Only the record's own origin, or a block it starts with, marks plumbing;
+    // a person discussing one is still speaking.
+    let lines = task_history_lines(&[serde_json::json!({
+        "type": "user",
+        "uuid": "u1",
+        "parentUuid": null,
+        "isSidechain": false,
+        "origin": {"kind": "human"},
+        "message": {"role": "user", "content": "why did the <task-notification> block appear?"},
+    })]);
+
+    assert_eq!(parse_replay(lines.as_bytes()).len(), 1);
 }

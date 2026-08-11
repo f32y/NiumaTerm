@@ -7,16 +7,21 @@ use std::cmp::Ordering;
 use std::time::{Duration, SystemTime};
 
 use gpui::prelude::*;
-use gpui::{AnyElement, Context, ScrollHandle, SharedString, Task, WeakEntity, Window, div, px};
+use gpui::{
+    AnyElement, Context, Entity, Hsla, ScrollHandle, SharedString, Task, WeakEntity, Window, div,
+    px,
+};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::tooltip::Tooltip;
-use gpui_component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
+use gpui_component::{ActiveTheme as _, IconName, Sizable as _, h_flex, v_flex};
 use nmt_agent_utils::background_task::{
-    BackgroundTaskDiscoveryState, BackgroundTaskSnapshot, BackgroundTaskState,
-    BackgroundTaskSummary,
+    BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskState,
+    BackgroundTaskSummary, BackgroundTaskTranscriptState,
 };
 
 use crate::agent_pane::AgentPane;
+use crate::agent_pane::transcript::TranscriptView;
+use crate::ui::AppSettings;
 
 /// Exact label used by both the panel heading and the title-bar button.
 pub(crate) const PANEL_TITLE: &str = "Background Tasks";
@@ -30,7 +35,60 @@ const COMPACT_FINISHED_ROWS: usize = 10;
 /// tick per second is enough to keep a seconds display truthful.
 const ELAPSED_TICK: Duration = Duration::from_secs(1);
 
+/// What the panel is showing. One child at a time replaces the list rather
+/// than opening beside it, so the shared right-side area still holds one view.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum PanelMode {
+    List,
+    Detail {
+        key: BackgroundTaskKey,
+        /// Section expansion restored when the user goes back, so returning
+        /// lands on what they were reading.
+        running_expanded: bool,
+        finished_expanded: bool,
+    },
+}
+
+impl PanelMode {
+    fn detail_key(&self) -> Option<&BackgroundTaskKey> {
+        match self {
+            Self::Detail { key, .. } => Some(key),
+            Self::List => None,
+        }
+    }
+
+    /// Open one child, remembering the list state behind it.
+    fn open(&mut self, key: BackgroundTaskKey, running_expanded: bool, finished_expanded: bool) {
+        *self = Self::Detail {
+            key,
+            running_expanded,
+            finished_expanded,
+        };
+    }
+
+    /// Return to the list. Reports the section expansion to restore, or `None`
+    /// when the list was already showing.
+    fn close(&mut self) -> Option<(bool, bool)> {
+        let Self::Detail {
+            running_expanded,
+            finished_expanded,
+            ..
+        } = self
+        else {
+            return None;
+        };
+        let restored = (*running_expanded, *finished_expanded);
+        *self = Self::List;
+        Some(restored)
+    }
+}
+
 pub(crate) struct BackgroundTasksView {
+    mode: PanelMode,
+    /// The open child's conversation, rendered by the same component the Agent
+    /// pane uses. Its own instance, so expansion and scroll belong to this
+    /// child rather than to the parent conversation.
+    detail_transcript: Option<Entity<TranscriptView>>,
     /// The Agent pane whose children are shown. Weak because the tab can close
     /// while the panel is still mounted for its closing animation.
     target: Option<WeakEntity<AgentPane>>,
@@ -46,6 +104,8 @@ pub(crate) struct BackgroundTasksView {
 impl BackgroundTasksView {
     pub(crate) fn new() -> Self {
         Self {
+            mode: PanelMode::List,
+            detail_transcript: None,
             target: None,
             running_expanded: false,
             finished_expanded: false,
@@ -71,6 +131,10 @@ impl BackgroundTasksView {
             return;
         }
         self.target = target;
+        // A child belongs to one parent session, so pointing at another one
+        // returns to the list rather than keeping that child on screen.
+        self.mode = PanelMode::List;
+        self.detail_transcript = None;
         self.running_expanded = false;
         self.finished_expanded = false;
         self.scroll = ScrollHandle::new();
@@ -111,6 +175,154 @@ impl BackgroundTasksView {
                 }
             }
         }));
+    }
+
+    /// Open one child's conversation, remembering the list state so going back
+    /// returns to what the user was reading.
+    fn open_detail(&mut self, key: BackgroundTaskKey, cx: &mut Context<Self>) {
+        let Some(pane) = self.target.as_ref().and_then(WeakEntity::upgrade) else {
+            return;
+        };
+        let (kind, cwd) = {
+            let pane = pane.read(cx);
+            (pane.agent_kind(), pane.working_directory())
+        };
+        self.detail_transcript = Some(cx.new(|_| TranscriptView::new(kind, cwd)));
+        self.mode
+            .open(key.clone(), self.running_expanded, self.finished_expanded);
+        // Codex stores a descendant's conversation and hands it over on
+        // request; Claude Code has been accumulating it live, so this is a
+        // no-op there.
+        pane.update(cx, |pane, cx| {
+            pane.load_background_task_transcript(&key, cx);
+        });
+        cx.notify();
+    }
+
+    fn close_detail(&mut self, cx: &mut Context<Self>) {
+        let Some((running_expanded, finished_expanded)) = self.mode.close() else {
+            return;
+        };
+        self.running_expanded = running_expanded;
+        self.finished_expanded = finished_expanded;
+        self.detail_transcript = None;
+        cx.notify();
+    }
+
+    fn render_detail(
+        &mut self,
+        key: BackgroundTaskKey,
+        transcript: Entity<TranscriptView>,
+        snapshot: &BackgroundTaskSnapshot,
+        now: SystemTime,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(task) = snapshot.tasks.iter().find(|task| task.key == key) else {
+            // The child left this session's snapshot, so there is nothing to
+            // show; the list is the honest place to be.
+            self.close_detail(cx);
+            return div().into_any_element();
+        };
+
+        let (items, state, dropped, revision) = self
+            .target
+            .as_ref()
+            .and_then(WeakEntity::upgrade)
+            .and_then(|pane| {
+                let pane = pane.read(cx);
+                let child = pane.background_task_transcript(&key)?;
+                Some((
+                    child.items().to_vec(),
+                    child.state().clone(),
+                    child.dropped(),
+                    child.revision(),
+                ))
+            })
+            .unwrap_or_else(|| (Vec::new(), BackgroundTaskTranscriptState::NotLoaded, 0, 0));
+
+        transcript.update(cx, |view, cx| view.show_items(&items, revision, cx));
+
+        let theme = cx.theme();
+        let header = v_flex()
+            .px_2()
+            .py_1()
+            .gap_0p5()
+            .border_b_1()
+            .border_color(theme.sidebar_border)
+            .child(
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .child(
+                        Button::new("background-task-back")
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::ArrowLeft)
+                            .tooltip("Back to background tasks")
+                            .aria_label("Back to background tasks")
+                            .on_click(cx.listener(|this, _, _, cx| this.close_detail(cx))),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .truncate()
+                            .text_sm()
+                            .child(task.display_label()),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(state_color(task.state, cx))
+                            .child(task.state.label()),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(div().flex_none().child(task.key.provider.label()))
+                    .child(div().flex_1().truncate().child(row_detail(task)))
+                    .children(row_timing(task, now).map(|timing| div().flex_none().child(timing))),
+            );
+
+        let body: AnyElement = match (&state, items.is_empty()) {
+            (BackgroundTaskTranscriptState::Unavailable { message }, _) => empty_state(
+                "Conversation unavailable",
+                &format!("This agent's conversation could not be read: {message}"),
+                cx,
+            ),
+            (BackgroundTaskTranscriptState::Loading, true) => {
+                empty_state("Loading", "Reading this agent's conversation…", cx)
+            }
+            (_, true) => empty_state(
+                "Nothing recorded yet",
+                "This agent has not produced any output.",
+                cx,
+            ),
+            _ => v_flex()
+                .flex_1()
+                .min_h_0()
+                // The retention bound drops the oldest content, so a truncated
+                // conversation says so rather than reading as complete.
+                .children((dropped > 0).then(|| {
+                    div()
+                        .px_2()
+                        .py_1()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(format!("Earlier {dropped} items are not shown"))
+                }))
+                .child(transcript)
+                .into_any_element(),
+        };
+
+        v_flex()
+            .size_full()
+            .child(header)
+            .child(body)
+            .into_any_element()
     }
 
     fn render_section(
@@ -171,13 +383,7 @@ fn render_row(
     cx: &mut Context<BackgroundTasksView>,
 ) -> AnyElement {
     let theme = cx.theme();
-    let color = match task.state {
-        BackgroundTaskState::Failed => theme.red,
-        BackgroundTaskState::NeedsInput => theme.yellow,
-        BackgroundTaskState::Done => theme.green,
-        BackgroundTaskState::Working | BackgroundTaskState::Starting => theme.foreground,
-        BackgroundTaskState::Interrupted | BackgroundTaskState::Stopped => theme.muted_foreground,
-    };
+    let color = state_color(task.state, cx);
     let name = task.display_label();
     let detail = row_detail(task);
     let timing = row_timing(task, now);
@@ -190,15 +396,19 @@ fn render_row(
     )
     .into();
 
+    let key = task.key.clone();
+
     v_flex()
-        // The id exists so the row can carry a tooltip for its truncated text;
-        // no click handler is attached, because the initial view reports
-        // status only and dispatches no child operation.
+        // Activating a row opens that child's own conversation. It carries no
+        // control that acts on the child: inspection only.
         .id(("background-task-row", index))
         .px_2()
         .py_1()
         .gap_0p5()
+        .cursor_pointer()
+        .hover(|this| this.bg(theme.list_hover))
         .aria_label(tooltip.clone())
+        .on_click(cx.listener(move |this, _, _, cx| this.open_detail(key.clone(), cx)))
         .child(
             h_flex()
                 .gap_2()
@@ -222,6 +432,17 @@ fn render_row(
 
 /// Objective first, then the latest status line, then a neutral fallback so a
 /// row with no optional metadata still reads as a real entry.
+fn state_color(state: BackgroundTaskState, cx: &Context<BackgroundTasksView>) -> Hsla {
+    let theme = cx.theme();
+    match state {
+        BackgroundTaskState::Failed => theme.red,
+        BackgroundTaskState::NeedsInput => theme.yellow,
+        BackgroundTaskState::Done => theme.green,
+        BackgroundTaskState::Working | BackgroundTaskState::Starting => theme.foreground,
+        BackgroundTaskState::Interrupted | BackgroundTaskState::Stopped => theme.muted_foreground,
+    }
+}
+
 fn row_detail(task: &BackgroundTaskSummary) -> String {
     task.objective
         .as_deref()
@@ -330,17 +551,23 @@ pub(crate) fn has_unseen_activity(
 
 impl Render for BackgroundTasksView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let settings = cx.global::<AppSettings>();
+        let font_family = settings.agent_font_family.clone();
+        let font_size = px(settings.agent_font_size as f32);
+
         v_flex()
             .size_full()
-            .child(
+            .font_family(font_family)
+            .text_size(font_size)
+            .children(matches!(self.mode, PanelMode::List).then(|| {
                 h_flex()
                     .px_2()
                     .py_1()
                     .items_center()
                     .border_b_1()
                     .border_color(cx.theme().sidebar_border)
-                    .child(div().text_sm().child(PANEL_TITLE)),
-            )
+                    .child(div().text_sm().child(PANEL_TITLE))
+            }))
             .child(self.render_body(cx))
     }
 }
@@ -349,6 +576,22 @@ impl BackgroundTasksView {
     fn render_body(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let snapshot = self.snapshot(cx);
         let now = SystemTime::now();
+
+        // A child's conversation replaces the list; the elapsed-time task is
+        // only about the list's running rows, so it stands down while reading.
+        if let (Some(key), Some(transcript)) = (
+            self.mode.detail_key().cloned(),
+            self.detail_transcript.clone(),
+        ) {
+            self.sync_elapsed_timer(false, cx);
+            return match snapshot {
+                Some(snapshot) => self.render_detail(key, transcript, &snapshot, now, cx),
+                None => {
+                    self.close_detail(cx);
+                    div().into_any_element()
+                }
+            };
+        }
 
         let Some(snapshot) = snapshot else {
             self.sync_elapsed_timer(false, cx);

@@ -1,3 +1,4 @@
+use crate::agent_pane::transcript::view::TranscriptView;
 use crate::agent_pane::*;
 
 pub(super) const AGENT_DISCLOSURE_SLOT: f32 = 16.0;
@@ -77,7 +78,7 @@ impl AgentDisclosureRow {
         self
     }
 
-    pub(super) fn render(self, cx: &mut Context<AgentPane>) -> Stateful<Div> {
+    pub(super) fn render(self, cx: &mut Context<TranscriptView>) -> Stateful<Div> {
         let hover_bg = cx.theme().muted.opacity(0.4);
         let expandable = self.expanded.is_some();
         let chevron = self.expanded.map(|expanded| {

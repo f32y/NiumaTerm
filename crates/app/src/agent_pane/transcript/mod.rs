@@ -2,6 +2,7 @@ mod disclosure_row;
 mod format;
 mod render;
 mod rows;
+mod view;
 mod virtual_code;
 
 #[allow(unused_imports)]
@@ -27,6 +28,7 @@ pub(super) use crate::agent_pane::transcript::format::{
 pub(super) use crate::agent_pane::transcript::rows::{
     Entry, RowSpec, TurnSummary, entry_fingerprint, turn_summary,
 };
+pub(crate) use crate::agent_pane::transcript::view::TranscriptView;
 #[cfg(test)]
 use crate::agent_pane::transcript::virtual_code::VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES;
 #[allow(unused_imports)]

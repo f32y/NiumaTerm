@@ -43,7 +43,7 @@ impl AgentPane {
                 if self.history_ui.mode == RecentSessionsMode::Loading
                     && let Some(replay) = self.history_ui.pending_resume_replay.take()
                 {
-                    self.clear_conversation_presentation();
+                    self.clear_conversation_presentation(cx);
                     self.history_ui.mode = RecentSessionsMode::Hidden;
                     self.palette.feedback = None;
                     self.apply_replay(replay, cx);
@@ -173,16 +173,17 @@ impl AgentPane {
                 cx.notify();
             }
             SessionEvent::TurnCompleted { error } => {
-                let interrupted_by_user = self.interrupted_turns.contains(&self.turn_seq);
+                let interrupted_by_user = self.transcript.read(cx).was_interrupted(self.turn_seq);
                 let completion_body = error
                     .clone()
-                    .or_else(|| self.latest_agent_message().map(str::to_owned))
+                    .or_else(|| self.latest_agent_message(cx))
                     .unwrap_or_else(|| format!("{} completed the turn", self.kind.display()));
                 self.palette.awaiting_command_turn = false;
                 self.unanswered_prompt = None;
                 // Compaction lives inside a turn; a flag surviving the turn
                 // would leave the indicator spinning with nothing behind it.
-                self.compacting = false;
+                self.transcript
+                    .update(cx, |transcript, cx| transcript.set_compacting(false, cx));
                 self.publish_queued_user_messages(cx);
                 self.finish_working(cx);
                 self.refresh_git_branch(cx);
@@ -192,7 +193,7 @@ impl AgentPane {
                 if let Some(text) = error
                     && !interrupted_by_user
                 {
-                    self.push(SessionItem::Error { text }, cx);
+                    self.push_item(SessionItem::Error { text }, cx);
                 }
                 self.emit_lifecycle(
                     AgentEventKind::Stopped,
@@ -204,10 +205,10 @@ impl AgentPane {
                 cx.notify();
             }
             SessionEvent::TurnOutputTokensUpdated(output_tokens) => {
-                if self.working_started.is_some() {
-                    self.working_output_tokens = Some(output_tokens);
-                    cx.notify();
-                }
+                self.transcript.update(cx, |transcript, cx| {
+                    transcript.set_working_output_tokens(output_tokens, cx)
+                });
+                cx.notify();
             }
             SessionEvent::ContextWindowUpdated(usage) => {
                 self.context_window_usage = Some(usage);
@@ -215,48 +216,65 @@ impl AgentPane {
             }
             SessionEvent::CompactionStarted => {
                 self.note_visible_agent_output();
-                self.compacting = true;
+                self.transcript
+                    .update(cx, |transcript, cx| transcript.set_compacting(true, cx));
                 cx.notify();
             }
             SessionEvent::CompactionFinished { error } => {
-                self.compacting = false;
+                self.transcript
+                    .update(cx, |transcript, cx| transcript.set_compacting(false, cx));
                 // A failed compaction is not the turn's own failure, so it needs
                 // its own row: the turn continues (and usually then dies on an
                 // over-length prompt) with no other trace of why.
                 if let Some(text) = error {
-                    self.push(SessionItem::Error { text }, cx);
+                    self.push_item(SessionItem::Error { text }, cx);
                 }
                 cx.notify();
             }
             SessionEvent::ItemStarted(item) => self.start_item(item, cx),
             SessionEvent::ItemCompleted(item) => self.complete_item(item, cx),
             SessionEvent::AgentMessageDelta { item_id, delta } => {
-                let visible = self.append_delta(&item_id, &delta, |item| match item {
-                    SessionItem::AgentMessage { text, .. } => Some(text),
-                    _ => None,
-                });
+                let visible = self.append_delta(
+                    &item_id,
+                    &delta,
+                    |item| match item {
+                        SessionItem::AgentMessage { text, .. } => Some(text),
+                        _ => None,
+                    },
+                    cx,
+                );
                 if visible {
                     self.note_visible_agent_output();
                 }
                 cx.notify();
             }
             SessionEvent::ReasoningSummaryDelta { item_id, delta } => {
-                let visible = self.append_delta(&item_id, &delta, |item| match item {
-                    SessionItem::Reasoning { summary, .. } => Some(summary),
-                    _ => None,
-                });
+                let visible = self.append_delta(
+                    &item_id,
+                    &delta,
+                    |item| match item {
+                        SessionItem::Reasoning { summary, .. } => Some(summary),
+                        _ => None,
+                    },
+                    cx,
+                );
                 if visible {
                     self.note_visible_agent_output();
                 }
                 cx.notify();
             }
             SessionEvent::CommandOutputDelta { item_id, delta } => {
-                let visible = self.append_delta(&item_id, &delta, |item| match item {
-                    SessionItem::CommandExecution {
-                        aggregated_output, ..
-                    } => Some(aggregated_output),
-                    _ => None,
-                });
+                let visible = self.append_delta(
+                    &item_id,
+                    &delta,
+                    |item| match item {
+                        SessionItem::CommandExecution {
+                            aggregated_output, ..
+                        } => Some(aggregated_output),
+                        _ => None,
+                    },
+                    cx,
+                );
                 if visible {
                     self.note_visible_agent_output();
                 }
@@ -314,7 +332,7 @@ impl AgentPane {
                 } else if self.palette.awaiting_command_turn {
                     self.palette.awaiting_command_turn = false;
                 }
-                self.push(SessionItem::Error { text: message }, cx);
+                self.push_item(SessionItem::Error { text: message }, cx);
                 if cancelled_queue {
                     self.set_command_feedback(
                         CommandFeedbackKind::Error,
@@ -341,6 +359,13 @@ impl AgentPane {
                 }
                 cx.notify();
             }
+            SessionEvent::BackgroundTaskTranscript { key, update } => {
+                // A child's conversation is view content only: it never
+                // reaches the parent transcript, composer, or turn state.
+                if update.apply_to(self.background_task_transcripts.entry(key).or_default()) {
+                    cx.notify();
+                }
+            }
             SessionEvent::BackgroundTasks(snapshot) => {
                 // Child lifecycle is reduced by the adapter, so this replaces
                 // the pane's copy without touching the composer, transcript,
@@ -350,7 +375,7 @@ impl AgentPane {
             }
             SessionEvent::Replay(items) => {
                 if self.history_ui.mode == RecentSessionsMode::Loading {
-                    self.clear_conversation_presentation();
+                    self.clear_conversation_presentation(cx);
                     self.history_ui.mode = RecentSessionsMode::Hidden;
                     self.palette.feedback = None;
                 }
@@ -370,16 +395,10 @@ impl AgentPane {
         replay: Vec<SessionItem>,
         cx: &mut Context<Self>,
     ) {
-        for item in replay {
-            // Replayed entries predate this pane; they get no wall-clock
-            // hover stamp.
-            self.items.push(Entry {
-                at: String::new(),
-                turn: self.turn_seq,
-                item,
-            });
-        }
-
+        let turn = self.turn_seq;
+        self.transcript.update(cx, |transcript, cx| {
+            transcript.append_replay(turn, replay, cx)
+        });
         cx.notify();
     }
 
@@ -392,7 +411,7 @@ impl AgentPane {
                     .is_some_and(|queued| queued == text)
             {
                 self.queued_user_messages.pop_front();
-                self.push(item, cx);
+                self.push_item(item, cx);
             }
             return;
         }
@@ -405,7 +424,7 @@ impl AgentPane {
             self.publish_queued_user_messages(cx);
         }
 
-        self.push(item, cx);
+        self.push_item(item, cx);
     }
 
     pub(in crate::agent_pane::session) fn publish_queued_user_messages(
@@ -413,7 +432,7 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) {
         while let Some(text) = self.queued_user_messages.pop_front() {
-            self.push(SessionItem::UserMessage { text: Some(text) }, cx);
+            self.push_item(SessionItem::UserMessage { text: Some(text) }, cx);
         }
     }
 
@@ -426,10 +445,7 @@ impl AgentPane {
             return;
         };
 
-        let known = self
-            .items
-            .iter()
-            .any(|entry| entry.item.id() == Some(id.as_str()));
+        let known = self.transcript.read(cx).contains_item(&id);
 
         // A completed item this pane never saw start (e.g. joined mid-turn)
         // still gets a transcript entry.
@@ -437,11 +453,8 @@ impl AgentPane {
             self.start_item(item.clone(), cx);
         }
 
-        for entry in &mut self.items {
-            if entry.item.merge_completed(&item) {
-                break;
-            }
-        }
+        self.transcript
+            .update(cx, |transcript, _| transcript.merge_completed(&item));
 
         if !hidden(&item) {
             self.note_visible_agent_output();
@@ -455,17 +468,10 @@ impl AgentPane {
         item_id: &str,
         delta: &str,
         select: fn(&mut SessionItem) -> Option<&mut Option<String>>,
+        cx: &mut Context<Self>,
     ) -> bool {
-        for entry in &mut self.items {
-            if entry.item.id() == Some(item_id)
-                && let Some(text) = select(&mut entry.item)
-            {
-                let text = text.get_or_insert_default();
-                text.push_str(delta);
-                return !text.trim().is_empty();
-            }
-        }
-
-        false
+        self.transcript.update(cx, |transcript, _| {
+            transcript.append_delta(item_id, delta, select)
+        })
     }
 }

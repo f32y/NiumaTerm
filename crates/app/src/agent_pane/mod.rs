@@ -7,7 +7,7 @@ mod context_usage;
 mod links;
 mod profile;
 mod session;
-mod transcript;
+pub(crate) mod transcript;
 mod view;
 
 use std::borrow::Cow;
@@ -24,7 +24,7 @@ use futures::StreamExt as _;
 use futures::channel::{mpsc, oneshot};
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, ClipboardItem, Context, Div, ElementId, Entity, FocusHandle, FollowMode,
+    AnyElement, App, ClipboardItem, Context, Div, ElementId, Entity, FocusHandle, FollowMode,
     FontWeight, Hsla, ListAlignment, ListHorizontalSizingBehavior, ListSizingBehavior, ListState,
     MouseButton, Pixels, ScrollHandle, ScrollStrategy, SharedString, Stateful, Task,
     UniformListScrollHandle, Window, div, linear_color_stop, linear_gradient, list, px, relative,
@@ -43,7 +43,9 @@ use gpui_component::{
     ActiveTheme as _, Disableable as _, ElementExt as _, Icon, IconName, IconNamed, Sizable as _,
     VirtualListScrollHandle, h_flex, text, v_flex, v_virtual_list,
 };
-use nmt_agent_utils::background_task::{BackgroundTaskKey, BackgroundTaskSnapshot};
+use nmt_agent_utils::background_task::{
+    BackgroundTaskKey, BackgroundTaskProvider, BackgroundTaskSnapshot, BackgroundTaskTranscript,
+};
 use nmt_agent_utils::chat::{
     Compaction, CompactionTrigger, ContextWindowUsage, Event as SessionEvent, Item as SessionItem,
     ModelInfo, SendOutcome, SessionSummary, SkillCatalog, SkillInfo, SkillReference,
@@ -75,7 +77,7 @@ use crate::agent_pane::session::{Backend, Status, UpdateSuspension};
 pub(crate) use crate::agent_pane::session::{
     RecoveryIdentity, RecoveryReadiness, RecoverySnapshot, RestorationReadiness,
 };
-use crate::agent_pane::transcript::{Entry, RowSpec, VirtualTranscriptState};
+use crate::agent_pane::transcript::{Entry, RowSpec, TranscriptView, VirtualTranscriptState};
 use crate::ui::{AppSettings, UI_RADIUS, WorkingIndicator, current_branch};
 
 #[derive(Clone)]
@@ -243,18 +245,9 @@ pub(crate) struct AgentPane {
     /// session history is scoped to it (resume ids only resolve against the
     /// same directory).
     cwd: Option<String>,
-    items: Vec<Entry>,
-    /// Virtualized transcript: only visible rows build elements each frame.
-    /// `row_specs` mirrors the list's item count; render() diffs freshly
-    /// built specs against it and splices/remeasures just the changed range.
-    transcript_list: ListState,
-    row_specs: Vec<RowSpec>,
-    /// Row heights depend on the agent font, which the specs can't see; the
-    /// last-seen font triggers a full remeasure when it changes.
-    transcript_font: (SharedString, f64),
-    /// Virtual rows cache measured heights; a width change can rewrap prose
-    /// without changing row fingerprints, so the viewport width is tracked too.
-    transcript_width: Option<Pixels>,
+    /// The conversation as the user reads it. Presentation lives in its own
+    /// view so a child agent's conversation renders through the same code.
+    transcript: Entity<TranscriptView>,
     input: Entity<InputState>,
     session: Option<Backend>,
     /// Bumped on every (re)spawn; the message pump and EOF handler of an
@@ -285,38 +278,9 @@ pub(crate) struct AgentPane {
     /// Model catalog; service tiers are per model, so the tier dropdown lists
     /// the selected model's tiers.
     models: Vec<ModelInfo>,
-    /// Collapsed work-log runs the user has expanded, keyed by the index of
-    /// the run's first transcript entry (stable — the list only appends).
-    expanded_groups: HashSet<usize>,
-    /// Completed turns the user has unfolded (completed turns fold their
-    /// intermediate work rows behind a "Worked for Ns" header by default).
-    expanded_turns: HashSet<u64>,
-    /// Settled turn durations drive fold headers without masquerading as
-    /// provider transcript items.
-    completed_turn_seconds: HashMap<u64, u64>,
-    /// Final provider-reported output tokens for settled turns, keyed by the
-    /// same local turn id as the duration used by the fold header.
-    completed_turn_output_tokens: HashMap<u64, u64>,
-    /// User-stopped turns use a status row instead of an elapsed-time
-    /// disclosure, whether or not provider activity was already visible.
-    interrupted_turns: HashSet<u64>,
-    /// Work-log rows whose detail (command output, reasoning text) is
-    /// expanded, keyed by transcript index.
-    expanded_rows: HashSet<usize>,
-    /// Long expanded code transcripts retain their segmented source and
-    /// independent uniform-list position while visible. Collapsing a row drops
-    /// the duplicate source so large outputs do not stay resident twice.
-    virtual_transcripts: HashMap<usize, VirtualTranscriptState>,
     /// Monotonic turn counter; entries are tagged with the turn they arrived
     /// in so a settled turn can fold as one unit.
     turn_seq: u64,
-    /// Start time of the running turn. While set, a ticking "Working for Ns"
-    /// row renders at the transcript end; completion records its elapsed time,
-    /// while a user interruption replaces it with a status row.
-    working_started: Option<Instant>,
-    /// Output tokens reported for the running turn. Provider adapters combine
-    /// multi-response turns before updating this replacement value.
-    working_output_tokens: Option<u64>,
     /// The active prompt remains recoverable until provider activity becomes
     /// visible, allowing an immediate stop to return it to the composer.
     unanswered_prompt: Option<UnansweredPrompt>,
@@ -327,10 +291,6 @@ pub(crate) struct AgentPane {
     rewind: RewindFlow,
     git_branch_poll: GitBranchPoll,
     context_window_usage: Option<ContextWindowUsage>,
-    /// The backend is compacting the conversation. Turn output pauses for the
-    /// duration, so the live progress row explains the wait instead of leaving
-    /// a bare seconds counter that looks stalled.
-    compacting: bool,
     /// Process replacement for a provider update is pane state rather than a
     /// terminal exit. Keeping it separate retains transcript and composer
     /// contents while preventing input from reaching a missing backend.
@@ -344,4 +304,8 @@ pub(crate) struct AgentPane {
     /// adapter owns child lifecycle; the pane keeps only this replacement copy
     /// so the right-side view never maintains a second mutable registry.
     background_tasks: Option<BackgroundTaskSnapshot>,
+    /// Each child's own conversation, accumulated here rather than in the
+    /// adapter so live activity is retained once and the retention bound
+    /// applies to what is actually shown.
+    background_task_transcripts: HashMap<BackgroundTaskKey, BackgroundTaskTranscript>,
 }

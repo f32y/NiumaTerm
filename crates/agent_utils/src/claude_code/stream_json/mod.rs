@@ -320,6 +320,11 @@ impl Session {
         if tasks_changed && let Some(snapshot) = self.tasks.snapshot() {
             events.push(Event::BackgroundTasks(snapshot));
         }
+        // A child's own conversation travels separately from its summary; the
+        // parent transcript above has already dropped this content.
+        for (key, update) in self.tasks.take_transcripts() {
+            events.push(Event::BackgroundTaskTranscript { key, update });
+        }
 
         events
     }
@@ -436,14 +441,21 @@ impl Session {
         restored: Result<Vec<RestoredTask>, String>,
         starting_sequence: u64,
     ) -> Vec<Event> {
-        if !self.tasks.finish_restoration(restored, starting_sequence) {
-            return Vec::new();
-        }
-        self.tasks
-            .snapshot()
-            .map(Event::BackgroundTasks)
+        let changed = self.tasks.finish_restoration(restored, starting_sequence);
+
+        // The restored child conversations must be published even when no row
+        // changed: a summary that already matched still leaves this the only
+        // delivery of the conversations behind it.
+        let mut events: Vec<Event> = self
+            .tasks
+            .take_transcripts()
             .into_iter()
-            .collect()
+            .map(|(key, update)| Event::BackgroundTaskTranscript { key, update })
+            .collect();
+        if changed && let Some(snapshot) = self.tasks.snapshot() {
+            events.push(Event::BackgroundTasks(snapshot));
+        }
+        events
     }
 
     pub fn process_exit(&mut self) -> Vec<Event> {
