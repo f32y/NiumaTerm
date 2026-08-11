@@ -94,8 +94,8 @@ Allowed types are `feat`, `fix`, `refactor`, `docs`, `perf`, `test`, `chore`,
 Use an unscoped typed subject for mechanical commits where a scope adds no
 signal, for example `chore: apply cargo fmt`.
 
-Follow the 50/72 rule: keep the subject at most 50 characters and wrap body
-lines at 72 characters. The commit-msg hook enforces both limits; trailer
+Follow the 60/80 rule: keep the subject at most 60 characters and wrap body
+lines at 80 characters. The commit-msg hook enforces both limits; trailer
 lines such as `Co-Authored-By` are exempt from the wrap.
 
 The pre-push hook rejects pushing the local `dev` branch to `origin`; push that
