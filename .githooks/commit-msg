@@ -38,8 +38,10 @@ fi
 # (AGENTS.md), so the credit records the actual model ID instead of a vendor
 # or human label. Model IDs are lowercase and versioned, so the name part
 # must contain a '-' or '.' separator (e.g. deepseek-v4-flash); a bare label
-# like "Claude" or "Codex" does not pass.
-coauthor_pattern='^Co-Authored-By: [a-z0-9][a-z0-9._-]*[-.][a-z0-9._-]* <noreply@[a-z0-9][a-z0-9.-]*\.[a-z]{2,}>$'
+# like "Claude" or "Codex" does not pass. A bracketed suffix carries the
+# variant an agent reports alongside the ID, such as the context window in
+# claude-opus-5[1m].
+coauthor_pattern='^Co-Authored-By: [a-z0-9][a-z0-9._-]*[-.][a-z0-9._-]*(\[[a-z0-9._-]+\])? <noreply@[a-z0-9][a-z0-9.-]*\.[a-z]{2,}>$'
 bad_coauthors=$(printf '%s\n' "$body" | grep -E '^Co-Authored-By:' | grep -Ev "$coauthor_pattern" || true)
 if [ -n "$bad_coauthors" ]; then
     cat >&2 <<EOF
