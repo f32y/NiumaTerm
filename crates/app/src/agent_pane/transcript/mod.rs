@@ -14,7 +14,8 @@ use crate::agent_pane::transcript::disclosure_row::{
 };
 #[cfg(test)]
 use crate::agent_pane::transcript::format::{
-    COMMAND_EXECUTION_HEADING, interrupted_status_label, worked_status_label, working_status_label,
+    COMMAND_EXECUTION_HEADING, elapsed_label, interrupted_status_label, worked_status_label,
+    working_status_label,
 };
 #[allow(unused_imports)]
 pub(super) use crate::agent_pane::transcript::format::{
