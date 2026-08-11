@@ -182,6 +182,21 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The settings entry holds one tab that terminates nothing, so its
+        // close control is the same gesture as dismissing the entry.
+        if self
+            .workspaces
+            .active_tabs()
+            .find(id)
+            .is_some_and(|tab| tab.surface().is_settings())
+        {
+            let ws_id = self.workspaces.active_id();
+
+            self.close_workspace_now(ws_id, window, cx);
+
+            return;
+        }
+
         let (count, is_agent) = self
             .workspaces
             .active_tabs()
@@ -194,7 +209,7 @@ impl Shell {
         if self.workspaces.active_tabs().len() == 1 {
             let ws_id = self.workspaces.active_id();
 
-            if self.workspaces.len() == 1 {
+            if self.workspaces.real_len() == 1 {
                 self.confirm_close_last_workspace(ws_id, window, cx);
                 return;
             }
@@ -282,7 +297,14 @@ impl Shell {
             return;
         }
 
-        if self.workspaces.len() == 1 {
+        // Dismissing the settings entry ends nothing the user could lose, so
+        // it closes on the first click whatever the confirmation settings say.
+        if self.workspaces.kind_of(id) == Some(WorkspaceKind::Settings) {
+            self.close_workspace_now(id, window, cx);
+            return;
+        }
+
+        if self.workspaces.real_len() == 1 {
             self.confirm_close_last_workspace(id, window, cx);
             return;
         }
@@ -469,9 +491,15 @@ impl Shell {
             })
             .unwrap_or_default();
 
+        let settings = self.workspaces.kind_of(id) == Some(WorkspaceKind::Settings);
+
         if self.workspaces.close_workspace(id).is_some() {
             for route in routes {
                 self.remove_agent_route(&route, cx);
+            }
+
+            if settings {
+                self.retire_settings_workspace(cx);
             }
 
             self.focus_active(window, cx);

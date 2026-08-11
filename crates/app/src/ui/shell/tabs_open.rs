@@ -47,6 +47,8 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.leave_settings_workspace();
+
         let id = Self::alloc_id(&mut self.next_id);
 
         let cwd = explicit_cwd(self.workspaces.active_cwd());
@@ -99,6 +101,7 @@ impl Shell {
             let _ = this.update_in(cx, |this, window, cx| match connected {
                 Ok(remote) => match TerminalPane::spawn_remote(cx, id, remote) {
                     Ok(pane) => {
+                        this.leave_settings_workspace();
                         this.register_agent_pane(&pane, cx);
                         this.workspaces.active_tabs_mut().new_tab(
                             TabSurface::Live(PaneTree::new_leaf(PaneId(id), pane)),
@@ -129,6 +132,8 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.leave_settings_workspace();
+
         let id = Self::alloc_id(&mut self.next_id);
         let cwd = explicit_cwd(self.workspaces.active_cwd());
 
@@ -206,6 +211,8 @@ impl Shell {
         {
             self.workspaces.activate(index);
         }
+
+        self.leave_settings_workspace();
 
         let id = Self::alloc_id(&mut self.next_id);
         let default_profile = Self::default_profile(cx);

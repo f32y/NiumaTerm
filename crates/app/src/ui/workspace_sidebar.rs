@@ -16,7 +16,7 @@ use crate::agent_pane::usage::AgentUsageView;
 use crate::ui::sidebar_resize::{self, ResizeDrag};
 use crate::ui::{UI_RADIUS, floating_surface};
 use crate::window::WindowRegistry;
-use crate::workspace::{WorkspaceId, WorkspaceSummary};
+use crate::workspace::{WorkspaceId, WorkspaceKind, WorkspaceSummary};
 
 /// Default expanded width of the workspace sidebar, in pixels; the user can
 /// drag the right edge to resize.
@@ -238,6 +238,7 @@ impl Sidebar {
         rename: Option<&(WorkspaceId, Entity<InputState>)>,
         cx: &mut Context<Shell>,
     ) -> AnyElement {
+        let settings_entry = ws.kind == WorkspaceKind::Settings;
         let (indicator, status_label) =
             agent_status_indicator(ws.agent_status, ("workspace-busy", idx), cx);
 
@@ -337,7 +338,7 @@ impl Sidebar {
             name.child(display_label.clone()).into_any_element()
         };
 
-        let drag_name: SharedString = display_label.into();
+        let drag_name: SharedString = display_label.clone().into();
         let drag_cwd: SharedString = display_path.clone().into();
         let drag_agent_status = ws.agent_status;
 
@@ -346,13 +347,17 @@ impl Sidebar {
         let drag_width = (self.width - 36.0).max(80.0);
         let item = Button::new(("workspace", idx))
             .ghost()
-            .tooltip(full_path.clone())
-            .aria_label(format!(
-                "Workspace {}, path {}, status {}",
-                workspace_display_label(&ws.name, &ws.cwd),
-                full_path,
-                status_label
-            ))
+            .when(!settings_entry, |this| this.tooltip(full_path.clone()))
+            .aria_label(if settings_entry {
+                display_label.clone()
+            } else {
+                format!(
+                    "Workspace {}, path {}, status {}",
+                    workspace_display_label(&ws.name, &ws.cwd),
+                    full_path,
+                    status_label
+                )
+            })
             .selected(ws.active)
             // Button resolves selected colors after element styles, so the
             // sidebar-accent pair must be the selected custom variant itself.
@@ -388,9 +393,19 @@ impl Sidebar {
                                     .text_xs()
                                     .overflow_hidden()
                                     .whitespace_nowrap()
-                                    .aria_label(full_path.clone())
+                                    .when(!settings_entry, |this| {
+                                        this.aria_label(full_path.clone())
+                                    })
                                     .text_color(cx.theme().sidebar_foreground.opacity(0.6))
-                                    .child(display_path),
+                                    // The settings entry has no working
+                                    // directory. A blank run still forms a line
+                                    // box, so its row stands as tall as the
+                                    // workspaces around it.
+                                    .child(if settings_entry {
+                                        SharedString::new_static(" ")
+                                    } else {
+                                        display_path.into()
+                                    }),
                             ),
                     )
                     .child(suffix),
@@ -462,20 +477,29 @@ impl Sidebar {
                 let pin_shell = shell.clone();
                 let cwd = cwd.clone();
 
-                menu.item(PopupMenuItem::new("Rename").on_click(move |_, window, cx| {
-                    rename_shell.update(cx, |this, cx| {
-                        this.start_workspace_rename(ws_id, window, cx)
-                    });
-                }))
-                .item(PopupMenuItem::new(pin_label).on_click(move |_, _, cx| {
-                    pin_shell.update(cx, |this, cx| this.set_workspace_pinned(ws_id, !pinned, cx));
-                }))
-                .item(
-                    PopupMenuItem::new("Copy Workspace Path").on_click(move |_, _, cx| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(cwd.clone()));
-                    }),
-                )
-                .item(PopupMenuItem::new("Close").disabled(!closeable).on_click(
+                // Renaming, pinning, and copying a path all describe a
+                // workspace the user owns; the settings entry is dismissible
+                // and nothing else.
+                let menu = if settings_entry {
+                    menu
+                } else {
+                    menu.item(PopupMenuItem::new("Rename").on_click(move |_, window, cx| {
+                        rename_shell.update(cx, |this, cx| {
+                            this.start_workspace_rename(ws_id, window, cx)
+                        });
+                    }))
+                    .item(PopupMenuItem::new(pin_label).on_click(move |_, _, cx| {
+                        pin_shell
+                            .update(cx, |this, cx| this.set_workspace_pinned(ws_id, !pinned, cx));
+                    }))
+                    .item(
+                        PopupMenuItem::new("Copy Workspace Path").on_click(move |_, _, cx| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(cwd.clone()));
+                        }),
+                    )
+                };
+
+                menu.item(PopupMenuItem::new("Close").disabled(!closeable).on_click(
                     move |_, window, cx| {
                         close_shell.update(cx, |this, cx| {
                             this.request_close_workspace(ws_id, window, cx)

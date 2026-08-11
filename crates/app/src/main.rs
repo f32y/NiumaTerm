@@ -356,6 +356,11 @@ fn run_app(argv_url: Option<String>, testing: bool) {
             .detach();
 
             cx.on_app_quit(|cx| {
+                // Settings edits live in the global until something writes
+                // them out. Closing the settings surface does that, and so
+                // does quitting with it still open.
+                cx.global::<AppSettings>().save();
+
                 let save_session = cx.global::<AppSettings>().restore_last_session_when_opening;
 
                 let state = LocalState {

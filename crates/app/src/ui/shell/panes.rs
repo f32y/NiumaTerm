@@ -205,6 +205,20 @@ impl Shell {
     /// The active tab's pane tree as nested resizable groups. The main surface
     /// owns the outer frame, so a single pane renders without another card.
     pub(super) fn render_active_tree(&self, cx: &mut Context<Self>) -> AnyElement {
+        if self.workspaces.active_tabs().active().is_settings() {
+            let mut settings = ui::settings::settings_view(cx);
+
+            if let Some(state) = self.settings_state.clone() {
+                settings = settings.state(state);
+            }
+
+            return div()
+                .size_full()
+                .overflow_hidden()
+                .child(settings)
+                .into_any_element();
+        }
+
         if let Some(agent) = self.active_agent() {
             return div()
                 .size_full()

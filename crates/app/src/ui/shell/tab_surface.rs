@@ -18,6 +18,9 @@ pub(crate) enum TabSurface {
     /// grid. It owns an agent route but no terminal panes or child-process
     /// accounting exposed through `tree()`.
     Agent(Entity<AgentPane>),
+    /// The settings UI filling the main area. It is rebuilt from the settings
+    /// global on every render, so the variant carries no state of its own.
+    Settings,
 }
 
 impl TabSurface {
@@ -25,7 +28,7 @@ impl TabSurface {
         match self {
             Self::Agent(pane) => Some(pane.read(cx).kind()),
             Self::Pending(state) => state.agent.as_deref().and_then(AgentKind::from_id),
-            Self::Live(_) => None,
+            Self::Live(_) | Self::Settings => None,
         }
     }
 
@@ -37,8 +40,12 @@ impl TabSurface {
                 .as_deref()
                 .and_then(AgentKind::from_id)
                 .is_some(),
-            Self::Live(_) => false,
+            Self::Live(_) | Self::Settings => false,
         }
+    }
+
+    pub(crate) fn is_settings(&self) -> bool {
+        matches!(self, Self::Settings)
     }
 
     /// The live pane tree. Every activation path materializes the newly active

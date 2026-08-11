@@ -30,6 +30,7 @@ use gpui_component::progress::Progress;
 use gpui_component::resizable::{
     PANEL_MIN_SIZE, ResizablePanelGroup, ResizableState, resizable_panel,
 };
+use gpui_component::setting::{SelectIndex, SettingsState};
 use gpui_component::{
     ActiveTheme, Icon, IconName, IconNamed, Root, TitleBar, WindowExt, h_flex, v_flex,
 };
@@ -65,7 +66,7 @@ use crate::ui::floating_surface;
 use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::git_status::{GitStatusModel, GitStatusView};
 use crate::ui::right_panel::{RightPanel, RightPanelKind};
-use crate::ui::settings::{AgentProfile, AppSettings, settings_view};
+use crate::ui::settings::{AgentProfile, AppSettings};
 pub(crate) use crate::ui::shell::actions::{
     CloseTab, NewAgentTab, NewRemoteTab, NewTab, NewWindow, NewWorkspace, NextTab, NextWorkspace,
     PrevTab, PrevWorkspace, ResizePaneDown, ResizePaneLeft, ResizePaneRight, ResizePaneUp,
@@ -81,9 +82,13 @@ use crate::ui::token_usage::TokenUsageView;
 use crate::ui::workspace_sidebar::{self, Sidebar};
 use crate::window::{AppWindow, LastActiveWindow, ShellEntry, ShellRegistry, WindowRegistry};
 use crate::workspace::{
-    self, DEFAULT_WORKSPACE_NAME, WorkspaceId, WorkspaceManager, best_match, exact_match,
+    self, DEFAULT_WORKSPACE_NAME, WorkspaceId, WorkspaceKind, WorkspaceManager, best_match,
+    exact_match,
 };
 use crate::{remote, ui};
+
+/// Sidebar entry name and tab title of the settings pseudo workspace.
+pub(super) const SETTINGS_TITLE: &str = "Settings";
 
 /// A workspace cwd as a shell working directory: `None` for empty or the
 /// legacy `"."` placeholder (shells then start in their default directory).
@@ -115,8 +120,14 @@ pub(crate) struct Shell {
     /// Whether we've started observing the wrapping `Root` (so dialog open/close
     /// re-renders the shell, which draws the dialog layer). Set on first render.
     root_observed: bool,
-    /// Theme directory watcher, alive only while this shell's settings dialog is open.
+    /// Theme directory watcher, alive only while this shell's settings entry
+    /// is open.
     theme_watcher: Option<Task<()>>,
+    /// Selected page and search query of the settings surface. The shell owns
+    /// it so switching to another workspace and back returns to the page the
+    /// user left; the element state the component keeps by default would be
+    /// dropped the frame the surface stops rendering.
+    settings_state: Option<Entity<SettingsState>>,
     focus: FocusHandle,
     /// This shell's window in the `WindowRegistry`; all state writes target
     /// this entry.
@@ -277,6 +288,7 @@ impl Shell {
             needs_focus: true,
             root_observed: false,
             theme_watcher: None,
+            settings_state: None,
             focus: cx.focus_handle(),
             window_id,
             token_usage: cx.new(TokenUsageView::new),
@@ -451,6 +463,15 @@ impl Shell {
     pub(crate) fn focus_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.ensure_active_tab_live(window, cx);
 
+        // The settings surface owns its inner focus (its search field and
+        // controls), and it has no pane to hand the keyboard to, so focus
+        // stops at the shell.
+        if self.workspaces.active_tabs().active().is_settings() {
+            window.focus(&self.focus, cx);
+
+            return;
+        }
+
         self.sync_active_terminal_title(cx);
 
         // Every activation path funnels through here, so this is the one place
@@ -579,45 +600,84 @@ impl Shell {
         cx.notify();
     }
 
-    /// Open the settings dialog as a gpui-component modal. `Root` blocks the
-    /// background; on close we restore focus to the active input for the current
-    /// input style. The body is the two-pane `Settings` view from `crate::settings`.
+    /// Show settings as a pseudo workspace: a sidebar entry holding a single
+    /// `Settings` tab whose surface fills the main area. A modal would block
+    /// the terminal the user is adjusting settings for, while an entry can be
+    /// left open and switched away from.
     ///
-    /// Field edits mutate the `AppSettings` global live (for preview); the whole
-    /// set is persisted once here, on close. Only the top-right close button
-    /// closes the dialog — mask clicks and Escape are disabled so a stray click
-    /// can't dismiss it.
-    fn on_show_settings(&mut self, _: &ShowSettings, window: &mut Window, cx: &mut Context<Self>) {
+    /// Field edits mutate the `AppSettings` global live (for preview); the set
+    /// is written when the entry closes and again on quit, since an entry the
+    /// user never closes would otherwise never reach the file.
+    pub(super) fn on_show_settings(
+        &mut self,
+        _: &ShowSettings,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(id) = self.workspaces.settings_id() {
+            if let Some(index) = self
+                .workspaces
+                .summaries()
+                .iter()
+                .position(|ws| ws.id == id)
+            {
+                self.workspaces.activate(index);
+                self.focus_active(window, cx);
+                cx.notify();
+            }
+
+            return;
+        }
+
+        // Live theme previews need the themes directory watched for as long as
+        // the settings surface is on screen.
         self.theme_watcher = ui::watch_themes(cx);
 
-        // Sized as a fraction of the window, so a large window gets a
-        // proportionally large dialog.
-        let shell = cx.entity();
+        // Nothing else repaints on a page click, because the state lives
+        // outside the element tree that would otherwise notify for it.
+        let state = SettingsState::owned(SelectIndex::default(), window, cx);
 
-        window.open_dialog(cx, move |dialog, window, _cx| {
-            let shell = shell.clone();
+        cx.observe(&state, |_, _, cx| cx.notify()).detach();
 
-            dialog
-                .title("Settings")
-                .overlay_closable(false)
-                .keyboard(false)
-                .on_close(move |_, window, cx| {
-                    cx.global::<AppSettings>().save();
-                    // Pick up relay URL / token edits made in the dialog.
-                    ui::settings::reconcile_remote_host(cx);
+        self.settings_state = Some(state);
 
-                    shell.update(cx, |this, cx| {
-                        this.theme_watcher = None;
+        let id = Self::alloc_id(&mut self.next_id);
+        let tabs = TabManager::new(TabSurface::Settings, TabId(id), SETTINGS_TITLE.to_string());
+        let ws_id = Self::alloc_id(&mut self.next_id);
 
-                        this.focus_active(window, cx);
-                    });
-                })
-                .w(window.viewport_size().width * 0.7)
-                .content(|content, window, cx| {
-                    content
-                        .h(window.viewport_size().height * 0.7)
-                        .child(settings_view(cx))
-                })
-        });
+        self.workspaces.new_workspace_of_kind(
+            tabs,
+            WorkspaceId(ws_id),
+            SETTINGS_TITLE.to_string(),
+            String::new(),
+            WorkspaceKind::Settings,
+        );
+
+        self.focus_active(window, cx);
+
+        cx.notify();
+    }
+
+    /// Persist settings and drop the machinery the settings surface owns.
+    /// Reached from every path that removes the settings entry.
+    pub(super) fn retire_settings_workspace(&mut self, cx: &mut Context<Self>) {
+        cx.global::<AppSettings>().save();
+        // Pick up relay URL / token edits made while the entry was open.
+        ui::settings::reconcile_remote_host(cx);
+
+        self.theme_watcher = None;
+        // Reopening starts on the first page, matching what the modal did.
+        self.settings_state = None;
+    }
+
+    /// Leave the settings entry for a normal workspace. Every path that adds a
+    /// tab funnels through this, so a new tab never lands in the settings
+    /// entry and breaks its single-tab presentation.
+    pub(crate) fn leave_settings_workspace(&mut self) {
+        if self.workspaces.active_kind() == WorkspaceKind::Settings {
+            let index = self.workspaces.first_normal_index();
+
+            self.workspaces.activate(index);
+        }
     }
 }

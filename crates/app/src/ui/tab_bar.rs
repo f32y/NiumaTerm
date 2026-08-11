@@ -160,6 +160,7 @@ struct TabItem {
     unread: bool,
     busy: bool,
     agent_kind: Option<AgentKind>,
+    settings: bool,
     bell: bool,
     /// Restored but not yet spawned.
     pending: bool,
@@ -183,12 +184,13 @@ fn agent_tab_indicator(busy: bool, unread: bool) -> Option<AgentTabIndicator> {
     }
 }
 
-/// The glyph a tab leads with: the agent's own mark on an agent tab, a
-/// terminal mark otherwise.
-fn tab_icon(agent_kind: Option<AgentKind>) -> Icon {
+/// The glyph a tab leads with: the agent's own mark on an agent tab, a gear on
+/// the settings tab, a terminal mark otherwise.
+fn tab_icon(agent_kind: Option<AgentKind>, settings: bool) -> Icon {
     match agent_kind {
         Some(AgentKind::Codex) => Icon::new(CodexIcon),
         Some(AgentKind::Claude) => Icon::new(ClaudeIcon),
+        None if settings => Icon::new(IconName::Settings),
         None => Icon::new(IconName::SquareTerminal),
     }
     .xsmall()
@@ -300,6 +302,7 @@ impl TabStrip {
                 unread: unread_tabs.contains(&tab.id()),
                 busy: busy_agent_tabs.contains(&tab.id()),
                 agent_kind: tab.surface().agent_kind(cx),
+                settings: tab.surface().is_settings(),
                 bell: tab.bell(),
                 pending: matches!(tab.surface(), TabSurface::Pending(_)),
                 exited: tab.exited(),
@@ -336,7 +339,7 @@ impl TabStrip {
 
                     menu = menu.item(
                         PopupMenuItem::new(profile.name.clone())
-                            .icon(tab_icon(None))
+                            .icon(tab_icon(None, false))
                             .on_click(move |_, window, cx| {
                                 let launch = (Some(shell_cmd.clone()), args.clone());
                                 item_shell.update(cx, |this, cx| {
@@ -364,7 +367,7 @@ impl TabStrip {
 
                     menu = menu.item(
                         PopupMenuItem::new(label)
-                            .icon(tab_icon(Some(AgentKind::from_profile(profile.kind))))
+                            .icon(tab_icon(Some(AgentKind::from_profile(profile.kind)), false))
                             .on_click(move |_, window, cx| {
                                 let profile = profile.clone();
                                 item_shell.update(cx, |this, cx| {
@@ -378,7 +381,11 @@ impl TabStrip {
             });
 
         let tab_count = items.len();
-        let closeable = tab_count > 1;
+        // The settings entry presents one tab and no way to add another, so
+        // its lone tab keeps a close control the tab strip would normally
+        // withhold from a single tab.
+        let settings_workspace = tabs.active().is_settings();
+        let closeable = tab_count > 1 || settings_workspace;
         let shell = cx.entity();
 
         // Width from the Appearance setting; long titles clip inside the tab's
@@ -409,8 +416,11 @@ impl TabStrip {
             // scroll the active tab into view on switches.
             .track_scroll(&self.scroll)
             // Empty title-bar space remains draggable; only the control blocks
-            // the drag hitbox behind it.
-            .inline_suffix(div().occlude().child(new_tab))
+            // the drag hitbox behind it. The settings entry holds exactly one
+            // tab, so it offers no way to add a second.
+            .when(!settings_workspace, |this| {
+                this.inline_suffix(div().occlude().child(new_tab))
+            })
             .children(items.into_iter().enumerate().map(|(index, item)| {
                 let TabItem {
                     id,
@@ -418,6 +428,7 @@ impl TabStrip {
                     unread,
                     busy,
                     agent_kind,
+                    settings: is_settings,
                     bell,
                     pending,
                     exited,
@@ -569,7 +580,7 @@ impl TabStrip {
                                                         this.invisible()
                                                     })
                                                 })
-                                                .child(tab_icon(agent_kind)),
+                                                .child(tab_icon(agent_kind, is_settings)),
                                         )
                                         .children(slot_close),
                                 );
@@ -643,7 +654,7 @@ impl TabStrip {
                                 .flex_none()
                                 .flex()
                                 .items_center()
-                                .child(tab_icon(None)),
+                                .child(tab_icon(None, is_settings)),
                         )
                     })
                     .when_some(agent_kind.filter(|_| !icon_only), |this, agent_kind| {
@@ -656,7 +667,7 @@ impl TabStrip {
                                 .flex()
                                 .items_center()
                                 .gap_1()
-                                .child(tab_icon(Some(agent_kind)))
+                                .child(tab_icon(Some(agent_kind), false))
                                 .when_some(indicator, |this, indicator| {
                                     this.child(
                                         div()
