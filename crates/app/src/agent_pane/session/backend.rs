@@ -77,6 +77,21 @@ impl Backend {
         }
     }
 
+    /// Ask the provider for one child's conversation. Codex reads the stored
+    /// descendant thread; Claude Code accumulates linked activity as it
+    /// arrives, so there is nothing extra to request.
+    pub(in crate::agent_pane) fn load_background_task_transcript(
+        &mut self,
+        key: &BackgroundTaskKey,
+    ) -> Vec<SessionEvent> {
+        match (self, key.provider) {
+            (Backend::Codex(session), BackgroundTaskProvider::Codex) => {
+                session.load_background_task_transcript(&key.id)
+            }
+            _ => Vec::new(),
+        }
+    }
+
     pub(in crate::agent_pane) fn session_id(&self) -> Option<&str> {
         match self {
             Backend::Claude(session) => session.session_id(),

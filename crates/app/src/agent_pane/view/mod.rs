@@ -31,10 +31,6 @@ impl gpui::Focusable for AgentPane {
 
 impl Render for AgentPane {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let settings = cx.global::<AppSettings>();
-        let collapse = settings.collapse_tool_calls;
-        self.transcript_list
-            .set_smooth_wheel_enabled(settings.smooth_scrolling.agent_enabled());
         let command_palette = self.render_command_palette(cx);
         let command_feedback = self.palette.feedback.as_ref().map(|feedback| {
             let (color, label) = match feedback.kind {
@@ -75,22 +71,6 @@ impl Render for AgentPane {
                 .child(div().min_w_0().truncate().child(label))
         });
 
-        // Transcript rows, one folded/expanded section per turn (entries are
-        // tagged with a monotonic turn id, so turns are contiguous slices).
-        // Only the visible slice becomes elements; the spec diff tells the
-        // list which rows changed shape.
-        let specs = self.build_row_specs(collapse);
-        self.sync_transcript_list(specs);
-
-        let font = (
-            cx.global::<AppSettings>().agent_font_family.clone(),
-            cx.global::<AppSettings>().agent_font_size,
-        );
-        if self.transcript_font != font {
-            self.transcript_font = font;
-            self.transcript_list.remeasure();
-        }
-
         let approval = self.render_approval_panel(cx);
 
         let running = composer_action(self.status) == ComposerAction::Stop;
@@ -103,8 +83,6 @@ impl Render for AgentPane {
             .as_ref()
             .is_some_and(|state| !state.is_picker());
         let session_loading = self.history_ui.mode == RecentSessionsMode::Loading;
-        let transcript_has_hidden_content_below = self.transcript_has_hidden_content_below();
-        let transcript_scrolled_from_top = self.transcript_has_hidden_content_above();
         let background = if cx
             .global::<AppSettings>()
             .agent_pane_use_terminal_background
@@ -124,7 +102,7 @@ impl Render for AgentPane {
         let history = self
             .history_ui
             .mode
-            .is_visible(self.items.is_empty(), history_rows)
+            .is_visible(self.transcript.read(cx).is_empty(), history_rows)
             .then(|| self.render_history(cx));
 
         v_flex()
@@ -161,108 +139,19 @@ impl Render for AgentPane {
             .text_size(px(cx.global::<AppSettings>().agent_font_size as f32))
             .children(update_banner)
             .child(
-                // The scrollbar must sit OUTSIDE the scrolling element (a
-                // child would scroll away with the content), so a relative
-                // wrapper hosts the scroll area and the overlay bar.
                 div()
-                    .relative()
                     .flex_1()
                     .min_h_0()
-                    .child(
-                        div()
-                            .id("agent-transcript")
-                            .size_full()
-                            .on_prepaint({
-                                let pane = cx.entity().downgrade();
-                                move |bounds, _, cx| {
-                                    pane.update(cx, |this, cx| {
-                                        let width = bounds.size.width;
-                                        if this.transcript_width != Some(width) {
-                                            this.transcript_width = Some(width);
-                                            this.transcript_list.remeasure();
-                                            cx.notify();
-                                        }
-                                    })
-                                    .ok();
-                                }
-                            })
-                            // Selectable transcript text claims focus during
-                            // mouse-down dispatch, so restore the composer on
-                            // release. Escape then reaches the pane-level
-                            // interrupt handler through the input.
-                            .on_mouse_up(
-                                MouseButton::Left,
-                                cx.listener(|this, _, window, cx| {
-                                    this.focus(window, cx);
-                                }),
-                            )
-                            .child(
-                                // Element callbacks run after this render's
-                                // entity lease is released, so the row builder
-                                // re-enters the pane through a weak handle.
-                                list(self.transcript_list.clone(), {
-                                    let this = cx.entity().downgrade();
-                                    move |ix, window, cx| {
-                                        this.update(cx, |this, cx| this.render_row(ix, window, cx))
-                                            .unwrap_or_else(|_| div().into_any_element())
-                                    }
-                                })
-                                .size_full()
-                                .pt(px(16.)),
-                            ),
+                    // Selectable transcript text claims focus during mouse-down
+                    // dispatch, so restore the composer on release. Escape then
+                    // reaches the pane-level interrupt handler through the input.
+                    .on_mouse_up(
+                        MouseButton::Left,
+                        cx.listener(|this, _, window, cx| {
+                            this.focus(window, cx);
+                        }),
                     )
-                    .children(transcript_scrolled_from_top.then(|| {
-                        // This decorative overlay has no handlers, so text
-                        // selection and wheel input continue to reach the list.
-                        div()
-                            .absolute()
-                            .top_0()
-                            .left_0()
-                            .right(px(16.))
-                            .h(px(24.))
-                            .bg(linear_gradient(
-                                180.,
-                                linear_color_stop(cx.theme().sidebar, 0.),
-                                linear_color_stop(cx.theme().sidebar.opacity(0.), 1.),
-                            ))
-                    }))
-                    // The bare Scrollbar element carries no inset of its own,
-                    // so it lands at its static flow position (below the
-                    // full-height sibling); the pinned strip gives it a
-                    // deterministic containing block at the right edge.
-                    .child(
-                        div()
-                            .absolute()
-                            .top_0()
-                            .right_0()
-                            .bottom_0()
-                            .w(px(16.))
-                            .child(Scrollbar::vertical(&self.transcript_list)),
-                    )
-                    .when(transcript_has_hidden_content_below, |this| {
-                        this.child(
-                            div()
-                                .absolute()
-                                .left_0()
-                                .right_0()
-                                .bottom(px(12.))
-                                .flex()
-                                .justify_center()
-                                .child(
-                                    Button::new("agent-jump-to-bottom")
-                                        .outline()
-                                        .small()
-                                        .rounded_full()
-                                        .icon(IconName::ArrowDown)
-                                        .tooltip("Jump to latest")
-                                        .shadow_md()
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.scroll_transcript_to_bottom();
-                                            cx.notify();
-                                        })),
-                                ),
-                        )
-                    }),
+                    .child(self.transcript.clone()),
             )
             .child({
                 // Composer area: auxiliary strips sit outside the bordered,

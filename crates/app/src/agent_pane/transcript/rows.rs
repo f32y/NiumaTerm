@@ -1,3 +1,4 @@
+use crate::agent_pane::transcript::view::TranscriptView;
 use crate::agent_pane::transcript::{
     compaction_accounting, hidden, is_work_row, should_show_jump_to_latest,
 };
@@ -126,7 +127,7 @@ pub(in crate::agent_pane) fn entry_fingerprint(item: &SessionItem, detail_expand
         ^ ((detail_expanded as u64) << 63)
 }
 
-impl AgentPane {
+impl TranscriptView {
     pub(in crate::agent_pane) fn transcript_has_hidden_content_below(&self) -> bool {
         should_show_jump_to_latest(
             self.transcript_list.is_following_tail(),
@@ -146,21 +147,21 @@ impl AgentPane {
 
     /// Re-engaging tail mode also scrolls to the very end (past the last
     /// item), which stays correct while the last row is still growing.
-    pub(in crate::agent_pane) fn scroll_transcript_to_bottom(&self) {
+    pub(crate) fn scroll_to_bottom(&self) {
         self.transcript_list.set_follow_mode(FollowMode::Tail);
     }
 
-    pub(in crate::agent_pane) fn push(&mut self, item: SessionItem, cx: &mut Context<Self>) {
+    pub(crate) fn push(&mut self, turn: u64, item: SessionItem, cx: &mut Context<Self>) {
         // Submitting a user message explicitly returns to the live tail.
         // Agent output preserves a manually chosen reading position via the
         // list's own tail-follow state.
         if matches!(&item, SessionItem::UserMessage { .. }) {
-            self.scroll_transcript_to_bottom();
+            self.scroll_to_bottom();
         }
 
         self.items.push(Entry {
             at: Local::now().format("%H:%M").to_string(),
-            turn: self.turn_seq,
+            turn,
             item,
         });
         cx.notify();

@@ -111,11 +111,26 @@ pub(super) fn user_prompt_text(record: &Value) -> Option<String> {
         // title a session with it and replay it as something the user typed;
         // `compaction_summary_text` claims it for its own transcript row.
         || is_compaction_summary(record)
+        || is_task_notification(record)
     {
         return None;
     }
 
     record_text(record)
+}
+
+/// A `user` record the CLI synthesized to report a background agent's state.
+/// It reads as plumbing addressed to the model — task and tool-use ids, an
+/// output-file path, a status — so replaying it as a prompt shows the user
+/// something they never typed.
+fn is_task_notification(record: &Value) -> bool {
+    match record["origin"]["kind"].as_str() {
+        Some(kind) => kind == "task-notification",
+        // Older CLI versions recorded no origin, leaving the notification
+        // block itself as the only marker.
+        None => record_text(record)
+            .is_some_and(|text| text.trim_start().starts_with("<task-notification>")),
+    }
 }
 
 /// A `user` record the CLI synthesized to carry a compaction summary rather

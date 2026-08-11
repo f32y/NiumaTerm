@@ -281,3 +281,102 @@ mod fence_tests {
         assert!(fenced.ends_with("\n`````"));
     }
 }
+
+/// Two conversations rendered by the same component must not share view state.
+/// The Agent pane's own conversation and a child agent's conversation are both
+/// `TranscriptView`s, so anything held on the type rather than per instance
+/// would leak one conversation's reading position into the other.
+mod separate_view_state_tests {
+    use gpui::{AppContext as _, TestAppContext};
+    use nmt_agent_utils::chat::Item as SessionItem;
+
+    use crate::agent_pane::transcript::{AgentKind, TranscriptView};
+
+    fn message(id: &str, text: &str) -> SessionItem {
+        SessionItem::AgentMessage {
+            id: id.into(),
+            text: Some(text.into()),
+        }
+    }
+
+    #[gpui::test]
+    fn expansion_and_turn_accounting_stay_per_conversation(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let parent = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
+            let child = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
+
+            parent.update(cx, |transcript, cx| {
+                transcript.push(1, message("a", "parent reply"), cx);
+                transcript.expanded_rows.insert(0);
+                transcript.expanded_turns.insert(1);
+                transcript.expanded_groups.insert(0);
+                transcript.mark_interrupted(1);
+            });
+
+            child.update(cx, |transcript, cx| {
+                transcript.push(1, message("b", "child reply"), cx);
+                assert!(
+                    transcript.expanded_rows.is_empty(),
+                    "row expansion belongs to one conversation"
+                );
+                assert!(transcript.expanded_turns.is_empty());
+                assert!(transcript.expanded_groups.is_empty());
+                assert!(
+                    !transcript.was_interrupted(1),
+                    "turn accounting belongs to one conversation"
+                );
+            });
+
+            // The parent keeps everything it had after the child was touched.
+            parent.update(cx, |transcript, _| {
+                assert!(transcript.expanded_rows.contains(&0));
+                assert!(transcript.was_interrupted(1));
+                assert!(!transcript.is_empty());
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn each_conversation_measures_its_own_rows(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let parent = cx.new(|_| TranscriptView::new(AgentKind::Codex, None));
+            let child = cx.new(|_| TranscriptView::new(AgentKind::Codex, None));
+
+            parent.update(cx, |transcript, cx| {
+                for index in 0..4 {
+                    transcript.push(1, message(&format!("p{index}"), "row"), cx);
+                }
+                transcript.sync_transcript_list(transcript.build_row_specs(false));
+            });
+            child.update(cx, |transcript, cx| {
+                transcript.push(1, message("c0", "row"), cx);
+                transcript.sync_transcript_list(transcript.build_row_specs(false));
+            });
+
+            // A shared list state would report one conversation's row count for
+            // both, which is what makes measured heights unusable across them.
+            assert_eq!(parent.read(cx).transcript_list.item_count(), 4);
+            assert_eq!(child.read(cx).transcript_list.item_count(), 1);
+        });
+    }
+
+    #[gpui::test]
+    fn clearing_one_conversation_leaves_the_other_intact(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let parent = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
+            let child = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
+
+            parent.update(cx, |transcript, cx| {
+                transcript.push(1, message("a", "parent"), cx)
+            });
+            child.update(cx, |transcript, cx| {
+                transcript.push(1, message("b", "child"), cx)
+            });
+
+            child.update(cx, |transcript, _| transcript.clear());
+
+            assert!(child.read(cx).is_empty());
+            assert!(!parent.read(cx).is_empty());
+        });
+    }
+}

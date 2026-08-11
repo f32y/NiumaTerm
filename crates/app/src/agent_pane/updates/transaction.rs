@@ -91,7 +91,7 @@ pub(crate) fn request_update(key: InstallationKey, window: &mut Window, cx: &mut
         .iter()
         .filter(|pane| {
             matches!(
-                pane.read(cx).recovery_readiness(),
+                pane.read(cx).recovery_readiness(cx),
                 RecoveryReadiness::Busy(_)
             )
         })
@@ -207,7 +207,7 @@ fn start_transaction(
         && let Some(message) =
             panes
                 .iter()
-                .find_map(|pane| match pane.read(cx).recovery_identity_snapshot() {
+                .find_map(|pane| match pane.read(cx).recovery_identity_snapshot(cx) {
                     RecoveryReadiness::MissingIdentity(message) => Some(message),
                     _ => None,
                 })
@@ -239,7 +239,7 @@ fn start_transaction(
             let assessments = cx.update(|cx| {
                 panes
                     .iter()
-                    .map(|pane| pane.read(cx).recovery_readiness())
+                    .map(|pane| pane.read(cx).recovery_readiness(cx))
                     .collect::<Vec<_>>()
             });
 

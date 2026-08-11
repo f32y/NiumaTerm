@@ -16,15 +16,19 @@
 //! work that is not a child agent at all.
 
 use std::collections::{HashMap, VecDeque};
+use std::mem::take;
 use std::time::SystemTime;
 
 use serde_json::Value;
 
 use crate::background_task::{
     BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskRefs, BackgroundTaskRegistry,
-    BackgroundTaskSnapshot, BackgroundTaskState, BackgroundTaskUpdate,
+    BackgroundTaskSnapshot, BackgroundTaskState, BackgroundTaskTranscriptUpdate,
+    BackgroundTaskUpdate,
 };
+use crate::chat::Item;
 use crate::claude_code::sessions::RestoredTask;
+use crate::claude_code::tool_items::{complete_tool_item, tool_item};
 
 /// Tool names that launch a child agent.
 const LAUNCH_TOOLS: [&str; 2] = ["Task", "Agent"];
@@ -63,6 +67,13 @@ pub(crate) struct ClaudeTasks {
     created_epoch: HashMap<String, u64>,
     /// Advanced by each `init`, which the CLI emits once per process.
     epoch: u64,
+    /// Child conversation content observed since the caller last drained it.
+    /// The reducer forwards items rather than retaining them, so a child's
+    /// conversation is stored once, where it is read.
+    pending_transcripts: Vec<(BackgroundTaskKey, BackgroundTaskTranscriptUpdate)>,
+    /// Tool calls a child started, so its matching result completes the same
+    /// row instead of appearing as a second one.
+    open_child_tools: HashMap<String, Item>,
 }
 
 impl ClaudeTasks {
@@ -95,25 +106,39 @@ impl ClaudeTasks {
         restored: Result<Vec<RestoredTask>, String>,
         starting_sequence: u64,
     ) -> bool {
-        let Some(registry) = self.registry.as_mut() else {
+        if self.registry.is_none() {
             return false;
-        };
+        }
         match restored {
             Ok(tasks) => {
                 let mut changed = false;
                 for task in tasks {
-                    changed |= registry.merge_restored(
-                        BackgroundTaskKey::claude_code(&task.id),
-                        task.update,
-                        starting_sequence,
-                    );
+                    let key = BackgroundTaskKey::claude_code(&task.id);
+                    if !task.items.is_empty() {
+                        // History predates whatever the live stream produced,
+                        // so it is offered as a restore: it fills a child
+                        // nothing has been seen for and never replaces newer
+                        // live content.
+                        self.pending_transcripts.push((
+                            key.clone(),
+                            BackgroundTaskTranscriptUpdate::restored(task.items),
+                        ));
+                    }
+                    if let Some(registry) = self.registry.as_mut() {
+                        changed |= registry.merge_restored(key, task.update, starting_sequence);
+                    }
                 }
+                let registry = self.registry.as_mut().expect("registry exists");
                 changed | registry.set_discovery(BackgroundTaskDiscoveryState::Ready)
             }
-            Err(message) if registry.is_empty() => {
-                registry.set_discovery(BackgroundTaskDiscoveryState::Unavailable { message })
+            Err(message) => {
+                let registry = self.registry.as_mut().expect("registry exists");
+                if registry.is_empty() {
+                    registry.set_discovery(BackgroundTaskDiscoveryState::Unavailable { message })
+                } else {
+                    registry.set_discovery(BackgroundTaskDiscoveryState::Ready)
+                }
             }
-            Err(_) => registry.set_discovery(BackgroundTaskDiscoveryState::Ready),
         }
     }
 
@@ -129,7 +154,16 @@ impl ClaudeTasks {
         self.aliases.clear();
         self.alias_order.clear();
         self.created_epoch.clear();
+        self.pending_transcripts.clear();
+        self.open_child_tools.clear();
         true
+    }
+
+    /// Take the child conversation content observed since the last call.
+    pub(crate) fn take_transcripts(
+        &mut self,
+    ) -> Vec<(BackgroundTaskKey, BackgroundTaskTranscriptUpdate)> {
+        take(&mut self.pending_transcripts)
     }
 
     /// Observe one incoming message. Returns true when child state changed.
@@ -319,6 +353,15 @@ impl ClaudeTasks {
             return false;
         };
         let preview = sidechain_preview(message);
+        // The same content the parent transcript drops becomes the child's own
+        // conversation; it still never reaches the parent.
+        let items = self.child_items(message);
+        if !items.is_empty() {
+            self.pending_transcripts.push((
+                BackgroundTaskKey::claude_code(&canonical),
+                BackgroundTaskTranscriptUpdate::appended(items),
+            ));
+        }
         // Linked child activity proves the task is doing work, but it cannot
         // revive one that already reported a terminal state.
         let state = self
@@ -335,6 +378,52 @@ impl ClaudeTasks {
                 ..BackgroundTaskUpdate::default()
             },
         )
+    }
+
+    /// Transcript items for one sidechain record, using the same item shapes
+    /// the parent conversation renders so a child reads identically.
+    fn child_items(&mut self, message: &Value) -> Vec<Item> {
+        let mut items = Vec::new();
+        for block in message["message"]["content"]
+            .as_array()
+            .into_iter()
+            .flatten()
+        {
+            let Some(id) = block["id"]
+                .as_str()
+                .or_else(|| block["tool_use_id"].as_str())
+                .map(str::to_owned)
+                .or_else(|| message["uuid"].as_str().map(str::to_owned))
+            else {
+                continue;
+            };
+            match block["type"].as_str() {
+                Some("text") => items.push(Item::AgentMessage {
+                    id,
+                    text: block["text"].as_str().map(str::to_owned),
+                }),
+                Some("thinking") => items.push(Item::Reasoning {
+                    id,
+                    summary: block["thinking"].as_str().map(str::to_owned),
+                }),
+                Some("tool_use") => {
+                    let item = tool_item(
+                        &id,
+                        block["name"].as_str().unwrap_or("tool"),
+                        &block["input"],
+                    );
+                    self.open_child_tools.insert(id, item.clone());
+                    items.push(item);
+                }
+                Some("tool_result") => {
+                    if let Some(started) = self.open_child_tools.remove(&id) {
+                        items.push(complete_tool_item(started, block));
+                    }
+                }
+                _ => {}
+            }
+        }
+        items
     }
 
     fn apply_lifecycle(&mut self, kind: &str, record: &Value) -> bool {

@@ -13,6 +13,9 @@ use std::time::UNIX_EPOCH;
 
 use serde_json::{Value, json};
 
+pub use crate::background_task::{
+    BackgroundTaskKey, BackgroundTaskTranscriptState, BackgroundTaskTranscriptUpdate,
+};
 pub use crate::chat::{
     Compaction, CompactionTrigger, ContextUsageScope, ContextWindowUsage, Event, Item, ModelInfo,
     ScopedTokenUsage, SendOutcome, SessionSummary, SkillCatalog, SkillInfo, SkillReference,
@@ -36,15 +39,15 @@ use crate::codex::app_server::compaction::{
 pub use crate::codex::app_server::options::{
     APPROVAL_OPTIONS, APPROVAL_REVIEWER_OPTIONS, EFFORT_OPTIONS, SANDBOX_OPTIONS,
 };
+#[cfg(test)]
+use crate::codex::app_server::protocol::thread_start_params;
 use crate::codex::app_server::protocol::{
     codex_command_request, codex_command_response, codex_user_input, delta_event,
     file_change_paths, initial_thread_request, parse_context_window_usage, parse_item,
-    parse_models, parse_thread_settings, parse_thread_summaries, resumed_thread_events,
-    skills_list_request, stringify_command, thread_list_params, thread_resume_params,
-    turn_start_params,
+    parse_models, parse_replay, parse_thread_settings, parse_thread_summaries,
+    resumed_thread_events, skills_list_request, stringify_command, thread_list_params,
+    thread_resume_params, turn_start_params,
 };
-#[cfg(test)]
-use crate::codex::app_server::protocol::{parse_replay, thread_start_params};
 #[cfg(test)]
 use crate::codex::app_server::skills::parse_skill_catalog;
 use crate::codex::app_server::skills::{SkillRefreshState, skill_catalog_from_response};
@@ -437,6 +440,21 @@ impl Session {
         self.start_descendant_discovery();
     }
 
+    /// Read one descendant's stored conversation. A read already in flight for
+    /// the same child is left to finish, and an unknown thread is ignored.
+    pub fn load_background_task_transcript(&mut self, thread_id: &str) -> Vec<Event> {
+        let rpc_id = self.alloc_rpc_id();
+        let Some(request) = self.background.transcript_request(rpc_id, thread_id) else {
+            return Vec::new();
+        };
+        self.send(request);
+
+        vec![Event::BackgroundTaskTranscript {
+            key: BackgroundTaskKey::codex(thread_id),
+            update: BackgroundTaskTranscriptUpdate::state(BackgroundTaskTranscriptState::Loading),
+        }]
+    }
+
     fn start_descendant_discovery(&mut self) {
         let Some(thread_id) = self.thread_id.clone() else {
             return;
@@ -544,6 +562,28 @@ impl Session {
             }
 
             return vec![Event::Skills(catalog)];
+        }
+
+        // A descendant read answers before the shared error path so a failed
+        // read reports an unavailable conversation instead of a session error.
+        if self.background.is_transcript_read(rpc_id) {
+            let Some(thread_id) = self.background.finish_transcript_read(rpc_id) else {
+                return Vec::new();
+            };
+            let key = BackgroundTaskKey::codex(&thread_id);
+            let update = match message["error"]["message"].as_str() {
+                Some(error) => BackgroundTaskTranscriptUpdate::state(
+                    BackgroundTaskTranscriptState::Unavailable {
+                        message: error.to_owned(),
+                    },
+                ),
+                // The same parser the parent transcript uses, so a child's
+                // tool cards cannot lose output or status relative to it.
+                None => BackgroundTaskTranscriptUpdate::loaded(parse_replay(
+                    &message["result"]["thread"]["turns"],
+                )),
+            };
+            return vec![Event::BackgroundTaskTranscript { key, update }];
         }
 
         // Descendant discovery answers before the shared error path so a

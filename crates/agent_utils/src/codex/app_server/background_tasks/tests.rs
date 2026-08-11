@@ -536,3 +536,68 @@ fn a_repeated_pagination_cursor_ends_discovery() {
     );
     assert!(tasks.accept_cursor("page-3"));
 }
+
+#[test]
+fn a_descendant_transcript_is_read_without_resuming_the_child() {
+    let mut tasks = rooted();
+    tasks.observe_parent_item(&spawn_item("thr_child"));
+
+    let request = tasks
+        .transcript_request(9, "thr_child")
+        .expect("a confirmed descendant can be read");
+    // `thread/read` returns stored turns without loading the thread into this
+    // session, so the parent keeps its own thread, turn, and approval state.
+    assert_eq!(request["method"], "thread/read");
+    assert_eq!(request["params"]["threadId"], "thr_child");
+    assert_eq!(request["params"]["includeTurns"], json!(true));
+    assert!(tasks.is_transcript_read(9));
+
+    assert_eq!(
+        tasks.finish_transcript_read(9).as_deref(),
+        Some("thr_child")
+    );
+    assert!(!tasks.is_transcript_read(9));
+}
+
+#[test]
+fn only_confirmed_descendants_can_be_read() {
+    let mut tasks = rooted();
+
+    assert!(
+        tasks.transcript_request(9, "thr_stranger").is_none(),
+        "a thread this parent never spawned is not readable through it"
+    );
+    assert!(
+        tasks.transcript_request(9, ROOT).is_none(),
+        "the parent's own conversation is not a child transcript"
+    );
+}
+
+#[test]
+fn a_second_read_for_the_same_child_is_not_issued() {
+    let mut tasks = rooted();
+    tasks.observe_parent_item(&spawn_item("thr_child"));
+
+    assert!(tasks.transcript_request(9, "thr_child").is_some());
+    assert!(
+        tasks.transcript_request(10, "thr_child").is_none(),
+        "a read already in flight would return the same stored conversation"
+    );
+
+    tasks.finish_transcript_read(9);
+    assert!(
+        tasks.transcript_request(11, "thr_child").is_some(),
+        "a later refresh is allowed once the previous read settled"
+    );
+}
+
+#[test]
+fn selecting_another_root_drops_in_flight_reads() {
+    let mut tasks = rooted();
+    tasks.observe_parent_item(&spawn_item("thr_child"));
+    tasks.transcript_request(9, "thr_child");
+
+    tasks.set_root("thr_other_parent");
+
+    assert!(!tasks.is_transcript_read(9));
+}

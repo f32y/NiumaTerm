@@ -81,25 +81,15 @@ impl AgentPane {
         })
         .detach();
 
+        let transcript = cx.new(|_| TranscriptView::new(kind, cwd.clone()));
+
         let mut this = Self {
             focus: cx.focus_handle(),
             agent_route: agent_process().allocate_route(),
             kind,
             profile,
             cwd,
-            items: Vec::new(),
-            transcript_list: {
-                // Bottom alignment + tail follow give chat-log behavior: pinned
-                // to the newest row until the user scrolls up, re-engaging when
-                // they return to the bottom. The overdraw keeps a viewport's
-                // worth of offscreen rows measured so scrolling doesn't pop.
-                let state = ListState::new(0, ListAlignment::Bottom, px(512.));
-                state.set_follow_mode(FollowMode::Tail);
-                state
-            },
-            row_specs: Vec::new(),
-            transcript_font: Default::default(),
-            transcript_width: None,
+            transcript,
             input,
             session: None,
             session_epoch: 0,
@@ -111,16 +101,7 @@ impl AgentPane {
             seed_approval_reviewer: false,
             restore_thread_settings_on_ready: None,
             models: Vec::new(),
-            expanded_groups: HashSet::new(),
-            expanded_turns: HashSet::new(),
-            completed_turn_seconds: HashMap::new(),
-            completed_turn_output_tokens: HashMap::new(),
-            interrupted_turns: HashSet::new(),
-            expanded_rows: HashSet::new(),
-            virtual_transcripts: HashMap::new(),
             turn_seq: 0,
-            working_started: None,
-            working_output_tokens: None,
             unanswered_prompt: None,
             palette: SlashPalette {
                 provider_commands_ready: kind == AgentKind::Codex,
@@ -130,11 +111,11 @@ impl AgentPane {
             rewind: RewindFlow::default(),
             git_branch_poll: GitBranchPoll::default(),
             context_window_usage: None,
-            compacting: false,
             update_suspension: None,
             last_recovery_snapshot: None,
             restored_task_session: None,
             background_tasks: None,
+            background_task_transcripts: HashMap::new(),
         };
 
         this.start_session(None, cx);
@@ -220,6 +201,24 @@ impl AgentPane {
         &self.agent_route
     }
 
+    pub(crate) fn agent_kind(&self) -> AgentKind {
+        self.kind
+    }
+
+    /// The tab's working directory, which transcript links resolve against.
+    pub(crate) fn working_directory(&self) -> Option<String> {
+        self.cwd.clone()
+    }
+
+    /// Append one item to the conversation, tagged with the current turn so
+    /// settled turns fold as one unit.
+    pub(in crate::agent_pane) fn push_item(&mut self, item: SessionItem, cx: &mut Context<Self>) {
+        let turn = self.turn_seq;
+        self.transcript
+            .update(cx, |transcript, cx| transcript.push(turn, item, cx));
+        cx.notify();
+    }
+
     pub(super) fn refresh_git_branch(&mut self, cx: &mut Context<Self>) {
         if !self.git_branch_poll.begin_refresh() {
             return;
@@ -269,13 +268,11 @@ impl AgentPane {
         }));
     }
 
-    pub(super) fn latest_agent_message(&self) -> Option<&str> {
-        self.items.iter().rev().find_map(|entry| match &entry.item {
-            SessionItem::AgentMessage {
-                text: Some(text), ..
-            } if entry.turn == self.turn_seq && !text.trim().is_empty() => Some(text.as_str()),
-            _ => None,
-        })
+    pub(super) fn latest_agent_message(&self, cx: &App) -> Option<String> {
+        self.transcript
+            .read(cx)
+            .latest_agent_message(self.turn_seq)
+            .map(str::to_owned)
     }
 
     /// Spawn the backend process (optionally resuming a persisted Claude
@@ -440,7 +437,7 @@ impl AgentPane {
                         }
                         this.publish_queued_user_messages(cx);
                         this.finish_working(cx);
-                        this.push(
+                        this.push_item(
                             SessionItem::Error {
                                 text: format!("{name} exited."),
                             },
@@ -457,12 +454,14 @@ impl AgentPane {
                 self.palette.awaiting_command_turn = false;
                 self.palette.command_queue.clear();
                 self.queued_user_messages.clear();
-                self.items.push(Entry {
-                    at: Local::now().format("%H:%M").to_string(),
-                    turn: self.turn_seq,
-                    item: SessionItem::Error {
-                        text: format!("Failed to start {name}: {err}"),
-                    },
+                let turn = self.turn_seq;
+                self.transcript.update(cx, |transcript, _| {
+                    transcript.push_stamped(
+                        turn,
+                        SessionItem::Error {
+                            text: format!("Failed to start {name}: {err}"),
+                        },
+                    );
                 });
                 false
             }
@@ -530,7 +529,7 @@ impl AgentPane {
         };
 
         if outcome == SendOutcome::NotReady {
-            self.push(
+            self.push_item(
                 SessionItem::Error {
                     text: format!(
                         "{} is still starting; try again in a moment.",
@@ -554,7 +553,7 @@ impl AgentPane {
                     text: text.clone(),
                     skill: skill.cloned(),
                 });
-                self.push(SessionItem::UserMessage { text: Some(text) }, cx);
+                self.push_item(SessionItem::UserMessage { text: Some(text) }, cx);
                 self.unanswered_prompt = unanswered_prompt;
                 self.start_working(cx);
             }
@@ -568,21 +567,11 @@ impl AgentPane {
         true
     }
 
-    pub(super) fn clear_conversation_presentation(&mut self) {
-        self.items.clear();
-        self.scroll_transcript_to_bottom();
-        self.expanded_groups.clear();
-        self.expanded_turns.clear();
-        self.completed_turn_seconds.clear();
-        self.completed_turn_output_tokens.clear();
-        self.interrupted_turns.clear();
-        self.expanded_rows.clear();
-        self.virtual_transcripts.clear();
+    pub(super) fn clear_conversation_presentation(&mut self, cx: &mut Context<Self>) {
+        self.transcript
+            .update(cx, |transcript, _| transcript.clear());
         self.turn_seq = 0;
-        self.working_started = None;
-        self.working_output_tokens = None;
         self.unanswered_prompt = None;
-        self.compacting = false;
         self.context_window_usage = None;
         self.queued_user_messages.clear();
         self.rewind.state = None;
@@ -592,6 +581,7 @@ impl AgentPane {
         // would show another parent session's tasks until the new adapter
         // publishes its first snapshot.
         self.background_tasks = None;
+        self.background_task_transcripts.clear();
     }
 
     /// Rebuild Claude child agents from the session's persisted history. The
@@ -657,6 +647,31 @@ impl AgentPane {
         }
     }
 
+    /// Ask the provider for one child's conversation. A provider that already
+    /// has it, or that streams it live, does no work here.
+    pub(crate) fn load_background_task_transcript(
+        &mut self,
+        key: &BackgroundTaskKey,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        for event in session.load_background_task_transcript(key) {
+            self.apply_event(event, cx);
+        }
+    }
+
+    /// One child's conversation, only while the pane still holds the session
+    /// that child belongs to.
+    pub(crate) fn background_task_transcript(
+        &self,
+        key: &BackgroundTaskKey,
+    ) -> Option<&BackgroundTaskTranscript> {
+        self.background_tasks()?;
+        self.background_task_transcripts.get(key)
+    }
+
     /// The latest snapshot, only while it still describes the session the pane
     /// currently holds. A snapshot left over from a replaced session is hidden
     /// rather than shown against the new parent.
@@ -671,7 +686,7 @@ impl AgentPane {
         self.session = None;
         // A fresh conversation always follows the live tail again, even if
         // the previous transcript was scrolled up when it was discarded.
-        self.clear_conversation_presentation();
+        self.clear_conversation_presentation(cx);
         self.settings = ThreadSettings::default();
         self.models.clear();
         self.palette.skill_catalog = None;
@@ -697,8 +712,8 @@ impl AgentPane {
     /// Start the turn clock and drive the once-a-second repaint of the live
     /// progress row; the ticker stops itself once `finish_working` clears it.
     pub(super) fn start_working(&mut self, cx: &mut Context<Self>) {
-        self.working_started = Some(Instant::now());
-        self.working_output_tokens = None;
+        self.transcript
+            .update(cx, |transcript, cx| transcript.start_working(cx));
         cx.notify();
 
         cx.spawn(async move |this, cx| {
@@ -706,7 +721,7 @@ impl AgentPane {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
 
                 let ticking = this.update(cx, |this, cx| {
-                    if this.working_started.is_some() {
+                    if this.transcript.read(cx).is_working() {
                         cx.notify();
                         true
                     } else {
@@ -726,18 +741,10 @@ impl AgentPane {
     /// row. These values are UI state rather than provider transcript content,
     /// so they stay outside the shared item stream.
     pub(super) fn finish_working(&mut self, cx: &mut Context<Self>) {
-        let output_tokens = self.working_output_tokens.take();
-        if let Some(started) = self.working_started.take() {
-            if !self.interrupted_turns.contains(&self.turn_seq) {
-                self.completed_turn_seconds
-                    .insert(self.turn_seq, started.elapsed().as_secs());
-            }
-            if let Some(output_tokens) = output_tokens {
-                self.completed_turn_output_tokens
-                    .insert(self.turn_seq, output_tokens);
-            }
-            cx.notify();
-        }
+        let turn = self.turn_seq;
+        self.transcript
+            .update(cx, |transcript, cx| transcript.settle_turn(turn, cx));
+        cx.notify();
     }
 
     fn note_visible_agent_output(&mut self) {
@@ -751,17 +758,16 @@ impl AgentPane {
     }
 
     pub(super) fn interrupt_from_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let interrupted_turn = self.working_started.is_some().then_some(self.turn_seq);
+        let working = self.transcript.read(cx).is_working();
+        let interrupted_turn = working.then_some(self.turn_seq);
         if let Some(prompt) = self
             .unanswered_prompt
             .take()
-            .filter(|prompt| prompt.turn == self.turn_seq && self.working_started.is_some())
+            .filter(|prompt| prompt.turn == self.turn_seq && working)
         {
-            self.working_started = None;
-            self.working_output_tokens = None;
-            self.completed_turn_seconds.remove(&prompt.turn);
-            self.completed_turn_output_tokens.remove(&prompt.turn);
-            self.compacting = false;
+            let turn = prompt.turn;
+            self.transcript
+                .update(cx, |transcript, cx| transcript.discard_turn(turn, cx));
 
             let current = self.input.read(cx).text().to_string();
             let restored = restored_input_after_interruption(&prompt.text, &current);
@@ -773,7 +779,8 @@ impl AgentPane {
             self.palette.skill_binding = prompt.skill;
         }
         if let Some(turn) = interrupted_turn {
-            self.interrupted_turns.insert(turn);
+            self.transcript
+                .update(cx, |transcript, _| transcript.mark_interrupted(turn));
         }
 
         self.interrupt(cx);

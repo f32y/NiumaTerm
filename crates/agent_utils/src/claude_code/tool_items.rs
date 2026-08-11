@@ -9,7 +9,7 @@ use crate::chat::Item;
 /// Map a tool-use block to a transcript item: Bash becomes a command card,
 /// file-editing tools become file-change cards, everything else a titled tool
 /// card.
-pub(super) fn tool_item(id: &str, name: &str, input: &Value) -> Item {
+pub(crate) fn tool_item(id: &str, name: &str, input: &Value) -> Item {
     let id = id.to_string();
     let status = Some("inProgress".to_string());
 
@@ -47,7 +47,7 @@ pub(super) fn tool_item(id: &str, name: &str, input: &Value) -> Item {
 /// Merge a `tool_result` block into the item created from its matching
 /// `tool_use`. Input detail for plans/todos survives acknowledgement, while
 /// other tools expose their returned content.
-pub(super) fn complete_tool_item(started: Item, result: &Value) -> Item {
+pub(crate) fn complete_tool_item(started: Item, result: &Value) -> Item {
     let failed = result["is_error"].as_bool().unwrap_or(false);
     let status = Some(if failed { "failed" } else { "completed" }.to_string());
     let output = tool_result_text(&result["content"]);

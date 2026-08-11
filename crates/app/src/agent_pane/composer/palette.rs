@@ -313,7 +313,11 @@ impl AgentPane {
             .history_ui
             .pending
             .unwrap_or(self.history_ui.sessions.len());
-        if !self.history_ui.mode.is_visible(self.items.is_empty(), rows) {
+        if !self
+            .history_ui
+            .mode
+            .is_visible(self.transcript.read(cx).is_empty(), rows)
+        {
             return false;
         }
 

@@ -65,6 +65,10 @@ pub(super) struct CodexTasks {
     queries: HashMap<u64, DescendantQuery>,
     /// Pagination cursors already requested for the current root.
     seen_cursors: HashSet<String>,
+    /// In-flight `thread/read` requests, by the descendant they will deliver.
+    /// One per child at a time: a second read would return the same stored
+    /// conversation and only cost another round trip.
+    reads: HashMap<u64, String>,
 }
 
 impl CodexTasks {
@@ -84,6 +88,7 @@ impl CodexTasks {
         self.pending_order.clear();
         self.queries.clear();
         self.seen_cursors.clear();
+        self.reads.clear();
         true
     }
 
@@ -572,6 +577,37 @@ impl CodexTasks {
             changed |= registry.set_discovery(BackgroundTaskDiscoveryState::Ready);
         }
         (changed, next_cursor)
+    }
+
+    /// Build a request for one descendant's stored conversation. `thread/read`
+    /// does not resume or load the thread into this session, so the parent's
+    /// thread id, turn state, approvals, and transcript are untouched by it.
+    /// `None` when the child is not a confirmed descendant, or when a read for
+    /// it is already in flight.
+    pub(super) fn transcript_request(&mut self, rpc_id: u64, thread_id: &str) -> Option<Value> {
+        if !self.confirmed.contains(thread_id) {
+            return None;
+        }
+        if self.reads.values().any(|pending| pending == thread_id) {
+            return None;
+        }
+        self.reads.insert(rpc_id, thread_id.to_owned());
+
+        Some(json!({
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "method": "thread/read",
+            "params": {"threadId": thread_id, "includeTurns": true},
+        }))
+    }
+
+    pub(super) fn is_transcript_read(&self, rpc_id: u64) -> bool {
+        self.reads.contains_key(&rpc_id)
+    }
+
+    /// The descendant a completed read belongs to.
+    pub(super) fn finish_transcript_read(&mut self, rpc_id: u64) -> Option<String> {
+        self.reads.remove(&rpc_id)
     }
 
     /// Record a failed descendant page. Known rows stay visible; the failure is

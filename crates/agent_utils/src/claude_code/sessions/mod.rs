@@ -32,9 +32,9 @@ use replay::parse_replay;
 pub use replay::{load_checkpoints, load_replay};
 #[cfg(test)]
 use serde_json::Value;
-#[cfg(test)]
-use task_history::parse_task_history;
 pub use task_history::{RestoredTask, load_task_history};
+#[cfg(test)]
+use task_history::{load_task_history_at, parse_task_history};
 #[cfg(test)]
 use titles::{compaction_summary_text, title_line, user_prompt_text};
 pub use titles::{count_sessions, list_sessions};
@@ -42,7 +42,7 @@ pub use titles::{count_sessions, list_sessions};
 use uuid::Uuid;
 
 #[cfg(test)]
-use crate::chat::{Compaction, Item};
+use crate::chat::Compaction;
 
 /// Whether the selected user message has a persisted file-history snapshot.
 /// `Unknown` is reserved for snapshot records whose schema is not understood;
