@@ -23,11 +23,13 @@ use crate::launcher::AgentCli;
 use crate::subprocess::JsonLineProcess;
 use crate::{CodexProviderConfig, LaunchConfig};
 
+mod background_tasks;
 mod compaction;
 mod options;
 mod protocol;
 mod skills;
 
+use crate::codex::app_server::background_tasks::{CodexTasks, ThreadScope, notification_thread_id};
 use crate::codex::app_server::compaction::{
     CompactionState, compaction_completed, compaction_started, is_legacy_compaction_notification,
 };
@@ -60,6 +62,22 @@ const PROVIDER_API_FIELD: &str = concat!("wi", "re_api");
 /// First page size for the history list; enough to fill the visible list
 /// several times over. `nextCursor` remains available for deeper paging.
 const THREAD_LIST_LIMIT: u64 = 50;
+
+/// Notifications that describe one thread's activity. They are routed by
+/// thread id before parent handling, so a descendant's turn or item can never
+/// change the parent's turn identity, running state, or transcript.
+const THREAD_SCOPED_NOTIFICATIONS: [&str; 10] = [
+    "turn/started",
+    "turn/completed",
+    "thread/status/changed",
+    "thread/tokenUsage/updated",
+    "item/started",
+    "item/completed",
+    "item/agentMessage/delta",
+    "item/reasoning/summaryTextDelta",
+    "item/commandExecution/outputDelta",
+    "error",
+];
 
 #[derive(Clone, Debug, Default)]
 struct ThreadProfile {
@@ -127,6 +145,8 @@ pub struct Session {
     thread_profile: ThreadProfile,
     initial_resume: Option<String>,
     suppress_resume_replay: bool,
+    /// Descendant-thread tracking for the `Background Tasks` view.
+    background: CodexTasks,
 }
 
 impl Session {
@@ -234,6 +254,7 @@ impl Session {
             thread_profile,
             initial_resume,
             suppress_resume_replay,
+            background: CodexTasks::default(),
         };
 
         session.send(json!({
@@ -409,6 +430,40 @@ impl Session {
         }));
     }
 
+    /// Reload descendant threads for the current parent. Opening the panel can
+    /// ask for fresher data; a request already in flight is left to complete
+    /// instead of racing a second pass over the same pages.
+    pub fn refresh_background_tasks(&mut self) {
+        self.start_descendant_discovery();
+    }
+
+    fn start_descendant_discovery(&mut self) {
+        let Some(thread_id) = self.thread_id.clone() else {
+            return;
+        };
+        self.background.set_root(&thread_id);
+        if self.background.query_in_flight() {
+            return;
+        }
+        let rpc_id = self.alloc_rpc_id();
+        if let Some(request) = self.background.descendant_request(rpc_id, None) {
+            self.send(request);
+        }
+    }
+
+    /// Publish the task snapshot only for a real change, so an unchanged
+    /// repeat of a known state does not repaint the panel.
+    fn background_events(&self, changed: bool) -> Vec<Event> {
+        if !changed {
+            return Vec::new();
+        }
+        self.background
+            .snapshot()
+            .map(Event::BackgroundTasks)
+            .into_iter()
+            .collect()
+    }
+
     /// Answer the pending approval request (`"accept"` / `"decline"`); a no-op
     /// when none is pending.
     pub fn respond_approval(&mut self, decision: &str) {
@@ -491,6 +546,33 @@ impl Session {
             return vec![Event::Skills(catalog)];
         }
 
+        // Descendant discovery answers before the shared error path so a
+        // failed page reports unavailable status instead of a session error.
+        if self.background.is_query(rpc_id) {
+            if let Some(error) = message["error"]["message"].as_str() {
+                let changed = self.background.fail_query(rpc_id, error);
+                return self.background_events(changed);
+            }
+
+            let (mut changed, next_cursor) = self
+                .background
+                .apply_descendants(rpc_id, &message["result"]);
+            // A server that keeps handing back the same cursor would page
+            // forever, so a repeat ends discovery instead of looping.
+            if let Some(cursor) = next_cursor.filter(|cursor| self.background.accept_cursor(cursor))
+            {
+                let next_rpc_id = self.alloc_rpc_id();
+                if let Some(request) = self
+                    .background
+                    .descendant_request(next_rpc_id, Some(&cursor))
+                {
+                    self.send(request);
+                    changed = true;
+                }
+            }
+            return self.background_events(changed);
+        }
+
         let pending_command = self.pending_commands.remove(&rpc_id);
         let is_command = pending_command.is_some();
 
@@ -562,6 +644,7 @@ impl Session {
                     "method": "thread/list",
                     "params": history_params,
                 }));
+                self.start_descendant_discovery();
 
                 vec![Event::Ready(parse_thread_settings(result))]
             }
@@ -588,6 +671,10 @@ impl Session {
 
                 self.thread_id = result["thread"]["id"].as_str().map(str::to_owned);
                 self.initial_resume = None;
+                // A resumed parent can already have finished descendants, and
+                // a reconnect resumes into a new process with none of the live
+                // child state the previous one observed.
+                self.start_descendant_discovery();
                 resumed_thread_events(result, take(&mut self.suppress_resume_replay))
             }
             _ => Vec::new(),
@@ -600,6 +687,32 @@ impl Session {
             // the authoritative item lifecycle. Ignoring it prevents a second
             // boundary for the same context rewrite.
             return Vec::new();
+        }
+
+        // Thread routing happens before any parent state change: a descendant's
+        // turn completion must not clear a still-running parent turn, and an
+        // unrelated thread's content must not enter the parent transcript.
+        if THREAD_SCOPED_NOTIFICATIONS.contains(&method) {
+            let thread_id = notification_thread_id(params).map(str::to_owned);
+            match self.background.scope(thread_id.as_deref()) {
+                ThreadScope::Descendant => {
+                    let thread_id = thread_id.unwrap_or_default();
+                    let changed = self
+                        .background
+                        .apply_descendant_notification(&thread_id, method, params);
+                    return self.background_events(changed);
+                }
+                ThreadScope::Unrelated => {
+                    let thread_id = thread_id.unwrap_or_default();
+                    self.background
+                        .hold_unrelated_notification(&thread_id, method, params);
+                    return Vec::new();
+                }
+                // A thread-scoped notification that carries no usable thread id
+                // keeps parent handling: the parent's running state is the only
+                // conversation this session can be describing.
+                ThreadScope::Parent | ThreadScope::Unscoped => {}
+            }
         }
 
         match method {
@@ -652,10 +765,16 @@ impl Session {
                     return compaction_started(&mut self.compaction, item);
                 }
 
-                parse_item(item)
+                // Collaboration items are the parent's own tool calls, so they
+                // keep their transcript row; they additionally identify the
+                // child thread the panel tracks.
+                let changed = self.background.observe_parent_item(item);
+                let mut events: Vec<Event> = parse_item(item)
                     .map(Event::ItemStarted)
                     .into_iter()
-                    .collect()
+                    .collect();
+                events.extend(self.background_events(changed));
+                events
             }
             "item/completed" => {
                 let item = &params["item"];
@@ -663,10 +782,13 @@ impl Session {
                     return compaction_completed(&mut self.compaction, item);
                 }
 
-                parse_item(item)
+                let changed = self.background.observe_parent_item(item);
+                let mut events: Vec<Event> = parse_item(item)
                     .map(Event::ItemCompleted)
                     .into_iter()
-                    .collect()
+                    .collect();
+                events.extend(self.background_events(changed));
+                events
             }
             "item/agentMessage/delta" => delta_event(params, |item_id, delta| {
                 Event::AgentMessageDelta { item_id, delta }

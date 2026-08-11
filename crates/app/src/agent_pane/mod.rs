@@ -43,6 +43,7 @@ use gpui_component::{
     ActiveTheme as _, Disableable as _, ElementExt as _, Icon, IconName, IconNamed, Sizable as _,
     VirtualListScrollHandle, h_flex, text, v_flex, v_virtual_list,
 };
+use nmt_agent_utils::background_task::{BackgroundTaskKey, BackgroundTaskSnapshot};
 use nmt_agent_utils::chat::{
     Compaction, CompactionTrigger, ContextWindowUsage, Event as SessionEvent, Item as SessionItem,
     ModelInfo, SendOutcome, SessionSummary, SkillCatalog, SkillInfo, SkillReference,
@@ -335,4 +336,12 @@ pub(crate) struct AgentPane {
     /// contents while preventing input from reaching a missing backend.
     update_suspension: Option<UpdateSuspension>,
     last_recovery_snapshot: Option<RecoverySnapshot>,
+    /// Claude session id whose child agents were already restored from
+    /// history. Ready fires again during first-turn initialization, so the
+    /// read happens once per conversation rather than once per confirmation.
+    restored_task_session: Option<String>,
+    /// Latest child-agent snapshot published by the provider adapter. The
+    /// adapter owns child lifecycle; the pane keeps only this replacement copy
+    /// so the right-side view never maintains a second mutable registry.
+    background_tasks: Option<BackgroundTaskSnapshot>,
 }

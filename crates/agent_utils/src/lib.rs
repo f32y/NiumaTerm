@@ -1,3 +1,4 @@
+pub mod background_task;
 pub mod chat;
 pub mod claude_code;
 pub mod codex;

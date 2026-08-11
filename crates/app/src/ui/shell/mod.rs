@@ -33,6 +33,7 @@ use gpui_component::resizable::{
 use gpui_component::{
     ActiveTheme, Icon, IconName, IconNamed, Root, TitleBar, WindowExt, h_flex, v_flex,
 };
+use nmt_agent_utils::background_task::BackgroundTaskKey;
 use nmt_agent_utils::update::{ProviderKind, UpdatePhase};
 use nmt_agent_utils::{
     AgentEvent, AgentMonitor, AgentNotification, AgentRoute, AgentRuntimeStatus, agent_process,
@@ -60,14 +61,17 @@ use crate::pane_tree::{PaneId, PaneNode, PaneTree, RemoveOutcome, SplitDirection
 use crate::tabs::{TabId, TabManager};
 use crate::terminal::session::HostEvent;
 use crate::terminal::view::{AgentInterrupted, TerminalPane};
+use crate::ui::background_tasks::BackgroundTasksView;
 use crate::ui::floating_surface;
 use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::git_status::{GitStatusModel, GitStatusView};
+use crate::ui::right_panel::{RightPanel, RightPanelKind};
 use crate::ui::settings::{AgentProfile, AppSettings, settings_view};
 pub(crate) use crate::ui::shell::actions::{
     CloseTab, NewAgentTab, NewRemoteTab, NewTab, NewWindow, NewWorkspace, NextTab, NextWorkspace,
     PrevTab, PrevWorkspace, ResizePaneDown, ResizePaneLeft, ResizePaneRight, ResizePaneUp,
-    ShowSettings, SplitDown, SplitLeft, SplitRight, SplitUp, ToggleGitSidebar, ToggleSidebar,
+    ShowSettings, SplitDown, SplitLeft, SplitRight, SplitUp, ToggleBackgroundTasks,
+    ToggleGitSidebar, ToggleSidebar,
 };
 #[cfg(test)]
 use crate::ui::shell::close::{should_confirm_close, should_confirm_tab_close};
@@ -127,9 +131,13 @@ pub(crate) struct Shell {
     git_model: Entity<GitStatusModel>,
     /// Titlebar `+N -M` indicator (self-gating on its setting).
     git_status: Entity<GitStatusView>,
-    /// Right-side git sidebar panel; always mounted so close can animate.
-    git_sidebar: Entity<GitSidebar>,
-    git_sidebar_open: bool,
+    /// The single right-side area, shared by Git and `Background Tasks`;
+    /// always mounted so close can animate.
+    right_panel: Entity<RightPanel>,
+    /// Highest task activity ordinal the user has already seen, per parent
+    /// session. Kept per session so opening one tab's view cannot hide new
+    /// activity in another tab.
+    seen_task_activity: collections::HashMap<BackgroundTaskKey, u64>,
     /// Stable entities let each installation's card replace content in place
     /// without entering the transient Root notification lifecycle.
     update_notifications: collections::HashMap<String, Entity<Notification>>,
@@ -279,9 +287,13 @@ impl Shell {
             token_usage: cx.new(TokenUsageView::new),
             agent_usage: cx.new(AgentUsageView::new),
             git_status: cx.new(|cx| GitStatusView::new(git_model.clone(), cx)),
-            git_sidebar: cx.new(|cx| GitSidebar::new(git_model.clone(), cx)),
+            right_panel: {
+                let git = cx.new(|cx| GitSidebar::new(git_model.clone(), cx));
+                let tasks = cx.new(|_| BackgroundTasksView::new());
+                cx.new(|_| RightPanel::new(git, tasks))
+            },
             git_model,
-            git_sidebar_open: false,
+            seen_task_activity: collections::HashMap::new(),
             update_notifications: collections::HashMap::new(),
             update_notification_views: collections::HashMap::new(),
             update_terminal_elapsed: collections::HashMap::new(),
@@ -316,12 +328,9 @@ impl Shell {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.git_sidebar_open = !self.git_sidebar_open;
-
-        let open = self.git_sidebar_open;
-
-        self.git_sidebar
-            .update(cx, |sidebar, cx| sidebar.set_open(open, cx));
+        let open = self
+            .right_panel
+            .update(cx, |panel, cx| panel.select(RightPanelKind::Git, cx));
 
         self.git_model.update(cx, |model, cx| {
             model.sidebar_open = open;
@@ -331,6 +340,71 @@ impl Shell {
         });
 
         cx.notify();
+    }
+
+    fn on_toggle_background_tasks(
+        &mut self,
+        _: &ToggleBackgroundTasks,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // The view is scoped to one parent session, so a pane without a
+        // started or restored provider session has nothing to open.
+        let Some(parent) = self.active_task_parent(cx) else {
+            return;
+        };
+        let open = self.right_panel.update(cx, |panel, cx| {
+            panel.select(RightPanelKind::BackgroundTasks, cx)
+        });
+
+        if open {
+            self.sync_task_panel_target(cx);
+            // Opening marks only this session's activity as seen.
+            if let Some(activity) = self.active_task_activity(cx) {
+                self.seen_task_activity.insert(parent, activity);
+            }
+            // Asking for fresher data happens on the open edge, not on every
+            // render, so a visible panel does not re-query the provider each
+            // frame. The adapter still ignores overlapping requests.
+            if let Some(pane) = self.active_agent() {
+                pane.update(cx, |pane, _| pane.refresh_background_tasks());
+            }
+        }
+        // Git content owns the poller's own visibility flag; leaving Git for
+        // another view stops the polling it turned on.
+        self.git_model
+            .update(cx, |model, _| model.sidebar_open = false);
+
+        cx.notify();
+    }
+
+    /// Provider-qualified parent session of the active pane, or `None` when it
+    /// is a terminal, an unsupported provider, or an Agent tab whose session id
+    /// is not established yet.
+    fn active_task_parent(&self, cx: &App) -> Option<BackgroundTaskKey> {
+        self.active_agent()?.read(cx).background_task_parent()
+    }
+
+    fn active_task_activity(&self, cx: &App) -> Option<u64> {
+        Some(self.active_agent()?.read(cx).background_tasks()?.activity)
+    }
+
+    /// Point the view at the active Agent pane and close it when that pane
+    /// stopped being a supported provider session.
+    fn sync_task_panel_target(&mut self, cx: &mut Context<Self>) {
+        let target = self
+            .active_agent()
+            .filter(|pane| pane.read(cx).background_task_parent().is_some());
+
+        if target.is_none() {
+            self.right_panel.update(cx, |panel, cx| {
+                panel.close_if_showing(RightPanelKind::BackgroundTasks, cx)
+            });
+        }
+
+        let handle = target.map(|pane| pane.downgrade());
+        let tasks = self.right_panel.read(cx).tasks().clone();
+        tasks.update(cx, |view, cx| view.set_target(handle, cx));
     }
 
     pub(crate) fn alloc_id(next_id: &mut u64) -> u64 {

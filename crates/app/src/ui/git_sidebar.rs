@@ -1,22 +1,18 @@
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, Context, DragMoveEvent, Entity, Pixels, ScrollStrategy, UniformListScrollHandle,
-    Window, div, px, uniform_list,
+    AnyElement, Context, Entity, ScrollStrategy, UniformListScrollHandle, Window, div, px,
+    uniform_list,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 use gpui_component::{ActiveTheme, IconName, Sizable as _, h_flex, v_flex};
 
 use crate::terminal::metrics;
-use crate::ui::UI_RADIUS;
 use crate::ui::git_status::{DiffLine, DiffLineKind, GitStatusModel, fetch_file_diff};
-use crate::ui::sidebar_resize::{self, ResizeDrag};
 
-const SIDEBAR_WIDTH: f32 = 360.0;
-/// Drag limits: keep the sidebar usable and leave room for the terminal.
-const MIN_WIDTH: f32 = 240.0;
-const MAX_WIDTH: f32 = 900.0;
-
+/// Git content for the shared right-side host. Open state, width, slide
+/// animation, resizing, and the outer card belong to that host, so Git and
+/// `Background Tasks` cannot disagree about the geometry they share.
 pub(crate) struct GitSidebar {
     model: Entity<GitStatusModel>,
     selected: Option<String>,
@@ -28,10 +24,6 @@ pub(crate) struct GitSidebar {
     seen_snapshot_seq: u64,
     files_scroll: UniformListScrollHandle,
     diff_scroll: UniformListScrollHandle,
-    width: Pixels,
-    open: bool,
-    /// False on startup and after resizing so only explicit toggles slide.
-    animated: bool,
 }
 
 impl GitSidebar {
@@ -54,17 +46,7 @@ impl GitSidebar {
             seen_snapshot_seq: 0,
             files_scroll: UniformListScrollHandle::default(),
             diff_scroll: UniformListScrollHandle::default(),
-            width: px(SIDEBAR_WIDTH),
-            open: false,
-            animated: false,
         }
-    }
-
-    pub(crate) fn set_open(&mut self, open: bool, cx: &mut Context<Self>) {
-        self.open = open;
-        self.animated = true;
-
-        cx.notify();
     }
 
     fn on_snapshot_changed(&mut self, cx: &mut Context<Self>) {
@@ -300,8 +282,6 @@ fn scrollbar(handle: &UniformListScrollHandle) -> impl IntoElement {
 
 impl Render for GitSidebar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let width = self.width;
-        let open = self.open;
         let model = self.model.clone();
         let in_repo = model.read(cx).snapshot.is_some();
 
@@ -343,58 +323,6 @@ impl Render for GitSidebar {
                 .into_any_element()
         };
 
-        let resize_handle =
-            open.then(|| sidebar_resize::resize_handle("git-sidebar-resize", true, cx));
-
-        // The sidebar surface is a floating card (own background, 1px border,
-        // large radius) in a gutter cut from the fixed width: right inset
-        // clears the window edge, the top inset lines up with the tab pills,
-        // and the terminal column's own gutter provides the left gap — so the
-        // resize handle keeps riding the card's left edge.
-        let card = v_flex()
-            .size_full()
-            .bg(cx.theme().sidebar)
-            .border_1()
-            .border_color(cx.theme().sidebar_border)
-            .rounded(UI_RADIUS)
-            .overflow_hidden()
-            .child(header)
-            .child(body);
-
-        let content = div()
-            .w(width)
-            .h_full()
-            .flex_none()
-            .relative()
-            .pr(px(6.))
-            .pt(px(4.))
-            .pb(px(6.))
-            .child(card);
-
-        let wrapper = div()
-            .h_full()
-            .flex_none()
-            .relative()
-            .overflow_hidden()
-            .on_drag_move(cx.listener(|this, e: &DragMoveEvent<ResizeDrag>, _, cx| {
-                // The panel's right edge is pinned to the window edge, so
-                // the new width is right edge minus pointer x.
-                let width = (e.bounds.right() - e.event.position.x)
-                    .max(px(MIN_WIDTH))
-                    .min(px(MAX_WIDTH));
-                if width != this.width {
-                    this.width = width;
-                    // Render at the live drag width; the next toggle re-arms
-                    // the slide animation.
-                    this.animated = false;
-                    cx.notify();
-                }
-            }))
-            .child(content)
-            .children(resize_handle);
-
-        // Keep the entity mounted at width zero while closed so it can render
-        // the closing frames instead of disappearing in the toggle render.
-        sidebar_resize::slide_width(wrapper, "git-sidebar", open, width, self.animated)
+        v_flex().size_full().child(header).child(body)
     }
 }

@@ -21,6 +21,7 @@ actions!(
         ResizePaneRight,
         ToggleSidebar,
         ToggleGitSidebar,
+        ToggleBackgroundTasks,
         ShowSettings,
         NewRemoteTab,
         NewAgentTab,
