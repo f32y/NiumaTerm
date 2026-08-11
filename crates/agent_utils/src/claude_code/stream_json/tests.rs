@@ -776,3 +776,33 @@ fn a_resumed_session_asks_for_its_context_before_the_first_turn() {
     drop(session);
     let _ = fs::remove_file(log);
 }
+
+/// The adapter forwards a command's arguments as its text, so an entry that
+/// declares none rejects input the CLI itself accepts. These entries are only
+/// a fallback for versions whose discovery payload omits the command, and a
+/// fallback that is stricter than the real thing is a bug.
+#[test]
+fn adapter_commands_declare_the_arguments_the_cli_accepts() {
+    let commands = Session::adapter_commands();
+    let compact = commands
+        .iter()
+        .find(|command| command.name == "compact")
+        .expect("compact is offered as a fallback");
+    let rewind = commands
+        .iter()
+        .find(|command| command.name == "rewind")
+        .expect("rewind is offered");
+
+    assert_eq!(compact.arguments, SlashCommandArguments::Freeform);
+    assert!(compact.argument_hint.is_some());
+    assert_eq!(
+        slash_command_text("compact", "focus on the API"),
+        "/compact focus on the API",
+        "instructions reach the CLI as part of the command"
+    );
+
+    // Rewind opens this application's own picker, so there is no text to
+    // forward and nothing for arguments to mean.
+    assert!(ui_owns_slash_command("rewind"));
+    assert_eq!(rewind.arguments, SlashCommandArguments::None);
+}

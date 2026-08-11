@@ -163,9 +163,15 @@ impl Session {
             SlashCommandInfo {
                 name: "compact".to_string(),
                 description: "Compact the current conversation context".to_string(),
-                argument_hint: None,
+                argument_hint: Some("[instructions]".to_string()),
                 source: SlashCommandSource::Adapter,
-                arguments: SlashCommandArguments::None,
+                // The CLI accepts optional instructions steering what the
+                // summary keeps, and this adapter forwards whatever it is
+                // given as the command's text. This entry exists only as a
+                // fallback for versions whose discovery payload omits the
+                // command, so declaring no arguments here would reject input
+                // the CLI itself accepts.
+                arguments: SlashCommandArguments::Freeform,
                 run_policy: SlashCommandRunPolicy::QueueUntilIdle,
             },
             SlashCommandInfo {
