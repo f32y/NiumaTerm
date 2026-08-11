@@ -530,6 +530,11 @@ fn dynamic_commands_accept_both_json_shapes_and_drop_invalid_duplicates() {
     assert_eq!(parsed[1].argument_hint.as_deref(), Some("[focus]"));
     assert_eq!(parsed[2].description, "Compact it");
     assert_eq!(parsed[1].arguments, SlashCommandArguments::Freeform);
+    // A command the catalog gave no hint for still takes arguments. Skills
+    // arrive this way, and rejecting them client-side made every one of them
+    // unusable with input.
+    assert_eq!(parsed[0].argument_hint, None);
+    assert_eq!(parsed[0].arguments, SlashCommandArguments::Freeform);
     assert!(parse_slash_commands(&Value::Null).is_empty());
 }
 
