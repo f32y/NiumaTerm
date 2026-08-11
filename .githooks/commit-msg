@@ -57,6 +57,43 @@ EOF
 fi
 
 subject=$(sed -n '/^#/!{/./{p;q;}}' "$msg_file")
+
+# 50/72 rule: keep the subject under 50 chars and wrap body lines at 72.
+# Trailer-shaped lines (Key: value) are exempt from the body wrap, matching
+# git's own behavior with generated trailers like Signed-off-by.
+subject_len=${#subject}
+if [ "$subject_len" -gt 50 ]; then
+    cat >&2 <<EOF
+commit-msg: subject exceeds 50 characters
+
+Keep the subject to a single line of at most 50 characters; put detail in
+the body.
+
+Actual ($subject_len chars):
+  $subject
+EOF
+    exit 1
+fi
+
+long_body=$(
+    printf '%s\n' "$body" | awk '
+        !subject_seen {
+            if (length($0) > 0) { subject_seen = 1; next }
+        }
+        /^[A-Za-z][A-Za-z0-9-]+: / { next }
+        length($0) > 72 { printf "%d: %d chars: %s\n", NR, length($0), $0 }
+    '
+)
+if [ -n "$long_body" ]; then
+    cat >&2 <<EOF
+commit-msg: body lines must be wrapped at 72 characters
+
+Offending lines:
+$long_body
+EOF
+    exit 1
+fi
+
 pattern='^(feat|fix|refactor|docs|perf|test|chore|build|ci|style|revert|lint)(\([a-z0-9_.-]+\))?: [a-z0-9].*$'
 
 if printf '%s\n' "$subject" | grep -Eq "$pattern"; then
