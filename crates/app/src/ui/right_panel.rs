@@ -57,16 +57,6 @@ impl RightPanelSelection {
         }
         self.open
     }
-
-    /// Close the area when it currently shows `kind`. Returns whether the
-    /// selection changed.
-    pub(crate) fn close_if_showing(&mut self, kind: RightPanelKind) -> bool {
-        if !self.shows(kind) {
-            return false;
-        }
-        self.open = false;
-        true
-    }
 }
 
 pub(crate) struct RightPanel {
@@ -107,17 +97,6 @@ impl RightPanel {
         self.sync_task_visibility(cx);
         cx.notify();
         open
-    }
-
-    /// Close the area when its current content has nothing to show, for
-    /// example after the active pane stops being a supported Agent tab.
-    pub(crate) fn close_if_showing(&mut self, kind: RightPanelKind, cx: &mut Context<Self>) {
-        if !self.selection.close_if_showing(kind) {
-            return;
-        }
-        self.animated = true;
-        self.sync_task_visibility(cx);
-        cx.notify();
     }
 
     fn sync_task_visibility(&self, cx: &mut Context<Self>) {
