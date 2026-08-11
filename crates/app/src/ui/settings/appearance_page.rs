@@ -82,6 +82,22 @@ pub(super) fn appearance_page(
                     .description("Use a translucent background for Terminal View and Agent Pane."),
                 )
                 .item(
+                    SettingItem::new("Background Opacity", background_opacity_field())
+                        .description(
+                            "Whole-window opacity while a translucent backdrop is selected.",
+                        )
+                        .disabled(backdrop == WindowBackdrop::Off),
+                )
+                .item(
+                    SettingItem::new("Background Image", background_image_field())
+                        .description("Local image stretched to cover the whole window."),
+                )
+                .item(
+                    SettingItem::new("Background Image Opacity", background_image_opacity_field())
+                        .description("How strongly the image shows through window surfaces.")
+                        .disabled(!background_image_enabled),
+                )
+                .item(
                     SettingItem::new(
                         "Smooth Scrolling",
                         SettingField::dropdown(
@@ -100,22 +116,6 @@ pub(super) fn appearance_page(
                         .default_value(SharedString::from("all")),
                     )
                     .description("Choose where traditional mouse-wheel scrolling is animated."),
-                )
-                .item(
-                    SettingItem::new("Background Opacity", background_opacity_field())
-                        .description(
-                            "Whole-window opacity while a translucent backdrop is selected.",
-                        )
-                        .disabled(backdrop == WindowBackdrop::Off),
-                )
-                .item(
-                    SettingItem::new("Background Image", background_image_field())
-                        .description("Local image stretched to cover the whole window."),
-                )
-                .item(
-                    SettingItem::new("Background Image Opacity", background_image_opacity_field())
-                        .description("How strongly the image shows through window surfaces.")
-                        .disabled(!background_image_enabled),
                 ),
         )
         .group(
