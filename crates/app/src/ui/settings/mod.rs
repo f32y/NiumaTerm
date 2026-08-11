@@ -6,6 +6,7 @@
 mod about_page;
 mod agent_page;
 mod agent_profile_dialog;
+mod agent_profile_list;
 mod appearance_page;
 mod card;
 mod fields;
@@ -14,6 +15,7 @@ mod profiles_page;
 mod remote_session_page;
 mod state;
 mod system_page;
+mod table;
 mod terminal_page;
 mod theme;
 
@@ -25,14 +27,14 @@ use gpui::AppContext as _;
 use gpui::WindowBackgroundAppearance;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, ClipboardItem, Div, FileDialogFilter, Global, IntoElement as _,
-    ParentElement as _, PathPromptOptions, SharedString, StyleRefinement, Styled as _, Window, div,
-    px, relative,
+    AnyElement, App, ClipboardItem, Div, FileDialogFilter, Global, InteractiveElement as _,
+    IntoElement as _, ParentElement as _, PathPromptOptions, SharedString,
+    StatefulInteractiveElement as _, StyleRefinement, Styled as _, Window, div, px, relative,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::dialog::{DialogClose, DialogFooter};
 use gpui_component::group_box::{GroupBox, GroupBoxVariants as _};
-use gpui_component::input::Input;
+use gpui_component::input::{Input, InputEvent};
 use gpui_component::label::Label;
 use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::setting::{
@@ -64,6 +66,7 @@ use crate::ui::settings::agent_page::agent_page;
 #[cfg(test)]
 use crate::ui::settings::agent_page::{installation_update_title, installation_version_text};
 use crate::ui::settings::agent_profile_dialog::open_agent_profile_dialog;
+use crate::ui::settings::agent_profile_list::agent_profile_list;
 use crate::ui::settings::appearance_page::appearance_page;
 use crate::ui::settings::card::{card_row, card_text_input};
 use crate::ui::settings::fields::{
@@ -103,6 +106,9 @@ use crate::ui::settings::state::{
     input_style_from_value, input_style_label,
 };
 use crate::ui::settings::system_page::system_page;
+use crate::ui::settings::table::{
+    ENV_OPERATION_COLUMN, TABLE_OPERATION_BUTTON, TrashIcon, table_frame, table_header, table_row,
+};
 use crate::ui::settings::terminal_page::terminal_page;
 #[cfg(test)]
 use crate::ui::settings::theme::tab_background_opacity;
