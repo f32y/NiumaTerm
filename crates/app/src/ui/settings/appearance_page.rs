@@ -3,6 +3,7 @@ use crate::ui::settings::*;
 pub(super) fn appearance_page(
     backdrop: WindowBackdrop,
     background_image_enabled: bool,
+    tab_auto_size: bool,
 ) -> SettingPage {
     SettingPage::new("Appearance")
         .default_open(true)
@@ -206,23 +207,43 @@ pub(super) fn appearance_page(
                 ),
         )
         .group(
-            SettingGroup::new().title("Tab Bar").item(
-                SettingItem::new(
-                    "Tab Width",
-                    SettingField::number_input(
-                        NumberFieldOptions {
-                            min: DEFAULT_TAB_WIDTH,
-                            max: MAX_TAB_WIDTH,
-                            step: 1.0,
-                        },
-                        |cx| cx.global::<AppSettings>().tab_width,
-                        |value, cx| {
-                            cx.global_mut::<AppSettings>().tab_width = clamp_tab_width(value);
-                        },
+            SettingGroup::new()
+                .title("Tab Bar")
+                .item(
+                    SettingItem::new(
+                        "Auto Size",
+                        SettingField::switch(
+                            |cx| cx.global::<AppSettings>().tab_auto_size,
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().tab_auto_size = value;
+                            },
+                        ),
+                    )
+                    .description(
+                        "Narrow tabs as the strip fills, down to the leading icon. \
+                         Turn off to hold a fixed width.",
                     ),
                 )
-                .description("Fixed tab width in pixels; long titles are clipped."),
-            ),
+                .item(
+                    SettingItem::new(
+                        "Tab Width",
+                        SettingField::number_input(
+                            NumberFieldOptions {
+                                min: DEFAULT_TAB_WIDTH,
+                                max: MAX_TAB_WIDTH,
+                                step: 1.0,
+                            },
+                            |cx| cx.global::<AppSettings>().tab_width,
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().tab_width = clamp_tab_width(value);
+                            },
+                        ),
+                    )
+                    // Auto Size derives the width from the strip, so the entry
+                    // would report a value the tabs no longer use.
+                    .disabled(tab_auto_size)
+                    .description("Fixed tab width in pixels; long titles are clipped."),
+                ),
         )
         .group(
             SettingGroup::new()

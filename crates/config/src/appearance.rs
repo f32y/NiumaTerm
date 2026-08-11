@@ -206,6 +206,10 @@ pub struct AppearanceConfig {
     /// Fixed tab width in pixels (120–360; clamped on load).
     #[serde(default = "default_tab_width", rename = "tab-width")]
     pub tab_width: f64,
+    /// Shrink tabs toward a minimum as the strip fills, instead of holding
+    /// `tab_width`.
+    #[serde(default, rename = "tab-auto-size")]
+    pub tab_auto_size: bool,
     /// Font family for the app chrome (titlebar, sidebar, tabs, dialogs).
     #[serde(default = "default_ui_font", rename = "ui-font")]
     pub ui_font: String,
@@ -291,6 +295,7 @@ impl Default for AppearanceConfig {
             show_git_status_on_title_bar: false,
             git_status_refresh_interval: default_git_status_refresh_interval(),
             tab_width: default_tab_width(),
+            tab_auto_size: false,
             ui_font: default_ui_font(),
             terminal_font_family: default_terminal_font_family(),
             terminal_font_size: default_terminal_font_size(),

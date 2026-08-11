@@ -140,7 +140,11 @@ pub fn settings_view(cx: &App) -> Settings {
         // whole category top to bottom.
         .single_group_pages(true)
         .page(terminal_page())
-        .page(appearance_page(backdrop, background_image_enabled))
+        .page(appearance_page(
+            backdrop,
+            background_image_enabled,
+            cx.global::<AppSettings>().tab_auto_size,
+        ))
         .page(profiles_page(&profiles, &agent_profiles))
         .page(agent_page(&agent_profiles, cx))
         .page(system_page(shell_integration_mismatched))
