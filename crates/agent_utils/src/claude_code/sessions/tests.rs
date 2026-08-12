@@ -1,6 +1,18 @@
+use std::io::BufRead;
+
 use crate::background_task::{BackgroundTaskState, BackgroundTaskTranscript};
 use crate::chat::{CompactionTrigger, Item};
 use crate::claude_code::sessions::*;
+
+/// Replayed conversation with its turn grouping flattened away, for the tests
+/// that assert what a session replays rather than how it is divided.
+fn replayed_items(reader: impl BufRead) -> Vec<Item> {
+    parse_replay(reader)
+        .into_iter()
+        .flat_map(|turn| turn.items)
+        .map(|entry| entry.item)
+        .collect()
+}
 
 const ACTIVE_CHAIN_FIXTURE: &str =
     include_str!("../../../tests/fixtures/claude/active-chain.jsonl");
@@ -139,8 +151,8 @@ fn fork_remaps_the_exact_active_prefix_and_preserves_unknown_fields() {
         .map(Value::to_string)
         .collect::<Vec<_>>()
         .join("\n");
-    let mut expected = parse_replay(ACTIVE_CHAIN_FIXTURE.as_bytes());
-    let mut actual = parse_replay(serialized.as_bytes());
+    let mut expected = replayed_items(ACTIVE_CHAIN_FIXTURE.as_bytes());
+    let mut actual = replayed_items(serialized.as_bytes());
     for items in [&mut expected, &mut actual] {
         for item in items {
             if let Item::Compaction { id, .. } = item {
@@ -213,7 +225,7 @@ fn atomic_fork_write_never_changes_the_source_file() {
 
 #[test]
 fn active_chain_replay_keeps_tools_and_compaction_but_drops_abandoned_content() {
-    let items = parse_replay(ACTIVE_CHAIN_FIXTURE.as_bytes());
+    let items = replayed_items(ACTIVE_CHAIN_FIXTURE.as_bytes());
 
     assert!(items.iter().any(|item| matches!(
         item,
@@ -270,7 +282,7 @@ fn a_missing_parent_keeps_only_the_reachable_suffix() {
         Some("ffffffff-ffff-4fff-8fff-ffffffffffff")
     );
     assert_eq!(
-        parse_replay(MISSING_PARENT_FIXTURE.as_bytes()),
+        replayed_items(MISSING_PARENT_FIXTURE.as_bytes()),
         vec![Item::AgentMessage {
             id: "replay-message-0".into(),
             text: Some("reachable suffix only".into()),
@@ -354,7 +366,7 @@ fn a_compaction_replays_as_one_row_carrying_summary_and_accounting() {
     ];
     let content: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
 
-    let items = parse_replay(content.join("\n").as_bytes());
+    let items = replayed_items(content.join("\n").as_bytes());
 
     assert_eq!(
         items,
@@ -402,7 +414,7 @@ fn a_summary_before_its_boundary_marker_still_replays_as_one_row() {
     ];
     let content: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
 
-    let items = parse_replay(content.join("\n").as_bytes());
+    let items = replayed_items(content.join("\n").as_bytes());
 
     assert_eq!(
         items,
@@ -439,7 +451,7 @@ fn a_boundary_without_a_summary_turn_still_marks_the_break() {
     ];
     let content: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
 
-    let items = parse_replay(content.join("\n").as_bytes());
+    let items = replayed_items(content.join("\n").as_bytes());
 
     assert_eq!(
         items,
@@ -468,7 +480,7 @@ fn a_summary_whose_boundary_never_reached_disk_keeps_its_row() {
     let line = serde_json::json!({"type": "user", "uuid": "s1",
         "isCompactSummary": true, "message": {"content": "partial summary"}});
 
-    let items = parse_replay(line.to_string().as_bytes());
+    let items = replayed_items(line.to_string().as_bytes());
 
     assert_eq!(
         items,
@@ -522,7 +534,7 @@ fn replay_keeps_dialogue_and_preserves_tool_details() {
     ];
     let content: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
 
-    let items = parse_replay(content.join("\n").as_bytes());
+    let items = replayed_items(content.join("\n").as_bytes());
 
     assert_eq!(
         items,
@@ -572,7 +584,7 @@ fn replay_preserves_api_error_semantics() {
         }
     });
 
-    let items = parse_replay(line.to_string().as_bytes());
+    let items = replayed_items(line.to_string().as_bytes());
 
     assert_eq!(
         items,
@@ -1005,7 +1017,7 @@ fn task_notifications_are_not_replayed_as_user_prompts() {
         }),
     ]);
 
-    let items = parse_replay(lines.as_bytes());
+    let items = replayed_items(lines.as_bytes());
 
     assert_eq!(
         items,
@@ -1035,7 +1047,7 @@ fn an_interruption_marker_is_not_replayed_as_a_user_prompt() {
         }),
     ]);
 
-    let items = parse_replay(lines.as_bytes());
+    let items = replayed_items(lines.as_bytes());
 
     assert_eq!(
         items,
@@ -1056,7 +1068,7 @@ fn a_task_notification_without_an_origin_is_still_not_a_prompt() {
         "message": {"role": "user", "content": "<task-notification>\n<status>completed</status>\n</task-notification>"},
     })]);
 
-    assert!(parse_replay(lines.as_bytes()).is_empty());
+    assert!(replayed_items(lines.as_bytes()).is_empty());
 }
 
 #[test]
@@ -1072,5 +1084,68 @@ fn an_ordinary_prompt_mentioning_a_notification_is_still_a_prompt() {
         "message": {"role": "user", "content": "why did the <task-notification> block appear?"},
     })]);
 
-    assert_eq!(parse_replay(lines.as_bytes()).len(), 1);
+    assert_eq!(replayed_items(lines.as_bytes()).len(), 1);
+}
+
+#[test]
+fn replay_divides_a_session_into_the_turns_it_recorded() {
+    let lines = [
+        serde_json::json!({"type": "user", "uuid": "u1", "parentUuid": null,
+            "timestamp": "2026-08-07T01:00:00Z",
+            "message": {"role": "user", "content": "first prompt"}}),
+        serde_json::json!({"type": "assistant", "uuid": "a1", "parentUuid": "u1",
+            "timestamp": "2026-08-07T01:00:42Z",
+            "message": {"content": [{"type": "text", "text": "first answer"}],
+                "usage": {"output_tokens": 120}}}),
+        // Written beside the chain rather than in it: nothing links to it.
+        serde_json::json!({"type": "system", "subtype": "turn_duration", "uuid": "d1",
+            "parentUuid": "a1", "isMeta": false, "durationMs": 42_000, "messageCount": 2}),
+        serde_json::json!({"type": "user", "uuid": "u2", "parentUuid": "a1",
+            "timestamp": "2026-08-07T01:01:00Z",
+            "message": {"role": "user", "content": "second prompt"}}),
+        serde_json::json!({"type": "assistant", "uuid": "a2", "parentUuid": "u2",
+            "message": {"content": [{"type": "text", "text": "second answer"}],
+                "usage": {"output_tokens": 30}}}),
+        serde_json::json!({"type": "user", "uuid": "i1", "parentUuid": "a2",
+            "interruptedMessageId": "msg_1",
+            "message": {"role": "user", "content": "[Request interrupted by user]"}}),
+    ];
+    let content: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+
+    let turns = parse_replay(content.join("\n").as_bytes());
+
+    assert_eq!(turns.len(), 2);
+    assert_eq!(turns[0].seconds, Some(42));
+    assert_eq!(turns[0].output_tokens, Some(120));
+    assert!(!turns[0].interrupted);
+    assert_eq!(
+        turns[0].items[0].at,
+        Some(
+            chrono::DateTime::parse_from_rfc3339("2026-08-07T01:00:00Z")
+                .unwrap()
+                .timestamp()
+        )
+    );
+    assert_eq!(
+        turns[0]
+            .items
+            .iter()
+            .map(|entry| entry.item.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            Item::UserMessage {
+                text: Some("first prompt".into())
+            },
+            Item::AgentMessage {
+                id: "replay-message-0".into(),
+                text: Some("first answer".into())
+            },
+        ]
+    );
+
+    // No duration record closed the second turn, and the user stopped it.
+    assert_eq!(turns[1].seconds, None);
+    assert_eq!(turns[1].output_tokens, Some(30));
+    assert!(turns[1].interrupted);
+    assert_eq!(turns[1].items.len(), 2);
 }

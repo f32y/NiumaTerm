@@ -4,8 +4,9 @@ use serde_json::{Value, json};
 
 use crate::CodexProviderConfig;
 use crate::chat::{
-    Compaction, ContextUsageScope, ContextWindowUsage, Event, Item, ModelInfo, ScopedTokenUsage,
-    SessionSummary, SkillReference, SlashCommandOutcome, ThreadSettings, TokenUsageBreakdown,
+    Compaction, ContextUsageScope, ContextWindowUsage, Event, Item, ModelInfo, ReplayItem,
+    ReplayTurn, ScopedTokenUsage, SessionSummary, SkillReference, SlashCommandOutcome,
+    ThreadSettings, TokenUsageBreakdown,
 };
 use crate::codex::app_server::{
     PROVIDER_API_FIELD, THREAD_LIST_LIMIT, THREAD_RESUME_RPC_ID, THREAD_START_RPC_ID, ThreadProfile,
@@ -354,39 +355,66 @@ pub(super) fn parse_thread_summaries(
 /// the same typed item parser as live notifications. Keeping one parser is the
 /// invariant that prevents restored tool cards from losing output or status as
 /// the app-server schema evolves.
-pub(super) fn parse_replay(turns: &Value) -> Vec<Item> {
-    let mut items: Vec<Item> = Vec::new();
+pub(super) fn parse_replay(turns: &Value) -> Vec<ReplayTurn> {
+    let mut replay = Vec::new();
 
-    for item in turns
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|turn| turn["items"].as_array())
-        .flatten()
-    {
-        match item["type"].as_str() {
-            // Hook prompts are provider plumbing rather than transcript
-            // activity. Every supported transcript item goes through the live
-            // parser so dialogue, command output, diffs, and tool results
-            // cannot diverge between live and restored sessions.
-            Some("hookPrompt") | None => {}
-            Some(_) => {
-                if let Some(item) = parse_item(item) {
-                    let visible = match &item {
-                        Item::UserMessage { text } | Item::AgentMessage { text, .. } => {
-                            text.as_deref().is_some_and(|text| !text.trim().is_empty())
+    for turn in turns.as_array().into_iter().flatten() {
+        // Every item is timed by the turn that produced it: the response dates
+        // turns, not the items inside them.
+        let at = turn["startedAt"].as_i64();
+        let mut items: Vec<ReplayItem> = Vec::new();
+
+        for item in turn["items"].as_array().into_iter().flatten() {
+            match item["type"].as_str() {
+                // Hook prompts are provider plumbing rather than transcript
+                // activity. Every supported transcript item goes through the
+                // live parser so dialogue, command output, diffs, and tool
+                // results cannot diverge between live and restored sessions.
+                Some("hookPrompt") | None => {}
+                Some(_) => {
+                    if let Some(item) = parse_item(item) {
+                        let visible = match &item {
+                            Item::UserMessage { text } | Item::AgentMessage { text, .. } => {
+                                text.as_deref().is_some_and(|text| !text.trim().is_empty())
+                            }
+                            _ => true,
+                        };
+                        if visible {
+                            items.push(ReplayItem { item, at });
                         }
-                        _ => true,
-                    };
-                    if visible {
-                        items.push(item);
                     }
                 }
             }
         }
+
+        // A turn that failed reports its reason here rather than as an item, so
+        // without this a failed turn would replay as though it had succeeded.
+        if let Some(error) = turn["error"]
+            .as_str()
+            .filter(|error| !error.trim().is_empty())
+        {
+            items.push(ReplayItem {
+                at,
+                item: Item::Error {
+                    text: error.to_string(),
+                },
+            });
+        }
+
+        if items.is_empty() {
+            continue;
+        }
+
+        replay.push(ReplayTurn {
+            items,
+            seconds: turn["durationMs"].as_u64().map(|ms| ms / 1000),
+            // The response reports no per-turn token total.
+            output_tokens: None,
+            interrupted: turn["status"].as_str() == Some("interrupted"),
+        });
     }
 
-    items
+    replay
 }
 
 /// A user message item's `content` is an array of typed `UserInput` blocks.

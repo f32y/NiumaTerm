@@ -1,6 +1,16 @@
 use crate::codex::app_server::protocol::{command_purpose, turn_start_params};
 use crate::codex::app_server::*;
 
+/// Replayed conversation with its turn grouping flattened away, for the tests
+/// that assert what a thread replays rather than how it is divided.
+fn replayed_items(turns: &Value) -> Vec<Item> {
+    parse_replay(turns)
+        .into_iter()
+        .flat_map(|turn| turn.items)
+        .map(|entry| entry.item)
+        .collect()
+}
+
 #[test]
 fn codex_initialize_enables_experimental_api_for_descendant_queries() {
     assert_eq!(
@@ -457,7 +467,7 @@ fn resumed_turns_replay_dialogue_and_preserve_activity_details() {
     ]);
 
     assert_eq!(
-        parse_replay(&turns),
+        replayed_items(&turns),
         vec![
             Item::UserMessage {
                 text: Some("question".into())
@@ -734,7 +744,7 @@ fn replayed_compaction_ignores_non_protocol_summary_fields() {
     ]}]);
 
     assert_eq!(
-        parse_replay(&turns),
+        replayed_items(&turns),
         vec![Item::Compaction {
             id: "compact-1".into(),
             detail: Compaction::default(),
@@ -770,4 +780,42 @@ fn compaction_is_structural_while_review_lifecycle_items_remain_tools() {
             })
         );
     }
+}
+
+#[test]
+fn replay_keeps_each_turns_accounting_and_failure() {
+    let turns = serde_json::json!([
+        {"id": "turn1", "status": "completed", "startedAt": 1_786_516_127i64,
+         "durationMs": 20_900, "error": null, "items": [
+            {"id": "i1", "type": "userMessage",
+             "content": [{"type": "text", "text": "question"}]},
+            {"id": "i2", "type": "agentMessage", "text": "answer"}
+        ]},
+        {"id": "turn2", "status": "interrupted", "durationMs": 935_645, "items": [
+            {"id": "i3", "type": "agentMessage", "text": "partial"}
+        ]},
+        {"id": "turn3", "status": "failed", "error": "model overloaded", "items": [
+            {"id": "i4", "type": "userMessage",
+             "content": [{"type": "text", "text": "retry"}]}
+        ]}
+    ]);
+
+    let replay = parse_replay(&turns);
+
+    assert_eq!(replay.len(), 3);
+    assert_eq!(replay[0].seconds, Some(20));
+    assert!(!replay[0].interrupted);
+    assert_eq!(replay[0].items[0].at, Some(1_786_516_127));
+
+    assert_eq!(replay[1].seconds, Some(935));
+    assert!(replay[1].interrupted);
+
+    // A failed turn reports its reason as a turn field, so replay has to
+    // materialize the row the live path builds from the same failure.
+    assert_eq!(
+        replay[2].items.last().map(|entry| entry.item.clone()),
+        Some(Item::Error {
+            text: "model overloaded".into()
+        })
+    );
 }

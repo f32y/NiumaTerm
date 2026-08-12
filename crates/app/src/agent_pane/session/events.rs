@@ -408,13 +408,17 @@ impl AgentPane {
     /// so they render as a plain chronological stream above the new turns.
     pub(in crate::agent_pane) fn apply_replay(
         &mut self,
-        replay: Vec<SessionItem>,
+        replay: Vec<ReplayTurn>,
         cx: &mut Context<Self>,
     ) {
-        let turn = self.turn_seq;
-        self.transcript.update(cx, |transcript, cx| {
-            transcript.append_replay(turn, replay, cx)
-        });
+        for turn in replay {
+            // Each restored turn takes its own id, so the sequence continues
+            // past the replay and new turns cannot merge into the last one.
+            self.turn_seq += 1;
+            let id = self.turn_seq;
+            self.transcript
+                .update(cx, |transcript, cx| transcript.append_replay(id, turn, cx));
+        }
         cx.notify();
     }
 

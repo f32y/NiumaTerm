@@ -146,22 +146,40 @@ impl TranscriptView {
         self.compacting = false;
     }
 
-    /// Append a restored conversation. Replayed entries predate this view, so
-    /// they carry no wall-clock stamp and share one turn: without a settled
-    /// duration they render as a plain chronological stream rather than
-    /// claiming a fold header the restored session never reported.
+    /// Append one turn of a restored conversation under its own turn id, with
+    /// the accounting the provider persisted for it. That accounting is what
+    /// makes a restored turn fold, report its duration, and mark an
+    /// interruption the way a turn completed in this process does. A turn the
+    /// provider timed no duration for still renders as a plain chronological
+    /// stream, since claiming a fold header would state an elapsed time the
+    /// session never reported.
     pub(in crate::agent_pane) fn append_replay(
         &mut self,
         turn: u64,
-        replay: Vec<SessionItem>,
+        replay: ReplayTurn,
         cx: &mut Context<Self>,
     ) {
-        for item in replay {
+        for entry in replay.items {
             self.items.push(Entry {
-                at: String::new(),
+                at: entry
+                    .at
+                    .and_then(|at| DateTime::from_timestamp(at, 0))
+                    .map(|at| at.with_timezone(&Local).format("%H:%M").to_string())
+                    .unwrap_or_default(),
                 turn,
-                item,
+                item: entry.item,
             });
+        }
+
+        if replay.interrupted {
+            self.interrupted_turns.insert(turn);
+        }
+        if let Some(seconds) = replay.seconds {
+            self.completed_turn_seconds.insert(turn, seconds);
+        }
+        if let Some(output_tokens) = replay.output_tokens {
+            self.completed_turn_output_tokens
+                .insert(turn, output_tokens);
         }
         cx.notify();
     }

@@ -124,7 +124,7 @@ pub(super) fn user_prompt_text(record: &Value) -> Option<String> {
 /// turn. Its body is the fixed `[Request interrupted by user]` notice
 /// addressed to the model, so replaying it as a prompt puts words in the
 /// user's mouth and titles a session with them.
-fn is_interruption(record: &Value) -> bool {
+pub(super) fn is_interruption(record: &Value) -> bool {
     record["type"].as_str() == Some("user") && !record["interruptedMessageId"].is_null()
 }
 

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader};
 
+use chrono::DateTime;
 use serde_json::Value;
 use tracing::warn;
 
@@ -10,13 +11,13 @@ use super::super::tool_items::{complete_tool_item, tool_item};
 use super::ClaudeCheckpoint;
 use super::index::TranscriptIndex;
 use super::paths::session_path;
-use super::titles::{clean_prompt, compaction_summary_text, user_prompt_text};
-use crate::chat::{Compaction, Item};
+use super::titles::{clean_prompt, compaction_summary_text, is_interruption, user_prompt_text};
+use crate::chat::{Compaction, Item, ReplayItem, ReplayTurn};
 
 /// Reconstruct a session's conversation for the transcript UI. Reads the
 /// whole file (resume replays nothing from the backend, so this is the only
 /// source); meant for a background thread.
-pub fn load_replay(cwd: Option<&str>, session_id: &str) -> Vec<Item> {
+pub fn load_replay(cwd: Option<&str>, session_id: &str) -> Vec<ReplayTurn> {
     let Some(path) = session_path(cwd, session_id) else {
         return Vec::new();
     };
@@ -51,18 +52,23 @@ pub fn load_checkpoints(
     Ok(transcript.checkpoints())
 }
 
-pub(super) fn parse_replay(reader: impl BufRead) -> Vec<Item> {
+pub(super) fn parse_replay(reader: impl BufRead) -> Vec<ReplayTurn> {
     parse_transcript(reader, /*sidechain*/ false)
 }
 
 /// A child agent's own file holds nothing but sidechain records, so replaying
 /// it keeps exactly the records the parent conversation drops. Both go through
-/// one parser, which is what makes a child read identically to its parent.
+/// one parser, which is what makes a child read identically to its parent. A
+/// child's conversation is presented as one stream, so its turns are flattened.
 pub(super) fn parse_child_replay(reader: impl BufRead) -> Vec<Item> {
     parse_transcript(reader, /*sidechain*/ true)
+        .into_iter()
+        .flat_map(|turn| turn.items)
+        .map(|entry| entry.item)
+        .collect()
 }
 
-fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<Item> {
+fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
     let transcript = TranscriptIndex::read(reader);
 
     if let Some(parent) = &transcript.broken_parent {
@@ -72,7 +78,13 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<Item> {
         );
     }
 
-    let mut items: Vec<Item> = Vec::new();
+    // A turn's duration is written as a `turn_duration` record hanging off the
+    // turn's last message rather than as a link in the parent chain, so it is
+    // collected up front and matched by that parent as the chain is walked.
+    let durations = turn_durations(&transcript.records);
+
+    let mut items: Vec<ReplayItem> = Vec::new();
+    let mut turns: Vec<TurnBuilder> = vec![TurnBuilder::default()];
     let mut pending_tools: HashMap<String, usize> = HashMap::new();
     let mut message_seq = 0usize;
     let mut thinking_seq = 0usize;
@@ -94,6 +106,22 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<Item> {
             continue;
         }
 
+        let at = record_time(record);
+        if let Some(turn) = turns.last_mut() {
+            if let Some(uuid) = record["uuid"].as_str()
+                && let Some(duration) = durations.get(uuid)
+            {
+                turn.seconds = Some(duration / 1000);
+            }
+            if is_interruption(record) {
+                turn.interrupted = true;
+            }
+            turn.output_tokens = match (turn.output_tokens, output_tokens(record)) {
+                (Some(total), Some(tokens)) => Some(total + tokens),
+                (total, tokens) => total.or(tokens),
+            };
+        }
+
         match record["type"].as_str() {
             Some("user") => {
                 complete_replayed_tools(&record, &mut items, &mut pending_tools);
@@ -103,15 +131,21 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<Item> {
                         .take()
                         .and_then(|index| items.get_mut(index))
                     {
-                        Some(Item::Compaction { detail, .. }) => detail.summary = Some(summary),
+                        Some(ReplayItem {
+                            item: Item::Compaction { detail, .. },
+                            ..
+                        }) => detail.summary = Some(summary),
                         _ => {
                             compaction_seq += 1;
                             summary_awaiting_boundary = Some(items.len());
-                            items.push(Item::Compaction {
-                                id: replayed_compaction_id(&record, compaction_seq),
-                                detail: Compaction {
-                                    summary: Some(summary),
-                                    ..Compaction::default()
+                            items.push(ReplayItem {
+                                at,
+                                item: Item::Compaction {
+                                    id: replayed_compaction_id(&record, compaction_seq),
+                                    detail: Compaction {
+                                        summary: Some(summary),
+                                        ..Compaction::default()
+                                    },
                                 },
                             });
                         }
@@ -122,7 +156,18 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<Item> {
                 if let Some(text) = user_prompt_text(&record) {
                     let text = clean_prompt(&text);
                     if !text.is_empty() {
-                        items.push(Item::UserMessage { text: Some(text) });
+                        // A prompt opens a turn, the same boundary the live path
+                        // draws when the user sends one.
+                        if turns.last().is_some_and(|turn| turn.start < items.len()) {
+                            turns.push(TurnBuilder {
+                                start: items.len(),
+                                ..TurnBuilder::default()
+                            });
+                        }
+                        items.push(ReplayItem {
+                            at,
+                            item: Item::UserMessage { text: Some(text) },
+                        });
                     }
                 }
             }
@@ -132,6 +177,7 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<Item> {
                 match summary_awaiting_boundary
                     .take()
                     .and_then(|index| items.get_mut(index))
+                    .map(|entry| &mut entry.item)
                 {
                     Some(Item::Compaction { id, detail: opened }) => {
                         // The boundary marker is the record the live protocol
@@ -150,9 +196,12 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<Item> {
                     _ => {
                         compaction_seq += 1;
                         boundary_awaiting_summary = Some(items.len());
-                        items.push(Item::Compaction {
-                            id: replayed_compaction_id(&record, compaction_seq),
-                            detail,
+                        items.push(ReplayItem {
+                            at,
+                            item: Item::Compaction {
+                                id: replayed_compaction_id(&record, compaction_seq),
+                                detail,
+                            },
                         });
                     }
                 }
@@ -181,7 +230,7 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<Item> {
                                         text: Some(text.to_string()),
                                     }
                                 };
-                                items.push(item);
+                                items.push(ReplayItem { item, at });
                             }
                         }
                         Some("thinking") => {
@@ -195,9 +244,12 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<Item> {
                                 thinking_seq += 1;
                                 id
                             });
-                            items.push(Item::Reasoning {
-                                id,
-                                summary: Some(summary.to_string()),
+                            items.push(ReplayItem {
+                                at,
+                                item: Item::Reasoning {
+                                    id,
+                                    summary: Some(summary.to_string()),
+                                },
                             });
                         }
                         Some("tool_use") | Some("server_tool_use") | Some("mcp_tool_use") => {
@@ -210,7 +262,7 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<Item> {
                                 &block["input"],
                             );
                             pending_tools.insert(id.to_string(), items.len());
-                            items.push(item);
+                            items.push(ReplayItem { item, at });
                         }
                         _ => {}
                     }
@@ -220,7 +272,78 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<Item> {
         }
     }
 
-    items
+    slice_turns(items, turns)
+}
+
+/// Accumulates one turn's accounting while its items are still being appended
+/// to the flat list. The list stays flat because replayed tool results are
+/// completed by index long after their call was positioned.
+#[derive(Default)]
+struct TurnBuilder {
+    start: usize,
+    seconds: Option<u64>,
+    output_tokens: Option<u64>,
+    interrupted: bool,
+}
+
+fn slice_turns(items: Vec<ReplayItem>, turns: Vec<TurnBuilder>) -> Vec<ReplayTurn> {
+    let mut items: Vec<Option<ReplayItem>> = items.into_iter().map(Some).collect();
+    let mut replay = Vec::with_capacity(turns.len());
+
+    for (index, turn) in turns.iter().enumerate() {
+        let end = turns
+            .get(index + 1)
+            .map_or(items.len(), |next| next.start.min(items.len()));
+        let Some(range) = items.get_mut(turn.start..end) else {
+            continue;
+        };
+        let items: Vec<ReplayItem> = range.iter_mut().filter_map(Option::take).collect();
+
+        if items.is_empty() {
+            continue;
+        }
+
+        replay.push(ReplayTurn {
+            items,
+            seconds: turn.seconds,
+            output_tokens: turn.output_tokens,
+            interrupted: turn.interrupted,
+        });
+    }
+
+    replay
+}
+
+/// `durationMs` by the uuid of the message each turn ended on. The record sits
+/// beside the chain rather than in it, so the walk cannot pick it up in order.
+fn turn_durations(records: &[Value]) -> HashMap<String, u64> {
+    records
+        .iter()
+        .filter(|record| {
+            record["type"].as_str() == Some("system")
+                && record["subtype"].as_str() == Some("turn_duration")
+        })
+        .filter_map(|record| {
+            let parent = record["parentUuid"].as_str()?.to_string();
+            Some((parent, record["durationMs"].as_u64()?))
+        })
+        .collect()
+}
+
+/// Output tokens an assistant record reported for itself. Summed over a turn,
+/// these are the count the live path receives as a running total.
+fn output_tokens(record: &Value) -> Option<u64> {
+    (record["type"].as_str() == Some("assistant"))
+        .then(|| record["message"]["usage"]["output_tokens"].as_u64())
+        .flatten()
+}
+
+/// Wall-clock time of a record as Unix seconds.
+fn record_time(record: &Value) -> Option<i64> {
+    let stamp = record["timestamp"].as_str()?;
+    DateTime::parse_from_rfc3339(stamp)
+        .ok()
+        .map(|time| time.timestamp())
 }
 
 /// Stable transcript id for a replayed compaction. The record's own uuid keeps
@@ -238,7 +361,7 @@ fn replayed_compaction_id(record: &Value, sequence: usize) -> String {
 /// while adding the completion payload and status.
 fn complete_replayed_tools(
     record: &Value,
-    items: &mut [Item],
+    items: &mut [ReplayItem],
     pending_tools: &mut HashMap<String, usize>,
 ) {
     let Some(blocks) = record["message"]["content"].as_array() else {
@@ -255,10 +378,10 @@ fn complete_replayed_tools(
         let Some(index) = pending_tools.remove(id) else {
             continue;
         };
-        let Some(item) = items.get_mut(index) else {
+        let Some(entry) = items.get_mut(index) else {
             continue;
         };
 
-        *item = complete_tool_item(item.clone(), block);
+        entry.item = complete_tool_item(entry.item.clone(), block);
     }
 }
