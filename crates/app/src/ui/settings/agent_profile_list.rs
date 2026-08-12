@@ -17,8 +17,8 @@ use crate::agent_pane::usage::{ClaudeIcon, CodexIcon};
 use crate::ui::settings::agent_profile_dialog::open_agent_profile_dialog;
 use crate::ui::settings::state::{AgentProfile, AppSettings};
 use crate::ui::settings::table::{
-    TABLE_HEADER_HEIGHT, TABLE_OPERATION_BUTTON, TABLE_ROW_CONTENT_HEIGHT, TABLE_ROW_HEIGHT,
-    TrashIcon, table_frame, table_header,
+    TABLE_HEADER_HEIGHT, TABLE_OPERATION_BUTTON, TABLE_ROW_HEIGHT, TrashIcon, table_frame,
+    table_header,
 };
 
 /// Column widths shared by the header and the rows, so the two line up
@@ -96,14 +96,17 @@ impl ListDelegate for AgentProfileList {
         let ruled = row + 1 < self.profiles.len();
 
         Some(
+            // Stating the row height keeps the divider inside it: without one,
+            // the row measures its content plus the border, and the rows would
+            // then total more than the frame reserves for them.
             ListItem::new(("agent-profile-row", row))
+                .h(px(TABLE_ROW_HEIGHT))
                 .when(ruled, |this| {
                     this.border_b_1().border_color(cx.theme().border)
                 })
                 .child(
                     h_flex()
                         .w_full()
-                        .h(TABLE_ROW_CONTENT_HEIGHT)
                         .items_center()
                         .gap_2()
                         .child(div().w(TYPE_COLUMN).flex_none().child(agent_icon(profile)))
@@ -199,10 +202,16 @@ pub(super) fn agent_profile_list(window: &mut Window, cx: &mut App) -> AnyElemen
 
     // The header plus the profiles, until the list is tall enough to scroll
     // on its own. An empty list still reserves one row for its empty state.
+    // The height sits on the list rather than the frame, because the frame's
+    // border counts against a height set on it and would shrink the list by
+    // those two pixels, leaving it scrollable by that much.
     let height = TABLE_HEADER_HEIGHT + TABLE_ROW_HEIGHT * rows.clamp(1.0, MAX_VISIBLE_ROWS);
 
     table_frame(cx)
-        .h(px(height))
-        .child(List::new(&state).scrollbar_visible(rows > MAX_VISIBLE_ROWS))
+        .child(
+            List::new(&state)
+                .h(px(height))
+                .scrollbar_visible(rows > MAX_VISIBLE_ROWS),
+        )
         .into_any_element()
 }
