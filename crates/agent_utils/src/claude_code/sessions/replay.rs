@@ -77,11 +77,15 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<Item> {
     let mut message_seq = 0usize;
     let mut thinking_seq = 0usize;
     let mut compaction_seq = 0usize;
-    // A compaction writes its summary first and its boundary marker second (the
-    // marker's parent is the last summary message). The summary is the part
-    // worth keeping, so it opens the row immediately and the marker enriches it,
-    // which also leaves the row intact if the marker never made it to disk.
-    let mut open_compaction: Option<usize> = None;
+    // A compaction writes two records, a boundary marker carrying the token
+    // accounting and a synthesized user turn carrying the summary, and their
+    // order in the chain differs between CLI versions: current builds parent
+    // the summary to the boundary, older ones parent the boundary to the
+    // summary. Whichever arrives first opens one row and the other fills in its
+    // half, so a compaction is one row either way, and a row whose other half
+    // never reached the file still marks the break.
+    let mut summary_awaiting_boundary: Option<usize> = None;
+    let mut boundary_awaiting_summary: Option<usize> = None;
 
     for record in transcript.active_records() {
         if record["isSidechain"].as_bool().unwrap_or(false) != sidechain
@@ -95,15 +99,23 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<Item> {
                 complete_replayed_tools(&record, &mut items, &mut pending_tools);
 
                 if let Some(summary) = compaction_summary_text(&record) {
-                    compaction_seq += 1;
-                    open_compaction = Some(items.len());
-                    items.push(Item::Compaction {
-                        id: replayed_compaction_id(&record, compaction_seq),
-                        detail: Compaction {
-                            summary: Some(summary),
-                            ..Compaction::default()
-                        },
-                    });
+                    match boundary_awaiting_summary
+                        .take()
+                        .and_then(|index| items.get_mut(index))
+                    {
+                        Some(Item::Compaction { detail, .. }) => detail.summary = Some(summary),
+                        _ => {
+                            compaction_seq += 1;
+                            summary_awaiting_boundary = Some(items.len());
+                            items.push(Item::Compaction {
+                                id: replayed_compaction_id(&record, compaction_seq),
+                                detail: Compaction {
+                                    summary: Some(summary),
+                                    ..Compaction::default()
+                                },
+                            });
+                        }
+                    }
                     continue;
                 }
 
@@ -117,7 +129,7 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<Item> {
             Some("system") if record["subtype"].as_str() == Some("compact_boundary") => {
                 let detail = parse_compaction(compaction_metadata(&record));
 
-                match open_compaction
+                match summary_awaiting_boundary
                     .take()
                     .and_then(|index| items.get_mut(index))
                 {
@@ -131,11 +143,13 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<Item> {
                             ..detail
                         };
                     }
-                    // Some compaction paths preserve a message segment instead
-                    // of writing a summary turn; the boundary still belongs in
-                    // the transcript.
+                    // Either the summary turn follows the marker, or this
+                    // compaction preserved a message segment instead of writing
+                    // one at all; the boundary belongs in the transcript now and
+                    // takes a summary later if one arrives.
                     _ => {
                         compaction_seq += 1;
+                        boundary_awaiting_summary = Some(items.len());
                         items.push(Item::Compaction {
                             id: replayed_compaction_id(&record, compaction_seq),
                             detail,
