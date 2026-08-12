@@ -110,6 +110,11 @@ impl AgentDisclosureRow {
         h_flex()
             .id(self.id)
             .w_full()
+            // The row's hover fill would otherwise run to the pane's edge,
+            // marking a band far wider than the text column it belongs to.
+            // Holding it to the reading measure keeps its right edge with the
+            // assistant prose above it, and a preview still truncates there.
+            .max_w(rems(AGENT_TEXT_MEASURE_REMS))
             .min_h(px(24.))
             .gap(px(AGENT_DISCLOSURE_GAP))
             .items_center()
