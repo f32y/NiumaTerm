@@ -283,11 +283,19 @@ impl TranscriptView {
             .gap_2()
             .context_menu(Self::copy_menu(cx.entity().downgrade(), index))
             .child(
-                div().flex_1().min_w_0().px_1().child(
-                    Self::markdown_view(("agent-md", index), text, self.cwd.clone())
-                        .style(Self::agent_text_style())
-                        .selectable(true),
-                ),
+                // The body stops at the reading measure plus its own padding,
+                // so the timestamp that follows it sits beside the text rather
+                // than being pushed out to the pane's right edge.
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .max_w(rems(AGENT_TEXT_MEASURE_REMS + 0.5))
+                    .px_1()
+                    .child(
+                        Self::markdown_view(("agent-md", index), text, self.cwd.clone())
+                            .style(Self::agent_text_style())
+                            .selectable(true),
+                    ),
             )
             .child(self.hover_stamp(index, cx))
             .into_any_element()
