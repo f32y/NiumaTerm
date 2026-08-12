@@ -100,6 +100,11 @@ pub struct AgentProfile {
     /// existed.
     #[serde(default)]
     pub effort: String,
+    /// Point Claude Code's per-tier model settings at [`Self::model`] too, so
+    /// a custom endpoint that serves a single model still answers the requests
+    /// the CLI routes to its Opus, Sonnet, and Haiku tiers.
+    #[serde(default, rename = "replace-sub-models")]
+    pub replace_sub_models: bool,
     #[serde(default, rename = "use-custom-endpoint")]
     pub use_custom_endpoint: bool,
     #[serde(default, rename = "api-base-url")]
@@ -125,6 +130,8 @@ struct PersistedAgentProfile {
     model: String,
     #[serde(default)]
     effort: String,
+    #[serde(default, rename = "replace-sub-models")]
+    replace_sub_models: bool,
     #[serde(default, rename = "use-custom-endpoint")]
     use_custom_endpoint: bool,
     #[serde(default, rename = "api-credentials")]
@@ -161,6 +168,7 @@ impl TryFrom<PersistedAgentProfile> for AgentProfile {
             executable: persisted.executable,
             model: persisted.model,
             effort: persisted.effort,
+            replace_sub_models: persisted.replace_sub_models,
             use_custom_endpoint: persisted.use_custom_endpoint,
             api_base_url,
             api_key,
@@ -212,6 +220,7 @@ pub(crate) fn patch_agent_document(
         table["executable"] = value(&profile.executable);
         table["model"] = value(&profile.model);
         table["effort"] = value(&profile.effort);
+        table["replace-sub-models"] = value(profile.replace_sub_models);
         table["use-custom-endpoint"] = value(profile.use_custom_endpoint);
         if !profile.api_base_url.is_empty() || !profile.api_key.is_empty() {
             let stored =
