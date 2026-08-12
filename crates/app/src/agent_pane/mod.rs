@@ -295,6 +295,11 @@ pub(crate) struct AgentPane {
     /// The active prompt remains recoverable until provider activity becomes
     /// visible, allowing an immediate stop to return it to the composer.
     unanswered_prompt: Option<UnansweredPrompt>,
+    /// Turn the user asked to stop. Interruption is a completion state of a
+    /// turn, so the "Interrupted" transcript row is drawn only when that turn
+    /// actually ends; a backend that keeps streaming past the stop request
+    /// keeps its truthful working row until then.
+    pending_interrupt: Option<u64>,
     palette: SlashPalette,
     /// Mid-turn inputs stay near the composer until provider activity confirms
     /// they have joined the running response.

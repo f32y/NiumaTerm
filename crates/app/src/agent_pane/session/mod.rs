@@ -103,6 +103,7 @@ impl AgentPane {
             models: Vec::new(),
             turn_seq: 0,
             unanswered_prompt: None,
+            pending_interrupt: None,
             palette: SlashPalette {
                 provider_commands_ready: kind == AgentKind::Codex,
                 ..SlashPalette::default()
@@ -580,6 +581,9 @@ impl AgentPane {
             .update(cx, |transcript, _| transcript.clear());
         self.turn_seq = 0;
         self.unanswered_prompt = None;
+        // The new conversation restarts turn ids from zero, so a stop request
+        // left over from the old one could match an unrelated future turn.
+        self.pending_interrupt = None;
         self.context_window_usage = None;
         self.context_composition = None;
         self.queued_user_messages.clear();
@@ -772,7 +776,9 @@ impl AgentPane {
 
     pub(super) fn interrupt_from_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let working = self.transcript.read(cx).is_working();
-        let interrupted_turn = working.then_some(self.turn_seq);
+        if working {
+            self.pending_interrupt = Some(self.turn_seq);
+        }
         if let Some(prompt) = self
             .unanswered_prompt
             .take()
@@ -790,10 +796,6 @@ impl AgentPane {
                 input.set_selected_range(cursor..cursor, cx);
             });
             self.palette.skill_binding = prompt.skill;
-        }
-        if let Some(turn) = interrupted_turn {
-            self.transcript
-                .update(cx, |transcript, _| transcript.mark_interrupted(turn));
         }
 
         self.interrupt(cx);
