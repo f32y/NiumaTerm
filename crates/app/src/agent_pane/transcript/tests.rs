@@ -63,20 +63,17 @@ mod prompt_truncation_tests {
 
     #[test]
     fn elapsed_time_reads_as_a_duration_rather_than_a_seconds_count() {
-        assert_eq!(elapsed_label(0), "0s");
-        assert_eq!(elapsed_label(45), "45s");
-        assert_eq!(elapsed_label(125), "2mins 5s");
-        assert_eq!(elapsed_label(3_721), "1hrs 2mins 1s");
-        assert_eq!(elapsed_label(90_061), "1days 1hrs 1mins 1s");
-
-        // Once a larger unit appears the smaller ones stay, so a ticking label
-        // keeps its shape instead of shifting as each unit rolls over.
-        assert_eq!(elapsed_label(3_605), "1hrs 0mins 5s");
-        assert_eq!(elapsed_label(86_400), "1days 0hrs 0mins 0s");
+        assert_eq!(elapsed_label(0), "0 s");
+        assert_eq!(elapsed_label(45), "45 s");
+        assert_eq!(elapsed_label(125), "2 mins 5 s");
+        assert_eq!(elapsed_label(3_721), "1 hour 2 mins 1 s");
+        assert_eq!(elapsed_label(90_061), "1 day 1 hour 1 min 1 s");
+        assert_eq!(elapsed_label(3_605), "1 hour 5 s");
+        assert_eq!(elapsed_label(86_400), "1 day");
 
         assert_eq!(
             worked_status_label(3_721, Some(12_400)),
-            "Worked for 1hrs 2mins 1s · 12k tokens"
+            "Worked for 1 hour 2 mins 1s · 12k tokens"
         );
     }
 
