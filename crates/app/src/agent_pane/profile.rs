@@ -51,6 +51,16 @@ impl AgentKind {
 pub(super) const ANTHROPIC_MODEL_ENV: &str = "ANTHROPIC_MODEL";
 pub(super) const OPENAI_API_KEY_ENV: &str = "OPENAI_API_KEY";
 
+/// The per-tier model overrides Claude Code reads when it dispatches work to
+/// something other than the primary model. A profile that pins every tier to
+/// its own model keeps a single-model endpoint from being asked for the three
+/// stock Anthropic names.
+pub(super) const ANTHROPIC_SUB_MODEL_ENVS: [&str; 3] = [
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+];
+
 /// A deterministic provider id keeps Codex history scoped to the profile
 /// without exposing display names as config keys. Profile names are already
 /// unique and act as the identity for restored tabs and remembered settings.
@@ -100,6 +110,12 @@ pub(crate) fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
         && let Some(model) = model.as_ref()
     {
         env.push((ANTHROPIC_MODEL_ENV.to_string(), model.clone()));
+
+        if profile.replace_sub_models {
+            for name in ANTHROPIC_SUB_MODEL_ENVS {
+                env.push((name.to_string(), model.clone()));
+            }
+        }
     }
 
     env.extend(
@@ -205,7 +221,10 @@ impl AgentThreadDefaults {
 mod agent_profile_launch_tests {
     use nmt_config::profile::{AgentProfile, AgentProfileKind, EnvVar};
 
-    use super::{ANTHROPIC_MODEL_ENV, OPENAI_API_KEY_ENV, agent_launch, launch_env_value};
+    use super::{
+        ANTHROPIC_MODEL_ENV, ANTHROPIC_SUB_MODEL_ENVS, OPENAI_API_KEY_ENV, agent_launch,
+        launch_env_value,
+    };
 
     #[test]
     fn claude_profile_model_is_an_environment_default_with_user_override_last() {
@@ -250,6 +269,86 @@ mod agent_profile_launch_tests {
             };
 
             assert_eq!(agent_launch(&profile).effort, None);
+        }
+    }
+
+    #[test]
+    fn replacing_sub_models_points_every_tier_at_the_profile_model() {
+        let profile = AgentProfile {
+            kind: AgentProfileKind::ClaudeCode,
+            executable: "claude".into(),
+            model: "vendor/only-model".into(),
+            replace_sub_models: true,
+            ..AgentProfile::default()
+        };
+
+        let launch = agent_launch(&profile);
+
+        assert_eq!(
+            launch_env_value(&launch, ANTHROPIC_MODEL_ENV).as_deref(),
+            Some("vendor/only-model")
+        );
+        for name in ANTHROPIC_SUB_MODEL_ENVS {
+            assert_eq!(
+                launch_env_value(&launch, name).as_deref(),
+                Some("vendor/only-model"),
+                "{name} should follow the profile model"
+            );
+        }
+    }
+
+    #[test]
+    fn a_user_env_entry_overrides_a_replaced_sub_model() {
+        // Case-insensitive, because Windows resolves process environment keys
+        // that way and the launcher hands the table straight to the command.
+        let profile = AgentProfile {
+            kind: AgentProfileKind::ClaudeCode,
+            executable: "claude".into(),
+            model: "vendor/only-model".into(),
+            replace_sub_models: true,
+            env: vec![EnvVar {
+                name: "anthropic_default_haiku_model".into(),
+                value: "vendor/small-model".into(),
+            }],
+            ..AgentProfile::default()
+        };
+
+        let launch = agent_launch(&profile);
+
+        assert_eq!(
+            launch_env_value(&launch, "ANTHROPIC_DEFAULT_HAIKU_MODEL").as_deref(),
+            Some("vendor/small-model")
+        );
+        assert_eq!(
+            launch_env_value(&launch, "ANTHROPIC_DEFAULT_OPUS_MODEL").as_deref(),
+            Some("vendor/only-model")
+        );
+    }
+
+    #[test]
+    fn sub_model_replacement_is_off_by_default_and_needs_a_model() {
+        let off = AgentProfile {
+            kind: AgentProfileKind::ClaudeCode,
+            executable: "claude".into(),
+            model: "vendor/only-model".into(),
+            ..AgentProfile::default()
+        };
+
+        // Without a model there is nothing to propagate, so the switch alone
+        // must not export empty overrides that would break model selection.
+        let no_model = AgentProfile {
+            kind: AgentProfileKind::ClaudeCode,
+            executable: "claude".into(),
+            replace_sub_models: true,
+            ..AgentProfile::default()
+        };
+
+        for profile in [off, no_model] {
+            let launch = agent_launch(&profile);
+
+            for name in ANTHROPIC_SUB_MODEL_ENVS {
+                assert_eq!(launch_env_value(&launch, name), None);
+            }
         }
     }
 

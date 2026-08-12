@@ -451,6 +451,14 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
             })
         });
 
+    let sub_models_switch = Switch::new("agent-profile-dialog-sub-models")
+        .checked(profile.replace_sub_models)
+        .on_click(|checked: &bool, _, cx: &mut App| {
+            cx.global_mut::<AgentProfileDraft>()
+                .profile
+                .replace_sub_models = *checked;
+        });
+
     let endpoint_switch = Switch::new("agent-profile-dialog-endpoint")
         .checked(endpoint_on)
         .on_click(|checked: &bool, _, cx: &mut App| {
@@ -521,6 +529,19 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
             Input::new(&model_input).w_64(),
             cx,
         ))
+        // Claude Code is the only kind that splits work across model tiers;
+        // Codex has no equivalent setting to redirect.
+        .when(profile.kind == AgentProfileKind::ClaudeCode, |this| {
+            this.child(card_row(
+                "Replace all sub-model config with primary",
+                "Also send the model above as ANTHROPIC_DEFAULT_OPUS_MODEL, \
+                 ANTHROPIC_DEFAULT_SONNET_MODEL, and ANTHROPIC_DEFAULT_HAIKU_MODEL, \
+                 so an endpoint serving one model answers every tier. An entry for \
+                 the same variable in the table below still wins.",
+                sub_models_switch,
+                cx,
+            ))
+        })
         .child(card_row(
             "Effort",
             "Reasoning effort forced on every conversation this profile starts. \
