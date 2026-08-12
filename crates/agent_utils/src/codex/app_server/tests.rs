@@ -2,6 +2,22 @@ use crate::codex::app_server::protocol::{command_purpose, turn_start_params};
 use crate::codex::app_server::*;
 
 #[test]
+fn codex_initialize_enables_experimental_api_for_descendant_queries() {
+    assert_eq!(
+        initialize_request(),
+        json!({
+            "jsonrpc": "2.0",
+            "id": INIT_RPC_ID,
+            "method": "initialize",
+            "params": {
+                "clientInfo": {"name": "NiumaTerm", "version": "0.1.0"},
+                "capabilities": {"experimentalApi": true},
+            },
+        })
+    );
+}
+
+#[test]
 fn turn_output_usage_tracks_growth_across_model_responses() {
     let mut usage = TurnOutputUsage::default();
 
