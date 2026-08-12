@@ -500,7 +500,9 @@ fn nonempty_string<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
 /// item kind and server version; structured payloads pretty-print as JSON so
 /// the transcript card can render (and highlight) them.
 pub(super) fn tool_output(item: &Value) -> Option<String> {
-    for key in ["output", "result", "aggregatedOutput", "content"] {
+    // `results` carries a web search's matches; without it the row shows the
+    // query and nothing the search found.
+    for key in ["output", "result", "results", "aggregatedOutput", "content"] {
         let value = &item[key];
         if let Some(text) = value.as_str() {
             if !text.trim().is_empty() {
