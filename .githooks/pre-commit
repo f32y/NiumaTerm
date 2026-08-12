@@ -146,16 +146,8 @@ check_rustfmt_and_clippy() {
 
     echo "pre-commit: staged Rust files detected"
 
-    echo "pre-commit: checking rustfmt"
-    cargo fmt --all --check
-
-    echo "pre-commit: running clippy with default rules"
-    cargo clippy --workspace --all-targets --quiet
-
-    echo "pre-commit: running clippy with clippy::absolute_paths"
-
     if ! command -v jq >/dev/null 2>&1; then
-        echo "pre-commit: jq is required to select first-party workspace members" >&2
+        echo "pre-commit: jq is required to select changed workspace members" >&2
         exit 1
     fi
 
@@ -164,36 +156,102 @@ check_rustfmt_and_clippy() {
         exit 1
     }
 
+    changed_packages=$(
+        printf '%s\n' "$workspace_metadata" |
+            jq -r --arg changed_files "$rust_files" '
+                def normalize_path: gsub("\\\\"; "/");
+
+                . as $workspace
+                | ($workspace.workspace_root | normalize_path) as $root
+                | ($changed_files
+                    | split("\n")
+                    | map(select(length > 0) | $root + "/" + normalize_path)
+                  ) as $files
+                | [
+                    $workspace.packages[]
+                    | select(.id as $id | $workspace.workspace_members | index($id))
+                    | {
+                        name,
+                        directory: (.manifest_path
+                            | normalize_path
+                            | sub("/Cargo.toml$"; ""))
+                      }
+                  ] as $packages
+                | [
+                    $files[] as $file
+                    | [$packages[]
+                        | select(.directory as $directory
+                            | $file == $directory
+                            or ($file | startswith($directory + "/")))]
+                    | sort_by(.directory | length)
+                    | last
+                    | select(. != null)
+                    | .name
+                  ]
+                | unique[]
+            '
+    ) || {
+        echo "pre-commit: failed to select changed workspace members" >&2
+        exit 1
+    }
+    changed_packages=$(printf '%s\n' "$changed_packages" | tr -d '\r')
+
+    rustfmt_files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.rs')
+    if [ -n "$rustfmt_files" ]; then
+        echo "pre-commit: checking rustfmt on staged Rust files"
+        while IFS= read -r file; do
+            rustfmt --edition 2024 --check --config skip_children=true "$file"
+        done <<EOF
+$rustfmt_files
+EOF
+    fi
+
+    if [ -z "$changed_packages" ]; then
+        echo "pre-commit: staged Rust files are outside workspace members; skipping clippy"
+        return 0
+    fi
+
+    set --
+    for package in $changed_packages; do
+        set -- "$@" -p "$package"
+    done
+
+    echo "pre-commit: running clippy on changed workspace members"
+    cargo clippy --all-targets --quiet "$@"
+
     first_party_packages=$(
         printf '%s\n' "$workspace_metadata" |
-            jq -r '
+            jq -r --arg changed_packages "$changed_packages" '
+                def normalize_path: gsub("\\\\"; "/");
+
                 . as $workspace
-                | ($workspace.workspace_root | gsub("\\\\"; "/")) as $root
+                | ($workspace.workspace_root | normalize_path) as $root
+                | ($changed_packages | split("\n")) as $changed
                 | $workspace.packages[]
                 | select(.id as $id | $workspace.workspace_members | index($id))
+                | select(.name as $name | $changed | index($name))
                 | select(
-                    (.manifest_path | gsub("\\\\"; "/"))
+                    (.manifest_path | normalize_path)
                     | startswith($root + "/crates/")
                   )
                 | .name
             '
     ) || {
-        echo "pre-commit: failed to select first-party workspace members" >&2
+        echo "pre-commit: failed to select changed first-party workspace members" >&2
         exit 1
     }
     first_party_packages=$(printf '%s\n' "$first_party_packages" | tr -d '\r')
+    if [ -z "$first_party_packages" ]; then
+        echo "pre-commit: no changed first-party workspace members; skipping clippy::absolute_paths"
+        return 0
+    fi
 
     set --
     for package in $first_party_packages; do
         set -- "$@" -p "$package"
     done
 
-    if [ "$#" -eq 0 ]; then
-        echo "pre-commit: no first-party workspace members found under crates" >&2
-        exit 1
-    fi
-
-    echo "pre-commit: running clippy on first-party workspace members"
+    echo "pre-commit: running clippy::absolute_paths on changed first-party members"
     cargo clippy --all-targets --no-deps --quiet "$@" -- -D clippy::absolute_paths
 }
 

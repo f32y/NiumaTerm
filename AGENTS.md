@@ -71,10 +71,10 @@ The pre-commit hook enforces these commit boundaries:
 - Newly added content containing the repository's AI-slop marker is rejected.
 - Added code comments are checked for implementation-instruction references;
   comments must explain the underlying technical rationale as described above.
-- If staged files include Rust, the hook runs `cargo fmt --all --check`,
-  `cargo clippy --workspace --all-targets --quiet`, and a first-party clippy
-  pass with `-D clippy::absolute_paths`. This path requires `jq` to be
-  available.
+- If staged files include Rust, the hook runs rustfmt on the staged Rust paths,
+  `cargo clippy --all-targets --quiet` for their workspace members, and a
+  first-party clippy pass with `-D clippy::absolute_paths`. This path requires
+  `jq` to be available.
 
 The commit-msg hook requires an English, printable-ASCII message and a
 Conventional Commit subject in this form:
