@@ -334,8 +334,56 @@ fn a_compaction_summary_is_never_mistaken_for_a_prompt() {
     );
 }
 
+/// The ordering current CLI builds write: the boundary marker opens the
+/// compacted chain with no parent, and the summary turn hangs off it.
 #[test]
 fn a_compaction_replays_as_one_row_carrying_summary_and_accounting() {
+    let lines = [
+        serde_json::json!({"type": "system", "subtype": "compact_boundary",
+            "uuid": "boundary-uuid", "parentUuid": null, "isMeta": false,
+            "content": "Conversation compacted",
+            "compactMetadata": {"trigger": "auto", "preTokens": 154_000,
+                "postTokens": 32_000, "messagesSummarized": 87}}),
+        serde_json::json!({"type": "user", "uuid": "summary-uuid",
+            "parentUuid": "boundary-uuid",
+            "isCompactSummary": true, "isVisibleInTranscriptOnly": true,
+            "message": {"content": "## Summary\nwhat happened so far"}}),
+        serde_json::json!({"type": "assistant", "uuid": "answer-uuid",
+            "parentUuid": "summary-uuid",
+            "message": {"content": [{"type": "text", "text": "answer"}]}}),
+    ];
+    let content: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+
+    let items = parse_replay(content.join("\n").as_bytes());
+
+    assert_eq!(
+        items,
+        vec![
+            Item::Compaction {
+                // The boundary record's identity wins, so the same
+                // compaction cannot also arrive live as a second row.
+                id: "compaction-boundary-uuid".into(),
+                detail: Compaction {
+                    trigger: Some(CompactionTrigger::Automatic),
+                    pre_tokens: Some(154_000),
+                    post_tokens: Some(32_000),
+                    messages_summarized: Some(87),
+                    user_context: None,
+                    summary: Some("## Summary\nwhat happened so far".into()),
+                },
+            },
+            Item::AgentMessage {
+                id: "replay-message-0".into(),
+                text: Some("answer".into())
+            },
+        ]
+    );
+}
+
+/// The ordering older CLI builds wrote, where the summary turn came first and
+/// the boundary marker hung off it.
+#[test]
+fn a_summary_before_its_boundary_marker_still_replays_as_one_row() {
     let lines = [
         serde_json::json!({"type": "user", "uuid": "question-uuid", "parentUuid": null,
             "message": {"content": [{"type": "text", "text": "question"}]}}),
@@ -363,8 +411,6 @@ fn a_compaction_replays_as_one_row_carrying_summary_and_accounting() {
                 text: Some("question".into())
             },
             Item::Compaction {
-                // The boundary record's identity wins, so the same
-                // compaction cannot also arrive live as a second row.
                 id: "compaction-boundary-uuid".into(),
                 detail: Compaction {
                     trigger: Some(CompactionTrigger::Automatic),
@@ -965,6 +1011,36 @@ fn task_notifications_are_not_replayed_as_user_prompts() {
         items,
         vec![Item::UserMessage {
             text: Some("review the diff".into())
+        }]
+    );
+}
+
+#[test]
+fn an_interruption_marker_is_not_replayed_as_a_user_prompt() {
+    let lines = task_history_lines(&[
+        serde_json::json!({
+            "type": "user",
+            "uuid": "u1",
+            "parentUuid": null,
+            "isSidechain": false,
+            "message": {"role": "user", "content": "run the tests"},
+        }),
+        serde_json::json!({
+            "type": "user",
+            "uuid": "u2",
+            "parentUuid": "u1",
+            "isSidechain": false,
+            "interruptedMessageId": "msg_011Cd5hihs8xXo8zvdmiVkGL",
+            "message": {"role": "user", "content": "[Request interrupted by user]"},
+        }),
+    ]);
+
+    let items = parse_replay(lines.as_bytes());
+
+    assert_eq!(
+        items,
+        vec![Item::UserMessage {
+            text: Some("run the tests".into())
         }]
     );
 }

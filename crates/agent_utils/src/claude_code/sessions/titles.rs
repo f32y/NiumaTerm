@@ -112,11 +112,20 @@ pub(super) fn user_prompt_text(record: &Value) -> Option<String> {
         // `compaction_summary_text` claims it for its own transcript row.
         || is_compaction_summary(record)
         || is_task_notification(record)
+        || is_interruption(record)
     {
         return None;
     }
 
     record_text(record)
+}
+
+/// A `user` record the CLI wrote to mark where the user stopped a running
+/// turn. Its body is the fixed `[Request interrupted by user]` notice
+/// addressed to the model, so replaying it as a prompt puts words in the
+/// user's mouth and titles a session with them.
+fn is_interruption(record: &Value) -> bool {
+    record["type"].as_str() == Some("user") && !record["interruptedMessageId"].is_null()
 }
 
 /// A `user` record the CLI synthesized to report a background agent's state.
