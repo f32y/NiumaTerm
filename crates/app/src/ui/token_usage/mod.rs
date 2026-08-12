@@ -2,7 +2,7 @@
 //!
 //! The background refresh reads the daily JSON report. The titlebar keeps a
 //! compact total while the hover card shows exact totals and per-model input,
-//! output, cache creation, and cache-read counts.
+//! output, cache creation, cache-read counts, and prices.
 
 use std::os::windows::process::CommandExt as _;
 use std::process;
@@ -29,7 +29,7 @@ use crate::ui::{AppSettings, UI_RADIUS};
 /// Shown before the first successful fetch and retained after fetch errors.
 const PLACEHOLDER: &str = "-";
 
-const USAGE_PANEL_WIDTH: Pixels = px(704.0);
+const USAGE_PANEL_WIDTH: Pixels = px(800.0);
 const MODEL_ROW_HEIGHT: f32 = 40.0;
 const MODEL_HEADER_HEIGHT: f32 = 32.0;
 const MAX_VISIBLE_ROWS: f32 = 8.0;
@@ -38,6 +38,7 @@ const OUTPUT_COLUMN: Pixels = px(80.0);
 const CACHE_CREATION_COLUMN: Pixels = px(104.0);
 const CACHE_READ_COLUMN: Pixels = px(96.0);
 const TOTAL_COLUMN: Pixels = px(96.0);
+const PRICE_COLUMN: Pixels = px(88.0);
 
 struct TokenIcon;
 
@@ -75,23 +76,36 @@ impl TokenCounts {
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct ModelTokenUsage {
     model_name: String,
     #[serde(flatten)]
     counts: TokenCounts,
+    #[serde(default, rename = "cost")]
+    price_usd: f64,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DailyTokenUsage {
     #[serde(alias = "period")]
     date: String,
     #[serde(flatten)]
     counts: TokenCounts,
+    #[serde(default, rename = "totalCost")]
+    price_usd: f64,
     #[serde(default)]
     model_breakdowns: Vec<ModelTokenUsage>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReportTotals {
+    #[serde(flatten)]
+    counts: TokenCounts,
+    #[serde(default, rename = "totalCost")]
+    price_usd: f64,
 }
 
 #[derive(Deserialize)]
@@ -99,7 +113,7 @@ struct CcusageReport {
     #[serde(default)]
     daily: Vec<DailyTokenUsage>,
     #[serde(default)]
-    totals: TokenCounts,
+    totals: ReportTotals,
 }
 
 pub(crate) struct TokenUsageView {
@@ -156,14 +170,16 @@ impl TokenUsageView {
         };
 
         let mut label = format!(
-            "Daily token usage: {} total",
-            format_token_count(usage.counts.total())
+            "Daily token usage: {} total, {}",
+            format_token_count(usage.counts.total()),
+            format_price(usage.price_usd)
         );
         for model in &usage.model_breakdowns {
             label.push_str(&format!(
-                "; {}: {}",
+                "; {}: {}, {}",
                 model.model_name,
-                format_token_count(model.counts.total())
+                format_token_count(model.counts.total()),
+                format_price(model.price_usd)
             ));
         }
         label
@@ -198,10 +214,11 @@ impl Render for TokenUsageView {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 struct ModelUsageRow {
     label: String,
     counts: TokenCounts,
+    price_usd: f64,
     is_daily_total: bool,
 }
 
@@ -210,11 +227,13 @@ fn model_usage_rows(usage: &DailyTokenUsage) -> Vec<ModelUsageRow> {
     rows.push(ModelUsageRow {
         label: "Today total".to_string(),
         counts: usage.counts,
+        price_usd: usage.price_usd,
         is_daily_total: true,
     });
     rows.extend(usage.model_breakdowns.iter().map(|model| ModelUsageRow {
         label: model.model_name.clone(),
         counts: model.counts,
+        price_usd: model.price_usd,
         is_daily_total: false,
     }));
     rows
@@ -241,6 +260,7 @@ impl ListDelegate for ModelUsageList {
         let row = self.rows.get(row_index)?;
         let label = row.label.clone();
         let counts = row.counts;
+        let price_usd = row.price_usd;
         let is_daily_total = row.is_daily_total;
         let ruled = row_index + 1 < self.rows.len();
         let foreground = cx.theme().foreground;
@@ -300,6 +320,10 @@ impl ListDelegate for ModelUsageList {
                         .child(
                             usage_value_cell(counts.total(), TOTAL_COLUMN, row_color)
                                 .font_weight(FontWeight::SEMIBOLD),
+                        )
+                        .child(
+                            price_value_cell(price_usd, PRICE_COLUMN, row_color)
+                                .font_weight(FontWeight::SEMIBOLD),
                         ),
                 ),
         )
@@ -332,6 +356,15 @@ fn usage_value_cell(tokens: u64, width: Pixels, color: gpui::Hsla) -> gpui::Div 
         .child(format_token_count(tokens))
 }
 
+fn price_value_cell(price_usd: f64, width: Pixels, color: gpui::Hsla) -> gpui::Div {
+    div()
+        .w(width)
+        .flex_none()
+        .text_right()
+        .text_color(color)
+        .child(format_price(price_usd))
+}
+
 fn usage_header_cell(label: &'static str, width: Pixels) -> gpui::Div {
     div().w(width).flex_none().text_right().child(label)
 }
@@ -354,6 +387,7 @@ fn model_usage_header(cx: &App) -> gpui::Div {
         .child(usage_header_cell("Cache create", CACHE_CREATION_COLUMN))
         .child(usage_header_cell("Cache read", CACHE_READ_COLUMN))
         .child(usage_header_cell("Total", TOTAL_COLUMN))
+        .child(usage_header_cell("Price", PRICE_COLUMN))
 }
 
 fn render_model_usage_list(
@@ -467,9 +501,14 @@ fn parse_usage(bytes: &[u8], date: &str) -> Result<DailyTokenUsage, String> {
 
     Ok(DailyTokenUsage {
         date: date.to_string(),
-        counts: report.totals,
+        counts: report.totals.counts,
+        price_usd: report.totals.price_usd,
         model_breakdowns: Vec::new(),
     })
+}
+
+fn format_price(price_usd: f64) -> String {
+    format!("${price_usd:.2}")
 }
 
 fn format_token_count(tokens: u64) -> String {
