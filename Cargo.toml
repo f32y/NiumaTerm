@@ -74,6 +74,11 @@ nmt_remote_net = { path = "crates/remote_net" }
 nmt_remote_session_hub = { path = "crates/remote_session_hub" }
 nmt_terminal = { path = "crates/terminal" }
 
+# Agent profile credential encryption. The aes-gcm `getrandom` default
+# feature provides the operating-system random source used for nonces.
+# base64 is declared in the GPUI Component section below.
+aes-gcm = "0.10"
+
 # Remote session wire protocol
 base32 = "0.5"
 postcard = { version = "1", features = ["use-std"] }

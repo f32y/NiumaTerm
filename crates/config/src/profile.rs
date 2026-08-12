@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use toml_edit::{ArrayOfTables, DocumentMut, Item, Table, value};
 
-use crate::ensure_explicit_table;
+use crate::{credentials, ensure_explicit_table};
 
 /// The `[profiles]` section: the default-profile name plus the profile
 /// entries (`[[profiles.list]]`). TOML cannot mix a scalar key with
@@ -75,9 +75,12 @@ pub struct EnvVar {
     pub value: String,
 }
 
-/// One `[[agent-profiles.list]]` entry. The API key is stored in plain text,
-/// matching the remote-session access token.
+/// One `[[agent-profiles.list]]` entry. The runtime type keeps the custom
+/// API URL and API key as plaintext strings for the settings editor and the
+/// launch adapters; on disk they live in one encrypted `api-credentials`
+/// value, decrypted through [`PersistedAgentProfile`] during load.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(try_from = "PersistedAgentProfile")]
 pub struct AgentProfile {
     #[serde(default)]
     pub name: String,
@@ -107,6 +110,65 @@ pub struct AgentProfile {
     pub env: Vec<EnvVar>,
 }
 
+/// On-disk shape of one `[[agent-profiles.list]]` entry. Credentials arrive
+/// either as the encrypted `api-credentials` value or as the legacy plaintext
+/// fields written by builds that predate encryption.
+#[derive(Deserialize)]
+struct PersistedAgentProfile {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    kind: AgentProfileKind,
+    #[serde(default)]
+    executable: String,
+    #[serde(default)]
+    model: String,
+    #[serde(default)]
+    effort: String,
+    #[serde(default, rename = "use-custom-endpoint")]
+    use_custom_endpoint: bool,
+    #[serde(default, rename = "api-credentials")]
+    api_credentials: Option<String>,
+    #[serde(default, rename = "api-base-url")]
+    api_base_url: String,
+    #[serde(default, rename = "api-key")]
+    api_key: String,
+    #[serde(default)]
+    env: Vec<EnvVar>,
+}
+
+impl TryFrom<PersistedAgentProfile> for AgentProfile {
+    type Error = String;
+
+    fn try_from(persisted: PersistedAgentProfile) -> Result<Self, Self::Error> {
+        // An encrypted value always wins over adjacent legacy fields, even
+        // when it fails to decrypt: falling back would let a modified
+        // ciphertext silently downgrade the profile to attacker-visible or
+        // stale plaintext left beside it. The error names the profile but
+        // never its credential data.
+        let (api_base_url, api_key) = match &persisted.api_credentials {
+            Some(stored) => credentials::decrypt(stored).map_err(|err| {
+                format!(
+                    "agent profile \"{}\": cannot read api-credentials: {err}",
+                    persisted.name
+                )
+            })?,
+            None => (persisted.api_base_url, persisted.api_key),
+        };
+        Ok(AgentProfile {
+            name: persisted.name,
+            kind: persisted.kind,
+            executable: persisted.executable,
+            model: persisted.model,
+            effort: persisted.effort,
+            use_custom_endpoint: persisted.use_custom_endpoint,
+            api_base_url,
+            api_key,
+            env: persisted.env,
+        })
+    }
+}
+
 /// Write the `[profiles]` section (`default` plus the `[[profiles.list]]`
 /// entries) into a parsed `config.toml` document, replacing any existing one.
 pub(crate) fn patch_document(doc: &mut DocumentMut, profiles: &[Profile], default_profile: &str) {
@@ -126,12 +188,16 @@ pub(crate) fn patch_document(doc: &mut DocumentMut, profiles: &[Profile], defaul
 
 /// Write the `[agent-profiles]` section (`default` plus the
 /// `[[agent-profiles.list]]` entries) into a parsed `config.toml` document,
-/// replacing any existing one.
+/// replacing any existing one. Credentials are written only as the encrypted
+/// `api-credentials` value; rebuilding every entry from the runtime type is
+/// what removes legacy plaintext fields on the first save after migration.
+/// An encryption failure aborts the whole patch so the caller never persists
+/// a document with missing credentials.
 pub(crate) fn patch_agent_document(
     doc: &mut DocumentMut,
     profiles: &[AgentProfile],
     default_profile: &str,
-) {
+) -> Result<(), String> {
     ensure_explicit_table(doc, "agent-profiles");
     doc["agent-profiles"]["default"] = value(default_profile);
     // Saving means the dialog managed this section; from now on an empty
@@ -147,8 +213,16 @@ pub(crate) fn patch_agent_document(
         table["model"] = value(&profile.model);
         table["effort"] = value(&profile.effort);
         table["use-custom-endpoint"] = value(profile.use_custom_endpoint);
-        table["api-base-url"] = value(&profile.api_base_url);
-        table["api-key"] = value(&profile.api_key);
+        if !profile.api_base_url.is_empty() || !profile.api_key.is_empty() {
+            let stored =
+                credentials::encrypt(&profile.api_base_url, &profile.api_key).map_err(|err| {
+                    format!(
+                        "agent profile \"{}\": cannot save credentials: {err}",
+                        profile.name
+                    )
+                })?;
+            table["api-credentials"] = value(stored);
+        }
 
         let mut env = toml_edit::Array::new();
         for var in &profile.env {
@@ -162,4 +236,5 @@ pub(crate) fn patch_agent_document(
         tables.push(table);
     }
     doc["agent-profiles"]["list"] = Item::ArrayOfTables(tables);
+    Ok(())
 }
