@@ -33,8 +33,6 @@ pub(crate) use mouse::{
 #[cfg(test)]
 use mouse::{mouse_button_code, mouse_motion_code, mouse_report_mods};
 #[cfg(test)]
-use scroll::should_scroll_to_bottom_before_input;
-#[cfg(test)]
 use selection::{block_selection_range, selection_screen_range};
 
 pub struct TerminalSurface {

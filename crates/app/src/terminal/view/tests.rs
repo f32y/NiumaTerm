@@ -1,7 +1,9 @@
 use gpui::{ScrollDelta, point, px};
 use nmt_terminal::selection::SelectionType;
 
+use crate::terminal::block_list::{BlockListState, block_list_alignment};
 use crate::terminal::surface::{SurfaceCell, SurfaceCellSide};
+use crate::terminal::view::scroll::{scroll_block_list_to_latest, viewport_is_scrolled};
 use crate::terminal::view::{
     dropped_paths_text, metrics, selection_drag_started, selection_type_for_click_count,
     terminal_cell_at_position, terminal_scroll_lines,
@@ -100,4 +102,26 @@ fn scroll_delta_maps_to_terminal_lines() {
         terminal_scroll_lines(ScrollDelta::Pixels(point(px(0.0), px(4.0))), cell),
         0
     );
+}
+
+#[test]
+fn typed_input_can_restore_a_scrolled_block_list() {
+    let mut block_list = BlockListState::new(block_list_alignment(false));
+    block_list.scrollbar = (24.0, 120.0);
+
+    assert!(scroll_block_list_to_latest(&mut block_list));
+    assert_eq!(block_list.scrollbar, (120.0, 120.0));
+    assert_eq!(
+        block_list.list.logical_scroll_top().item_ix,
+        block_list.list.item_count()
+    );
+
+    assert!(!scroll_block_list_to_latest(&mut block_list));
+}
+
+#[test]
+fn terminal_viewport_only_moves_when_above_the_bottom() {
+    assert!(viewport_is_scrolled(3, 20, 10));
+    assert!(!viewport_is_scrolled(10, 20, 10));
+    assert!(!viewport_is_scrolled(0, 10, 20));
 }

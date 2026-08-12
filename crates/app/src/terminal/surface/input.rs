@@ -16,43 +16,39 @@ pub(crate) enum TerminalKeyResult {
 }
 
 impl TerminalSurface {
-    pub fn write_text(&self, text: &str) {
-        self.write_bytes(text.as_bytes());
+    pub fn write_text(&self, text: &str) -> bool {
+        self.write_bytes(text.as_bytes())
     }
 
-    pub(super) fn write_bytes(&self, bytes: &[u8]) {
+    pub(super) fn write_bytes(&self, bytes: &[u8]) -> bool {
         if bytes.is_empty() || self.read_only.load(Ordering::Relaxed) {
-            return;
+            return false;
         }
 
-        self.scroll_viewport_bottom_before_input();
-
         self.session.write_input(bytes);
+
+        true
     }
 
     pub(crate) fn apply_key_action(&self, action: TerminalKeyAction) -> TerminalKeyResult {
         match action {
             TerminalKeyAction::Write(bytes) => {
-                if bytes.is_empty() || self.read_only.load(Ordering::Relaxed) {
-                    return TerminalKeyResult::Ignored;
+                if self.write_bytes(&bytes) {
+                    TerminalKeyResult::Handled
+                } else {
+                    TerminalKeyResult::Ignored
                 }
-
-                self.write_bytes(&bytes);
-
-                TerminalKeyResult::Handled
             }
             TerminalKeyAction::CopyOrWrite(bytes) => {
                 if self.copy_selection() {
                     return TerminalKeyResult::Copied;
                 }
 
-                if bytes.is_empty() || self.read_only.load(Ordering::Relaxed) {
-                    return TerminalKeyResult::Ignored;
+                if self.write_bytes(&bytes) {
+                    TerminalKeyResult::Handled
+                } else {
+                    TerminalKeyResult::Ignored
                 }
-
-                self.write_bytes(&bytes);
-
-                TerminalKeyResult::Handled
             }
             TerminalKeyAction::Paste => {
                 if self.paste() {
@@ -78,9 +74,7 @@ impl TerminalSurface {
             return false;
         };
 
-        self.write_bytes(&bytes);
-
-        true
+        self.write_bytes(&bytes)
     }
 }
 

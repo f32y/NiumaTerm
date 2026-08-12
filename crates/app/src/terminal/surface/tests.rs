@@ -9,7 +9,7 @@ use nmt_terminal::terminal::pos::{Column, Line, Pos, Side};
 use super::{
     SurfaceMouseButton, TerminalSurface, block_selection_range, mouse_button_code,
     mouse_motion_code, mouse_report_mods, paste_payload, selection_screen_range,
-    should_scroll_to_bottom_before_input, tab_state_with_cwd,
+    tab_state_with_cwd,
 };
 use crate::terminal::session::TerminalSessionConfig;
 
@@ -127,11 +127,4 @@ fn mouse_helpers_match_xterm_codes() {
         mouse_motion_code(Mode::MOUSE_DRAG, Some(SurfaceMouseButton::Right)),
         Some(34)
     );
-}
-
-#[test]
-fn input_snap_only_when_viewport_is_scrolled_up() {
-    assert!(should_scroll_to_bottom_before_input(3, 20, 10));
-    assert!(!should_scroll_to_bottom_before_input(10, 20, 10));
-    assert!(!should_scroll_to_bottom_before_input(0, 10, 20));
 }

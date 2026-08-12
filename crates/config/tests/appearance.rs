@@ -7,10 +7,21 @@ fn appearance_section_defaults_when_absent() {
     let config: Config = from_str("").unwrap();
     assert_eq!(config.appearance, AppearanceConfig::default());
     assert_eq!(config.appearance.input_style, InputStyle::Waterfall);
+    assert!(config.appearance.scroll_to_bottom_when_typing);
     assert!(!config.appearance.agent_pane_use_terminal_background);
     assert!(config.appearance.transparent_main_view);
     assert_eq!(config.appearance.smooth_scrolling, SmoothScrollingMode::All);
     assert!(config.profiles.list.is_empty());
+}
+
+#[test]
+fn scroll_to_bottom_when_typing_defaults_on_and_accepts_false() {
+    let missing: Config = from_str("[appearance]\n").unwrap();
+    assert!(missing.appearance.scroll_to_bottom_when_typing);
+
+    let disabled: Config =
+        from_str("[appearance]\nscroll-to-bottom-when-typing = false\n").unwrap();
+    assert!(!disabled.appearance.scroll_to_bottom_when_typing);
 }
 
 #[test]
