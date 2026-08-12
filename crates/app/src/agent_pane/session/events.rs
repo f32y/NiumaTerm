@@ -185,6 +185,17 @@ impl AgentPane {
                 cx.notify();
             }
             SessionEvent::TurnCompleted { error } => {
+                // Interruption is a completion state of the turn: the stop
+                // request recorded at press time becomes the transcript mark
+                // only once the backend actually ended the turn, so a backend
+                // that keeps streaming never shows an "Interrupted" row above
+                // live output. A stale request for an earlier turn is dropped
+                // at this boundary.
+                if self.pending_interrupt.take() == Some(self.turn_seq) {
+                    let turn = self.turn_seq;
+                    self.transcript
+                        .update(cx, |transcript, _| transcript.mark_interrupted(turn));
+                }
                 let interrupted_by_user = self.transcript.read(cx).was_interrupted(self.turn_seq);
                 let completion_body = error
                     .clone()
