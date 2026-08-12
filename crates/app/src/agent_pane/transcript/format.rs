@@ -47,7 +47,7 @@ pub(super) fn timed_token_label(verb: &str, seconds: u64, output_tokens: Option<
 }
 
 /// Elapsed time broken into nonzero units so sparse durations stay compact;
-/// an entirely empty duration still renders as `0s` instead of a blank label.
+/// an entirely empty duration still renders as `0 s` instead of a blank label.
 pub(super) fn elapsed_label(total_seconds: u64) -> String {
     let units = [
         (total_seconds / 86_400, "day", "days"),

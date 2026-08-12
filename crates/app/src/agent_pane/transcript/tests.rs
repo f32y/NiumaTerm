@@ -54,10 +54,10 @@ mod prompt_truncation_tests {
 
     #[test]
     fn working_status_adds_compact_live_output_tokens() {
-        assert_eq!(working_status_label(4, None), "Working for 4s");
+        assert_eq!(working_status_label(4, None), "Working for 4 s");
         assert_eq!(
             working_status_label(12, Some(1_250)),
-            "Working for 12s · 1.2k tokens"
+            "Working for 12 s · 1.2k tokens"
         );
     }
 
@@ -73,16 +73,16 @@ mod prompt_truncation_tests {
 
         assert_eq!(
             worked_status_label(3_721, Some(12_400)),
-            "Worked for 1 hour 2 mins 1s · 12k tokens"
+            "Worked for 1 hour 2 mins 1 s · 12k tokens"
         );
     }
 
     #[test]
     fn worked_status_keeps_the_final_output_tokens() {
-        assert_eq!(worked_status_label(8, None), "Worked for 8s");
+        assert_eq!(worked_status_label(8, None), "Worked for 8 s");
         assert_eq!(
             worked_status_label(21, Some(12_400)),
-            "Worked for 21s · 12k tokens"
+            "Worked for 21 s · 12k tokens"
         );
     }
 
