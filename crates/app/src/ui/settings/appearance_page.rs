@@ -4,6 +4,7 @@ pub(super) fn appearance_page(
     backdrop: WindowBackdrop,
     background_image_enabled: bool,
     tab_auto_size: bool,
+    show_git_status: bool,
 ) -> SettingPage {
     SettingPage::new("Appearance")
         .default_open(true)
@@ -301,6 +302,10 @@ pub(super) fn appearance_page(
                         )
                         .default_value(SharedString::from("30")),
                     )
+                    // The titlebar switch is the feature's master toggle;
+                    // while it is off the interval has no display to pace, so
+                    // the entry is locked instead of reporting a dead value.
+                    .disabled(!show_git_status)
                     .description("How often the git status is re-read."),
                 ),
         )

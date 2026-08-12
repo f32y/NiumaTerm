@@ -151,6 +151,7 @@ pub fn settings_view(cx: &App) -> Settings {
             backdrop,
             background_image_enabled,
             cx.global::<AppSettings>().tab_auto_size,
+            cx.global::<AppSettings>().show_git_status_on_title_bar,
         ))
         .page(profiles_page(&profiles, &agent_profiles))
         .page(agent_page(&agent_profiles, cx))
