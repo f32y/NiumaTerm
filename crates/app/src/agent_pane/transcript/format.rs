@@ -46,27 +46,27 @@ pub(super) fn timed_token_label(verb: &str, seconds: u64, output_tokens: Option<
     }
 }
 
-/// Elapsed time broken into its units. A long turn reported as a raw seconds
-/// count reads as a number rather than a duration; once a larger unit appears
-/// the smaller ones stay, including at zero, so a ticking label keeps its
-/// shape instead of shifting as each unit rolls over.
-pub(super) fn elapsed_label(seconds: u64) -> String {
-    let days = seconds / 86_400;
-    let hours = (seconds % 86_400) / 3_600;
-    let minutes = (seconds % 3_600) / 60;
-    let seconds = seconds % 60;
+/// Elapsed time broken into nonzero units so sparse durations stay compact;
+/// an entirely empty duration still renders as `0s` instead of a blank label.
+pub(super) fn elapsed_label(total_seconds: u64) -> String {
+    let units = [
+        (total_seconds / 86_400, "day", "days"),
+        ((total_seconds % 86_400) / 3_600, "hour", "hours"),
+        ((total_seconds % 3_600) / 60, "min", "mins"),
+    ];
+    let seconds = total_seconds % 60;
 
-    let mut parts = Vec::new();
-    if days > 0 {
-        parts.push(format!("{days}days"));
+    let mut parts = units
+        .into_iter()
+        .filter(|(value, _, _)| *value > 0)
+        .map(|(value, singular, plural)| {
+            format!("{value} {}", if value == 1 { singular } else { plural })
+        })
+        .collect::<Vec<_>>();
+
+    if seconds > 0 || parts.is_empty() {
+        parts.push(format!("{seconds} s"));
     }
-    if days > 0 || hours > 0 {
-        parts.push(format!("{hours}hrs"));
-    }
-    if days > 0 || hours > 0 || minutes > 0 {
-        parts.push(format!("{minutes}mins"));
-    }
-    parts.push(format!("{seconds}s"));
 
     parts.join(" ")
 }
