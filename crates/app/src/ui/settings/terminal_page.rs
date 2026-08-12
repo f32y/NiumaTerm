@@ -62,6 +62,18 @@ pub(super) fn terminal_page() -> SettingPage {
                                  exit status, and duration. Off: outputs run together like a \
                                  classic terminal.",
                 ),
+            )
+            .item(
+                SettingItem::new(
+                    "Scroll to bottom when typing",
+                    SettingField::switch(
+                        |cx| cx.global::<AppSettings>().scroll_to_bottom_when_typing,
+                        |value, cx| {
+                            cx.global_mut::<AppSettings>().scroll_to_bottom_when_typing = value;
+                        },
+                    ),
+                )
+                .description("Show the latest terminal output when typing into a scrolled view."),
             ),
     )
 }

@@ -31,6 +31,8 @@ pub struct AppSettings {
     pub themes: Vec<(String, Theme)>,
     pub agent_pane_use_terminal_background: bool,
     pub input_style: InputStyle,
+    /// Move a scrolled terminal viewport to the latest output on typed input.
+    pub scroll_to_bottom_when_typing: bool,
     pub cursor_shape: CursorShape,
     pub profiles: Vec<Profile>,
     /// Name of the profile new terminals use. Always references an existing
@@ -124,6 +126,7 @@ impl Default for AppSettings {
             themes: Vec::new(),
             agent_pane_use_terminal_background: false,
             input_style: InputStyle::Waterfall,
+            scroll_to_bottom_when_typing: true,
             cursor_shape: CursorShape::Block,
             profiles: vec![builtin_profile()],
             default_profile: builtin_profile().name,
@@ -362,6 +365,7 @@ impl AppSettings {
             themes: load_theme_choices(),
             agent_pane_use_terminal_background: appearance.agent_pane_use_terminal_background,
             input_style: appearance.input_style,
+            scroll_to_bottom_when_typing: appearance.scroll_to_bottom_when_typing,
             cursor_shape: config.cursor.shape,
             profiles,
             default_profile,
@@ -574,6 +578,7 @@ impl AppSettings {
     pub(super) fn appearance_config(&self) -> AppearanceConfig {
         AppearanceConfig {
             input_style: self.input_style,
+            scroll_to_bottom_when_typing: self.scroll_to_bottom_when_typing,
             agent_pane_use_terminal_background: self.agent_pane_use_terminal_background,
             command_blocks: self.command_blocks,
             show_daily_token_usage: self.show_daily_token_usage,

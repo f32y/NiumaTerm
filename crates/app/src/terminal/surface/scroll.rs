@@ -56,20 +56,4 @@ impl TerminalSurface {
 
         changed
     }
-
-    pub(super) fn scroll_viewport_bottom_before_input(&self) {
-        let should_scroll = {
-            let sb = self.session.render_buffer.lock().scrollbar();
-
-            should_scroll_to_bottom_before_input(sb.offset, sb.total, sb.len)
-        };
-
-        if should_scroll {
-            self.session.engine.lock().scroll_viewport_bottom();
-        }
-    }
-}
-
-pub(super) fn should_scroll_to_bottom_before_input(offset: u64, total: u64, len: u64) -> bool {
-    offset < total.saturating_sub(len)
 }

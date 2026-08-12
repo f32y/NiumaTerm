@@ -137,6 +137,7 @@ fn load_falls_back_to_default_profile() {
     // profile resolves to that profile's name.
     let settings = AppSettings::load();
     assert_eq!(settings.input_style, InputStyle::Waterfall);
+    assert!(settings.scroll_to_bottom_when_typing);
     assert_eq!(settings.window_backdrop, WindowBackdrop::Acrylic);
     assert_eq!(settings.profiles.len(), 1);
     assert_eq!(settings.default_profile, settings.profiles[0].name);
@@ -312,12 +313,21 @@ fn default_agent_profile_entry_resolves_by_name() {
 fn defaults_have_one_powershell_profile() {
     let settings = AppSettings::default();
     assert_eq!(settings.input_style, InputStyle::Waterfall);
+    assert!(settings.scroll_to_bottom_when_typing);
     assert_eq!(settings.window_backdrop, WindowBackdrop::Acrylic);
     assert_eq!(settings.profiles.len(), 1);
     assert_eq!(settings.profiles[0].shell, DEFAULT_SHELL);
     assert_eq!(settings.profiles[0].args, "");
     assert!(settings.restore_last_session_when_opening);
     assert_eq!(settings.smooth_scrolling, SmoothScrollingMode::All);
+}
+
+#[test]
+fn scroll_to_bottom_when_typing_maps_to_saved_appearance() {
+    let mut settings = AppSettings::default();
+    settings.scroll_to_bottom_when_typing = false;
+
+    assert!(!settings.appearance_config().scroll_to_bottom_when_typing);
 }
 
 #[test]

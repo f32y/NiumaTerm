@@ -1,5 +1,22 @@
 use crate::terminal::view::*;
 
+pub(in crate::terminal) fn scroll_block_list_to_latest(block_list: &mut BlockListState) -> bool {
+    let (offset, max) = block_list.scrollbar;
+
+    if offset >= max {
+        return false;
+    }
+
+    block_list.list.scroll_to_end();
+    block_list.scrollbar.0 = max;
+
+    true
+}
+
+pub(in crate::terminal) fn viewport_is_scrolled(offset: u64, total: u64, len: u64) -> bool {
+    offset < total.saturating_sub(len)
+}
+
 impl TerminalPane {
     /// Record a user scroll action and schedule the repaint that starts fading
     /// the scrollbar once [`SCROLLBAR_LINGER`] passes without further activity.
@@ -35,14 +52,9 @@ impl TerminalPane {
     /// leaving End available for normal shell line navigation at the bottom.
     pub(super) fn scroll_to_latest(&mut self, cx: &mut Context<Self>) -> bool {
         if self.block_list_mode(cx) {
-            let (offset, max) = self.block_list.scrollbar;
-
-            if offset >= max {
+            if !scroll_block_list_to_latest(&mut self.block_list) {
                 return false;
             }
-
-            self.block_list.list.scroll_to_end();
-            self.block_list.scrollbar.0 = max;
 
             self.mark_scroll_activity(cx);
 
@@ -54,7 +66,7 @@ impl TerminalPane {
         let scrolled = self.frame_cache.current().is_some_and(|frame| {
             let scrollbar = frame.scrollbar();
 
-            scrollbar.offset < scrollbar.total.saturating_sub(scrollbar.len)
+            viewport_is_scrolled(scrollbar.offset, scrollbar.total, scrollbar.len)
         });
 
         if scrolled {

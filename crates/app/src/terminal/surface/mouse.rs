@@ -115,9 +115,7 @@ impl TerminalSurface {
             return false;
         };
 
-        self.write_bytes(&msg);
-
-        true
+        self.write_bytes(&msg)
     }
 }
 

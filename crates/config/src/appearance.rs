@@ -155,6 +155,10 @@ fn default_terminal_line_height() -> f64 {
     1.0
 }
 
+fn default_scroll_to_bottom_when_typing() -> bool {
+    true
+}
+
 fn default_agent_font_family() -> String {
     default_terminal_font_family()
 }
@@ -184,6 +188,12 @@ fn default_transparent_main_view() -> bool {
 pub struct AppearanceConfig {
     #[serde(default, rename = "input-style")]
     pub input_style: InputStyle,
+    /// Move a scrolled viewport to the latest output after typed input.
+    #[serde(
+        default = "default_scroll_to_bottom_when_typing",
+        rename = "scroll-to-bottom-when-typing"
+    )]
+    pub scroll_to_bottom_when_typing: bool,
     /// Use the terminal theme background for Agent Pane.
     #[serde(default, rename = "agent-pane-use-terminal-background")]
     pub agent_pane_use_terminal_background: bool,
@@ -289,6 +299,7 @@ impl Default for AppearanceConfig {
     fn default() -> Self {
         Self {
             input_style: InputStyle::default(),
+            scroll_to_bottom_when_typing: true,
             agent_pane_use_terminal_background: false,
             command_blocks: true,
             show_daily_token_usage: false,

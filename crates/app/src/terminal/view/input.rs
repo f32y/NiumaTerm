@@ -37,6 +37,14 @@ pub(super) fn dropped_paths_text(paths: &[PathBuf]) -> String {
 }
 
 impl TerminalPane {
+    /// UI reaction to input reaching the PTY: optionally snap the view back
+    /// to the latest output.
+    fn react_to_pty_input(&mut self, cx: &mut Context<Self>) {
+        if cx.global::<AppSettings>().scroll_to_bottom_when_typing {
+            self.scroll_to_latest(cx);
+        }
+    }
+
     pub(super) fn on_key_down(
         &mut self,
         event: &KeyDownEvent,
@@ -71,30 +79,31 @@ impl TerminalPane {
             }
         }
 
-        let result = self.surface.apply_key_action(action);
-
-        if result == SurfaceKeyResult::Copied {
-            show_text_copied(window, cx);
+        match self.surface.apply_key_action(action) {
+            SurfaceKeyResult::Ignored => return,
+            SurfaceKeyResult::Copied => show_text_copied(window, cx),
+            SurfaceKeyResult::Handled => self.react_to_pty_input(cx),
         }
 
-        if result != SurfaceKeyResult::Ignored {
-            if interrupts_agent {
-                cx.emit(AgentInterrupted);
-            }
-
-            self.invalidate(cx);
+        if interrupts_agent {
+            cx.emit(AgentInterrupted);
         }
+
+        self.invalidate(cx);
     }
 
     /// Route a keystroke straight to the terminal PTY.
     pub(crate) fn feed_terminal_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) {
-        if self
+        match self
             .surface
             .apply_key_action(terminal_input::key_action(keystroke))
-            != SurfaceKeyResult::Ignored
         {
-            self.invalidate(cx);
+            SurfaceKeyResult::Ignored => return,
+            SurfaceKeyResult::Handled => self.react_to_pty_input(cx),
+            SurfaceKeyResult::Copied => {}
         }
+
+        self.invalidate(cx);
     }
 
     /// Tab/Shift-Tab belong to the shell (completion) while the terminal is
@@ -158,9 +167,10 @@ impl EntityInputHandler for TerminalPane {
             return;
         }
 
-        self.surface.write_text(text);
-
-        self.invalidate(cx);
+        if self.surface.write_text(text) {
+            self.react_to_pty_input(cx);
+            self.invalidate(cx);
+        }
     }
 
     fn bounds_for_range(
