@@ -3,8 +3,9 @@
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, Context, Entity, IntoElement, ParentElement as _, Pixels, Styled as _, Window,
-    div, px,
+    AnyElement, App, AppContext as _, Context, DragMoveEvent, Entity, InteractiveElement as _,
+    IntoElement, ParentElement as _, Pixels, Render, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Window, div, px,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::list::{List, ListDelegate, ListItem, ListState};
@@ -67,12 +68,40 @@ fn delete_profile(ix: usize, window: &mut Window, cx: &mut App) {
     });
 }
 
+/// Drag payload for reordering rows: the position the drag started from.
+struct ProfileDrag {
+    from: usize,
+}
+
+/// Floating preview under the cursor while a profile row is dragged: the
+/// profile's name in a small themed pill.
+struct ProfileDragPreview {
+    label: SharedString,
+}
+
+impl Render for ProfileDragPreview {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px_2()
+            .py_1()
+            .rounded(cx.theme().radius)
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().background)
+            .text_sm()
+            .child(self.label.clone())
+    }
+}
+
 /// Row source for the list. It holds its own copy of the profiles rather than
 /// reading the global while rendering, so the settings view can compare and
 /// refresh it, which is also what marks the list dirty after an add, an edit,
 /// or a delete.
 pub(super) struct AgentProfileList {
     profiles: Vec<AgentProfile>,
+    /// Row a profile drag currently hovers, highlighted as the drop target.
+    /// Dropping there moves the dragged profile to that position.
+    drag_over: Option<usize>,
 }
 
 impl ListDelegate for AgentProfileList {
@@ -91,9 +120,11 @@ impl ListDelegate for AgentProfileList {
         let row = ix.row;
         let profile = self.profiles.get(row)?;
         let label = profile_label(row, profile);
+        let drag_label: SharedString = label.clone().into();
         // The frame around the list supplies the last row's bottom edge, so
         // repeating it here would double the line.
         let ruled = row + 1 < self.profiles.len();
+        let drag_target = self.drag_over == Some(row);
 
         Some(
             // Stating the row height keeps the divider inside it: without one,
@@ -104,11 +135,55 @@ impl ListDelegate for AgentProfileList {
                 .when(ruled, |this| {
                     this.border_b_1().border_color(cx.theme().border)
                 })
+                .when(drag_target, |this| this.bg(cx.theme().list_active))
                 .child(
                     h_flex()
+                        .id(("agent-profile-drag", row))
                         .w_full()
                         .items_center()
                         .gap_2()
+                        // Drag a row to reorder it; drop moves the dragged
+                        // profile (`from`) to this row's position.
+                        .on_drag(ProfileDrag { from: row }, move |_, _, _, cx| {
+                            cx.new(|_| ProfileDragPreview {
+                                label: drag_label.clone(),
+                            })
+                        })
+                        .on_drag_move(cx.listener(
+                            move |this, e: &DragMoveEvent<ProfileDrag>, _, cx| {
+                                if !e.bounds.contains(&e.event.position) {
+                                    return;
+                                }
+
+                                // No highlight over the drag's own row:
+                                // dropping there is a no-op.
+                                let target = (e.drag(cx).from != row).then_some(row);
+
+                                if this.delegate().drag_over != target {
+                                    this.delegate_mut().drag_over = target;
+                                    cx.notify();
+                                }
+                            },
+                        ))
+                        .on_drop(cx.listener(move |this, drag: &ProfileDrag, _, cx| {
+                            this.delegate_mut().drag_over = None;
+
+                            let from = drag.from;
+                            let profiles = &mut cx.global_mut::<AppSettings>().agent_profiles;
+                            // Stale indices only appear if the list changed
+                            // mid-drag; skip the move rather than panic.
+                            if from != row && from < profiles.len() && row < profiles.len() {
+                                let profile = profiles.remove(from);
+                                profiles.insert(row, profile);
+                            }
+
+                            // Refresh the rows directly: the drop lands on
+                            // this list, so no outer render is guaranteed to
+                            // push the reordered profiles back in.
+                            this.delegate_mut().profiles =
+                                cx.global::<AppSettings>().agent_profiles.clone();
+                            cx.notify();
+                        }))
                         .child(div().w(TYPE_COLUMN).flex_none().child(agent_icon(profile)))
                         .child(div().flex_1().min_w_0().truncate().child(label))
                         .child(
@@ -186,6 +261,7 @@ pub(super) fn agent_profile_list(window: &mut Window, cx: &mut App) -> AnyElemen
             ListState::new(
                 AgentProfileList {
                     profiles: Vec::new(),
+                    drag_over: None,
                 },
                 window,
                 cx,
@@ -194,6 +270,14 @@ pub(super) fn agent_profile_list(window: &mut Window, cx: &mut App) -> AnyElemen
         });
 
     state.update(cx, |state, cx| {
+        // Drop the target highlight once the drag is gone without a drop on
+        // the list (cancelled via Escape, or released elsewhere) — the cancel
+        // itself refreshes the window, so this always gets a chance to run.
+        if state.delegate().drag_over.is_some() && !cx.has_active_drag() {
+            state.delegate_mut().drag_over = None;
+            cx.notify();
+        }
+
         if state.delegate().profiles != profiles {
             state.delegate_mut().profiles = profiles;
             cx.notify();
