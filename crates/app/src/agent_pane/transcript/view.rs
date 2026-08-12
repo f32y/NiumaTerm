@@ -414,9 +414,13 @@ impl Render for TranscriptView {
                         .flex()
                         .justify_center()
                         .child(
+                            // Button::small() hard-codes h_6 during render, which
+                            // would overwrite any height set here; min_h clamps the
+                            // final layout instead. The solid (non-outline) variant
+                            // keeps transcript text from showing through the button.
                             Button::new("agent-jump-to-bottom")
-                                .outline()
                                 .small()
+                                .min_h(px(36.))
                                 .rounded(UI_RADIUS)
                                 .icon(IconName::ArrowDown)
                                 .label("Scroll to Bottom")
