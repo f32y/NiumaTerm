@@ -97,6 +97,18 @@ impl From<&LaunchConfig> for ThreadProfile {
     }
 }
 
+fn initialize_request() -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": INIT_RPC_ID,
+        "method": "initialize",
+        "params": {
+            "clientInfo": {"name": "NiumaTerm", "version": "0.1.0"},
+            "capabilities": {"experimentalApi": true},
+        },
+    })
+}
+
 #[derive(Default)]
 struct TurnOutputUsage {
     latest_total: Option<u64>,
@@ -260,12 +272,7 @@ impl Session {
             background: CodexTasks::default(),
         };
 
-        session.send(json!({
-            "jsonrpc": "2.0",
-            "id": INIT_RPC_ID,
-            "method": "initialize",
-            "params": {"clientInfo": {"name": "NiumaTerm", "version": "0.1.0"}},
-        }));
+        session.send(initialize_request());
 
         Ok(session)
     }
