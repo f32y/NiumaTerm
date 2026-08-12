@@ -2,6 +2,7 @@ pub mod agent;
 pub mod appearance;
 pub mod builtin_themes;
 pub mod colors;
+mod credentials;
 pub mod defaults;
 pub mod local_state;
 pub mod profile;
@@ -490,7 +491,14 @@ fn save_settings_to(path: &Path, patch: &SettingsPatch<'_>) -> io::Result<()> {
         Err(_) => DocumentMut::new(),
     };
 
-    patch_settings_document(&mut doc, patch);
+    // Credential encryption runs while patching, before any file is touched;
+    // a failure here must leave the existing configuration file as it is.
+    patch_settings_document(&mut doc, patch).map_err(|err| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("not saving settings: {err}"),
+        )
+    })?;
 
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
@@ -501,7 +509,7 @@ fn save_settings_to(path: &Path, patch: &SettingsPatch<'_>) -> io::Result<()> {
     Ok(())
 }
 
-fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) {
+fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) -> Result<(), String> {
     let &SettingsPatch {
         theme,
         appearance,
@@ -562,7 +570,7 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) {
     remote_session::patch_document(doc, remote_session);
 
     profile::patch_document(doc, profiles, default_profile);
-    profile::patch_agent_document(doc, agent_profiles, default_agent_profile);
+    profile::patch_agent_document(doc, agent_profiles, default_agent_profile)
 }
 
 /// Make `doc[key]` an explicit table so nested managed keys never turn into an
@@ -667,7 +675,8 @@ mod tests {
                 agent_profiles: &sample_agent_profiles(),
                 default_agent_profile: "Claude Code",
             },
-        );
+        )
+        .unwrap();
     }
 
     #[test]
@@ -748,6 +757,147 @@ mod tests {
         assert_eq!(fs::read_to_string(&path).unwrap(), "not [ valid");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The stored `api-credentials` string of the first agent profile.
+    fn stored_credentials(doc: &DocumentMut) -> String {
+        doc["agent-profiles"]["list"]
+            .as_array_of_tables()
+            .unwrap()
+            .get(0)
+            .unwrap()["api-credentials"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    #[test]
+    fn saved_agent_credentials_contain_no_plaintext() {
+        let mut doc = DocumentMut::new();
+        patch_settings(&mut doc);
+        let out = doc.to_string();
+
+        assert!(out.contains("api-credentials = \"aes256gcm-v1:"));
+        assert!(!out.contains("proxy.example.com"));
+        assert!(!out.contains("sk-test"));
+        assert!(!out.contains("api-base-url"));
+        assert!(!out.contains("api-key"));
+
+        let config: Config = parse_toml(&out).unwrap();
+        assert_eq!(config.agent_profiles.list, sample_agent_profiles());
+    }
+
+    #[test]
+    fn repeated_saves_produce_different_stored_credentials() {
+        let mut first = DocumentMut::new();
+        patch_settings(&mut first);
+        let mut second = DocumentMut::new();
+        patch_settings(&mut second);
+
+        assert_ne!(stored_credentials(&first), stored_credentials(&second));
+
+        let restored: Config = parse_toml(&second.to_string()).unwrap();
+        assert_eq!(restored.agent_profiles.list, sample_agent_profiles());
+    }
+
+    #[test]
+    fn empty_agent_credentials_are_omitted() {
+        let profiles = vec![profile::AgentProfile {
+            name: "Plain".to_string(),
+            ..profile::AgentProfile::default()
+        }];
+        let mut doc = DocumentMut::new();
+        profile::patch_agent_document(&mut doc, &profiles, "Plain").unwrap();
+        let out = doc.to_string();
+
+        assert!(!out.contains("api-credentials"));
+        assert!(!out.contains("api-base-url"));
+        assert!(!out.contains("api-key"));
+    }
+
+    const LEGACY_PROFILE_TOML: &str = r#"
+[[agent-profiles.list]]
+name = "Legacy"
+kind = "claude-code"
+executable = "claude"
+use-custom-endpoint = true
+api-base-url = "https://legacy.example.com"
+api-key = "sk-legacy"
+"#;
+
+    #[test]
+    fn legacy_plaintext_credentials_load_without_touching_the_file() {
+        let dir = tmp_dir().join("NiumaTerm-legacy-credentials-test");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        fs::write(&path, LEGACY_PROFILE_TOML).unwrap();
+
+        let config = Config::load_for_startup_from(&path, &dir).unwrap();
+        let profile = &config.agent_profiles.list[0];
+        assert_eq!(profile.api_base_url, "https://legacy.example.com");
+        assert_eq!(profile.api_key, "sk-legacy");
+        assert_eq!(fs::read_to_string(&path).unwrap(), LEGACY_PROFILE_TOML);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn legacy_plaintext_credentials_migrate_on_save() {
+        let config: Config = parse_toml(LEGACY_PROFILE_TOML).unwrap();
+        let mut doc = LEGACY_PROFILE_TOML.parse::<DocumentMut>().unwrap();
+        profile::patch_agent_document(&mut doc, &config.agent_profiles.list, "Legacy").unwrap();
+        let out = doc.to_string();
+
+        assert!(out.contains("api-credentials = \"aes256gcm-v1:"));
+        assert!(!out.contains("api-base-url"));
+        assert!(!out.contains("api-key"));
+        assert!(!out.contains("sk-legacy"));
+
+        let restored: Config = parse_toml(&out).unwrap();
+        let profile = &restored.agent_profiles.list[0];
+        assert_eq!(profile.api_base_url, "https://legacy.example.com");
+        assert_eq!(profile.api_key, "sk-legacy");
+    }
+
+    #[test]
+    fn encrypted_credentials_win_over_adjacent_legacy_fields() {
+        let stored = credentials::encrypt("https://current.example.com", "sk-current").unwrap();
+        let toml_str = format!(
+            "[[agent-profiles.list]]\nname = \"Both\"\napi-credentials = \"{stored}\"\n\
+             api-base-url = \"https://stale.example.com\"\napi-key = \"sk-stale\"\n"
+        );
+
+        let config: Config = parse_toml(&toml_str).unwrap();
+        let profile = &config.agent_profiles.list[0];
+        assert_eq!(profile.api_base_url, "https://current.example.com");
+        assert_eq!(profile.api_key, "sk-current");
+    }
+
+    #[test]
+    fn invalid_encrypted_credentials_fail_without_legacy_fallback() {
+        let valid = credentials::encrypt("https://real.example.com", "sk-real").unwrap();
+        // Corrupt the last Base64 character while keeping the text decodable.
+        let mut modified = valid.clone();
+        let last = modified.pop().unwrap();
+        modified.push(if last == 'A' { 'B' } else { 'A' });
+
+        for bad in [
+            "aes256gcm-v1:@@not-base64@@".to_string(),
+            "aes256gcm-v9:AAAA".to_string(),
+            modified,
+        ] {
+            let toml_str = format!(
+                "[[agent-profiles.list]]\nname = \"Broken\"\napi-credentials = \"{bad}\"\n\
+                 api-base-url = \"https://stale.example.com\"\napi-key = \"sk-stale\"\n"
+            );
+            let err = parse_toml::<Config>(&toml_str).unwrap_err().to_string();
+            assert!(err.contains("Broken"), "{err}");
+            assert!(!err.contains("sk-real"), "{err}");
+            assert!(!err.contains("sk-stale"), "{err}");
+            let payload = bad.strip_prefix("aes256gcm-").unwrap_or(&bad);
+            assert!(!err.contains(payload), "{err}");
+        }
     }
 
     #[test]

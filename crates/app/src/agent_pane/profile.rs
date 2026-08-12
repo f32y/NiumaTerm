@@ -254,6 +254,34 @@ mod agent_profile_launch_tests {
     }
 
     #[test]
+    fn claude_custom_endpoint_exports_base_url_and_api_key() {
+        // The runtime profile holds the decrypted URL and key restored by
+        // nmt_config, so this pins the full path from restored values to the
+        // provider environment.
+        let profile = AgentProfile {
+            name: "Claude Proxy".into(),
+            kind: AgentProfileKind::ClaudeCode,
+            executable: "claude".into(),
+            use_custom_endpoint: true,
+            api_base_url: "https://proxy.example.com".into(),
+            api_key: "sk-test".into(),
+            ..AgentProfile::default()
+        };
+
+        let launch = agent_launch(&profile);
+
+        assert_eq!(
+            launch_env_value(&launch, "ANTHROPIC_BASE_URL").as_deref(),
+            Some("https://proxy.example.com")
+        );
+        assert_eq!(
+            launch_env_value(&launch, "ANTHROPIC_API_KEY").as_deref(),
+            Some("sk-test")
+        );
+        assert!(launch.provider.is_none());
+    }
+
+    #[test]
     fn codex_custom_endpoint_becomes_a_thread_provider_not_a_base_url_env_var() {
         let profile = AgentProfile {
             name: "Codex Proxy".into(),

@@ -552,10 +552,21 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
             "API Key",
             match profile.kind {
                 AgentProfileKind::ClaudeCode => {
-                    format!("Exported as {key_env} while the custom endpoint is enabled.")
+                    format!(
+                        "Exported as {key_env} while the custom endpoint is enabled. \
+                         URL and key are stored encrypted in config.toml, which hides \
+                         them from programs reading the file; inspecting the NiumaTerm \
+                         executable or the agent process can still recover them."
+                    )
                 }
                 AgentProfileKind::Codex => {
-                    format!("Exported as {key_env} and referenced by the profile-scoped provider.")
+                    format!(
+                        "Exported as {key_env} and referenced by the profile-scoped \
+                         provider. URL and key are stored encrypted in config.toml, \
+                         which hides them from programs reading the file; inspecting \
+                         the NiumaTerm executable or the agent process can still \
+                         recover them."
+                    )
                 }
             },
             Input::new(&key_input).disabled(!endpoint_on).w_64(),

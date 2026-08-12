@@ -9,6 +9,8 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+aes-gcm.workspace = true
+base64.workspace = true
 dirs.workspace = true
 regex.workspace = true
 serde.workspace = true
