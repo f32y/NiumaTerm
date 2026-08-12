@@ -12,14 +12,14 @@ use super::index::TranscriptIndex;
 use super::paths::session_path;
 use super::replay::parse_replay;
 use super::titles::{title_line, user_prompt_text};
-use crate::chat::Item;
+use crate::chat::ReplayTurn;
 
 /// A conversation rewind either starts a fresh process before the first
 /// prompt or resumes an immutable prefix copied into a new Claude session.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClaudeFork {
     pub session_id: Option<String>,
-    pub replay: Vec<Item>,
+    pub replay: Vec<ReplayTurn>,
 }
 
 /// Fork the active conversation immediately before a human prompt. The source

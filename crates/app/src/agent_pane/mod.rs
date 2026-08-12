@@ -19,7 +19,7 @@ use std::path::Path;
 use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime};
 
-use chrono::Local;
+use chrono::{DateTime, Local};
 use futures::StreamExt as _;
 use futures::channel::{mpsc, oneshot};
 use gpui::prelude::*;
@@ -48,8 +48,8 @@ use nmt_agent_utils::background_task::{
 };
 use nmt_agent_utils::chat::{
     Compaction, CompactionTrigger, ContextComposition, ContextWindowUsage, Event as SessionEvent,
-    Item as SessionItem, ModelInfo, SendOutcome, SessionSummary, SkillCatalog, SkillInfo,
-    SkillReference, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
+    Item as SessionItem, ModelInfo, ReplayTurn, SendOutcome, SessionSummary, SkillCatalog,
+    SkillInfo, SkillReference, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
     SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
 };
 use nmt_agent_utils::claude_code::{sessions, stream_json};
@@ -202,7 +202,7 @@ struct SessionHistoryUi {
     selected: usize,
     /// Claude replay is loaded before process replacement and published only
     /// after the resumed process confirms readiness.
-    pending_resume_replay: Option<Vec<SessionItem>>,
+    pending_resume_replay: Option<Vec<ReplayTurn>>,
     scroll: VirtualListScrollHandle,
 }
 

@@ -509,13 +509,53 @@ pub enum Event {
     /// Resumable sessions for the tab's working directory, newest first.
     History(Vec<SessionSummary>),
     /// Reconstructed transcript of a resumed session, to pre-fill the UI.
-    Replay(Vec<Item>),
+    Replay(Vec<ReplayTurn>),
     StatusDetail(Option<String>),
     Error {
         message: String,
         /// The handshake itself failed; the session will not become usable.
         fatal: bool,
     },
+}
+
+/// One turn of a resumed conversation. A live turn's shape comes from the turn
+/// lifecycle events — where it started, how long it ran, what it cost, whether
+/// the user stopped it — none of which a flat list of items can express, so a
+/// replay that dropped it left restored conversations unfoldable and without
+/// their durations. Every field is optional because providers persist
+/// different parts of it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ReplayTurn {
+    pub items: Vec<ReplayItem>,
+    /// Wall time the turn took.
+    pub seconds: Option<u64>,
+    /// Output tokens the turn produced.
+    pub output_tokens: Option<u64>,
+    /// The user stopped the turn before it finished.
+    pub interrupted: bool,
+}
+
+/// One entry of a resumed turn, with the wall-clock time the provider recorded
+/// for it as Unix seconds. Formatting belongs to the UI, which owns the
+/// viewer's time zone.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReplayItem {
+    pub item: Item,
+    pub at: Option<i64>,
+}
+
+impl ReplayTurn {
+    /// A turn carrying items but none of the accounting, for a provider that
+    /// persists no turn metadata.
+    pub fn from_items(items: impl IntoIterator<Item = Item>) -> Self {
+        Self {
+            items: items
+                .into_iter()
+                .map(|item| ReplayItem { item, at: None })
+                .collect(),
+            ..Self::default()
+        }
+    }
 }
 
 /// Outcome of a session's `send_user_message`.

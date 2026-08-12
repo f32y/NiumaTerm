@@ -585,10 +585,16 @@ impl Session {
                     },
                 ),
                 // The same parser the parent transcript uses, so a child's
-                // tool cards cannot lose output or status relative to it.
-                None => BackgroundTaskTranscriptUpdate::loaded(parse_replay(
-                    &message["result"]["thread"]["turns"],
-                )),
+                // tool cards cannot lose output or status relative to it. A
+                // child's conversation is presented as one stream, so its turn
+                // grouping is flattened away.
+                None => BackgroundTaskTranscriptUpdate::loaded(
+                    parse_replay(&message["result"]["thread"]["turns"])
+                        .into_iter()
+                        .flat_map(|turn| turn.items)
+                        .map(|entry| entry.item)
+                        .collect(),
+                ),
             };
             return vec![Event::BackgroundTaskTranscript { key, update }];
         }
