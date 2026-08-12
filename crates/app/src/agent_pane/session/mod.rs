@@ -586,6 +586,10 @@ impl AgentPane {
         self.rewind.state = None;
         self.rewind.file_completion = None;
         self.history_ui.pending_resume_replay = None;
+        // An approval belongs to the tool call that asked for it. The backend
+        // that asked is the one being replaced, so leaving the card up offers a
+        // decision that would be answered into a different conversation.
+        self.pending_approval = None;
         // Child rows belong to the conversation being replaced; keeping them
         // would show another parent session's tasks until the new adapter
         // publishes its first snapshot.
