@@ -112,20 +112,30 @@ impl Shell {
                     // strip and push them off the window.
                     .flex_none()
                     .child(div().occlude().child(self.git_status.clone()))
+                    // The sidebar itself stays reachable through the
+                    // `ToggleGitSidebar` action while the button is hidden.
+                    .children(
+                        cx.global::<AppSettings>()
+                            .show_git_status_on_title_bar
+                            .then(|| {
+                                div().occlude().child(
+                                    Button::new("toggle-git-sidebar")
+                                        .ghost()
+                                        .icon(GitIcon)
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.on_toggle_git_sidebar(
+                                                &ToggleGitSidebar,
+                                                window,
+                                                cx,
+                                            )
+                                        })),
+                                )
+                            }),
+                    )
                     .child(
                         div()
                             .occlude()
                             .child(self.render_background_tasks_button(cx)),
-                    )
-                    .child(
-                        div().occlude().child(
-                            Button::new("toggle-git-sidebar")
-                                .ghost()
-                                .icon(GitIcon)
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.on_toggle_git_sidebar(&ToggleGitSidebar, window, cx)
-                                })),
-                        ),
                     ),
             )
     }
