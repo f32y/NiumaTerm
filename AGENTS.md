@@ -49,6 +49,29 @@ only; visibility markers such as `pub(super)` and `pub(in ...)` remain the
 correct tools. Widen visibility one step at a time (private, `pub(super)`,
 `pub(crate)`, `pub`) and never further than a real caller requires.
 
+## Technical taste
+
+Each layer answers its own questions and returns honest results; callers
+decide how to react.
+
+- Command-style functions (PTY writes, clipboard operations, state mutations)
+  return what actually happened as a domain result: a `bool` for
+  accepted-or-rejected, or a small result enum. UI reactions to that result
+  (scrolling, focus moves, notifications, repaints) belong to the view layer
+  that owns the settings and widgets involved; never bury them as hidden side
+  effects inside the command path.
+- Do not add a boolean parameter that a helper re-checks when every call site
+  already knows the answer; branch at the call site instead. A literal `true`
+  or `false` argument in a call is the tell.
+- Do not extract a trivial expression (a bare `&&`, a single comparison) into
+  a free function merely to unit-test it, and do not write tests that only
+  exercise such a wrapper.
+- Decode a result enum once with a single `match`; chained `==`/`!=`
+  comparisons against the same value split the control flow.
+- Append new entries (settings items, menu entries, config keys) at the end of
+  the existing list unless the list has an established ordering rule or a
+  specific position was requested.
+
 ## Commit message conventions
 
 The repository uses hooks from `.githooks`. Do not bypass them with
