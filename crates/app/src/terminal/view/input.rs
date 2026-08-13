@@ -1,3 +1,5 @@
+use nmt_i18n::i18n;
+
 use crate::terminal::input as terminal_input;
 use crate::terminal::view::*;
 
@@ -6,7 +8,7 @@ struct TextCopiedNotification;
 fn show_text_copied(window: &mut Window, cx: &mut App) {
     window.push_notification(
         Notification::new()
-            .message("Text copied")
+            .message(i18n("terminal-text-copied"))
             .id::<TextCopiedNotification>()
             .autohide_after(Duration::from_millis(1500))
             .show_close(false)

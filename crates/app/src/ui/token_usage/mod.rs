@@ -18,6 +18,7 @@ use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::hover_card::HoverCard;
 use gpui_component::list::{List, ListDelegate, ListItem, ListState};
 use gpui_component::{ActiveTheme as _, IconNamed, IndexPath, Sizable as _, h_flex, v_flex};
+use nmt_i18n::i18n;
 use serde::Deserialize;
 use serde_json::from_slice;
 use tracing::warn;
@@ -166,14 +167,12 @@ impl TokenUsageView {
 
     fn accessibility_label(&self) -> String {
         let Some(usage) = self.usage.as_ref() else {
-            return "Daily token usage unavailable".to_string();
+            return i18n("usage-token-unavailable").to_string();
         };
 
-        let mut label = format!(
-            "Daily token usage: {} total, {}",
-            format_token_count(usage.counts.total()),
-            format_price(usage.price_usd)
-        );
+        let mut label = i18n("usage-token-summary")
+            .replace("{total}", &format_token_count(usage.counts.total()))
+            .replace("{price}", &format_price(usage.price_usd));
         for model in &usage.model_breakdowns {
             label.push_str(&format!(
                 "; {}: {}, {}",
@@ -225,7 +224,7 @@ struct ModelUsageRow {
 fn model_usage_rows(usage: &DailyTokenUsage) -> Vec<ModelUsageRow> {
     let mut rows = Vec::with_capacity(usage.model_breakdowns.len() + 1);
     rows.push(ModelUsageRow {
-        label: "Today total".to_string(),
+        label: i18n("usage-token-today-total").to_string(),
         counts: usage.counts,
         price_usd: usage.price_usd,
         is_daily_total: true,
@@ -381,13 +380,36 @@ fn model_usage_header(cx: &App) -> gpui::Div {
         .bg(cx.theme().muted.opacity(0.4))
         .text_size(px(14.0))
         .text_color(cx.theme().muted_foreground)
-        .child(div().flex_1().min_w_0().child("Model"))
-        .child(usage_header_cell("Input", INPUT_COLUMN))
-        .child(usage_header_cell("Output", OUTPUT_COLUMN))
-        .child(usage_header_cell("Cache create", CACHE_CREATION_COLUMN))
-        .child(usage_header_cell("Cache read", CACHE_READ_COLUMN))
-        .child(usage_header_cell("Total", TOTAL_COLUMN))
-        .child(usage_header_cell("Price", PRICE_COLUMN))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .child(i18n("usage-token-header-model")),
+        )
+        .child(usage_header_cell(
+            i18n("usage-token-header-input"),
+            INPUT_COLUMN,
+        ))
+        .child(usage_header_cell(
+            i18n("usage-token-header-output"),
+            OUTPUT_COLUMN,
+        ))
+        .child(usage_header_cell(
+            i18n("usage-token-header-cache-create"),
+            CACHE_CREATION_COLUMN,
+        ))
+        .child(usage_header_cell(
+            i18n("usage-token-header-cache-read"),
+            CACHE_READ_COLUMN,
+        ))
+        .child(usage_header_cell(
+            i18n("usage-token-header-total"),
+            TOTAL_COLUMN,
+        ))
+        .child(usage_header_cell(
+            i18n("usage-token-header-price"),
+            PRICE_COLUMN,
+        ))
 }
 
 fn render_model_usage_list(
@@ -450,18 +472,14 @@ fn render_usage_panel(
                         div()
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(foreground)
-                            .child("DAILY TOKEN USAGE"),
+                            .child(i18n("usage-token-panel-title")),
                     )
                     .child(div().flex_none().text_color(muted).child(usage.date)),
             )
             .child(list)
         })
         .when(waiting, |this| {
-            this.child(
-                div()
-                    .text_color(muted)
-                    .child("Waiting for daily token usage"),
-            )
+            this.child(div().text_color(muted).child(i18n("usage-token-waiting")))
         })
         .into_any_element()
 }

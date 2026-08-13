@@ -7,6 +7,7 @@ use nmt_agent_utils::chat::{
     SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments, SlashCommandInfo,
     SlashCommandRunPolicy, SlashCommandSource,
 };
+use nmt_i18n::i18n;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ParsedSlashCommand {
@@ -35,47 +36,77 @@ pub(super) fn local_commands() -> Vec<SlashCommandInfo> {
     vec![
         command(
             "new",
-            "Start a new conversation",
+            i18n("agent-command-new-description"),
             None,
             SlashCommandArguments::None,
             SlashCommandRunPolicy::IdleOnly,
         ),
         command(
             "clear",
-            "Clear this conversation and start over",
+            i18n("agent-command-clear-description"),
             None,
             SlashCommandArguments::None,
             SlashCommandRunPolicy::IdleOnly,
         ),
         command(
             "resume",
-            "Choose a recent conversation",
+            i18n("agent-command-resume-description"),
             None,
             SlashCommandArguments::None,
             SlashCommandRunPolicy::IdleOnly,
         ),
         command(
             "model",
-            "Choose the model for subsequent turns",
-            Some("<model>"),
+            i18n("agent-command-model-description"),
+            Some(i18n("agent-command-model-hint")),
             SlashCommandArguments::Choices,
             SlashCommandRunPolicy::Immediate,
         ),
         command(
             "permissions",
-            "Choose the approval or permission policy",
-            Some("<policy>"),
+            i18n("agent-command-permissions-description"),
+            Some(i18n("agent-command-permissions-hint")),
             SlashCommandArguments::Choices,
             SlashCommandRunPolicy::Immediate,
         ),
         command(
             "status",
-            "Show known session settings and state",
+            i18n("agent-command-status-description"),
             None,
             SlashCommandArguments::None,
             SlashCommandRunPolicy::Immediate,
         ),
     ]
+}
+
+pub(super) fn setting_value_label(value: &str) -> String {
+    let key = match value {
+        "default" => "agent-setting-value-default",
+        "auto" => "agent-setting-value-auto",
+        "acceptEdits" => "agent-setting-value-accept-edits",
+        "plan" => "agent-setting-value-plan",
+        "bypassPermissions" => "agent-setting-value-bypass-permissions",
+        "untrusted" => "agent-setting-value-untrusted",
+        "on-request" => "agent-setting-value-on-request",
+        "never" => "agent-setting-value-never",
+        "user" => "agent-setting-value-user",
+        "auto_review" => "agent-setting-value-auto-review",
+        "readOnly" | "read-only" => "agent-setting-value-read-only",
+        "workspaceWrite" | "workspace-write" => "agent-setting-value-workspace-write",
+        "dangerFullAccess" | "full-access" => "agent-setting-value-full-access",
+        "none" => "agent-setting-value-none",
+        "minimal" => "agent-setting-value-minimal",
+        "low" => "agent-setting-value-low",
+        "medium" => "agent-setting-value-medium",
+        "high" => "agent-setting-value-high",
+        "xhigh" => "agent-setting-value-xhigh",
+        "max" => "agent-setting-value-max",
+        "ultra" => "agent-setting-value-ultra",
+        "normal" => "agent-setting-value-normal",
+        _ => return value.to_string(),
+    };
+
+    i18n(key).to_string()
 }
 
 fn command(
@@ -241,26 +272,17 @@ pub(super) fn validate_skill_binding(
     }
 
     let Some(catalog) = catalog else {
-        return Err(
-            "Codex skill discovery is still loading; choose the skill again when it is ready."
-                .to_string(),
-        );
+        return Err(i18n("agent-command-skill-loading").to_string());
     };
     let Some(skill) = catalog
         .skills
         .iter()
         .find(|skill| skill.name == binding.name && skill.path == binding.path)
     else {
-        return Err(format!(
-            "${} is no longer available; run /skills and select it again.",
-            binding.name
-        ));
+        return Err(i18n("agent-command-skill-unavailable").replace("{name}", &binding.name));
     };
     if !skill.enabled {
-        return Err(format!(
-            "${} is disabled; run /skills and choose an enabled skill.",
-            binding.name
-        ));
+        return Err(i18n("agent-command-skill-disabled").replace("{name}", &binding.name));
     }
 
     Ok(Some(binding.clone()))
@@ -270,7 +292,7 @@ pub(super) fn prepare_skill_selection(
     skill: &SkillInfo,
 ) -> Result<(String, SkillReference), String> {
     if !skill.enabled {
-        return Err(format!("${} is disabled by Codex.", skill.name));
+        return Err(i18n("agent-command-skill-disabled-by-codex").replace("{name}", &skill.name));
     }
 
     Ok((
@@ -305,8 +327,8 @@ pub(super) fn resolve_choice(input: &str, choices: &[(String, String)]) -> Resul
 
     match candidates.as_slice() {
         [(value, _)] => Ok(value.clone()),
-        [] => Err(format!("Unknown value: {input}")),
-        _ => Err(format!("Ambiguous value: {input}")),
+        [] => Err(i18n("agent-command-value-unknown").replace("{value}", input)),
+        _ => Err(i18n("agent-command-value-ambiguous").replace("{value}", input)),
     }
 }
 

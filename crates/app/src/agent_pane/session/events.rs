@@ -1,3 +1,5 @@
+use nmt_i18n::i18n;
+
 use crate::agent_pane::composer::CommandFeedbackKind;
 use crate::agent_pane::session::{Status, UpdateSuspension};
 use crate::agent_pane::transcript::hidden;
@@ -145,14 +147,16 @@ impl AgentPane {
                 SlashCommandOutcome::Accepted => {
                     self.set_command_feedback(
                         CommandFeedbackKind::Notice,
-                        format!("/{name} accepted."),
+                        i18n("agent-session-command-accepted").replace("{name}", &name),
                         cx,
                     );
                 }
                 SlashCommandOutcome::Completed { message } => {
                     self.set_command_feedback(
                         CommandFeedbackKind::Notice,
-                        message.unwrap_or_else(|| format!("/{name} completed.")),
+                        message.unwrap_or_else(|| {
+                            i18n("agent-session-command-completed").replace("{name}", &name)
+                        }),
                         cx,
                     );
                     if self.palette.awaiting_command_turn && self.status != Status::Running {
@@ -169,7 +173,8 @@ impl AgentPane {
                     self.palette.awaiting_command_turn = false;
                     self.set_command_feedback(
                         CommandFeedbackKind::Error,
-                        format!("{} is not ready.", self.kind.display()),
+                        i18n("agent-session-provider-not-ready")
+                            .replace("{name}", self.kind.display()),
                         cx,
                     );
                     self.run_next_queued_command(cx);
@@ -200,7 +205,9 @@ impl AgentPane {
                 let completion_body = error
                     .clone()
                     .or_else(|| self.latest_agent_message(cx))
-                    .unwrap_or_else(|| format!("{} completed the turn", self.kind.display()));
+                    .unwrap_or_else(|| {
+                        i18n("agent-session-turn-completed").replace("{name}", self.kind.display())
+                    });
                 self.palette.awaiting_command_turn = false;
                 self.unanswered_prompt = None;
                 // Compaction lives inside a turn; a flag surviving the turn
@@ -220,7 +227,7 @@ impl AgentPane {
                 }
                 self.emit_lifecycle(
                     AgentEventKind::Stopped,
-                    &format!("{} finished", self.kind.display()),
+                    &i18n("agent-session-provider-finished").replace("{name}", self.kind.display()),
                     &completion_body,
                     cx,
                 );
@@ -307,7 +314,7 @@ impl AgentPane {
                 self.note_visible_agent_output();
                 self.emit_lifecycle(
                     AgentEventKind::PermissionRequested,
-                    &format!("{} needs input", self.kind.display()),
+                    &i18n("agent-session-needs-input").replace("{name}", self.kind.display()),
                     &description,
                     cx,
                 );
@@ -337,7 +344,7 @@ impl AgentPane {
                     }
                     self.set_command_feedback(
                         CommandFeedbackKind::Error,
-                        format!("Could not open the selected session: {message}"),
+                        i18n("agent-session-open-failed").replace("{error}", &message),
                         cx,
                     );
                 }
@@ -359,7 +366,7 @@ impl AgentPane {
                 if cancelled_queue {
                     self.set_command_feedback(
                         CommandFeedbackKind::Error,
-                        "Queued commands were cancelled because the session failed.".to_string(),
+                        i18n("agent-session-queued-cancelled-failed").to_string(),
                         cx,
                     );
                 } else if !fatal {

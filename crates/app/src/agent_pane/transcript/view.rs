@@ -1,3 +1,5 @@
+use nmt_i18n::i18n;
+
 use crate::agent_pane::*;
 
 /// One agent conversation as the user reads it: the entry list, the row
@@ -423,7 +425,7 @@ impl Render for TranscriptView {
                                 .min_h(px(36.))
                                 .rounded(UI_RADIUS)
                                 .icon(IconName::ArrowDown)
-                                .label("Scroll to Bottom")
+                                .label(i18n("agent-transcript-scroll-bottom"))
                                 .shadow_md()
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.scroll_to_bottom();

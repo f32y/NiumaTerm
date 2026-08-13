@@ -12,6 +12,7 @@ use nmt_agent_utils::update::{
     UpdateProgress,
 };
 use nmt_config::profile::AgentProfileKind;
+use nmt_i18n::i18n;
 
 use crate::agent_pane::updates::AgentUpdates;
 use crate::agent_pane::{AgentPane, RecoveryReadiness, RecoverySnapshot, RestorationReadiness};
@@ -62,9 +63,7 @@ pub(in crate::agent_pane::updates) fn resolve_preflight(
         );
     }
     if mode.interrupts_active_work() && stop_timeout_elapsed {
-        return PreflightResolution::Failed(
-            "affected tabs did not reach a recoverable interruption boundary".to_string(),
-        );
+        return PreflightResolution::Failed(i18n("agent-update-interruption-timeout").to_string());
     }
     PreflightResolution::Wait
 }
@@ -79,8 +78,15 @@ pub(in crate::agent_pane::updates) fn combine_transaction_error(
     Some(UpdateError::new(
         UpdateErrorKind::Recovery,
         operation_error.map_or_else(
-            || format!("{restore_failures} agent tab(s) could not reconnect"),
-            |error| format!("{error}; {restore_failures} agent tab(s) could not reconnect"),
+            || {
+                i18n("agent-update-reconnect-failures")
+                    .replace("{count}", &restore_failures.to_string())
+            },
+            |error| {
+                i18n("agent-update-error-with-reconnect-failures")
+                    .replace("{error}", error.message())
+                    .replace("{count}", &restore_failures.to_string())
+            },
         ),
     ))
 }
@@ -105,26 +111,31 @@ pub(crate) fn request_update(key: InstallationKey, window: &mut Window, cx: &mut
         let wait_key = key.clone();
         let stop_key = key.clone();
         dialog
-            .title("Update agent provider")
+            .title(i18n("agent-update-dialog-title"))
             .overlay_closable(false)
             .content(move |content, _, cx| {
                 content.child(
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child(format!(
-                            "{} affected tab(s) still have active work. Waiting is the safe default; stopping now interrupts current provider work.",
-                            busy
-                        )),
+                        .child(
+                            i18n("agent-update-dialog-active-work")
+                                .replace("{count}", &busy.to_string()),
+                        ),
                 )
             })
             .footer(
                 DialogFooter::new()
-                    .child(DialogClose::new().child(Button::new("agent-update-cancel").label("Cancel")))
+                    .child(
+                        DialogClose::new().child(
+                            Button::new("agent-update-cancel")
+                                .label(i18n("agent-update-dialog-cancel")),
+                        ),
+                    )
                     .child(
                         Button::new("agent-update-when-idle")
                             .primary()
-                            .label("Update when idle")
+                            .label(i18n("agent-update-dialog-when-idle"))
                             .on_click(move |_, window, cx| {
                                 window.close_dialog(cx);
                                 let panes = matching_panes(&wait_key, cx);
@@ -139,16 +150,11 @@ pub(crate) fn request_update(key: InstallationKey, window: &mut Window, cx: &mut
                     .child(
                         Button::new("agent-update-stop-now")
                             .danger()
-                            .label("Stop now and update")
+                            .label(i18n("agent-update-dialog-stop-now"))
                             .on_click(move |_, window, cx| {
                                 window.close_dialog(cx);
                                 let panes = matching_panes(&stop_key, cx);
-                                start_transaction(
-                                    stop_key.clone(),
-                                    UpdateMode::StopNow,
-                                    panes,
-                                    cx,
-                                );
+                                start_transaction(stop_key.clone(), UpdateMode::StopNow, panes, cx);
                             }),
                     ),
             )
@@ -421,8 +427,7 @@ async fn restore_tabs(
                         let index = suspended[position];
                         panes[index].update(cx, |pane, cx| {
                             pane.fail_update_recovery(
-                                "The provider did not become ready before the recovery timeout."
-                                    .to_string(),
+                                i18n("agent-update-recovery-timeout").to_string(),
                                 cx,
                             )
                         });

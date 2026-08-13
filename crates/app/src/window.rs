@@ -5,6 +5,7 @@ use gpui::{
 };
 use gpui_component::{Root, Theme as ComponentTheme};
 use nmt_config::local_state::{SessionState, WindowLocalState, WindowState};
+use nmt_i18n::i18n;
 
 use crate::ui::{self, Shell};
 
@@ -139,6 +140,7 @@ impl AppWindow {
                 // `TitleBar`); the Windows backend routes controls/drag/resize.
                 window_decorations: Some(WindowDecorations::Client),
                 titlebar: Some(TitlebarOptions {
+                    title: Some(i18n("app-window-title").into()),
                     appears_transparent: true,
                     ..Default::default()
                 }),

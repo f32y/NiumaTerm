@@ -1,3 +1,5 @@
+use nmt_i18n::i18n;
+
 use crate::ui::shell::*;
 
 impl Shell {
@@ -82,10 +84,7 @@ impl Shell {
     ) {
         let hosts = remote::known_hosts();
         let Some(host) = hosts.into_iter().next() else {
-            window.push_notification(
-                "No paired remote hosts. Pair one in Settings → Remote Session.",
-                cx,
-            );
+            window.push_notification(i18n("shell-remote-no-hosts"), cx);
             return;
         };
         // Connects to the first paired host; a host picker is only meaningful
@@ -106,18 +105,27 @@ impl Shell {
                         this.workspaces.active_tabs_mut().new_tab(
                             TabSurface::Live(PaneTree::new_leaf(PaneId(id), pane)),
                             TabId(id),
-                            "Remote".to_string(),
+                            i18n("shell-remote-tab-title").to_string(),
                         );
                         this.focus_active(window, cx);
                         cx.notify();
                     }
                     Err(e) => {
-                        window
-                            .push_notification(format!("Remote session failed: {e}").as_str(), cx);
+                        window.push_notification(
+                            i18n("shell-remote-session-failed")
+                                .replace("{error}", &e.to_string())
+                                .as_str(),
+                            cx,
+                        );
                     }
                 },
                 Err(e) => {
-                    window.push_notification(format!("Connect failed: {e}").as_str(), cx);
+                    window.push_notification(
+                        i18n("shell-remote-connect-failed")
+                            .replace("{error}", &e.to_string())
+                            .as_str(),
+                        cx,
+                    );
                 }
             });
         })
@@ -199,7 +207,12 @@ impl Shell {
         let target = path.display().to_string();
 
         let Some(ws_id) = best_match(&self.workspaces.summaries(), path) else {
-            self.create_workspace(DEFAULT_WORKSPACE_NAME.into(), target, window, cx);
+            self.create_workspace(
+                i18n("shell-workspace-default-name").into(),
+                target,
+                window,
+                cx,
+            );
             return;
         };
 

@@ -10,6 +10,7 @@ use gpui_component::{ActiveTheme as _, Icon, IconNamed, Sizable as _, h_flex, v_
 use nmt_agent_utils::claude_code::usage_fetcher as claude_usage;
 use nmt_agent_utils::codex::usage_fetcher as codex_usage;
 use nmt_agent_utils::usage::{UsageSnapshot, UsageWindow, now_unix_millis};
+use nmt_i18n::i18n;
 use tracing::warn;
 
 use crate::ui::AppSettings;
@@ -188,12 +189,15 @@ impl AgentUsageView {
         let [codex_five_hour, codex_week] = self.codex.compact_values();
         let [claude_five_hour, claude_week] = self.claude.compact_values();
         let refreshing = (self.codex_refresh.refreshing || self.claude_refresh.refreshing)
-            .then_some(" Refreshing.")
+            .then_some(i18n("agent-usage-accessibility-refreshing"))
             .unwrap_or_default();
 
-        format!(
-            "Agent usage remaining. Codex five hour: {codex_five_hour}; Codex week: {codex_week}; Claude five hour: {claude_five_hour}; Claude week: {claude_week}.{refreshing}"
-        )
+        i18n("agent-usage-accessibility")
+            .replace("{codex_session}", &codex_five_hour)
+            .replace("{codex_week}", &codex_week)
+            .replace("{claude_session}", &claude_five_hour)
+            .replace("{claude_week}", &claude_week)
+            .replace("{refreshing}", refreshing)
     }
 }
 
@@ -217,19 +221,19 @@ fn usage_window_rows(usage: &UsageSnapshot) -> Vec<UsageWindowRow<'_>> {
     let mut rows = Vec::with_capacity(3);
     if let Some(window) = usage.five_hour.as_ref() {
         rows.push(UsageWindowRow {
-            label: "Session",
+            label: i18n("agent-usage-session"),
             window,
         });
     }
     if let Some(window) = usage.weekly.as_ref() {
         rows.push(UsageWindowRow {
-            label: "Weekly",
+            label: i18n("agent-usage-weekly"),
             window,
         });
     }
     if let Some(window) = usage.fable_weekly.as_ref() {
         rows.push(UsageWindowRow {
-            label: "Fable weekly",
+            label: i18n("agent-usage-fable-weekly"),
             window,
         });
     }
@@ -238,41 +242,46 @@ fn usage_window_rows(usage: &UsageSnapshot) -> Vec<UsageWindowRow<'_>> {
 
 fn format_window_duration(window_minutes: u32) -> String {
     if window_minutes % (24 * 60) == 0 {
-        format!("{}d", window_minutes / (24 * 60))
+        i18n("agent-usage-duration-days")
+            .replace("{count}", &(window_minutes / (24 * 60)).to_string())
     } else if window_minutes % 60 == 0 {
-        format!("{}h", window_minutes / 60)
+        i18n("agent-usage-duration-hours").replace("{count}", &(window_minutes / 60).to_string())
     } else {
-        format!("{window_minutes}m")
+        i18n("agent-usage-duration-minutes").replace("{count}", &window_minutes.to_string())
     }
 }
 
 fn format_duration_until(timestamp: i64, now: i64) -> String {
     let remaining = timestamp.saturating_sub(now);
     if remaining <= 0 {
-        return "now".to_string();
+        return i18n("agent-usage-duration-now").to_string();
     }
 
     let total_minutes = remaining.saturating_add(59_999) / 60_000;
     if total_minutes < 60 {
-        return format!("{total_minutes}m");
+        return i18n("agent-usage-duration-minutes").replace("{count}", &total_minutes.to_string());
     }
 
     let total_hours = total_minutes / 60;
     let minutes = total_minutes % 60;
     if total_hours < 24 {
         return if minutes == 0 {
-            format!("{total_hours}h")
+            i18n("agent-usage-duration-hours").replace("{count}", &total_hours.to_string())
         } else {
-            format!("{total_hours}h {minutes}m")
+            i18n("agent-usage-duration-hours-minutes")
+                .replace("{hours}", &total_hours.to_string())
+                .replace("{minutes}", &minutes.to_string())
         };
     }
 
     let days = total_hours / 24;
     let hours = total_hours % 24;
     if hours == 0 {
-        format!("{days}d")
+        i18n("agent-usage-duration-days").replace("{count}", &days.to_string())
     } else {
-        format!("{days}d {hours}h")
+        i18n("agent-usage-duration-days-hours")
+            .replace("{days}", &days.to_string())
+            .replace("{hours}", &hours.to_string())
     }
 }
 
@@ -280,49 +289,55 @@ fn format_reset_label(window: &UsageWindow, now: i64) -> Option<String> {
     window
         .resets_at
         .map(|timestamp| match format_duration_until(timestamp, now) {
-            duration if duration == "now" => "Resets now".to_string(),
-            duration => format!("Resets in {duration}"),
+            duration if duration == i18n("agent-usage-duration-now") => {
+                i18n("agent-usage-resets-now").to_string()
+            }
+            duration => i18n("agent-usage-resets-in").replace("{duration}", &duration),
         })
         .or_else(|| window.reset_description.clone())
 }
 
 fn format_updated_label(usage: &UsageSnapshot, refreshing: bool, failed: bool, now: i64) -> String {
     if refreshing {
-        return "Refreshing…".to_string();
+        return i18n("agent-usage-refreshing").to_string();
     }
     if failed && usage.updated_at.is_none() {
-        return "Usage unavailable".to_string();
+        return i18n("agent-usage-unavailable").to_string();
     }
 
     let Some(updated_at) = usage.updated_at else {
-        return "Waiting for usage data".to_string();
+        return i18n("agent-usage-waiting").to_string();
     };
     let elapsed = now.saturating_sub(updated_at);
     let age = if elapsed < 60_000 {
-        "just now".to_string()
+        i18n("agent-usage-just-now").to_string()
     } else if elapsed < 60 * 60_000 {
-        format!("{}m ago", elapsed / 60_000)
+        i18n("agent-usage-minutes-ago").replace("{count}", &(elapsed / 60_000).to_string())
     } else {
-        format!("{}h ago", elapsed / (60 * 60_000))
+        i18n("agent-usage-hours-ago").replace("{count}", &(elapsed / (60 * 60_000)).to_string())
     };
 
     if failed {
-        format!("Refresh failed · updated {age}")
+        i18n("agent-usage-refresh-failed").replace("{age}", &age)
     } else {
-        format!("Updated {age}")
+        i18n("agent-usage-updated").replace("{age}", &age)
     }
 }
 
 fn reset_credit_label(usage: &UsageSnapshot, now: i64) -> Option<String> {
     let credits = usage.reset_credits.as_ref()?;
     let count_label = match credits.available_count {
-        1 => "1 limit reset available".to_string(),
-        count => format!("{count} limit resets available"),
+        1 => i18n("agent-usage-one-reset-available").to_string(),
+        count => i18n("agent-usage-many-resets-available").replace("{count}", &count.to_string()),
     };
     Some(match credits.next_expires_at {
         Some(expires_at) => match format_duration_until(expires_at, now) {
-            duration if duration == "now" => format!("{count_label} · next expires now"),
-            duration => format!("{count_label} · next expires in {duration}"),
+            duration if duration == i18n("agent-usage-duration-now") => {
+                i18n("agent-usage-next-expires-now").replace("{count}", &count_label)
+            }
+            duration => i18n("agent-usage-next-expires-in")
+                .replace("{count}", &count_label)
+                .replace("{duration}", &duration),
         },
         None => count_label,
     })
@@ -352,19 +367,18 @@ fn render_usage_window(row: UsageWindowRow<'_>, now: i64, colors: UsagePanelColo
                         .text_xs()
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(colors.foreground)
-                        .child(format!(
-                            "{} ({})",
-                            row.label,
-                            format_window_duration(row.window.window_minutes)
-                        )),
+                        .child(
+                            i18n("agent-usage-window-label")
+                                .replace("{name}", row.label)
+                                .replace(
+                                    "{duration}",
+                                    &format_window_duration(row.window.window_minutes),
+                                ),
+                        ),
                 )
-                .child(
-                    div()
-                        .flex_none()
-                        .text_xs()
-                        .text_color(colors.muted)
-                        .child(format!("{remaining}% left")),
-                ),
+                .child(div().flex_none().text_xs().text_color(colors.muted).child(
+                    i18n("agent-usage-percent-left").replace("{percent}", &remaining.to_string()),
+                )),
         )
         .child(
             div()
@@ -405,7 +419,10 @@ fn render_provider_panel(
 ) -> AnyElement {
     let rows = usage_window_rows(usage);
     let status = format_updated_label(usage, refreshing, failed, now);
-    let plan = usage.plan_type.as_ref().map(|plan| format!("{plan} plan"));
+    let plan = usage
+        .plan_type
+        .as_ref()
+        .map(|plan| i18n("agent-usage-plan").replace("{name}", plan));
 
     v_flex()
         .w_full()
@@ -441,7 +458,7 @@ fn render_provider_panel(
                     .py_1()
                     .text_xs()
                     .text_color(colors.muted)
-                    .child("No subscription limits available"),
+                    .child(i18n("agent-usage-no-limits")),
             )
         })
         .children(
@@ -483,7 +500,7 @@ impl Render for AgentUsageView {
                     .child(
                         div()
                             .id("agent-usage-codex-icon")
-                            .aria_label("Codex")
+                            .aria_label(i18n("agent-provider-codex"))
                             .child(Icon::new(CodexIcon).xsmall()),
                     )
                     .child(codex_five_hour)
@@ -494,7 +511,7 @@ impl Render for AgentUsageView {
                     .child(
                         div()
                             .id("agent-usage-claude-icon")
-                            .aria_label("Claude")
+                            .aria_label(i18n("agent-provider-claude"))
                             .child(Icon::new(ClaudeIcon).xsmall()),
                     )
                     .child(claude_five_hour)
@@ -524,7 +541,7 @@ impl Render for AgentUsageView {
                         .w(px(272.))
                         .gap_3()
                         .child(render_provider_panel(
-                            "Codex",
+                            i18n("agent-provider-codex"),
                             Icon::new(CodexIcon).small().into_any_element(),
                             &codex,
                             codex_refreshing,
@@ -539,7 +556,7 @@ impl Render for AgentUsageView {
                                 .border_color(colors.border.opacity(0.65)),
                         )
                         .child(render_provider_panel(
-                            "Claude",
+                            i18n("agent-provider-claude"),
                             Icon::new(ClaudeIcon).small().into_any_element(),
                             &claude,
                             claude_refreshing,

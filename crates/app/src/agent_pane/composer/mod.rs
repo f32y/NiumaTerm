@@ -13,6 +13,8 @@ pub(super) use crate::agent_pane::composer::rewind::{
 #[cfg(test)]
 mod tests;
 
+use nmt_i18n::i18n;
+
 use crate::agent_pane::*;
 
 #[derive(Clone)]
@@ -91,7 +93,7 @@ impl AgentPane {
         if rewind_blocks_submission(self.rewind.state.as_ref()) {
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
-                "Finish or cancel the current rewind before sending a message.".to_string(),
+                i18n("agent-session-rewind-blocks-send").to_string(),
                 cx,
             );
             return;
@@ -154,7 +156,7 @@ impl AgentPane {
         if parsed.name.is_empty() {
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
-                "Choose a slash command from the list.".to_string(),
+                i18n("agent-composer-choose-command").to_string(),
                 cx,
             );
             return false;
@@ -167,7 +169,7 @@ impl AgentPane {
         else {
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
-                format!("Unknown command: /{}", parsed.name),
+                i18n("agent-composer-unknown-command").replace("{name}", &parsed.name),
                 cx,
             );
             return false;
@@ -178,14 +180,14 @@ impl AgentPane {
         // command or an ordinary user turn.
         if command.arguments == SlashCommandArguments::Skills {
             let message = match self.palette.skill_catalog.as_ref() {
-                None => "Codex skill discovery is still loading.".to_string(),
+                None => i18n("agent-composer-skill-discovery-loading-period").to_string(),
                 Some(catalog) if catalog.skills.is_empty() && !catalog.errors.is_empty() => {
                     catalog.errors[0].clone()
                 }
                 Some(catalog) if catalog.skills.is_empty() => {
-                    "No Codex skills are available for this folder.".to_string()
+                    i18n("agent-composer-no-skills-period").to_string()
                 }
-                Some(_) => "Choose a skill from the list.".to_string(),
+                Some(_) => i18n("agent-composer-choose-skill").to_string(),
             };
 
             self.set_command_feedback(CommandFeedbackKind::Error, message, cx);
@@ -195,7 +197,7 @@ impl AgentPane {
         if command.arguments == SlashCommandArguments::None && !parsed.arguments.trim().is_empty() {
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
-                format!("/{} does not accept arguments.", command.name),
+                i18n("agent-composer-command-no-arguments").replace("{name}", &command.name),
                 cx,
             );
             return false;
@@ -205,7 +207,7 @@ impl AgentPane {
             if parsed.arguments.trim().is_empty() {
                 self.set_command_feedback(
                     CommandFeedbackKind::Error,
-                    format!("Choose a value for /{}.", command.name),
+                    i18n("agent-composer-choose-value").replace("{name}", &command.name),
                     cx,
                 );
                 return false;
@@ -218,7 +220,7 @@ impl AgentPane {
                     self.remember_thread_defaults(cx);
                     self.set_command_feedback(
                         CommandFeedbackKind::Notice,
-                        format!("Model set to {value}."),
+                        i18n("agent-composer-model-set").replace("{value}", &value),
                         cx,
                     );
                     return true;
@@ -228,7 +230,8 @@ impl AgentPane {
                     self.remember_thread_defaults(cx);
                     self.set_command_feedback(
                         CommandFeedbackKind::Notice,
-                        format!("Permissions set to {value}."),
+                        i18n("agent-composer-permissions-set")
+                            .replace("{value}", &setting_value_label(&value)),
                         cx,
                     );
                     return true;
@@ -246,10 +249,7 @@ impl AgentPane {
                 if self.is_command_busy() {
                     self.set_command_feedback(
                         CommandFeedbackKind::Error,
-                        format!(
-                            "/{} is available only while the agent is idle.",
-                            command.name
-                        ),
+                        i18n("agent-composer-command-idle-only").replace("{name}", &command.name),
                         cx,
                     );
                     false
@@ -287,17 +287,16 @@ impl AgentPane {
                 SlashCommandRunPolicy::QueueUntilIdle => {
                     let name = command.name.clone();
                     self.palette.command_queue.push_back(command);
+                    let count = self.palette.command_queue.len();
                     self.set_command_feedback(
                         CommandFeedbackKind::Queued,
-                        format!(
-                            "Queued /{name} ({} command{} waiting).",
-                            self.palette.command_queue.len(),
-                            if self.palette.command_queue.len() == 1 {
-                                ""
-                            } else {
-                                "s"
-                            }
-                        ),
+                        i18n(if count == 1 {
+                            "agent-composer-command-queued-one"
+                        } else {
+                            "agent-composer-command-queued-many"
+                        })
+                        .replace("{name}", &name)
+                        .replace("{count}", &count.to_string()),
                         cx,
                     );
                     true
@@ -305,10 +304,7 @@ impl AgentPane {
                 SlashCommandRunPolicy::IdleOnly => {
                     self.set_command_feedback(
                         CommandFeedbackKind::Error,
-                        format!(
-                            "/{} is available only while the agent is idle.",
-                            command.name
-                        ),
+                        i18n("agent-composer-command-idle-only").replace("{name}", &command.name),
                         cx,
                     );
                     false
@@ -336,7 +332,7 @@ impl AgentPane {
                 self.palette.awaiting_command_turn = true;
                 self.set_command_feedback(
                     CommandFeedbackKind::Notice,
-                    format!("Starting /{}…", command.name),
+                    i18n("agent-composer-command-starting").replace("{name}", &command.name),
                     cx,
                 );
                 true
@@ -344,7 +340,9 @@ impl AgentPane {
             SlashCommandOutcome::Completed { message } => {
                 self.set_command_feedback(
                     CommandFeedbackKind::Notice,
-                    message.unwrap_or_else(|| format!("/{} completed.", command.name)),
+                    message.unwrap_or_else(|| {
+                        i18n("agent-session-command-completed").replace("{name}", &command.name)
+                    }),
                     cx,
                 );
                 true
@@ -356,10 +354,7 @@ impl AgentPane {
             SlashCommandOutcome::NotReady => {
                 self.set_command_feedback(
                     CommandFeedbackKind::Error,
-                    format!(
-                        "{} is still starting; try again in a moment.",
-                        self.kind.display()
-                    ),
+                    i18n("agent-session-still-starting").replace("{name}", self.kind.display()),
                     cx,
                 );
                 false
@@ -382,29 +377,50 @@ impl AgentPane {
 
     pub(super) fn show_status(&mut self, cx: &mut Context<Self>) {
         let status = match self.status {
-            Status::Starting => "starting",
-            Status::Idle => "idle",
-            Status::Running => "running",
-            Status::Exited => "exited",
+            Status::Starting => i18n("agent-composer-status-starting"),
+            Status::Idle => i18n("agent-composer-status-idle"),
+            Status::Running => i18n("agent-composer-status-running"),
+            Status::Exited => i18n("agent-composer-status-exited"),
         };
         let mut fields = vec![
-            format!("backend={}", self.kind.display()),
-            format!("status={status}"),
+            i18n("agent-composer-status-field")
+                .replace("{name}", i18n("agent-composer-status-backend"))
+                .replace("{value}", self.kind.display()),
+            i18n("agent-composer-status-field")
+                .replace("{name}", i18n("agent-composer-status-label"))
+                .replace("{value}", status),
         ];
 
         for (name, value) in [
-            ("model", self.settings.model.as_deref()),
-            ("permissions", self.settings.approval.as_deref()),
-            ("sandbox", self.settings.sandbox.as_deref()),
-            ("effort", self.settings.effort.as_deref()),
-            ("tier", self.settings.tier.as_deref()),
+            (i18n("agent-setting-model"), self.settings.model.as_deref()),
+            (
+                i18n("agent-setting-permissions"),
+                self.settings.approval.as_deref(),
+            ),
+            (
+                i18n("agent-setting-sandbox"),
+                self.settings.sandbox.as_deref(),
+            ),
+            (
+                i18n("agent-setting-effort"),
+                self.settings.effort.as_deref(),
+            ),
+            (i18n("agent-setting-tier"), self.settings.tier.as_deref()),
         ] {
             if let Some(value) = value {
-                fields.push(format!("{name}={value}"));
+                fields.push(
+                    i18n("agent-composer-status-field")
+                        .replace("{name}", name)
+                        .replace("{value}", value),
+                );
             }
         }
         if !self.palette.command_queue.is_empty() {
-            fields.push(format!("queued={}", self.palette.command_queue.len()));
+            fields.push(
+                i18n("agent-composer-status-field")
+                    .replace("{name}", i18n("agent-composer-status-queued"))
+                    .replace("{value}", &self.palette.command_queue.len().to_string()),
+            );
         }
 
         // Answering /status is information the user asked for, so it holds
@@ -459,11 +475,11 @@ impl AgentPane {
 
     pub(super) fn skill_disabled_reason(&self, skill: &SkillInfo) -> Option<String> {
         if !skill.enabled {
-            Some("Disabled by Codex".to_string())
+            Some(i18n("agent-composer-disabled-by-codex").to_string())
         } else if matches!(self.status, Status::Starting | Status::Exited) {
             Some(match self.status {
-                Status::Starting => "Agent is still starting".to_string(),
-                Status::Exited => "Agent has exited".to_string(),
+                Status::Starting => i18n("agent-composer-agent-starting").to_string(),
+                Status::Exited => i18n("agent-composer-agent-exited").to_string(),
                 _ => unreachable!(),
             })
         } else {
@@ -498,11 +514,11 @@ impl AgentPane {
             "permissions" => match self.kind {
                 AgentKind::Codex => app_server::APPROVAL_OPTIONS
                     .iter()
-                    .map(|value| (value.to_string(), value.to_string()))
+                    .map(|value| (value.to_string(), setting_value_label(value)))
                     .collect(),
                 AgentKind::Claude => stream_json::PERMISSION_OPTIONS
                     .iter()
-                    .map(|value| (value.to_string(), value.to_string()))
+                    .map(|value| (value.to_string(), setting_value_label(value)))
                     .collect(),
             },
             _ => Vec::new(),

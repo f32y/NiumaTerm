@@ -4,6 +4,8 @@ mod events;
 mod tests;
 mod update_recovery;
 
+use nmt_i18n::i18n;
+
 use crate::agent_pane::composer::{
     CommandFeedbackKind, restored_input_after_interruption, rewind_blocks_submission,
 };
@@ -54,7 +56,7 @@ impl AgentPane {
             InputState::new(window, cx)
                 .auto_grow(1, 8)
                 .submit_on_enter(true)
-                .placeholder(format!("Message {name} — Enter to send"))
+                .placeholder(i18n("agent-session-message-placeholder").replace("{name}", name))
         });
 
         cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| {
@@ -431,16 +433,18 @@ impl AgentPane {
                         cx.emit(AgentPaneEvent::Interrupted);
                         this.status = Status::Exited;
                         if matches!(this.update_suspension, Some(UpdateSuspension::Reconnecting)) {
-                            this.update_suspension = Some(UpdateSuspension::Failed(format!(
-                                "{name} exited before the conversation was restored."
-                            )));
+                            this.update_suspension = Some(UpdateSuspension::Failed(
+                                i18n("agent-session-exited-before-restored")
+                                    .replace("{name}", name),
+                            ));
                         }
                         this.palette.awaiting_command_turn = false;
                         if !this.palette.command_queue.is_empty() {
                             this.palette.command_queue.clear();
                             this.set_command_feedback(
                                 CommandFeedbackKind::Error,
-                                format!("Queued commands were cancelled because {name} exited."),
+                                i18n("agent-session-queued-cancelled-exited")
+                                    .replace("{name}", name),
                                 cx,
                             );
                         }
@@ -448,7 +452,7 @@ impl AgentPane {
                         this.finish_working(cx);
                         this.push_item(
                             SessionItem::Error {
-                                text: format!("{name} exited."),
+                                text: i18n("agent-session-exited").replace("{name}", name),
                             },
                             cx,
                         );
@@ -468,7 +472,9 @@ impl AgentPane {
                     transcript.push_stamped(
                         turn,
                         SessionItem::Error {
-                            text: format!("Failed to start {name}: {err}"),
+                            text: i18n("agent-session-start-failed")
+                                .replace("{name}", name)
+                                .replace("{error}", &err.to_string()),
                         },
                     );
                 });
@@ -517,7 +523,7 @@ impl AgentPane {
         if rewind_blocks_submission(self.rewind.state.as_ref()) {
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
-                "Finish or cancel the current rewind before sending a message.".to_string(),
+                i18n("agent-session-rewind-blocks-send").to_string(),
                 cx,
             );
             return false;
@@ -525,7 +531,7 @@ impl AgentPane {
         if self.palette.awaiting_command_turn {
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
-                "A command is starting; wait for its turn to begin.".to_string(),
+                i18n("agent-session-command-starting").to_string(),
                 cx,
             );
             return false;
@@ -540,10 +546,8 @@ impl AgentPane {
         if outcome == SendOutcome::NotReady {
             self.push_item(
                 SessionItem::Error {
-                    text: format!(
-                        "{} is still starting; try again in a moment.",
-                        self.kind.display()
-                    ),
+                    text: i18n("agent-session-still-starting")
+                        .replace("{name}", self.kind.display()),
                 },
                 cx,
             );
@@ -844,7 +848,7 @@ impl AgentPane {
         self.seed_approval_reviewer = self.kind == AgentKind::Codex;
         self.set_command_feedback(
             CommandFeedbackKind::Notice,
-            "Opening recent session…".to_string(),
+            i18n("agent-session-opening-recent").to_string(),
             cx,
         );
 
@@ -857,7 +861,7 @@ impl AgentPane {
                     self.status = previous_status;
                     self.set_command_feedback(
                         CommandFeedbackKind::Error,
-                        "Codex is not ready to open a recent session.".to_string(),
+                        i18n("agent-session-codex-recent-not-ready").to_string(),
                         cx,
                     );
                 }

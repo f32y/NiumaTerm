@@ -10,6 +10,7 @@ use gpui_component::progress::ProgressCircle;
 use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 use gpui_component::{ActiveTheme, Icon, IconNamed, Selectable, Sizable, h_flex, v_flex};
 use nmt_agent_utils::AgentRuntimeStatus;
+use nmt_i18n::i18n;
 
 use super::{AppSettings, NewWorkspace, Shell};
 use crate::agent_pane::usage::AgentUsageView;
@@ -40,9 +41,18 @@ fn workspace_status_presentation(
     status: AgentRuntimeStatus,
 ) -> (WorkspaceStatusVisual, &'static str) {
     match status {
-        AgentRuntimeStatus::Running => (WorkspaceStatusVisual::Running, "Running"),
-        AgentRuntimeStatus::NeedsInput => (WorkspaceStatusVisual::NeedsInput, "Needs input"),
-        AgentRuntimeStatus::Idle => (WorkspaceStatusVisual::Hidden, "Idle"),
+        AgentRuntimeStatus::Running => (
+            WorkspaceStatusVisual::Running,
+            i18n("sidebar-workspace-status-running"),
+        ),
+        AgentRuntimeStatus::NeedsInput => (
+            WorkspaceStatusVisual::NeedsInput,
+            i18n("sidebar-workspace-status-needs-input"),
+        ),
+        AgentRuntimeStatus::Idle => (
+            WorkspaceStatusVisual::Hidden,
+            i18n("sidebar-workspace-status-idle"),
+        ),
     }
 }
 
@@ -74,7 +84,7 @@ fn agent_status_indicator(
 }
 
 fn workspace_display_label(name: &str, cwd: &str) -> String {
-    if name != "New Workspace" {
+    if name != "New Workspace" && name != i18n("shell-workspace-default-name") {
         return name.to_string();
     }
 
@@ -292,7 +302,10 @@ impl Sidebar {
             .children((ws.unread_count > 0).then(|| {
                 div()
                     .id(("workspace-unread", idx))
-                    .aria_label(format!("{} unread notifications", ws.unread_count))
+                    .aria_label(
+                        i18n("sidebar-workspace-unread-label")
+                            .replace("{count}", &ws.unread_count.to_string()),
+                    )
                     .size_5()
                     .flex()
                     .items_center()
@@ -351,12 +364,10 @@ impl Sidebar {
             .aria_label(if settings_entry {
                 display_label.clone()
             } else {
-                format!(
-                    "Workspace {}, path {}, status {}",
-                    workspace_display_label(&ws.name, &ws.cwd),
-                    full_path,
-                    status_label
-                )
+                i18n("sidebar-workspace-item-label")
+                    .replace("{name}", &workspace_display_label(&ws.name, &ws.cwd))
+                    .replace("{path}", &full_path)
+                    .replace("{status}", status_label)
             })
             .selected(ws.active)
             // Button resolves selected colors after element styles, so the
@@ -423,7 +434,11 @@ impl Sidebar {
         let drag_shell = shell.clone();
         let pinned = ws.pinned;
         let closeable = ws.closeable;
-        let pin_label = if pinned { "Unpin" } else { "Pin" };
+        let pin_label = if pinned {
+            i18n("sidebar-workspace-menu-unpin")
+        } else {
+            i18n("sidebar-workspace-menu-pin")
+        };
         let cwd = ws.cwd.clone();
 
         div()
@@ -483,29 +498,37 @@ impl Sidebar {
                 let menu = if settings_entry {
                     menu
                 } else {
-                    menu.item(PopupMenuItem::new("Rename").on_click(move |_, window, cx| {
-                        rename_shell.update(cx, |this, cx| {
-                            this.start_workspace_rename(ws_id, window, cx)
-                        });
-                    }))
+                    menu.item(
+                        PopupMenuItem::new(i18n("sidebar-workspace-menu-rename")).on_click(
+                            move |_, window, cx| {
+                                rename_shell.update(cx, |this, cx| {
+                                    this.start_workspace_rename(ws_id, window, cx)
+                                });
+                            },
+                        ),
+                    )
                     .item(PopupMenuItem::new(pin_label).on_click(move |_, _, cx| {
                         pin_shell
                             .update(cx, |this, cx| this.set_workspace_pinned(ws_id, !pinned, cx));
                     }))
                     .item(
-                        PopupMenuItem::new("Copy Workspace Path").on_click(move |_, _, cx| {
-                            cx.write_to_clipboard(ClipboardItem::new_string(cwd.clone()));
-                        }),
+                        PopupMenuItem::new(i18n("sidebar-workspace-menu-copy-path")).on_click(
+                            move |_, _, cx| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(cwd.clone()));
+                            },
+                        ),
                     )
                 };
 
-                menu.item(PopupMenuItem::new("Close").disabled(!closeable).on_click(
-                    move |_, window, cx| {
-                        close_shell.update(cx, |this, cx| {
-                            this.request_close_workspace(ws_id, window, cx)
-                        });
-                    },
-                ))
+                menu.item(
+                    PopupMenuItem::new(i18n("sidebar-workspace-menu-close"))
+                        .disabled(!closeable)
+                        .on_click(move |_, window, cx| {
+                            close_shell.update(cx, |this, cx| {
+                                this.request_close_workspace(ws_id, window, cx)
+                            });
+                        }),
+                )
             })
             .child(item)
             .into_any_element()
@@ -546,7 +569,7 @@ impl Sidebar {
             .child(
                 Button::new("new-workspace")
                     .ghost()
-                    .label("+ Workspace")
+                    .label(i18n("sidebar-workspace-new"))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.on_new_workspace(&NewWorkspace, window, cx)
                     })),

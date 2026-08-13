@@ -1,3 +1,5 @@
+use nmt_i18n::i18n;
+
 use crate::agent_pane::transcript::relative_time;
 use crate::agent_pane::*;
 
@@ -11,7 +13,7 @@ pub(in crate::agent_pane::view) fn queued_message_label(
             .collect::<Vec<_>>()
             .join(" · ");
 
-        format!("Queued message: {text}")
+        i18n("agent-history-queued-message").replace("{text}", &text)
     })
 }
 
@@ -144,7 +146,7 @@ impl AgentPane {
                             .text_xs()
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(cx.theme().muted_foreground)
-                            .child("RECENT SESSIONS"),
+                            .child(i18n("agent-history-recent-sessions")),
                     )
                     .child(body),
             )

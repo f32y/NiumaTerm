@@ -5,6 +5,8 @@ mod settings_row;
 #[cfg(test)]
 mod tests;
 
+use nmt_i18n::i18n;
+
 use crate::agent_pane::composer::{
     CommandFeedbackKind, ComposerAction, PaletteControl, composer_action,
 };
@@ -34,10 +36,12 @@ impl Render for AgentPane {
         let command_palette = self.render_command_palette(cx);
         let command_feedback = self.visible_command_feedback().map(|feedback| {
             let (color, label) = match feedback.kind {
-                CommandFeedbackKind::Notice => (cx.theme().primary, "NOTICE"),
-                CommandFeedbackKind::Status => (cx.theme().muted_foreground, "STATUS"),
-                CommandFeedbackKind::Error => (cx.theme().danger, "ERROR"),
-                CommandFeedbackKind::Queued => (cx.theme().warning, "QUEUED"),
+                CommandFeedbackKind::Notice => (cx.theme().primary, i18n("agent-feedback-notice")),
+                CommandFeedbackKind::Status => {
+                    (cx.theme().muted_foreground, i18n("agent-feedback-status"))
+                }
+                CommandFeedbackKind::Error => (cx.theme().danger, i18n("agent-feedback-error")),
+                CommandFeedbackKind::Queued => (cx.theme().warning, i18n("agent-feedback-queued")),
             };
 
             h_flex()
@@ -294,8 +298,8 @@ impl Render for AgentPane {
                                                 .size(px(32.))
                                                 .rounded_full()
                                                 .icon(StopResponseIcon)
-                                                .tooltip("Stop response")
-                                                .aria_label("Stop response")
+                                                .tooltip(i18n("agent-action-stop-response"))
+                                                .aria_label(i18n("agent-action-stop-response"))
                                                 .on_click(cx.listener(|this, _, window, cx| {
                                                     this.interrupt_from_ui(window, cx)
                                                 }))
@@ -310,8 +314,8 @@ impl Render for AgentPane {
                                                 .size(px(32.))
                                                 .rounded_full()
                                                 .icon(IconName::ArrowUp)
-                                                .tooltip("Send message")
-                                                .aria_label("Send message")
+                                                .tooltip(i18n("agent-action-send-message"))
+                                                .aria_label(i18n("agent-action-send-message"))
                                                 .on_click(cx.listener(|this, _, window, cx| {
                                                     this.send_user_message(window, cx)
                                                 }))

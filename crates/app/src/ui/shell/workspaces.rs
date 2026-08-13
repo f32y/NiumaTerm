@@ -1,3 +1,5 @@
+use nmt_i18n::i18n;
+
 use crate::ui::shell::*;
 
 impl Shell {
@@ -193,11 +195,13 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         let name_input = cx.new(|cx| {
-            InputState::new(window, cx).default_value(DEFAULT_WORKSPACE_NAME.to_string())
+            InputState::new(window, cx)
+                .default_value(i18n("shell-workspace-default-name").to_string())
         });
 
-        let dir_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Working directory (required)"));
+        let dir_input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(i18n("shell-workspace-dir-placeholder"))
+        });
 
         let shell = cx.entity();
 
@@ -210,13 +214,13 @@ impl Shell {
             let margin_top = ((window.viewport_size().height - px(300.)) * 0.5).max(px(16.));
 
             dialog
-                .title("New Workspace")
+                .title(i18n("shell-workspace-new-title"))
                 .overlay_closable(false)
                 .margin_top(margin_top)
                 .button_props(
                     DialogButtonProps::default()
-                        .ok_text("Create")
-                        .cancel_text("Cancel")
+                        .ok_text(i18n("shell-workspace-create"))
+                        .cancel_text(i18n("shell-workspace-cancel"))
                         .show_cancel(true),
                 )
                 // Plain `Dialog` never renders `button_props` buttons (only
@@ -224,10 +228,17 @@ impl Shell {
                 // wrappers dispatch Confirm/CancelDialog into on_ok/on_cancel.
                 .footer(
                     DialogFooter::new()
-                        .child(DialogClose::new().child(Button::new("cancel-ws").label("Cancel")))
                         .child(
-                            DialogAction::new()
-                                .child(Button::new("create-ws").label("Create").primary()),
+                            DialogClose::new().child(
+                                Button::new("cancel-ws").label(i18n("shell-workspace-cancel")),
+                            ),
+                        )
+                        .child(
+                            DialogAction::new().child(
+                                Button::new("create-ws")
+                                    .label(i18n("shell-workspace-create"))
+                                    .primary(),
+                            ),
                         ),
                 )
                 .content(move |content, _, cx| {
@@ -235,16 +246,16 @@ impl Shell {
                     content.child(
                         v_flex()
                             .gap_2()
-                            .child(div().text_sm().child("Name"))
+                            .child(div().text_sm().child(i18n("shell-workspace-name-label")))
                             .child(Input::new(&content_name))
-                            .child(div().text_sm().child("Working directory"))
+                            .child(div().text_sm().child(i18n("shell-workspace-dir-label")))
                             .child(
                                 h_flex()
                                     .gap_2()
                                     .child(div().flex_1().child(Input::new(&content_dir)))
                                     .child(
                                         Button::new("browse-workspace-dir")
-                                            .label("Browse…")
+                                            .label(i18n("shell-workspace-browse"))
                                             .on_click(move |_, window, cx| {
                                                 let rx = cx.prompt_for_paths(PathPromptOptions {
                                                     files: false,
@@ -281,7 +292,7 @@ impl Shell {
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("Shells in this workspace start in this directory."),
+                                    .child(i18n("shell-workspace-dir-description")),
                             ),
                     )
                 })
@@ -311,7 +322,7 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         let name = if name.is_empty() {
-            DEFAULT_WORKSPACE_NAME.to_string()
+            i18n("shell-workspace-default-name").to_string()
         } else {
             name
         };

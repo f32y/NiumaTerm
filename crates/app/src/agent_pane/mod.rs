@@ -62,6 +62,7 @@ use nmt_agent_utils::{
 };
 use nmt_config::local_state::{self, AgentDefaults as StoredAgentDefaults};
 use nmt_config::profile::{AgentProfile, AgentProfileKind};
+use nmt_i18n::i18n;
 use serde_json::Value;
 use tracing::{info, warn};
 
@@ -69,7 +70,8 @@ use crate::agent_pane::commands::{
     PaletteCatalogEntry, PaletteDirection, claim_command_turn_start, filter_palette_catalog,
     filter_skill_catalog, is_current_session_epoch, local_commands, merge_catalog,
     move_palette_selection, next_session_epoch, parse_slash_command, prepare_skill_selection,
-    reconcile_skill_binding, reset_command_runtime, resolve_choice, validate_skill_binding,
+    reconcile_skill_binding, reset_command_runtime, resolve_choice, setting_value_label,
+    validate_skill_binding,
 };
 use crate::agent_pane::composer::{CommandFeedback, PendingSlashCommand, RewindState};
 pub(crate) use crate::agent_pane::profile::{AgentKind, AgentThreadDefaults, agent_launch};
@@ -156,9 +158,9 @@ impl GitBranchPoll {
     fn presentation(&self) -> (String, f32) {
         let label = self.branch.clone().unwrap_or_else(|| {
             if self.ready {
-                "No Git branch".to_string()
+                i18n("agent-git-no-branch").to_string()
             } else {
-                "Detecting branch…".to_string()
+                i18n("agent-git-detecting-branch").to_string()
             }
         });
         let opacity = if self.branch.is_some() { 0.72 } else { 0.48 };

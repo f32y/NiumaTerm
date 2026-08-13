@@ -7,6 +7,7 @@ use gpui_component::button::Button;
 use gpui_component::setting::SettingField;
 use gpui_component::slider::{Slider, SliderEvent, SliderState};
 use gpui_component::{ActiveTheme as _, AxisExt as _, Disableable as _, h_flex};
+use nmt_i18n::i18n;
 
 use crate::ui::settings::state::{
     AppSettings, clamp_background_image_opacity, clamp_background_opacity,
@@ -144,7 +145,10 @@ pub(super) fn background_image_opacity_field() -> SettingField<SharedString> {
 pub(super) fn background_image_field() -> SettingField<SharedString> {
     SettingField::render(|options, _window, cx| {
         let path = cx.global::<AppSettings>().background_image.clone();
-        let label = SharedString::from(path.clone().unwrap_or_else(|| "None".to_string()));
+        let label = SharedString::from(
+            path.clone()
+                .unwrap_or_else(|| i18n("settings-common-none").to_string()),
+        );
 
         h_flex()
             .map(|this| {
@@ -159,16 +163,16 @@ pub(super) fn background_image_field() -> SettingField<SharedString> {
             .child(
                 Button::new("background-image-browse")
                     .outline()
-                    .label("Browse")
+                    .label(i18n("settings-common-browse"))
                     .disabled(options.disabled)
                     .on_click(|_, window, cx| {
                         let rx = cx.prompt_for_paths(PathPromptOptions {
                             files: true,
                             directories: false,
                             multiple: false,
-                            prompt: Some("Select background image".into()),
+                            prompt: Some(i18n("settings-background-select-image").into()),
                             file_types: vec![FileDialogFilter {
-                                name: "Images".into(),
+                                name: i18n("settings-background-images-filter").into(),
                                 extensions: ["png", "jpg", "jpeg", "webp", "bmp"]
                                     .into_iter()
                                     .map(Into::into)
@@ -192,7 +196,7 @@ pub(super) fn background_image_field() -> SettingField<SharedString> {
             .children(path.is_some().then(|| {
                 Button::new("background-image-clear")
                     .outline()
-                    .label("Clear")
+                    .label(i18n("settings-common-clear"))
                     .disabled(options.disabled)
                     .on_click(|_, _, cx: &mut App| {
                         cx.global_mut::<AppSettings>().background_image = None;

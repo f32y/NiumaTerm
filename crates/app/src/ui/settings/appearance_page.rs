@@ -1,3 +1,5 @@
+use nmt_i18n::i18n;
+
 use crate::ui::settings::*;
 
 pub(super) fn appearance_page(
@@ -6,15 +8,15 @@ pub(super) fn appearance_page(
     tab_auto_size: bool,
     show_git_status: bool,
 ) -> SettingPage {
-    SettingPage::new("Appearance")
+    SettingPage::new(i18n("settings-appearance-title"))
         .default_open(true)
         .group(
             SettingGroup::new()
-                .title("Theme")
-                .description("Themes are loaded from the themes directory and applied immediately.")
+                .title(i18n("settings-appearance-theme"))
+                .description(i18n("settings-appearance-theme-description"))
                 .item(
                     SettingItem::new(
-                        "Make agent pane use terminal's background color",
+                        i18n("settings-appearance-agent-pane-terminal-background"),
                         SettingField::switch(
                             |cx| {
                                 cx.global::<AppSettings>()
@@ -26,11 +28,13 @@ pub(super) fn appearance_page(
                             },
                         ),
                     )
-                    .description("Use the terminal theme's background color for Agent Pane."),
+                    .description(i18n(
+                        "settings-appearance-agent-pane-terminal-background-description",
+                    )),
                 )
                 .item(
                     SettingItem::new(
-                        "Search",
+                        i18n("settings-appearance-theme-search"),
                         SettingField::input(
                             |cx| cx.global::<AppSettings>().theme_filter.clone().into(),
                             |value, cx| {
@@ -38,24 +42,31 @@ pub(super) fn appearance_page(
                             },
                         ),
                     )
-                    .description("Filter themes by file name or UI theme name."),
+                    .description(i18n("settings-appearance-theme-search-description")),
                 )
-                .item(
-                    SettingItem::render(|_, _, cx| theme_list(cx))
-                        .keywords(["theme", "colors", "palette"]),
-                ),
+                .item(SettingItem::render(|_, _, cx| theme_list(cx)).keywords([
+                    i18n("settings-appearance-keyword-theme"),
+                    i18n("settings-appearance-keyword-colors"),
+                    i18n("settings-appearance-keyword-palette"),
+                ])),
         )
         .group(
             SettingGroup::new()
-                .title("Window")
+                .title(i18n("settings-appearance-window"))
                 .item(
                     SettingItem::new(
-                        "Window Backdrop",
+                        i18n("settings-appearance-window-backdrop"),
                         SettingField::dropdown(
                             vec![
-                                ("mica".into(), "Mica".into()),
-                                ("acrylic".into(), "Acrylic".into()),
-                                ("off".into(), "Off".into()),
+                                (
+                                    "mica".into(),
+                                    i18n("settings-appearance-window-backdrop-mica").into(),
+                                ),
+                                (
+                                    "acrylic".into(),
+                                    i18n("settings-appearance-window-backdrop-acrylic").into(),
+                                ),
+                                ("off".into(), i18n("settings-common-off").into()),
                             ],
                             |cx| cx.global::<AppSettings>().window_backdrop.as_str().into(),
                             |value, cx| {
@@ -65,14 +76,11 @@ pub(super) fn appearance_page(
                         )
                         .default_value(SharedString::from("acrylic")),
                     )
-                    .description(
-                        "Window backdrop material. Acrylic blurs the content behind the window; \
-                         Mica is a static Windows 11 tint; Off keeps the window opaque.",
-                    ),
+                    .description(i18n("settings-appearance-window-backdrop-description")),
                 )
                 .item(
                     SettingItem::new(
-                        "Transparent Main View",
+                        i18n("settings-appearance-transparent-main-view"),
                         SettingField::switch(
                             |cx| cx.global::<AppSettings>().transparent_main_view,
                             |value, cx| {
@@ -80,33 +88,53 @@ pub(super) fn appearance_page(
                             },
                         ),
                     )
-                    .description("Use a translucent background for Terminal View and Agent Pane."),
-                )
-                .item(
-                    SettingItem::new("Background Opacity", background_opacity_field())
-                        .description(
-                            "Whole-window opacity while a translucent backdrop is selected.",
-                        )
-                        .disabled(backdrop == WindowBackdrop::Off),
-                )
-                .item(
-                    SettingItem::new("Background Image", background_image_field())
-                        .description("Local image stretched to cover the whole window."),
-                )
-                .item(
-                    SettingItem::new("Background Image Opacity", background_image_opacity_field())
-                        .description("How strongly the image shows through window surfaces.")
-                        .disabled(!background_image_enabled),
+                    .description(i18n(
+                        "settings-appearance-transparent-main-view-description",
+                    )),
                 )
                 .item(
                     SettingItem::new(
-                        "Smooth Scrolling",
+                        i18n("settings-appearance-background-opacity"),
+                        background_opacity_field(),
+                    )
+                    .description(i18n("settings-appearance-background-opacity-description"))
+                    .disabled(backdrop == WindowBackdrop::Off),
+                )
+                .item(
+                    SettingItem::new(
+                        i18n("settings-appearance-background-image"),
+                        background_image_field(),
+                    )
+                    .description(i18n("settings-appearance-background-image-description")),
+                )
+                .item(
+                    SettingItem::new(
+                        i18n("settings-appearance-background-image-opacity"),
+                        background_image_opacity_field(),
+                    )
+                    .description(i18n(
+                        "settings-appearance-background-image-opacity-description",
+                    ))
+                    .disabled(!background_image_enabled),
+                )
+                .item(
+                    SettingItem::new(
+                        i18n("settings-appearance-smooth-scrolling"),
                         SettingField::dropdown(
                             vec![
-                                ("all".into(), "All".into()),
-                                ("only-terminal".into(), "Only Terminal".into()),
-                                ("only-agent".into(), "Only Agent".into()),
-                                ("off".into(), "Off".into()),
+                                (
+                                    "all".into(),
+                                    i18n("settings-appearance-scrolling-all").into(),
+                                ),
+                                (
+                                    "only-terminal".into(),
+                                    i18n("settings-appearance-scrolling-only-terminal").into(),
+                                ),
+                                (
+                                    "only-agent".into(),
+                                    i18n("settings-appearance-scrolling-only-agent").into(),
+                                ),
+                                ("off".into(), i18n("settings-common-off").into()),
                             ],
                             |cx| cx.global::<AppSettings>().smooth_scrolling.as_str().into(),
                             |value, cx| {
@@ -116,29 +144,29 @@ pub(super) fn appearance_page(
                         )
                         .default_value(SharedString::from("all")),
                     )
-                    .description("Choose where traditional mouse-wheel scrolling is animated."),
+                    .description(i18n("settings-appearance-smooth-scrolling-description")),
                 ),
         )
         .group(
             SettingGroup::new()
-                .title("Font")
+                .title(i18n("settings-appearance-font"))
                 .item(
                     SettingItem::new(
-                        "UI Font",
+                        i18n("settings-appearance-ui-font"),
                         ui::font_picker::font_family_field(ui::font_picker::FontTarget::Ui),
                     )
-                    .description("Font for the app chrome (titlebar, sidebar, tabs, dialogs)."),
+                    .description(i18n("settings-appearance-ui-font-description")),
                 )
                 .item(
                     SettingItem::new(
-                        "Terminal Font",
+                        i18n("settings-appearance-terminal-font"),
                         ui::font_picker::font_family_field(ui::font_picker::FontTarget::Terminal),
                     )
-                    .description("Font used by the terminal view."),
+                    .description(i18n("settings-appearance-terminal-font-description")),
                 )
                 .item(
                     SettingItem::new(
-                        "Terminal Font Size",
+                        i18n("settings-appearance-terminal-font-size"),
                         SettingField::number_input(
                             NumberFieldOptions {
                                 min: 6.0,
@@ -151,11 +179,11 @@ pub(super) fn appearance_page(
                             },
                         ),
                     )
-                    .description("Font size in pixels."),
+                    .description(i18n("settings-appearance-font-size-description")),
                 )
                 .item(
                     SettingItem::new(
-                        "Terminal Line Height",
+                        i18n("settings-appearance-terminal-line-height"),
                         SettingField::number_input(
                             NumberFieldOptions {
                                 min: 0.8,
@@ -168,18 +196,18 @@ pub(super) fn appearance_page(
                             },
                         ),
                     )
-                    .description("Line height as a multiplier on font size."),
+                    .description(i18n("settings-appearance-terminal-line-height-description")),
                 )
                 .item(
                     SettingItem::new(
-                        "Agent Font",
+                        i18n("settings-appearance-agent-font"),
                         ui::font_picker::font_family_field(ui::font_picker::FontTarget::Agent),
                     )
-                    .description("Font used by agent (chat) tabs."),
+                    .description(i18n("settings-appearance-agent-font-description")),
                 )
                 .item(
                     SettingItem::new(
-                        "Agent Font Size",
+                        i18n("settings-appearance-agent-font-size"),
                         SettingField::number_input(
                             NumberFieldOptions {
                                 min: 6.0,
@@ -192,11 +220,11 @@ pub(super) fn appearance_page(
                             },
                         ),
                     )
-                    .description("Font size in pixels."),
+                    .description(i18n("settings-appearance-font-size-description")),
                 )
                 .item(
                     SettingItem::new(
-                        "Show monospace fonts only",
+                        i18n("settings-appearance-monospace-only"),
                         SettingField::switch(
                             |cx| cx.global::<AppSettings>().monospace_only,
                             |value, cx| {
@@ -204,15 +232,15 @@ pub(super) fn appearance_page(
                             },
                         ),
                     )
-                    .description("Filter the font list to fixed-width fonts."),
+                    .description(i18n("settings-appearance-monospace-only-description")),
                 ),
         )
         .group(
             SettingGroup::new()
-                .title("Tab Bar")
+                .title(i18n("settings-appearance-tab-bar"))
                 .item(
                     SettingItem::new(
-                        "Auto Size",
+                        i18n("settings-appearance-tab-auto-size"),
                         SettingField::switch(
                             |cx| cx.global::<AppSettings>().tab_auto_size,
                             |value, cx| {
@@ -220,14 +248,11 @@ pub(super) fn appearance_page(
                             },
                         ),
                     )
-                    .description(
-                        "Narrow tabs as the strip fills, down to the leading icon. \
-                         Turn off to hold a fixed width.",
-                    ),
+                    .description(i18n("settings-appearance-tab-auto-size-description")),
                 )
                 .item(
                     SettingItem::new(
-                        "Tab Width",
+                        i18n("settings-appearance-tab-width"),
                         SettingField::number_input(
                             NumberFieldOptions {
                                 min: DEFAULT_TAB_WIDTH,
@@ -243,15 +268,15 @@ pub(super) fn appearance_page(
                     // Auto Size derives the width from the strip, so the entry
                     // would report a value the tabs no longer use.
                     .disabled(tab_auto_size)
-                    .description("Fixed tab width in pixels; long titles are clipped."),
+                    .description(i18n("settings-appearance-tab-width-description")),
                 ),
         )
         .group(
             SettingGroup::new()
-                .title("Title Bar")
+                .title(i18n("settings-appearance-title-bar"))
                 .item(
                     SettingItem::new(
-                        "Show daily token usage",
+                        i18n("settings-appearance-daily-token-usage"),
                         SettingField::switch(
                             |cx| cx.global::<AppSettings>().show_daily_token_usage,
                             |value, cx| {
@@ -259,14 +284,11 @@ pub(super) fn appearance_page(
                             },
                         ),
                     )
-                    .description(
-                        "Show today's ccusage token totals in the titlebar, \
-                             refreshed every 60 seconds (click to refresh now).",
-                    ),
+                    .description(i18n("settings-appearance-daily-token-usage-description")),
                 )
                 .item(
                     SettingItem::new(
-                        "Show Git Status on Title Bar",
+                        i18n("settings-appearance-git-status"),
                         SettingField::switch(
                             |cx| cx.global::<AppSettings>().show_git_status_on_title_bar,
                             |value, cx| {
@@ -274,20 +296,29 @@ pub(super) fn appearance_page(
                             },
                         ),
                     )
-                    .description(
-                        "Show the active repository's +added -removed line \
-                             counts in the titlebar.",
-                    ),
+                    .description(i18n("settings-appearance-git-status-description")),
                 )
                 .item(
                     SettingItem::new(
-                        "Git Status Refresh Interval",
+                        i18n("settings-appearance-git-interval"),
                         SettingField::dropdown(
                             vec![
-                                ("10".into(), "10s".into()),
-                                ("15".into(), "15s".into()),
-                                ("30".into(), "30s".into()),
-                                ("60".into(), "60s".into()),
+                                (
+                                    "10".into(),
+                                    i18n("settings-appearance-git-interval-10").into(),
+                                ),
+                                (
+                                    "15".into(),
+                                    i18n("settings-appearance-git-interval-15").into(),
+                                ),
+                                (
+                                    "30".into(),
+                                    i18n("settings-appearance-git-interval-30").into(),
+                                ),
+                                (
+                                    "60".into(),
+                                    i18n("settings-appearance-git-interval-60").into(),
+                                ),
                             ],
                             |cx| {
                                 cx.global::<AppSettings>()
@@ -306,7 +337,31 @@ pub(super) fn appearance_page(
                     // while it is off the interval has no display to pace, so
                     // the entry is locked instead of reporting a dead value.
                     .disabled(!show_git_status)
-                    .description("How often the git status is re-read."),
+                    .description(i18n("settings-appearance-git-interval-description")),
+                ),
+        )
+        .group(
+            SettingGroup::new()
+                .title(i18n("settings-appearance-language"))
+                .item(
+                    SettingItem::new(
+                        i18n("settings-appearance-language"),
+                        SettingField::dropdown(
+                            vec![
+                                // Language names are proper nouns shown in their
+                                // own language, so they stay out of the catalogs.
+                                ("en".into(), "English".into()),
+                                ("zh-CN".into(), "简体中文".into()),
+                            ],
+                            |cx| cx.global::<AppSettings>().language.as_str().into(),
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().language =
+                                    Language::from_value(&value);
+                            },
+                        )
+                        .default_value(SharedString::from("en")),
+                    )
+                    .description(i18n("settings-appearance-language-description")),
                 ),
         )
 }

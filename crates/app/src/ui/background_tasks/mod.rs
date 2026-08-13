@@ -18,13 +18,11 @@ use nmt_agent_utils::background_task::{
     BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskState,
     BackgroundTaskSummary, BackgroundTaskTranscriptState,
 };
+use nmt_i18n::i18n;
 
 use crate::agent_pane::AgentPane;
 use crate::agent_pane::transcript::TranscriptView;
 use crate::ui::AppSettings;
-
-/// Exact label used by both the panel heading and the title-bar button.
-pub(crate) const PANEL_TITLE: &str = "Background Tasks";
 
 /// Rows shown before the section control offers the rest. Running work is the
 /// part a user watches, so the finished list stays shorter per row of interest.
@@ -258,8 +256,8 @@ impl BackgroundTasksView {
                             .ghost()
                             .xsmall()
                             .icon(IconName::ArrowLeft)
-                            .tooltip("Back to background tasks")
-                            .aria_label("Back to background tasks")
+                            .tooltip(i18n("tasks-background-back-tooltip"))
+                            .aria_label(i18n("tasks-background-back-tooltip"))
                             .on_click(cx.listener(|this, _, _, cx| this.close_detail(cx))),
                     )
                     .child(
@@ -273,7 +271,7 @@ impl BackgroundTasksView {
                         div()
                             .text_xs()
                             .text_color(state_color(task.state, cx))
-                            .child(task.state.label()),
+                            .child(background_task_state_label(task.state)),
                     ),
             )
             .child(
@@ -289,16 +287,19 @@ impl BackgroundTasksView {
 
         let body: AnyElement = match (&state, items.is_empty()) {
             (BackgroundTaskTranscriptState::Unavailable { message }, _) => empty_state(
-                "Conversation unavailable",
-                &format!("This agent's conversation could not be read: {message}"),
+                i18n("tasks-background-transcript-unavailable-title"),
+                &i18n("tasks-background-transcript-unavailable-detail")
+                    .replace("{message}", message),
                 cx,
             ),
-            (BackgroundTaskTranscriptState::Loading, true) => {
-                empty_state("Loading", "Reading this agent's conversation…", cx)
-            }
+            (BackgroundTaskTranscriptState::Loading, true) => empty_state(
+                i18n("tasks-background-loading-title"),
+                i18n("tasks-background-transcript-loading-detail"),
+                cx,
+            ),
             (_, true) => empty_state(
-                "Nothing recorded yet",
-                "This agent has not produced any output.",
+                i18n("tasks-background-transcript-empty-title"),
+                i18n("tasks-background-transcript-empty-detail"),
                 cx,
             ),
             _ => v_flex()
@@ -312,7 +313,10 @@ impl BackgroundTasksView {
                         .py_1()
                         .text_xs()
                         .text_color(theme.muted_foreground)
-                        .child(format!("Earlier {dropped} items are not shown"))
+                        .child(
+                            i18n("tasks-background-transcript-truncated")
+                                .replace("{count}", &dropped.to_string()),
+                        )
                 }))
                 .child(transcript)
                 .into_any_element(),
@@ -387,11 +391,12 @@ fn render_row(
     let name = task.display_label();
     let detail = row_detail(task);
     let timing = row_timing(task, now);
+    let state_label = background_task_state_label(task.state);
     let tooltip: SharedString = format!(
         "{} · {} · {}\n{}",
         task.key.provider.label(),
         task.key.id,
-        task.state.label(),
+        state_label,
         detail
     )
     .into();
@@ -414,7 +419,7 @@ fn render_row(
                 .gap_2()
                 .items_center()
                 .child(div().flex_1().truncate().text_sm().child(name))
-                .child(div().text_xs().text_color(color).child(task.state.label())),
+                .child(div().text_xs().text_color(color).child(state_label)),
         )
         .child(
             h_flex()
@@ -449,14 +454,15 @@ fn row_detail(task: &BackgroundTaskSummary) -> String {
         .or(task.status.as_deref())
         .or(task.last_preview.as_deref())
         .map(str::to_owned)
-        .unwrap_or_else(|| "No description reported".to_string())
+        .unwrap_or_else(|| i18n("tasks-background-no-description").to_string())
 }
 
 fn row_timing(task: &BackgroundTaskSummary, now: SystemTime) -> Option<String> {
     if task.state.is_terminal() {
-        return task
-            .completed_at
-            .map(|completed| format!("{} ago", duration_label(now, completed)));
+        return task.completed_at.map(|completed| {
+            i18n("tasks-background-finished-ago")
+                .replace("{duration}", &duration_label(now, completed))
+        });
     }
     task.started_at.map(|started| duration_label(now, started))
 }
@@ -466,10 +472,25 @@ fn row_timing(task: &BackgroundTaskSummary, now: SystemTime) -> Option<String> {
 fn duration_label(now: SystemTime, past: SystemTime) -> String {
     let seconds = now.duration_since(past).unwrap_or_default().as_secs();
     match seconds {
-        0..60 => format!("{seconds}s"),
-        60..3600 => format!("{}m", seconds / 60),
-        3600..86400 => format!("{}h", seconds / 3600),
-        _ => format!("{}d", seconds / 86400),
+        0..60 => i18n("tasks-background-duration-seconds").replace("{count}", &seconds.to_string()),
+        60..3600 => i18n("tasks-background-duration-minutes")
+            .replace("{count}", &(seconds / 60).to_string()),
+        3600..86400 => i18n("tasks-background-duration-hours")
+            .replace("{count}", &(seconds / 3600).to_string()),
+        _ => i18n("tasks-background-duration-days")
+            .replace("{count}", &(seconds / 86400).to_string()),
+    }
+}
+
+fn background_task_state_label(state: BackgroundTaskState) -> &'static str {
+    match state {
+        BackgroundTaskState::Starting => i18n("tasks-background-state-starting"),
+        BackgroundTaskState::Working => i18n("tasks-background-state-working"),
+        BackgroundTaskState::NeedsInput => i18n("tasks-background-state-needs-input"),
+        BackgroundTaskState::Done => i18n("tasks-background-state-done"),
+        BackgroundTaskState::Interrupted => i18n("tasks-background-state-interrupted"),
+        BackgroundTaskState::Stopped => i18n("tasks-background-state-stopped"),
+        BackgroundTaskState::Failed => i18n("tasks-background-state-failed"),
     }
 }
 
@@ -515,22 +536,25 @@ fn visible_rows(total: usize, limit: usize, expanded: bool) -> usize {
 
 fn section_control_label(hidden: usize, expanded: bool) -> Option<String> {
     if expanded {
-        return Some("Show fewer".to_string());
+        return Some(i18n("tasks-background-show-fewer").to_string());
     }
-    (hidden > 0).then(|| format!("Show {hidden} more"))
+    (hidden > 0).then(|| i18n("tasks-background-show-more").replace("{count}", &hidden.to_string()))
 }
 
 fn running_heading(snapshot: &BackgroundTaskSnapshot) -> String {
     let active = snapshot.active_count();
     let needs_input = snapshot.needs_input_count();
     if needs_input > 0 {
-        return format!("Running · {active} · {needs_input} need input");
+        return i18n("tasks-background-heading-running-needs-input")
+            .replace("{count}", &active.to_string())
+            .replace("{needs}", &needs_input.to_string());
     }
-    format!("Running · {active}")
+    i18n("tasks-background-heading-running").replace("{count}", &active.to_string())
 }
 
 fn finished_heading(snapshot: &BackgroundTaskSnapshot) -> String {
-    format!("Finished · {}", snapshot.terminal_count())
+    i18n("tasks-background-heading-finished")
+        .replace("{count}", &snapshot.terminal_count().to_string())
 }
 
 impl Render for BackgroundTasksView {
@@ -550,7 +574,7 @@ impl Render for BackgroundTasksView {
                     .items_center()
                     .border_b_1()
                     .border_color(cx.theme().sidebar_border)
-                    .child(div().text_sm().child(PANEL_TITLE))
+                    .child(div().text_sm().child(i18n("tasks-background-title")))
             }))
             .child(self.render_body(cx))
     }
@@ -583,10 +607,14 @@ impl BackgroundTasksView {
             // has something to report, so a targeted view with none yet is
             // still starting up rather than looking at the wrong kind of tab.
             return match self.target.is_some() {
-                true => empty_state("Loading", "Looking for background agents…", cx),
+                true => empty_state(
+                    i18n("tasks-background-loading-title"),
+                    i18n("tasks-background-loading-detail"),
+                    cx,
+                ),
                 false => empty_state(
-                    "No agent session",
-                    "Open a Codex or Claude Code tab to see its background agents.",
+                    i18n("tasks-background-no-session-title"),
+                    i18n("tasks-background-no-session-detail"),
                     cx,
                 ),
             };
@@ -602,16 +630,19 @@ impl BackgroundTasksView {
         if running.is_empty() && finished.is_empty() {
             return match &snapshot.discovery {
                 BackgroundTaskDiscoveryState::Unavailable { message } => empty_state(
-                    "Status unavailable",
-                    &format!("Background task status could not be loaded: {message}"),
+                    i18n("tasks-background-status-unavailable-title"),
+                    &i18n("tasks-background-status-unavailable-detail")
+                        .replace("{message}", message),
                     cx,
                 ),
-                BackgroundTaskDiscoveryState::Loading => {
-                    empty_state("Loading", "Looking for background agents…", cx)
-                }
+                BackgroundTaskDiscoveryState::Loading => empty_state(
+                    i18n("tasks-background-loading-title"),
+                    i18n("tasks-background-loading-detail"),
+                    cx,
+                ),
                 _ => empty_state(
-                    "No background agents",
-                    "Child agents started by this session appear here.",
+                    i18n("tasks-background-empty-title"),
+                    i18n("tasks-background-empty-detail"),
                     cx,
                 ),
             };

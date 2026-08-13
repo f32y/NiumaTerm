@@ -1,3 +1,5 @@
+use nmt_i18n::i18n;
+
 use crate::agent_pane::transcript::disclosure_row::{
     AGENT_DISCLOSURE_DETAIL_INSET, AGENT_TEXT_MEASURE_REMS, AgentDisclosureRow,
     USER_TEXT_MEASURE_REMS,
@@ -6,8 +8,8 @@ use crate::agent_pane::transcript::format::{interrupted_status_label, worked_sta
 use crate::agent_pane::transcript::{
     code_transcript_format, command_execution_detail, command_execution_heading,
     compact_token_count, compaction_accounting, compaction_label, compaction_row_is_expandable,
-    entry_copy_text, fenced_code_block_as, is_work_row, should_virtualize_transcript,
-    strip_read_gutter, truncated_user_prompt, working_label,
+    compaction_trigger_label, entry_copy_text, fenced_code_block_as, is_work_row,
+    should_virtualize_transcript, strip_read_gutter, truncated_user_prompt, working_label,
 };
 use crate::agent_pane::*;
 
@@ -81,7 +83,7 @@ impl TranscriptView {
                     div()
                         .text_xs()
                         .text_color(accent)
-                        .child("Compacting context…"),
+                        .child(i18n("agent-transcript-compacting")),
                 )
                 .child(
                     div()
@@ -160,11 +162,11 @@ impl TranscriptView {
                 .flatten();
 
             match copy_text {
-                Some(copy_text) => {
-                    menu.item(PopupMenuItem::new("Copy").on_click(move |_, _, cx| {
+                Some(copy_text) => menu.item(
+                    PopupMenuItem::new(i18n("agent-transcript-copy")).on_click(move |_, _, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
-                    }))
-                }
+                    }),
+                ),
                 None => menu,
             }
         }
@@ -195,9 +197,9 @@ impl TranscriptView {
                 .text_color(cx.theme().primary)
                 .cursor_pointer()
                 .child(if expanded {
-                    "Show less".to_string()
+                    i18n("agent-transcript-show-less").to_string()
                 } else {
-                    "Show full message".to_string()
+                    i18n("agent-transcript-show-full-message").to_string()
                 })
                 .id(("user-expand", index))
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -366,7 +368,7 @@ impl TranscriptView {
                 ..
             } => (
                 IconName::File,
-                format!("Edit {paths}"),
+                i18n("agent-transcript-edit-paths").replace("{paths}", paths),
                 Some(status.as_deref().unwrap_or("inProgress").to_string()),
                 diff.as_deref()
                     .filter(|diff| !diff.trim().is_empty())
@@ -397,7 +399,7 @@ impl TranscriptView {
             ),
             SessionItem::Reasoning { summary, .. } => (
                 IconName::Bot,
-                "Thinking".to_string(),
+                i18n("agent-transcript-thinking").to_string(),
                 None,
                 summary
                     .as_deref()
@@ -409,7 +411,14 @@ impl TranscriptView {
 
         let expandable = detail.is_some();
         let expanded = expandable && self.expanded_rows.contains(&index);
-        let status_label = status.as_deref().unwrap_or("No status");
+        let status_label = match status.as_deref() {
+            Some("failed") => i18n("agent-transcript-status-failed"),
+            Some("declined") => i18n("agent-transcript-status-declined"),
+            Some("completed") => i18n("agent-transcript-status-completed"),
+            Some("inProgress") => i18n("agent-transcript-status-in-progress"),
+            Some(status) => status,
+            None => i18n("agent-transcript-no-status"),
+        };
         let status_glyph = status.as_ref().map(|state| {
             let (name, color) = match state.as_str() {
                 "failed" | "declined" => (IconName::CircleX, cx.theme().danger),
@@ -429,9 +438,9 @@ impl TranscriptView {
             status_label,
             if expandable {
                 if expanded {
-                    ". Expanded"
+                    i18n("agent-transcript-accessibility-expanded")
                 } else {
-                    ". Collapsed"
+                    i18n("agent-transcript-accessibility-collapsed")
                 }
             } else {
                 ""
@@ -662,7 +671,11 @@ impl TranscriptView {
         let accessible_label = if expandable {
             format!(
                 "{label}. {preview}. {}",
-                if expanded { "Expanded" } else { "Collapsed" }
+                if expanded {
+                    i18n("agent-transcript-expanded")
+                } else {
+                    i18n("agent-transcript-collapsed")
+                }
             )
         } else {
             format!("{label}. {preview}")
@@ -701,17 +714,28 @@ impl TranscriptView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let accounting_rows = [
-            ("Before", detail.pre_tokens.map(compact_token_count)),
-            ("After", detail.post_tokens.map(compact_token_count)),
             (
-                "Messages summarized",
+                i18n("agent-transcript-before"),
+                detail.pre_tokens.map(compact_token_count),
+            ),
+            (
+                i18n("agent-transcript-after"),
+                detail.post_tokens.map(compact_token_count),
+            ),
+            (
+                i18n("agent-transcript-messages-summarized"),
                 detail.messages_summarized.map(|count| count.to_string()),
             ),
             (
-                "Trigger",
-                detail.trigger.map(|trigger| trigger.label().to_string()),
+                i18n("agent-transcript-trigger"),
+                detail
+                    .trigger
+                    .map(|trigger| compaction_trigger_label(trigger).to_string()),
             ),
-            ("Instructions", detail.user_context.clone()),
+            (
+                i18n("agent-transcript-instructions"),
+                detail.user_context.clone(),
+            ),
         ];
         let summary_scroll = window
             .use_keyed_state(("compaction-scroll", index), cx, |_, _| {
@@ -818,7 +842,11 @@ impl TranscriptView {
                     .expanded(!folded)
                     .accessible_label(format!(
                         "{label}. {}",
-                        if folded { "Collapsed" } else { "Expanded" }
+                        if folded {
+                            i18n("agent-transcript-collapsed")
+                        } else {
+                            i18n("agent-transcript-expanded")
+                        }
                     ))
                     .render(cx)
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -860,9 +888,9 @@ impl TranscriptView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let label = if expanded {
-            "Show fewer tool calls".to_string()
+            i18n("agent-transcript-show-fewer-tool-calls").to_string()
         } else {
-            format!("+{tool_count} tool calls")
+            i18n("agent-transcript-tool-calls").replace("{count}", &tool_count.to_string())
         };
 
         AgentDisclosureRow::new(("wl-run", run_start), label.clone())
@@ -870,7 +898,11 @@ impl TranscriptView {
             .without_type_icon_slot()
             .accessible_label(format!(
                 "{label}. {}",
-                if expanded { "Expanded" } else { "Collapsed" }
+                if expanded {
+                    i18n("agent-transcript-expanded")
+                } else {
+                    i18n("agent-transcript-collapsed")
+                }
             ))
             .render(cx)
             .on_click(cx.listener(move |this, _, _, cx| {

@@ -1,9 +1,22 @@
+use nmt_i18n::i18n;
+
 use crate::ui::settings::*;
 
 /// Reasoning-effort choices a profile can pin. `default` is stored as an
 /// empty string, which is also what a profile written before this field
 /// existed carries, so both mean "leave the effort to the agent".
 const PROFILE_EFFORT_OPTIONS: [&str; 6] = ["default", "low", "medium", "high", "xhigh", "max"];
+
+fn effort_label(option: &str) -> &'static str {
+    match option {
+        "low" => i18n("settings-agent-profile-effort-low"),
+        "medium" => i18n("settings-agent-profile-effort-medium"),
+        "high" => i18n("settings-agent-profile-effort-high"),
+        "xhigh" => i18n("settings-agent-profile-effort-xhigh"),
+        "max" => i18n("settings-agent-profile-effort-max"),
+        _ => i18n("settings-agent-profile-effort-default"),
+    }
+}
 
 /// Which half of an environment-variable row is open for editing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,9 +66,9 @@ pub(super) fn open_agent_profile_dialog(target: Option<usize>, window: &mut Wind
 
     window.open_dialog(cx, move |dialog, window, _| {
         let title = if target.is_some() {
-            "Edit Agent Profile"
+            i18n("settings-agent-profile-edit-title")
         } else {
-            "Add Agent Profile"
+            i18n("settings-agent-profile-add-title")
         };
         let settings_height = window.viewport_size().height;
         let dialog_height = settings_height * 0.72;
@@ -63,17 +76,20 @@ pub(super) fn open_agent_profile_dialog(target: Option<usize>, window: &mut Wind
 
         // Deleting lives in the profile list's own row control, so this
         // dialog stays an editor: everything in it is reversible by cancelling.
-        let footer = DialogFooter::new()
-            .child(DialogClose::new().child(Button::new("agent-profile-cancel").label("Cancel")))
-            .child(
-                Button::new("agent-profile-save")
-                    .primary()
-                    .label("Save")
-                    .on_click(|_, window, cx: &mut App| {
-                        save_agent_profile_draft(cx);
-                        window.close_dialog(cx);
-                    }),
-            );
+        let footer =
+            DialogFooter::new()
+                .child(DialogClose::new().child(
+                    Button::new("agent-profile-cancel").label(i18n("settings-common-cancel")),
+                ))
+                .child(
+                    Button::new("agent-profile-save")
+                        .primary()
+                        .label(i18n("settings-common-save"))
+                        .on_click(|_, window, cx: &mut App| {
+                            save_agent_profile_draft(cx);
+                            window.close_dialog(cx);
+                        }),
+                );
 
         dialog
             .title(title)
@@ -133,7 +149,7 @@ fn kind_choice_button(
     kind: AgentProfileKind,
     current: AgentProfileKind,
 ) -> Button {
-    let button = Button::new(id).label(agent_kind_label(kind));
+    let button = Button::new(id).label(agent_kind_display_label(kind));
     let button = if kind == current {
         button.primary()
     } else {
@@ -260,14 +276,19 @@ fn env_var_table(env: &[EnvVar], window: &mut Window, cx: &mut App) -> AnyElemen
 
     let mut table = table_frame(cx).child(
         table_header(cx)
-            .child(div().flex_1().min_w_0().child("Name"))
-            .child(div().flex_1().min_w_0().child("Value"))
+            .child(div().flex_1().min_w_0().child(i18n("settings-common-name")))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(i18n("settings-common-value")),
+            )
             .child(
                 div()
                     .w(ENV_OPERATION_COLUMN)
                     .flex_none()
                     .text_right()
-                    .child("Operation"),
+                    .child(i18n("settings-common-operation")),
             ),
     );
 
@@ -277,7 +298,7 @@ fn env_var_table(env: &[EnvVar], window: &mut Window, cx: &mut App) -> AnyElemen
                 table_row(false, cx)
                     .text_sm()
                     .text_color(cx.theme().muted_foreground)
-                    .child("No variables yet."),
+                    .child(i18n("settings-agent-profile-no-variables")),
             )
             .into_any_element();
     }
@@ -291,7 +312,7 @@ fn env_var_table(env: &[EnvVar], window: &mut Window, cx: &mut App) -> AnyElemen
                     row,
                     EnvField::Name,
                     &var.name,
-                    "Name",
+                    i18n("settings-common-name"),
                     editing == Some((row, EnvField::Name)),
                     window,
                     cx,
@@ -300,7 +321,7 @@ fn env_var_table(env: &[EnvVar], window: &mut Window, cx: &mut App) -> AnyElemen
                     row,
                     EnvField::Value,
                     &var.value,
-                    "Value",
+                    i18n("settings-common-value"),
                     editing == Some((row, EnvField::Value)),
                     window,
                     cx,
@@ -319,8 +340,8 @@ fn env_var_table(env: &[EnvVar], window: &mut Window, cx: &mut App) -> AnyElemen
                             .ghost()
                             .with_size(TABLE_OPERATION_BUTTON)
                             .icon(TrashIcon)
-                            .aria_label("Delete")
-                            .tooltip("Delete")
+                            .aria_label(i18n("settings-common-delete"))
+                            .tooltip(i18n("settings-common-delete"))
                             .on_click(move |_, _, cx: &mut App| {
                                 let draft = cx.global_mut::<AgentProfileDraft>();
                                 if row < draft.profile.env.len() {
@@ -342,7 +363,7 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
     let profile = cx.global::<AgentProfileDraft>().profile.clone();
     let is_edit = cx.global::<AgentProfileDraft>().target.is_some();
 
-    let kind_label = agent_kind_label(profile.kind);
+    let kind_label = agent_kind_display_label(profile.kind);
     let key_env = match profile.kind {
         AgentProfileKind::ClaudeCode => "ANTHROPIC_API_KEY",
         AgentProfileKind::Codex => "OPENAI_API_KEY",
@@ -425,7 +446,7 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
     let effort_control = Button::new("agent-profile-dialog-effort")
         .outline()
         .w_64()
-        .label(selected_effort.clone())
+        .label(effort_label(&selected_effort))
         .dropdown_caret(true)
         .dropdown_menu(move |menu, _, _| {
             let selected = selected_effort.clone();
@@ -434,7 +455,7 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
                 let option = *option;
 
                 menu.item(
-                    PopupMenuItem::new(option)
+                    PopupMenuItem::new(effort_label(option))
                         .checked(option == selected)
                         .on_click(move |_, _, cx: &mut App| {
                             // `default` is the absence of a choice, so it is
@@ -470,22 +491,19 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
     let env_section = v_flex()
         .w_full()
         .gap_2()
-        .child(Label::new("Environment Variables").text_sm())
+        .child(Label::new(i18n("settings-agent-profile-environment")).text_sm())
         .child(
             div()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .child(
-                    "Extra environment variables applied to the agent process. \
-                     Double-click a cell to edit it.",
-                ),
+                .child(i18n("settings-agent-profile-environment-description")),
         )
         .child(env_var_table(&profile.env, window, cx))
         .child(
             h_flex().child(
                 Button::new("agent-profile-dialog-env-add")
                     .outline()
-                    .label("Add Variable")
+                    .label(i18n("settings-agent-profile-add-variable"))
                     .on_click(|_, _, cx: &mut App| {
                         cx.global_mut::<AgentProfileDraft>()
                             .profile
@@ -499,32 +517,30 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
         .w_full()
         .gap_4()
         .child(card_row(
-            "Name",
-            "Display name; it keys the default selector and per-profile settings.",
+            i18n("settings-common-name"),
+            i18n("settings-agent-profile-name-description"),
             Input::new(&name_input).w_64(),
             cx,
         ))
         .child(card_row(
-            "Base Agent",
-            "Which agent CLI this profile launches.",
+            i18n("settings-agent-profile-base-agent"),
+            i18n("settings-agent-profile-base-agent-description"),
             kind_control,
             cx,
         ))
         .child(card_row(
-            "Executable Path",
-            "Executable name or full path; a bare name resolves via PATH.",
+            i18n("settings-agent-profile-executable"),
+            i18n("settings-agent-profile-executable-description"),
             Input::new(&exe_input).w_64(),
             cx,
         ))
         .child(card_row(
-            "Model",
+            i18n("settings-agent-profile-model"),
             match profile.kind {
                 AgentProfileKind::ClaudeCode => {
-                    "Initial model; passed to Claude Code as ANTHROPIC_MODEL."
+                    i18n("settings-agent-profile-model-claude-description")
                 }
-                AgentProfileKind::Codex => {
-                    "Initial model; passed to Codex when its app-server thread starts."
-                }
+                AgentProfileKind::Codex => i18n("settings-agent-profile-model-codex-description"),
             },
             Input::new(&model_input).w_64(),
             cx,
@@ -533,62 +549,44 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
         // Codex has no equivalent setting to redirect.
         .when(profile.kind == AgentProfileKind::ClaudeCode, |this| {
             this.child(card_row(
-                "Replace all sub-model config with primary",
-                "Also send the model above as ANTHROPIC_DEFAULT_OPUS_MODEL, \
-                 ANTHROPIC_DEFAULT_SONNET_MODEL, and ANTHROPIC_DEFAULT_HAIKU_MODEL, \
-                 so an endpoint serving one model answers every tier. An entry for \
-                 the same variable in the table below still wins.",
+                i18n("settings-agent-profile-replace-sub-models"),
+                i18n("settings-agent-profile-replace-sub-models-description"),
                 sub_models_switch,
                 cx,
             ))
         })
         .child(card_row(
-            "Effort",
-            "Reasoning effort forced on every conversation this profile starts. \
-             `default` leaves it to the agent and the last remembered pick.",
+            i18n("settings-agent-profile-effort"),
+            i18n("settings-agent-profile-effort-description"),
             effort_control,
             cx,
         ))
         .child(card_row(
-            "Use Custom API Endpoint",
-            "Route this agent through your own API endpoint.",
+            i18n("settings-agent-profile-custom-endpoint"),
+            i18n("settings-agent-profile-custom-endpoint-description"),
             endpoint_switch,
             cx,
         ))
         .child(card_row(
-            "API URL",
+            i18n("settings-agent-profile-api-url"),
             match profile.kind {
                 AgentProfileKind::ClaudeCode => {
-                    "Exported as ANTHROPIC_BASE_URL while the custom endpoint is enabled."
-                        .to_string()
+                    i18n("settings-agent-profile-api-url-claude-description")
                 }
-                AgentProfileKind::Codex => {
-                    "Injected as a profile-scoped Codex model provider base URL.".to_string()
-                }
+                AgentProfileKind::Codex => i18n("settings-agent-profile-api-url-codex-description"),
             },
             Input::new(&url_input).disabled(!endpoint_on).w_64(),
             cx,
         ))
         .child(card_row(
-            "API Key",
+            i18n("settings-agent-profile-api-key"),
             match profile.kind {
                 AgentProfileKind::ClaudeCode => {
-                    format!(
-                        "Exported as {key_env} while the custom endpoint is enabled. \
-                         URL and key are stored encrypted in config.toml, which hides \
-                         them from programs reading the file; inspecting the NiumaTerm \
-                         executable or the agent process can still recover them."
-                    )
+                    i18n("settings-agent-profile-api-key-claude-description")
+                        .replace("{key}", key_env)
                 }
-                AgentProfileKind::Codex => {
-                    format!(
-                        "Exported as {key_env} and referenced by the profile-scoped \
-                         provider. URL and key are stored encrypted in config.toml, \
-                         which hides them from programs reading the file; inspecting \
-                         the NiumaTerm executable or the agent process can still \
-                         recover them."
-                    )
-                }
+                AgentProfileKind::Codex => i18n("settings-agent-profile-api-key-codex-description")
+                    .replace("{key}", key_env),
             },
             Input::new(&key_input).disabled(!endpoint_on).w_64(),
             cx,

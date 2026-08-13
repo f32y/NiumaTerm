@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::{env, fs};
 
 use nmt_config::remote_session::RemoteSessionConfig;
+use nmt_i18n::i18n;
 use nmt_remote_net::{
     AttachTarget, HostConfig, HostHandle, PairingCode, ProtocolSessionOptions, RemoteSession,
     hex_decode, hex_encode, load_or_create_keypair, open_remote_session,
@@ -194,5 +195,5 @@ pub fn connect_new_session(host: &KnownHost) -> Result<RemoteSession, String> {
 }
 
 fn hostname() -> String {
-    env::var("COMPUTERNAME").unwrap_or_else(|_| "NiumaTerm client".to_owned())
+    env::var("COMPUTERNAME").unwrap_or_else(|_| i18n("remote-default-client-name").to_owned())
 }

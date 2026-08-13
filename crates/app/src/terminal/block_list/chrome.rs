@@ -1,3 +1,5 @@
+use nmt_i18n::i18n;
+
 use crate::terminal::block_list::*;
 
 /// Chrome of one visible item: gutter accent, right-aligned header,
@@ -87,11 +89,13 @@ pub(crate) fn format_duration(d: time::Duration) -> String {
     let secs = d.as_secs();
 
     if secs >= 60 {
-        format!("{}m{:02}s", secs / 60, secs % 60)
+        i18n("terminal-duration-minutes-seconds")
+            .replace("{minutes}", &(secs / 60).to_string())
+            .replace("{seconds}", &format!("{:02}", secs % 60))
     } else if secs >= 1 {
-        format!("{:.1}s", d.as_secs_f32())
+        i18n("terminal-duration-seconds").replace("{seconds}", &format!("{:.1}", d.as_secs_f32()))
     } else {
-        format!("{}ms", d.as_millis())
+        i18n("terminal-duration-milliseconds").replace("{count}", &d.as_millis().to_string())
     }
 }
 

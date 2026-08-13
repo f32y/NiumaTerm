@@ -1,19 +1,18 @@
+use nmt_i18n::i18n;
+
 use crate::remote::reconcile as reconcile_remote_session;
 use crate::ui::settings::*;
 
 pub(super) fn remote_session_page() -> SettingPage {
-    SettingPage::new("Remote Session")
+    SettingPage::new(i18n("settings-remote-title"))
         .default_open(true)
-        .description(
-            "Reach this machine's terminal sessions from other computers through a relay. \
-             Traffic is end-to-end encrypted; the relay only ever sees ciphertext.",
-        )
+        .description(i18n("settings-remote-description"))
         .group(
             SettingGroup::new()
-                .title("Host Service")
+                .title(i18n("settings-remote-host-service"))
                 .item(
                     SettingItem::new(
-                        "Enable Host Service",
+                        i18n("settings-remote-enable-host"),
                         SettingField::switch(
                             |cx| cx.global::<AppSettings>().remote_host_enabled,
                             |value, cx| {
@@ -22,14 +21,11 @@ pub(super) fn remote_session_page() -> SettingPage {
                             },
                         ),
                     )
-                    .description(
-                        "Register with the relay so paired devices can attach to sessions on \
-                         this machine. Sessions keep running while no client is connected.",
-                    ),
+                    .description(i18n("settings-remote-enable-host-description")),
                 )
                 .item(
                     SettingItem::new(
-                        "Relay URL",
+                        i18n("settings-remote-relay-url"),
                         SettingField::input(
                             |cx| cx.global::<AppSettings>().remote_relay_url.clone(),
                             |value, cx| {
@@ -37,14 +33,11 @@ pub(super) fn remote_session_page() -> SettingPage {
                             },
                         ),
                     )
-                    .description(
-                        "WebSocket endpoint, e.g. wss://relay.example.com/ws. Applied when you \
-                         toggle the service or close settings.",
-                    ),
+                    .description(i18n("settings-remote-relay-url-description")),
                 )
                 .item(
                     SettingItem::new(
-                        "Access Token",
+                        i18n("settings-remote-access-token"),
                         SettingField::input(
                             |cx| cx.global::<AppSettings>().remote_access_token.clone(),
                             |value, cx| {
@@ -52,24 +45,21 @@ pub(super) fn remote_session_page() -> SettingPage {
                             },
                         ),
                     )
-                    .description("Shared secret the relay requires to register this host."),
+                    .description(i18n("settings-remote-access-token-description")),
                 ),
         )
         .group(
             SettingGroup::new()
-                .title("Pairing & Devices")
+                .title(i18n("settings-remote-pairing-devices"))
                 .item(SettingItem::render(|_, _, cx| remote_host_status(cx))),
         )
         .group(
             SettingGroup::new()
-                .title("Connect to a Host")
-                .description(
-                    "Pair with another machine's host service using the code it shows, then \
-                     open remote tabs with Ctrl+Shift+R.",
-                )
+                .title(i18n("settings-remote-connect-host"))
+                .description(i18n("settings-remote-connect-host-description"))
                 .item(
                     SettingItem::new(
-                        "Pairing Code",
+                        i18n("settings-remote-pairing-code"),
                         SettingField::input(
                             |cx| cx.global::<AppSettings>().remote_pairing_input.clone(),
                             |value, cx| {
@@ -77,7 +67,7 @@ pub(super) fn remote_session_page() -> SettingPage {
                             },
                         ),
                     )
-                    .description("Paste the code from the host machine, then click Pair."),
+                    .description(i18n("settings-remote-pairing-code-description")),
                 )
                 .item(SettingItem::render(|_, _, cx| remote_client_status(cx))),
         )
@@ -111,7 +101,7 @@ fn remote_host_status(cx: &mut App) -> Div {
             div()
                 .py_2()
                 .text_color(muted)
-                .child("Enable the host service (with a relay URL and token) to pair devices."),
+                .child(i18n("settings-remote-host-disabled")),
         );
     }
 
@@ -123,25 +113,31 @@ fn remote_host_status(cx: &mut App) -> Div {
         .w_full()
         .gap_3()
         .child(
-            h_flex().gap_2().child("Host ID").child(
-                div()
-                    .font_family("monospace")
-                    .text_color(muted)
-                    .child(host_id),
-            ),
+            h_flex()
+                .gap_2()
+                .child(i18n("settings-remote-host-id"))
+                .child(
+                    div()
+                        .font_family("monospace")
+                        .text_color(muted)
+                        .child(host_id),
+                ),
         )
         .child(
-            h_flex().justify_between().child("Pair a new device").child(
-                Button::new("remote-generate-pairing")
-                    .outline()
-                    .label("Generate Pairing Code")
-                    .on_click(|_, _, cx: &mut App| {
-                        if let Some(code) = remote::begin_pairing() {
-                            cx.global_mut::<AppSettings>().remote_pairing_code =
-                                Some(code.encode());
-                        }
-                    }),
-            ),
+            h_flex()
+                .justify_between()
+                .child(i18n("settings-remote-pair-new-device"))
+                .child(
+                    Button::new("remote-generate-pairing")
+                        .outline()
+                        .label(i18n("settings-remote-generate-pairing-code"))
+                        .on_click(|_, _, cx: &mut App| {
+                            if let Some(code) = remote::begin_pairing() {
+                                cx.global_mut::<AppSettings>().remote_pairing_code =
+                                    Some(code.encode());
+                            }
+                        }),
+                ),
         )
         .when_some(pairing, |this, code| {
             this.child(
@@ -155,26 +151,31 @@ fn remote_host_status(cx: &mut App) -> Div {
                     .child(
                         div()
                             .text_color(muted)
-                            .child("Enter this code on the other computer within 5 minutes:"),
+                            .child(i18n("settings-remote-pairing-code-instruction")),
                     )
                     .child(div().font_family("monospace").child(code.clone()))
                     .child(
                         Button::new("remote-copy-pairing")
                             .outline()
-                            .label("Copy")
+                            .label(i18n("settings-common-copy"))
                             .on_click(move |_, _, cx: &mut App| {
                                 cx.write_to_clipboard(ClipboardItem::new_string(code.clone()));
                             }),
                     ),
             )
         })
-        .child(div().mt_2().text_color(muted).child("Authorized Devices"))
+        .child(
+            div()
+                .mt_2()
+                .text_color(muted)
+                .child(i18n("settings-remote-authorized-devices")),
+        )
         .when(devices.is_empty(), |this| {
             this.child(
                 div()
                     .py_2()
                     .text_color(muted)
-                    .child("No devices paired yet."),
+                    .child(i18n("settings-remote-no-devices")),
             )
         })
         .children(devices.into_iter().enumerate().map(|(index, device)| {
@@ -189,7 +190,7 @@ fn remote_host_status(cx: &mut App) -> Div {
                 .child(
                     Button::new(("remote-revoke", index))
                         .outline()
-                        .label("Revoke")
+                        .label(i18n("settings-remote-revoke"))
                         .on_click(move |_, _, cx: &mut App| {
                             remote::revoke_device(&key);
                             cx.refresh_windows();
@@ -200,7 +201,7 @@ fn remote_host_status(cx: &mut App) -> Div {
 
 #[cfg(not(windows))]
 fn remote_host_status(_cx: &mut App) -> Div {
-    v_flex().child(div().child("Remote sessions are only available on Windows."))
+    v_flex().child(div().child(i18n("settings-remote-windows-only")))
 }
 
 #[cfg(windows)]
@@ -218,46 +219,67 @@ fn remote_client_status(cx: &mut App) -> Div {
         .child(
             h_flex()
                 .justify_between()
-                .child("Pair with this code")
-                .child(Button::new("remote-pair").outline().label("Pair").on_click(
-                    |_, _, cx: &mut App| {
-                        let code = cx.global::<AppSettings>().remote_pairing_input.to_string();
-                        if code.trim().is_empty() {
+                .child(i18n("settings-remote-pair-with-code"))
+                .child(
+                    Button::new("remote-pair")
+                        .outline()
+                        .label(i18n("settings-remote-pair"))
+                        .on_click(|_, _, cx: &mut App| {
+                            let code = cx.global::<AppSettings>().remote_pairing_input.to_string();
+                            if code.trim().is_empty() {
+                                cx.global_mut::<AppSettings>().remote_client_status =
+                                    Some(i18n("settings-remote-enter-code-first").to_owned());
+                                return;
+                            }
                             cx.global_mut::<AppSettings>().remote_client_status =
-                                Some("Enter a pairing code first.".to_owned());
-                            return;
-                        }
-                        cx.global_mut::<AppSettings>().remote_client_status =
-                            Some("Pairing…".to_owned());
-                        // Pairing is a network round trip: running it inline
-                        // would freeze the window until the relay answers or
-                        // the attempt times out.
-                        cx.spawn(async move |cx| {
-                            let paired = cx
-                                .background_executor()
-                                .spawn(async move { remote::pair_with_code(&code, "remote host") })
-                                .await;
-                            cx.update_global(|settings: &mut AppSettings, _| {
-                                let message = match paired {
-                                    Ok(host) => {
-                                        settings.remote_pairing_input = SharedString::default();
-                                        format!("Paired with {} ({}).", host.name, host.host_id)
-                                    }
-                                    Err(e) => format!("Pairing failed: {e}"),
-                                };
-                                settings.remote_client_status = Some(message);
+                                Some(i18n("settings-remote-pairing").to_owned());
+                            // Pairing is a network round trip: running it inline
+                            // would freeze the window until the relay answers or
+                            // the attempt times out.
+                            cx.spawn(async move |cx| {
+                                let paired = cx
+                                    .background_executor()
+                                    .spawn(async move {
+                                        remote::pair_with_code(
+                                            &code,
+                                            i18n("settings-remote-default-host-name"),
+                                        )
+                                    })
+                                    .await;
+                                cx.update_global(|settings: &mut AppSettings, _| {
+                                    let message = match paired {
+                                        Ok(host) => {
+                                            settings.remote_pairing_input = SharedString::default();
+                                            i18n("settings-remote-paired-success")
+                                                .replace("{name}", &host.name)
+                                                .replace("{id}", &host.host_id)
+                                        }
+                                        Err(e) => i18n("settings-remote-pairing-failed")
+                                            .replace("{error}", &e.to_string()),
+                                    };
+                                    settings.remote_client_status = Some(message);
+                                })
                             })
-                        })
-                        .detach();
-                    },
-                )),
+                            .detach();
+                        }),
+                ),
         )
         .when_some(status, |this, message| {
             this.child(div().text_color(muted).child(message))
         })
-        .child(div().mt_2().text_color(muted).child("Paired Hosts"))
+        .child(
+            div()
+                .mt_2()
+                .text_color(muted)
+                .child(i18n("settings-remote-paired-hosts")),
+        )
         .when(hosts.is_empty(), |this| {
-            this.child(div().py_2().text_color(muted).child("No hosts paired yet."))
+            this.child(
+                div()
+                    .py_2()
+                    .text_color(muted)
+                    .child(i18n("settings-remote-no-hosts")),
+            )
         })
         .children(hosts.into_iter().enumerate().map(|(index, host)| {
             let host_id = host.host_id.clone();
@@ -278,7 +300,7 @@ fn remote_client_status(cx: &mut App) -> Div {
                 .child(
                     Button::new(("remote-forget", index))
                         .outline()
-                        .label("Forget")
+                        .label(i18n("settings-remote-forget"))
                         .on_click(move |_, _, cx: &mut App| {
                             remote::forget_host(&host_id);
                             cx.refresh_windows();

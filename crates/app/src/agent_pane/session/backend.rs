@@ -1,3 +1,5 @@
+use nmt_i18n::i18n;
+
 use crate::agent_pane::*;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -60,7 +62,7 @@ impl Backend {
         match self {
             Backend::Claude(session) => session.rewind_files(user_message_id),
             Backend::Codex(_) => SlashCommandOutcome::Rejected {
-                message: "File rewind is available only for Claude.".to_string(),
+                message: i18n("agent-session-file-rewind-claude-only").to_string(),
             },
         }
     }

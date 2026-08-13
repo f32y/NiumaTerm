@@ -558,6 +558,7 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) -> 
             .remove("background-image");
     }
     doc["appearance"]["background-image-opacity"] = value(appearance.background_image_opacity);
+    doc["appearance"]["language"] = value(appearance.language.as_str());
 
     ensure_explicit_table(doc, "cursor");
     doc["cursor"]["shape"] = value(cursor_shape.as_str());
@@ -617,6 +618,7 @@ mod tests {
             background_opacity: 0.85,
             background_image: Some(r"C:\Wallpapers\background.png".to_string()),
             background_image_opacity: 0.4,
+            language: appearance::Language::ZhCn,
         }
     }
 

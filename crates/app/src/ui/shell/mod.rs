@@ -44,6 +44,7 @@ use nmt_config::get;
 use nmt_config::local_state::TabState;
 use nmt_config::local_state::WindowState;
 use nmt_config::system::WarnBeforeTerminatingShell;
+use nmt_i18n::i18n;
 use nmt_platform::{
     NativeNotification, remove_notification, show_notification, system_notification_enabled,
 };
@@ -82,13 +83,16 @@ use crate::ui::token_usage::TokenUsageView;
 use crate::ui::workspace_sidebar::{self, Sidebar};
 use crate::window::{AppWindow, LastActiveWindow, ShellEntry, ShellRegistry, WindowRegistry};
 use crate::workspace::{
-    self, DEFAULT_WORKSPACE_NAME, WorkspaceId, WorkspaceKind, WorkspaceManager, best_match,
-    exact_match,
+    self, WorkspaceId, WorkspaceKind, WorkspaceManager, best_match, exact_match,
 };
 use crate::{remote, ui};
 
-/// Sidebar entry name and tab title of the settings pseudo workspace.
-pub(super) const SETTINGS_TITLE: &str = "Settings";
+/// Sidebar entry name and tab title of the settings pseudo workspace, in the
+/// active language. Looked up at creation time; the entry is never persisted,
+/// so a stale-language name cannot leak into local_state.
+pub(super) fn settings_title() -> &'static str {
+    i18n("shell-workspace-settings-title")
+}
 
 /// A workspace cwd as a shell working directory: `None` for empty or the
 /// legacy `"."` placeholder (shells then start in their default directory).
@@ -582,7 +586,7 @@ impl Shell {
         };
 
         if tab.exited() {
-            format!("{base} [exited]")
+            i18n("shell-tab-exited-title").replace("{title}", base)
         } else {
             base.to_string()
         }
@@ -642,13 +646,17 @@ impl Shell {
         self.settings_state = Some(state);
 
         let id = Self::alloc_id(&mut self.next_id);
-        let tabs = TabManager::new(TabSurface::Settings, TabId(id), SETTINGS_TITLE.to_string());
+        let tabs = TabManager::new(
+            TabSurface::Settings,
+            TabId(id),
+            settings_title().to_string(),
+        );
         let ws_id = Self::alloc_id(&mut self.next_id);
 
         self.workspaces.new_workspace_of_kind(
             tabs,
             WorkspaceId(ws_id),
-            SETTINGS_TITLE.to_string(),
+            settings_title().to_string(),
             String::new(),
             WorkspaceKind::Settings,
         );

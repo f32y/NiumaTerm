@@ -7,6 +7,7 @@ use gpui_component::{ActiveTheme as _, Icon, IconName, h_flex, v_flex};
 use nmt_agent_utils::chat::{
     ContextComposition, ContextSegment, ContextUsageScope, ContextWindowUsage, TokenUsageBreakdown,
 };
+use nmt_i18n::i18n;
 
 use super::transcript::compact_token_count;
 
@@ -85,7 +86,7 @@ impl RenderOnce for ContextSegmentRow {
                     .truncate()
                     .text_color(label_color)
                     .child(if self.deferred {
-                        format!("{} (deferred)", self.label)
+                        i18n("agent-context-deferred").replace("{label}", &self.label)
                     } else {
                         self.label
                     }),
@@ -124,11 +125,11 @@ fn remaining_context_percent(usage: ContextWindowUsage) -> Option<u64> {
 
 fn context_indicator_label(usage: ContextWindowUsage) -> String {
     match remaining_context_percent(usage) {
-        Some(remaining_percent) => format!(
-            "{} used · {remaining_percent}% left",
-            compact_token_count(usage.used_tokens())
-        ),
-        None => format!("{} used", compact_token_count(usage.used_tokens())),
+        Some(remaining_percent) => i18n("agent-context-used-left")
+            .replace("{tokens}", &compact_token_count(usage.used_tokens()))
+            .replace("{percent}", &remaining_percent.to_string()),
+        None => i18n("agent-context-used")
+            .replace("{tokens}", &compact_token_count(usage.used_tokens())),
     }
 }
 
@@ -140,10 +141,13 @@ fn context_capacity_labels(usage: ContextWindowUsage) -> (String, Option<String>
                 compact_token_count(usage.used_tokens()),
                 compact_token_count(max_tokens)
             ),
-            remaining_context_percent(usage).map(|percent| format!("{percent}% left")),
+            remaining_context_percent(usage).map(|percent| {
+                i18n("agent-context-percent-left").replace("{percent}", &percent.to_string())
+            }),
         ),
         None => (
-            format!("{} used", compact_token_count(usage.used_tokens())),
+            i18n("agent-context-used")
+                .replace("{tokens}", &compact_token_count(usage.used_tokens())),
             None,
         ),
     }
@@ -154,42 +158,42 @@ fn token_usage_rows(usage: TokenUsageBreakdown, include_total: bool) -> Vec<Toke
 
     if include_total {
         rows.push(TokenUsageRow {
-            label: "Total",
+            label: i18n("agent-context-total"),
             tokens: usage.total_tokens,
             nested: false,
         });
     }
     if let Some(tokens) = usage.input_tokens {
         rows.push(TokenUsageRow {
-            label: "Input",
+            label: i18n("agent-context-input"),
             tokens,
             nested: false,
         });
     }
     if let Some(tokens) = usage.cache_read_input_tokens {
         rows.push(TokenUsageRow {
-            label: "Cache read",
+            label: i18n("agent-context-cache-read"),
             tokens,
             nested: true,
         });
     }
     if let Some(tokens) = usage.cache_write_input_tokens {
         rows.push(TokenUsageRow {
-            label: "Cache write",
+            label: i18n("agent-context-cache-write"),
             tokens,
             nested: true,
         });
     }
     if let Some(tokens) = usage.output_tokens {
         rows.push(TokenUsageRow {
-            label: "Output",
+            label: i18n("agent-context-output"),
             tokens,
             nested: false,
         });
     }
     if let Some(tokens) = usage.reasoning_output_tokens {
         rows.push(TokenUsageRow {
-            label: "Reasoning",
+            label: i18n("agent-context-reasoning"),
             tokens,
             nested: true,
         });
@@ -200,8 +204,8 @@ fn token_usage_rows(usage: TokenUsageBreakdown, include_total: bool) -> Vec<Toke
 
 fn cumulative_usage_heading(scope: ContextUsageScope) -> &'static str {
     match scope {
-        ContextUsageScope::Thread => "Thread total",
-        ContextUsageScope::LastTurn => "Last turn",
+        ContextUsageScope::Thread => i18n("agent-context-thread-total"),
+        ContextUsageScope::LastTurn => i18n("agent-context-last-turn"),
     }
 }
 
@@ -241,7 +245,8 @@ impl RenderOnce for ContextUsageIndicator {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let usage = self.usage;
         let indicator_label = context_indicator_label(usage);
-        let accessibility_label = format!("Agent context: {indicator_label}");
+        let accessibility_label =
+            i18n("agent-context-accessibility").replace("{usage}", &indicator_label);
         let (capacity_label, remaining_label) = context_capacity_labels(usage);
         // Both sections report the same categories, so the live context and
         // the last turn can be read against each other. A conversation
@@ -285,7 +290,7 @@ impl RenderOnce for ContextUsageIndicator {
                                     .text_xs()
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(muted.opacity(0.72))
-                                    .child("AGENT CONTEXT"),
+                                    .child(i18n("agent-context-heading")),
                             )
                             .child(
                                 h_flex()
@@ -320,7 +325,7 @@ impl RenderOnce for ContextUsageIndicator {
                                         .text_xs()
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .text_color(muted.opacity(0.72))
-                                        .child("What fills it"),
+                                        .child(i18n("agent-context-what-fills-it")),
                                 )
                                 .children(segment_rows.iter().cloned()),
                         )
@@ -334,7 +339,7 @@ impl RenderOnce for ContextUsageIndicator {
                                         .text_xs()
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .text_color(muted.opacity(0.72))
-                                        .child("Current context"),
+                                        .child(i18n("agent-context-current")),
                                 )
                                 .children(current_rows.iter().copied()),
                         )

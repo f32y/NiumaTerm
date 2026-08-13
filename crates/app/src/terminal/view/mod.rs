@@ -25,6 +25,7 @@ use gpui_component::notification::Notification;
 use nmt_agent_utils::{AgentRoute, agent_process};
 use nmt_config::local_state::TabState;
 use nmt_config::{CursorShape, active_colors};
+use nmt_i18n::i18n;
 use nmt_terminal::block_store::BlockStore;
 use nmt_terminal::ghostty::{BlockHandle, ScrollbarInfo};
 use nmt_terminal::selection::SelectionType;
@@ -233,7 +234,7 @@ impl TerminalPane {
             Self::from_surface(
                 cx,
                 surface_id,
-                "Remote".to_string(),
+                i18n("terminal-remote-profile-name").to_string(),
                 agent_route,
                 wake,
                 wake_rx,

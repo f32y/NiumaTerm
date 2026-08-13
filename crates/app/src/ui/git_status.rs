@@ -9,6 +9,7 @@ use std::{fs, io, path, process};
 use gpui::prelude::*;
 use gpui::{Context, Entity, SharedString, Window, div};
 use gpui_component::{ActiveTheme, h_flex};
+use nmt_i18n::i18n;
 use tracing::warn;
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
@@ -89,7 +90,7 @@ pub(crate) fn current_branch(cwd: &str) -> Option<String> {
     branch.or_else(|| {
         let commit = run_git(cwd, &["rev-parse", "--short", "HEAD"]).ok()?;
         let commit = String::from_utf8_lossy(&commit).trim().to_string();
-        (!commit.is_empty()).then(|| format!("detached@{commit}"))
+        (!commit.is_empty()).then(|| i18n("git-status-detached").replace("{commit}", &commit))
     })
 }
 
@@ -189,11 +190,17 @@ fn count_file_lines(root: &str, path: &str) -> u64 {
 pub(crate) fn fetch_file_diff(root: &str, path: &str, untracked: bool) -> Vec<DiffLine> {
     if untracked {
         let Ok(bytes) = fs::read(path::Path::new(root).join(path)) else {
-            return vec![line(DiffLineKind::FileHeader, "unreadable file")];
+            return vec![line(
+                DiffLineKind::FileHeader,
+                i18n("git-status-unreadable-file"),
+            )];
         };
 
         if bytes.contains(&0) {
-            return vec![line(DiffLineKind::FileHeader, "Binary file")];
+            return vec![line(
+                DiffLineKind::FileHeader,
+                i18n("git-status-binary-file"),
+            )];
         }
 
         let text = String::from_utf8_lossy(&bytes);

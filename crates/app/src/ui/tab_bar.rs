@@ -11,6 +11,7 @@ use gpui_component::menu::{ContextMenuExt, DropdownMenu as _, PopupMenuItem};
 use gpui_component::progress::ProgressCircle;
 use gpui_component::tab::{Tab, TabBar, TabVariant};
 use gpui_component::{ActiveTheme, ElementExt as _, Icon, IconName, Sizable};
+use nmt_i18n::i18n;
 use nmt_terminal::event::{ProgressReport, ProgressState};
 
 use super::Shell;
@@ -359,7 +360,7 @@ impl TabStrip {
 
                 for (ix, profile) in agent_profiles.into_iter().enumerate() {
                     let label = if profile.name.trim().is_empty() {
-                        format!("Agent Profile {}", ix + 1)
+                        i18n("tabbar-menu-agent-profile").replace("{index}", &(ix + 1).to_string())
                     } else {
                         profile.name.clone()
                     };
@@ -526,7 +527,7 @@ impl TabStrip {
                             let rename_shell = menu_shell.clone();
                             let close_shell = menu_shell.clone();
 
-                            menu.item(PopupMenuItem::new("Rename").on_click(
+                            menu.item(PopupMenuItem::new(i18n("tabbar-menu-rename")).on_click(
                                 move |_, window, cx| {
                                     rename_shell.update(cx, |this, cx| {
                                         this.start_tab_rename(TabId(id), window, cx)
@@ -534,13 +535,13 @@ impl TabStrip {
                                 },
                             ))
                             .item(
-                                PopupMenuItem::new("Close").disabled(!closeable).on_click(
-                                    move |_, window, cx| {
+                                PopupMenuItem::new(i18n("tabbar-menu-close"))
+                                    .disabled(!closeable)
+                                    .on_click(move |_, window, cx| {
                                         close_shell.update(cx, |this, cx| {
                                             this.request_close_tab(TabId(id), window, cx)
                                         });
-                                    },
-                                ),
+                                    }),
                             )
                         })
                         .gap_1()
@@ -673,8 +674,12 @@ impl TabStrip {
                                         div()
                                             .id(("tab-agent-indicator", id as usize))
                                             .aria_label(match indicator {
-                                                AgentTabIndicator::Busy => "Agent busy",
-                                                AgentTabIndicator::Ready => "Agent ready",
+                                                AgentTabIndicator::Busy => {
+                                                    i18n("tabbar-tooltip-agent-busy")
+                                                }
+                                                AgentTabIndicator::Ready => {
+                                                    i18n("tabbar-tooltip-agent-ready")
+                                                }
                                             })
                                             .size_4()
                                             .flex_none()

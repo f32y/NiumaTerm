@@ -6,6 +6,7 @@ use gpui_component::resizable::ResizableState;
 use nmt_config::local_state::{
     PaneNodeState, PaneSplitAxis, SessionState, TabState, WorkspaceState,
 };
+use nmt_i18n::i18n;
 use tracing::warn;
 
 use super::Shell;
@@ -16,7 +17,7 @@ use crate::pane_tree::{PaneId, PaneNode, PaneTree};
 use crate::tabs::{TabId, TabManager};
 use crate::terminal::view::TerminalPane;
 use crate::window::WindowRegistry;
-use crate::workspace::{DEFAULT_WORKSPACE_NAME, WorkspaceId, WorkspaceKind, WorkspaceManager};
+use crate::workspace::{WorkspaceId, WorkspaceKind, WorkspaceManager, default_workspace_name};
 
 /// A pane that runs the current default profile's exact command is saved with
 /// `shell = None` — "follow the default profile" — so later profile changes apply
@@ -172,7 +173,7 @@ impl Shell {
         WorkspaceManager::new(
             tabs,
             WorkspaceId(workspace_id),
-            DEFAULT_WORKSPACE_NAME.into(),
+            default_workspace_name().into(),
             cwd,
         )
     }
@@ -206,7 +207,8 @@ impl Shell {
 
             let workspace_id = WorkspaceId(Self::alloc_id(next_id));
             let name = if name.trim().is_empty() {
-                format!("Workspace {restored_count}")
+                i18n("workspace-restored-default-name")
+                    .replace("{count}", &restored_count.to_string())
             } else {
                 name
             };
@@ -481,9 +483,10 @@ impl Shell {
                         // unavailable) — no terminal can ever open, so tell
                         // the user why before exiting instead of dying with
                         // an invisible panic.
-                        crate::show_startup_error_dialog(&format!(
-                            "NiumaTerm could not start a terminal session:\n\n{error}"
-                        ));
+                        crate::show_startup_error_dialog(
+                            &i18n("startup-terminal-spawn-error")
+                                .replace("{error}", &error.to_string()),
+                        );
                         process::exit(1);
                     }
                 }
