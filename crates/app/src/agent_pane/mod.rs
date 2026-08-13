@@ -102,6 +102,9 @@ pub(crate) enum AgentPaneEvent {
     /// count of running agents moved. Reported as an event so the chrome can
     /// track it without observing every pane repaint.
     WorkflowActivity,
+    /// This tab's count of running child agents moved. Reported as an event so
+    /// the chrome can track it without observing every pane repaint.
+    BackgroundTaskActivity,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

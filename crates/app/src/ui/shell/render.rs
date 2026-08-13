@@ -149,18 +149,21 @@ impl Shell {
                             .occlude()
                             .child(self.render_workflows_button(running, cx))
                     }))
-                    .child(
+                    .child({
+                        // Scoped to the active tab, because activating the
+                        // control opens that tab's children.
+                        let running = self
+                            .active_agent()
+                            .map(|pane| pane.read(cx).running_background_tasks())
+                            .unwrap_or(0);
+
                         div()
                             .occlude()
-                            .child(self.render_background_tasks_button(cx)),
-                    ),
+                            .child(self.render_background_tasks_button(running, cx))
+                    }),
             )
     }
 
-    /// Upper-right `Background Tasks` control. Always available: a session
-    /// with no children, and a pane that is not an agent at all, are states
-    /// the view reports for itself, so a disabled control would hide the
-    /// answer rather than give it.
     /// Upper-right `Workflows` control, revealed once a run exists. It carries
     /// the number of agents running right now, which is the one thing about a
     /// workflow worth watching without opening the view; a run with nothing in
@@ -179,12 +182,28 @@ impl Shell {
             }))
     }
 
-    fn render_background_tasks_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// Upper-right `Background Tasks` control. Always available: a session
+    /// with no children, and a pane that is not an agent at all, are states
+    /// the view reports for itself, so a disabled control would hide the
+    /// answer rather than give it. It carries the number of child agents
+    /// running right now; a session with none in flight shows the icon alone
+    /// rather than a zero.
+    fn render_background_tasks_button(
+        &self,
+        running: usize,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let label = match running {
+            0 => i18n("tasks-background-title").to_string(),
+            _ => i18n("tasks-background-running-agents").replace("{count}", &running.to_string()),
+        };
+
         Button::new("toggle-background-tasks")
             .ghost()
             .icon(IconName::Bot)
-            .aria_label(i18n("tasks-background-title"))
-            .tooltip(i18n("tasks-background-title"))
+            .when(running > 0, |button| button.label(running.to_string()))
+            .aria_label(label.clone())
+            .tooltip(label)
             .on_click(cx.listener(|this, _, window, cx| {
                 this.on_toggle_background_tasks(&ToggleBackgroundTasks, window, cx)
             }))

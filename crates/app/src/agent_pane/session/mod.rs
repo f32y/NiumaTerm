@@ -721,6 +721,13 @@ impl AgentPane {
         )
     }
 
+    /// Child agents of this tab the provider currently reports as active.
+    pub(crate) fn running_background_tasks(&self) -> usize {
+        self.background_tasks()
+            .map(BackgroundTaskSnapshot::active_count)
+            .unwrap_or(0)
+    }
+
     pub(super) fn reset_conversation(&mut self, cx: &mut Context<Self>) {
         self.session = None;
         // A fresh conversation always follows the live tail again, even if

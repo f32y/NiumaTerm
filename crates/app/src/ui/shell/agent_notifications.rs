@@ -316,6 +316,12 @@ impl Shell {
                     cx.notify();
                     return;
                 }
+                AgentPaneEvent::BackgroundTaskActivity => {
+                    // The count is read at render time, so this only has to
+                    // repaint the title bar.
+                    cx.notify();
+                    return;
+                }
                 AgentPaneEvent::Interrupted => {
                     this.agent_monitor.interrupt(&route, time::Instant::now())
                 }
