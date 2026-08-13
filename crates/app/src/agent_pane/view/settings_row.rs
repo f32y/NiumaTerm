@@ -1,3 +1,5 @@
+use nmt_i18n::i18n;
+
 use crate::agent_pane::transcript::permission_icon;
 use crate::agent_pane::*;
 
@@ -29,7 +31,7 @@ impl AgentPane {
             .collect();
         let permission_options: Vec<(String, String)> = stream_json::PERMISSION_OPTIONS
             .iter()
-            .map(|v| (v.to_string(), v.to_string()))
+            .map(|v| (v.to_string(), setting_value_label(v)))
             .collect();
         let effort_options: Vec<(String, String)> = self
             .models
@@ -41,7 +43,7 @@ impl AgentPane {
         let model = Self::setting_picker(
             cx,
             "agent-model",
-            "model",
+            i18n("agent-setting-model"),
             IconName::Cpu,
             self.settings.model.clone(),
             model_options,
@@ -55,7 +57,7 @@ impl AgentPane {
         let permission = Self::setting_picker(
             cx,
             "agent-permission",
-            "permissions",
+            i18n("agent-setting-permissions"),
             permission_icon(self.settings.approval.as_deref()),
             self.settings.approval.clone(),
             permission_options,
@@ -72,9 +74,13 @@ impl AgentPane {
             .gap_1()
             .flex_wrap()
             .text_color(cx.theme().muted_foreground)
-            .child(Self::settings_group("Model", vec![model], cx))
             .child(Self::settings_group(
-                "Execution policy",
+                i18n("agent-settings-model"),
+                vec![model],
+                cx,
+            ))
+            .child(Self::settings_group(
+                i18n("agent-settings-execution-policy"),
                 vec![permission],
                 cx,
             ));
@@ -83,7 +89,7 @@ impl AgentPane {
             let effort = Self::setting_picker(
                 cx,
                 "agent-effort",
-                "effort",
+                i18n("agent-setting-effort"),
                 IconName::Gauge,
                 // The protocol never reports the session's current effort;
                 // until the user picks one, the honest label is the CLI's
@@ -101,7 +107,11 @@ impl AgentPane {
                 },
             )
             .into_any_element();
-            row = row.child(Self::settings_group("Quality and cost", vec![effort], cx));
+            row = row.child(Self::settings_group(
+                i18n("agent-settings-quality-cost"),
+                vec![effort],
+                cx,
+            ));
         }
 
         row
@@ -120,7 +130,8 @@ impl AgentPane {
         // additional tiers (e.g. "Fast") — the normal tier is implicit, so
         // the menu carries a synthetic entry for it. Empty protocol value =
         // normal = explicit `serviceTier: null` on the next turn.
-        let mut tier_options: Vec<(String, String)> = vec![(String::new(), "normal".to_string())];
+        let mut tier_options: Vec<(String, String)> =
+            vec![(String::new(), setting_value_label("normal"))];
 
         tier_options.extend(
             self.models
@@ -131,25 +142,25 @@ impl AgentPane {
         );
         let approval_options: Vec<(String, String)> = app_server::APPROVAL_OPTIONS
             .iter()
-            .map(|v| (v.to_string(), v.to_string()))
+            .map(|v| (v.to_string(), setting_value_label(v)))
             .collect();
         let reviewer_options: Vec<(String, String)> = app_server::APPROVAL_REVIEWER_OPTIONS
             .iter()
-            .map(|v| (v.to_string(), v.to_string()))
+            .map(|v| (v.to_string(), setting_value_label(v)))
             .collect();
         let sandbox_options: Vec<(String, String)> = app_server::SANDBOX_OPTIONS
             .iter()
-            .map(|(v, label)| (v.to_string(), label.to_string()))
+            .map(|(v, label)| (v.to_string(), setting_value_label(label)))
             .collect();
         let effort_options: Vec<(String, String)> = app_server::EFFORT_OPTIONS
             .iter()
-            .map(|v| (v.to_string(), v.to_string()))
+            .map(|v| (v.to_string(), setting_value_label(v)))
             .collect();
 
         let model = Self::setting_picker(
             cx,
             "agent-model",
-            "model",
+            i18n("agent-setting-model"),
             IconName::Cpu,
             self.settings.model.clone(),
             model_options,
@@ -174,7 +185,7 @@ impl AgentPane {
         let approval = Self::setting_picker(
             cx,
             "agent-approval",
-            "approval",
+            i18n("agent-setting-approval"),
             permission_icon(self.settings.approval.as_deref()),
             self.settings.approval.clone(),
             approval_options,
@@ -188,7 +199,7 @@ impl AgentPane {
         let sandbox = Self::setting_picker(
             cx,
             "agent-sandbox",
-            "sandbox",
+            i18n("agent-setting-sandbox"),
             IconName::Shield,
             self.settings.sandbox.clone(),
             sandbox_options,
@@ -202,7 +213,7 @@ impl AgentPane {
         let reviewer = Self::setting_picker(
             cx,
             "agent-approval-reviewer",
-            "approval reviewer",
+            i18n("agent-setting-approval-reviewer"),
             IconName::User,
             self.settings.approvals_reviewer.clone(),
             reviewer_options,
@@ -216,7 +227,7 @@ impl AgentPane {
         let effort = Self::setting_picker(
             cx,
             "agent-effort",
-            "effort",
+            i18n("agent-setting-effort"),
             IconName::Gauge,
             self.settings.effort.clone(),
             effort_options,
@@ -230,7 +241,7 @@ impl AgentPane {
         let tier = Self::setting_picker(
             cx,
             "agent-tier",
-            "tier",
+            i18n("agent-setting-tier"),
             IconName::Zap,
             Some(self.settings.tier.clone().unwrap_or_default()),
             tier_options,
@@ -247,14 +258,18 @@ impl AgentPane {
             .gap_1()
             .flex_wrap()
             .text_color(cx.theme().muted_foreground)
-            .child(Self::settings_group("Model", vec![model], cx))
             .child(Self::settings_group(
-                "Execution policy",
+                i18n("agent-settings-model"),
+                vec![model],
+                cx,
+            ))
+            .child(Self::settings_group(
+                i18n("agent-settings-execution-policy"),
                 vec![approval, reviewer, sandbox],
                 cx,
             ))
             .child(Self::settings_group(
-                "Quality and cost",
+                i18n("agent-settings-quality-cost"),
                 vec![effort, tier],
                 cx,
             ))
@@ -300,7 +315,7 @@ impl AgentPane {
                     .iter()
                     .find(|(option_value, _)| option_value == value)
                     .map(|(_, label)| label.clone())
-                    .unwrap_or_else(|| value.clone())
+                    .unwrap_or_else(|| setting_value_label(value))
             })
             .unwrap_or_else(|| "—".to_string());
 
@@ -332,7 +347,7 @@ impl AgentPane {
                 let mut menu = menu;
 
                 if options.is_empty() {
-                    menu = menu.label("loading…");
+                    menu = menu.label(i18n("agent-setting-loading"));
                 }
 
                 for (value, label) in options.clone() {

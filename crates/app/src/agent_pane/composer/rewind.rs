@@ -1,3 +1,5 @@
+use nmt_i18n::i18n;
+
 use crate::agent_pane::composer::{CommandFeedbackKind, PaletteAction, PaletteModel, PaletteRow};
 use crate::agent_pane::*;
 
@@ -86,7 +88,7 @@ pub(in crate::agent_pane) fn rewind_prompt_label(prompt: &str) -> String {
     let line = prompt
         .lines()
         .find(|line| !line.trim().is_empty())
-        .unwrap_or("Untitled prompt")
+        .unwrap_or_else(|| i18n("agent-rewind-untitled-prompt"))
         .trim();
     let mut label = line.chars().take(72).collect::<String>();
     if line.chars().count() > 72 {
@@ -112,7 +114,7 @@ impl AgentPane {
         if self.status != Status::Idle || self.is_command_busy() {
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
-                "/rewind is available only while Claude is idle.".to_string(),
+                i18n("agent-rewind-idle-only").to_string(),
                 cx,
             );
             return false;
@@ -126,7 +128,7 @@ impl AgentPane {
         else {
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
-                "Claude has not published a resumable session id yet.".to_string(),
+                i18n("agent-rewind-no-session-id").to_string(),
                 cx,
             );
             return false;
@@ -139,7 +141,7 @@ impl AgentPane {
         self.palette.dismissed = false;
         self.set_command_feedback(
             CommandFeedbackKind::Status,
-            "Loading Claude rewind checkpoints…".to_string(),
+            i18n("agent-rewind-loading-checkpoints").to_string(),
             cx,
         );
 
@@ -166,7 +168,7 @@ impl AgentPane {
                         this.rewind.state = None;
                         this.set_command_feedback(
                             CommandFeedbackKind::Error,
-                            "This Claude session has no rewindable human prompts.".to_string(),
+                            i18n("agent-rewind-no-prompts").to_string(),
                             cx,
                         );
                     }
@@ -216,13 +218,13 @@ impl AgentPane {
         match state {
             RewindState::Loading { .. } => Some(PaletteModel {
                 rows: vec![PaletteRow {
-                    label: "Cancel".to_string(),
-                    description: "Close rewind without changing anything".to_string(),
+                    label: i18n("agent-rewind-cancel").to_string(),
+                    description: i18n("agent-rewind-cancel-description").to_string(),
                     hint: None,
                     disabled_reason: None,
                     action: PaletteAction::RewindAction(RewindAction::Cancel),
                 }],
-                note: Some("Loading checkpoints from the active Claude branch…".to_string()),
+                note: Some(i18n("agent-rewind-loading-active-branch").to_string()),
             }),
             RewindState::SelectingCheckpoint { checkpoints, .. } => {
                 let mut rows = checkpoints
@@ -230,15 +232,15 @@ impl AgentPane {
                     .cloned()
                     .map(|checkpoint| PaletteRow {
                         label: rewind_prompt_label(&checkpoint.prompt),
-                        description: "Return to immediately before this prompt".to_string(),
+                        description: i18n("agent-rewind-return-before-prompt").to_string(),
                         hint: rewind_timestamp(checkpoint.timestamp.as_deref()),
                         disabled_reason: None,
                         action: PaletteAction::RewindCheckpoint(checkpoint),
                     })
                     .collect::<Vec<_>>();
                 rows.push(PaletteRow {
-                    label: "Cancel".to_string(),
-                    description: "Close rewind without changing anything".to_string(),
+                    label: i18n("agent-rewind-cancel").to_string(),
+                    description: i18n("agent-rewind-cancel-description").to_string(),
                     hint: None,
                     disabled_reason: None,
                     action: PaletteAction::RewindAction(RewindAction::Cancel),
@@ -246,70 +248,63 @@ impl AgentPane {
 
                 Some(PaletteModel {
                     rows,
-                    note: Some("Choose a prompt · newest first · Esc cancels".to_string()),
+                    note: Some(i18n("agent-rewind-choose-prompt").to_string()),
                 })
             }
             RewindState::SelectingAction { checkpoint, .. } => {
                 let file_disabled = match checkpoint.file_restore_availability {
-                    sessions::FileRestoreAvailability::Unavailable => Some(
-                        "No file checkpoint was recorded for this prompt; conversation rewind is still available."
-                            .to_string(),
-                    ),
+                    sessions::FileRestoreAvailability::Unavailable => {
+                        Some(i18n("agent-rewind-file-checkpoint-unavailable").to_string())
+                    }
                     _ => None,
                 };
                 let file_description = match checkpoint.file_restore_availability {
                     sessions::FileRestoreAvailability::Available => {
-                        "Restore tracked files; keep this conversation and composer unchanged"
+                        i18n("agent-rewind-files-description-available")
                     }
                     sessions::FileRestoreAvailability::Unknown => {
-                        "Ask Claude to restore tracked files; checkpoint availability is unknown"
+                        i18n("agent-rewind-files-description-unknown")
                     }
                     sessions::FileRestoreAvailability::Unavailable => {
-                        "No persisted file snapshot is associated with this prompt"
+                        i18n("agent-rewind-files-description-unavailable")
                     }
                 };
 
                 Some(PaletteModel {
                     rows: vec![
                         PaletteRow {
-                            label: "Restore files".to_string(),
+                            label: i18n("agent-rewind-restore-files").to_string(),
                             description: file_description.to_string(),
-                            hint: Some("files only".to_string()),
+                            hint: Some(i18n("agent-rewind-files-only").to_string()),
                             disabled_reason: file_disabled.clone(),
                             action: PaletteAction::RewindAction(RewindAction::Files),
                         },
                         PaletteRow {
-                            label: "Restore conversation".to_string(),
-                            description:
-                                "Open an independent prefix session and put this prompt in the composer"
-                                    .to_string(),
-                            hint: Some("conversation only".to_string()),
+                            label: i18n("agent-rewind-restore-conversation").to_string(),
+                            description: i18n("agent-rewind-conversation-description").to_string(),
+                            hint: Some(i18n("agent-rewind-conversation-only").to_string()),
                             disabled_reason: None,
                             action: PaletteAction::RewindAction(RewindAction::Conversation),
                         },
                         PaletteRow {
-                            label: "Restore files and conversation".to_string(),
-                            description:
-                                "Restore files first, then open the independent prefix session"
-                                    .to_string(),
-                            hint: Some("combined".to_string()),
+                            label: i18n("agent-rewind-restore-files-conversation").to_string(),
+                            description: i18n("agent-rewind-combined-description").to_string(),
+                            hint: Some(i18n("agent-rewind-combined").to_string()),
                             disabled_reason: file_disabled,
-                            action: PaletteAction::RewindAction(
-                                RewindAction::FilesAndConversation,
-                            ),
+                            action: PaletteAction::RewindAction(RewindAction::FilesAndConversation),
                         },
                         PaletteRow {
-                            label: "Cancel".to_string(),
-                            description: "Close rewind without changing anything".to_string(),
+                            label: i18n("agent-rewind-cancel").to_string(),
+                            description: i18n("agent-rewind-cancel-description").to_string(),
                             hint: None,
                             disabled_reason: None,
                             action: PaletteAction::RewindAction(RewindAction::Cancel),
                         },
                     ],
-                    note: Some(format!(
-                        "Selected: {} · Esc cancels",
-                        rewind_prompt_label(&checkpoint.prompt)
-                    )),
+                    note: Some(
+                        i18n("agent-rewind-selected")
+                            .replace("{prompt}", &rewind_prompt_label(&checkpoint.prompt)),
+                    ),
                 })
             }
             RewindState::RestoringFiles { .. } | RewindState::ForkingConversation { .. } => None,
@@ -376,7 +371,7 @@ impl AgentPane {
             SlashCommandOutcome::NotReady => {
                 self.set_command_feedback(
                     CommandFeedbackKind::Error,
-                    "Claude is not ready to restore files.".to_string(),
+                    i18n("agent-rewind-files-not-ready").to_string(),
                     cx,
                 );
                 return;
@@ -384,8 +379,7 @@ impl AgentPane {
             SlashCommandOutcome::Completed { message } => {
                 self.set_command_feedback(
                     CommandFeedbackKind::Error,
-                    message
-                        .unwrap_or_else(|| "Claude returned an invalid file restore state.".into()),
+                    message.unwrap_or_else(|| i18n("agent-rewind-invalid-file-state").to_string()),
                     cx,
                 );
                 return;
@@ -398,17 +392,17 @@ impl AgentPane {
         self.set_command_feedback(
             CommandFeedbackKind::Status,
             if continue_with_fork {
-                "Restoring Claude files before creating the conversation fork…".to_string()
+                i18n("agent-rewind-restoring-before-fork").to_string()
             } else {
-                "Restoring Claude files…".to_string()
+                i18n("agent-rewind-restoring-files").to_string()
             },
             cx,
         );
 
         cx.spawn_in(window, async move |this, cx| {
-            let result = completion_rx.await.unwrap_or_else(|_| {
-                Err("The file restore was cancelled before Claude replied.".to_string())
-            });
+            let result = completion_rx
+                .await
+                .unwrap_or_else(|_| Err(i18n("agent-rewind-file-restore-cancelled").to_string()));
 
             let _ = this.update_in(cx, |this, window, cx| {
                 let is_current = this.rewind.state.as_ref().is_some_and(|state| {
@@ -420,19 +414,14 @@ impl AgentPane {
                 }
 
                 match file_restore_next(continue_with_fork, result) {
-                    FileRestoreNext::ForkConversation => this.start_conversation_fork(
-                        operation_id,
-                        checkpoint,
-                        true,
-                        window,
-                        cx,
-                    ),
+                    FileRestoreNext::ForkConversation => {
+                        this.start_conversation_fork(operation_id, checkpoint, true, window, cx)
+                    }
                     FileRestoreNext::Complete => {
                         this.rewind.state = None;
                         this.set_command_feedback(
                             CommandFeedbackKind::Notice,
-                            "Files restored. The conversation and session id were not changed."
-                                .to_string(),
+                            i18n("agent-rewind-files-restored").to_string(),
                             cx,
                         );
                     }
@@ -445,11 +434,10 @@ impl AgentPane {
                         this.set_command_feedback(
                             CommandFeedbackKind::Error,
                             if continue_with_fork {
-                                format!(
-                                    "File restore failed; the conversation was not rewound: {message}"
-                                )
+                                i18n("agent-rewind-file-failed-no-conversation")
+                                    .replace("{error}", &message)
                             } else {
-                                format!("File restore failed: {message}")
+                                i18n("agent-rewind-file-failed").replace("{error}", &message)
                             },
                             cx,
                         );
@@ -481,10 +469,9 @@ impl AgentPane {
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
                 if files_restored {
-                    "Files were restored, but Claude no longer exposes the source session id. The original conversation remains in history."
-                        .to_string()
+                    i18n("agent-rewind-source-id-missing-after-files").to_string()
                 } else {
-                    "Claude no longer exposes the source session id.".to_string()
+                    i18n("agent-rewind-source-id-missing").to_string()
                 },
                 cx,
             );
@@ -496,7 +483,7 @@ impl AgentPane {
         self.rewind.state = Some(RewindState::ForkingConversation { operation_id });
         self.set_command_feedback(
             CommandFeedbackKind::Status,
-            "Creating an independent Claude conversation prefix…".to_string(),
+            i18n("agent-rewind-creating-prefix").to_string(),
             cx,
         );
 
@@ -528,11 +515,11 @@ impl AgentPane {
                         this.set_command_feedback(
                             CommandFeedbackKind::Error,
                             if files_restored {
-                                format!(
-                                    "Files were restored, but conversation rewind failed: {message}. The original session remains available in history."
-                                )
+                                i18n("agent-rewind-conversation-failed-after-files")
+                                    .replace("{error}", &message)
                             } else {
-                                format!("Conversation rewind failed: {message}")
+                                i18n("agent-rewind-conversation-failed")
+                                    .replace("{error}", &message)
                             },
                             cx,
                         );
@@ -584,17 +571,13 @@ impl AgentPane {
                 CommandFeedbackKind::Error
             },
             if !started && files_restored {
-                "Files were restored and the conversation fork was created, but Claude could not start it. The original session remains available in history."
-                    .to_string()
+                i18n("agent-rewind-start-failed-after-files").to_string()
             } else if !started {
-                "The conversation fork was created, but Claude could not start it. The original session remains available in history."
-                    .to_string()
+                i18n("agent-rewind-start-failed").to_string()
             } else if files_restored {
-                "Files restored and conversation rewound. Review the recovered prompt, then send it when ready."
-                    .to_string()
+                i18n("agent-rewind-complete-with-files").to_string()
             } else {
-                "Conversation rewound. Review the recovered prompt, then send it when ready."
-                    .to_string()
+                i18n("agent-rewind-complete").to_string()
             },
             cx,
         );

@@ -1,3 +1,5 @@
+use nmt_i18n::i18n;
+
 use crate::agent_pane::context_usage::ContextUsageIndicator;
 use crate::agent_pane::*;
 
@@ -20,7 +22,7 @@ impl AgentPane {
                         .text_xs()
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(cx.theme().muted_foreground)
-                        .child("PENDING APPROVAL"),
+                        .child(i18n("agent-approval-pending")),
                 )
                 .child(
                     div()
@@ -40,7 +42,7 @@ impl AgentPane {
                         .child(
                             Button::new("approval-cancel")
                                 .ghost()
-                                .label("Cancel turn")
+                                .label(i18n("agent-approval-cancel-turn"))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.respond_approval("cancel", cx)
                                 })),
@@ -48,7 +50,7 @@ impl AgentPane {
                         .child(
                             Button::new("approval-decline")
                                 .outline()
-                                .label("Decline")
+                                .label(i18n("agent-approval-decline"))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.respond_approval("decline", cx)
                                 })),
@@ -56,7 +58,7 @@ impl AgentPane {
                         .child(
                             Button::new("approval-session")
                                 .outline()
-                                .label("Always allow this session")
+                                .label(i18n("agent-approval-allow-session"))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.respond_approval("acceptForSession", cx)
                                 })),
@@ -64,7 +66,7 @@ impl AgentPane {
                         .child(
                             Button::new("approval-accept")
                                 .primary()
-                                .label("Approve once")
+                                .label(i18n("agent-approval-approve-once"))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.respond_approval("accept", cx)
                                 })),
@@ -81,26 +83,30 @@ impl AgentPane {
         self.update_suspension.as_ref().map(|state| {
             let (label, detail, failed) = match state {
                 UpdateSuspension::Waiting => (
-                    "WAITING FOR UPDATE",
-                    "New provider input is paused until this tab becomes recoverably idle.",
+                    i18n("agent-update-waiting-label"),
+                    i18n("agent-update-waiting-detail"),
                     false,
                 ),
                 UpdateSuspension::Stopping => (
-                    "STOPPING AGENT",
-                    "The provider process is closing while this tab stays open.",
+                    i18n("agent-update-stopping-label"),
+                    i18n("agent-update-stopping-detail"),
                     false,
                 ),
                 UpdateSuspension::Updating => (
-                    "UPDATING PROVIDER",
-                    "The provider binary is being updated; transcript and draft are retained.",
+                    i18n("agent-update-updating-label"),
+                    i18n("agent-update-updating-detail"),
                     false,
                 ),
                 UpdateSuspension::Reconnecting => (
-                    "RECONNECTING",
-                    "Restoring this tab to its provider conversation.",
+                    i18n("agent-update-reconnecting-label"),
+                    i18n("agent-update-reconnecting-detail"),
                     false,
                 ),
-                UpdateSuspension::Failed(message) => ("RECONNECT FAILED", message.as_str(), true),
+                UpdateSuspension::Failed(message) => (
+                    i18n("agent-update-reconnect-failed-label"),
+                    message.as_str(),
+                    true,
+                ),
             };
 
             h_flex()
@@ -139,14 +145,14 @@ impl AgentPane {
                         Button::new("agent-update-retry")
                             .outline()
                             .small()
-                            .label("Retry")
+                            .label(i18n("agent-update-retry"))
                             .on_click(cx.listener(|this, _, _, cx| this.retry_update_recovery(cx))),
                     )
                     .child(
                         Button::new("agent-update-new-session")
                             .danger()
                             .small()
-                            .label("Start new session")
+                            .label(i18n("agent-update-start-new-session"))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.start_new_after_update_failure(cx)
                             })),

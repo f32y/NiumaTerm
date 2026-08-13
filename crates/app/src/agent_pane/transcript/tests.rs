@@ -5,13 +5,12 @@ mod prompt_truncation_tests {
     use crate::agent_pane::composer::{ComposerAction, composer_action};
     use crate::agent_pane::transcript::{
         AGENT_DISCLOSURE_DETAIL_INSET, AGENT_DISCLOSURE_GAP, AGENT_DISCLOSURE_PADDING,
-        AGENT_DISCLOSURE_SLOT, AGENT_TEXT_MEASURE_REMS, AgentKind, COMMAND_EXECUTION_HEADING,
-        Status, TurnSummary, USER_TEXT_MEASURE_REMS, VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES,
-        command_execution_detail, command_execution_heading, compaction_accounting,
-        compaction_label, compaction_row_is_expandable, elapsed_label, entry_copy_text,
-        interrupted_status_label, is_work_row, should_show_jump_to_latest,
-        should_virtualize_transcript, transcript_segments, truncated_user_prompt, turn_summary,
-        worked_status_label, working_status_label,
+        AGENT_DISCLOSURE_SLOT, AGENT_TEXT_MEASURE_REMS, AgentKind, Status, TurnSummary,
+        USER_TEXT_MEASURE_REMS, VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES, command_execution_detail,
+        command_execution_heading, compaction_accounting, compaction_label,
+        compaction_row_is_expandable, elapsed_label, entry_copy_text, interrupted_status_label,
+        is_work_row, should_show_jump_to_latest, should_virtualize_transcript, transcript_segments,
+        truncated_user_prompt, turn_summary, worked_status_label, working_status_label,
     };
 
     /// The reading measures are expressed in rems but chosen as character
@@ -169,7 +168,6 @@ mod prompt_truncation_tests {
 
     #[test]
     fn command_tool_moves_the_full_command_and_output_into_detail() {
-        assert_eq!(COMMAND_EXECUTION_HEADING, "Run Command");
         assert_eq!(
             command_execution_heading(Some("Inspect repository status")),
             "Inspect repository status"

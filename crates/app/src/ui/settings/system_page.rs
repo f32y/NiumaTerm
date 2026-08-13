@@ -1,162 +1,155 @@
+use nmt_i18n::i18n;
+
 use crate::ui::settings::*;
 
 pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
-    SettingPage::new("System")
-                    .default_open(true)
-                    .group(
-                        SettingGroup::new().title("Session").item(
-                            SettingItem::new(
-                                "Restore last session when opening",
-                                SettingField::switch(
-                                    |cx| cx.global::<AppSettings>().restore_last_session_when_opening,
-                                    |value, cx| {
-                                        cx.global_mut::<AppSettings>()
-                                            .restore_last_session_when_opening = value;
-                                    },
-                                ),
-                            )
-                            .description("Reopen saved workspaces and tabs on startup."),
+    SettingPage::new(i18n("settings-system-title"))
+        .default_open(true)
+        .group(
+            SettingGroup::new()
+                .title(i18n("settings-system-session"))
+                .item(
+                    SettingItem::new(
+                        i18n("settings-system-restore-session"),
+                        SettingField::switch(
+                            |cx| cx.global::<AppSettings>().restore_last_session_when_opening,
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>()
+                                    .restore_last_session_when_opening = value;
+                            },
                         ),
                     )
-                    .group(
-                        SettingGroup::new().title("Workspace").item(
-                            SettingItem::new(
-                                "Confirm before closing",
-                                SettingField::switch(
-                                    |cx| cx.global::<AppSettings>().confirm_before_closing,
-                                    |value, cx| {
-                                        cx.global_mut::<AppSettings>().confirm_before_closing = value;
-                                    },
-                                ),
-                            )
-                            .description(
-                                "Ask for confirmation when closing a workspace, Agent tab, or window.",
-                            ),
+                    .description(i18n("settings-system-restore-session-description")),
+                ),
+        )
+        .group(
+            SettingGroup::new()
+                .title(i18n("settings-system-workspace"))
+                .item(
+                    SettingItem::new(
+                        i18n("settings-system-confirm-closing"),
+                        SettingField::switch(
+                            |cx| cx.global::<AppSettings>().confirm_before_closing,
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().confirm_before_closing = value;
+                            },
                         ),
                     )
-                    .group(
-                        SettingGroup::new()
-                            .title("Process")
-                            .item(
-                                SettingItem::new(
-                                    "Manage subprocess by Windows Job API",
-                                    SettingField::switch(
-                                        |cx| cx.global::<AppSettings>().manage_subprocess_job,
-                                        |value, cx| {
-                                            cx.global_mut::<AppSettings>().manage_subprocess_job =
-                                                value;
-                                        },
-                                    ),
-                                )
-                                .description(
-                                    "Closing a tab kills the shell's entire process tree. \
-                             Applies to newly opened tabs.",
-                                ),
-                            )
-                            .item(
-                                SettingItem::new(
-                                    "Warn before terminating shell",
-                                    SettingField::dropdown(
-                                        vec![
-                                            ("disabled".into(), "Disabled".into()),
-                                            (
-                                                "when-child-processes-running".into(),
-                                                "When child processes running".into(),
-                                            ),
-                                            ("always".into(), "Always".into()),
-                                        ],
-                                        |cx| {
-                                            cx.global::<AppSettings>()
-                                                .warn_before_terminating_shell
-                                                .as_str()
-                                                .into()
-                                        },
-                                        |value, cx| {
-                                            cx.global_mut::<AppSettings>()
-                                                .warn_before_terminating_shell =
-                                                WarnBeforeTerminatingShell::from_value(&value);
-                                        },
-                                    )
-                                    .default_value(SharedString::from(
-                                        WarnBeforeTerminatingShell::WhenChildProcessesRunning.as_str(),
-                                    )),
-                                )
-                                .description(
-                                    "Choose when closing a shell asks for confirmation. Detecting \
-                             child processes requires Job management.",
-                                ),
-                            ),
+                    .description(i18n("settings-system-confirm-closing-description")),
+                ),
+        )
+        .group(
+            SettingGroup::new()
+                .title(i18n("settings-system-process"))
+                .item(
+                    SettingItem::new(
+                        i18n("settings-system-manage-job"),
+                        SettingField::switch(
+                            |cx| cx.global::<AppSettings>().manage_subprocess_job,
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().manage_subprocess_job = value;
+                            },
+                        ),
                     )
-                    .group(
-                        SettingGroup::new()
-                            .title("Windows")
-                            .item(
-                                SettingItem::new(
-                                    if shell_integration_mismatched {
-                                        "Enable Windows Context Menu  ⚠"
-                                    } else {
-                                        "Enable Windows Context Menu"
-                                    },
-                                    SettingField::switch(
-                                        |_| is_shell_integration_registered(),
-                                        |value, _| {
-                                            let result = if value {
-                                                register_shell_integration()
-                                            } else {
-                                                unregister_shell_integration()
-                                            };
-
-                                            if let Err(err) = result {
-                                                warn!(
-                                                    "failed to toggle Windows context menu: {err:#}"
-                                                );
-                                            }
-                                        },
-                                    ),
-                                )
-                                .description(if shell_integration_mismatched {
-                                    "The registered shell extension does not point to the DLL beside the current NiumaTerm executable."
+                    .description(i18n("settings-system-manage-job-description")),
+                )
+                .item(
+                    SettingItem::new(
+                        i18n("settings-system-warn-terminate"),
+                        SettingField::dropdown(
+                            vec![
+                                (
+                                    "disabled".into(),
+                                    i18n("settings-system-warn-disabled").into(),
+                                ),
+                                (
+                                    "when-child-processes-running".into(),
+                                    i18n("settings-system-warn-when-children").into(),
+                                ),
+                                ("always".into(), i18n("settings-system-warn-always").into()),
+                            ],
+                            |cx| {
+                                cx.global::<AppSettings>()
+                                    .warn_before_terminating_shell
+                                    .as_str()
+                                    .into()
+                            },
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().warn_before_terminating_shell =
+                                    WarnBeforeTerminatingShell::from_value(&value);
+                            },
+                        )
+                        .default_value(SharedString::from(
+                            WarnBeforeTerminatingShell::WhenChildProcessesRunning.as_str(),
+                        )),
+                    )
+                    .description(i18n("settings-system-warn-terminate-description")),
+                ),
+        )
+        .group(
+            SettingGroup::new()
+                .title(i18n("settings-system-windows"))
+                .item(
+                    SettingItem::new(
+                        if shell_integration_mismatched {
+                            i18n("settings-system-context-menu-warning")
+                        } else {
+                            i18n("settings-system-context-menu")
+                        },
+                        SettingField::switch(
+                            |_| is_shell_integration_registered(),
+                            |value, _| {
+                                let result = if value {
+                                    register_shell_integration()
                                 } else {
-                                    "Add NiumaTerm actions to File Explorer directory menus."
-                                }),
-                            )
-                            .item(
-                                SettingItem::new(
-                                    "Enable System Notification",
-                                    SettingField::switch(
-                                        |_| system_notification_enabled(),
-                                        |value, _| {
-                                            if let Err(err) =
-                                                set_system_notification_enabled(value)
-                                            {
-                                                warn!(
-                                                    "failed to toggle system notifications: {err:#}"
-                                                );
-                                            }
-                                        },
-                                    ),
-                                )
-                                .description(
-                                    "Show Windows notifications for terminal and agent events.",
-                                ),
-                            ),
-                    )
-                    .group(
-                        SettingGroup::new().title("Performance").item(
-                            SettingItem::new(
-                                "Prioritize UI threads",
-                                SettingField::switch(
-                                    |cx| cx.global::<AppSettings>().prioritize_ui_threads,
-                                    |value, cx| {
-                                        cx.global_mut::<AppSettings>().prioritize_ui_threads = value;
+                                    unregister_shell_integration()
+                                };
 
-                                        cx.global::<PlatformHandle>()
-                                            .0
-                                            .set_ui_thread_priority(value);
-                                    },
-                                ),
-                            )
-                            .description("Raise the main and render thread priority to AboveNormal."),
+                                if let Err(err) = result {
+                                    warn!("failed to toggle Windows context menu: {err:#}");
+                                }
+                            },
                         ),
                     )
+                    .description(if shell_integration_mismatched {
+                        i18n("settings-system-context-menu-mismatch-description")
+                    } else {
+                        i18n("settings-system-context-menu-description")
+                    }),
+                )
+                .item(
+                    SettingItem::new(
+                        i18n("settings-system-notification"),
+                        SettingField::switch(
+                            |_| system_notification_enabled(),
+                            |value, _| {
+                                if let Err(err) = set_system_notification_enabled(value) {
+                                    warn!("failed to toggle system notifications: {err:#}");
+                                }
+                            },
+                        ),
+                    )
+                    .description(i18n("settings-system-notification-description")),
+                ),
+        )
+        .group(
+            SettingGroup::new()
+                .title(i18n("settings-system-performance"))
+                .item(
+                    SettingItem::new(
+                        i18n("settings-system-prioritize-ui"),
+                        SettingField::switch(
+                            |cx| cx.global::<AppSettings>().prioritize_ui_threads,
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().prioritize_ui_threads = value;
+
+                                cx.global::<PlatformHandle>()
+                                    .0
+                                    .set_ui_thread_priority(value);
+                            },
+                        ),
+                    )
+                    .description(i18n("settings-system-prioritize-ui-description")),
+                ),
+        )
 }

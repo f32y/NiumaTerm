@@ -15,6 +15,7 @@ use gpui_component::{
 use nmt_config::colors::{ColorArray, Colors};
 use nmt_config::theme::{AppearanceTheme, Theme, UiTheme};
 use nmt_config::{Config, config_dir_path, set_active_colors};
+use nmt_i18n::i18n;
 use notify::{
     Event as NotifyEvent, RecursiveMode, Result as NotifyResult, Watcher as _, recommended_watcher,
 };
@@ -194,18 +195,22 @@ fn theme_preview(colors: Colors) -> Div {
                 .child(
                     div()
                         .text_color(preview_color(colors.foreground))
-                        .child("ls"),
+                        .child(i18n("settings-theme-preview-command")),
                 )
-                .child(div().text_color(preview_color(colors.blue)).child("dir"))
+                .child(
+                    div()
+                        .text_color(preview_color(colors.blue))
+                        .child(i18n("settings-theme-preview-directory")),
+                )
                 .child(
                     div()
                         .text_color(preview_color(colors.red))
-                        .child("executable"),
+                        .child(i18n("settings-theme-preview-executable")),
                 )
                 .child(
                     div()
                         .text_color(preview_color(colors.foreground))
-                        .child("file"),
+                        .child(i18n("settings-theme-preview-file")),
                 ),
         )
         .child(h_flex().gap_1().children(swatches.into_iter().map(|color| {
@@ -227,7 +232,11 @@ pub(super) fn theme_list(cx: &mut App) -> Div {
         .clone()
         .into_iter()
         .filter(|(name, theme)| {
-            let display_name = if name.is_empty() { "Default" } else { name };
+            let display_name = if name.is_empty() {
+                i18n("settings-theme-default")
+            } else {
+                name
+            };
             filter.is_empty()
                 || display_name.to_lowercase().contains(&filter)
                 || theme.name.to_lowercase().contains(&filter)
@@ -243,19 +252,22 @@ pub(super) fn theme_list(cx: &mut App) -> Div {
         .w_full()
         .gap_2()
         .child(
-            h_flex().justify_between().child("Themes").child(
-                Button::new("theme-refresh")
-                    .outline()
-                    .label("Refresh")
-                    .on_click(|_, _, cx: &mut App| reload_themes(cx)),
-            ),
+            h_flex()
+                .justify_between()
+                .child(i18n("settings-theme-title"))
+                .child(
+                    Button::new("theme-refresh")
+                        .outline()
+                        .label(i18n("settings-theme-refresh"))
+                        .on_click(|_, _, cx: &mut App| reload_themes(cx)),
+                ),
         )
         .when(themes.is_empty(), |this| {
             this.child(
                 div()
                     .py_4()
                     .text_color(cx.theme().muted_foreground)
-                    .child("No matching .toml themes found."),
+                    .child(i18n("settings-theme-no-matches")),
             )
         })
         .children(
@@ -266,7 +278,11 @@ pub(super) fn theme_list(cx: &mut App) -> Div {
                     let is_selected = name == selected;
 
                     let display_name = if theme.name.is_empty() {
-                        if name.is_empty() { "Default" } else { &name }
+                        if name.is_empty() {
+                            i18n("settings-theme-default")
+                        } else {
+                            &name
+                        }
                     } else {
                         &theme.name
                     }
@@ -284,14 +300,16 @@ pub(super) fn theme_list(cx: &mut App) -> Div {
                         .cursor_pointer()
                         .on_click(move |_, _, cx| select_theme(name.clone(), cx))
                         .child(theme_preview(theme.colors.terminal))
-                        .child(
-                            h_flex().mt_2().justify_between().child(display_name).when(
-                                is_selected,
-                                |this| {
-                                    this.child(div().text_color(selected_border).child("Selected"))
-                                },
-                            ),
-                        )
+                        .child(h_flex().mt_2().justify_between().child(display_name).when(
+                            is_selected,
+                            |this| {
+                                this.child(
+                                    div()
+                                        .text_color(selected_border)
+                                        .child(i18n("settings-theme-selected")),
+                                )
+                            },
+                        ))
                 }),
         )
 }

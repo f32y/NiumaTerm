@@ -1,3 +1,5 @@
+use nmt_i18n::i18n;
+
 use crate::ui::shell::*;
 
 impl Shell {
@@ -56,7 +58,7 @@ impl Shell {
                 let settings_shell = settings_shell.clone();
                 Button::new(format!("{settings_key}-settings"))
                     .ghost()
-                    .label("Settings")
+                    .label(i18n("shell-updates-settings"))
                     .on_click(move |_, window, cx| {
                         let _ = settings_shell.update(cx, |shell, cx| {
                             shell.on_show_settings(&ShowSettings, window, cx)
@@ -83,8 +85,8 @@ impl Shell {
                 Button::new(format!("{}-primary", action_key.as_str()))
                     .primary()
                     .label(match primary {
-                        NotificationPrimaryAction::Update => "Update",
-                        NotificationPrimaryAction::Retry => "Retry",
+                        NotificationPrimaryAction::Update => i18n("shell-updates-update"),
+                        NotificationPrimaryAction::Retry => i18n("shell-updates-retry"),
                     })
                     .on_click({
                         let action_key = action_key.clone();

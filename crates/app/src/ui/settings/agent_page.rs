@@ -1,3 +1,5 @@
+use nmt_i18n::i18n;
+
 use crate::ui::settings::*;
 
 fn agent_hook_item(
@@ -47,10 +49,10 @@ fn agent_hook_item(
 pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPage {
     let installations = agent_updates::installations_for_profiles(agent_profiles, cx);
     let mut general = SettingGroup::new()
-        .title("General")
+        .title(i18n("settings-agent-general"))
         .item(
             SettingItem::new(
-                "Show Agent Usage",
+                i18n("settings-agent-show-usage"),
                 SettingField::switch(
                     |cx| cx.global::<AppSettings>().show_agent_usage,
                     |value, cx| {
@@ -58,11 +60,11 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                     },
                 ),
             )
-            .description("Show Agent account usage in the workspace sidebar."),
+            .description(i18n("settings-agent-show-usage-description")),
         )
         .item(
             SettingItem::new(
-                "Collapse Tool Call details by default",
+                i18n("settings-agent-collapse-tool-calls"),
                 SettingField::switch(
                     |cx| cx.global::<AppSettings>().collapse_tool_calls,
                     |value, cx| {
@@ -70,14 +72,11 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                     },
                 ),
             )
-            .description(
-                "In agent tabs, show only the newest of consecutive tool calls; older \
-                 ones sit behind a \"+N previous tool calls\" toggle.",
-            ),
+            .description(i18n("settings-agent-collapse-tool-calls-description")),
         )
         .item(
             SettingItem::new(
-                "Check for Agent Updates",
+                i18n("settings-agent-check-updates"),
                 SettingField::switch(
                     |cx| cx.global::<AppSettings>().check_agent_updates,
                     |value, cx| {
@@ -85,11 +84,7 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                     },
                 ),
             )
-            .description(
-                "Check every hour whether the Claude Code and Codex installations referenced by \
-                 Agent Profiles have a newer version. The Check button below stays available \
-                 while this is off.",
-            ),
+            .description(i18n("settings-agent-check-updates-description")),
         )
         .item(agent_update_check_item());
 
@@ -110,16 +105,16 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
         ));
     }
 
-    SettingPage::new("Agent")
+    SettingPage::new(i18n("settings-agent-title"))
         .default_open(true)
-        .description("Configure Agent event handling and per-Agent Hook installation.")
+        .description(i18n("settings-agent-description"))
         .group(general)
         .group(
             SettingGroup::new()
-                .title("Agent Hooks")
+                .title(i18n("settings-agent-hooks"))
                 .item(
                     SettingItem::new(
-                        "Enable Agent Hooks",
+                        i18n("settings-agent-enable-hooks"),
                         SettingField::switch(
                             |cx| cx.global::<AppSettings>().enable_agent_hooks,
                             |value, cx| {
@@ -127,12 +122,10 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                             },
                         ),
                     )
-                    .description(
-                        "Process new lifecycle events from installed Agent Hooks. This does not change their installation state.",
-                    ),
+                    .description(i18n("settings-agent-enable-hooks-description")),
                 )
                 .item(agent_hook_item(
-                    "Claude Code",
+                    i18n("settings-agent-kind-claude-code"),
                     claude_hook::settings_path(),
                     claude_hook::settings_path(),
                     claude_hook::hooks_status,
@@ -140,7 +133,7 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                     claude_hook::uninstall_hooks,
                 ))
                 .item(agent_hook_item(
-                    "Codex",
+                    i18n("settings-agent-kind-codex"),
                     codex_hook::config_path(),
                     codex_hook::hooks_path(),
                     codex_hook::hooks_status,
@@ -156,9 +149,11 @@ pub(super) fn installation_update_title(
     provider_total: usize,
 ) -> String {
     if provider_total > 1 {
-        format!("{} Updates {provider_ordinal}", provider.display())
+        i18n("settings-agent-updates-title-numbered")
+            .replace("{provider}", provider.display())
+            .replace("{ordinal}", &provider_ordinal.to_string())
     } else {
-        format!("{} Updates", provider.display())
+        i18n("settings-agent-updates-title").replace("{provider}", provider.display())
     }
 }
 
@@ -168,7 +163,7 @@ pub(super) fn installation_version_text(
     available: &str,
 ) -> String {
     if phase == UpdatePhase::Unknown {
-        "Not checked".to_string()
+        i18n("settings-agent-not-checked").to_string()
     } else {
         format!("{current} → {available}")
     }
@@ -182,15 +177,19 @@ fn agent_update_check_item() -> SettingItem {
         let check_profiles = profiles.clone();
         let check = Button::new("agent-updates-check-all")
             .outline()
-            .label(if busy { "Working…" } else { "Check" })
+            .label(if busy {
+                i18n("settings-agent-working")
+            } else {
+                i18n("settings-agent-check-button")
+            })
             .disabled(options.disabled || busy || installations.is_empty())
             .on_click(move |_, _, cx| {
                 agent_updates::manual_check_profiles(&check_profiles, cx);
             });
 
         card_row(
-            "Check for Updates",
-            "Check each distinct Claude Code and Codex installation referenced by Agent Profiles.",
+            i18n("settings-agent-check-for-updates"),
+            i18n("settings-agent-check-for-updates-description"),
             check,
             cx,
         )
@@ -202,17 +201,23 @@ fn agent_update_status_item(ix: usize, title: String, key: InstallationKey) -> S
     SettingItem::render(move |options, _window, cx| {
         let snapshot = agent_updates::installation(&key, cx);
         let (detail, busy, can_update) = snapshot.map_or_else(
-            || ("Update status unavailable".to_string(), false, false),
+            || {
+                (
+                    i18n("settings-agent-status-unavailable").to_string(),
+                    false,
+                    false,
+                )
+            },
             |snapshot| {
                 let versions = snapshot.state.versions.as_ref();
                 let current = versions
                     .and_then(|status| status.current.as_ref())
                     .map(ToString::to_string)
-                    .unwrap_or_else(|| "unknown".to_string());
+                    .unwrap_or_else(|| i18n("settings-agent-version-unknown").to_string());
                 let available = versions
                     .and_then(|status| status.available.as_ref())
                     .map(ToString::to_string)
-                    .unwrap_or_else(|| "unknown".to_string());
+                    .unwrap_or_else(|| i18n("settings-agent-version-unknown").to_string());
                 let labels = versions
                     .map(|status| {
                         [status.install_method.as_deref(), status.channel.as_deref()]
@@ -226,7 +231,10 @@ fn agent_update_status_item(ix: usize, title: String, key: InstallationKey) -> S
                     .unwrap_or_default();
                 let checked = snapshot
                     .last_checked
-                    .map(|time| format!(" · checked {}", time.format("%Y-%m-%d %H:%M")))
+                    .map(|time| {
+                        i18n("settings-agent-checked-at")
+                            .replace("{time}", &time.format("%Y-%m-%d %H:%M").to_string())
+                    })
                     .unwrap_or_default();
                 let diagnostic = snapshot
                     .state
@@ -242,19 +250,19 @@ fn agent_update_status_item(ix: usize, title: String, key: InstallationKey) -> S
                     .map(|message| format!(" · {}", message.chars().take(256).collect::<String>()))
                     .unwrap_or_default();
                 let phase = match snapshot.state.phase {
-                    UpdatePhase::Unknown => "not checked",
-                    UpdatePhase::Checking => "checking",
-                    UpdatePhase::Current => "current",
-                    UpdatePhase::Available => "update available",
-                    UpdatePhase::WaitingForIdle => "waiting for idle",
-                    UpdatePhase::Suspending => "stopping agents",
-                    UpdatePhase::Updating => "updating",
-                    UpdatePhase::Verifying => "verifying",
-                    UpdatePhase::Restoring => "restoring tabs",
-                    UpdatePhase::Updated => "updated",
-                    UpdatePhase::Unchanged => "version unchanged",
-                    UpdatePhase::Unsupported => "automatic discovery unsupported",
-                    UpdatePhase::Failed => "failed",
+                    UpdatePhase::Unknown => i18n("settings-agent-phase-not-checked"),
+                    UpdatePhase::Checking => i18n("settings-agent-phase-checking"),
+                    UpdatePhase::Current => i18n("settings-agent-phase-current"),
+                    UpdatePhase::Available => i18n("settings-agent-phase-available"),
+                    UpdatePhase::WaitingForIdle => i18n("settings-agent-phase-waiting-idle"),
+                    UpdatePhase::Suspending => i18n("settings-agent-phase-suspending"),
+                    UpdatePhase::Updating => i18n("settings-agent-phase-updating"),
+                    UpdatePhase::Verifying => i18n("settings-agent-phase-verifying"),
+                    UpdatePhase::Restoring => i18n("settings-agent-phase-restoring"),
+                    UpdatePhase::Updated => i18n("settings-agent-phase-updated"),
+                    UpdatePhase::Unchanged => i18n("settings-agent-phase-unchanged"),
+                    UpdatePhase::Unsupported => i18n("settings-agent-phase-unsupported"),
+                    UpdatePhase::Failed => i18n("settings-agent-phase-failed"),
                 };
                 let can_update =
                     versions.is_some_and(|status| status.can_update && status.update_available());
@@ -271,7 +279,7 @@ fn agent_update_status_item(ix: usize, title: String, key: InstallationKey) -> S
         let update_key = key.clone();
         let update = Button::new(("agent-update-install", ix))
             .primary()
-            .label("Update")
+            .label(i18n("settings-agent-update-button"))
             .disabled(options.disabled || busy || !can_update)
             .on_click(move |_, window, cx| {
                 agent_updates::request_update(update_key.clone(), window, cx);

@@ -1,3 +1,5 @@
+use nmt_i18n::i18n;
+
 use crate::ui::shell::*;
 
 pub(super) fn should_confirm_tab_close(
@@ -64,18 +66,16 @@ impl Shell {
         }
 
         let description = if count > 0 {
-            format!(
-                "{} in this pane. Closing the pane will terminate them.",
-                Self::processes_running(count)
-            )
+            i18n("shell-close-pane-processes-description")
+                .replace("{processes}", &Self::processes_running(count))
         } else {
-            "Closing the pane will terminate its shell.".to_string()
+            i18n("shell-close-pane-description").to_string()
         };
 
         Self::open_close_confirm(
             window,
             cx,
-            "Close this pane?",
+            i18n("shell-close-pane-title"),
             description,
             move |this, window, cx| this.close_pane_now(id, window, cx),
         );
@@ -110,9 +110,9 @@ impl Shell {
     /// lead-in of every close-confirmation description.
     fn processes_running(count: usize) -> String {
         if count == 1 {
-            "1 child process is running".to_string()
+            i18n("shell-close-one-process-running").to_string()
         } else {
-            format!("{count} child processes are running")
+            i18n("shell-close-many-processes-running").replace("{count}", &count.to_string())
         }
     }
 
@@ -131,6 +131,8 @@ impl Shell {
     fn open_close_confirm(
         window: &mut Window,
         cx: &mut Context<Self>,
+        // The catalog outlives the app, so a key-literal lookup yields a
+        // `'static` title without allocating per dialog.
         title: &'static str,
         description: String,
         on_confirm: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
@@ -215,23 +217,18 @@ impl Shell {
             }
 
             let description = if count > 0 {
-                format!(
-                    "This is the last tab in this workspace, and {} in it. \
-                     Closing it will terminate them and close the workspace.",
-                    Self::processes_running(count)
-                )
+                i18n("shell-close-last-tab-processes-description")
+                    .replace("{processes}", &Self::processes_running(count))
             } else if is_agent {
-                "This is the last tab in this workspace. Closing it will end its agent session and close the workspace."
-                    .to_string()
+                i18n("shell-close-last-tab-agent-description").to_string()
             } else {
-                "This is the last tab in this workspace. Closing it also closes the workspace."
-                    .to_string()
+                i18n("shell-close-last-tab-description").to_string()
             };
 
             Self::open_close_confirm(
                 window,
                 cx,
-                "Close the last tab?",
+                i18n("shell-close-last-tab-title"),
                 description,
                 move |this, window, cx| this.close_workspace_now(ws_id, window, cx),
             );
@@ -248,20 +245,18 @@ impl Shell {
         }
 
         let description = if is_agent {
-            "Closing the tab will end its agent session.".to_string()
+            i18n("shell-close-tab-agent-description").to_string()
         } else if count > 0 {
-            format!(
-                "{} in this tab. Closing the tab will terminate them.",
-                Self::processes_running(count)
-            )
+            i18n("shell-close-tab-processes-description")
+                .replace("{processes}", &Self::processes_running(count))
         } else {
-            "Closing the tab will terminate its shell.".to_string()
+            i18n("shell-close-tab-description").to_string()
         };
 
         Self::open_close_confirm(
             window,
             cx,
-            "Close this tab?",
+            i18n("shell-close-tab-title"),
             description,
             move |this, window, cx| this.close_tab_now(id, window, cx),
         );
@@ -321,18 +316,16 @@ impl Shell {
         }
 
         let description = if count > 0 {
-            format!(
-                "{} in this workspace. Closing the workspace will terminate them.",
-                Self::processes_running(count)
-            )
+            i18n("shell-close-workspace-processes-description")
+                .replace("{processes}", &Self::processes_running(count))
         } else {
-            "All tabs in this workspace will be closed and their shells terminated.".to_string()
+            i18n("shell-close-workspace-description").to_string()
         };
 
         Self::open_close_confirm(
             window,
             cx,
-            "Close this workspace?",
+            i18n("shell-close-workspace-title"),
             description,
             move |this, window, cx| this.close_workspace_now(id, window, cx),
         );
@@ -351,16 +344,10 @@ impl Shell {
         let count = self.workspace_process_count(id, cx);
 
         let message = if count > 0 {
-            format!(
-                "This is the only workspace, and {} in it. Quit the app \
-                 (terminating them), or replace it with a fresh workspace in \
-                 your home directory?",
-                Self::processes_running(count)
-            )
+            i18n("shell-close-last-workspace-processes-message")
+                .replace("{processes}", &Self::processes_running(count))
         } else {
-            "This is the only workspace. Quit the app, or replace it with a \
-             fresh workspace in your home directory?"
-                .to_string()
+            i18n("shell-close-last-workspace-message").to_string()
         };
 
         let shell = cx.entity();
@@ -371,7 +358,7 @@ impl Shell {
             let message = message.clone();
 
             dialog
-                .title("Close the last workspace?")
+                .title(i18n("shell-close-last-workspace-title"))
                 .overlay_closable(false)
                 .content(move |content, _, cx| {
                     content.child(
@@ -383,10 +370,13 @@ impl Shell {
                 })
                 .footer(
                     DialogFooter::new()
-                        .child(DialogClose::new().child(Button::new("keep-ws").label("Cancel")))
+                        .child(
+                            DialogClose::new()
+                                .child(Button::new("keep-ws").label(i18n("shell-close-cancel"))),
+                        )
                         .child(
                             Button::new("replace-ws")
-                                .label("New Default Workspace")
+                                .label(i18n("shell-close-new-default-workspace"))
                                 .primary()
                                 .on_click(move |_, window, cx| {
                                     window.close_dialog(cx);
@@ -395,12 +385,15 @@ impl Shell {
                                     });
                                 }),
                         )
-                        .child(Button::new("quit-app").label("Quit").danger().on_click(
-                            move |_, _, cx| {
-                                quit_shell.update(cx, |this, cx| this.doom_workspace(id, cx));
-                                cx.quit();
-                            },
-                        )),
+                        .child(
+                            Button::new("quit-app")
+                                .label(i18n("shell-close-quit"))
+                                .danger()
+                                .on_click(move |_, _, cx| {
+                                    quit_shell.update(cx, |this, cx| this.doom_workspace(id, cx));
+                                    cx.quit();
+                                }),
+                        ),
                 )
         });
     }
@@ -454,12 +447,10 @@ impl Shell {
         }
 
         let description = if count > 0 {
-            format!(
-                "{} in this window. Closing the window will terminate them.",
-                Self::processes_running(count)
-            )
+            i18n("shell-close-window-processes-description")
+                .replace("{processes}", &Self::processes_running(count))
         } else {
-            "All workspaces and tabs in this window will be closed.".to_string()
+            i18n("shell-close-window-description").to_string()
         };
 
         // `remove_window` tears the window down directly (no WM_CLOSE
@@ -467,7 +458,7 @@ impl Shell {
         Self::open_close_confirm(
             window,
             cx,
-            "Close this window?",
+            i18n("shell-close-window-title"),
             description,
             |_, window, _| window.remove_window(),
         );

@@ -13,6 +13,7 @@ members = [
     "crates/agent_hook_cli",
     "crates/app",
     "crates/config",
+    "crates/i18n",
     "crates/input",
     "crates/platform",
     "crates/remote_net",
@@ -67,6 +68,7 @@ disallowed_types = "deny"
 [workspace.dependencies]
 nmt_agent_utils = { path = "crates/agent_utils" }
 nmt_config = { path = "crates/config" }
+nmt_i18n = { path = "crates/i18n" }
 nmt_input = { path = "crates/input" }
 libghostty-vt-sys = { path = "third_party/libghostty-vt-sys" }
 nmt_platform = { path = "crates/platform" }

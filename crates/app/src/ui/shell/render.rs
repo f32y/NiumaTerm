@@ -1,4 +1,5 @@
-use crate::ui::background_tasks::PANEL_TITLE;
+use nmt_i18n::i18n;
+
 use crate::ui::shell::*;
 
 /// Width the tab strip keeps once the title bar runs out of room: about one
@@ -148,8 +149,8 @@ impl Shell {
         Button::new("toggle-background-tasks")
             .ghost()
             .icon(IconName::Bot)
-            .aria_label(PANEL_TITLE)
-            .tooltip(PANEL_TITLE)
+            .aria_label(i18n("tasks-background-title"))
+            .tooltip(i18n("tasks-background-title"))
             .on_click(cx.listener(|this, _, window, cx| {
                 this.on_toggle_background_tasks(&ToggleBackgroundTasks, window, cx)
             }))

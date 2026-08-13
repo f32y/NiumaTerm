@@ -12,6 +12,7 @@ use gpui_component::list::{List, ListDelegate, ListItem, ListState};
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, IndexPath, Sizable as _, WindowExt as _, h_flex,
 };
+use nmt_i18n::i18n;
 
 use crate::agent_pane::AgentKind;
 use crate::agent_pane::usage::{ClaudeIcon, CodexIcon};
@@ -41,26 +42,26 @@ fn agent_icon(profile: &AgentProfile) -> Icon {
 
 fn profile_label(ix: usize, profile: &AgentProfile) -> String {
     if profile.name.trim().is_empty() {
-        format!("Agent Profile {}", ix + 1)
+        i18n("settings-agent-profile-unnamed").replace("{n}", &(ix + 1).to_string())
     } else {
         profile.name.clone()
     }
 }
 
 fn delete_profile(ix: usize, window: &mut Window, cx: &mut App) {
-    let subject = cx
+    let description = cx
         .global::<AppSettings>()
         .agent_profiles
         .get(ix)
         .map(|profile| profile_label(ix, profile))
-        .map(|label| format!("profile \"{label}\""))
-        .unwrap_or_else(|| "this profile".to_string());
+        .map(|label| i18n("settings-agent-profile-delete-named").replace("{name}", &label))
+        .unwrap_or_else(|| i18n("settings-agent-profile-delete-current").to_string());
 
     window.open_alert_dialog(cx, move |alert, _, _| {
         alert
             .confirm()
-            .title("Delete Agent Profile")
-            .description(format!("Delete {subject}? This cannot be undone."))
+            .title(i18n("settings-agent-profile-delete-title"))
+            .description(description.clone())
             .on_ok(move |_, _, cx| {
                 cx.global_mut::<AppSettings>().remove_agent_profile(ix);
                 true
@@ -197,8 +198,8 @@ impl ListDelegate for AgentProfileList {
                                         .ghost()
                                         .with_size(TABLE_OPERATION_BUTTON)
                                         .icon(IconName::PenLine)
-                                        .aria_label("Edit")
-                                        .tooltip("Edit")
+                                        .aria_label(i18n("settings-common-edit"))
+                                        .tooltip(i18n("settings-common-edit"))
                                         .on_click(move |_, window, cx: &mut App| {
                                             open_agent_profile_dialog(Some(row), window, cx);
                                         }),
@@ -208,8 +209,8 @@ impl ListDelegate for AgentProfileList {
                                         .ghost()
                                         .with_size(TABLE_OPERATION_BUTTON)
                                         .icon(TrashIcon)
-                                        .aria_label("Delete")
-                                        .tooltip("Delete")
+                                        .aria_label(i18n("settings-common-delete"))
+                                        .tooltip(i18n("settings-common-delete"))
                                         .on_click(move |_, window, cx: &mut App| {
                                             delete_profile(row, window, cx);
                                         }),
@@ -227,14 +228,19 @@ impl ListDelegate for AgentProfileList {
     ) -> Option<impl IntoElement> {
         Some(
             table_header(cx)
-                .child(div().w(TYPE_COLUMN).flex_none().child("Type"))
-                .child(div().flex_1().min_w_0().child("Name"))
+                .child(
+                    div()
+                        .w(TYPE_COLUMN)
+                        .flex_none()
+                        .child(i18n("settings-common-type")),
+                )
+                .child(div().flex_1().min_w_0().child(i18n("settings-common-name")))
                 .child(
                     div()
                         .w(OPERATION_COLUMN)
                         .flex_none()
                         .text_right()
-                        .child("Operation"),
+                        .child(i18n("settings-common-operation")),
                 ),
         )
     }

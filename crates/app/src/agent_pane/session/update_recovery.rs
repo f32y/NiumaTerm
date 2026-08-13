@@ -1,3 +1,5 @@
+use nmt_i18n::i18n;
+
 use crate::agent_pane::session::{Backend, RecoveryIdentity, Status};
 use crate::agent_pane::*;
 
@@ -51,10 +53,9 @@ impl AgentPane {
             .as_ref()
             .is_some_and(|state| !matches!(state, UpdateSuspension::Waiting))
         {
-            return RecoveryReadiness::Busy(format!(
-                "{} is already participating in an update",
-                self.profile.name
-            ));
+            return RecoveryReadiness::Busy(
+                i18n("agent-update-profile-already-updating").replace("{name}", &self.profile.name),
+            );
         }
         if matches!(self.status, Status::Starting | Status::Running)
             || self.pending_approval.is_some()
@@ -68,10 +69,9 @@ impl AgentPane {
                 .as_ref()
                 .is_some_and(Backend::has_active_operation)
         {
-            return RecoveryReadiness::Busy(format!(
-                "{} still has active agent work",
-                self.profile.name
-            ));
+            return RecoveryReadiness::Busy(
+                i18n("agent-update-profile-active-work").replace("{name}", &self.profile.name),
+            );
         }
 
         self.recovery_identity_snapshot(cx)
@@ -83,11 +83,11 @@ impl AgentPane {
         } else if let Some(identity) = self.session.as_ref().and_then(Backend::recovery_identity) {
             identity
         } else {
-            return RecoveryReadiness::MissingIdentity(format!(
-                "{} has conversation content but has not published a resumable {} identity yet",
-                self.profile.name,
-                self.kind.display()
-            ));
+            return RecoveryReadiness::MissingIdentity(
+                i18n("agent-update-profile-missing-identity")
+                    .replace("{name}", &self.profile.name)
+                    .replace("{provider}", self.kind.display()),
+            );
         };
 
         RecoveryReadiness::Ready(RecoverySnapshot {
@@ -186,7 +186,7 @@ impl AgentPane {
         let started = self.start_session_with_options(recovery, true, cx);
         if !started {
             self.update_suspension = Some(UpdateSuspension::Failed(
-                "The provider could not restart. Retry or start a new session.".to_string(),
+                i18n("agent-update-recovery-restart-failed").to_string(),
             ));
         }
         cx.notify();
@@ -218,7 +218,7 @@ impl AgentPane {
         self.update_suspension = Some(UpdateSuspension::Reconnecting);
         if !self.start_session_with_options(None, true, cx) {
             self.update_suspension = Some(UpdateSuspension::Failed(
-                "The provider could not start a new session.".to_string(),
+                i18n("agent-update-recovery-new-session-failed").to_string(),
             ));
         }
         cx.notify();

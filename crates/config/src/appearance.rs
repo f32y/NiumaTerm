@@ -131,6 +131,41 @@ where
     })
 }
 
+/// UI display language, stored as its BCP 47 tag in `config.toml`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum Language {
+    #[default]
+    #[serde(rename = "en")]
+    En,
+    #[serde(rename = "zh-CN")]
+    ZhCn,
+}
+
+impl Language {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::En => "en",
+            Self::ZhCn => "zh-CN",
+        }
+    }
+
+    pub fn from_value(value: &str) -> Self {
+        match value {
+            "zh-CN" => Self::ZhCn,
+            _ => Self::En,
+        }
+    }
+}
+
+fn deserialize_language<'de, D>(deserializer: D) -> Result<Language, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    // A hand-edited or future language tag must load as English instead of
+    // failing the whole config parse.
+    Ok(Language::from_value(&String::deserialize(deserializer)?))
+}
+
 fn default_git_status_refresh_interval() -> u64 {
     30
 }
@@ -285,6 +320,13 @@ pub struct AppearanceConfig {
         rename = "background-image-opacity"
     )]
     pub background_image_opacity: f64,
+    /// UI display language.
+    #[serde(
+        default,
+        rename = "language",
+        deserialize_with = "deserialize_language"
+    )]
+    pub language: Language,
 }
 
 fn default_command_blocks() -> bool {
@@ -320,6 +362,7 @@ impl Default for AppearanceConfig {
             background_opacity: default_background_opacity(),
             background_image: None,
             background_image_opacity: default_background_image_opacity(),
+            language: Language::default(),
         }
     }
 }

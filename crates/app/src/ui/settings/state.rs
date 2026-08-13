@@ -1,13 +1,14 @@
 use gpui::{Global, SharedString};
 use nmt_config::agent::AgentConfig;
 use nmt_config::appearance::{AppearanceConfig, SmoothScrollingMode};
-pub use nmt_config::appearance::{InputStyle, WindowBackdrop};
+pub use nmt_config::appearance::{InputStyle, Language, WindowBackdrop};
 use nmt_config::defaults::default_theme;
 pub use nmt_config::profile::{AgentProfile, AgentProfileKind, EnvVar, Profile};
 use nmt_config::remote_session::RemoteSessionConfig;
 use nmt_config::system::{SystemConfig, WarnBeforeTerminatingShell};
 use nmt_config::theme::Theme;
 use nmt_config::{CursorShape, SettingsPatch, get, save_settings};
+use nmt_i18n::i18n;
 use tracing::warn;
 
 use crate::ui::settings::MAX_TAB_WIDTH;
@@ -84,6 +85,8 @@ pub struct AppSettings {
     pub background_image: Option<String>,
     /// How strongly the image shows through the window surfaces (0.0..=1.0).
     pub background_image_opacity: f64,
+    /// UI display language.
+    pub language: Language,
     /// Process lifecycle events received from Agent Hook executables.
     pub enable_agent_hooks: bool,
     /// Show Agent account usage in the workspace sidebar.
@@ -154,6 +157,7 @@ impl Default for AppSettings {
             background_opacity: 1.0,
             background_image: None,
             background_image_opacity: DEFAULT_BACKGROUND_IMAGE_OPACITY,
+            language: Language::default(),
             enable_agent_hooks: true,
             show_agent_usage: true,
             collapse_tool_calls: false,
@@ -183,8 +187,8 @@ fn initial_font_family() -> SharedString {
 
 pub(super) fn input_style_label(style: InputStyle) -> &'static str {
     match style {
-        InputStyle::Waterfall => "Waterfall",
-        InputStyle::FixedBottom => "Fixed Bottom",
+        InputStyle::Waterfall => i18n("settings-terminal-input-style-waterfall"),
+        InputStyle::FixedBottom => i18n("settings-terminal-input-style-fixed-bottom"),
     }
 }
 
@@ -217,6 +221,13 @@ pub(super) fn agent_kind_label(kind: AgentProfileKind) -> &'static str {
     match kind {
         AgentProfileKind::ClaudeCode => "Claude Code",
         AgentProfileKind::Codex => "Codex",
+    }
+}
+
+pub(super) fn agent_kind_display_label(kind: AgentProfileKind) -> &'static str {
+    match kind {
+        AgentProfileKind::ClaudeCode => i18n("settings-agent-kind-claude-code"),
+        AgentProfileKind::Codex => i18n("settings-agent-kind-codex"),
     }
 }
 
@@ -399,6 +410,7 @@ impl AppSettings {
             background_image_opacity: clamp_background_image_opacity(
                 appearance.background_image_opacity,
             ),
+            language: appearance.language,
             enable_agent_hooks: config.agent.enable_agent_hooks,
             show_agent_usage: config.agent.show_agent_usage,
             collapse_tool_calls: config.agent.collapse_tool_calls,
@@ -422,7 +434,7 @@ impl AppSettings {
         let mut n = self.profiles.len() + 1;
 
         let name = loop {
-            let candidate = format!("Profile {n}");
+            let candidate = i18n("settings-profiles-new-name").replace("{n}", &n.to_string());
             if !self.profiles.iter().any(|p| p.name == candidate) {
                 break candidate;
             }
@@ -604,6 +616,7 @@ impl AppSettings {
             background_opacity: self.background_opacity,
             background_image: self.background_image.clone(),
             background_image_opacity: self.background_image_opacity,
+            language: self.language,
         }
     }
 

@@ -1,3 +1,5 @@
+use nmt_i18n::i18n;
+
 use crate::agent_pane::composer::{CommandFeedbackKind, RewindAction, RewindState};
 use crate::agent_pane::*;
 
@@ -38,7 +40,7 @@ impl AgentPane {
         if self.is_command_busy() {
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
-                "/resume is available only while the agent is idle.".to_string(),
+                i18n("agent-composer-resume-idle-only").to_string(),
                 cx,
             );
             return false;
@@ -52,7 +54,7 @@ impl AgentPane {
             self.history_ui.mode = RecentSessionsMode::Hidden;
             self.set_command_feedback(
                 CommandFeedbackKind::Notice,
-                "No recent sessions are available for this folder.".to_string(),
+                i18n("agent-composer-no-recent-sessions").to_string(),
                 cx,
             );
             return true;
@@ -87,7 +89,7 @@ impl AgentPane {
                 let Some(skill_catalog) = self.palette.skill_catalog.as_ref() else {
                     return Some(PaletteModel {
                         rows: Vec::new(),
-                        note: Some("Codex skill discovery is still loading".to_string()),
+                        note: Some(i18n("agent-composer-skill-discovery-loading").to_string()),
                     });
                 };
                 let rows = filter_skill_catalog(&skill_catalog.skills, &query)
@@ -107,11 +109,11 @@ impl AgentPane {
                 let note = if rows.is_empty() && !skill_catalog.errors.is_empty() {
                     Some(skill_catalog.errors[0].clone())
                 } else if rows.is_empty() && query.is_empty() {
-                    Some("No Codex skills are available for this folder".to_string())
+                    Some(i18n("agent-composer-no-skills").to_string())
                 } else if rows.is_empty() {
-                    Some("No matching skills".to_string())
+                    Some(i18n("agent-composer-no-matching-skills").to_string())
                 } else if let Some(error) = skill_catalog.errors.first() {
-                    Some(format!("Some skills could not be loaded: {error}"))
+                    Some(i18n("agent-composer-skill-load-partial").replace("{error}", error))
                 } else {
                     None
                 };
@@ -145,7 +147,9 @@ impl AgentPane {
                 .collect::<Vec<_>>();
 
             return Some(PaletteModel {
-                note: rows.is_empty().then(|| "No matching values".to_string()),
+                note: rows
+                    .is_empty()
+                    .then(|| i18n("agent-composer-no-matching-values").to_string()),
                 rows,
             });
         }
@@ -172,13 +176,13 @@ impl AgentPane {
                     let disabled_reason = if command.run_policy == SlashCommandRunPolicy::IdleOnly
                         && self.is_command_busy()
                     {
-                        Some("Available when the agent is idle".to_string())
+                        Some(i18n("agent-composer-available-when-idle").to_string())
                     } else if command.source != SlashCommandSource::Local
                         && matches!(self.status, Status::Starting | Status::Exited)
                     {
                         Some(match self.status {
-                            Status::Starting => "Agent is still starting".to_string(),
-                            Status::Exited => "Agent has exited".to_string(),
+                            Status::Starting => i18n("agent-composer-agent-starting").to_string(),
+                            Status::Exited => i18n("agent-composer-agent-exited").to_string(),
                             _ => unreachable!(),
                         })
                     } else {
@@ -196,7 +200,7 @@ impl AgentPane {
                 PaletteCatalogEntry::Skill(skill) => PaletteRow {
                     label: format!("/{}", skill.name),
                     description: skill.description.clone(),
-                    hint: Some(format!("skill · {}", skill.scope)),
+                    hint: Some(i18n("agent-composer-skill-scope").replace("{scope}", &skill.scope)),
                     disabled_reason: self.skill_disabled_reason(&skill),
                     action: PaletteAction::Skill(skill),
                 },
@@ -204,7 +208,7 @@ impl AgentPane {
             .collect::<Vec<_>>();
         let note = if rows.is_empty() {
             if self.kind == AgentKind::Codex && self.palette.skill_catalog.is_none() {
-                Some("Codex skill discovery is still loading".to_string())
+                Some(i18n("agent-composer-skill-discovery-loading").to_string())
             } else if self.kind == AgentKind::Codex
                 && self
                     .palette
@@ -217,20 +221,20 @@ impl AgentPane {
                     .as_ref()
                     .and_then(|catalog| catalog.errors.first().cloned())
             } else if self.kind == AgentKind::Codex {
-                Some("No matching commands or skills".to_string())
+                Some(i18n("agent-composer-no-matching-commands-skills").to_string())
             } else {
-                Some("No matching commands".to_string())
+                Some(i18n("agent-composer-no-matching-commands").to_string())
             }
         } else if self.kind == AgentKind::Claude && !self.palette.provider_commands_ready {
-            Some("Claude command discovery is still loading".to_string())
+            Some(i18n("agent-composer-claude-command-loading").to_string())
         } else if self.kind == AgentKind::Codex && self.palette.skill_catalog.is_none() {
-            Some("Codex skill discovery is still loading".to_string())
+            Some(i18n("agent-composer-skill-discovery-loading").to_string())
         } else if self.kind == AgentKind::Codex {
             self.palette
                 .skill_catalog
                 .as_ref()
                 .and_then(|catalog| catalog.errors.first())
-                .map(|error| format!("Some skills could not be loaded: {error}"))
+                .map(|error| i18n("agent-composer-skill-load-partial").replace("{error}", error))
         } else {
             None
         };
@@ -392,7 +396,8 @@ impl AgentPane {
                 let Ok((text, binding)) = prepare_skill_selection(&skill) else {
                     self.set_command_feedback(
                         CommandFeedbackKind::Error,
-                        format!("${} is disabled by Codex.", skill.name),
+                        i18n("agent-command-skill-disabled-by-codex")
+                            .replace("{name}", &skill.name),
                         cx,
                     );
                     return;

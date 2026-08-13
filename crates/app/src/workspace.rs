@@ -6,6 +6,7 @@
 use std::path;
 
 use nmt_agent_utils::AgentRuntimeStatus;
+use nmt_i18n::i18n;
 
 use crate::tabs::{TabId, TabManager};
 use crate::ui::{ActiveList, HasId, TabSurface};
@@ -44,7 +45,9 @@ pub struct WorkspaceManager {
     workspaces: ActiveList<Workspace>,
 }
 
-pub const DEFAULT_WORKSPACE_NAME: &str = "New Workspace";
+pub fn default_workspace_name() -> &'static str {
+    i18n("shell-workspace-default-name")
+}
 
 /// A path as comparable components: separators unified by `Path`, each
 /// component lowercased (Windows filesystems are case-insensitive). Literal

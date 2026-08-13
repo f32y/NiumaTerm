@@ -146,6 +146,10 @@ fn run_app(argv_url: Option<String>, testing: bool) {
 
     let startup_files = load_startup_files_or_exit();
 
+    // Translations must be ready before any view exists so the first frame
+    // already renders in the configured language.
+    nmt_i18n::init(get().appearance.language.as_str());
+
     // A second launch forwards its action to the existing process so one process
     // URL (or an activate request) to the running instance and exits. A
     // malformed URL degrades to activate — the primary just comes forward.
@@ -178,7 +182,7 @@ fn run_app(argv_url: Option<String>, testing: bool) {
 
     let platform = Rc::new(WindowsPlatform::new(false).expect("failed to initialize GPUI Windows"));
 
-    platform.set_file_drop_description("Paste path to terminal");
+    platform.set_file_drop_description(nmt_i18n::i18n("app-drop-paste-path"));
 
     let platform_handle = platform.clone();
 
@@ -190,6 +194,11 @@ fn run_app(argv_url: Option<String>, testing: bool) {
             // Initialize gpui-component (theme, root, component globals) before any
             // component renders. Themes without `[colors.ui]` retain the dark default.
             init_components(cx);
+
+            // The component library localizes its own chrome (dialog buttons,
+            // search placeholders) through a separate catalog; keep it on the
+            // app language.
+            gpui_component::set_locale(get().appearance.language.as_str());
 
             ui::apply_ui_theme(get().ui_theme.as_ref(), cx);
 
@@ -229,6 +238,17 @@ fn run_app(argv_url: Option<String>, testing: bool) {
                 // between acrylic composition and opaque presentation.
                 ui::apply_window_translucency(cx);
 
+                // The component-library locale doubles as the change detector:
+                // the observer fires on every settings edit (including theme
+                // filter keystrokes), and only a real language switch should
+                // pay for a full re-render of every window.
+                let language = cx.global::<AppSettings>().language;
+                let language_changed = &*gpui_component::locale() != language.as_str();
+                if language_changed {
+                    nmt_i18n::set_language(language.as_str());
+                    gpui_component::set_locale(language.as_str());
+                }
+
                 let background = ui::window_background_appearance(cx);
                 let appearance = selected_window_appearance(cx);
 
@@ -244,6 +264,9 @@ fn run_app(argv_url: Option<String>, testing: bool) {
                         .update(cx, |_, window, cx| {
                             window.set_background_appearance(background);
                             window.set_appearance_override(Some(appearance), cx);
+                            if language_changed {
+                                window.refresh();
+                            }
                         })
                         .ok();
                 }
@@ -418,12 +441,16 @@ fn load_startup_files_or_exit() -> StartupFiles {
 }
 
 fn startup_error_and_exit(file: &str, error: &str) -> ! {
-    show_startup_error_dialog(&format!("Failed to parse {file}:\n\n{error}"));
+    show_startup_error_dialog(
+        &nmt_i18n::i18n("startup-parse-error")
+            .replace("{file}", file)
+            .replace("{error}", error),
+    );
     process::exit(1);
 }
 
 pub(crate) fn show_startup_error_dialog(message: &str) {
-    let title: Vec<u16> = "NiumaTerm configuration error"
+    let title: Vec<u16> = nmt_i18n::i18n("startup-configuration-error")
         .encode_utf16()
         .chain(Some(0))
         .collect();
