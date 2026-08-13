@@ -129,7 +129,8 @@ impl AgentPane {
             None
         };
 
-        if self.send_text_with_skill(text, skill.as_ref(), cx) {
+        if self.send_text_with_skill(text.clone(), skill.as_ref(), cx) {
+            self.record_input_history(&text, cx);
             self.palette.skill_binding = None;
             self.input
                 .update(cx, |input, cx| input.set_value("", window, cx));
@@ -140,6 +141,7 @@ impl AgentPane {
         let input = self.input.read(cx).text().to_string();
 
         if self.submit_slash_input(&input, cx) {
+            self.record_input_history(&input, cx);
             self.input
                 .update(cx, |input, cx| input.set_value("", window, cx));
             self.palette.dismissed = false;
