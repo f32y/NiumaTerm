@@ -53,7 +53,7 @@ use nmt_agent_utils::update::{DiscoverySupport, InstallationKey, ProviderKind, U
 use nmt_config::CursorShape;
 use nmt_config::appearance::SmoothScrollingMode;
 use nmt_config::remote_session::RemoteSessionConfig;
-use nmt_config::system::WarnBeforeTerminatingShell;
+use nmt_config::system::{NewlineShortcut, WarnBeforeTerminatingShell};
 use nmt_platform::{
     is_shell_integration_registered, register_shell_integration, set_system_notification_enabled,
     shell_integration_dll_mismatched, system_notification_enabled, unregister_shell_integration,

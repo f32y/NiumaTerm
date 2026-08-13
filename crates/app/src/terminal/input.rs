@@ -1,4 +1,5 @@
 use gpui::{Keystroke, Modifiers};
+use nmt_config::system::NewlineShortcut;
 use nmt_input::event::ElementState;
 use nmt_input::keyboard::{Key, KeyLocation, ModifiersState, NamedKey};
 use nmt_input::{KeyEncodeFlags, KeyInput, encode_terminal_input};
@@ -6,8 +7,11 @@ use nmt_input::{KeyEncodeFlags, KeyInput, encode_terminal_input};
 use crate::terminal::surface::TerminalKeyAction;
 
 #[cfg(test)]
-pub(crate) fn pty_bytes_for_key(event: &Keystroke) -> Option<Vec<u8>> {
-    match key_action(event) {
+pub(crate) fn pty_bytes_for_key(
+    event: &Keystroke,
+    newline_shortcut: NewlineShortcut,
+) -> Option<Vec<u8>> {
+    match key_action(event, newline_shortcut) {
         TerminalKeyAction::Write(bytes) => Some(bytes),
         TerminalKeyAction::CopyOrWrite(_)
         | TerminalKeyAction::Paste
@@ -27,7 +31,14 @@ pub(crate) fn should_defer_to_ime(event: &Keystroke) -> bool {
         && named_key(&event.key).is_none()
 }
 
-pub(crate) fn key_action(event: &Keystroke) -> TerminalKeyAction {
+pub(crate) fn key_action(
+    event: &Keystroke,
+    newline_shortcut: NewlineShortcut,
+) -> TerminalKeyAction {
+    if let Some(action) = modified_enter_action(event, newline_shortcut) {
+        return action;
+    }
+
     if is_clipboard_shortcut(event, "c") {
         return TerminalKeyAction::CopyOrWrite(vec![0x03]);
     }
@@ -49,6 +60,27 @@ pub(crate) fn key_action(event: &Keystroke) -> TerminalKeyAction {
     .map(TerminalKeyAction::Write)
     .or_else(|| legacy_ctrl_byte(event).map(|b| TerminalKeyAction::Write(vec![b])))
     .unwrap_or(TerminalKeyAction::Ignore)
+}
+
+fn modified_enter_action(
+    event: &Keystroke,
+    newline_shortcut: NewlineShortcut,
+) -> Option<TerminalKeyAction> {
+    if !event.key.eq_ignore_ascii_case("enter") || event.modifiers.alt || event.modifiers.platform {
+        return None;
+    }
+
+    let inserts_newline = match (event.modifiers.control, event.modifiers.shift) {
+        (true, false) => newline_shortcut == NewlineShortcut::CtrlEnter,
+        (false, true) => newline_shortcut == NewlineShortcut::ShiftEnter,
+        _ => return None,
+    };
+
+    Some(TerminalKeyAction::Write(vec![if inserts_newline {
+        b'\n'
+    } else {
+        b'\r'
+    }]))
 }
 
 /// Legacy (non-kitty) Ctrl-chord byte (Ctrl-C → 0x03, …). The platform layer
@@ -188,6 +220,7 @@ fn named_key(name: &str) -> Option<NamedKey> {
 #[cfg(test)]
 mod tests {
     use gpui::{Keystroke, Modifiers};
+    use nmt_config::system::NewlineShortcut;
 
     use super::{key_action, pty_bytes_for_key, should_defer_to_ime};
     use crate::terminal::surface::TerminalKeyAction;
@@ -207,7 +240,7 @@ mod tests {
     }
 
     fn bytes(name: &str, key_char: Option<&str>) -> Vec<u8> {
-        match key_action(&key(name, key_char)) {
+        match key_action(&key(name, key_char), NewlineShortcut::CtrlEnter) {
             TerminalKeyAction::Write(bytes) => bytes,
             action => panic!("expected write action, got {action:?}"),
         }
@@ -232,21 +265,58 @@ mod tests {
         ctrl_alt.alt = true;
 
         assert_eq!(
-            pty_bytes_for_key(&modified("enter", Some("\r"), Modifiers::none())).as_deref(),
+            pty_bytes_for_key(
+                &modified("enter", Some("\r"), Modifiers::none()),
+                NewlineShortcut::CtrlEnter,
+            )
+            .as_deref(),
             Some(&b"\r"[..])
         );
         assert_eq!(
-            pty_bytes_for_key(&modified("enter", Some("\r"), Modifiers::control())).as_deref(),
+            pty_bytes_for_key(
+                &modified("enter", Some("\r"), Modifiers::control()),
+                NewlineShortcut::CtrlEnter,
+            )
+            .as_deref(),
             Some(&b"\n"[..])
         );
         assert_eq!(
-            pty_bytes_for_key(&modified("enter", Some("\r"), Modifiers::alt())).as_deref(),
+            pty_bytes_for_key(
+                &modified("enter", Some("\r"), Modifiers::alt()),
+                NewlineShortcut::CtrlEnter,
+            )
+            .as_deref(),
             Some(&b"\x1b\r"[..])
         );
         assert_eq!(
-            pty_bytes_for_key(&modified("enter", Some("\r"), ctrl_alt)).as_deref(),
+            pty_bytes_for_key(
+                &modified("enter", Some("\r"), ctrl_alt),
+                NewlineShortcut::CtrlEnter,
+            )
+            .as_deref(),
             Some(&b"\x1b\n"[..])
         );
+    }
+
+    #[test]
+    fn newline_shortcut_controls_modified_enter() {
+        let ctrl_enter = modified("enter", Some("\r"), Modifiers::control());
+        let shift_enter = modified("enter", Some("\r"), Modifiers::shift());
+
+        for (shortcut, ctrl_bytes, shift_bytes) in [
+            (NewlineShortcut::CtrlEnter, b'\n', b'\r'),
+            (NewlineShortcut::ShiftEnter, b'\r', b'\n'),
+            (NewlineShortcut::Off, b'\r', b'\r'),
+        ] {
+            assert_eq!(
+                pty_bytes_for_key(&ctrl_enter, shortcut).as_deref(),
+                Some(&[ctrl_bytes][..])
+            );
+            assert_eq!(
+                pty_bytes_for_key(&shift_enter, shortcut).as_deref(),
+                Some(&[shift_bytes][..])
+            );
+        }
     }
 
     #[test]
@@ -275,14 +345,14 @@ mod tests {
         ctrl_left.modifiers.control = true;
 
         assert_eq!(
-            pty_bytes_for_key(&ctrl_left).as_deref(),
+            pty_bytes_for_key(&ctrl_left, NewlineShortcut::CtrlEnter).as_deref(),
             Some(&b"\x1b[1;5D"[..])
         );
 
         let mut shift_tab = key("tab", None);
         shift_tab.modifiers.shift = true;
         assert_eq!(
-            pty_bytes_for_key(&shift_tab).as_deref(),
+            pty_bytes_for_key(&shift_tab, NewlineShortcut::CtrlEnter).as_deref(),
             Some(&b"\x1b[Z"[..])
         );
     }
@@ -293,7 +363,11 @@ mod tests {
         // ride the `legacy_ctrl_byte` fallback.
         for (name, byte) in [("z", 0x1au8), ("d", 0x04), ("\\", 0x1c)] {
             assert_eq!(
-                pty_bytes_for_key(&modified(name, None, Modifiers::control())).as_deref(),
+                pty_bytes_for_key(
+                    &modified(name, None, Modifiers::control()),
+                    NewlineShortcut::CtrlEnter,
+                )
+                .as_deref(),
                 Some(&[byte][..]),
                 "ctrl-{name}"
             );
@@ -301,7 +375,10 @@ mod tests {
         // Ctrl-Shift chords stay with the UI (copy/paste shortcuts).
         let mut ctrl_shift = Modifiers::control();
         ctrl_shift.shift = true;
-        assert_eq!(pty_bytes_for_key(&modified("x", None, ctrl_shift)), None);
+        assert_eq!(
+            pty_bytes_for_key(&modified("x", None, ctrl_shift), NewlineShortcut::CtrlEnter,),
+            None
+        );
     }
 
     #[test]
@@ -331,11 +408,14 @@ mod tests {
         let paste = modified("v", Some("v"), Modifiers::control());
 
         assert_eq!(
-            key_action(&copy),
+            key_action(&copy, NewlineShortcut::CtrlEnter),
             TerminalKeyAction::CopyOrWrite(vec![0x03])
         );
-        assert_eq!(key_action(&paste), TerminalKeyAction::Paste);
-        assert_eq!(pty_bytes_for_key(&copy), None);
+        assert_eq!(
+            key_action(&paste, NewlineShortcut::CtrlEnter),
+            TerminalKeyAction::Paste
+        );
+        assert_eq!(pty_bytes_for_key(&copy, NewlineShortcut::CtrlEnter), None);
     }
 
     #[test]
@@ -343,7 +423,13 @@ mod tests {
         let copy = modified("c", Some("c"), Modifiers::control_shift());
         let paste = modified("v", Some("v"), Modifiers::control_shift());
 
-        assert_eq!(key_action(&copy), TerminalKeyAction::Ignore);
-        assert_eq!(key_action(&paste), TerminalKeyAction::Ignore);
+        assert_eq!(
+            key_action(&copy, NewlineShortcut::CtrlEnter),
+            TerminalKeyAction::Ignore
+        );
+        assert_eq!(
+            key_action(&paste, NewlineShortcut::CtrlEnter),
+            TerminalKeyAction::Ignore
+        );
     }
 }

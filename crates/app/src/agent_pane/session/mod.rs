@@ -49,9 +49,9 @@ impl AgentPane {
     ) -> Self {
         let kind = AgentKind::from_profile(profile.kind);
         let name = kind.display();
-        // Auto-grow wraps long prompts instead of scrolling them off-screen;
-        // Enter still submits (submit_on_enter), Shift+Enter inserts a
-        // newline.
+        // Auto-grow wraps long prompts instead of scrolling them off-screen.
+        // The view intercepts modified Enter actions before this input's
+        // submit-on-enter behavior runs.
         let input = cx.new(|cx| {
             InputState::new(window, cx)
                 .auto_grow(1, 8)
@@ -60,9 +60,13 @@ impl AgentPane {
         });
 
         cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| {
-            // Shift+Enter emits PressEnter too, but it inserted a newline —
-            // only a plain Enter sends.
-            if matches!(event, InputEvent::PressEnter { shift: false, .. }) {
+            if matches!(
+                event,
+                InputEvent::PressEnter {
+                    secondary: false,
+                    shift: false,
+                }
+            ) {
                 this.send_user_message(window, cx);
             } else if matches!(event, InputEvent::Change) {
                 let text = this.input.read(cx).text().to_string();

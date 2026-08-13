@@ -65,7 +65,10 @@ impl TerminalPane {
             return;
         }
 
-        let action = terminal_input::key_action(&event.keystroke);
+        let action = terminal_input::key_action(
+            &event.keystroke,
+            cx.global::<AppSettings>().newline_shortcut,
+        );
         let interrupts_agent = matches!(event.keystroke.key.as_str(), "escape" | "esc")
             && !event.keystroke.modifiers.modified();
 
@@ -96,10 +99,10 @@ impl TerminalPane {
 
     /// Route a keystroke straight to the terminal PTY.
     pub(crate) fn feed_terminal_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) {
-        match self
-            .surface
-            .apply_key_action(terminal_input::key_action(keystroke))
-        {
+        match self.surface.apply_key_action(terminal_input::key_action(
+            keystroke,
+            cx.global::<AppSettings>().newline_shortcut,
+        )) {
             SurfaceKeyResult::Ignored => return,
             SurfaceKeyResult::Handled => self.react_to_pty_input(cx),
             SurfaceKeyResult::Copied => {}

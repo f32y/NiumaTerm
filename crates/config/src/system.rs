@@ -41,6 +41,33 @@ impl WarnBeforeTerminatingShell {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum NewlineShortcut {
+    #[default]
+    CtrlEnter,
+    ShiftEnter,
+    Off,
+}
+
+impl NewlineShortcut {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CtrlEnter => "ctrl-enter",
+            Self::ShiftEnter => "shift-enter",
+            Self::Off => "off",
+        }
+    }
+
+    pub fn from_value(value: &str) -> Self {
+        match value {
+            "shift-enter" => Self::ShiftEnter,
+            "off" => Self::Off,
+            _ => Self::CtrlEnter,
+        }
+    }
+}
+
 /// The `[system]` section: process/system behavior settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SystemConfig {
@@ -65,6 +92,9 @@ pub struct SystemConfig {
     /// Raise the main (UI) and render thread priority to AboveNormal.
     #[serde(default, rename = "prioritize-ui-threads")]
     pub prioritize_ui_threads: bool,
+    /// Modified Enter key that inserts a new line without submitting input.
+    #[serde(default, rename = "newline-shortcut")]
+    pub newline_shortcut: NewlineShortcut,
 }
 
 impl Default for SystemConfig {
@@ -75,6 +105,7 @@ impl Default for SystemConfig {
             warn_before_terminating_shell: WarnBeforeTerminatingShell::default(),
             confirm_before_closing_workspace: true,
             prioritize_ui_threads: false,
+            newline_shortcut: NewlineShortcut::default(),
         }
     }
 }
@@ -90,4 +121,5 @@ pub(crate) fn patch_document(doc: &mut DocumentMut, system: &SystemConfig) {
     doc["system"]["confirm-before-closing-workspace"] =
         value(system.confirm_before_closing_workspace);
     doc["system"]["prioritize-ui-threads"] = value(system.prioritize_ui_threads);
+    doc["system"]["newline-shortcut"] = value(system.newline_shortcut.as_str());
 }

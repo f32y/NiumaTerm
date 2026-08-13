@@ -130,4 +130,24 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                     ),
                 )),
         )
+        .group(
+            SettingGroup::new()
+                .title(i18n("settings-system-input"))
+                .item(SettingItem::new(
+                    i18n("settings-system-newline-shortcut"),
+                    SettingField::dropdown(
+                        vec![
+                            ("ctrl-enter".into(), "Ctrl-Enter".into()),
+                            ("shift-enter".into(), "Shift-Enter".into()),
+                            ("off".into(), i18n("settings-common-off").into()),
+                        ],
+                        |cx| cx.global::<AppSettings>().newline_shortcut.as_str().into(),
+                        |value, cx| {
+                            cx.global_mut::<AppSettings>().newline_shortcut =
+                                NewlineShortcut::from_value(&value);
+                        },
+                    )
+                    .default_value(SharedString::from(NewlineShortcut::CtrlEnter.as_str())),
+                )),
+        )
 }

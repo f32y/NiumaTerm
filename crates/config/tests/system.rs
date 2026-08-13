@@ -14,6 +14,20 @@ fn system_section_defaults_when_absent() {
     );
     assert!(config.system.confirm_before_closing_workspace);
     assert!(!config.system.prioritize_ui_threads);
+    assert_eq!(config.system.newline_shortcut, NewlineShortcut::CtrlEnter);
+}
+
+#[test]
+fn newline_shortcut_accepts_supported_values() {
+    for (value, expected) in [
+        ("ctrl-enter", NewlineShortcut::CtrlEnter),
+        ("shift-enter", NewlineShortcut::ShiftEnter),
+        ("off", NewlineShortcut::Off),
+    ] {
+        let config: Config =
+            from_str(&format!("[system]\nnewline-shortcut = \"{value}\"")).unwrap();
+        assert_eq!(config.system.newline_shortcut, expected);
+    }
 }
 
 #[test]
