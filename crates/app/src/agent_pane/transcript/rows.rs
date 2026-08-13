@@ -167,9 +167,9 @@ impl TranscriptView {
         cx.notify();
     }
 
-    /// Render one turn: user rows, then (for settled turns) a clickable
-    /// "Worked for Ns" fold header hiding the intermediate work rows by
-    /// default, then the final reply. Running turns render chronologically.
+    /// Render one turn: user rows, the intermediate work rows (hidden by
+    /// default behind the fold), the final reply, and last the clickable
+    /// "Worked for Ns" summary. Running turns render chronologically.
     pub(in crate::agent_pane) fn entry_spec(&self, index: usize) -> RowSpec {
         RowSpec::Entry {
             index,
@@ -268,13 +268,6 @@ impl TranscriptView {
             rows.push(self.entry_spec(i));
         }
 
-        rows.push(RowSpec::FoldHeader {
-            turn,
-            seconds,
-            output_tokens: self.completed_turn_output_tokens.get(&turn).copied(),
-            folded,
-        });
-
         if folded {
             // Errors, compaction boundaries and steered prompts stay visible
             // inside a folded turn: an error is what the user needs to act on,
@@ -300,6 +293,17 @@ impl TranscriptView {
         if let Some(i) = final_agent {
             rows.push(self.entry_spec(i));
         }
+
+        // The turn's summary closes it, below the answer it accounts for, the
+        // same place the interrupted marker sits. Its work rows precede the
+        // answer, so expanding the fold inserts them where they happened
+        // instead of between the summary and the reply it summarizes.
+        rows.push(RowSpec::FoldHeader {
+            turn,
+            seconds,
+            output_tokens: self.completed_turn_output_tokens.get(&turn).copied(),
+            folded,
+        });
     }
 
     /// Chronological rows for a slice of the transcript, collapsing runs of

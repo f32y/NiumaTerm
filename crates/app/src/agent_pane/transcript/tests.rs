@@ -460,12 +460,13 @@ mod steered_prompt_rows_tests {
 
                 // Folded: the work between prompt and answer is hidden, while
                 // the user's own steered words stay readable above the reply.
-                assert_eq!(order(transcript), vec![Some(0), None, Some(2), Some(3)]);
+                // The summary closes the turn, below the reply.
+                assert_eq!(order(transcript), vec![Some(0), Some(2), Some(3), None]);
 
                 transcript.expanded_turns.insert(1);
                 assert_eq!(
                     order(transcript),
-                    vec![Some(0), None, Some(1), Some(2), Some(3)],
+                    vec![Some(0), Some(1), Some(2), Some(3), None],
                     "the steered prompt sits after the reply it arrived during"
                 );
             });
