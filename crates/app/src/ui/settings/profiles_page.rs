@@ -35,34 +35,27 @@ fn terminal_profiles_group(profiles: &[Profile]) -> SettingGroup {
 
     let mut group = SettingGroup::new()
         .title(i18n("settings-profiles-terminal-group"))
-        .description(i18n("settings-profiles-terminal-group-description"))
-        .item(
-            SettingItem::new(
-                i18n("settings-profiles-default"),
-                SettingField::dropdown(
-                    options,
-                    |cx| cx.global::<AppSettings>().default_profile.clone().into(),
-                    |value, cx| {
-                        cx.global_mut::<AppSettings>().default_profile = value.to_string();
-                    },
-                ),
-            )
-            .description(i18n("settings-profiles-default-description")),
-        )
-        .item(
-            SettingItem::new(
-                i18n("settings-profiles-add"),
-                SettingField::render(|_, _, _| {
-                    Button::new("profile-add")
-                        .outline()
-                        .label(i18n("settings-common-add"))
-                        .on_click(|_, _, cx: &mut App| {
-                            cx.global_mut::<AppSettings>().add_profile();
-                        })
-                }),
-            )
-            .description(i18n("settings-profiles-add-description")),
-        );
+        .item(SettingItem::new(
+            i18n("settings-profiles-default"),
+            SettingField::dropdown(
+                options,
+                |cx| cx.global::<AppSettings>().default_profile.clone().into(),
+                |value, cx| {
+                    cx.global_mut::<AppSettings>().default_profile = value.to_string();
+                },
+            ),
+        ))
+        .item(SettingItem::new(
+            i18n("settings-profiles-add"),
+            SettingField::render(|_, _, _| {
+                Button::new("profile-add")
+                    .outline()
+                    .label(i18n("settings-common-add"))
+                    .on_click(|_, _, cx: &mut App| {
+                        cx.global_mut::<AppSettings>().add_profile();
+                    })
+            }),
+        ));
 
     let count = profiles.len();
     for ix in 0..count {
@@ -219,7 +212,7 @@ fn terminal_profile_card(ix: usize, count: usize) -> SettingItem {
                 .gap_4()
                 .child(card_row(
                     i18n("settings-common-name"),
-                    i18n("settings-profiles-name-description"),
+                    "",
                     Input::new(&name_input)
                         .disabled(disabled)
                         .with_size(size)
@@ -228,13 +221,13 @@ fn terminal_profile_card(ix: usize, count: usize) -> SettingItem {
                 ))
                 .child(card_row(
                     i18n("settings-profiles-shell-path"),
-                    i18n("settings-profiles-shell-path-description"),
+                    "",
                     shell_control,
                     cx,
                 ))
                 .child(card_row(
                     i18n("settings-profiles-arguments"),
-                    i18n("settings-profiles-arguments-description"),
+                    "",
                     Input::new(&args_input)
                         .disabled(disabled)
                         .with_size(size)
@@ -243,11 +236,7 @@ fn terminal_profile_card(ix: usize, count: usize) -> SettingItem {
                 ))
                 .child(card_row(
                     i18n("settings-profiles-remove-title"),
-                    if count <= 1 {
-                        i18n("settings-profiles-remove-last")
-                    } else {
-                        i18n("settings-profiles-remove-default-note")
-                    },
+                    "",
                     remove_button,
                     cx,
                 )),
@@ -275,39 +264,32 @@ fn agent_profiles_group(agent_profiles: &[AgentProfile]) -> SettingGroup {
 
     let group = SettingGroup::new()
         .title(i18n("settings-profiles-agent-group"))
-        .description(i18n("settings-profiles-agent-group-description"))
-        .item(
-            SettingItem::new(
-                i18n("settings-profiles-default"),
-                SettingField::dropdown(
-                    options,
-                    |cx| {
-                        cx.global::<AppSettings>()
-                            .default_agent_profile
-                            .clone()
-                            .into()
-                    },
-                    |value, cx| {
-                        cx.global_mut::<AppSettings>().default_agent_profile = value.to_string();
-                    },
-                ),
-            )
-            .description(i18n("settings-profiles-agent-default-description")),
-        )
-        .item(
-            SettingItem::new(
-                i18n("settings-profiles-add"),
-                SettingField::render(|_, _, _| {
-                    Button::new("agent-profile-add")
-                        .outline()
-                        .label(i18n("settings-common-add"))
-                        .on_click(|_, window, cx: &mut App| {
-                            open_agent_profile_dialog(None, window, cx);
-                        })
-                }),
-            )
-            .description(i18n("settings-profiles-agent-add-description")),
-        );
+        .item(SettingItem::new(
+            i18n("settings-profiles-default"),
+            SettingField::dropdown(
+                options,
+                |cx| {
+                    cx.global::<AppSettings>()
+                        .default_agent_profile
+                        .clone()
+                        .into()
+                },
+                |value, cx| {
+                    cx.global_mut::<AppSettings>().default_agent_profile = value.to_string();
+                },
+            ),
+        ))
+        .item(SettingItem::new(
+            i18n("settings-profiles-add"),
+            SettingField::render(|_, _, _| {
+                Button::new("agent-profile-add")
+                    .outline()
+                    .label(i18n("settings-common-add"))
+                    .on_click(|_, window, cx: &mut App| {
+                        open_agent_profile_dialog(None, window, cx);
+                    })
+            }),
+        ));
 
     group.item(SettingItem::render(|_, window, cx| {
         agent_profile_list(window, cx)
