@@ -589,11 +589,14 @@ impl Session {
                 // child's conversation is presented as one stream, so its turn
                 // grouping is flattened away.
                 None => BackgroundTaskTranscriptUpdate::loaded(
-                    parse_replay(&message["result"]["thread"]["turns"])
-                        .into_iter()
-                        .flat_map(|turn| turn.items)
-                        .map(|entry| entry.item)
-                        .collect(),
+                    self.background.with_launch_message(
+                        &thread_id,
+                        parse_replay(&message["result"]["thread"]["turns"])
+                            .into_iter()
+                            .flat_map(|turn| turn.items)
+                            .map(|entry| entry.item)
+                            .collect(),
+                    ),
                 ),
             };
             return vec![Event::BackgroundTaskTranscript { key, update }];
@@ -739,6 +742,14 @@ impl Session {
             // Current servers can publish this deprecated notification beside
             // the authoritative item lifecycle. Ignoring it prevents a second
             // boundary for the same context rewrite.
+            return Vec::new();
+        }
+
+        if method == "rawResponseItem/completed" {
+            if let Some(thread_id) = notification_thread_id(params) {
+                self.background
+                    .observe_raw_response_item(thread_id, &params["item"]);
+            }
             return Vec::new();
         }
 

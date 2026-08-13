@@ -6,6 +6,8 @@
 //! child lifecycle out of the parent conversation, plus the `thread/list`
 //! descendant query used to recover children after a resume or reconnect.
 
+mod launch_messages;
+
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -15,6 +17,8 @@ use crate::background_task::{
     BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskRefs, BackgroundTaskRegistry,
     BackgroundTaskSnapshot, BackgroundTaskState, BackgroundTaskUpdate,
 };
+use crate::chat::Item;
+use crate::codex::app_server::background_tasks::launch_messages::LaunchMessages;
 
 /// Page size for descendant discovery. Threads are cheap metadata rows and the
 /// cursor is followed to completion, so this only bounds one response.
@@ -62,6 +66,7 @@ pub(super) struct CodexTasks {
     pending: HashMap<String, BackgroundTaskUpdate>,
     /// Insertion order of `pending`, so the oldest candidate can be evicted.
     pending_order: Vec<String>,
+    launch_messages: LaunchMessages,
     queries: HashMap<u64, DescendantQuery>,
     /// Pagination cursors already requested for the current root.
     seen_cursors: HashSet<String>,
@@ -86,6 +91,7 @@ impl CodexTasks {
         self.parents.clear();
         self.pending.clear();
         self.pending_order.clear();
+        self.launch_messages.clear();
         self.queries.clear();
         self.seen_cursors.clear();
         self.reads.clear();
@@ -145,6 +151,7 @@ impl CodexTasks {
             self.parents.insert(thread_id.to_owned(), parent.to_owned());
         }
         self.confirmed.insert(thread_id.to_owned());
+        self.launch_messages.confirm(thread_id);
         true
     }
 
@@ -282,6 +289,9 @@ impl CodexTasks {
                 continue;
             }
             changed |= self.drain_pending(&thread_id);
+            if is_spawn && let Some(prompt) = prompt.as_deref() {
+                self.launch_messages.remember(&thread_id, prompt);
+            }
 
             let state = &states[thread_id.as_str()];
             let mut update = BackgroundTaskUpdate {
@@ -608,6 +618,21 @@ impl CodexTasks {
     /// The descendant a completed read belongs to.
     pub(super) fn finish_transcript_read(&mut self, rpc_id: u64) -> Option<String> {
         self.reads.remove(&rpc_id)
+    }
+
+    pub(super) fn observe_raw_response_item(&mut self, thread_id: &str, item: &Value) -> bool {
+        let Some(root) = self.root() else {
+            return false;
+        };
+        if root == thread_id {
+            return false;
+        }
+        self.launch_messages
+            .observe(thread_id, item, self.confirmed.contains(thread_id))
+    }
+
+    pub(super) fn with_launch_message(&self, thread_id: &str, items: Vec<Item>) -> Vec<Item> {
+        self.launch_messages.prepend(thread_id, items)
     }
 
     /// Record a failed descendant page. Known rows stay visible; the failure is

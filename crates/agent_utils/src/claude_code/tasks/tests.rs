@@ -496,6 +496,30 @@ fn linked_activity_becomes_the_childs_own_conversation() {
 }
 
 #[test]
+fn linked_user_text_becomes_the_childs_first_instruction() {
+    let mut tasks = reducer();
+    tasks.observe(&launch("toolu_1"));
+    tasks.take_transcripts();
+
+    tasks.observe(&json!({
+        "type": "user",
+        "session_id": SESSION,
+        "parent_tool_use_id": "toolu_1",
+        "uuid": "u-0",
+        "message": {"content": [
+            {"type": "text", "text": "review the parser"},
+        ]},
+    }));
+
+    let published = tasks.take_transcripts();
+    assert_eq!(published.len(), 1);
+    assert!(matches!(
+        &published[0].1.items[0],
+        Item::UserMessage { text: Some(text) } if text == "review the parser"
+    ));
+}
+
+#[test]
 fn a_child_tool_result_completes_the_call_it_answers() {
     let mut tasks = reducer();
     tasks.observe(&launch("toolu_1"));

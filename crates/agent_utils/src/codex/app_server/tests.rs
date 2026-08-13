@@ -318,6 +318,7 @@ fn thread_start_injects_profile_model_and_provider_without_a_secret() {
     let mut expected = json!({
         "model": "vendor/custom-model",
         "modelProvider": "niumaterm-a1",
+        "experimentalRawEvents": true,
         "config": {
             "model_providers.niumaterm-a1": {
                 "name": "Proxy",
