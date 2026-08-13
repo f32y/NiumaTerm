@@ -302,16 +302,31 @@ impl SettingItem {
                                     )
                                 }),
                         )
-                        .child(div().id("field").child(Self::render_field(
-                            field,
-                            RenderOptions {
-                                layout,
-                                disabled,
-                                ..*options
-                            },
-                            window,
-                            cx,
-                        )))
+                        .child(
+                            // A row is as tall as its tallest column, so a
+                            // switch (20px at Medium) leaves it shorter than a
+                            // neighbouring dropdown or input (32px) and a group
+                            // of mixed controls reads as ragged. Giving the
+                            // field slot the standard control height as a floor
+                            // and centring the control inside it keeps rows
+                            // uniform and puts a short control on the same axis
+                            // as a full-height one.
+                            div()
+                                .id("field")
+                                .flex()
+                                .items_center()
+                                .min_h(options.size.table_row_height())
+                                .child(Self::render_field(
+                                    field,
+                                    RenderOptions {
+                                        layout,
+                                        disabled,
+                                        ..*options
+                                    },
+                                    window,
+                                    cx,
+                                )),
+                        )
                         .into_any_element()
                 }
                 SettingItem::Element {
