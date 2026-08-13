@@ -856,3 +856,105 @@ fn a_retired_marker_only_counts_at_the_start_of_a_description() {
 
     assert_eq!(parsed.len(), 1);
 }
+
+#[test]
+fn ask_user_question_input_parses_options_and_drops_unanswerable_questions() {
+    let parsed = parse_questions(&json!({
+        "questions": [
+            {
+                "question": "Which database?",
+                "header": "Database",
+                "options": [
+                    {"label": "Postgres", "description": "Relational"},
+                    {"label": "SQLite"},
+                ],
+            },
+            {
+                "question": "Which extras?",
+                "multiSelect": true,
+                "options": [
+                    {"label": "Metrics", "description": "Prometheus"},
+                    {"label": "Tracing", "description": "OpenTelemetry"},
+                    {"label": "Audit log", "description": "Append-only"},
+                ],
+            },
+            // A single-option question cannot be answered by picking.
+            {"question": "Proceed?", "options": [{"label": "Yes"}]},
+        ]
+    }));
+
+    assert_eq!(parsed.len(), 2);
+
+    assert_eq!(parsed[0].header.as_deref(), Some("Database"));
+    assert!(!parsed[0].multi_select);
+    assert_eq!(
+        parsed[0].options[0].description.as_deref(),
+        Some("Relational")
+    );
+    assert_eq!(parsed[0].options[1].description, None);
+
+    assert_eq!(parsed[1].header, None);
+    assert!(parsed[1].multi_select);
+    assert_eq!(parsed[1].options.len(), 3);
+}
+
+#[test]
+fn answered_questions_merge_into_the_original_tool_input() {
+    let input = json!({
+        "questions": [{"question": "Which database?"}, {"question": "Which extras?"}],
+        "metadata": {"source": "cli"},
+    });
+    let questions = parse_questions(&json!({
+        "questions": [
+            {
+                "question": "Which database?",
+                "options": [{"label": "Postgres"}, {"label": "SQLite"}],
+            },
+            {
+                "question": "Which extras?",
+                "multiSelect": true,
+                "options": [{"label": "Metrics"}, {"label": "Tracing"}],
+            },
+        ]
+    }));
+
+    let merged = merge_question_answers(
+        input,
+        &questions,
+        vec![
+            vec!["Postgres".to_owned()],
+            vec!["Metrics".to_owned(), "Tracing".to_owned()],
+        ],
+    );
+
+    // Everything the CLI sent must survive: the tool re-reads its own input.
+    assert_eq!(merged["metadata"]["source"], json!("cli"));
+    assert_eq!(merged["questions"].as_array().map(Vec::len), Some(2));
+
+    // Single-select reports a bare label, multi-select an array.
+    assert_eq!(merged["answers"]["Which database?"], json!("Postgres"));
+    assert_eq!(
+        merged["answers"]["Which extras?"],
+        json!(["Metrics", "Tracing"])
+    );
+}
+
+#[test]
+fn unanswered_questions_are_omitted_rather_than_reported_as_empty() {
+    let questions = parse_questions(&json!({
+        "questions": [
+            {"question": "Which database?", "options": [{"label": "Postgres"}, {"label": "SQLite"}]},
+            {"question": "Which extras?", "options": [{"label": "Metrics"}, {"label": "Tracing"}]},
+        ]
+    }));
+
+    let merged = merge_question_answers(
+        json!({"questions": []}),
+        &questions,
+        vec![vec![], vec!["Tracing".to_owned()]],
+    );
+
+    let answers = merged["answers"].as_object().expect("answers object");
+    assert!(!answers.contains_key("Which database?"));
+    assert_eq!(answers["Which extras?"], json!("Tracing"));
+}

@@ -76,6 +76,135 @@ impl AgentPane {
         })
     }
 
+    /// The `AskUserQuestion` card. The provider caps a batch at four questions
+    /// of two to four options, so every question renders expanded rather than
+    /// paged: the user sees the whole ask before answering any of it.
+    pub(in crate::agent_pane::view) fn render_question_panel(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let prompt = self.pending_questions.as_ref()?;
+        let complete = prompt.is_complete();
+
+        // Collected eagerly: each row needs `cx` mutably to build its listeners,
+        // which a lazy iterator would still be holding while the surrounding
+        // card reads the theme.
+        let questions: Vec<AnyElement> = prompt
+            .questions
+            .iter()
+            .enumerate()
+            .map(|(index, question)| {
+                let header = question.header.as_ref().map(|header| {
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(cx.theme().muted_foreground)
+                        .child(header.clone())
+                });
+
+                v_flex()
+                    .w_full()
+                    .gap_1p5()
+                    .children(header)
+                    .child(div().text_sm().child(question.question.clone()))
+                    .child(self.render_question_options(index, question, prompt, cx))
+                    .into_any_element()
+            })
+            .collect();
+
+        Some(
+            v_flex()
+                .w_full()
+                .px_4()
+                .py_3()
+                .gap_3()
+                .border_b_1()
+                .border_color(cx.theme().border.opacity(0.65))
+                .bg(cx.theme().muted.opacity(0.2))
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(cx.theme().muted_foreground)
+                        .child(i18n("agent-question-pending")),
+                )
+                .children(questions)
+                .child(
+                    h_flex()
+                        .justify_end()
+                        .gap_2()
+                        .child(
+                            Button::new("question-skip")
+                                .ghost()
+                                .label(i18n("agent-question-skip"))
+                                .on_click(
+                                    cx.listener(|this, _, _, cx| this.respond_questions(false, cx)),
+                                ),
+                        )
+                        .child(
+                            Button::new("question-submit")
+                                .primary()
+                                // Submitting a partial set would report the
+                                // unanswered questions as refusals, so the
+                                // button waits for every question.
+                                .disabled(!complete)
+                                .label(i18n("agent-question-submit"))
+                                .on_click(
+                                    cx.listener(|this, _, _, cx| this.respond_questions(true, cx)),
+                                ),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+
+    fn render_question_options(
+        &self,
+        question_index: usize,
+        question: &Question,
+        prompt: &QuestionPrompt,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let describe = |option: &QuestionOption| {
+            option
+                .description
+                .as_ref()
+                .filter(|description| !description.is_empty())
+                .map_or_else(
+                    || option.label.clone(),
+                    |description| format!("{} — {description}", option.label),
+                )
+        };
+
+        // One id namespace per question, so option ids stay unique across the
+        // card without assuming how many options a question carries.
+        let group: SharedString = format!("agent-question-{question_index}").into();
+
+        if question.multi_select {
+            return v_flex()
+                .gap_1()
+                .children(question.options.iter().enumerate().map(|(index, option)| {
+                    Checkbox::new((group.clone(), index))
+                        .label(describe(option))
+                        .checked(prompt.is_selected(question_index, index))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_question_option(question_index, index, cx)
+                        }))
+                }))
+                .into_any_element();
+        }
+
+        // Single-select maps onto a radio group, which owns the
+        // one-of-N invariant instead of leaving it to the click handler.
+        RadioGroup::vertical(group)
+            .children(question.options.iter().map(describe))
+            .selected_index(prompt.selected[question_index].first().copied())
+            .on_click(cx.listener(move |this, index: &usize, _, cx| {
+                this.toggle_question_option(question_index, *index, cx)
+            }))
+            .into_any_element()
+    }
+
     pub(in crate::agent_pane::view) fn render_update_banner(
         &self,
         cx: &mut Context<Self>,

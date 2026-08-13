@@ -19,8 +19,8 @@ use std::process::Command;
 use std::time::Duration;
 
 use control::{
-    PendingApproval, PendingControlOperation, fail_pending_control_operations,
-    resolve_pending_control_operation,
+    PendingApproval, PendingControlOperation, PendingQuestions, fail_pending_control_operations,
+    merge_question_answers, parse_questions, resolve_pending_control_operation,
 };
 #[cfg(test)]
 use launch::{ANTHROPIC_MODEL_ENV, FILE_CHECKPOINTING_ENV};
@@ -114,6 +114,7 @@ pub struct Session {
     /// turn-started notification — `result` is the only turn boundary).
     turn_reported: bool,
     pending_approval: Option<PendingApproval>,
+    pending_questions: Option<PendingQuestions>,
     /// Last model/permission actually applied by the backend, so settings picked
     /// in the UI turn into `set_model` / `set_permission_mode` control
     /// requests exactly when they change.
@@ -252,6 +253,7 @@ impl Session {
             turn_active: false,
             turn_reported: false,
             pending_approval: None,
+            pending_questions: None,
             applied_model: initial_model,
             applied_permission: None,
             open_blocks: HashMap::new(),
@@ -282,6 +284,7 @@ impl Session {
     pub fn has_active_operation(&self) -> bool {
         self.turn_active
             || self.pending_approval.is_some()
+            || self.pending_questions.is_some()
             || self.compacting
             || !self.pending_control_operations.is_empty()
     }
@@ -318,13 +321,24 @@ impl Session {
             Some("control_request") => events.extend(self.process_control_request(&message)),
             Some("control_response") => events.extend(self.process_control_response(&message)),
             Some("control_cancel_request") => {
+                let cancelled = message["request_id"].as_str();
+
                 if self
                     .pending_approval
                     .as_ref()
-                    .is_some_and(|p| Some(p.request_id.as_str()) == message["request_id"].as_str())
+                    .is_some_and(|p| Some(p.request_id.as_str()) == cancelled)
                 {
                     self.pending_approval = None;
                     events.push(Event::ApprovalResolved);
+                }
+
+                if self
+                    .pending_questions
+                    .as_ref()
+                    .is_some_and(|p| Some(p.request_id.as_str()) == cancelled)
+                {
+                    self.pending_questions = None;
+                    events.push(Event::QuestionsResolved);
                 }
             }
             _ => {}
@@ -549,6 +563,40 @@ impl Session {
         if decision == "cancel" {
             self.interrupt();
         }
+    }
+
+    /// Answer the pending `AskUserQuestion` request. `answers` holds the chosen
+    /// option labels per question, in question order; `None` declines. The CLI
+    /// re-runs the tool with the merged input and writes the tool result
+    /// itself, so nothing further is sent for this tool call.
+    pub fn respond_questions(&mut self, answers: Option<Vec<Vec<String>>>) {
+        let Some(pending) = self.pending_questions.take() else {
+            return;
+        };
+
+        let response = match answers {
+            Some(answers) if answers.iter().any(|labels| !labels.is_empty()) => {
+                let updated_input =
+                    merge_question_answers(pending.input, &pending.questions, answers);
+
+                json!({"behavior": "allow", "updatedInput": updated_input})
+            }
+            // Declining is a deny, which the CLI turns into a "no answer"
+            // tool result; the turn continues instead of aborting.
+            _ => json!({
+                "behavior": "deny",
+                "message": "The user dismissed the questions; make your best assumption and continue.",
+            }),
+        };
+
+        self.send(json!({
+            "type": "control_response",
+            "response": {
+                "subtype": "success",
+                "request_id": pending.request_id,
+                "response": response,
+            },
+        }));
     }
 
     fn alloc_item_id(&mut self, prefix: &str) -> String {
@@ -893,6 +941,10 @@ impl Session {
             events.push(Event::ApprovalResolved);
         }
 
+        if self.pending_questions.take().is_some() {
+            events.push(Event::QuestionsResolved);
+        }
+
         // Compaction only runs inside a turn, so a still-set flag here means
         // its end notification was lost (interrupt, aborted turn); the
         // indicator must not outlive the turn that owned it.
@@ -960,23 +1012,37 @@ impl Session {
 
         let tool_name = request["tool_name"].as_str().unwrap_or("tool");
 
-        // AskUserQuestion expects client-injected answers, and this UI has no
-        // question form yet; a deny with guidance keeps the turn moving
-        // instead of hanging it.
+        // AskUserQuestion is a permission request only in shape: the CLI runs
+        // the tool with whatever answers the client merges into `updatedInput`,
+        // so it needs the question card rather than an allow/deny card.
         if tool_name == "AskUserQuestion" {
-            self.send(json!({
-                "type": "control_response",
-                "response": {
-                    "subtype": "success",
-                    "request_id": request_id,
-                    "response": {
-                        "behavior": "deny",
-                        "message": "Interactive questions are not supported in this client; make your best assumption and continue.",
-                    },
-                },
-            }));
+            let questions = parse_questions(&request["input"]);
 
-            return Vec::new();
+            // Nothing renderable means nothing the user could answer; denying
+            // keeps the turn moving instead of showing an empty card.
+            if questions.is_empty() {
+                self.send(json!({
+                    "type": "control_response",
+                    "response": {
+                        "subtype": "success",
+                        "request_id": request_id,
+                        "response": {
+                            "behavior": "deny",
+                            "message": "The question payload was unusable; make your best assumption and continue.",
+                        },
+                    },
+                }));
+
+                return Vec::new();
+            }
+
+            self.pending_questions = Some(PendingQuestions {
+                request_id,
+                input: request["input"].clone(),
+                questions: questions.clone(),
+            });
+
+            return vec![Event::QuestionsRequested { questions }];
         }
 
         let description = approval_description(tool_name, &request["input"]);

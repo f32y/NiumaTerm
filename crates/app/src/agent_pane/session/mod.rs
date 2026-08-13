@@ -108,6 +108,7 @@ impl AgentPane {
             status: Status::Starting,
             history_ui: SessionHistoryUi::default(),
             pending_approval: None,
+            pending_questions: None,
             settings: ThreadSettings::default(),
             seed_thread_defaults: true,
             seed_approval_reviewer: false,
@@ -831,6 +832,38 @@ impl AgentPane {
 
         if let Some(session) = self.session.as_mut() {
             session.respond_approval(decision);
+        }
+        cx.notify();
+    }
+
+    /// Record a pick without answering yet; the card stays open until the user
+    /// submits, so multi-select questions can accumulate choices.
+    pub(super) fn toggle_question_option(
+        &mut self,
+        question: usize,
+        option: usize,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(prompt) = self.pending_questions.as_mut() {
+            prompt.toggle(question, option);
+            cx.notify();
+        }
+    }
+
+    /// Submit the current picks, or decline when `submit` is false. The card is
+    /// dismissed immediately; the session's `QuestionsResolved` confirmation is
+    /// then an idempotent status refresh, as with approvals.
+    pub(super) fn respond_questions(&mut self, submit: bool, cx: &mut Context<Self>) {
+        let Some(prompt) = self.pending_questions.take() else {
+            return;
+        };
+
+        let answers = (submit && prompt.is_complete()).then(|| prompt.answers());
+
+        self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
+
+        if let Some(session) = self.session.as_mut() {
+            session.respond_questions(answers);
         }
         cx.notify();
     }

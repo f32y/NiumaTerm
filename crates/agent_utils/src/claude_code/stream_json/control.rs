@@ -3,7 +3,7 @@ use std::mem::take;
 
 use serde_json::Value;
 
-use crate::chat::{ContextComposition, ContextSegment, Event};
+use crate::chat::{ContextComposition, ContextSegment, Event, Question, QuestionOption};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum PendingControlOperation {
@@ -18,6 +18,88 @@ pub(super) struct PendingApproval {
     pub(super) request_id: String,
     pub(super) input: Value,
     pub(super) suggestions: Option<Value>,
+}
+
+/// An `AskUserQuestion` request awaiting the user's picks. The CLI does not
+/// generate the answers itself: it re-runs the tool with whatever the client
+/// merges into `updatedInput`, so the untouched `input` is kept to echo back
+/// and the parsed questions drive the card.
+pub(super) struct PendingQuestions {
+    pub(super) request_id: String,
+    pub(super) input: Value,
+    pub(super) questions: Vec<Question>,
+}
+
+/// Build the `updatedInput` an answered `AskUserQuestion` is re-run with.
+/// `answers` holds chosen option labels per question, in question order.
+///
+/// The tool reads its answers back out of its own input, so the original
+/// payload is echoed with `answers` merged in rather than replaced by an
+/// answers-only object. Keys are the question texts verbatim, because that is
+/// what the provider matches an answer against.
+pub(super) fn merge_question_answers(
+    mut input: Value,
+    questions: &[Question],
+    answers: Vec<Vec<String>>,
+) -> Value {
+    let mut answered = serde_json::Map::new();
+
+    for (question, labels) in questions.iter().zip(answers) {
+        if labels.is_empty() {
+            continue;
+        }
+
+        // A single-select question is reported as the bare label; the provider
+        // joins a multi-select array with ", " on its side, so the array form
+        // stays the honest representation of what was picked.
+        answered.insert(
+            question.question.clone(),
+            if question.multi_select {
+                Value::Array(labels.into_iter().map(Value::String).collect())
+            } else {
+                Value::String(labels.into_iter().next().unwrap_or_default())
+            },
+        );
+    }
+
+    input["answers"] = Value::Object(answered);
+    input
+}
+
+/// Read the tool's `questions` array. A question with fewer than two options
+/// cannot be answered by picking, so it is dropped rather than rendered as an
+/// unanswerable row; an empty result means the request is not usable at all.
+pub(super) fn parse_questions(input: &Value) -> Vec<Question> {
+    let Some(questions) = input["questions"].as_array() else {
+        return Vec::new();
+    };
+
+    questions
+        .iter()
+        .filter_map(|question| {
+            let options: Vec<QuestionOption> = question["options"]
+                .as_array()?
+                .iter()
+                .filter_map(|option| {
+                    Some(QuestionOption {
+                        label: option["label"].as_str()?.to_owned(),
+                        description: option["description"].as_str().map(str::to_owned),
+                    })
+                })
+                .collect();
+
+            if options.len() < 2 {
+                return None;
+            }
+
+            Some(Question {
+                header: question["header"].as_str().map(str::to_owned),
+                question: question["question"].as_str()?.to_owned(),
+                multi_select: question["multiSelect"].as_bool().unwrap_or(false),
+                options,
+            })
+        })
+        .collect()
 }
 
 pub(super) fn resolve_pending_control_operation(
