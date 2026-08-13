@@ -435,7 +435,13 @@ impl AgentPane {
                 // Child lifecycle is reduced by the adapter, so this replaces
                 // the pane's copy without touching the composer, transcript,
                 // approval, queued commands, or running state.
+                let before = self.running_background_tasks();
                 self.background_tasks = Some(snapshot);
+                // The chrome carries the running count, so it is told when that
+                // number moves rather than on every refreshed snapshot.
+                if self.running_background_tasks() != before {
+                    cx.emit(AgentPaneEvent::BackgroundTaskActivity);
+                }
                 cx.notify();
             }
             SessionEvent::Replay(items) => {

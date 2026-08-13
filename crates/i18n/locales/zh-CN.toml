@@ -393,6 +393,7 @@
 "tasks-background-state-interrupted" = "已中断"
 "tasks-background-state-stopped" = "已停止"
 "tasks-background-state-failed" = "失败"
+"tasks-background-running-agents" = "后台任务 — {count} 个 Agent 运行中"
 
 # 每日词元用量
 "usage-token-unavailable" = "每日词元用量不可用"
