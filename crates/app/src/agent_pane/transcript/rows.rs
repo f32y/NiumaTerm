@@ -257,10 +257,15 @@ impl TranscriptView {
                 && !hidden(&self.items[i].item)
         });
 
-        for i in start..end {
-            if matches!(&self.items[i].item, SessionItem::UserMessage { .. }) {
-                rows.push(self.entry_spec(i));
-            }
+        // Only the prompt that opened the turn heads it. A message steered
+        // into a turn already in flight was written after part of the reply
+        // existed, so hoisting it here would show it above output it never
+        // saw; it keeps its place in the stream instead.
+        let opening_user =
+            (start..end).find(|&i| matches!(&self.items[i].item, SessionItem::UserMessage { .. }));
+
+        if let Some(i) = opening_user {
+            rows.push(self.entry_spec(i));
         }
 
         rows.push(RowSpec::FoldHeader {
@@ -271,22 +276,24 @@ impl TranscriptView {
         });
 
         if folded {
-            // Errors and compaction boundaries stay visible inside a folded
-            // turn: an error is what the user needs to act on, and a boundary
-            // marks where the conversation above it stopped being verbatim.
+            // Errors, compaction boundaries and steered prompts stay visible
+            // inside a folded turn: an error is what the user needs to act on,
+            // a boundary marks where the conversation above it stopped being
+            // verbatim, and words the user typed are never work to hide.
             for i in start..end {
-                if matches!(
-                    &self.items[i].item,
-                    SessionItem::Error { .. } | SessionItem::Compaction { .. }
-                ) {
+                let visible_when_folded = match &self.items[i].item {
+                    SessionItem::Error { .. } | SessionItem::Compaction { .. } => true,
+                    SessionItem::UserMessage { .. } => {
+                        Some(i) != opening_user && !hidden(&self.items[i].item)
+                    }
+                    _ => false,
+                };
+                if visible_when_folded {
                     rows.push(self.entry_spec(i));
                 }
             }
         } else {
-            let skip = |i: usize| {
-                Some(i) == final_agent
-                    || matches!(&self.items[i].item, SessionItem::UserMessage { .. })
-            };
+            let skip = |i: usize| Some(i) == final_agent || Some(i) == opening_user;
             self.stream_specs(start, end, &skip, collapse, rows);
         }
 

@@ -410,3 +410,65 @@ mod separate_view_state_tests {
         });
     }
 }
+
+/// A settled turn leads with the prompt that opened it. Claude never echoes a
+/// message steered into a running turn, so the pane publishes it from its own
+/// queue partway through the turn; row order has to keep it where it happened
+/// rather than lifting it to the head of the turn it interrupted.
+mod steered_prompt_rows_tests {
+    use gpui::{AppContext as _, TestAppContext};
+    use nmt_agent_utils::chat::Item as SessionItem;
+
+    use crate::agent_pane::transcript::{AgentKind, RowSpec, TranscriptView};
+
+    fn reply(id: &str) -> SessionItem {
+        SessionItem::AgentMessage {
+            id: id.into(),
+            text: Some(format!("reply {id}")),
+        }
+    }
+
+    fn prompt(text: &str) -> SessionItem {
+        SessionItem::UserMessage {
+            text: Some(text.into()),
+        }
+    }
+
+    /// Entry indexes in render order, with the fold header marked as `None`.
+    fn order(transcript: &TranscriptView) -> Vec<Option<usize>> {
+        transcript
+            .build_row_specs(false)
+            .into_iter()
+            .map(|spec| match spec {
+                RowSpec::Entry { index, .. } | RowSpec::Work { index, .. } => Some(index),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[gpui::test]
+    fn a_steered_prompt_keeps_its_place_in_the_turn(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let transcript = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
+
+            transcript.update(cx, |transcript, cx| {
+                transcript.push(1, prompt("open the turn"), cx);
+                transcript.push(1, reply("a"), cx);
+                transcript.push(1, prompt("steered mid-turn"), cx);
+                transcript.push(1, reply("b"), cx);
+                transcript.completed_turn_seconds.insert(1, 12);
+
+                // Folded: the work between prompt and answer is hidden, while
+                // the user's own steered words stay readable above the reply.
+                assert_eq!(order(transcript), vec![Some(0), None, Some(2), Some(3)]);
+
+                transcript.expanded_turns.insert(1);
+                assert_eq!(
+                    order(transcript),
+                    vec![Some(0), None, Some(1), Some(2), Some(3)],
+                    "the steered prompt sits after the reply it arrived during"
+                );
+            });
+        });
+    }
+}
