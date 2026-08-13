@@ -384,6 +384,19 @@ impl ClaudeTasks {
     /// the parent conversation renders so a child reads identically.
     fn child_items(&mut self, message: &Value) -> Vec<Item> {
         let mut items = Vec::new();
+        if message["type"].as_str() == Some("user") {
+            let text = message["message"]["content"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|block| block["type"].as_str() == Some("text"))
+                .filter_map(|block| block["text"].as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !text.trim().is_empty() {
+                items.push(Item::UserMessage { text: Some(text) });
+            }
+        }
         for block in message["message"]["content"]
             .as_array()
             .into_iter()
@@ -398,10 +411,13 @@ impl ClaudeTasks {
                 continue;
             };
             match block["type"].as_str() {
-                Some("text") => items.push(Item::AgentMessage {
-                    id,
-                    text: block["text"].as_str().map(str::to_owned),
-                }),
+                Some("text") if message["type"].as_str() != Some("user") => {
+                    items.push(Item::AgentMessage {
+                        id,
+                        text: block["text"].as_str().map(str::to_owned),
+                    })
+                }
+                Some("text") => {}
                 Some("thinking") => items.push(Item::Reasoning {
                     id,
                     summary: block["thinking"].as_str().map(str::to_owned),

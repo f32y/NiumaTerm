@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 use crate::background_task::{
     BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskRefs, BackgroundTaskState,
 };
+use crate::chat::Item;
 use crate::codex::app_server::THREAD_SCOPED_NOTIFICATIONS;
 use crate::codex::app_server::background_tasks::{
     CodexTasks, MAX_PENDING_THREADS, ThreadScope, notification_thread_id,
@@ -600,4 +601,96 @@ fn selecting_another_root_drops_in_flight_reads() {
     tasks.set_root("thr_other_parent");
 
     assert!(!tasks.is_transcript_read(9));
+}
+
+#[test]
+fn a_spawn_prompt_is_the_first_item_in_a_child_transcript() {
+    let mut tasks = rooted();
+    tasks.observe_parent_item(&spawn_item("thr_child"));
+
+    let items = tasks.with_launch_message(
+        "thr_child",
+        vec![Item::AgentMessage {
+            id: "reply-1".into(),
+            text: Some("review complete".into()),
+        }],
+    );
+
+    assert!(matches!(
+        &items[0],
+        Item::UserMessage { text: Some(text) } if text == "review the diff"
+    ));
+}
+
+#[test]
+fn a_raw_agent_message_supplies_the_v2_launch_instruction() {
+    let mut tasks = rooted();
+    assert!(tasks.observe_raw_response_item(
+        "thr_child",
+        &json!({
+            "type": "agent_message",
+            "author": "/root",
+            "recipient": "/root/reviewer",
+            "content": [
+                {"type": "input_text", "text": "inspect the updated parser"},
+            ],
+        }),
+    ));
+    tasks.observe_parent_item(&json!({
+        "type": "subAgentActivity",
+        "id": "activity-1",
+        "kind": "started",
+        "agentThreadId": "thr_child",
+        "agentPath": "reviewer",
+    }));
+    assert!(!tasks.observe_raw_response_item(
+        "thr_child",
+        &json!({
+            "type": "agent_message",
+            "author": "/root",
+            "recipient": "/root/reviewer",
+            "content": [
+                {"type": "input_text", "text": "a later message"},
+            ],
+        }),
+    ));
+
+    let items = tasks.with_launch_message("thr_child", Vec::new());
+    assert_eq!(
+        items,
+        vec![Item::UserMessage {
+            text: Some("inspect the updated parser".into()),
+        }]
+    );
+}
+
+#[test]
+fn encrypted_agent_content_is_not_shown_as_a_partial_instruction() {
+    let mut tasks = rooted();
+
+    assert!(!tasks.observe_raw_response_item(
+        "thr_child",
+        &json!({
+            "type": "agent_message",
+            "author": "/root",
+            "recipient": "/root/reviewer",
+            "content": [
+                {"type": "input_text", "text": "message metadata"},
+                {"type": "encrypted_content", "encrypted_content": "ciphertext"},
+            ],
+        }),
+    ));
+}
+
+#[test]
+fn a_matching_stored_user_message_is_not_added_twice() {
+    let mut tasks = rooted();
+    tasks.observe_parent_item(&spawn_item("thr_child"));
+    let existing = Item::UserMessage {
+        text: Some("review the diff".into()),
+    };
+
+    let items = tasks.with_launch_message("thr_child", vec![existing.clone()]);
+
+    assert_eq!(items, vec![existing]);
 }

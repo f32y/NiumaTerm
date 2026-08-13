@@ -130,7 +130,7 @@ pub(super) fn add_provider_config(params: &mut Value, provider: &CodexProviderCo
 }
 
 pub(super) fn thread_start_params(profile: &ThreadProfile) -> Value {
-    let mut params = json!({});
+    let mut params = json!({"experimentalRawEvents": true});
     if let Some(model) = profile.model.as_deref() {
         params["model"] = json!(model);
     }

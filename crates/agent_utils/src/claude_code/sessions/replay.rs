@@ -6,13 +6,15 @@ use chrono::DateTime;
 use serde_json::Value;
 use tracing::warn;
 
-use super::super::compaction::{compaction_metadata, parse_compaction};
-use super::super::tool_items::{complete_tool_item, tool_item};
-use super::ClaudeCheckpoint;
-use super::index::TranscriptIndex;
-use super::paths::session_path;
-use super::titles::{clean_prompt, compaction_summary_text, is_interruption, user_prompt_text};
 use crate::chat::{Compaction, Item, ReplayItem, ReplayTurn};
+use crate::claude_code::compaction::{compaction_metadata, parse_compaction};
+use crate::claude_code::sessions::ClaudeCheckpoint;
+use crate::claude_code::sessions::index::TranscriptIndex;
+use crate::claude_code::sessions::paths::session_path;
+use crate::claude_code::sessions::titles::{
+    clean_prompt, compaction_summary_text, conversation_user_text, is_interruption,
+};
+use crate::claude_code::tool_items::{complete_tool_item, tool_item};
 
 /// Reconstruct a session's conversation for the transcript UI. Reads the
 /// whole file (resume replays nothing from the backend, so this is the only
@@ -153,8 +155,12 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                     continue;
                 }
 
-                if let Some(text) = user_prompt_text(&record) {
-                    let text = clean_prompt(&text);
+                if let Some(text) = conversation_user_text(&record) {
+                    let text = if sidechain {
+                        text.trim().to_owned()
+                    } else {
+                        clean_prompt(&text)
+                    };
                     if !text.is_empty() {
                         // A prompt opens a turn, the same boundary the live path
                         // draws when the user sends one.

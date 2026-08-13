@@ -4,8 +4,8 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use super::paths::project_dir;
 use crate::chat::SessionSummary;
+use crate::claude_code::sessions::paths::project_dir;
 
 /// Head window scanned for the first user prompt. Sessions can open with
 /// kilobytes of hook output and queue records before the first prompt, but
@@ -103,8 +103,18 @@ fn head_title(path: &Path) -> (Option<String>, Option<String>) {
 /// real prompt: sidechain (subagent) traffic, meta records, compaction
 /// summaries, and tool-result containers.
 pub(super) fn user_prompt_text(record: &Value) -> Option<String> {
+    if record["isSidechain"].as_bool() == Some(true) {
+        return None;
+    }
+
+    conversation_user_text(record)
+}
+
+/// User text that belongs to the selected conversation. Replay selects parent
+/// or child records before calling this helper, while session titles reject
+/// child traffic through `user_prompt_text`.
+pub(super) fn conversation_user_text(record: &Value) -> Option<String> {
     if record["type"].as_str() != Some("user")
-        || record["isSidechain"].as_bool() == Some(true)
         || record["isMeta"].as_bool() == Some(true)
         // The CLI stores a compaction summary as a synthesized user turn. It is
         // machine-written continuation context, so treating it as a prompt would

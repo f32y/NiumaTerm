@@ -812,9 +812,19 @@ fn task_history_rebuilds_a_childs_own_conversation_from_linked_sidechains() {
     let lines = task_history_lines(&[
         assistant_launch("a1", None, "toolu_1"),
         serde_json::json!({
+            "type": "user",
+            "uuid": "s0",
+            "parentUuid": "a1",
+            "isSidechain": true,
+            "parent_tool_use_id": "toolu_1",
+            "message": {"role": "user", "content": [
+                {"type": "text", "text": "review the parser"},
+            ]},
+        }),
+        serde_json::json!({
             "type": "assistant",
             "uuid": "s1",
-            "parentUuid": "a1",
+            "parentUuid": "s0",
             "isSidechain": true,
             "parent_tool_use_id": "toolu_1",
             "message": {"role": "assistant", "content": [
@@ -856,9 +866,16 @@ fn task_history_rebuilds_a_childs_own_conversation_from_linked_sidechains() {
     assert!(transcript.restore(tasks[0].items.clone()));
 
     let ids: Vec<_> = transcript.items().iter().map(Item::id).collect();
-    assert_eq!(ids, [Some("th-1"), Some("tu-1"), Some("tx-1")]);
+    assert_eq!(ids, [None, Some("th-1"), Some("tu-1"), Some("tx-1")]);
     assert!(
-        matches!(transcript.items()[0], Item::Reasoning { .. }),
+        matches!(
+            &transcript.items()[0],
+            Item::UserMessage { text: Some(text) } if text == "review the parser"
+        ),
+        "the child's first instruction is shown as user input"
+    );
+    assert!(
+        matches!(transcript.items()[1], Item::Reasoning { .. }),
         "the child's work uses the same row kinds as the parent conversation"
     );
 }
@@ -924,15 +941,26 @@ fn a_child_conversation_is_read_from_its_own_file_and_linked_by_metadata() {
     // Every record in a child's own file is a sidechain record.
     fs::write(
         subagents.join("agent-abc123.jsonl"),
-        task_history_lines(&[serde_json::json!({
-            "type": "assistant",
-            "uuid": "c1",
-            "parentUuid": null,
-            "isSidechain": true,
-            "message": {"role": "assistant", "content": [
-                {"type": "text", "text": "found the popup component"},
-            ]},
-        })]),
+        task_history_lines(&[
+            serde_json::json!({
+                "type": "user",
+                "uuid": "c0",
+                "parentUuid": null,
+                "isSidechain": true,
+                "message": {"role": "user", "content": [
+                    {"type": "text", "text": "find the popup component"},
+                ]},
+            }),
+            serde_json::json!({
+                "type": "assistant",
+                "uuid": "c1",
+                "parentUuid": "c0",
+                "isSidechain": true,
+                "message": {"role": "assistant", "content": [
+                    {"type": "text", "text": "found the popup component"},
+                ]},
+            }),
+        ]),
     )
     .unwrap();
 
@@ -941,9 +969,13 @@ fn a_child_conversation_is_read_from_its_own_file_and_linked_by_metadata() {
     assert_eq!(tasks.len(), 1);
     assert_eq!(
         tasks[0].items.len(),
-        1,
+        2,
         "the child's conversation comes from its own file"
     );
+    assert!(matches!(
+        &tasks[0].items[0],
+        Item::UserMessage { text: Some(text) } if text == "find the popup component"
+    ));
     assert_eq!(
         tasks[0].update.agent_type.as_deref(),
         Some("code-reviewer"),

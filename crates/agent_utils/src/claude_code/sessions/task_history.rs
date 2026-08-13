@@ -22,6 +22,7 @@ use crate::chat::Item;
 use crate::claude_code::sessions::index::TranscriptIndex;
 use crate::claude_code::sessions::paths::project_dir;
 use crate::claude_code::sessions::replay::parse_child_replay;
+use crate::claude_code::sessions::titles::conversation_user_text;
 use crate::claude_code::tool_items::{complete_tool_item, tool_item};
 
 /// Tool names whose launch creates a child agent.
@@ -284,6 +285,9 @@ fn enrich_from_sidechain(
 /// shapes the parent conversation renders.
 fn child_items(record: &Value, open_tools: &mut HashMap<String, Item>) -> Vec<Item> {
     let mut items = Vec::new();
+    if let Some(text) = conversation_user_text(record) {
+        items.push(Item::UserMessage { text: Some(text) });
+    }
     for block in record["message"]["content"]
         .as_array()
         .into_iter()
@@ -298,10 +302,13 @@ fn child_items(record: &Value, open_tools: &mut HashMap<String, Item>) -> Vec<It
             continue;
         };
         match block["type"].as_str() {
-            Some("text") => items.push(Item::AgentMessage {
-                id,
-                text: block["text"].as_str().map(str::to_owned),
-            }),
+            Some("text") if record["type"].as_str() != Some("user") => {
+                items.push(Item::AgentMessage {
+                    id,
+                    text: block["text"].as_str().map(str::to_owned),
+                })
+            }
+            Some("text") => {}
             Some("thinking") => items.push(Item::Reasoning {
                 id,
                 summary: block["thinking"].as_str().map(str::to_owned),
