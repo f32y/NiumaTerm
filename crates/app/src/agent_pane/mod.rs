@@ -32,10 +32,12 @@ use gpui::{
     relative, rems, size, uniform_list,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::checkbox::Checkbox;
 use gpui_component::input::{
     Enter, Escape, IndentInline, Input, InputEvent, InputState, MoveDown, MoveUp,
 };
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
+use gpui_component::radio::RadioGroup;
 use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 use gpui_component::skeleton::Skeleton;
 use gpui_component::spinner::Spinner;
@@ -49,9 +51,10 @@ use nmt_agent_utils::background_task::{
 };
 use nmt_agent_utils::chat::{
     Compaction, CompactionTrigger, ContextComposition, ContextWindowUsage, Event as SessionEvent,
-    Item as SessionItem, ModelInfo, ReplayTurn, SendOutcome, SessionSummary, SkillCatalog,
-    SkillInfo, SkillReference, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
-    SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
+    Item as SessionItem, ModelInfo, Question, QuestionOption, ReplayTurn, SendOutcome,
+    SessionSummary, SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments,
+    SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
+    ThreadSettings,
 };
 use nmt_agent_utils::claude_code::{sessions, stream_json};
 use nmt_agent_utils::codex::app_server;
@@ -143,6 +146,72 @@ struct UnansweredPrompt {
     skill: Option<SkillReference>,
 }
 
+/// A pending `AskUserQuestion` card and the picks made so far. Selections are
+/// held as option indices per question so the rendered state and the labels
+/// sent back cannot drift apart.
+struct QuestionPrompt {
+    questions: Vec<Question>,
+    selected: Vec<Vec<usize>>,
+}
+
+impl QuestionPrompt {
+    fn new(questions: Vec<Question>) -> Self {
+        let selected = vec![Vec::new(); questions.len()];
+
+        Self {
+            questions,
+            selected,
+        }
+    }
+
+    fn is_selected(&self, question: usize, option: usize) -> bool {
+        self.selected[question].contains(&option)
+    }
+
+    /// Single-select replaces the pick; multi-select toggles it. Multi-select
+    /// keeps ascending order so the answer array matches the visible order
+    /// rather than the order the user happened to click in.
+    fn toggle(&mut self, question: usize, option: usize) {
+        let multi_select = self.questions[question].multi_select;
+        let picks = &mut self.selected[question];
+
+        if !multi_select {
+            *picks = vec![option];
+            return;
+        }
+
+        match picks.iter().position(|picked| *picked == option) {
+            Some(index) => {
+                picks.remove(index);
+            }
+            None => {
+                picks.push(option);
+                picks.sort_unstable();
+            }
+        }
+    }
+
+    /// Every question needs an answer: the provider reports an unanswered one
+    /// as "(no option selected)", which reads to the model as a refusal.
+    fn is_complete(&self) -> bool {
+        self.selected.iter().all(|picks| !picks.is_empty())
+    }
+
+    fn answers(&self) -> Vec<Vec<String>> {
+        self.questions
+            .iter()
+            .zip(&self.selected)
+            .map(|(question, picks)| {
+                picks
+                    .iter()
+                    .filter_map(|index| question.options.get(*index))
+                    .map(|option| option.label.clone())
+                    .collect()
+            })
+            .collect()
+    }
+}
+
 impl GitBranchPoll {
     fn begin_refresh(&mut self) -> bool {
         if self.refreshing {
@@ -168,6 +237,62 @@ impl GitBranchPoll {
         });
         let opacity = if self.branch.is_some() { 0.72 } else { 0.48 };
         (label, opacity)
+    }
+}
+
+#[cfg(test)]
+mod question_prompt_tests {
+    use nmt_agent_utils::chat::{Question, QuestionOption};
+
+    use super::QuestionPrompt;
+
+    fn question(text: &str, multi_select: bool, labels: &[&str]) -> Question {
+        Question {
+            header: None,
+            question: text.to_owned(),
+            multi_select,
+            options: labels
+                .iter()
+                .map(|label| QuestionOption {
+                    label: (*label).to_owned(),
+                    description: None,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn single_select_replaces_and_multi_select_toggles_in_option_order() {
+        let mut prompt = QuestionPrompt::new(vec![
+            question("Which database?", false, &["Postgres", "SQLite"]),
+            question("Which extras?", true, &["Metrics", "Tracing", "Audit log"]),
+        ]);
+
+        assert!(!prompt.is_complete());
+
+        prompt.toggle(0, 1);
+        prompt.toggle(0, 0);
+        assert!(prompt.is_selected(0, 0));
+        assert!(!prompt.is_selected(0, 1));
+
+        // Picked out of order; the answer still follows the visible order.
+        prompt.toggle(1, 2);
+        prompt.toggle(1, 0);
+        assert!(prompt.is_complete());
+        assert_eq!(
+            prompt.answers(),
+            vec![
+                vec!["Postgres".to_owned()],
+                vec!["Metrics".to_owned(), "Audit log".to_owned()],
+            ]
+        );
+
+        // Re-clicking a multi-select option clears it, and clearing the last
+        // pick of a question blocks submission again.
+        prompt.toggle(1, 0);
+        prompt.toggle(1, 2);
+        assert!(!prompt.is_complete());
+        assert_eq!(prompt.answers()[1], Vec::<String>::new());
     }
 }
 
@@ -278,6 +403,10 @@ pub(crate) struct AgentPane {
     /// Description of the approval request blocking the turn, shown as the
     /// card above the input; the request id lives in the session.
     pending_approval: Option<String>,
+    /// Questions the model wants answered before it continues, plus the
+    /// selection the user has built so far. The request id lives in the
+    /// session, so this holds only what the card renders.
+    pending_questions: Option<QuestionPrompt>,
     /// Current thread settings, seeded from the session's `Ready` event and
     /// changed via the dropdowns under the input; sent as overrides on every
     /// turn start (idempotent when unchanged).

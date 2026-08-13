@@ -326,6 +326,26 @@ impl AgentPane {
                 self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
                 cx.notify();
             }
+            SessionEvent::QuestionsRequested { questions } => {
+                self.note_visible_agent_output();
+                // The turn is blocked on the user exactly as an approval is, so
+                // it raises the same attention signal rather than a new one.
+                self.emit_lifecycle(
+                    AgentEventKind::PermissionRequested,
+                    &i18n("agent-session-needs-input").replace("{name}", self.kind.display()),
+                    questions
+                        .first()
+                        .map_or("", |question| question.question.as_str()),
+                    cx,
+                );
+                self.pending_questions = Some(QuestionPrompt::new(questions));
+                cx.notify();
+            }
+            SessionEvent::QuestionsResolved => {
+                self.pending_questions = None;
+                self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
+                cx.notify();
+            }
             SessionEvent::FileRewindCompleted { error } => {
                 let result = error.map_or(Ok(()), Err);
                 if let Some(completion) = self.rewind.file_completion.take() {
