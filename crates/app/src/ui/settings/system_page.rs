@@ -17,11 +17,7 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                                 .restore_last_session_when_opening = value;
                         },
                     ),
-                )),
-        )
-        .group(
-            SettingGroup::new()
-                .title(i18n("settings-system-workspace"))
+                ))
                 .item(SettingItem::new(
                     i18n("settings-system-confirm-closing"),
                     SettingField::switch(
@@ -30,23 +26,7 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                             cx.global_mut::<AppSettings>().confirm_before_closing = value;
                         },
                     ),
-                )),
-        )
-        .group(
-            SettingGroup::new()
-                .title(i18n("settings-system-process"))
-                .item(
-                    SettingItem::new(
-                        i18n("settings-system-manage-job"),
-                        SettingField::switch(
-                            |cx| cx.global::<AppSettings>().manage_subprocess_job,
-                            |value, cx| {
-                                cx.global_mut::<AppSettings>().manage_subprocess_job = value;
-                            },
-                        ),
-                    )
-                    .description(i18n("settings-system-manage-job-description")),
-                )
+                ))
                 .item(SettingItem::new(
                     i18n("settings-system-warn-terminate"),
                     SettingField::dropdown(
@@ -76,6 +56,22 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                         WarnBeforeTerminatingShell::WhenChildProcessesRunning.as_str(),
                     )),
                 )),
+        )
+        .group(
+            SettingGroup::new()
+                .title(i18n("settings-system-process"))
+                .item(
+                    SettingItem::new(
+                        i18n("settings-system-manage-job"),
+                        SettingField::switch(
+                            |cx| cx.global::<AppSettings>().manage_subprocess_job,
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().manage_subprocess_job = value;
+                            },
+                        ),
+                    )
+                    .description(i18n("settings-system-manage-job-description")),
+                ),
         )
         .group(
             SettingGroup::new()

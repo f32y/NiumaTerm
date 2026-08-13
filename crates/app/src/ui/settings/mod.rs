@@ -147,16 +147,16 @@ pub fn settings_view(cx: &App) -> Settings {
         // Each subcategory is its own page; the alternative scrolls the
         // whole category top to bottom.
         .single_group_pages(true)
-        .page(terminal_page())
         .page(appearance_page(
             backdrop,
             background_image_enabled,
             cx.global::<AppSettings>().tab_auto_size,
             cx.global::<AppSettings>().show_git_status_on_title_bar,
         ))
-        .page(profiles_page(&profiles, &agent_profiles))
-        .page(agent_page(&agent_profiles, cx))
         .page(system_page(shell_integration_mismatched))
+        .page(profiles_page(&profiles, &agent_profiles))
+        .page(terminal_page())
+        .page(agent_page(&agent_profiles, cx))
         .page(remote_session_page())
         .page(about_page())
 }
