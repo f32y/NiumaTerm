@@ -514,6 +514,31 @@ fn initialize_uses_model_pinned_by_launch_environment() {
 }
 
 #[test]
+fn a_requested_model_is_used_unless_the_environment_pins_one() {
+    let requested = LaunchConfig {
+        executable: "claude".into(),
+        model: Some("opus[1m]".into()),
+        ..LaunchConfig::default()
+    };
+
+    assert_eq!(launch_model(&requested).as_deref(), Some("opus[1m]"));
+
+    let pinned = LaunchConfig {
+        env: vec![(ANTHROPIC_MODEL_ENV.into(), "claude-haiku-4-5".into())],
+        ..requested.clone()
+    };
+
+    assert_eq!(launch_model(&pinned).as_deref(), Some("claude-haiku-4-5"));
+
+    let blank = LaunchConfig {
+        model: Some("  ".into()),
+        ..requested
+    };
+
+    assert_eq!(launch_model(&blank), None);
+}
+
+#[test]
 fn approval_descriptions_name_the_action() {
     assert_eq!(
         approval_description("Bash", &json!({"command": "rm -rf build"})),
