@@ -1,3 +1,4 @@
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     App, AppContext as _, Div, Entity, ParentElement as _, SharedString, Styled as _, Subscription,
     Window,
@@ -61,15 +62,17 @@ pub(super) fn card_text_input(
     input
 }
 
-/// One labeled row inside a profile card: title and muted description on the
-/// left, the control on the right (mirrors `SettingItem`'s horizontal
-/// layout so cards read like regular setting rows).
+/// One labeled row inside a profile card: title and an optional muted
+/// description on the left, with the control on the right. An empty
+/// description omits the second line entirely.
 pub(super) fn card_row(
     title: impl Into<SharedString>,
     description: impl Into<SharedString>,
     control: impl gpui::IntoElement,
     cx: &App,
 ) -> Div {
+    let description = description.into();
+
     h_flex()
         .w_full()
         .justify_between()
@@ -81,12 +84,14 @@ pub(super) fn card_row(
                 .max_w_3_5()
                 .gap_1()
                 .child(Label::new(title.into()).text_sm())
-                .child(
-                    gpui::div()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(description.into()),
-                ),
+                .when(!description.is_empty(), |this| {
+                    this.child(
+                        gpui::div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(description),
+                    )
+                }),
         )
         .child(control.into_any_element())
 }

@@ -50,42 +50,33 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
     let installations = agent_updates::installations_for_profiles(agent_profiles, cx);
     let mut general = SettingGroup::new()
         .title(i18n("settings-agent-general"))
-        .item(
-            SettingItem::new(
-                i18n("settings-agent-show-usage"),
-                SettingField::switch(
-                    |cx| cx.global::<AppSettings>().show_agent_usage,
-                    |value, cx| {
-                        cx.global_mut::<AppSettings>().show_agent_usage = value;
-                    },
-                ),
-            )
-            .description(i18n("settings-agent-show-usage-description")),
-        )
-        .item(
-            SettingItem::new(
-                i18n("settings-agent-collapse-tool-calls"),
-                SettingField::switch(
-                    |cx| cx.global::<AppSettings>().collapse_tool_calls,
-                    |value, cx| {
-                        cx.global_mut::<AppSettings>().collapse_tool_calls = value;
-                    },
-                ),
-            )
-            .description(i18n("settings-agent-collapse-tool-calls-description")),
-        )
-        .item(
-            SettingItem::new(
-                i18n("settings-agent-check-updates"),
-                SettingField::switch(
-                    |cx| cx.global::<AppSettings>().check_agent_updates,
-                    |value, cx| {
-                        cx.global_mut::<AppSettings>().check_agent_updates = value;
-                    },
-                ),
-            )
-            .description(i18n("settings-agent-check-updates-description")),
-        )
+        .item(SettingItem::new(
+            i18n("settings-agent-show-usage"),
+            SettingField::switch(
+                |cx| cx.global::<AppSettings>().show_agent_usage,
+                |value, cx| {
+                    cx.global_mut::<AppSettings>().show_agent_usage = value;
+                },
+            ),
+        ))
+        .item(SettingItem::new(
+            i18n("settings-agent-collapse-tool-calls"),
+            SettingField::switch(
+                |cx| cx.global::<AppSettings>().collapse_tool_calls,
+                |value, cx| {
+                    cx.global_mut::<AppSettings>().collapse_tool_calls = value;
+                },
+            ),
+        ))
+        .item(SettingItem::new(
+            i18n("settings-agent-check-updates"),
+            SettingField::switch(
+                |cx| cx.global::<AppSettings>().check_agent_updates,
+                |value, cx| {
+                    cx.global_mut::<AppSettings>().check_agent_updates = value;
+                },
+            ),
+        ))
         .item(agent_update_check_item());
 
     for (index, snapshot) in installations.iter().enumerate() {
@@ -107,7 +98,6 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
 
     SettingPage::new(i18n("settings-agent-title"))
         .default_open(true)
-        .description(i18n("settings-agent-description"))
         .group(general)
         .group(
             SettingGroup::new()
@@ -187,13 +177,7 @@ fn agent_update_check_item() -> SettingItem {
                 agent_updates::manual_check_profiles(&check_profiles, cx);
             });
 
-        card_row(
-            i18n("settings-agent-check-for-updates"),
-            i18n("settings-agent-check-for-updates-description"),
-            check,
-            cx,
-        )
-        .into_any_element()
+        card_row(i18n("settings-agent-check-for-updates"), "", check, cx).into_any_element()
     })
 }
 
