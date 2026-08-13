@@ -91,6 +91,9 @@ pub struct AppSettings {
     /// Collapse consecutive tool-call rows in agent tabs into a one-line
     /// summary by default.
     pub collapse_tool_calls: bool,
+    /// Probe each Agent installation for a newer provider version in the
+    /// background.
+    pub check_agent_updates: bool,
     /// Restore the last saved workspace/tab session on startup.
     pub restore_last_session_when_opening: bool,
     /// Manage each tab's shell with a Windows Job Object: closing the tab
@@ -154,6 +157,7 @@ impl Default for AppSettings {
             enable_agent_hooks: true,
             show_agent_usage: true,
             collapse_tool_calls: false,
+            check_agent_updates: true,
             restore_last_session_when_opening: true,
             manage_subprocess_job: false,
             warn_before_terminating_shell: WarnBeforeTerminatingShell::default(),
@@ -398,6 +402,7 @@ impl AppSettings {
             enable_agent_hooks: config.agent.enable_agent_hooks,
             show_agent_usage: config.agent.show_agent_usage,
             collapse_tool_calls: config.agent.collapse_tool_calls,
+            check_agent_updates: config.agent.check_agent_updates,
             restore_last_session_when_opening: config.system.restore_last_session_when_opening,
             manage_subprocess_job: config.system.manage_subprocess_job,
             warn_before_terminating_shell: config.system.warn_before_terminating_shell,
@@ -612,6 +617,7 @@ impl AppSettings {
             enable_agent_hooks: self.enable_agent_hooks,
             show_agent_usage: self.show_agent_usage,
             collapse_tool_calls: self.collapse_tool_calls,
+            check_agent_updates: self.check_agent_updates,
         };
 
         let system = SystemConfig {

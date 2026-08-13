@@ -75,6 +75,22 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                  ones sit behind a \"+N previous tool calls\" toggle.",
             ),
         )
+        .item(
+            SettingItem::new(
+                "Check for Agent Updates",
+                SettingField::switch(
+                    |cx| cx.global::<AppSettings>().check_agent_updates,
+                    |value, cx| {
+                        cx.global_mut::<AppSettings>().check_agent_updates = value;
+                    },
+                ),
+            )
+            .description(
+                "Check every hour whether the Claude Code and Codex installations referenced by \
+                 Agent Profiles have a newer version. The Check button below stays available \
+                 while this is off.",
+            ),
+        )
         .item(agent_update_check_item());
 
     for (index, snapshot) in installations.iter().enumerate() {

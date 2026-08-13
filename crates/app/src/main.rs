@@ -386,7 +386,7 @@ fn run_app(argv_url: Option<String>, testing: bool) {
             for initial in initials {
                 AppWindow::open(cx, initial);
             }
-            agent_pane::updates::schedule_startup_checks(cx);
+            agent_pane::updates::schedule_automatic_checks(cx);
 
             // Apply CLI actions (argv + forwarded over the IPC pipe) on the
             // foreground; windows above exist before the first poll.
