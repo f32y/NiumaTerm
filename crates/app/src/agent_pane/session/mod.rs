@@ -356,12 +356,25 @@ impl AgentPane {
         let deliver = move |message| {
             let _ = tx.unbounded_send(message);
         };
-        let launch = agent_launch(&self.profile);
+        let mut launch = agent_launch(&self.profile);
+        // Claude builds its system prompt from the model it resolves during the
+        // handshake, so a pick that only reached the CLI afterwards would leave
+        // that prompt describing a different model than the one serving the
+        // turns. The pane already knows the pick here: the profile assigned it
+        // above, or it is the one remembered for this profile. A tab with
+        // neither leaves the flag off and starts on the CLI's configured model.
+        if kind == AgentKind::Claude {
+            launch.model = self.settings.model.clone().or_else(|| {
+                self.stored_thread_settings(cx)
+                    .and_then(|stored| stored.model.clone())
+            });
+        }
         // Env names only: the values can carry API keys.
         info!(
-            "agent session start: profile=\"{}\", executable=\"{}\", env=[{}]",
+            "agent session start: profile=\"{}\", executable=\"{}\", model={:?}, env=[{}]",
             self.profile.name,
             launch.executable,
+            launch.model,
             launch
                 .env
                 .iter()
@@ -962,6 +975,16 @@ impl AgentPane {
         } else {
             self.profile.name.clone()
         }
+    }
+
+    /// The picks remembered for this profile, falling back to the bucket its
+    /// agent kind shares with unnamed profiles.
+    pub(super) fn stored_thread_settings<'a>(&self, cx: &'a App) -> Option<&'a ThreadSettings> {
+        let defaults = cx.try_global::<AgentThreadDefaults>()?;
+        defaults
+            .0
+            .get(&self.defaults_key())
+            .or_else(|| defaults.0.get(self.kind.id()))
     }
 
     /// Effective startup model after protocol mapping and user environment

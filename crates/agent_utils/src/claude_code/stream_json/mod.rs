@@ -237,6 +237,16 @@ impl Session {
             command.args(["--effort", effort]);
         }
 
+        // The CLI resolves the model once during its handshake and builds the
+        // system prompt from it, including the identity it states to the model
+        // itself. A later `set_model` reroutes the requests while that prompt
+        // keeps describing the startup model, so a model the tab already knows
+        // about has to arrive as a launch flag. Without one the CLI starts on
+        // the model from its own configuration.
+        if let Some(model) = &initial_model {
+            command.args(["--model", model]);
+        }
+
         if let Some(session_id) = &resume {
             command.args(["--resume", session_id]);
         }
@@ -1166,10 +1176,10 @@ impl Session {
         // does NOT report the session's current permission mode, and the CLI
         // resolves its startup mode from user config — so the initial value
         // comes from the same config file (`permissions.defaultMode`); the
-        // first turn's `init` message then confirms or corrects it. The
-        // `ANTHROPIC_MODEL` fixes the model before the handshake; without it,
-        // the session starts on the catalog's "default" entry because spawn
-        // passes no `--model` argument.
+        // first turn's `init` message then confirms or corrects it. A model
+        // resolved at spawn reaches the CLI as `--model`, so it is already
+        // applied here; a launch that named none starts on the catalog's
+        // "default" entry.
         if response["request_id"].as_str() == Some(INIT_REQUEST_ID) && !self.ready {
             let permission =
                 Some(configured_permission_mode().unwrap_or_else(|| "default".to_string()));

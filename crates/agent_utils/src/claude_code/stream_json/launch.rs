@@ -9,6 +9,9 @@ use crate::hook_store::home_dir;
 pub(super) const ANTHROPIC_MODEL_ENV: &str = "ANTHROPIC_MODEL";
 pub(super) const FILE_CHECKPOINTING_ENV: &str = "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING";
 
+/// The model the CLI must start on. `ANTHROPIC_MODEL` comes first because it
+/// is exported into the child environment and would win there anyway; the
+/// launch config's own field carries the model the tab asked for otherwise.
 pub(super) fn launch_model(launch: &LaunchConfig) -> Option<String> {
     // Command environment overrides are last-value-wins, so the adapter must
     // resolve duplicate entries the same way as the spawned Claude process.
@@ -19,6 +22,14 @@ pub(super) fn launch_model(launch: &LaunchConfig) -> Option<String> {
         .find(|(name, _)| name.trim().eq_ignore_ascii_case(ANTHROPIC_MODEL_ENV))
         .map(|(_, value)| value.trim().to_string())
         .filter(|value| !value.is_empty())
+        .or_else(|| {
+            launch
+                .model
+                .as_deref()
+                .map(str::trim)
+                .filter(|model| !model.is_empty())
+                .map(str::to_owned)
+        })
 }
 
 pub(super) fn initial_ready_model(model: Option<&str>) -> String {

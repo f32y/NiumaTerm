@@ -75,14 +75,7 @@ impl AgentPane {
                 let seed_thread_defaults = take(&mut self.seed_thread_defaults);
                 let seed_approval_reviewer = take(&mut self.seed_approval_reviewer);
                 let stored = (seed_thread_defaults || seed_approval_reviewer)
-                    .then(|| {
-                        cx.try_global::<AgentThreadDefaults>().and_then(|defaults| {
-                            defaults
-                                .0
-                                .get(&self.defaults_key())
-                                .or_else(|| defaults.0.get(self.kind.id()))
-                        })
-                    })
+                    .then(|| self.stored_thread_settings(cx))
                     .flatten();
                 let preserve_current = self.kind == AgentKind::Claude && !seed_thread_defaults;
                 let local = if preserve_current {
