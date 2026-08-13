@@ -9,3 +9,4 @@ mod tool_items;
 pub mod update;
 #[cfg(target_os = "windows")]
 pub mod usage_fetcher;
+pub mod workflows;

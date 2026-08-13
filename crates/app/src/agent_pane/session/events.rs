@@ -126,6 +126,7 @@ impl AgentPane {
                 // The session id is known by now, so child agents that ran
                 // before this tab opened can be rebuilt from history.
                 self.restore_background_tasks(cx);
+                self.restore_workflows(cx);
                 cx.notify();
             }
             SessionEvent::Models(models) => {
@@ -340,6 +341,16 @@ impl AgentPane {
                 );
                 self.pending_questions = Some(QuestionPrompt::new(questions));
                 cx.notify();
+            }
+            SessionEvent::Workflows(snapshot) => {
+                self.apply_workflow_snapshot(snapshot, cx);
+            }
+            SessionEvent::WorkflowAgentTranscript {
+                task_id,
+                agent_id,
+                items,
+            } => {
+                self.apply_workflow_transcript(&task_id, &agent_id, items, cx);
             }
             SessionEvent::QuestionsResolved => {
                 self.pending_questions = None;

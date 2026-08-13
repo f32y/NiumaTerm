@@ -7,6 +7,7 @@ pub mod launcher;
 #[cfg(target_os = "windows")]
 pub mod update;
 pub mod usage;
+pub mod workflow;
 
 mod hook_store;
 #[cfg(target_os = "windows")]

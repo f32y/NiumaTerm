@@ -1,6 +1,7 @@
-//! The single right-side area. Git and `Background Tasks` are two contents of
-//! one host rather than two sidebars, so choosing one replaces the other at the
-//! current width and the main pane can never be narrowed by two columns.
+//! The single right-side area. Git, `Background Tasks`, and `Workflows` are
+//! contents of one host rather than separate sidebars, so choosing one replaces
+//! the visible one at the current width and the main pane can never be narrowed
+//! by a second column.
 
 use gpui::prelude::*;
 use gpui::{AnyElement, Context, DragMoveEvent, Entity, Pixels, Window, div, px};
@@ -10,6 +11,7 @@ use crate::ui::UI_RADIUS;
 use crate::ui::background_tasks::BackgroundTasksView;
 use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::sidebar_resize::{self, ResizeDrag};
+use crate::ui::workflows::WorkflowsView;
 
 /// Handle id for this column's resize grip. Every resizable column receives
 /// every other column's drag-move events, so this is what distinguishes them.
@@ -24,6 +26,7 @@ const MAX_WIDTH: f32 = 900.0;
 pub(crate) enum RightPanelKind {
     Git,
     BackgroundTasks,
+    Workflows,
 }
 
 /// Which content the right-side area shows, and whether it is open at all.
@@ -66,16 +69,22 @@ pub(crate) struct RightPanel {
     animated: bool,
     git: Entity<GitSidebar>,
     tasks: Entity<BackgroundTasksView>,
+    workflows: Entity<WorkflowsView>,
 }
 
 impl RightPanel {
-    pub(crate) fn new(git: Entity<GitSidebar>, tasks: Entity<BackgroundTasksView>) -> Self {
+    pub(crate) fn new(
+        git: Entity<GitSidebar>,
+        tasks: Entity<BackgroundTasksView>,
+        workflows: Entity<WorkflowsView>,
+    ) -> Self {
         Self {
             selection: RightPanelSelection::new(),
             width: px(PANEL_WIDTH),
             animated: false,
             git,
             tasks,
+            workflows,
         }
     }
 
@@ -85,6 +94,10 @@ impl RightPanel {
 
     pub(crate) fn tasks(&self) -> &Entity<BackgroundTasksView> {
         &self.tasks
+    }
+
+    pub(crate) fn workflows(&self) -> &Entity<WorkflowsView> {
+        &self.workflows
     }
 
     /// Choose what the right-side area shows. Selecting the visible content
@@ -99,10 +112,16 @@ impl RightPanel {
         open
     }
 
+    /// Each content polls or repaints only while it is the visible one, so
+    /// both are told on every selection change.
     fn sync_task_visibility(&self, cx: &mut Context<Self>) {
-        let visible = self.shows(RightPanelKind::BackgroundTasks);
+        let tasks_visible = self.shows(RightPanelKind::BackgroundTasks);
         self.tasks
-            .update(cx, |view, cx| view.set_visible(visible, cx));
+            .update(cx, |view, cx| view.set_visible(tasks_visible, cx));
+
+        let workflows_visible = self.shows(RightPanelKind::Workflows);
+        self.workflows
+            .update(cx, |view, cx| view.set_visible(workflows_visible, cx));
     }
 }
 
@@ -110,13 +129,15 @@ impl Render for RightPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let width = self.width;
         let open = self.selection.shows(RightPanelKind::Git)
-            || self.selection.shows(RightPanelKind::BackgroundTasks);
+            || self.selection.shows(RightPanelKind::BackgroundTasks)
+            || self.selection.shows(RightPanelKind::Workflows);
 
         // One content is mounted at a time; two right-side columns are not
         // representable by this layout.
         let body: AnyElement = match self.selection.kind {
             RightPanelKind::Git => self.git.clone().into_any_element(),
             RightPanelKind::BackgroundTasks => self.tasks.clone().into_any_element(),
+            RightPanelKind::Workflows => self.workflows.clone().into_any_element(),
         };
 
         // The panel surface is a floating card (own background, 1px border,

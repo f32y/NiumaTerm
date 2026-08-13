@@ -225,6 +225,12 @@ impl TranscriptView {
                     // long prompt wraps at the prompt measure instead of
                     // stretching a tinted block across the transcript.
                     .max_w(rems(USER_TEXT_MEASURE_REMS))
+                    // The measure is a cap, not a floor: a container narrower
+                    // than it — the side panels showing a child or workflow
+                    // agent conversation — must still wrap the bubble. Without
+                    // this the item keeps its content width and, being
+                    // right-aligned, overflows past the container's left edge.
+                    .min_w_0()
                     .px_3()
                     .py_2()
                     .rounded(UI_RADIUS)

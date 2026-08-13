@@ -131,6 +131,7 @@ impl AgentPane {
             restored_task_session: None,
             background_tasks: None,
             background_task_transcripts: HashMap::new(),
+            workflows: WorkflowUi::default(),
         };
 
         this.start_session(None, cx);
@@ -614,6 +615,12 @@ impl AgentPane {
         // publishes its first snapshot.
         self.background_tasks = None;
         self.background_task_transcripts.clear();
+        // Workflow runs are scoped the same way, and their refresh must not
+        // keep polling a directory that belongs to the replaced conversation.
+        self.clear_workflows();
+        // The question card is answered into the backend being replaced, so it
+        // cannot outlive it either.
+        self.pending_questions = None;
     }
 
     /// Rebuild Claude child agents from the session's persisted history. The

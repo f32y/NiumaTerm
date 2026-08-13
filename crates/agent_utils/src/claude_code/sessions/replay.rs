@@ -62,7 +62,7 @@ pub(super) fn parse_replay(reader: impl BufRead) -> Vec<ReplayTurn> {
 /// it keeps exactly the records the parent conversation drops. Both go through
 /// one parser, which is what makes a child read identically to its parent. A
 /// child's conversation is presented as one stream, so its turns are flattened.
-pub(super) fn parse_child_replay(reader: impl BufRead) -> Vec<Item> {
+pub(in crate::claude_code) fn parse_child_replay(reader: impl BufRead) -> Vec<Item> {
     parse_transcript(reader, /*sidechain*/ true)
         .into_iter()
         .flat_map(|turn| turn.items)

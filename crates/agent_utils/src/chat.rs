@@ -8,6 +8,7 @@ use std::time::SystemTime;
 use crate::background_task::{
     BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscriptUpdate,
 };
+use crate::workflow::WorkflowSnapshot;
 
 /// Thread settings a chat UI lets the user pick. Field meanings are
 /// per-backend: Codex sends them as overrides on every `turn/start`;
@@ -529,6 +530,18 @@ pub enum Event {
     /// lifecycle is reduced by the adapter, so this never affects the parent
     /// transcript, turn state, or approvals.
     BackgroundTasks(BackgroundTaskSnapshot),
+    /// Replacement snapshot of this session's workflow runs. Workflow agents
+    /// are not child agents, so these rows never reach `Background Tasks` and
+    /// never affect the parent transcript or turn state.
+    Workflows(WorkflowSnapshot),
+    /// One workflow agent's own conversation, read from its persisted
+    /// transcript. Delivered separately from the run snapshot because it is
+    /// read only while someone has that agent open.
+    WorkflowAgentTranscript {
+        task_id: String,
+        agent_id: String,
+        items: Vec<Item>,
+    },
     /// One child's own conversation, in the same items the parent transcript
     /// uses. Delivered separately from the summary snapshot because a child's
     /// content is only worth carrying once someone is reading it.

@@ -10,6 +10,7 @@ mod profile;
 mod session;
 pub(crate) mod transcript;
 mod view;
+mod workflows;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
@@ -56,10 +57,14 @@ use nmt_agent_utils::chat::{
     SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
     ThreadSettings,
 };
+use nmt_agent_utils::claude_code::workflows::{
+    RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult,
+};
 use nmt_agent_utils::claude_code::{sessions, stream_json};
 use nmt_agent_utils::codex::app_server;
 use nmt_agent_utils::launcher::AgentCli;
 use nmt_agent_utils::update::{InstallationKey, ProviderKind};
+use nmt_agent_utils::workflow::{WorkflowAgentState, WorkflowRun, WorkflowSnapshot};
 use nmt_agent_utils::{
     AgentEvent, AgentEventKind, AgentRoute, CodexProviderConfig, LaunchConfig, agent_process,
     normalize_body, normalize_title,
@@ -86,12 +91,17 @@ pub(crate) use crate::agent_pane::session::{
     RecoveryIdentity, RecoveryReadiness, RecoverySnapshot, RestorationReadiness,
 };
 use crate::agent_pane::transcript::{Entry, RowSpec, TranscriptView, VirtualTranscriptState};
+use crate::agent_pane::workflows::WorkflowUi;
 use crate::ui::{AppSettings, UI_RADIUS, WorkingIndicator, current_branch};
 
 #[derive(Clone)]
 pub(crate) enum AgentPaneEvent {
     Lifecycle(AgentEvent),
     Interrupted,
+    /// This tab's workflow picture changed: it gained its first run, or its
+    /// count of running agents moved. Reported as an event so the chrome can
+    /// track it without observing every pane repaint.
+    WorkflowActivity,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -463,4 +473,8 @@ pub(crate) struct AgentPane {
     /// adapter so live activity is retained once and the retention bound
     /// applies to what is actually shown.
     background_task_transcripts: HashMap<BackgroundTaskKey, BackgroundTaskTranscript>,
+    /// Workflow runs of this session and the agent conversation the user has
+    /// open. Workflow agents are not child agents, so they never reach the
+    /// `Background Tasks` state above.
+    workflows: WorkflowUi,
 }

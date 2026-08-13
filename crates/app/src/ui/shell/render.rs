@@ -133,6 +133,22 @@ impl Shell {
                                 )
                             }),
                     )
+                    // Each control gets its own occluding wrapper: a shared one
+                    // would stack them, because the wrapper is a column.
+                    // The workflow control stays out of the chrome until a run
+                    // exists to look at.
+                    .children(self.workflows_seen().then(|| {
+                        // Scoped to the active tab, because activating the
+                        // control opens that tab's runs.
+                        let running = self
+                            .active_agent()
+                            .map(|pane| pane.read(cx).running_workflow_agents())
+                            .unwrap_or(0);
+
+                        div()
+                            .occlude()
+                            .child(self.render_workflows_button(running, cx))
+                    }))
                     .child(
                         div()
                             .occlude()
@@ -145,6 +161,24 @@ impl Shell {
     /// with no children, and a pane that is not an agent at all, are states
     /// the view reports for itself, so a disabled control would hide the
     /// answer rather than give it.
+    /// Upper-right `Workflows` control, revealed once a run exists. It carries
+    /// the number of agents running right now, which is the one thing about a
+    /// workflow worth watching without opening the view; a run with nothing in
+    /// flight shows the icon alone rather than a zero.
+    fn render_workflows_button(&self, running: usize, cx: &mut Context<Self>) -> impl IntoElement {
+        let label = i18n("workflows-running-agents").replace("{count}", &running.to_string());
+
+        Button::new("toggle-workflows")
+            .ghost()
+            .icon(IconName::LayoutDashboard)
+            .when(running > 0, |button| button.label(running.to_string()))
+            .aria_label(label.clone())
+            .tooltip(label)
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.on_toggle_workflows(&ToggleWorkflows, window, cx)
+            }))
+    }
+
     fn render_background_tasks_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
         Button::new("toggle-background-tasks")
             .ghost()
@@ -287,6 +321,11 @@ impl Render for Shell {
             .child(
                 div()
                     .flex_1()
+                    // Without this the row keeps `min-height: auto` and any
+                    // child taller than the window stretches it, which pushes
+                    // the bottom-anchored pane content below the viewport and
+                    // reads as a blank main area.
+                    .min_h_0()
                     .flex()
                     .flex_row()
                     .child(sidebar)

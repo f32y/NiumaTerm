@@ -38,10 +38,10 @@ fn agent_tab_close_honors_confirmation_setting() {
     assert!(should_confirm_tab_close(false, false, Always, 0));
 }
 
-/// The right-side area holds one content at a time, so Git and
-/// `Background Tasks` cannot both consume a column.
+/// The right-side area holds one content at a time, so Git,
+/// `Background Tasks`, and `Workflows` cannot each consume a column.
 #[test]
-fn git_and_background_tasks_share_one_right_side_area() {
+fn right_side_views_share_one_area() {
     use crate::ui::right_panel::{RightPanelKind, RightPanelSelection};
 
     let mut selection = RightPanelSelection::new();
@@ -56,8 +56,15 @@ fn git_and_background_tasks_share_one_right_side_area() {
     assert!(selection.shows(RightPanelKind::BackgroundTasks));
     assert!(!selection.shows(RightPanelKind::Git));
 
+    // A third content joins the same rotation rather than adding a column.
+    assert!(selection.select(RightPanelKind::Workflows));
+    assert!(selection.shows(RightPanelKind::Workflows));
+    assert!(!selection.shows(RightPanelKind::BackgroundTasks));
+    assert!(!selection.shows(RightPanelKind::Git));
+
     // Selecting the visible view closes the area.
-    assert!(!selection.select(RightPanelKind::BackgroundTasks));
+    assert!(!selection.select(RightPanelKind::Workflows));
+    assert!(!selection.shows(RightPanelKind::Workflows));
     assert!(!selection.shows(RightPanelKind::BackgroundTasks));
     assert!(!selection.shows(RightPanelKind::Git));
 }
