@@ -317,8 +317,11 @@ impl Shell {
                     return;
                 }
                 AgentPaneEvent::BackgroundTaskActivity => {
-                    // The count is read at render time, so this only has to
-                    // repaint the title bar.
+                    // Sticky: a finished child stays reachable, so the control
+                    // never goes away once it has appeared. The running count
+                    // is read at render time, so this only has to repaint the
+                    // title bar.
+                    this.background_tasks_seen |= pane.read(cx).background_task_count() > 0;
                     cx.notify();
                     return;
                 }

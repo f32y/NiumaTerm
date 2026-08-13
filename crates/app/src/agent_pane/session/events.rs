@@ -428,11 +428,22 @@ impl AgentPane {
                 // Child lifecycle is reduced by the adapter, so this replaces
                 // the pane's copy without touching the composer, transcript,
                 // approval, queued commands, or running state.
-                let before = self.running_background_tasks();
+                let before = (
+                    self.background_task_count(),
+                    self.running_background_tasks(),
+                );
                 self.background_tasks = Some(snapshot);
-                // The chrome carries the running count, so it is told when that
-                // number moves rather than on every refreshed snapshot.
-                if self.running_background_tasks() != before {
+                // The chrome reveals its control on this tab's first child and
+                // then carries the running count, so it is told when either
+                // number moves rather than on every refreshed snapshot. A child
+                // that is created and finishes within one batch of provider
+                // messages never moves the running count, but it does move the
+                // total, and it is still a child the view can open.
+                if (
+                    self.background_task_count(),
+                    self.running_background_tasks(),
+                ) != before
+                {
                     cx.emit(AgentPaneEvent::BackgroundTaskActivity);
                 }
                 cx.notify();

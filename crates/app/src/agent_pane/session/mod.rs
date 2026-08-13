@@ -741,6 +741,15 @@ impl AgentPane {
             .unwrap_or(0)
     }
 
+    /// Child agents this tab has, running and finished alike. A finished child
+    /// is still something to open the view for, so the chrome asks for this
+    /// rather than the running count when deciding to offer the control.
+    pub(crate) fn background_task_count(&self) -> usize {
+        self.background_tasks()
+            .map(|tasks| tasks.tasks.len())
+            .unwrap_or(0)
+    }
+
     pub(super) fn reset_conversation(&mut self, cx: &mut Context<Self>) {
         self.session = None;
         // A fresh conversation always follows the live tail again, even if
