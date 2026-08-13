@@ -123,11 +123,11 @@ impl SettingItem {
 
     /// Set whether the setting item is disabled, default is false.
     ///
-    /// A disabled item is rendered with reduced opacity. For
-    /// [`SettingItem::Item`] the underlying field is also rendered in a
-    /// non-interactive state. For [`SettingItem::Element`] the `disabled` flag
-    /// is forwarded via [`RenderOptions::disabled`] so the custom renderer can
-    /// disable its interactive controls.
+    /// For [`SettingItem::Item`], disabling affects only the field so the title
+    /// and description remain readable. For [`SettingItem::Element`], the
+    /// complete custom element keeps reduced opacity and the `disabled` flag is
+    /// forwarded via [`RenderOptions::disabled`] so its renderer can disable
+    /// interactive controls.
     pub fn disabled(mut self, disabled: bool) -> Self {
         match &mut self {
             SettingItem::Item { disabled: d, .. } => *d = disabled,
@@ -273,7 +273,6 @@ impl SettingItem {
                     div()
                         .w_full()
                         .overflow_hidden()
-                        .when(disabled, |this| this.opacity(0.5))
                         .map(|this| {
                             if layout.is_horizontal() {
                                 this.h_flex().justify_between().items_start()
