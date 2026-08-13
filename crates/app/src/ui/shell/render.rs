@@ -120,10 +120,11 @@ impl Shell {
                             .show_git_status_on_title_bar
                             .then(|| {
                                 div().occlude().child(
-                                    Button::new("toggle-git-sidebar")
+                                    Toggle::new("toggle-git-sidebar")
                                         .ghost()
+                                        .checked(self.right_panel_shows(RightPanelKind::Git, cx))
                                         .icon(GitIcon)
-                                        .on_click(cx.listener(|this, _, window, cx| {
+                                        .on_click(cx.listener(|this, _: &bool, window, cx| {
                                             this.on_toggle_git_sidebar(
                                                 &ToggleGitSidebar,
                                                 window,
@@ -173,13 +174,16 @@ impl Shell {
     fn render_workflows_button(&self, running: usize, cx: &mut Context<Self>) -> impl IntoElement {
         let label = i18n("workflows-running-agents").replace("{count}", &running.to_string());
 
-        Button::new("toggle-workflows")
+        Toggle::new("toggle-workflows")
             .ghost()
+            .checked(self.right_panel_shows(RightPanelKind::Workflows, cx))
+            // Matches the gap a Button puts between its icon and label; the
+            // toggle centres its children without one.
+            .gap_2()
             .icon(IconName::LayoutDashboard)
-            .when(running > 0, |button| button.label(running.to_string()))
-            .aria_label(label.clone())
+            .when(running > 0, |toggle| toggle.label(running.to_string()))
             .tooltip(label)
-            .on_click(cx.listener(|this, _, window, cx| {
+            .on_click(cx.listener(|this, _: &bool, window, cx| {
                 this.on_toggle_workflows(&ToggleWorkflows, window, cx)
             }))
     }
@@ -199,13 +203,14 @@ impl Shell {
             _ => i18n("tasks-background-running-agents").replace("{count}", &running.to_string()),
         };
 
-        Button::new("toggle-background-tasks")
+        Toggle::new("toggle-background-tasks")
             .ghost()
+            .checked(self.right_panel_shows(RightPanelKind::BackgroundTasks, cx))
+            .gap_2()
             .icon(IconName::Bot)
-            .when(running > 0, |button| button.label(running.to_string()))
-            .aria_label(label.clone())
+            .when(running > 0, |toggle| toggle.label(running.to_string()))
             .tooltip(label)
-            .on_click(cx.listener(|this, _, window, cx| {
+            .on_click(cx.listener(|this, _: &bool, window, cx| {
                 this.on_toggle_background_tasks(&ToggleBackgroundTasks, window, cx)
             }))
     }
