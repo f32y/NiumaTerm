@@ -32,6 +32,15 @@ pub(super) fn parse_slash_command(input: &str) -> Option<ParsedSlashCommand> {
     })
 }
 
+/// Parse only an input whose first token is `$name`. Once the user types past
+/// that token the composer holds a skill invocation with arguments, so the
+/// picker stops claiming the input.
+pub(super) fn parse_skill_prefix(input: &str) -> Option<String> {
+    let tail = input.strip_prefix('$')?;
+
+    (!tail.contains(char::is_whitespace)).then(|| tail.to_ascii_lowercase())
+}
+
 pub(super) fn local_commands() -> Vec<SlashCommandInfo> {
     vec![
         command(
@@ -732,5 +741,14 @@ mod tests {
             ))
         );
         assert!(prepare_skill_selection(&disabled).is_err());
+    }
+
+    #[test]
+    fn skill_prefix_covers_only_the_leading_token() {
+        assert_eq!(parse_skill_prefix("$"), Some(String::new()));
+        assert_eq!(parse_skill_prefix("$Review"), Some("review".to_string()));
+        assert_eq!(parse_skill_prefix("$review changes"), None);
+        assert_eq!(parse_skill_prefix("/review"), None);
+        assert_eq!(parse_skill_prefix("cost is $5"), None);
     }
 }

@@ -143,6 +143,8 @@
 "settings-agent-show-usage-description" = "在工作区侧边栏中显示智能体账户用量。"
 "settings-agent-collapse-tool-calls" = "默认折叠工具调用详情"
 "settings-agent-collapse-tool-calls-description" = "在智能体标签页中仅显示连续工具调用中的最新一项；较早的调用收进“前 N 个工具调用”开关。"
+"settings-agent-codex-skill-compat" = "Codex 技能命令兼容"
+"settings-agent-codex-skill-compat-description" = "在 / 命令面板中列出 Codex 技能，选中后改写为 $name 形式。关闭后 / 只列出命令，输入 $ 打开技能列表。"
 "settings-agent-check-updates" = "检查智能体更新"
 "settings-agent-check-updates-description" = "每小时检查智能体配置引用的 Claude Code 和 Codex 安装是否有新版本。即使关闭此项，下方的检查按钮仍可使用。"
 "settings-agent-hooks" = "智能体 Hook"

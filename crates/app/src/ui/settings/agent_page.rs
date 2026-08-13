@@ -68,6 +68,18 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                 },
             ),
         ))
+        .item(
+            SettingItem::new(
+                i18n("settings-agent-codex-skill-compat"),
+                SettingField::switch(
+                    |cx| cx.global::<AppSettings>().codex_skill_command_compat,
+                    |value, cx| {
+                        cx.global_mut::<AppSettings>().codex_skill_command_compat = value;
+                    },
+                ),
+            )
+            .description(i18n("settings-agent-codex-skill-compat-description")),
+        )
         .item(SettingItem::new(
             i18n("settings-agent-check-updates"),
             SettingField::switch(

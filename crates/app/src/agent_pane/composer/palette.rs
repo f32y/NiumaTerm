@@ -68,6 +68,42 @@ impl AgentPane {
         true
     }
 
+    /// Rows for a skill query, shared by the `/` picker stage and the `$`
+    /// prefix. Discovery runs in the background, so a missing catalog is a
+    /// loading state rather than an empty result.
+    fn skill_palette_model(&self, query: &str) -> PaletteModel {
+        let Some(skill_catalog) = self.palette.skill_catalog.as_ref() else {
+            return PaletteModel {
+                rows: Vec::new(),
+                note: Some(i18n("agent-composer-skill-discovery-loading").to_string()),
+            };
+        };
+
+        let rows = filter_skill_catalog(&skill_catalog.skills, query)
+            .into_iter()
+            .map(|skill| PaletteRow {
+                label: format!("${}", skill.name),
+                description: skill.description.clone(),
+                hint: Some(skill.scope.clone()),
+                disabled_reason: self.skill_disabled_reason(&skill),
+                action: PaletteAction::Skill(skill),
+            })
+            .collect::<Vec<_>>();
+        let note = if rows.is_empty() && !skill_catalog.errors.is_empty() {
+            Some(skill_catalog.errors[0].clone())
+        } else if rows.is_empty() && query.is_empty() {
+            Some(i18n("agent-composer-no-skills").to_string())
+        } else if rows.is_empty() {
+            Some(i18n("agent-composer-no-matching-skills").to_string())
+        } else if let Some(error) = skill_catalog.errors.first() {
+            Some(i18n("agent-composer-skill-load-partial").replace("{error}", error))
+        } else {
+            None
+        };
+
+        PaletteModel { rows, note }
+    }
+
     pub(in crate::agent_pane) fn palette_model(&self, cx: &Context<Self>) -> Option<PaletteModel> {
         if let Some(state) = self.rewind.state.as_ref() {
             return self.rewind_palette_model(state);
@@ -78,48 +114,29 @@ impl AgentPane {
 
         let input = self.input.read(cx);
         let text = input.text().to_string();
+
+        if self.kind == AgentKind::Codex {
+            if let Some(query) = parse_skill_prefix(&text) {
+                return Some(self.skill_palette_model(&query));
+            }
+        }
+
         let parsed = parse_slash_command(&text)?;
         let cursor = input.cursor();
         let catalog = self.command_catalog();
+        // Codex reaches skills through `$name`. Listing them under `/` too is
+        // a convenience for users who expect one command key, so it follows
+        // the compatibility setting instead of the agent kind alone.
+        let slash_skills =
+            self.kind == AgentKind::Codex && cx.global::<AppSettings>().codex_skill_command_compat;
 
         if parsed.has_argument_separator {
             let command = catalog.iter().find(|command| command.name == parsed.name)?;
 
             if command.arguments == SlashCommandArguments::Skills {
                 let query = parsed.arguments.trim().to_ascii_lowercase();
-                let Some(skill_catalog) = self.palette.skill_catalog.as_ref() else {
-                    return Some(PaletteModel {
-                        rows: Vec::new(),
-                        note: Some(i18n("agent-composer-skill-discovery-loading").to_string()),
-                    });
-                };
-                let rows = filter_skill_catalog(&skill_catalog.skills, &query)
-                    .into_iter()
-                    .map(|skill| {
-                        let disabled_reason = self.skill_disabled_reason(&skill);
 
-                        PaletteRow {
-                            label: format!("${}", skill.name),
-                            description: skill.description.clone(),
-                            hint: Some(skill.scope.clone()),
-                            disabled_reason,
-                            action: PaletteAction::Skill(skill),
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                let note = if rows.is_empty() && !skill_catalog.errors.is_empty() {
-                    Some(skill_catalog.errors[0].clone())
-                } else if rows.is_empty() && query.is_empty() {
-                    Some(i18n("agent-composer-no-skills").to_string())
-                } else if rows.is_empty() {
-                    Some(i18n("agent-composer-no-matching-skills").to_string())
-                } else if let Some(error) = skill_catalog.errors.first() {
-                    Some(i18n("agent-composer-skill-load-partial").replace("{error}", error))
-                } else {
-                    None
-                };
-
-                return Some(PaletteModel { rows, note });
+                return Some(self.skill_palette_model(&query));
             }
 
             if command.arguments != SlashCommandArguments::Choices {
@@ -161,7 +178,7 @@ impl AgentPane {
             return None;
         }
 
-        let skills: &[SkillInfo] = if self.kind == AgentKind::Codex {
+        let skills: &[SkillInfo] = if slash_skills {
             self.palette
                 .skill_catalog
                 .as_ref()
@@ -208,9 +225,9 @@ impl AgentPane {
             })
             .collect::<Vec<_>>();
         let note = if rows.is_empty() {
-            if self.kind == AgentKind::Codex && self.palette.skill_catalog.is_none() {
+            if slash_skills && self.palette.skill_catalog.is_none() {
                 Some(i18n("agent-composer-skill-discovery-loading").to_string())
-            } else if self.kind == AgentKind::Codex
+            } else if slash_skills
                 && self
                     .palette
                     .skill_catalog
@@ -221,16 +238,16 @@ impl AgentPane {
                     .skill_catalog
                     .as_ref()
                     .and_then(|catalog| catalog.errors.first().cloned())
-            } else if self.kind == AgentKind::Codex {
+            } else if slash_skills {
                 Some(i18n("agent-composer-no-matching-commands-skills").to_string())
             } else {
                 Some(i18n("agent-composer-no-matching-commands").to_string())
             }
         } else if self.kind == AgentKind::Claude && !self.palette.provider_commands_ready {
             Some(i18n("agent-composer-claude-command-loading").to_string())
-        } else if self.kind == AgentKind::Codex && self.palette.skill_catalog.is_none() {
+        } else if slash_skills && self.palette.skill_catalog.is_none() {
             Some(i18n("agent-composer-skill-discovery-loading").to_string())
-        } else if self.kind == AgentKind::Codex {
+        } else if slash_skills {
             self.palette
                 .skill_catalog
                 .as_ref()

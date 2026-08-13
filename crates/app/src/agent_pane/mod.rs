@@ -79,9 +79,9 @@ use tracing::{info, warn};
 use crate::agent_pane::commands::{
     PaletteCatalogEntry, PaletteDirection, claim_command_turn_start, filter_palette_catalog,
     filter_skill_catalog, is_current_session_epoch, local_commands, merge_catalog,
-    move_palette_selection, next_session_epoch, parse_slash_command, prepare_skill_selection,
-    reconcile_skill_binding, reset_command_runtime, resolve_choice, setting_value_label,
-    validate_skill_binding,
+    move_palette_selection, next_session_epoch, parse_skill_prefix, parse_slash_command,
+    prepare_skill_selection, reconcile_skill_binding, reset_command_runtime, resolve_choice,
+    setting_value_label, validate_skill_binding,
 };
 use crate::agent_pane::composer::{CommandFeedback, PendingSlashCommand, RewindState};
 use crate::agent_pane::input_history::{InputHistoryNavigation, InputHistoryScope};

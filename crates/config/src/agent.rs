@@ -21,6 +21,11 @@ pub struct AgentConfig {
     /// background. Manual checks stay available while this is off.
     #[serde(default = "default_bool_true", rename = "check-agent-updates")]
     pub check_agent_updates: bool,
+    /// List Codex skills in the `/` command palette and rewrite a chosen one
+    /// to its `$name` form. With this off the `/` palette carries commands
+    /// only and `$` is the sole skill trigger.
+    #[serde(default = "default_bool_true", rename = "codex-skill-command-compat")]
+    pub codex_skill_command_compat: bool,
 }
 
 impl Default for AgentConfig {
@@ -30,6 +35,7 @@ impl Default for AgentConfig {
             show_agent_usage: true,
             collapse_tool_calls: false,
             check_agent_updates: true,
+            codex_skill_command_compat: true,
         }
     }
 }
@@ -39,4 +45,5 @@ pub(crate) fn patch_document(doc: &mut DocumentMut, agent: &AgentConfig) {
     doc["agent"]["show-agent-usage"] = value(agent.show_agent_usage);
     doc["agent"]["collapse-tool-calls"] = value(agent.collapse_tool_calls);
     doc["agent"]["check-agent-updates"] = value(agent.check_agent_updates);
+    doc["agent"]["codex-skill-command-compat"] = value(agent.codex_skill_command_compat);
 }
