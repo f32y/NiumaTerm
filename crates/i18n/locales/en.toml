@@ -144,6 +144,8 @@
 "settings-agent-show-usage-description" = "Show Agent account usage in the workspace sidebar."
 "settings-agent-collapse-tool-calls" = "Collapse Tool Call details by default"
 "settings-agent-collapse-tool-calls-description" = "In agent tabs, show only the newest of consecutive tool calls; older ones sit behind a \"+N previous tool calls\" toggle."
+"settings-agent-codex-skill-compat" = "Codex skill command compatibility"
+"settings-agent-codex-skill-compat-description" = "List Codex skills in the / command palette and rewrite a chosen skill to its $name form. With this off, / lists commands only and typing $ opens the skill list."
 "settings-agent-check-updates" = "Check for Agent Updates"
 "settings-agent-check-updates-description" = "Check every hour whether the Claude Code and Codex installations referenced by Agent Profiles have a newer version. The Check button below stays available while this is off."
 "settings-agent-hooks" = "Agent Hooks"

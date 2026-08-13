@@ -639,6 +639,7 @@ mod tests {
             show_agent_usage: false,
             collapse_tool_calls: true,
             check_agent_updates: false,
+            codex_skill_command_compat: false,
         }
     }
 

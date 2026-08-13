@@ -97,6 +97,9 @@ pub struct AppSettings {
     /// Probe each Agent installation for a newer provider version in the
     /// background.
     pub check_agent_updates: bool,
+    /// List Codex skills in the `/` command palette and rewrite a chosen one
+    /// to its `$name` form.
+    pub codex_skill_command_compat: bool,
     /// Restore the last saved workspace/tab session on startup.
     pub restore_last_session_when_opening: bool,
     /// Manage each tab's shell with a Windows Job Object: closing the tab
@@ -164,6 +167,7 @@ impl Default for AppSettings {
             show_agent_usage: true,
             collapse_tool_calls: false,
             check_agent_updates: true,
+            codex_skill_command_compat: true,
             restore_last_session_when_opening: true,
             manage_subprocess_job: false,
             warn_before_terminating_shell: WarnBeforeTerminatingShell::default(),
@@ -418,6 +422,7 @@ impl AppSettings {
             show_agent_usage: config.agent.show_agent_usage,
             collapse_tool_calls: config.agent.collapse_tool_calls,
             check_agent_updates: config.agent.check_agent_updates,
+            codex_skill_command_compat: config.agent.codex_skill_command_compat,
             restore_last_session_when_opening: config.system.restore_last_session_when_opening,
             manage_subprocess_job: config.system.manage_subprocess_job,
             warn_before_terminating_shell: config.system.warn_before_terminating_shell,
@@ -635,6 +640,7 @@ impl AppSettings {
             show_agent_usage: self.show_agent_usage,
             collapse_tool_calls: self.collapse_tool_calls,
             check_agent_updates: self.check_agent_updates,
+            codex_skill_command_compat: self.codex_skill_command_compat,
         };
 
         let system = SystemConfig {
