@@ -492,7 +492,7 @@ fn fetch_usage(since: &str, date: &str) -> Result<DailyTokenUsage, String> {
         .args([
             "/D",
             "/C",
-            &format!("npx ccusage@latest -j --offline --since {since}"),
+            &format!("npx ccusage@latest -j --since {since}"),
         ])
         .creation_flags(CREATE_NO_WINDOW)
         .output()
