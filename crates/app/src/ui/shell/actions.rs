@@ -22,6 +22,7 @@ actions!(
         ToggleSidebar,
         ToggleGitSidebar,
         ToggleBackgroundTasks,
+        ToggleWorkflows,
         ShowSettings,
         NewRemoteTab,
         NewAgentTab,

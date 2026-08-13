@@ -51,6 +51,9 @@ use crate::chat::{
 };
 use crate::claude_code::sessions::RestoredTask;
 use crate::claude_code::tasks::ClaudeTasks;
+use crate::claude_code::workflows::{
+    ClaudeWorkflows, RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult,
+};
 use crate::launcher::AgentCli;
 use crate::subprocess::JsonLineProcess;
 
@@ -154,6 +157,9 @@ pub struct Session {
     /// Child-agent state reduced from Task launches, lifecycle records, and
     /// linked sidechain traffic for the `Background Tasks` view.
     tasks: ClaudeTasks,
+    /// Workflow runs, reduced from the same records the child-agent reducer
+    /// rejects. The two views never share a row.
+    workflows: ClaudeWorkflows,
 }
 
 impl Session {
@@ -270,6 +276,7 @@ impl Session {
             turn_output_usage: TurnOutputUsage::default(),
             compacting: false,
             tasks: ClaudeTasks::default(),
+            workflows: ClaudeWorkflows::default(),
         };
 
         session.send(json!({
@@ -305,6 +312,7 @@ impl Session {
         // drops linked sidechain records to keep child text out of the
         // transcript; the child state would otherwise be lost with them.
         let tasks_changed = self.tasks.observe(&message);
+        let workflows_changed = self.workflows.observe(&message);
 
         // First sign of life after a send: the turn is actually running.
         if self.turn_active && !self.turn_reported {
@@ -346,6 +354,9 @@ impl Session {
 
         if tasks_changed && let Some(snapshot) = self.tasks.snapshot() {
             events.push(Event::BackgroundTasks(snapshot));
+        }
+        if workflows_changed && let Some(snapshot) = self.workflows.snapshot() {
+            events.push(Event::Workflows(snapshot));
         }
         // A child's own conversation travels separately from its summary; the
         // parent transcript above has already dropped this content.
@@ -597,6 +608,64 @@ impl Session {
                 "response": response,
             },
         }));
+    }
+
+    /// What each still-running workflow run needs read on the next refresh
+    /// tick. A terminal run is left out: its record can no longer change.
+    pub fn workflow_refresh_requests(&self) -> Vec<WorkflowRefreshRequest> {
+        let Some(snapshot) = self.workflows.snapshot() else {
+            return Vec::new();
+        };
+
+        snapshot
+            .runs
+            .into_iter()
+            .filter(|run| !run.state.is_terminal())
+            .map(|run| WorkflowRefreshRequest {
+                task_id: run.task_id,
+                agent_ids: run
+                    .agents
+                    .into_iter()
+                    .filter_map(|agent| agent.agent_id)
+                    .collect(),
+                open_agent: None,
+                open_agent_len: None,
+            })
+            .collect()
+    }
+
+    /// Fold one run's refresh back in. The transcript travels as its own event
+    /// because it is read only while someone has that agent open.
+    pub fn apply_workflow_refresh(&mut self, result: WorkflowRefreshResult) -> Vec<Event> {
+        let mut events = Vec::new();
+        let task_id = result.task_id;
+
+        if self.workflows.apply_refresh(&task_id, result.refresh)
+            && let Some(snapshot) = self.workflows.snapshot()
+        {
+            events.push(Event::Workflows(snapshot));
+        }
+        if let Some(transcript) = result.transcript {
+            events.push(Event::WorkflowAgentTranscript {
+                task_id,
+                agent_id: transcript.agent_id,
+                items: transcript.items,
+            });
+        }
+
+        events
+    }
+
+    /// Fold a resumed session's completed runs in.
+    pub fn restore_workflows(&mut self, restored: Vec<RestoredWorkflowRun>) -> Vec<Event> {
+        if !self.workflows.merge_restored(restored) {
+            return Vec::new();
+        }
+
+        self.workflows
+            .snapshot()
+            .map(|snapshot| vec![Event::Workflows(snapshot)])
+            .unwrap_or_default()
     }
 
     fn alloc_item_id(&mut self, prefix: &str) -> String {

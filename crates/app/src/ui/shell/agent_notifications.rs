@@ -308,6 +308,14 @@ impl Shell {
                     .agent_monitor
                     .apply(event.clone(), time::Instant::now()),
                 AgentPaneEvent::Lifecycle(_) => return,
+                AgentPaneEvent::WorkflowActivity => {
+                    // Sticky: a finished run stays reachable, so the control
+                    // never goes away once it has appeared. The running count
+                    // is read at render time, so this only has to repaint.
+                    this.workflows_seen = true;
+                    cx.notify();
+                    return;
+                }
                 AgentPaneEvent::Interrupted => {
                     this.agent_monitor.interrupt(&route, time::Instant::now())
                 }

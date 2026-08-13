@@ -204,6 +204,41 @@ impl Backend {
         }
     }
 
+    /// What each still-running workflow run needs read on the next refresh
+    /// tick. Only Claude reports workflows, so Codex has nothing to read.
+    pub(in crate::agent_pane) fn workflow_refresh_requests(&self) -> Vec<WorkflowRefreshRequest> {
+        match self {
+            Backend::Claude(session) => session.workflow_refresh_requests(),
+            Backend::Codex(_) => Vec::new(),
+            #[cfg(test)]
+            Backend::Test(_) => Vec::new(),
+        }
+    }
+
+    pub(in crate::agent_pane) fn apply_workflow_refresh(
+        &mut self,
+        result: WorkflowRefreshResult,
+    ) -> Vec<SessionEvent> {
+        match self {
+            Backend::Claude(session) => session.apply_workflow_refresh(result),
+            Backend::Codex(_) => Vec::new(),
+            #[cfg(test)]
+            Backend::Test(_) => Vec::new(),
+        }
+    }
+
+    pub(in crate::agent_pane) fn restore_workflows(
+        &mut self,
+        restored: Vec<RestoredWorkflowRun>,
+    ) -> Vec<SessionEvent> {
+        match self {
+            Backend::Claude(session) => session.restore_workflows(restored),
+            Backend::Codex(_) => Vec::new(),
+            #[cfg(test)]
+            Backend::Test(_) => Vec::new(),
+        }
+    }
+
     /// Answer an `AskUserQuestion` card. Only Claude asks structured questions;
     /// Codex has no equivalent request, so there is nothing to answer there.
     pub(in crate::agent_pane) fn respond_questions(&mut self, answers: Option<Vec<Vec<String>>>) {

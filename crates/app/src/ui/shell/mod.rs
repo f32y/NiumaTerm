@@ -72,7 +72,7 @@ pub(crate) use crate::ui::shell::actions::{
     CloseTab, NewAgentTab, NewRemoteTab, NewTab, NewWindow, NewWorkspace, NextTab, NextWorkspace,
     PrevTab, PrevWorkspace, ResizePaneDown, ResizePaneLeft, ResizePaneRight, ResizePaneUp,
     ShowSettings, SplitDown, SplitLeft, SplitRight, SplitUp, ToggleBackgroundTasks,
-    ToggleGitSidebar, ToggleSidebar,
+    ToggleGitSidebar, ToggleSidebar, ToggleWorkflows,
 };
 #[cfg(test)]
 use crate::ui::shell::close::{should_confirm_close, should_confirm_tab_close};
@@ -80,6 +80,7 @@ use crate::ui::shell::close::{should_confirm_close, should_confirm_tab_close};
 pub(crate) use crate::ui::shell::tab_surface::{TabSurface, TerminalPaneTree};
 use crate::ui::tab_bar::TabStrip;
 use crate::ui::token_usage::TokenUsageView;
+use crate::ui::workflows::WorkflowsView;
 use crate::ui::workspace_sidebar::{self, Sidebar};
 use crate::window::{AppWindow, LastActiveWindow, ShellEntry, ShellRegistry, WindowRegistry};
 use crate::workspace::{
@@ -121,6 +122,10 @@ pub(crate) struct Shell {
     /// Focus the active pane on the first render (the window root is `Root`, so
     /// initial focus can't be set from the app entry point).
     needs_focus: bool,
+    /// Whether any tab has run a workflow. Sticky: the title-bar control
+    /// appears the first time one runs and stays, so a finished run remains
+    /// reachable after its rows have settled.
+    workflows_seen: bool,
     /// Whether we've started observing the wrapping `Root` (so dialog open/close
     /// re-renders the shell, which draws the dialog layer). Set on first render.
     root_observed: bool,
@@ -290,6 +295,7 @@ impl Shell {
             workspace_rename: None,
             tab_rename: None,
             needs_focus: true,
+            workflows_seen: false,
             root_observed: false,
             theme_watcher: None,
             settings_state: None,
@@ -301,7 +307,8 @@ impl Shell {
             right_panel: {
                 let git = cx.new(|cx| GitSidebar::new(git_model.clone(), cx));
                 let tasks = cx.new(|_| BackgroundTasksView::new());
-                cx.new(|_| RightPanel::new(git, tasks))
+                let workflows = cx.new(|_| WorkflowsView::new());
+                cx.new(|_| RightPanel::new(git, tasks, workflows))
             },
             git_model,
             update_notifications: collections::HashMap::new(),
@@ -377,6 +384,44 @@ impl Shell {
             .update(cx, |model, _| model.sidebar_open = false);
 
         cx.notify();
+    }
+
+    pub(super) fn workflows_seen(&self) -> bool {
+        self.workflows_seen
+    }
+
+    fn on_toggle_workflows(
+        &mut self,
+        _: &ToggleWorkflows,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let open = self
+            .right_panel
+            .update(cx, |panel, cx| panel.select(RightPanelKind::Workflows, cx));
+
+        if open {
+            self.sync_workflow_panel_target(cx);
+        }
+        // Git owns the poller's own visibility flag; leaving Git for another
+        // view stops the polling it turned on.
+        self.git_model
+            .update(cx, |model, _| model.sidebar_open = false);
+
+        cx.notify();
+    }
+
+    /// Point the workflow view at the active Agent pane. Only Claude Code
+    /// reports workflows, so any other pane clears the target and the view
+    /// reports that there is no session rather than closing.
+    fn sync_workflow_panel_target(&mut self, cx: &mut Context<Self>) {
+        let target = self
+            .active_agent()
+            .filter(|pane| pane.read(cx).claude_session_id().is_some());
+
+        let handle = target.map(|pane| pane.downgrade());
+        let workflows = self.right_panel.read(cx).workflows().clone();
+        workflows.update(cx, |view, cx| view.set_target(handle, cx));
     }
 
     /// Point the view at the active Agent pane. A pane with no supported

@@ -32,5 +32,6 @@ mod shell;
 mod sidebar_resize;
 mod tab_bar;
 mod token_usage;
+mod workflows;
 mod working_indicator;
 mod workspace_sidebar;

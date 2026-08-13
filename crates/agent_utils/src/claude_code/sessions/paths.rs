@@ -22,7 +22,7 @@ pub(super) fn munge_cwd(cwd: &str) -> String {
 
 /// The transcript directory for `cwd` (falling back to the process cwd, which
 /// is what a spawned `claude` without an explicit working directory uses).
-pub(super) fn project_dir(cwd: Option<&str>) -> Option<PathBuf> {
+pub(in crate::claude_code) fn project_dir(cwd: Option<&str>) -> Option<PathBuf> {
     let cwd = match cwd {
         Some(cwd) => cwd.to_string(),
         None => env::current_dir().ok()?.to_string_lossy().into_owned(),
