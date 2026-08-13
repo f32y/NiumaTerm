@@ -33,6 +33,7 @@ use crate::agent_pane::updates::transaction::{
     resolve_preflight,
 };
 pub(crate) use crate::agent_pane::updates::transaction::{provider_for_profile, request_update};
+use crate::ui::AppSettings;
 
 pub(crate) struct AgentUpdates {
     pub(crate) coordinator: UpdateCoordinator,
@@ -163,26 +164,39 @@ pub(crate) fn manual_check_profiles(profiles: &[AgentProfile], cx: &mut App) {
     .detach();
 }
 
-pub(crate) fn schedule_startup_checks(cx: &mut App) {
-    let updates = cx.global::<AgentUpdates>();
-    if updates.testing() {
+/// Automatic re-check cadence. Matches the coordinator's cache freshness, so a
+/// tick that finds a fresh cached result costs nothing.
+const AUTOMATIC_CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
+
+pub(crate) fn schedule_automatic_checks(cx: &mut App) {
+    if cx.global::<AgentUpdates>().testing() {
         return;
     }
-    let coordinator = updates.coordinator.clone();
-    let keys = coordinator
-        .snapshots()
-        .into_iter()
-        .map(|snapshot| snapshot.identity.key)
-        .collect::<Vec<_>>();
     cx.spawn(async move |cx| {
+        // Let the first windows finish opening before probing providers.
         cx.background_executor().timer(Duration::from_secs(3)).await;
-        let worker = cx.background_executor().spawn(async move {
-            for key in keys {
-                let _ = coordinator.check(&key, false);
+        loop {
+            // Re-read the switch every tick: the user can toggle it, and the
+            // registered installations change, while the app runs.
+            let active = cx.update(|cx| {
+                let coordinator = cx.global::<AgentUpdates>().coordinator.clone();
+                cx.global::<AppSettings>()
+                    .check_agent_updates
+                    .then_some(coordinator)
+            });
+            if let Some(coordinator) = active {
+                let worker = cx.background_executor().spawn(async move {
+                    for snapshot in coordinator.snapshots() {
+                        let _ = coordinator.check(&snapshot.identity.key, false);
+                    }
+                });
+                worker.await;
+                cx.update(|cx| cx.refresh_windows());
             }
-        });
-        worker.await;
-        let _ = cx.update(|cx| cx.refresh_windows());
+            cx.background_executor()
+                .timer(AUTOMATIC_CHECK_INTERVAL)
+                .await;
+        }
     })
     .detach();
 }

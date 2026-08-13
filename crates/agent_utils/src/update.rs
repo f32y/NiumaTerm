@@ -355,7 +355,7 @@ fn hex_digest(bytes: &[u8]) -> String {
 }
 
 const CACHE_VERSION: u32 = 1;
-const CACHE_FRESHNESS: ChronoDuration = ChronoDuration::hours(24);
+const CACHE_FRESHNESS: ChronoDuration = ChronoDuration::hours(1);
 
 #[derive(Clone, Debug)]
 pub struct InstallationSnapshot {
@@ -481,7 +481,7 @@ impl UpdateCoordinator {
     }
 
     /// Check an installation. Automatic callers reuse a successful result for
-    /// 24 hours; manual callers always probe the provider.
+    /// one hour; manual callers always probe the provider.
     pub fn check(&self, key: &InstallationKey, manual: bool) -> Result<VersionStatus, UpdateError> {
         let (launcher, maintenance) = {
             let mut inner = self.inner.lock();
