@@ -15,6 +15,30 @@ pub(crate) enum RecoveryIdentity {
 pub(in crate::agent_pane) enum Backend {
     Codex(app_server::Session),
     Claude(stream_json::Session),
+    #[cfg(test)]
+    Test(TestBackend),
+}
+
+#[cfg(test)]
+pub(in crate::agent_pane) struct TestBackend {
+    send_outcomes: VecDeque<SendOutcome>,
+    slash_outcome: SlashCommandOutcome,
+    commands: Vec<SlashCommandInfo>,
+}
+
+#[cfg(test)]
+impl TestBackend {
+    pub(in crate::agent_pane) fn new(
+        send_outcomes: impl IntoIterator<Item = SendOutcome>,
+        slash_outcome: SlashCommandOutcome,
+        commands: Vec<SlashCommandInfo>,
+    ) -> Self {
+        Self {
+            send_outcomes: send_outcomes.into_iter().collect(),
+            slash_outcome,
+            commands,
+        }
+    }
 }
 
 impl Backend {
@@ -22,6 +46,8 @@ impl Backend {
         match self {
             Backend::Codex(session) => session.process(message),
             Backend::Claude(session) => session.process(message),
+            #[cfg(test)]
+            Backend::Test(_) => Vec::new(),
         }
     }
 
@@ -34,6 +60,11 @@ impl Backend {
         match self {
             Backend::Codex(session) => session.send_user_message_with_skill(text, settings, skill),
             Backend::Claude(session) => session.send_user_message(text, settings),
+            #[cfg(test)]
+            Backend::Test(session) => session
+                .send_outcomes
+                .pop_front()
+                .unwrap_or(SendOutcome::NotReady),
         }
     }
 
@@ -41,6 +72,8 @@ impl Backend {
         match self {
             Backend::Codex(_) => app_server::Session::adapter_commands(),
             Backend::Claude(_) => stream_json::Session::adapter_commands(),
+            #[cfg(test)]
+            Backend::Test(session) => session.commands.clone(),
         }
     }
 
@@ -52,6 +85,8 @@ impl Backend {
         match self {
             Backend::Codex(session) => session.execute_slash_command(name, arguments),
             Backend::Claude(session) => session.execute_slash_command(name, arguments),
+            #[cfg(test)]
+            Backend::Test(session) => session.slash_outcome.clone(),
         }
     }
 
@@ -64,6 +99,8 @@ impl Backend {
             Backend::Codex(_) => SlashCommandOutcome::Rejected {
                 message: i18n("agent-session-file-rewind-claude-only").to_string(),
             },
+            #[cfg(test)]
+            Backend::Test(session) => session.slash_outcome.clone(),
         }
     }
 
@@ -76,6 +113,8 @@ impl Backend {
             // Claude Code rebuilds tasks from session history rather than a
             // provider query, so there is nothing to re-request live.
             Backend::Claude(_) => {}
+            #[cfg(test)]
+            Backend::Test(_) => {}
         }
     }
 
@@ -98,6 +137,8 @@ impl Backend {
         match self {
             Backend::Claude(session) => session.session_id(),
             Backend::Codex(_) => None,
+            #[cfg(test)]
+            Backend::Test(_) => None,
         }
     }
 
@@ -109,6 +150,8 @@ impl Backend {
             Backend::Codex(session) => session
                 .thread_id()
                 .map(|id| RecoveryIdentity::CodexThread(id.to_string())),
+            #[cfg(test)]
+            Backend::Test(_) => None,
         }
     }
 
@@ -116,6 +159,8 @@ impl Backend {
         match self {
             Backend::Claude(session) => session.has_active_operation(),
             Backend::Codex(session) => session.has_active_operation(),
+            #[cfg(test)]
+            Backend::Test(_) => false,
         }
     }
 
@@ -127,6 +172,8 @@ impl Backend {
         match self {
             Backend::Claude(session) => session.shutdown(timeout, force),
             Backend::Codex(session) => session.shutdown(timeout, force),
+            #[cfg(test)]
+            Backend::Test(_) => Ok(()),
         }
     }
 
@@ -134,6 +181,8 @@ impl Backend {
         match self {
             Backend::Claude(session) => session.process_exit(),
             Backend::Codex(_) => Vec::new(),
+            #[cfg(test)]
+            Backend::Test(_) => Vec::new(),
         }
     }
 
@@ -141,6 +190,8 @@ impl Backend {
         match self {
             Backend::Codex(session) => session.interrupt(),
             Backend::Claude(session) => session.interrupt(),
+            #[cfg(test)]
+            Backend::Test(_) => {}
         }
     }
 
@@ -148,6 +199,8 @@ impl Backend {
         match self {
             Backend::Codex(session) => session.respond_approval(decision),
             Backend::Claude(session) => session.respond_approval(decision),
+            #[cfg(test)]
+            Backend::Test(_) => {}
         }
     }
 }

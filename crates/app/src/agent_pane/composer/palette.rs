@@ -1,6 +1,7 @@
 use nmt_i18n::i18n;
 
 use crate::agent_pane::composer::{CommandFeedbackKind, RewindAction, RewindState};
+use crate::agent_pane::input_history::InputHistoryDirection;
 use crate::agent_pane::*;
 
 #[derive(Clone)]
@@ -250,6 +251,18 @@ impl AgentPane {
     ) {
         let Some(model) = self.palette_model(cx) else {
             if self.handle_recent_sessions_control(control, cx) {
+                return;
+            }
+            let direction = match control {
+                PaletteControl::Previous => Some(InputHistoryDirection::Older),
+                PaletteControl::Next => Some(InputHistoryDirection::Newer),
+                PaletteControl::Activate | PaletteControl::Complete | PaletteControl::Dismiss => {
+                    None
+                }
+            };
+            if direction
+                .is_some_and(|direction| self.handle_input_history_control(direction, window, cx))
+            {
                 return;
             }
             cx.propagate();

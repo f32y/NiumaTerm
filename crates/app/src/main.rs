@@ -209,6 +209,7 @@ fn run_app(argv_url: Option<String>, testing: bool) {
             cx.set_global(AppSettings::load());
             let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
             agent_pane::updates::initialize(testing, &agent_profiles, cx);
+            agent_pane::input_history::initialize(testing, cx);
 
             // Bring up the remote host service if it was left enabled. Runs on
             // its own runtime thread; failures only log.
@@ -379,6 +380,10 @@ fn run_app(argv_url: Option<String>, testing: bool) {
             .detach();
 
             cx.on_app_quit(|cx| {
+                if let Err(error) = agent_pane::input_history::flush(cx) {
+                    warn!("failed to flush Agent input history: {error}");
+                }
+
                 // Settings edits live in the global until something writes
                 // them out. Closing the settings surface does that, and so
                 // does quitting with it still open.

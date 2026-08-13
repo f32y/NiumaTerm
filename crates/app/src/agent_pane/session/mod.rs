@@ -12,6 +12,8 @@ use crate::agent_pane::composer::{
 use crate::agent_pane::profile::{ANTHROPIC_MODEL_ENV, launch_env_value};
 pub(super) use crate::agent_pane::session::backend::Backend;
 pub(crate) use crate::agent_pane::session::backend::RecoveryIdentity;
+#[cfg(test)]
+pub(in crate::agent_pane) use crate::agent_pane::session::backend::TestBackend;
 pub(super) use crate::agent_pane::session::update_recovery::UpdateSuspension;
 pub(crate) use crate::agent_pane::session::update_recovery::{
     RecoveryReadiness, RecoverySnapshot, RestorationReadiness,
@@ -48,6 +50,7 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) -> Self {
         let kind = AgentKind::from_profile(profile.kind);
+        let input_history_scope = InputHistoryScope::local(kind, cwd.as_deref());
         let name = kind.display();
         // Auto-grow wraps long prompts instead of scrolling them off-screen.
         // The view intercepts modified Enter actions before this input's
@@ -70,6 +73,7 @@ impl AgentPane {
                 this.send_user_message(window, cx);
             } else if matches!(event, InputEvent::Change) {
                 let text = this.input.read(cx).text().to_string();
+                this.input_history_navigation.reset();
                 reconcile_skill_binding(&text, &mut this.palette.skill_binding);
                 this.palette.selected = 0;
                 this.palette.dismissed = false;
@@ -95,6 +99,8 @@ impl AgentPane {
             kind,
             profile,
             cwd,
+            input_history_scope,
+            input_history_navigation: InputHistoryNavigation::default(),
             transcript,
             input,
             session: None,

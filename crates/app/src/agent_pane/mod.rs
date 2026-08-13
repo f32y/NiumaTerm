@@ -1,3 +1,4 @@
+pub(crate) mod input_history;
 pub(crate) mod updates;
 pub(super) mod usage;
 
@@ -75,6 +76,7 @@ use crate::agent_pane::commands::{
     validate_skill_binding,
 };
 use crate::agent_pane::composer::{CommandFeedback, PendingSlashCommand, RewindState};
+use crate::agent_pane::input_history::{InputHistoryNavigation, InputHistoryScope};
 pub(crate) use crate::agent_pane::profile::{AgentKind, AgentThreadDefaults, agent_launch};
 use crate::agent_pane::session::{Backend, Status, UpdateSuspension};
 pub(crate) use crate::agent_pane::session::{
@@ -259,6 +261,8 @@ pub(crate) struct AgentPane {
     /// session history is scoped to it (resume ids only resolve against the
     /// same directory).
     cwd: Option<String>,
+    input_history_scope: InputHistoryScope,
+    input_history_navigation: InputHistoryNavigation,
     /// The conversation as the user reads it. Presentation lives in its own
     /// view so a child agent's conversation renders through the same code.
     transcript: Entity<TranscriptView>,
