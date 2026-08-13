@@ -26,7 +26,7 @@ The system SHALL place a button labeled `Background Tasks` at the upper-right of
 - **THEN** the right-side area stays open reporting that there is no agent session, rather than closing
 
 ### Requirement: Share one right-side area
-Git and `Background Tasks` SHALL select the same resizable right-side area. Selecting either view SHALL replace the other view without opening a second right-side column, and both views SHALL use the same current width and resize behavior.
+Git, `Background Tasks`, and `Workflows` SHALL select the same resizable right-side area. Selecting any of these views SHALL replace the currently shown one without opening a second right-side column, and all of them SHALL use the same current width and resize behavior.
 
 #### Scenario: Switch from Git to Background Tasks
 - **WHEN** Git is visible and the user selects `Background Tasks`
@@ -35,6 +35,10 @@ Git and `Background Tasks` SHALL select the same resizable right-side area. Sele
 #### Scenario: Switch back to Git
 - **WHEN** `Background Tasks` is visible and the user selects Git
 - **THEN** Git replaces `Background Tasks` at the current right-side width
+
+#### Scenario: Switch from Background Tasks to Workflows
+- **WHEN** `Background Tasks` is visible and the user selects `Workflows`
+- **THEN** `Workflows` replaces `Background Tasks` at the current right-side width and no second column opens
 
 ### Requirement: Limit the initial view to child-agent work
 The initial `Background Tasks` view SHALL include Codex descendants created as subagents and Claude Code Task or Agent child work. It SHALL NOT include background shell commands, preview servers, workflows, monitors, scheduled work, or other non-agent background activity.
