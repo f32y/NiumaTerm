@@ -48,7 +48,7 @@ fn agent_hook_item(
 
 pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPage {
     let installations = agent_updates::installations_for_profiles(agent_profiles, cx);
-    let mut general = SettingGroup::new()
+    let general = SettingGroup::new()
         .title(i18n("settings-agent-general"))
         .item(SettingItem::new(
             i18n("settings-agent-show-usage"),
@@ -79,7 +79,10 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                 ),
             )
             .description(i18n("settings-agent-codex-skill-compat-description")),
-        )
+        );
+
+    let mut cli_updates = SettingGroup::new()
+        .title(i18n("settings-agent-cli-updates"))
         .item(SettingItem::new(
             i18n("settings-agent-check-updates"),
             SettingField::switch(
@@ -101,7 +104,7 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
             .iter()
             .filter(|item| item.identity.provider == provider)
             .count();
-        general = general.item(agent_update_status_item(
+        cli_updates = cli_updates.item(agent_update_status_item(
             index,
             installation_update_title(provider, provider_ordinal, provider_total),
             snapshot.identity.key.clone(),
@@ -143,6 +146,7 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                     codex_hook::uninstall_hooks,
                 )),
         )
+        .group(cli_updates)
 }
 
 pub(super) fn installation_update_title(
