@@ -33,7 +33,15 @@ The system SHALL use the configured launcher and effective agent environment to 
 - **THEN** the system reports any safely discovered current version and marks available-version discovery unsupported without guessing an installer or channel mapping
 
 ### Requirement: Update status and user control
-The system SHALL present update controls under Agent General, with one manual Check action covering all effective installations referenced by agent profiles and one status and Update row per distinct installation.
+The system SHALL present update controls under Agent General, with one automatic-check switch, one manual Check action covering all effective installations referenced by agent profiles, and one status and Update row per distinct installation.
+
+#### Scenario: Automatic checking is enabled
+- **WHEN** the automatic-check switch is on
+- **THEN** the system checks every effective installation once shortly after startup and again every hour while the application runs
+
+#### Scenario: Automatic checking is disabled
+- **WHEN** the automatic-check switch is off
+- **THEN** the system performs no automatic provider checks and keeps the manual Check and Update actions available
 
 #### Scenario: Profiles share update controls
 - **WHEN** several agent profiles resolve to the same effective installation
@@ -111,10 +119,10 @@ The system SHALL present an available provider update as a persistent in-app not
 - **THEN** the system hides the notification without cancelling the transaction or marking the target version as skipped and continues exposing live state in settings and affected tabs
 
 ### Requirement: Cached and isolated update checks
-The system SHALL cache successful automatic check results per installation for 24 hours while allowing a manual check to bypass the cache.
+The system SHALL cache successful automatic check results per installation for one hour while allowing a manual check to bypass the cache.
 
 #### Scenario: Fresh cached result exists
-- **WHEN** startup checking considers an installation whose successful cache entry is less than 24 hours old
+- **WHEN** automatic checking considers an installation whose successful cache entry is less than one hour old
 - **THEN** the system uses the cached result without contacting the provider release service
 
 #### Scenario: Manual check is requested
