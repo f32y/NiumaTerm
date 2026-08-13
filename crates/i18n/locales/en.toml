@@ -238,6 +238,8 @@
 "settings-system-performance" = "Performance"
 "settings-system-prioritize-ui" = "Prioritize UI threads"
 "settings-system-prioritize-ui-description" = "Raise the main and render thread priority to AboveNormal."
+"settings-system-input" = "Input"
+"settings-system-newline-shortcut" = "Press to Insert New Line"
 
 # Remote-session settings
 "settings-remote-title" = "Remote Session"

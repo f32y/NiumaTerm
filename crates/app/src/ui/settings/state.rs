@@ -5,7 +5,7 @@ pub use nmt_config::appearance::{InputStyle, Language, WindowBackdrop};
 use nmt_config::defaults::default_theme;
 pub use nmt_config::profile::{AgentProfile, AgentProfileKind, EnvVar, Profile};
 use nmt_config::remote_session::RemoteSessionConfig;
-use nmt_config::system::{SystemConfig, WarnBeforeTerminatingShell};
+use nmt_config::system::{NewlineShortcut, SystemConfig, WarnBeforeTerminatingShell};
 use nmt_config::theme::Theme;
 use nmt_config::{CursorShape, SettingsPatch, get, save_settings};
 use nmt_i18n::i18n;
@@ -108,6 +108,8 @@ pub struct AppSettings {
     pub confirm_before_closing: bool,
     /// Raise the main (UI) and render thread priority to AboveNormal.
     pub prioritize_ui_threads: bool,
+    /// Modified Enter key that inserts a new line without submitting input.
+    pub newline_shortcut: NewlineShortcut,
     /// Host this machine's local sessions for remote clients via the relay.
     pub remote_host_enabled: bool,
     /// Relay endpoint both host and clients dial.
@@ -167,6 +169,7 @@ impl Default for AppSettings {
             warn_before_terminating_shell: WarnBeforeTerminatingShell::default(),
             confirm_before_closing: true,
             prioritize_ui_threads: false,
+            newline_shortcut: NewlineShortcut::default(),
             remote_host_enabled: false,
             remote_relay_url: SharedString::default(),
             remote_access_token: SharedString::default(),
@@ -420,6 +423,7 @@ impl AppSettings {
             warn_before_terminating_shell: config.system.warn_before_terminating_shell,
             confirm_before_closing: config.system.confirm_before_closing_workspace,
             prioritize_ui_threads: config.system.prioritize_ui_threads,
+            newline_shortcut: config.system.newline_shortcut,
             remote_host_enabled: config.remote_session.host_enabled,
             remote_relay_url: config.remote_session.relay_url.clone().into(),
             remote_access_token: config.remote_session.access_token.clone().into(),
@@ -639,6 +643,7 @@ impl AppSettings {
             warn_before_terminating_shell: self.warn_before_terminating_shell,
             confirm_before_closing_workspace: self.confirm_before_closing,
             prioritize_ui_threads: self.prioritize_ui_threads,
+            newline_shortcut: self.newline_shortcut,
         };
 
         let remote_session = RemoteSessionConfig {

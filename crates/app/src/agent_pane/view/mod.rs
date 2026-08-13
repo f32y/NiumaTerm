@@ -17,6 +17,29 @@ use crate::ui::main_view_background_opacity;
 
 struct StopResponseIcon;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ComposerEnterBehavior {
+    InsertNewline,
+    Submit,
+    ActivateOrSubmit,
+}
+
+pub(super) fn composer_enter_behavior(
+    shortcut: NewlineShortcut,
+    action: &Enter,
+) -> ComposerEnterBehavior {
+    match (action.secondary, action.shift) {
+        (false, false) => ComposerEnterBehavior::ActivateOrSubmit,
+        (true, false) if shortcut == NewlineShortcut::CtrlEnter => {
+            ComposerEnterBehavior::InsertNewline
+        }
+        (false, true) if shortcut == NewlineShortcut::ShiftEnter => {
+            ComposerEnterBehavior::InsertNewline
+        }
+        _ => ComposerEnterBehavior::Submit,
+    }
+}
+
 impl IconNamed for StopResponseIcon {
     fn path(self) -> SharedString {
         "icons/stop.svg".into()
@@ -233,14 +256,26 @@ impl Render for AgentPane {
                                         ))
                                         .capture_action(cx.listener(
                                             |this, action: &Enter, window, cx| {
-                                                if action.shift || action.secondary {
-                                                    cx.propagate();
-                                                } else {
-                                                    this.handle_palette_control(
-                                                        PaletteControl::Activate,
-                                                        window,
-                                                        cx,
-                                                    );
+                                                match composer_enter_behavior(
+                                                    cx.global::<AppSettings>().newline_shortcut,
+                                                    action,
+                                                ) {
+                                                    ComposerEnterBehavior::InsertNewline => {
+                                                        this.input.update(cx, |input, cx| {
+                                                            input.replace("\n", window, cx);
+                                                        });
+                                                        cx.stop_propagation();
+                                                    }
+                                                    ComposerEnterBehavior::Submit => {
+                                                        this.send_user_message(window, cx);
+                                                        cx.stop_propagation();
+                                                    }
+                                                    ComposerEnterBehavior::ActivateOrSubmit => this
+                                                        .handle_palette_control(
+                                                            PaletteControl::Activate,
+                                                            window,
+                                                            cx,
+                                                        ),
                                                 }
                                             },
                                         ))

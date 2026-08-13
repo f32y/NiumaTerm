@@ -629,6 +629,7 @@ mod tests {
             warn_before_terminating_shell: system::WarnBeforeTerminatingShell::Disabled,
             confirm_before_closing_workspace: false,
             prioritize_ui_threads: true,
+            newline_shortcut: system::NewlineShortcut::ShiftEnter,
         }
     }
 

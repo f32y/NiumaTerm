@@ -237,6 +237,8 @@
 "settings-system-performance" = "性能"
 "settings-system-prioritize-ui" = "提高界面线程优先级"
 "settings-system-prioritize-ui-description" = "将主线程和渲染线程的优先级提升为 AboveNormal。"
+"settings-system-input" = "输入"
+"settings-system-newline-shortcut" = "按键插入换行"
 
 # 远程会话设置
 "settings-remote-title" = "远程会话"

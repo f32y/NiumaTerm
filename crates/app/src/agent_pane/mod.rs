@@ -62,6 +62,7 @@ use nmt_agent_utils::{
 };
 use nmt_config::local_state::{self, AgentDefaults as StoredAgentDefaults};
 use nmt_config::profile::{AgentProfile, AgentProfileKind};
+use nmt_config::system::NewlineShortcut;
 use nmt_i18n::i18n;
 use serde_json::Value;
 use tracing::{info, warn};
