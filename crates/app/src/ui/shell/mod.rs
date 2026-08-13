@@ -22,7 +22,7 @@ use gpui::{
     ObjectFit, PathPromptOptions, Pixels, Render, SharedString, Task, Window, WindowBounds,
     WindowId, div, img, px,
 };
-use gpui_component::button::{Button, ButtonVariants};
+use gpui_component::button::{Button, ButtonVariants, Toggle, ToggleVariants};
 use gpui_component::dialog::{DialogAction, DialogButtonProps, DialogClose, DialogFooter};
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::notification::{Notification, NotificationType};
@@ -397,6 +397,12 @@ impl Shell {
 
     pub(super) fn background_tasks_seen(&self) -> bool {
         self.background_tasks_seen
+    }
+
+    /// Whether the right-side area currently shows this content, which is the
+    /// checked state of the title-bar control that opens it.
+    pub(super) fn right_panel_shows(&self, kind: RightPanelKind, cx: &App) -> bool {
+        self.right_panel.read(cx).shows(kind)
     }
 
     fn on_toggle_workflows(
