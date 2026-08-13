@@ -126,6 +126,10 @@ pub(crate) struct Shell {
     /// appears the first time one runs and stays, so a finished run remains
     /// reachable after its rows have settled.
     workflows_seen: bool,
+    /// Whether any tab has spawned a background task. Sticky for the same
+    /// reason as `workflows_seen`: a child that has finished is still worth
+    /// opening the view for.
+    background_tasks_seen: bool,
     /// Whether we've started observing the wrapping `Root` (so dialog open/close
     /// re-renders the shell, which draws the dialog layer). Set on first render.
     root_observed: bool,
@@ -296,6 +300,7 @@ impl Shell {
             tab_rename: None,
             needs_focus: true,
             workflows_seen: false,
+            background_tasks_seen: false,
             root_observed: false,
             theme_watcher: None,
             settings_state: None,
@@ -388,6 +393,10 @@ impl Shell {
 
     pub(super) fn workflows_seen(&self) -> bool {
         self.workflows_seen
+    }
+
+    pub(super) fn background_tasks_seen(&self) -> bool {
+        self.background_tasks_seen
     }
 
     fn on_toggle_workflows(

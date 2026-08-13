@@ -149,7 +149,9 @@ impl Shell {
                             .occlude()
                             .child(self.render_workflows_button(running, cx))
                     }))
-                    .child({
+                    // The background-task control stays out of the chrome until
+                    // a tab has spawned a child to look at.
+                    .children(self.background_tasks_seen().then(|| {
                         // Scoped to the active tab, because activating the
                         // control opens that tab's children.
                         let running = self
@@ -160,7 +162,7 @@ impl Shell {
                         div()
                             .occlude()
                             .child(self.render_background_tasks_button(running, cx))
-                    }),
+                    })),
             )
     }
 
@@ -182,12 +184,11 @@ impl Shell {
             }))
     }
 
-    /// Upper-right `Background Tasks` control. Always available: a session
-    /// with no children, and a pane that is not an agent at all, are states
-    /// the view reports for itself, so a disabled control would hide the
-    /// answer rather than give it. It carries the number of child agents
-    /// running right now; a session with none in flight shows the icon alone
-    /// rather than a zero.
+    /// Upper-right `Background Tasks` control, revealed once a tab has spawned
+    /// a child agent. It carries the number of child agents running right now;
+    /// a session with none in flight shows the icon alone rather than a zero.
+    /// The `ToggleBackgroundTasks` action still reaches the view while the
+    /// control is hidden.
     fn render_background_tasks_button(
         &self,
         running: usize,
