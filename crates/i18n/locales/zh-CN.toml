@@ -147,6 +147,7 @@
 "settings-agent-codex-skill-compat-description" = "在 / 命令面板中列出 Codex 技能，选中后改写为 $name 形式。关闭后 / 只列出命令，输入 $ 打开技能列表。"
 "settings-agent-check-updates" = "检查智能体更新"
 "settings-agent-check-updates-description" = "每小时检查智能体配置引用的 Claude Code 和 Codex 安装是否有新版本。即使关闭此项，下方的检查按钮仍可使用。"
+"settings-agent-cli-updates" = "CLI 更新"
 "settings-agent-hooks" = "智能体 Hook"
 "settings-agent-enable-hooks" = "启用智能体 Hook"
 "settings-agent-enable-hooks-description" = "处理已安装智能体 Hook 发出的新生命周期事件。此选项不会更改其安装状态。"
