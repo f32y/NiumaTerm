@@ -26,6 +26,14 @@ impl AgentPane {
                 )
                 .child(
                     div()
+                        // The description carries whatever the request holds:
+                        // a whole plan for ExitPlanMode, a full command line
+                        // for Bash. Without a ceiling the card grows past the
+                        // pane and the decision buttons below it are clipped
+                        // away, leaving the turn unanswerable.
+                        .id("approval-description")
+                        .max_h(px(256.))
+                        .overflow_y_scroll()
                         .px_3()
                         .py_2()
                         .rounded(UI_RADIUS)
