@@ -74,6 +74,14 @@ pub(crate) struct ClaudeTasks {
     /// Tool calls a child started, so its matching result completes the same
     /// row instead of appearing as a second one.
     open_child_tools: HashMap<String, Item>,
+    /// Launch instructions already published as a child's opening message, by
+    /// canonical id. Claude Code 2.1.2x keeps a child's conversation entirely
+    /// in its own file and streams only the child's assistant output, so the
+    /// launch block is the one place the live stream states what the child was
+    /// asked to do. Older versions also replay that text as a sidechain user
+    /// record, which this recognizes as the same instruction rather than a
+    /// second one.
+    launch_prompts: HashMap<String, String>,
 }
 
 impl ClaudeTasks {
@@ -156,6 +164,7 @@ impl ClaudeTasks {
         self.created_epoch.clear();
         self.pending_transcripts.clear();
         self.open_child_tools.clear();
+        self.launch_prompts.clear();
         true
     }
 
@@ -275,6 +284,7 @@ impl ClaudeTasks {
             };
 
             let input = &block["input"];
+            let objective = text_field(input, &["prompt", "task", "instructions"]);
             changed |= self.apply(
                 tool_use_id,
                 BackgroundTaskUpdate {
@@ -289,15 +299,38 @@ impl ClaudeTasks {
                     display_name: text_field(input, &["description", "name", "title"]),
                     agent_type: text_field(input, &["subagent_type", "agent_type", "agent"])
                         .or_else(|| Some(name.to_owned())),
-                    objective: text_field(input, &["prompt", "task", "instructions"]),
+                    objective: objective.clone(),
                     model: text_field(input, &["model"]),
                     started_at: Some(SystemTime::now()),
                     updated_at: Some(SystemTime::now()),
                     ..BackgroundTaskUpdate::default()
                 },
             );
+            changed |= self.open_child_conversation(tool_use_id, objective);
         }
         changed
+    }
+
+    /// Open a child's conversation with the instructions it was launched on,
+    /// which is what the restored transcript of the same child begins with.
+    /// The launch block carries them, so the child reads the same way whether
+    /// or not the CLI version streams the child's own copy of the prompt.
+    fn open_child_conversation(&mut self, tool_use_id: &str, objective: Option<String>) -> bool {
+        let Some(prompt) = objective else {
+            return false;
+        };
+        if self.launch_prompts.contains_key(tool_use_id) {
+            return false;
+        }
+        self.launch_prompts
+            .insert(tool_use_id.to_owned(), prompt.clone());
+        self.pending_transcripts.push((
+            BackgroundTaskKey::claude_code(tool_use_id),
+            BackgroundTaskTranscriptUpdate::appended(vec![Item::UserMessage {
+                text: Some(prompt),
+            }]),
+        ));
+        true
     }
 
     /// Parent user messages carry tool results and, in some versions, task
@@ -355,7 +388,7 @@ impl ClaudeTasks {
         let preview = sidechain_preview(message);
         // The same content the parent transcript drops becomes the child's own
         // conversation; it still never reaches the parent.
-        let items = self.child_items(message);
+        let items = self.child_items(&canonical, message);
         if !items.is_empty() {
             self.pending_transcripts.push((
                 BackgroundTaskKey::claude_code(&canonical),
@@ -382,7 +415,7 @@ impl ClaudeTasks {
 
     /// Transcript items for one sidechain record, using the same item shapes
     /// the parent conversation renders so a child reads identically.
-    fn child_items(&mut self, message: &Value) -> Vec<Item> {
+    fn child_items(&mut self, canonical: &str, message: &Value) -> Vec<Item> {
         let mut items = Vec::new();
         if message["type"].as_str() == Some("user") {
             let text = message["message"]["content"]
@@ -393,7 +426,11 @@ impl ClaudeTasks {
                 .filter_map(|block| block["text"].as_str())
                 .collect::<Vec<_>>()
                 .join("\n");
-            if !text.trim().is_empty() {
+            let repeats_launch = self
+                .launch_prompts
+                .get(canonical)
+                .is_some_and(|prompt| prompt.trim() == text.trim());
+            if !text.trim().is_empty() && !repeats_launch {
                 items.push(Item::UserMessage { text: Some(text) });
             }
         }
