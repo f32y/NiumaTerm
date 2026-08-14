@@ -84,7 +84,8 @@ use crate::ui::workflows::WorkflowsView;
 use crate::ui::workspace_sidebar::{self, Sidebar};
 use crate::window::{AppWindow, LastActiveWindow, ShellEntry, ShellRegistry, WindowRegistry};
 use crate::workspace::{
-    self, TerminalActivity, WorkspaceId, WorkspaceKind, WorkspaceManager, best_match, exact_match,
+    self, ProgressTally, TerminalActivity, WorkspaceId, WorkspaceKind, WorkspaceManager,
+    best_match, exact_match,
 };
 use crate::{remote, ui};
 
@@ -629,6 +630,19 @@ impl Shell {
                 .flat_map(|tabs| tabs.tabs())
                 .map(|tab| Self::tab_terminal_activity(tab, cx))
                 .fold(TerminalActivity::Idle, TerminalActivity::merge);
+
+            // The manager's tally covers what the tabs report over OSC 9;4;
+            // an agent's task list lives inside a pane entity, which only a
+            // reader holding the app context can reach.
+            summary.progress = self
+                .workspaces
+                .tabs_of(summary.id)
+                .into_iter()
+                .flat_map(|tabs| tabs.tabs())
+                .filter_map(|tab| tab.surface().agent())
+                .filter_map(|pane| pane.read(cx).task_tally(cx))
+                .map(|(done, total)| ProgressTally::tasks(done, total))
+                .fold(summary.progress, ProgressTally::merge);
         }
         summaries
     }

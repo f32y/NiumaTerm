@@ -248,6 +248,16 @@ impl TranscriptView {
         })
     }
 
+    /// Completed and total entries of the task list the agent is working from.
+    /// Only the newest list counts: a task list is republished in full whenever
+    /// it changes, so the earlier ones describe states the agent has left.
+    pub(crate) fn task_tally(&self) -> Option<(u32, u32)> {
+        self.items
+            .iter()
+            .rev()
+            .find_map(|entry| entry.item.task_tally())
+    }
+
     pub(in crate::agent_pane) fn is_working(&self) -> bool {
         self.working_started.is_some()
     }
