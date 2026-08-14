@@ -62,8 +62,11 @@ pub enum HostEvent {
     PromptBoundaryTrusted(bool),
     /// A trusted integrated-shell prompt region is open.
     PromptStarted,
-    /// Integrated-shell command metadata changed in the block store.
-    CommandFinished,
+    /// Integrated-shell command metadata changed in the block store. The exit
+    /// code rides along so the chrome can grade the result without reaching
+    /// back into the block store for the entry that just landed; a shell that
+    /// reports no code yields `None`.
+    CommandFinished { exit_code: Option<i32> },
     /// An integrated-shell command began executing; read `in_flight_block`.
     CommandStarted,
 }

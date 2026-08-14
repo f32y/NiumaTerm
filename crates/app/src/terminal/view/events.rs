@@ -66,7 +66,7 @@ impl TerminalPane {
                 | HostEvent::Bell
                 | HostEvent::Progress(_)
                 | HostEvent::Notification { .. } => {}
-                HostEvent::CommandFinished => {
+                HostEvent::CommandFinished { .. } => {
                     // Finishing transfers the active SCREEN rows into an
                     // immutable block, so live selection anchors no longer
                     // address the content they were created for.

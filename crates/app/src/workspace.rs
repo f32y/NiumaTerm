@@ -8,8 +8,43 @@ use std::path;
 use nmt_agent_utils::AgentRuntimeStatus;
 use nmt_i18n::i18n;
 
-use crate::tabs::{TabId, TabManager};
+use crate::tabs::{CommandOutcome, TabId, TabManager};
 use crate::ui::{ActiveList, HasId, TabSurface};
+
+/// What a workspace entry reports about the terminals inside it, folded over
+/// every tab it owns.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TerminalActivity {
+    #[default]
+    Idle,
+    /// A command is executing right now.
+    Running,
+    /// A command ended in a background tab and the user has not looked yet.
+    Finished(CommandOutcome),
+}
+
+impl TerminalActivity {
+    /// Rank for [`Self::merge`]. An unacknowledged result outranks live output
+    /// because it is the part the user has not seen, and a failure outranks a
+    /// success for the same reason.
+    fn rank(self) -> u8 {
+        match self {
+            Self::Idle => 0,
+            Self::Running => 1,
+            Self::Finished(CommandOutcome::Succeeded) => 2,
+            Self::Finished(CommandOutcome::Failed) => 3,
+        }
+    }
+
+    /// Fold one more tab's activity into the workspace entry's single slot.
+    pub fn merge(self, other: Self) -> Self {
+        if other.rank() > self.rank() {
+            other
+        } else {
+            self
+        }
+    }
+}
 
 /// Stable per-workspace identity. Survives close (index changes, id does not).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -109,6 +144,10 @@ pub struct WorkspaceSummary {
     pub cwd: String,
     pub active: bool,
     pub agent_status: AgentRuntimeStatus,
+    /// Terminal activity across this workspace's tabs. The manager cannot see
+    /// pane state, so the shell fills this in when it projects the summaries
+    /// for the chrome.
+    pub terminal_activity: TerminalActivity,
     pub unread_count: usize,
     pub latest_unread_text: Option<String>,
     pub pinned: bool,
@@ -348,6 +387,7 @@ impl WorkspaceManager {
                 cwd: ws.cwd.clone(),
                 active: index == self.workspaces.active_index(),
                 agent_status: AgentRuntimeStatus::Idle,
+                terminal_activity: TerminalActivity::Idle,
                 unread_count: 0,
                 latest_unread_text: None,
                 pinned: ws.pinned,
@@ -382,6 +422,7 @@ mod tests {
                 cwd: cwd.to_string(),
                 active: i == 0,
                 agent_status: AgentRuntimeStatus::Idle,
+                terminal_activity: TerminalActivity::Idle,
                 unread_count: 0,
                 latest_unread_text: None,
                 pinned: false,
@@ -429,6 +470,23 @@ mod tests {
         }
 
         manager
+    }
+
+    #[test]
+    fn an_unseen_result_outranks_a_running_command() {
+        let running = TerminalActivity::Running;
+        let succeeded = TerminalActivity::Finished(CommandOutcome::Succeeded);
+        let failed = TerminalActivity::Finished(CommandOutcome::Failed);
+
+        assert_eq!(running.merge(succeeded), succeeded);
+        assert_eq!(succeeded.merge(running), succeeded);
+        assert_eq!(succeeded.merge(failed), failed);
+        assert_eq!(failed.merge(succeeded), failed);
+        assert_eq!(TerminalActivity::Idle.merge(running), running);
+        assert_eq!(
+            TerminalActivity::Idle.merge(TerminalActivity::Idle),
+            TerminalActivity::Idle
+        );
     }
 
     #[test]

@@ -377,7 +377,7 @@ fn in_flight_block_lifecycle() {
     let q = events.lock();
     assert!(matches!(&q[0], HostEvent::PromptStarted));
     assert!(matches!(&q[1], HostEvent::CommandStarted));
-    assert!(matches!(&q[2], HostEvent::CommandFinished));
+    assert!(matches!(&q[2], HostEvent::CommandFinished { .. }));
 }
 
 /// Block-split wiring: `BlockBatch` events feed the shared store, and

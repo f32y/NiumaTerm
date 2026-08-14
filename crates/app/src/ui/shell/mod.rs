@@ -59,7 +59,7 @@ use crate::agent_pane::usage::AgentUsageView;
 use crate::agent_pane::{AgentKind, AgentPane, AgentPaneEvent};
 use crate::cli::CliAction;
 use crate::pane_tree::{PaneId, PaneNode, PaneTree, RemoveOutcome, SplitDirection, SplitOutcome};
-use crate::tabs::{TabId, TabManager};
+use crate::tabs::{CommandOutcome, Tab, TabId, TabManager};
 use crate::terminal::session::HostEvent;
 use crate::terminal::view::{AgentInterrupted, TerminalPane};
 use crate::ui::background_tasks::BackgroundTasksView;
@@ -84,7 +84,7 @@ use crate::ui::workflows::WorkflowsView;
 use crate::ui::workspace_sidebar::{self, Sidebar};
 use crate::window::{AppWindow, LastActiveWindow, ShellEntry, ShellRegistry, WindowRegistry};
 use crate::workspace::{
-    self, WorkspaceId, WorkspaceKind, WorkspaceManager, best_match, exact_match,
+    self, TerminalActivity, WorkspaceId, WorkspaceKind, WorkspaceManager, best_match, exact_match,
 };
 use crate::{remote, ui};
 
@@ -539,8 +539,9 @@ impl Shell {
         self.sync_active_terminal_title(cx);
 
         // Every activation path funnels through here, so this is the one place
-        // that acknowledges the tab's bell.
-        if self.workspaces.active_tabs_mut().clear_active_bell() {
+        // that acknowledges the tab's bell and its last command's result.
+        let tabs = self.workspaces.active_tabs_mut();
+        if tabs.clear_active_bell() | tabs.clear_active_outcome() {
             cx.notify();
         }
 
@@ -587,6 +588,23 @@ impl Shell {
         self.acknowledge_notification(&route, &id, cx);
     }
 
+    /// One tab's terminal activity: a live command outranks the tab's recorded
+    /// outcome, because that recorded result belongs to a command that already
+    /// ended and a new one is running in the same place.
+    pub(super) fn tab_terminal_activity(tab: &Tab<TabSurface>, cx: &App) -> TerminalActivity {
+        if tab
+            .surface()
+            .leaves()
+            .into_iter()
+            .any(|(_, pane)| pane.read(cx).command_running())
+        {
+            return TerminalActivity::Running;
+        }
+
+        tab.last_outcome()
+            .map_or(TerminalActivity::Idle, TerminalActivity::Finished)
+    }
+
     fn projected_workspace_summaries(&self, cx: &App) -> Vec<workspace::WorkspaceSummary> {
         let mut summaries = self.workspaces.summaries();
         for summary in &mut summaries {
@@ -603,13 +621,22 @@ impl Shell {
             summary.agent_status = projection.status;
             summary.unread_count = projection.unread_count;
             summary.latest_unread_text = projection.latest_unread_text;
+
+            summary.terminal_activity = self
+                .workspaces
+                .tabs_of(summary.id)
+                .into_iter()
+                .flat_map(|tabs| tabs.tabs())
+                .map(|tab| Self::tab_terminal_activity(tab, cx))
+                .fold(TerminalActivity::Idle, TerminalActivity::merge);
         }
         summaries
     }
 
     /// Project each tab's routes once for the two chrome indicators. Busy is
-    /// limited to the dedicated Agent surface; terminal progress continues to
-    /// use OSC 9;4 and must not acquire a second activity signal.
+    /// limited to the dedicated Agent surface: a terminal tab reports its own
+    /// activity through [`Self::tab_terminal_activity`], which is driven by
+    /// OSC 133 rather than by an agent route.
     fn tab_agent_indicators(
         &self,
         cx: &App,

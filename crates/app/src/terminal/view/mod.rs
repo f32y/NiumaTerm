@@ -431,6 +431,13 @@ impl TerminalPane {
         self.surface.child_process_count()
     }
 
+    /// Whether a command is currently executing in this pane. Mirrors the
+    /// session's in-flight block, so it only reports for shells whose OSC 133
+    /// marks are trusted; an unintegrated shell always reads as idle.
+    pub(crate) fn command_running(&self) -> bool {
+        self.in_flight.is_some()
+    }
+
     pub(crate) fn tab_state(&self) -> TabState {
         self.surface.tab_state()
     }

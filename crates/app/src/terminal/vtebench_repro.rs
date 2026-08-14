@@ -143,7 +143,7 @@ fn run_command_within(
 ) -> bool {
     let finished_before = all
         .iter()
-        .filter(|e| matches!(e, HostEvent::CommandFinished))
+        .filter(|e| matches!(e, HostEvent::CommandFinished { .. }))
         .count();
 
     session.write_input(cmd.as_bytes());
@@ -156,7 +156,7 @@ fn run_command_within(
         evs.contains(&HostEvent::Exit)
             || evs
                 .iter()
-                .filter(|e| matches!(e, HostEvent::CommandFinished))
+                .filter(|e| matches!(e, HostEvent::CommandFinished { .. }))
                 .count()
                 > finished_before
     }) && !all.contains(&HostEvent::Exit)
