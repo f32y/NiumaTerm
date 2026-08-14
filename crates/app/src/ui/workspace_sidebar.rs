@@ -15,9 +15,10 @@ use nmt_i18n::i18n;
 use super::{AppSettings, NewWorkspace, Shell};
 use crate::agent_pane::usage::AgentUsageView;
 use crate::ui::sidebar_resize::{self, ResizeDrag};
+use crate::ui::terminal_status::{terminal_dot, terminal_presentation};
 use crate::ui::{UI_RADIUS, floating_surface};
 use crate::window::WindowRegistry;
-use crate::workspace::{WorkspaceId, WorkspaceKind, WorkspaceSummary};
+use crate::workspace::{TerminalActivity, WorkspaceId, WorkspaceKind, WorkspaceSummary};
 
 /// Default expanded width of the workspace sidebar, in pixels; the user can
 /// drag the right edge to resize.
@@ -30,57 +31,82 @@ pub(super) const RESIZE_HANDLE: &str = "workspace-sidebar-resize";
 pub(super) const MIN_WIDTH: f32 = 140.0;
 pub(crate) const MAX_WIDTH: f32 = 480.0;
 
+/// Diameter of a status dot in the sidebar column. Smaller than the agent
+/// spinner's `size_3`, so a stacked pair reads as a spinner with a mark under
+/// it rather than as two equal glyphs.
+const STATUS_DOT: f32 = 8.0;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum WorkspaceStatusVisual {
-    Hidden,
+enum AgentVisual {
     Running,
     NeedsInput,
 }
 
-fn workspace_status_presentation(
-    status: AgentRuntimeStatus,
-) -> (WorkspaceStatusVisual, &'static str) {
+/// The agent half of the status column, absent while the agent is idle.
+fn agent_presentation(status: AgentRuntimeStatus) -> Option<(AgentVisual, &'static str)> {
     match status {
-        AgentRuntimeStatus::Running => (
-            WorkspaceStatusVisual::Running,
+        AgentRuntimeStatus::Running => Some((
+            AgentVisual::Running,
             i18n("sidebar-workspace-status-running"),
-        ),
-        AgentRuntimeStatus::NeedsInput => (
-            WorkspaceStatusVisual::NeedsInput,
+        )),
+        AgentRuntimeStatus::NeedsInput => Some((
+            AgentVisual::NeedsInput,
             i18n("sidebar-workspace-status-needs-input"),
-        ),
-        AgentRuntimeStatus::Idle => (
-            WorkspaceStatusVisual::Hidden,
-            i18n("sidebar-workspace-status-idle"),
-        ),
+        )),
+        AgentRuntimeStatus::Idle => None,
     }
 }
 
-fn agent_status_indicator(
+/// One accessible label for whatever the column holds. The two halves report
+/// independent things, so both are named when both are showing.
+fn status_column_label(agent: Option<&'static str>, terminal: Option<&'static str>) -> String {
+    match (agent, terminal) {
+        (Some(agent), Some(terminal)) => i18n("sidebar-workspace-status-pair")
+            .replace("{agent}", agent)
+            .replace("{terminal}", terminal),
+        (Some(label), None) | (None, Some(label)) => label.to_string(),
+        (None, None) => i18n("sidebar-workspace-status-idle").to_string(),
+    }
+}
+
+/// Glyphs for the status column, agent above terminal. The caller stacks them;
+/// with one glyph the stack collapses to a centered single mark.
+fn workspace_status_glyphs(
     status: AgentRuntimeStatus,
+    terminal: TerminalActivity,
     busy_id: impl Into<ElementId>,
     cx: &gpui::App,
-) -> (Option<AnyElement>, &'static str) {
-    let (visual, label) = workspace_status_presentation(status);
-    let indicator = match visual {
-        WorkspaceStatusVisual::Running => Some(
-            ProgressCircle::new(busy_id)
+) -> (Vec<AnyElement>, String) {
+    let agent = agent_presentation(status);
+    let terminal = terminal_presentation(terminal);
+
+    let label = status_column_label(
+        agent.map(|(_, label)| label),
+        terminal.map(|(_, label)| label),
+    );
+
+    let dot = |color| {
+        div()
+            .size(px(STATUS_DOT))
+            .rounded_full()
+            .bg(color)
+            .into_any_element()
+    };
+
+    let glyphs = agent
+        .map(|(visual, _)| match visual {
+            AgentVisual::Running => ProgressCircle::new(busy_id)
                 .small()
                 .loading(true)
                 .color(cx.theme().warning)
                 .into_any_element(),
-        ),
-        WorkspaceStatusVisual::NeedsInput => Some(
-            div()
-                .size(px(8.))
-                .rounded_full()
-                .bg(cx.theme().primary)
-                .into_any_element(),
-        ),
-        WorkspaceStatusVisual::Hidden => None,
-    };
+            AgentVisual::NeedsInput => dot(cx.theme().primary),
+        })
+        .into_iter()
+        .chain(terminal.map(|(visual, _)| terminal_dot(visual, STATUS_DOT, cx)))
+        .collect();
 
-    (indicator, label)
+    (glyphs, label)
 }
 
 fn workspace_display_label(name: &str, cwd: &str) -> String {
@@ -138,23 +164,28 @@ struct WorkspaceDragPreview {
     name: SharedString,
     cwd: SharedString,
     agent_status: AgentRuntimeStatus,
+    terminal_activity: TerminalActivity,
     width: f32,
 }
 
 impl Render for WorkspaceDragPreview {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let (indicator, status_label) =
-            agent_status_indicator(self.agent_status, "workspace-drag-busy", cx);
+        let (glyphs, status_label) = workspace_status_glyphs(
+            self.agent_status,
+            self.terminal_activity,
+            "workspace-drag-busy",
+            cx,
+        );
 
-        let indicator = div()
+        let indicator = v_flex()
             .id("workspace-drag-status")
             .aria_label(status_label)
-            .size_4()
+            .w_4()
             .flex_none()
-            .flex()
+            .gap_0p5()
             .items_center()
             .justify_center()
-            .children(indicator);
+            .children(glyphs);
 
         let background = cx
             .theme()
@@ -249,20 +280,26 @@ impl Sidebar {
         cx: &mut Context<Shell>,
     ) -> AnyElement {
         let settings_entry = ws.kind == WorkspaceKind::Settings;
-        let (indicator, status_label) =
-            agent_status_indicator(ws.agent_status, ("workspace-busy", idx), cx);
+        let (glyphs, status_label) = workspace_status_glyphs(
+            ws.agent_status,
+            ws.terminal_activity,
+            ("workspace-busy", idx),
+            cx,
+        );
 
-        let indicator = div()
+        let indicator = v_flex()
             .id(("workspace-status", idx))
-            .aria_label(status_label)
-            // The slot remains fixed so Idle can suppress its glyph without
-            // shifting workspace names relative to active status indicators.
-            .size_4()
+            .aria_label(status_label.clone())
+            // The column's width is fixed so an idle workspace can suppress its
+            // glyphs without shifting its name relative to active neighbours;
+            // the height follows its contents so a stacked pair centers as a
+            // group and a lone glyph centers on its own.
+            .w_4()
             .flex_none()
-            .flex()
+            .gap_0p5()
             .items_center()
             .justify_center()
-            .children(indicator)
+            .children(glyphs)
             .into_any_element();
 
         let ws_id = ws.id;
@@ -354,6 +391,7 @@ impl Sidebar {
         let drag_name: SharedString = display_label.clone().into();
         let drag_cwd: SharedString = display_path.clone().into();
         let drag_agent_status = ws.agent_status;
+        let drag_terminal_activity = ws.terminal_activity;
 
         // Replicate the item's rendered width: sidebar width minus the card
         // gutter/border and the card's inner paddings around the list.
@@ -367,7 +405,7 @@ impl Sidebar {
                 i18n("sidebar-workspace-item-label")
                     .replace("{name}", &workspace_display_label(&ws.name, &ws.cwd))
                     .replace("{path}", &full_path)
-                    .replace("{status}", status_label)
+                    .replace("{status}", &status_label)
             })
             .selected(ws.active)
             // Button resolves selected colors after element styles, so the
@@ -459,6 +497,7 @@ impl Sidebar {
                     name: drag_name.clone(),
                     cwd: drag_cwd.clone(),
                     agent_status: drag_agent_status,
+                    terminal_activity: drag_terminal_activity,
                     width: drag_width,
                 })
             })
@@ -677,6 +716,7 @@ impl Sidebar {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tabs::CommandOutcome;
 
     #[test]
     fn generated_workspace_uses_final_cwd_component() {
@@ -704,12 +744,25 @@ mod tests {
     }
 
     #[test]
-    fn idle_status_has_no_glyph_but_retains_semantics() {
-        // Rendering owns the fixed slot; this state projection verifies that
-        // Idle supplies no visual child while keeping its accessible label.
-        let (visual, label) = workspace_status_presentation(AgentRuntimeStatus::Idle);
-        assert_eq!(visual, WorkspaceStatusVisual::Hidden);
-        assert_eq!(label, "Idle");
+    fn an_idle_workspace_supplies_no_glyph_but_retains_semantics() {
+        // Rendering owns the column; this state projection verifies that an
+        // idle workspace contributes no glyph while keeping a spoken label.
+        assert_eq!(agent_presentation(AgentRuntimeStatus::Idle), None);
+        assert_eq!(terminal_presentation(TerminalActivity::Idle), None);
+        assert_eq!(status_column_label(None, None), "Idle");
+    }
+
+    #[test]
+    fn both_halves_of_the_column_are_spoken_together() {
+        let (agent, agent_label) = agent_presentation(AgentRuntimeStatus::NeedsInput).unwrap();
+        let (_, terminal_label) =
+            terminal_presentation(TerminalActivity::Finished(CommandOutcome::Failed)).unwrap();
+
+        assert_eq!(agent, AgentVisual::NeedsInput);
+        assert_eq!(
+            status_column_label(Some(agent_label), Some(terminal_label)),
+            "Needs input, Command failed"
+        );
     }
 }
 

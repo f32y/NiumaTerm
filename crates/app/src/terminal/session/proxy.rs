@@ -224,7 +224,9 @@ impl EventListener for TerminalEventProxy {
                     "command block metadata recorded"
                 );
 
-                HostEvent::CommandFinished
+                HostEvent::CommandFinished {
+                    exit_code: cmd.exit_code,
+                }
             }
             _ => return,
         };

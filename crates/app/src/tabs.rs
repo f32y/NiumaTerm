@@ -13,6 +13,25 @@ use crate::ui::{ActiveList, HasId};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TabId(pub u64);
 
+/// How an integrated-shell command ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommandOutcome {
+    Succeeded,
+    Failed,
+}
+
+impl CommandOutcome {
+    /// Grade an OSC 133 `;D` exit code. A shell that reports no code offers no
+    /// evidence of failure, so silence reads as success rather than flagging
+    /// every command from a partially integrated shell.
+    pub fn from_exit_code(exit_code: Option<i32>) -> Self {
+        match exit_code {
+            Some(0) | None => Self::Succeeded,
+            Some(_) => Self::Failed,
+        }
+    }
+}
+
 pub struct Tab<S> {
     id: TabId,
     surface: S,
@@ -24,6 +43,11 @@ pub struct Tab<S> {
     /// is the acknowledgement — a bell on the tab you are already looking at
     /// never sets this, so no timer is needed to expire it.
     bell: bool,
+    /// Result of the last command that finished while this tab sat in the
+    /// background. Cleared on activation, on the same acknowledgement grounds
+    /// as `bell`: a command that ends in front of the user already shows its
+    /// own output and exit code.
+    last_outcome: Option<CommandOutcome>,
     /// Latest OSC 9;4 report from any pane in the tab; `None` once the command
     /// clears it (state 0).
     progress: Option<ProgressReport>,
@@ -50,6 +74,7 @@ impl<S> Tab<S> {
             terminal_title: None,
             exited: false,
             bell: false,
+            last_outcome: None,
             progress: None,
         }
     }
@@ -71,6 +96,10 @@ impl<S> Tab<S> {
 
     pub fn bell(&self) -> bool {
         self.bell
+    }
+
+    pub fn last_outcome(&self) -> Option<CommandOutcome> {
+        self.last_outcome
     }
 
     pub fn progress(&self) -> Option<ProgressReport> {
@@ -176,6 +205,23 @@ impl<S> TabManager<S> {
         tab.bell = false;
 
         rang
+    }
+
+    /// Record how a background tab's command ended. A failure outranks a
+    /// success so a run of quick commands after a failing one cannot bury it
+    /// before the user looks.
+    pub fn record_outcome(&mut self, id: TabId, outcome: CommandOutcome) {
+        if let Some(tab) = self.tabs.find_mut(id)
+            && tab.last_outcome != Some(CommandOutcome::Failed)
+        {
+            tab.last_outcome = Some(outcome);
+        }
+    }
+
+    /// Clear the active tab's command outcome; returns whether anything
+    /// changed, so the caller can skip a repaint.
+    pub fn clear_active_outcome(&mut self) -> bool {
+        self.tabs.active_mut().last_outcome.take().is_some()
     }
 
     /// Record an OSC 9;4 report. Panes in one tab share a single bar, so the
@@ -366,6 +412,34 @@ mod tests {
         assert!(mgr.clear_active_bell());
         assert!(!mgr.tabs()[0].bell());
         assert!(!mgr.clear_active_bell());
+    }
+
+    #[test]
+    fn a_failure_survives_the_successes_that_follow_it() {
+        let mut mgr = manager(2); // tab 2 is active
+
+        mgr.record_outcome(TabId(1), CommandOutcome::from_exit_code(Some(1)));
+        mgr.record_outcome(TabId(1), CommandOutcome::from_exit_code(Some(0)));
+
+        assert_eq!(mgr.tabs()[0].last_outcome(), Some(CommandOutcome::Failed));
+
+        // Clearing acts on the active tab, so the flagged one keeps its result
+        // until the user goes there.
+        assert!(!mgr.clear_active_outcome());
+
+        mgr.activate(0);
+
+        assert!(mgr.clear_active_outcome());
+        assert_eq!(mgr.tabs()[0].last_outcome(), None);
+        assert!(!mgr.clear_active_outcome());
+    }
+
+    #[test]
+    fn an_unreported_exit_code_is_not_a_failure() {
+        assert_eq!(
+            CommandOutcome::from_exit_code(None),
+            CommandOutcome::Succeeded
+        );
     }
 
     #[test]

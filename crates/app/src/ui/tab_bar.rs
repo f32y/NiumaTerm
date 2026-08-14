@@ -19,7 +19,9 @@ use super::shell::TabSurface;
 use crate::agent_pane::AgentKind;
 use crate::agent_pane::usage::{ClaudeIcon, CodexIcon};
 use crate::tabs::{TabId, TabManager};
+use crate::ui::terminal_status::{terminal_dot, terminal_presentation};
 use crate::ui::{AppSettings, UI_RADIUS};
+use crate::workspace::TerminalActivity;
 
 struct TabDrag {
     from: usize,
@@ -167,7 +169,12 @@ struct TabItem {
     pending: bool,
     exited: bool,
     progress: Option<ProgressReport>,
+    terminal: TerminalActivity,
 }
+
+/// Diameter of a tab's status dot, matching the unread and bell marks that
+/// share the strip.
+const TAB_DOT: f32 = 6.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AgentTabIndicator {
@@ -308,6 +315,7 @@ impl TabStrip {
                 pending: matches!(tab.surface(), TabSurface::Pending(_)),
                 exited: tab.exited(),
                 progress: tab.progress(),
+                terminal: Shell::tab_terminal_activity(tab, cx),
             })
             .collect();
 
@@ -434,6 +442,7 @@ impl TabStrip {
                     pending,
                     exited,
                     progress,
+                    terminal,
                 } = item;
                 // `×` closes this tab; `stop_propagation` keeps the click from
                 // also activating the tab (the TabBar's on_click). Shown only
@@ -648,14 +657,34 @@ impl TabStrip {
                         this.ml(px(TAB_MAKE_WAY_PX))
                     })
                     .when(agent_kind.is_none() && !icon_only, |this| {
+                        // Laid out like the agent prefix below, so a terminal
+                        // tab's icon sits at the same offset whether or not a
+                        // command is running and never shifts when one starts.
                         this.prefix(
                             div()
                                 .relative()
-                                .left(px(8.0))
+                                .left(px(4.0))
                                 .flex_none()
                                 .flex()
                                 .items_center()
-                                .child(tab_icon(None, is_settings)),
+                                .gap_1()
+                                .child(tab_icon(None, is_settings))
+                                .when_some(
+                                    terminal_presentation(terminal),
+                                    |this, (visual, label)| {
+                                        this.child(
+                                            div()
+                                                .id(("tab-terminal-indicator", id as usize))
+                                                .aria_label(label)
+                                                .size_4()
+                                                .flex_none()
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .child(terminal_dot(visual, TAB_DOT, cx)),
+                                        )
+                                    },
+                                ),
                         )
                     })
                     .when_some(agent_kind.filter(|_| !icon_only), |this, agent_kind| {

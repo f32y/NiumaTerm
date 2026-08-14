@@ -119,9 +119,25 @@ impl Shell {
                         chrome_changed = true;
                     }
                 }
+                HostEvent::CommandFinished { exit_code } => {
+                    // Only a tab the user is not watching records its result: a
+                    // command that ends in front of them already shows its own
+                    // output, and the record would clear on activation anyway.
+                    if let Some(tab_id) = self.tab_for_pane(pane_id)
+                        && self.workspaces.active_tabs().active_id() != tab_id
+                        && let Some(tabs) = self.workspaces.tab_manager_for_mut(tab_id)
+                    {
+                        tabs.record_outcome(tab_id, CommandOutcome::from_exit_code(*exit_code));
+                    }
+
+                    chrome_changed = true;
+                }
+                // A command starting flips the workspace indicator, which lives
+                // in the chrome rather than in the pane's own grid.
                 HostEvent::InteractiveState(_)
                 | HostEvent::PromptBoundaryTrusted(_)
-                | HostEvent::PromptStarted => chrome_changed = true,
+                | HostEvent::PromptStarted
+                | HostEvent::CommandStarted => chrome_changed = true,
                 HostEvent::Cwd(_) => session_changed = true,
                 HostEvent::Notification { title, body } => {
                     let mutation = self.agent_monitor.notify(&agent_route, title, body);

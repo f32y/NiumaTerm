@@ -31,6 +31,7 @@ mod settings;
 mod shell;
 mod sidebar_resize;
 mod tab_bar;
+mod terminal_status;
 mod token_usage;
 mod workflows;
 mod working_indicator;
