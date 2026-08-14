@@ -624,6 +624,13 @@
 "agent-context-what-fills-it" = "What fills it"
 "agent-context-current" = "Current context"
 
+# Agent composer status readouts
+"agent-status-turns" = "{count} turns"
+"agent-status-steps" = "{count} steps"
+"agent-status-first-output" = "first {value}"
+"agent-status-cache-hit" = "{percent}% cached"
+"agent-status-accessibility" = "Conversation stats: {stats}"
+
 # Agent settings controls
 "agent-setting-model" = "model"
 "agent-setting-permissions" = "permissions"

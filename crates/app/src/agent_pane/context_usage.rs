@@ -123,6 +123,17 @@ fn remaining_context_percent(usage: ContextWindowUsage) -> Option<u64> {
     Some((remaining_tokens as f64 * 100.0 / max_tokens as f64).round() as u64)
 }
 
+/// Share of the request's input the provider served from its cache. Claude
+/// folds cache reads and writes into `input_tokens`, so the read is a share of
+/// that total; a provider that instead reports its cached tokens outside the
+/// input count would exceed 100%, which the clamp keeps out of the readout.
+pub(super) fn cache_hit_percent(usage: TokenUsageBreakdown) -> Option<u64> {
+    let input_tokens = usage.input_tokens.filter(|tokens| *tokens > 0)?;
+    let cache_read = usage.cache_read_input_tokens?;
+
+    Some(((cache_read as f64 * 100.0 / input_tokens as f64).round() as u64).min(100))
+}
+
 fn context_indicator_label(usage: ContextWindowUsage) -> String {
     match remaining_context_percent(usage) {
         Some(remaining_percent) => i18n("agent-context-used-left")

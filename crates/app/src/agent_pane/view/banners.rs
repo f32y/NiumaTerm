@@ -1,7 +1,49 @@
 use nmt_i18n::i18n;
 
-use crate::agent_pane::context_usage::ContextUsageIndicator;
+use crate::agent_pane::context_usage::{ContextUsageIndicator, cache_hit_percent};
 use crate::agent_pane::*;
+
+/// Sub-second latencies are the interesting ones, and a reading like `0.8s`
+/// hides how much of a second it was; past a second the tenth is enough.
+fn latency_readout(latency: Duration) -> String {
+    if latency < Duration::from_secs(1) {
+        format!("{}ms", latency.as_millis())
+    } else {
+        format!("{:.1}s", latency.as_secs_f64())
+    }
+}
+
+/// The composer's one-line account of the conversation: how many turns it has
+/// run, how many actions the newest turn took, how long that turn waited for
+/// its first output, and how much of its input the provider had cached. Each
+/// part is dropped rather than shown as a zero when nothing reports it, and a
+/// conversation that has not run a turn yet reports nothing at all.
+pub(in crate::agent_pane::view) fn composer_stats_label(
+    turns: u64,
+    steps: usize,
+    first_output: Option<Duration>,
+    cache_hit: Option<u64>,
+) -> Option<String> {
+    if turns == 0 {
+        return None;
+    }
+
+    let mut parts = vec![i18n("agent-status-turns").replace("{count}", &turns.to_string())];
+
+    if steps > 0 {
+        parts.push(i18n("agent-status-steps").replace("{count}", &steps.to_string()));
+    }
+    if let Some(first_output) = first_output {
+        parts.push(
+            i18n("agent-status-first-output").replace("{value}", &latency_readout(first_output)),
+        );
+    }
+    if let Some(percent) = cache_hit {
+        parts.push(i18n("agent-status-cache-hit").replace("{percent}", &percent.to_string()));
+    }
+
+    Some(parts.join(" · "))
+}
 
 impl AgentPane {
     pub(in crate::agent_pane::view) fn render_approval_panel(
@@ -309,6 +351,14 @@ impl AgentPane {
             .context_window_usage
             .map(|usage| ContextUsageIndicator::new(usage, self.context_composition.clone()));
 
+        let stats = composer_stats_label(
+            self.turn_seq,
+            self.transcript.read(cx).turn_steps(self.turn_seq),
+            self.first_output_latency,
+            self.context_window_usage
+                .and_then(|usage| cache_hit_percent(usage.current)),
+        );
+
         v_flex()
             .w(relative(0.95))
             .rounded_b(UI_RADIUS)
@@ -337,7 +387,27 @@ impl AgentPane {
                             .child(Icon::new(IconName::GitBranch).size_3())
                             .child(div().min_w_0().truncate().child(branch)),
                     )
-                    .children(usage),
+                    .child(
+                        // The readouts belong with the context indicator rather
+                        // than centered between it and the branch: both report
+                        // what the conversation has spent, and a variable-width
+                        // group in the middle would drift as its parts appear.
+                        h_flex()
+                            .flex_none()
+                            .gap_3()
+                            .items_center()
+                            .children(stats.map(|stats| {
+                                div()
+                                    .id("agent-composer-stats")
+                                    .aria_label(
+                                        i18n("agent-status-accessibility")
+                                            .replace("{stats}", &stats),
+                                    )
+                                    .text_color(cx.theme().muted_foreground.opacity(0.72))
+                                    .child(stats)
+                            }))
+                            .children(usage),
+                    ),
             )
             .into_any_element()
     }

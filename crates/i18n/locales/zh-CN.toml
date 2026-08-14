@@ -623,6 +623,13 @@
 "agent-context-what-fills-it" = "内容构成"
 "agent-context-current" = "当前上下文"
 
+# 智能体输入框状态读数
+"agent-status-turns" = "{count} 轮"
+"agent-status-steps" = "{count} 步"
+"agent-status-first-output" = "首响 {value}"
+"agent-status-cache-hit" = "缓存 {percent}%"
+"agent-status-accessibility" = "会话统计：{stats}"
+
 # 智能体设置控件
 "agent-setting-model" = "模型"
 "agent-setting-permissions" = "权限"

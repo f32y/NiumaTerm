@@ -1,5 +1,6 @@
 use nmt_i18n::i18n;
 
+use crate::agent_pane::transcript::is_work_row;
 use crate::agent_pane::*;
 
 /// One agent conversation as the user reads it: the entry list, the row
@@ -246,6 +247,16 @@ impl TranscriptView {
             } if entry.turn == turn && !text.trim().is_empty() => Some(text.as_str()),
             _ => None,
         })
+    }
+
+    /// How many actions `turn` has taken: the tool calls, file changes and
+    /// thinking passes it logged. Conversation text is the turn talking rather
+    /// than working, so it does not count.
+    pub(in crate::agent_pane) fn turn_steps(&self, turn: u64) -> usize {
+        self.items
+            .iter()
+            .filter(|entry| entry.turn == turn && is_work_row(&entry.item))
+            .count()
     }
 
     /// Completed and total entries of the task list the agent is working from.

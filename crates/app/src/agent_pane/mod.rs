@@ -441,6 +441,14 @@ pub(crate) struct AgentPane {
     /// Monotonic turn counter; entries are tagged with the turn they arrived
     /// in so a settled turn can fold as one unit.
     turn_seq: u64,
+    /// When the running turn was handed to the backend, kept until its first
+    /// visible output answers it. Measured from submission rather than from the
+    /// backend's turn-started event, so the reading covers the whole wait the
+    /// user sat through, CLI and RPC latency included.
+    turn_submitted_at: Option<Instant>,
+    /// How long the last turn took to produce anything visible. Survives the
+    /// turn so the composer keeps reporting it while the conversation is idle.
+    first_output_latency: Option<Duration>,
     /// The active prompt remains recoverable until provider activity becomes
     /// visible, allowing an immediate stop to return it to the composer.
     unanswered_prompt: Option<UnansweredPrompt>,
