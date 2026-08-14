@@ -42,6 +42,7 @@ use super::tool_items::{complete_tool_item, tool_item};
 #[cfg(test)]
 use super::tool_items::{edit_diff, input_detail};
 use crate::LaunchConfig;
+use crate::background_task::{BackgroundTaskKey, BackgroundTaskTranscriptUpdate};
 #[cfg(test)]
 use crate::chat::ContextUsageScope;
 use crate::chat::{
@@ -49,7 +50,7 @@ use crate::chat::{
     SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
     ThreadSettings, TokenUsageBreakdown,
 };
-use crate::claude_code::sessions::RestoredTask;
+use crate::claude_code::sessions::{RestoredTask, load_child_transcript};
 use crate::claude_code::tasks::ClaudeTasks;
 use crate::claude_code::workflows::{
     ClaudeWorkflows, RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult,
@@ -504,6 +505,32 @@ impl Session {
     /// live updates that landed while it was running.
     pub fn begin_task_restoration(&mut self) -> u64 {
         self.tasks.begin_restoration()
+    }
+
+    /// Read one child's stored conversation. The CLI publishes a child's own
+    /// turns only in the file it writes for that child; the parent stream
+    /// carries the launch instruction and the lifecycle records but none of
+    /// the replies, so this read is what the child's row has to show.
+    ///
+    /// A session that wrote no child files leaves the row as the stream left
+    /// it, which keeps older CLI versions (whose stream did carry the child's
+    /// turns) working unchanged.
+    pub fn load_background_task_transcript(
+        &self,
+        tool_use_id: &str,
+        cwd: Option<&str>,
+    ) -> Vec<Event> {
+        let Some(session_id) = self.session_id.as_deref() else {
+            return Vec::new();
+        };
+        let Some(items) = load_child_transcript(cwd, session_id, tool_use_id) else {
+            return Vec::new();
+        };
+
+        vec![Event::BackgroundTaskTranscript {
+            key: BackgroundTaskKey::claude_code(tool_use_id),
+            update: BackgroundTaskTranscriptUpdate::loaded(items),
+        }]
     }
 
     pub fn finish_task_restoration(

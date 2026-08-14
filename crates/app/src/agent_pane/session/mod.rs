@@ -716,10 +716,11 @@ impl AgentPane {
         key: &BackgroundTaskKey,
         cx: &mut Context<Self>,
     ) {
+        let cwd = self.cwd.clone();
         let Some(session) = self.session.as_mut() else {
             return;
         };
-        for event in session.load_background_task_transcript(key) {
+        for event in session.load_background_task_transcript(key, cwd.as_deref()) {
             self.apply_event(event, cx);
         }
     }
