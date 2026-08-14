@@ -434,14 +434,23 @@ mod steered_prompt_rows_tests {
         }
     }
 
-    /// Entry indexes in render order, with the fold header marked as `None`.
-    fn order(transcript: &TranscriptView) -> Vec<Option<usize>> {
+    /// Settle a turn the way a turn completed in this process does: finished,
+    /// with the duration the session reported for it.
+    fn settle(transcript: &mut TranscriptView, turn: u64, seconds: u64) {
+        transcript.settled_turns.insert(turn);
+        transcript.completed_turn_seconds.insert(turn, seconds);
+    }
+
+    /// Render order as entry indexes, with the turn's two chrome rows named.
+    fn order(transcript: &TranscriptView) -> Vec<String> {
         transcript
             .build_row_specs(false)
             .into_iter()
             .map(|spec| match spec {
-                RowSpec::Entry { index, .. } | RowSpec::Work { index, .. } => Some(index),
-                _ => None,
+                RowSpec::Entry { index, .. } | RowSpec::Work { index, .. } => index.to_string(),
+                RowSpec::TurnFold { row_count, .. } => format!("fold({row_count})"),
+                RowSpec::TurnSummary { .. } => "summary".to_string(),
+                _ => "?".to_string(),
             })
             .collect()
     }
@@ -456,19 +465,77 @@ mod steered_prompt_rows_tests {
                 transcript.push(1, reply("a"), cx);
                 transcript.push(1, prompt("steered mid-turn"), cx);
                 transcript.push(1, reply("b"), cx);
-                transcript.completed_turn_seconds.insert(1, 12);
+                settle(transcript, 1, 12);
 
                 // Folded: the work between prompt and answer is hidden, while
                 // the user's own steered words stay readable above the reply.
-                // The summary closes the turn, below the reply.
-                assert_eq!(order(transcript), vec![Some(0), Some(2), Some(3), None]);
+                // The disclosure heads the rows it hides; the summary closes
+                // the turn below the reply.
+                assert_eq!(order(transcript), vec!["0", "fold(1)", "2", "3", "summary"]);
 
                 transcript.expanded_turns.insert(1);
                 assert_eq!(
                     order(transcript),
-                    vec![Some(0), Some(1), Some(2), Some(3), None],
-                    "the steered prompt sits after the reply it arrived during"
+                    vec!["0", "fold(1)", "1", "2", "3", "summary"],
+                    "expanding inserts the work below the disclosure, above the reply"
                 );
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn a_turn_with_nothing_to_hide_gets_no_disclosure(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let transcript = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
+
+            transcript.update(cx, |transcript, cx| {
+                transcript.push(1, prompt("ask"), cx);
+                transcript.push(1, reply("answer"), cx);
+                settle(transcript, 1, 3);
+
+                // A control that would disclose nothing is not rendered; the
+                // summary still closes the turn.
+                assert_eq!(order(transcript), vec!["0", "1", "summary"]);
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn a_replayed_turn_folds_without_claiming_a_duration(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let transcript = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
+
+            transcript.update(cx, |transcript, cx| {
+                transcript.push(1, prompt("ask"), cx);
+                transcript.push(1, reply("a"), cx);
+                transcript.push(1, reply("b"), cx);
+
+                // What a resumed conversation looks like: the turn is over, but
+                // the transcript file recorded no wall time for it.
+                transcript.settled_turns.insert(1);
+
+                // It folds like any settled turn, and closes after its reply
+                // rather than stating a duration the session never reported.
+                assert_eq!(order(transcript), vec!["0", "fold(1)", "2"]);
+
+                transcript.expanded_turns.insert(1);
+                assert_eq!(order(transcript), vec!["0", "fold(1)", "1", "2"]);
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn a_running_turn_stays_chronological(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let transcript = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
+
+            transcript.update(cx, |transcript, cx| {
+                transcript.push(1, prompt("ask"), cx);
+                transcript.push(1, reply("a"), cx);
+                transcript.push(1, reply("b"), cx);
+
+                // Nothing is hidden while the work is still happening.
+                assert_eq!(order(transcript), vec!["0", "1", "2"]);
             });
         });
     }

@@ -27,11 +27,18 @@ pub(in crate::agent_pane) enum RowSpec {
         index: usize,
         fingerprint: u64,
     },
-    FoldHeader {
+    /// The turn's work disclosure, placed above the rows it hides so the
+    /// chevron points at its own content.
+    TurnFold {
         turn: u64,
+        row_count: usize,
+        folded: bool,
+    },
+    /// The turn's closing "Worked for Ns" line. Reporting only; the work it
+    /// accounts for is disclosed by [`RowSpec::TurnFold`] further up.
+    TurnSummary {
         seconds: u64,
         output_tokens: Option<u64>,
-        folded: bool,
     },
     Interrupted {
         turn: u64,
@@ -167,9 +174,9 @@ impl TranscriptView {
         cx.notify();
     }
 
-    /// Render one turn: user rows, the intermediate work rows (hidden by
-    /// default behind the fold), the final reply, and last the clickable
-    /// "Worked for Ns" summary. Running turns render chronologically.
+    /// Render one turn: the opening prompt, the work disclosure and the rows
+    /// it hides, the final reply, and last the "Worked for Ns" summary.
+    /// Running turns render chronologically.
     pub(in crate::agent_pane) fn entry_spec(&self, index: usize) -> RowSpec {
         RowSpec::Entry {
             index,
@@ -228,25 +235,31 @@ impl TranscriptView {
         collapse: bool,
         rows: &mut Vec<RowSpec>,
     ) {
-        let seconds = match turn_summary(
+        // How the turn closes, once it has one. A stopped turn is closed by its
+        // own marker; otherwise an elapsed-time line, when the session reported
+        // a duration at all.
+        let summary = turn_summary(
             self.interrupted_turns.contains(&turn),
             self.completed_turn_seconds.get(&turn).copied(),
-        ) {
-            Some(TurnSummary::Interrupted) => {
-                self.stream_specs(start, end, &|_| false, collapse, rows);
-                rows.push(RowSpec::Interrupted {
-                    turn,
-                    output_tokens: self.completed_turn_output_tokens.get(&turn).copied(),
-                });
-                return;
-            }
-            Some(TurnSummary::Worked(seconds)) => seconds,
-            None => {
-                // Running (or pre-thread) turn: plain chronological stream.
-                self.stream_specs(start, end, &|_| false, collapse, rows);
-                return;
-            }
-        };
+        );
+
+        if summary == Some(TurnSummary::Interrupted) {
+            self.stream_specs(start, end, &|_| false, collapse, rows);
+            rows.push(RowSpec::Interrupted {
+                turn,
+                output_tokens: self.completed_turn_output_tokens.get(&turn).copied(),
+            });
+            return;
+        }
+
+        // Running (or pre-thread) turn: plain chronological stream, because its
+        // work is what the user is watching happen. Folding keys off the turn
+        // having settled rather than off a known duration, so a replayed turn
+        // folds too — the transcript file carries no timing for it.
+        if !self.settled_turns.contains(&turn) {
+            self.stream_specs(start, end, &|_| false, collapse, rows);
+            return;
+        }
 
         let folded = !self.expanded_turns.contains(&turn);
 
@@ -266,6 +279,34 @@ impl TranscriptView {
 
         if let Some(i) = opening_user {
             rows.push(self.entry_spec(i));
+        }
+
+        // What the fold owns: everything the expanded turn shows that the
+        // folded one does not. Counting it here keeps the disclosure's label
+        // honest and lets a turn with nothing to hide skip the control.
+        let folded_away = |i: usize| {
+            let item = &self.items[i].item;
+
+            !hidden(item)
+                && Some(i) != opening_user
+                && Some(i) != final_agent
+                && !matches!(
+                    item,
+                    SessionItem::Error { .. }
+                        | SessionItem::Compaction { .. }
+                        | SessionItem::UserMessage { .. }
+                )
+        };
+        let row_count = (start..end).filter(|&i| folded_away(i)).count();
+
+        // Above the rows it discloses, so expanding inserts them below the
+        // control the user just clicked instead of further up the turn.
+        if row_count > 0 {
+            rows.push(RowSpec::TurnFold {
+                turn,
+                row_count,
+                folded,
+            });
         }
 
         if folded {
@@ -295,15 +336,14 @@ impl TranscriptView {
         }
 
         // The turn's summary closes it, below the answer it accounts for, the
-        // same place the interrupted marker sits. Its work rows precede the
-        // answer, so expanding the fold inserts them where they happened
-        // instead of between the summary and the reply it summarizes.
-        rows.push(RowSpec::FoldHeader {
-            turn,
-            seconds,
-            output_tokens: self.completed_turn_output_tokens.get(&turn).copied(),
-            folded,
-        });
+        // same place the interrupted marker sits. A replayed turn reaches here
+        // with no duration to state and simply ends after its reply.
+        if let Some(TurnSummary::Worked(seconds)) = summary {
+            rows.push(RowSpec::TurnSummary {
+                seconds,
+                output_tokens: self.completed_turn_output_tokens.get(&turn).copied(),
+            });
+        }
     }
 
     /// Chronological rows for a slice of the transcript, collapsing runs of

@@ -30,12 +30,15 @@ impl TranscriptView {
         let row = match spec {
             RowSpec::Entry { index, .. } => self.render_entry_row(index, window, cx),
             RowSpec::Work { index, .. } => self.render_work_row(index, window, cx),
-            RowSpec::FoldHeader {
+            RowSpec::TurnFold {
                 turn,
+                row_count,
+                folded,
+            } => self.render_turn_fold(turn, row_count, folded, cx),
+            RowSpec::TurnSummary {
                 seconds,
                 output_tokens,
-                folded,
-            } => self.render_fold_header(turn, seconds, output_tokens, folded, cx),
+            } => self.render_turn_summary(seconds, output_tokens, cx),
             RowSpec::Interrupted { output_tokens, .. } => {
                 self.render_interrupted_row(output_tokens, cx)
             }
@@ -828,14 +831,50 @@ impl TranscriptView {
             .into_any_element()
     }
 
-    /// The settled turn's "Worked for Ns" disclosure line, doubling as a
-    /// section divider (bottom hairline).
-    pub(in crate::agent_pane) fn render_fold_header(
+    /// The settled turn's work disclosure. It heads the rows it hides, so the
+    /// chevron keeps its usual meaning: the content it reveals is below it.
+    pub(in crate::agent_pane) fn render_turn_fold(
         &self,
         turn: u64,
+        row_count: usize,
+        folded: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let label = if folded {
+            i18n("agent-transcript-turn-work").replace("{count}", &row_count.to_string())
+        } else {
+            i18n("agent-transcript-turn-work-hide").to_string()
+        };
+
+        AgentDisclosureRow::new(("turn-fold", turn as usize), label.clone())
+            .expanded(!folded)
+            .without_type_icon_slot()
+            .accessible_label(format!(
+                "{label}. {}",
+                if folded {
+                    i18n("agent-transcript-collapsed")
+                } else {
+                    i18n("agent-transcript-expanded")
+                }
+            ))
+            .render(cx)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if !this.expanded_turns.insert(turn) {
+                    this.expanded_turns.remove(&turn);
+                }
+                cx.notify();
+            }))
+            .into_any_element()
+    }
+
+    /// The settled turn's closing "Worked for Ns" line, doubling as a section
+    /// divider (bottom hairline). Reporting only: it accounts for work the
+    /// disclosure above it owns, so making it clickable too would give one
+    /// turn two controls over the same rows.
+    pub(in crate::agent_pane) fn render_turn_summary(
+        &self,
         seconds: u64,
         output_tokens: Option<u64>,
-        folded: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let label = worked_status_label(seconds, output_tokens);
@@ -844,23 +883,11 @@ impl TranscriptView {
             .w_full()
             .gap_1()
             .child(
-                AgentDisclosureRow::new(("turn-fold", turn as usize), label.clone())
-                    .expanded(!folded)
-                    .accessible_label(format!(
-                        "{label}. {}",
-                        if folded {
-                            i18n("agent-transcript-collapsed")
-                        } else {
-                            i18n("agent-transcript-expanded")
-                        }
-                    ))
-                    .render(cx)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if !this.expanded_turns.insert(turn) {
-                            this.expanded_turns.remove(&turn);
-                        }
-                        cx.notify();
-                    })),
+                div()
+                    .px_1()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground.opacity(0.7))
+                    .child(label),
             )
             .child(div().w_full().h(px(1.)).bg(cx.theme().border.opacity(0.6)))
             .into_any_element()

@@ -596,6 +596,8 @@
 "agent-transcript-instructions" = "指令"
 "agent-transcript-show-fewer-tool-calls" = "收起工具调用"
 "agent-transcript-tool-calls" = "+{count} 次工具调用"
+"agent-transcript-turn-work" = "展开工作过程（{count}）"
+"agent-transcript-turn-work-hide" = "收起工作过程"
 "agent-transcript-scroll-bottom" = "滚动到底部"
 
 # 智能体上下文用量

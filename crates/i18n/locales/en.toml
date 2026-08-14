@@ -597,6 +597,8 @@
 "agent-transcript-instructions" = "Instructions"
 "agent-transcript-show-fewer-tool-calls" = "Show fewer tool calls"
 "agent-transcript-tool-calls" = "+{count} tool calls"
+"agent-transcript-turn-work" = "Show work ({count})"
+"agent-transcript-turn-work-hide" = "Hide work"
 "agent-transcript-scroll-bottom" = "Scroll to Bottom"
 
 # Agent context usage
