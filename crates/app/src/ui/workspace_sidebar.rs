@@ -359,7 +359,13 @@ impl Sidebar {
             &full_path,
             (((self.width - 80.0) / 7.0).floor() as usize).clamp(8, 64),
         );
-        let display_label = workspace_display_label(&ws.name, &ws.cwd);
+        // A temporary workspace wears the same `*` an unsaved document does,
+        // so its absence from the next session is visible before the user
+        // closes the window.
+        let display_label = match ws.temporary {
+            true => format!("* {}", workspace_display_label(&ws.name, &ws.cwd)),
+            false => workspace_display_label(&ws.name, &ws.cwd),
+        };
         let name = div()
             .id(("workspace-secondary", idx))
             .aria_label(display_label.clone())
@@ -403,7 +409,7 @@ impl Sidebar {
                 display_label.clone()
             } else {
                 i18n("sidebar-workspace-item-label")
-                    .replace("{name}", &workspace_display_label(&ws.name, &ws.cwd))
+                    .replace("{name}", &display_label)
                     .replace("{path}", &full_path)
                     .replace("{status}", &status_label)
             })
@@ -478,6 +484,7 @@ impl Sidebar {
             i18n("sidebar-workspace-menu-pin")
         };
         let cwd = ws.cwd.clone();
+        let temporary = ws.temporary;
 
         div()
             .id(("workspace-menu", idx))
@@ -529,6 +536,7 @@ impl Sidebar {
                 let rename_shell = shell.clone();
                 let close_shell = shell.clone();
                 let pin_shell = shell.clone();
+                let activate_shell = shell.clone();
                 let cwd = cwd.clone();
 
                 // Renaming, pinning, and copying a path all describe a
@@ -557,6 +565,18 @@ impl Sidebar {
                             },
                         ),
                     )
+                    // Only a temporary workspace has anything to adopt.
+                    .when(temporary, |menu| {
+                        menu.item(
+                            PopupMenuItem::new(i18n("sidebar-workspace-menu-activate")).on_click(
+                                move |_, _, cx| {
+                                    activate_shell.update(cx, |this, cx| {
+                                        this.activate_as_workspace(ws_id, cx)
+                                    });
+                                },
+                            ),
+                        )
+                    })
                 };
 
                 menu.item(

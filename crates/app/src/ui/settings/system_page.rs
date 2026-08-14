@@ -107,7 +107,19 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                             }
                         },
                     ),
-                )),
+                ))
+                .item(
+                    SettingItem::new(
+                        i18n("settings-system-open-best-workspace"),
+                        SettingField::switch(
+                            |cx| cx.global::<AppSettings>().open_in_best_workspace,
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().open_in_best_workspace = value;
+                            },
+                        ),
+                    )
+                    .description(i18n("settings-system-open-best-workspace-description")),
+                ),
         )
         .group(
             SettingGroup::new()

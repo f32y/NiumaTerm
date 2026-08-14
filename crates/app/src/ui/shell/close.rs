@@ -1,3 +1,4 @@
+use gpui_component::StyledExt;
 use nmt_i18n::i18n;
 
 use crate::ui::shell::*;
@@ -77,6 +78,7 @@ impl Shell {
             cx,
             i18n("shell-close-pane-title"),
             description,
+            None,
             move |this, window, cx| this.close_pane_now(id, window, cx),
         );
     }
@@ -116,6 +118,29 @@ impl Shell {
         }
     }
 
+    /// "You have N temporary workspaces." for the dialogs that end this
+    /// window, or `None` when every workspace here is saved. Temporary
+    /// workspaces stay out of local_state, so they are the part of the window
+    /// that will not come back.
+    fn temporary_workspace_note(&self) -> Option<SharedString> {
+        let count = self
+            .workspaces
+            .summaries()
+            .iter()
+            .filter(|ws| ws.temporary)
+            .count();
+
+        match count {
+            0 => None,
+            1 => Some(i18n("shell-close-one-temporary-workspace").into()),
+            _ => Some(
+                i18n("shell-close-many-temporary-workspaces")
+                    .replace("{count}", &count.to_string())
+                    .into(),
+            ),
+        }
+    }
+
     /// Child processes running across every pane of workspace `id`.
     fn workspace_process_count(&self, id: WorkspaceId, cx: &App) -> usize {
         self.workspaces.tabs_of(id).map_or(0, |tabs| {
@@ -127,7 +152,9 @@ impl Shell {
     }
 
     /// Shared scaffolding of every close-confirmation alert: title +
-    /// description, OK runs `on_confirm` against this shell.
+    /// description, OK runs `on_confirm` against this shell. `note` adds a
+    /// bold line under the description for a consequence the description
+    /// itself does not cover.
     fn open_close_confirm(
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -135,6 +162,7 @@ impl Shell {
         // `'static` title without allocating per dialog.
         title: &'static str,
         description: String,
+        note: Option<SharedString>,
         on_confirm: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
     ) {
         let shell = cx.entity();
@@ -147,7 +175,12 @@ impl Shell {
             alert
                 .confirm()
                 .title(title)
-                .description(description.clone())
+                .description(
+                    v_flex()
+                        .gap_1()
+                        .child(description.clone())
+                        .children(note.clone().map(|note| div().font_bold().child(note))),
+                )
                 .on_ok(move |_, window, cx| {
                     let on_confirm = Rc::clone(&on_confirm);
                     shell.update(cx, |this, cx| on_confirm(this, window, cx));
@@ -230,6 +263,7 @@ impl Shell {
                 cx,
                 i18n("shell-close-last-tab-title"),
                 description,
+                None,
                 move |this, window, cx| this.close_workspace_now(ws_id, window, cx),
             );
 
@@ -258,6 +292,7 @@ impl Shell {
             cx,
             i18n("shell-close-tab-title"),
             description,
+            None,
             move |this, window, cx| this.close_tab_now(id, window, cx),
         );
     }
@@ -327,6 +362,7 @@ impl Shell {
             cx,
             i18n("shell-close-workspace-title"),
             description,
+            None,
             move |this, window, cx| this.close_workspace_now(id, window, cx),
         );
     }
@@ -350,22 +386,29 @@ impl Shell {
             i18n("shell-close-last-workspace-message").to_string()
         };
 
+        // Quitting from here saves the session, so the same warning the
+        // window-close dialog carries applies to this choice too.
+        let note = self.temporary_workspace_note();
+
         let shell = cx.entity();
 
         window.open_dialog(cx, move |dialog, _, _| {
             let quit_shell = shell.clone();
             let replace_shell = shell.clone();
             let message = message.clone();
+            let note = note.clone();
 
             dialog
                 .title(i18n("shell-close-last-workspace-title"))
                 .overlay_closable(false)
                 .content(move |content, _, cx| {
                     content.child(
-                        div()
+                        v_flex()
+                            .gap_1()
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child(message.clone()),
+                            .child(message.clone())
+                            .children(note.clone().map(|note| div().font_bold().child(note))),
                     )
                 })
                 .footer(
@@ -453,6 +496,8 @@ impl Shell {
             i18n("shell-close-window-description").to_string()
         };
 
+        let note = self.temporary_workspace_note();
+
         // `remove_window` tears the window down directly (no WM_CLOSE
         // round-trip), so this dialog won't re-trigger.
         Self::open_close_confirm(
@@ -460,6 +505,7 @@ impl Shell {
             cx,
             i18n("shell-close-window-title"),
             description,
+            note,
             |_, window, _| window.remove_window(),
         );
         false

@@ -179,9 +179,10 @@ impl Shell {
         self.open_agent_tab(profile, window, cx);
     }
 
-    /// CLI `new_tab`: open `path` in the deepest workspace whose cwd contains
-    /// it (new tab, shell starts in `path`), or in a fresh workspace when
-    /// nothing matches, preserving the user's target.
+    /// CLI `new_tab`: reuse the workspace rooted exactly at `path`, otherwise
+    /// open a fresh workspace there. With `open_in_best_workspace` on, a
+    /// containing workspace is preferred over a new one and gets the tab
+    /// instead, with the shell started in `path`.
     pub(crate) fn open_dir_tab(
         &mut self,
         path: &path::Path,
@@ -206,7 +207,13 @@ impl Shell {
 
         let target = path.display().to_string();
 
-        let Some(ws_id) = best_match(&self.workspaces.summaries(), path) else {
+        let containing = cx
+            .global::<AppSettings>()
+            .open_in_best_workspace
+            .then(|| best_match(&self.workspaces.summaries(), path))
+            .flatten();
+
+        let Some(ws_id) = containing else {
             self.create_workspace(
                 i18n("shell-workspace-default-name").into(),
                 target,
