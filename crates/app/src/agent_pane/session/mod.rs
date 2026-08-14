@@ -516,6 +516,12 @@ impl AgentPane {
         self.kind
     }
 
+    /// Progress through the task list this conversation is working from, as
+    /// completed items out of the total, for the workspace entry's bar.
+    pub(crate) fn task_tally(&self, cx: &App) -> Option<(u32, u32)> {
+        self.transcript.read(cx).task_tally()
+    }
+
     /// Name of the launch profile, persisted with the tab snapshot so
     /// restore reopens the same profile.
     pub(crate) fn profile_name(&self) -> &str {

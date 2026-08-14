@@ -1,7 +1,7 @@
 use gpui::prelude::*;
 use gpui::{
     AnyElement, ClipboardItem, Context, DragMoveEvent, ElementId, Entity, KeyDownEvent,
-    MouseButton, ScrollHandle, SharedString, StatefulInteractiveElement, Window, div, px,
+    MouseButton, ScrollHandle, SharedString, StatefulInteractiveElement, Window, div, px, relative,
 };
 use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants};
 use gpui_component::input::{Input, InputState};
@@ -107,6 +107,26 @@ fn workspace_status_glyphs(
         .collect();
 
     (glyphs, label)
+}
+
+/// Progress bar along the bottom edge of a sidebar item, driven by the combined
+/// OSC 9;4 progress of the workspace's tabs. One corner radius of space at each
+/// side keeps the track on the straight part of the bottom edge.
+fn workspace_progress_bar(fraction: f32, cx: &gpui::App) -> AnyElement {
+    div()
+        .absolute()
+        .bottom_0()
+        .left(UI_RADIUS)
+        .right(UI_RADIUS)
+        .h(px(2.0))
+        .child(
+            div()
+                .h_full()
+                .w(relative(fraction))
+                .rounded_full()
+                .bg(cx.theme().primary),
+        )
+        .into_any_element()
 }
 
 fn workspace_display_label(name: &str, cwd: &str) -> String {
@@ -486,9 +506,15 @@ impl Sidebar {
         let cwd = ws.cwd.clone();
         let temporary = ws.temporary;
 
+        let progress = ws
+            .progress
+            .fraction()
+            .map(|fraction| workspace_progress_bar(fraction, cx));
+
         div()
             .id(("workspace-menu", idx))
             .w_full()
+            .relative()
             .when(self.dragging == Some(idx), |this| this.opacity(0.0))
             // Make way for the dragged item: the hovered item slides down,
             // opening an insertion gap at the pointer.
@@ -590,6 +616,7 @@ impl Sidebar {
                 )
             })
             .child(item)
+            .children(progress)
             .into_any_element()
     }
 

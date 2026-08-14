@@ -316,6 +316,25 @@ fn content_bearing_inputs_seed_the_card_detail() {
 }
 
 #[test]
+fn a_todo_card_counts_back_out_as_a_task_tally() {
+    let todos = tool_item(
+        "t1",
+        "TodoWrite",
+        &json!({"todos": [
+            {"content": "done thing", "status": "completed"},
+            {"content": "next thing", "status": "pending"},
+            {"content": "later thing", "status": "pending"},
+        ]}),
+    );
+
+    assert_eq!(todos.task_tally(), Some((1, 3)));
+    assert_eq!(
+        tool_item("t2", "Grep", &json!({"pattern": "x"})).task_tally(),
+        None
+    );
+}
+
+#[test]
 fn edit_diff_prefixes_old_and_new_lines() {
     let diff = edit_diff("Edit", &json!({"old_string": "a\nb", "new_string": "c"}));
     assert_eq!(diff.as_deref(), Some("-a\n-b\n+c\n"));

@@ -46,6 +46,48 @@ impl TerminalActivity {
     }
 }
 
+/// Work behind a workspace entry's progress bar, folded over everything inside
+/// it that reports progress. Counted in percent points so contributors on
+/// different scales add up: one unit of work is 100 points, whether it is a
+/// terminal command reporting 40% or one item of an agent's task list.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ProgressTally {
+    done: u32,
+    total: u32,
+}
+
+impl ProgressTally {
+    /// One unit of work that is `percent` complete.
+    pub fn percent(percent: u8) -> Self {
+        Self {
+            done: u32::from(percent).min(100),
+            total: 100,
+        }
+    }
+
+    /// `done` finished units out of `total`.
+    pub fn tasks(done: u32, total: u32) -> Self {
+        Self {
+            done: done.min(total) * 100,
+            total: total * 100,
+        }
+    }
+
+    /// Fold one more contributor into the workspace entry's single slot.
+    pub fn merge(self, other: Self) -> Self {
+        Self {
+            done: self.done + other.done,
+            total: self.total + other.total,
+        }
+    }
+
+    /// Share of the tallied work that is done, or `None` while nothing in the
+    /// workspace reports progress at all.
+    pub fn fraction(self) -> Option<f32> {
+        (self.total > 0).then(|| self.done as f32 / self.total as f32)
+    }
+}
+
 /// Stable per-workspace identity. Survives close (index changes, id does not).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct WorkspaceId(pub u64);
@@ -159,6 +201,23 @@ pub struct WorkspaceSummary {
     /// Not part of the saved session until the user activates it.
     pub temporary: bool,
     pub kind: WorkspaceKind,
+    /// Work reported inside this workspace. The manager can only see what its
+    /// tabs report over OSC 9;4; the shell folds in the agent panes' task
+    /// lists, which live behind entities the manager cannot read.
+    pub progress: ProgressTally,
+}
+
+/// OSC 9;4 progress of a workspace's tabs. Only tabs carrying a number take
+/// part — an indeterminate report has no percentage to add, and a tab without a
+/// running command has no progress at all, so neither drags the bar down while
+/// the others advance.
+fn tabs_progress(tabs: &TabManager<TabSurface>) -> ProgressTally {
+    tabs.tabs()
+        .iter()
+        .filter_map(|tab| tab.progress())
+        .filter_map(|report| report.progress)
+        .map(ProgressTally::percent)
+        .fold(ProgressTally::default(), ProgressTally::merge)
 }
 
 impl WorkspaceManager {
@@ -409,6 +468,7 @@ impl WorkspaceManager {
                 closeable: (closeable || ws.kind == WorkspaceKind::Settings) && !ws.pinned,
                 temporary: ws.temporary,
                 kind: ws.kind,
+                progress: tabs_progress(&ws.tabs),
             })
             .collect()
     }
@@ -426,6 +486,8 @@ impl WorkspaceManager {
 
 #[cfg(test)]
 mod tests {
+    use nmt_terminal::event::{ProgressReport, ProgressState};
+
     use super::*;
 
     /// Summaries with the given cwds, ids = 1-based position.
@@ -445,6 +507,7 @@ mod tests {
                 closeable: cwds.len() > 1,
                 temporary: false,
                 kind: WorkspaceKind::Normal,
+                progress: ProgressTally::default(),
             })
             .collect()
     }
@@ -487,6 +550,54 @@ mod tests {
         }
 
         manager
+    }
+
+    #[test]
+    fn workspace_progress_averages_the_tabs_reporting_a_percentage() {
+        let mut tabs = TabManager::new(
+            TabSurface::Pending(Box::default()),
+            TabId(1),
+            "Tab".to_string(),
+        );
+        tabs.new_tab(
+            TabSurface::Pending(Box::default()),
+            TabId(2),
+            "Tab".to_string(),
+        );
+        tabs.new_tab(
+            TabSurface::Pending(Box::default()),
+            TabId(3),
+            "Tab".to_string(),
+        );
+
+        assert_eq!(tabs_progress(&tabs).fraction(), None);
+
+        let set = |progress| ProgressReport {
+            state: ProgressState::Set,
+            progress,
+        };
+        tabs.set_progress(TabId(1), set(Some(50)));
+        tabs.set_progress(TabId(2), set(Some(100)));
+        // No percentage to add, so this tab stays out of the average.
+        tabs.set_progress(
+            TabId(3),
+            ProgressReport {
+                state: ProgressState::Indeterminate,
+                progress: None,
+            },
+        );
+
+        assert_eq!(tabs_progress(&tabs).fraction(), Some(0.75));
+    }
+
+    #[test]
+    fn terminal_percentages_and_agent_tasks_share_one_scale() {
+        // A half-finished command plus a task list with one of three items
+        // done: 1.5 units of 4.
+        let tally = ProgressTally::percent(50).merge(ProgressTally::tasks(1, 3));
+
+        assert_eq!(tally.fraction(), Some(1.5 / 4.0));
+        assert_eq!(ProgressTally::tasks(0, 0).fraction(), None);
     }
 
     #[test]

@@ -231,6 +231,34 @@ impl Item {
         }
     }
 
+    /// Completed and total entries of an agent-published task list, for items
+    /// that are one. Claude's `TodoWrite` restates the entire list on every
+    /// call and carries it as a markdown checklist, so counting the checklist
+    /// lines of the latest such item describes the plan the agent is on.
+    pub fn task_tally(&self) -> Option<(u32, u32)> {
+        let Self::Other {
+            kind,
+            output: Some(checklist),
+            ..
+        } = self
+        else {
+            return None;
+        };
+
+        if kind != "TodoWrite" {
+            return None;
+        }
+
+        let tally = checklist
+            .lines()
+            .filter(|line| line.starts_with("- ["))
+            .fold((0, 0), |(done, total), line| {
+                (done + u32::from(line.starts_with("- [x]")), total + 1)
+            });
+
+        (tally.1 > 0).then_some(tally)
+    }
+
     /// Fold an authoritative completed payload into transcript state without
     /// discarding streamed fields that the provider omitted at completion.
     /// Returns false when the payload belongs to another item kind or id.
