@@ -113,6 +113,9 @@ pub struct AppSettings {
     pub prioritize_ui_threads: bool,
     /// Modified Enter key that inserts a new line without submitting input.
     pub newline_shortcut: NewlineShortcut,
+    /// Open a directory in the deepest workspace that already contains it,
+    /// instead of always opening a workspace of its own.
+    pub open_in_best_workspace: bool,
     /// Host this machine's local sessions for remote clients via the relay.
     pub remote_host_enabled: bool,
     /// Relay endpoint both host and clients dial.
@@ -174,6 +177,7 @@ impl Default for AppSettings {
             confirm_before_closing: true,
             prioritize_ui_threads: false,
             newline_shortcut: NewlineShortcut::default(),
+            open_in_best_workspace: true,
             remote_host_enabled: false,
             remote_relay_url: SharedString::default(),
             remote_access_token: SharedString::default(),
@@ -429,6 +433,7 @@ impl AppSettings {
             confirm_before_closing: config.system.confirm_before_closing_workspace,
             prioritize_ui_threads: config.system.prioritize_ui_threads,
             newline_shortcut: config.system.newline_shortcut,
+            open_in_best_workspace: config.system.open_in_best_workspace,
             remote_host_enabled: config.remote_session.host_enabled,
             remote_relay_url: config.remote_session.relay_url.clone().into(),
             remote_access_token: config.remote_session.access_token.clone().into(),
@@ -650,6 +655,7 @@ impl AppSettings {
             confirm_before_closing_workspace: self.confirm_before_closing,
             prioritize_ui_threads: self.prioritize_ui_threads,
             newline_shortcut: self.newline_shortcut,
+            open_in_best_workspace: self.open_in_best_workspace,
         };
 
         let remote_session = RemoteSessionConfig {

@@ -95,6 +95,10 @@ pub struct SystemConfig {
     /// Modified Enter key that inserts a new line without submitting input.
     #[serde(default, rename = "newline-shortcut")]
     pub newline_shortcut: NewlineShortcut,
+    /// Open an Explorer directory in the deepest workspace that already
+    /// contains it, instead of always opening a workspace of its own.
+    #[serde(default = "default_bool_true", rename = "open-in-best-workspace")]
+    pub open_in_best_workspace: bool,
 }
 
 impl Default for SystemConfig {
@@ -106,6 +110,7 @@ impl Default for SystemConfig {
             confirm_before_closing_workspace: true,
             prioritize_ui_threads: false,
             newline_shortcut: NewlineShortcut::default(),
+            open_in_best_workspace: true,
         }
     }
 }
@@ -122,4 +127,5 @@ pub(crate) fn patch_document(doc: &mut DocumentMut, system: &SystemConfig) {
         value(system.confirm_before_closing_workspace);
     doc["system"]["prioritize-ui-threads"] = value(system.prioritize_ui_threads);
     doc["system"]["newline-shortcut"] = value(system.newline_shortcut.as_str());
+    doc["system"]["open-in-best-workspace"] = value(system.open_in_best_workspace);
 }

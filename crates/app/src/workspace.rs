@@ -65,6 +65,10 @@ pub struct Workspace {
     name: String,
     cwd: String,
     pinned: bool,
+    /// A workspace the user has not adopted yet: it stays out of the saved
+    /// session, so opening a directory to run one command leaves nothing
+    /// behind. Clearing the flag is what promotes it to saved work.
+    temporary: bool,
     kind: WorkspaceKind,
     tabs: TabManager<TabSurface>,
 }
@@ -152,6 +156,8 @@ pub struct WorkspaceSummary {
     pub latest_unread_text: Option<String>,
     pub pinned: bool,
     pub closeable: bool,
+    /// Not part of the saved session until the user activates it.
+    pub temporary: bool,
     pub kind: WorkspaceKind,
 }
 
@@ -164,6 +170,7 @@ impl WorkspaceManager {
                 name,
                 cwd,
                 pinned: false,
+                temporary: false,
                 kind: WorkspaceKind::Normal,
                 tabs,
             }),
@@ -195,10 +202,18 @@ impl WorkspaceManager {
             name,
             cwd,
             pinned: false,
+            temporary: false,
             kind,
             tabs,
         });
         id
+    }
+
+    /// Mark whether the workspace with `id` stays out of the saved session.
+    pub fn set_temporary(&mut self, id: WorkspaceId, temporary: bool) {
+        if let Some(workspace) = self.workspaces.find_mut(id) {
+            workspace.temporary = temporary;
+        }
     }
 
     /// Id of the settings pseudo workspace, when one is open in this window.
@@ -392,6 +407,7 @@ impl WorkspaceManager {
                 latest_unread_text: None,
                 pinned: ws.pinned,
                 closeable: (closeable || ws.kind == WorkspaceKind::Settings) && !ws.pinned,
+                temporary: ws.temporary,
                 kind: ws.kind,
             })
             .collect()
@@ -427,6 +443,7 @@ mod tests {
                 latest_unread_text: None,
                 pinned: false,
                 closeable: cwds.len() > 1,
+                temporary: false,
                 kind: WorkspaceKind::Normal,
             })
             .collect()

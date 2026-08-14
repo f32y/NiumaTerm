@@ -518,6 +518,13 @@ impl Shell {
                 continue;
             }
 
+            // A temporary workspace is scratch space the user has not adopted;
+            // its tabs go with it, while tabs opened in an adopted workspace
+            // are saved below like any other.
+            if workspace.temporary {
+                continue;
+            }
+
             let Some(tabs) = self.workspaces.tabs_of(workspace.id) else {
                 continue;
             };

@@ -311,9 +311,23 @@ impl Shell {
         });
     }
 
+    /// Adopt a temporary workspace: from here on it is saved with the session
+    /// like any other. Already-persistent workspaces are unaffected.
+    pub(crate) fn activate_as_workspace(&mut self, id: WorkspaceId, cx: &mut Context<Self>) {
+        self.workspaces.set_temporary(id, false);
+
+        self.sync_session_memory(cx);
+
+        cx.notify();
+    }
+
     /// Create a workspace named `name` (empty falls back to the shared default)
     /// whose shells start in `dir` (empty falls back to the default
     /// startup directory), seeded with one fresh tab, and activate it.
+    ///
+    /// The workspace starts out temporary — opening a directory to run one
+    /// command should not grow the saved session behind the user's back — and
+    /// the sidebar's "activate" action is what makes it stick.
     pub(super) fn create_workspace(
         &mut self,
         name: String,
@@ -345,8 +359,11 @@ impl Shell {
         let ws_id = Self::alloc_id(&mut self.next_id);
         let ws_cwd = cwd.unwrap_or_else(|| ".".to_string());
 
-        self.workspaces
+        let ws_id = self
+            .workspaces
             .new_workspace(tabs, WorkspaceId(ws_id), name, ws_cwd);
+
+        self.workspaces.set_temporary(ws_id, true);
 
         self.focus_active(window, cx);
 

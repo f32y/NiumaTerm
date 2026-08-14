@@ -630,6 +630,7 @@ mod tests {
             confirm_before_closing_workspace: false,
             prioritize_ui_threads: true,
             newline_shortcut: system::NewlineShortcut::ShiftEnter,
+            open_in_best_workspace: false,
         }
     }
 
