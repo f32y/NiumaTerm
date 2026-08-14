@@ -520,6 +520,36 @@ fn linked_user_text_becomes_the_childs_first_instruction() {
 }
 
 #[test]
+fn a_launch_opens_the_childs_conversation_with_its_instructions() {
+    let mut tasks = reducer();
+    tasks.observe(&launch("toolu_1"));
+
+    // Claude Code 2.1.2x streams a child's assistant output only, so the
+    // launch block is the sole live source of the prompt.
+    let published = tasks.take_transcripts();
+    assert_eq!(published.len(), 1);
+    assert_eq!(published[0].0, BackgroundTaskKey::claude_code("toolu_1"));
+    assert!(matches!(
+        &published[0].1.items[0],
+        Item::UserMessage { text: Some(text) }
+            if text == "Read the changed files and report issues"
+    ));
+
+    // An older CLI also replays the same prompt as sidechain traffic.
+    tasks.observe(&json!({
+        "type": "user",
+        "session_id": SESSION,
+        "parent_tool_use_id": "toolu_1",
+        "uuid": "u-0",
+        "message": {"content": [
+            {"type": "text", "text": "Read the changed files and report issues"},
+        ]},
+    }));
+
+    assert!(tasks.take_transcripts().is_empty());
+}
+
+#[test]
 fn a_child_tool_result_completes_the_call_it_answers() {
     let mut tasks = reducer();
     tasks.observe(&launch("toolu_1"));
