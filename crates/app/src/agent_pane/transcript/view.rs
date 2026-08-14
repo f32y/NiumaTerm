@@ -38,8 +38,13 @@ pub(crate) struct TranscriptView {
     /// independent uniform-list position while visible. Collapsing a row drops
     /// the duplicate source so large outputs do not stay resident twice.
     pub(in crate::agent_pane) virtual_transcripts: HashMap<usize, VirtualTranscriptState>,
-    /// Settled turn durations drive fold headers without masquerading as
-    /// provider transcript items.
+    /// Turns that have finished, whether in this process or in a session this
+    /// view replayed. Folding keys off this rather than off a known duration,
+    /// because a resumed conversation carries no timing: the CLI reports a
+    /// turn's wall time only on the live stream, never in the transcript file.
+    pub(in crate::agent_pane) settled_turns: HashSet<u64>,
+    /// Settled turn durations drive the closing summary without masquerading
+    /// as provider transcript items. Absent for a replayed turn.
     pub(in crate::agent_pane) completed_turn_seconds: HashMap<u64, u64>,
     /// Final provider-reported output tokens for settled turns, keyed by the
     /// same local turn id as the duration used by the fold header.
@@ -85,6 +90,7 @@ impl TranscriptView {
             expanded_turns: HashSet::new(),
             expanded_rows: HashSet::new(),
             virtual_transcripts: HashMap::new(),
+            settled_turns: HashSet::new(),
             completed_turn_seconds: HashMap::new(),
             completed_turn_output_tokens: HashMap::new(),
             interrupted_turns: HashSet::new(),
@@ -139,6 +145,7 @@ impl TranscriptView {
         self.expanded_groups.clear();
         self.expanded_turns.clear();
         self.expanded_rows.clear();
+        self.settled_turns.clear();
         self.completed_turn_seconds.clear();
         self.completed_turn_output_tokens.clear();
         self.interrupted_turns.clear();
@@ -149,12 +156,11 @@ impl TranscriptView {
     }
 
     /// Append one turn of a restored conversation under its own turn id, with
-    /// the accounting the provider persisted for it. That accounting is what
-    /// makes a restored turn fold, report its duration, and mark an
-    /// interruption the way a turn completed in this process does. A turn the
-    /// provider timed no duration for still renders as a plain chronological
-    /// stream, since claiming a fold header would state an elapsed time the
-    /// session never reported.
+    /// the accounting the provider persisted for it. Replaying it settles the
+    /// turn, so it folds its work exactly like one completed in this process.
+    /// Its duration is a separate question: the transcript file records none,
+    /// so a replayed turn usually closes without an elapsed-time line rather
+    /// than stating a time the session never reported.
     pub(in crate::agent_pane) fn append_replay(
         &mut self,
         turn: u64,
@@ -172,6 +178,8 @@ impl TranscriptView {
                 item: entry.item,
             });
         }
+
+        self.settled_turns.insert(turn);
 
         if replay.interrupted {
             self.interrupted_turns.insert(turn);
@@ -288,6 +296,7 @@ impl TranscriptView {
     pub(in crate::agent_pane) fn settle_turn(&mut self, turn: u64, cx: &mut Context<Self>) {
         let output_tokens = self.working_output_tokens.take();
         if let Some(started) = self.working_started.take() {
+            self.settled_turns.insert(turn);
             if !self.interrupted_turns.contains(&turn) {
                 self.completed_turn_seconds
                     .insert(turn, started.elapsed().as_secs());
@@ -305,6 +314,7 @@ impl TranscriptView {
     pub(in crate::agent_pane) fn discard_turn(&mut self, turn: u64, cx: &mut Context<Self>) {
         self.working_started = None;
         self.working_output_tokens = None;
+        self.settled_turns.remove(&turn);
         self.completed_turn_seconds.remove(&turn);
         self.completed_turn_output_tokens.remove(&turn);
         self.compacting = false;
