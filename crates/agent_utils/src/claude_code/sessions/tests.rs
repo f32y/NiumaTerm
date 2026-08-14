@@ -990,6 +990,57 @@ fn a_child_conversation_is_read_from_its_own_file_and_linked_by_metadata() {
     fs::remove_dir_all(&root).ok();
 }
 
+/// The parent stream carries a child's launch instruction and its lifecycle
+/// records but none of its replies, so the row's conversation is read from the
+/// child's own file on demand rather than accumulated from the stream.
+#[test]
+fn one_childs_conversation_is_readable_without_rebuilding_the_session() {
+    use std::fs;
+
+    let root = env::temp_dir().join(format!("nmt-subagent-read-{}", Uuid::new_v4()));
+    let session_id = "sess-abc";
+    let subagents = root.join(session_id).join("subagents");
+    fs::create_dir_all(&subagents).unwrap();
+
+    fs::write(
+        subagents.join("agent-abc123.meta.json"),
+        serde_json::json!({"toolUseId": "toolu_1"}).to_string(),
+    )
+    .unwrap();
+    fs::write(
+        subagents.join("agent-abc123.jsonl"),
+        task_history_lines(&[serde_json::json!({
+            "type": "assistant",
+            "uuid": "c1",
+            "parentUuid": null,
+            "isSidechain": true,
+            "message": {"role": "assistant", "content": [
+                {"type": "text", "text": "found the popup component"},
+            ]},
+        })]),
+    )
+    .unwrap();
+
+    let items =
+        load_child_transcript_at(&root, session_id, "toolu_1").expect("the child wrote a file");
+    assert!(matches!(
+        &items[0],
+        Item::AgentMessage { text: Some(text), .. } if text == "found the popup component"
+    ));
+
+    // A session that kept no child files leaves the row as the stream left it.
+    assert_eq!(
+        load_child_transcript_at(&root, session_id, "toolu_other"),
+        None
+    );
+    assert_eq!(
+        load_child_transcript_at(&root, "sess-other", "toolu_1"),
+        None
+    );
+
+    fs::remove_dir_all(&root).ok();
+}
+
 #[test]
 fn a_child_conversation_with_no_matching_launch_is_left_alone() {
     use std::fs;

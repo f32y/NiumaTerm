@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader, ErrorKind};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chrono::DateTime;
@@ -73,27 +73,65 @@ pub(super) fn load_task_history_at(
     Ok(tasks)
 }
 
+/// One child's conversation, read from the file the CLI wrote for it. Recent
+/// versions publish a child's own turns only there: the parent stream carries
+/// the launch instruction and lifecycle records but none of the child's
+/// replies, so a live row has nothing to show without this read.
+///
+/// Returns `None` when this session kept no child files, which leaves whatever
+/// the stream did supply in place rather than blanking it.
+pub fn load_child_transcript(
+    cwd: Option<&str>,
+    session_id: &str,
+    tool_use_id: &str,
+) -> Option<Vec<Item>> {
+    let project = project_dir(cwd)?;
+    load_child_transcript_at(&project, session_id, tool_use_id)
+}
+
+pub(super) fn load_child_transcript_at(
+    project: &Path,
+    session_id: &str,
+    tool_use_id: &str,
+) -> Option<Vec<Item>> {
+    let (_, conversation) = child_conversations(project, session_id)
+        .into_iter()
+        .find(|(meta, _)| meta["toolUseId"].as_str() == Some(tool_use_id))?;
+    let file = fs::File::open(&conversation).ok()?;
+
+    Some(parse_child_replay(BufReader::new(file)))
+}
+
+/// Every child of one session, as its metadata paired with the conversation
+/// file beside it. `agent-<id>.meta.json` names `agent-<id>.jsonl`.
+fn child_conversations(project: &Path, session_id: &str) -> Vec<(Value, PathBuf)> {
+    let dir = project.join(session_id).join("subagents");
+    let Ok(entries) = fs::read_dir(&dir) else {
+        // No child ever ran, or this Claude version keeps them elsewhere.
+        return Vec::new();
+    };
+
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.extension().is_none_or(|extension| extension != "json") {
+                return None;
+            }
+            let meta = fs::read_to_string(&path)
+                .ok()
+                .and_then(|text| serde_json::from_str::<Value>(&text).ok())?;
+
+            Some((meta, path.with_extension("").with_extension("jsonl")))
+        })
+        .collect()
+}
+
 /// Fold each persisted child conversation onto the launch that started it.
 /// A conversation whose metadata names no launch in this history belongs to
 /// another branch and is left alone.
 fn attach_child_transcripts(project: &Path, session_id: &str, tasks: &mut [RestoredTask]) {
-    let dir = project.join(session_id).join("subagents");
-    let Ok(entries) = fs::read_dir(&dir) else {
-        // No child ever ran, or this Claude version keeps them elsewhere.
-        return;
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().is_none_or(|extension| extension != "json") {
-            continue;
-        }
-        let Some(meta) = fs::read_to_string(&path)
-            .ok()
-            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        else {
-            continue;
-        };
+    for (meta, conversation) in child_conversations(project, session_id) {
         let Some(tool_use_id) = meta["toolUseId"].as_str() else {
             continue;
         };
@@ -101,8 +139,6 @@ fn attach_child_transcripts(project: &Path, session_id: &str, tasks: &mut [Resto
             continue;
         };
 
-        // `agent-<id>.meta.json` sits beside `agent-<id>.jsonl`.
-        let conversation = path.with_extension("").with_extension("jsonl");
         if let Ok(file) = fs::File::open(&conversation) {
             task.items = parse_child_replay(BufReader::new(file));
         }

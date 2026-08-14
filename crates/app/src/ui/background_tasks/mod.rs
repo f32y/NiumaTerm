@@ -168,11 +168,32 @@ impl BackgroundTasksView {
         self.elapsed_timer = Some(cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(ELAPSED_TICK).await;
-                if this.update(cx, |_, cx| cx.notify()).is_err() {
+                let alive = this.update(cx, |this, cx| {
+                    this.refresh_open_child(cx);
+                    cx.notify();
+                });
+                if alive.is_err() {
                     return;
                 }
             }
         }));
+    }
+
+    /// Re-read the open child while it is still working. Claude Code writes a
+    /// child's own turns to that child's file instead of publishing them on
+    /// the parent stream, so no event arrives to repaint from and the panel
+    /// has to look again. The read costs one transcript parse per tick, which
+    /// is why it runs only while a working child is actually on screen.
+    fn refresh_open_child(&mut self, cx: &mut Context<Self>) {
+        let Some(key) = self.mode.detail_key().cloned() else {
+            return;
+        };
+        let Some(pane) = self.target.as_ref().and_then(WeakEntity::upgrade) else {
+            return;
+        };
+        pane.update(cx, |pane, cx| {
+            pane.load_background_task_transcript(&key, cx);
+        });
     }
 
     /// Open one child's conversation, remembering the list state so going back
@@ -221,6 +242,10 @@ impl BackgroundTasksView {
             self.close_detail(cx);
             return div().into_any_element();
         };
+        // A finished child's conversation cannot change again, so only one
+        // that is still working keeps the refresh tick alive.
+        let active = task.state.is_active();
+        self.sync_elapsed_timer(active, cx);
 
         let (items, state, dropped, revision) = self
             .target
