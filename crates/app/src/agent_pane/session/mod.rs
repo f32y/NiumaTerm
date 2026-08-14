@@ -115,6 +115,8 @@ impl AgentPane {
             restore_thread_settings_on_ready: None,
             models: Vec::new(),
             turn_seq: 0,
+            turn_submitted_at: None,
+            first_output_latency: None,
             unanswered_prompt: None,
             pending_interrupt: None,
             palette: SlashPalette {
@@ -615,6 +617,8 @@ impl AgentPane {
         self.transcript
             .update(cx, |transcript, _| transcript.clear());
         self.turn_seq = 0;
+        self.turn_submitted_at = None;
+        self.first_output_latency = None;
         self.unanswered_prompt = None;
         // The new conversation restarts turn ids from zero, so a stop request
         // left over from the old one could match an unrelated future turn.
@@ -786,6 +790,7 @@ impl AgentPane {
     /// Start the turn clock and drive the once-a-second repaint of the live
     /// progress row; the ticker stops itself once `finish_working` clears it.
     pub(super) fn start_working(&mut self, cx: &mut Context<Self>) {
+        self.turn_submitted_at = Some(Instant::now());
         self.transcript
             .update(cx, |transcript, cx| transcript.start_working(cx));
         cx.notify();
@@ -822,6 +827,13 @@ impl AgentPane {
     }
 
     fn note_visible_agent_output(&mut self) {
+        // Only the first output of a turn answers "how long until it said
+        // something", so taking the stamp both records the reading and closes
+        // the measurement for the rest of the turn.
+        if let Some(submitted_at) = self.turn_submitted_at.take() {
+            self.first_output_latency = Some(submitted_at.elapsed());
+        }
+
         if self
             .unanswered_prompt
             .as_ref()
