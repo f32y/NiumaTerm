@@ -2,8 +2,8 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Research; Phase 0 measured on Windows (section 11) |
-| Date | 2026-08-14 |
+| Status | Research; Phase 0 measured on Windows (section 11); plugin path proven by writing one (section 12) |
+| Date | 2026-08-14; revised 2026-08-15 |
 | Scope | Adding DeepSeek Harness (`dsh`) as a third Agent Tab harness |
 | Companion | [`docs/agent-harness-integration-requirements.md`](../agent-harness-integration-requirements.md) |
 
@@ -24,6 +24,9 @@ in fidelity, and the choice between them is the whole design decision.
   experience is wanted for DeepSeek specifically. It carries everything the
   requirements list, but over HTTP plus two WebSockets rather than stdio, so it
   is a different adapter rather than an extension of the ACP one.
+  **Superseded by section 12**: a plugin we write reaches the same data over
+  stdio, so the upgrade path is now a real choice between the two rather than
+  the Web interface by default.
 - **Do not use the SDK stdio JSON-RPC interface.** It streams richer data than
   ACP but has no way to cancel a turn, which fails HR-002 outright (section 3).
 
@@ -102,6 +105,32 @@ That is three requirements failed at once, one of them Core:
   always creates a fresh agent and never resumes
   (`packages/sdk/server/src/server.ts:218`).
 
+### 3.1 The Python SDK is a client of this, not a fourth interface
+
+Re-checked 2026-08-15 against the repository at `47f9438`. `python/sdk`
+(`deepseek-harness-sdk`, 873 lines) drives the runtime as a subprocess over the
+same newline-delimited JSON-RPC, so it inherits all three failures above
+unchanged. The server's dispatch still answers exactly `initialize`,
+`session/prompt`, and `shutdown` and throws on anything else, and
+`getOrCreateSession` still calls `ctx.agents.create`, never `resume`. The client
+does carry `next_request`/`respond` plumbing for server-initiated requests, but
+the server contains no code that sends one, matching the protocol package's own
+statement.
+
+It is also unusable here for a second, simpler reason. The bundled runtime
+binaries exist only for Linux and macOS —
+`_PLATFORM_TAGS = {"linux": "linux", "darwin": "macos"}` — and the resolver
+raises on any other platform, naming `linux/macos on x64/arm64` as the supported
+set. NiumaTerm is Windows-only. Pointing the SDK at a Node-run
+`dsh-jsonrpc-agent` instead is possible, but then the Python layer adds a Python
+runtime while providing nothing a Rust client would not do directly against the
+same three methods.
+
+The event side really is rich: `session.event`, `session.status`,
+`subagent.started`, and `subagent.finished`. So this interface offers the data
+and withholds the operations, which is the same verdict as section 3 and not a
+new option.
+
 ## 4. What ACP gives, and what it does not
 
 `packages/acp/acp/README.md` describes the server as "a transport adapter, not a
@@ -151,6 +180,11 @@ Two capabilities exist only here and matter for the requirements:
   These are never persisted, so they do not appear in the raw event stream that
   the SDK interface exposes. Without them, HR-004's file changes and command
   output would have to be reconstructed by NiumaTerm from raw tool arguments.
+
+  **Correction (section 12).** The views are indeed not persisted, but the
+  conclusion drawn here is wrong. They are a pure derivation from data the log
+  does carry, computed through a presenter that any plugin can reach, so
+  reconstruction from raw arguments is not the alternative.
 - **Derived projections**: `tokenUsage`, `contextPressure` with the context
   window, and `contextBreakdown` — precisely the HR-010 model.
 
@@ -205,6 +239,11 @@ rather than the plan, because the Web interface already exposes everything that
 plugin would add — including the tool render views, which the raw event stream
 does not carry — and it would commit a Rust team to maintaining a TypeScript
 plugin against a pre-release plugin runtime.
+
+**Correction (section 12).** The reason given for ranking the plugin below the
+Web interface does not hold: the render views are reachable from a plugin. The
+remaining objection, maintaining TypeScript against a pre-release runtime, is
+real and is what section 12 weighs instead.
 
 ## 7. NiumaTerm-side cost
 
@@ -402,3 +441,274 @@ Time to first output is not comparable to the native harnesses yet — the same
 prompts were not run against Codex and Claude on this machine. The 1.8 s
 text-only figure includes 280 ms of Node startup, which is the part that is
 structurally different from a native binary.
+
+## 12. Writing our own plugin
+
+Measured 2026-08-15 by reading the published type declarations and package
+documentation of `@deepseek-ai/*` at `0.1.0-rc.6`, installed from npm. Every
+package ships `lib/types/*.d.ts` and a README, so the extension points are
+readable without building the repository.
+
+### 12.1 The answer
+
+A NiumaTerm-owned plugin can expose everything the requirements ask for,
+including the two capabilities section 5 listed as reachable only through the
+Web interface. Sections 5 and 6 rank the plugin last partly on a claim that does
+not survive checking, and the ranking should be redone.
+
+The plugin would be an application plugin in the same position as the ACP
+server: `apply(ctx, config)` opens a transport of our choosing on stdio,
+subscribes to the session event stream, and drives the same services the Web
+host drives. `dsh-acp` compiles to 530 lines, which is the closest available
+size comparison.
+
+### 12.2 Why the render-view claim fails
+
+Three declarations settle it, and they agree with each other.
+
+- `ToolDefinition.presentCall(args)` and `presentResult(args, result)` live on
+  the tool registry (`ctx.tools`), which is host-plane and therefore visible to
+  every plugin in the composition. Their declarations require both to be pure
+  and side-effect-free, with the stated reason that a UI may call them during
+  live streaming and during a session-log replay.
+- The registry's `get(name, scope)` is public and returns the definition
+  including those two methods. Its own documentation is addressed to presenter
+  callers: it explains that they pass the calling agent so the rendered card
+  matches the definition that executed.
+- `ToolEventView` in `dsh-host-apiproxy` describes what the Web host attaches to
+  a tool event as a pure derivation of args and result through the presenter,
+  and says it is never persisted because the session log carries only the event.
+
+So the Web host holds no privilege here. It computes a card from the event plus
+the registry, and any plugin holding `ctx.tools` computes the identical card
+from the identical inputs. Those inputs are in the log: `tool/call` carries
+`name` and the raw `arguments` string as the model produced it, and
+`tool/result` carries the model-facing message, an optional failure identity,
+and the tool-private `meta`. The `meta` declaration states outright that the
+durable log reproduces the identical card on replay, and names `dsh-tool-fs`
+carrying its result-time contextual diff there.
+
+Section 5's wording was accurate — the views are not persisted — but persistence
+was the wrong question. What matters is whether the derivation is reproducible,
+and it is designed to be.
+
+### 12.3 What a plugin reaches
+
+| Requirement | Service and entry point | Notes |
+| --- | --- | --- |
+| HR-003 streamed text, reasoning, tools | session event stream | The full 44-type union, which ACP filters down to committed assistant text |
+| HR-004 file changes, command output | `ctx.tools.get(name, scope)` then `presentCall` / `presentResult` | Diff and terminal cards, section 12.2 |
+| HR-002 stop | `ctx.agents` handle | Already reached by ACP, measured at 3 ms in section 11 |
+| HR-009 resume | `AgentRegistry.resume({resumeSessionId})` | Exists on the service; ACP does not expose it |
+| HR-009 history | `ctx.sessionQuery.listSessions()` / `readSession()` | |
+| HR-010 usage and context | `ctx.sessionProjections` | A declaration-merged table filled by the token meter and cache packages |
+| HR-011 approvals | `approval/request` waterfall listener, or an answerer | Request carries the agent, tool name, call id, and the asker's reason |
+| HR-011 questions | `UserQuestionProvider.ask()` on `ctx.userQuestions` | The service takes one active provider, supplied by whichever package is the UI |
+| HR-012 child agents, workflows | `ctx.subagents`, plus the subagent and workflow session events | |
+
+### 12.4 It also repairs the worst Phase 0 finding
+
+Section 11 found that `session/request_permission` arrives carrying only a tool
+call id and two options, so an approval card could say no more than that the
+agent wants to run something. That is ACP discarding data, not data the harness
+lacks.
+
+`ApprovalRequest` carries the agent, the tool name, the optional call id, and
+the asker's human-readable reason. Its `callId` documentation states the intent
+directly: arguments are not duplicated on the request because the id links to a
+tool call the UI already presented. ACP never presents tool calls, so its
+approval has nothing to attach to. A plugin that emits tool calls has a fully
+described approval, which is the capability that decides whether the tab feels
+broken next to the Codex and Claude tabs.
+
+### 12.5 Loading it without publishing
+
+`dsh plugin add` shells out to pnpm, but publishing is not required: the loader
+resolves relative plugin specifiers against a configured base URL, so a
+composition can name a plugin directory by path. NiumaTerm can therefore ship
+the plugin inside its own installation and compose a profile that points at it,
+with no npm publish and no pnpm on the user's PATH.
+
+### 12.6 The costs that are real
+
+Removing the render-view objection does not make this free.
+
+- **A TypeScript component in a Rust product.** It needs a build step and a
+  place in the installation layout. This is the objection section 6 raised that
+  still stands. The Node dependency may not, however — see 12.6.1.
+- **The interface is pre-release and elaborate.** The declarations read as a
+  fast-moving design: scoped registries, execution tokens, waterfall events,
+  generated invocation descriptors. `dsh` is at `0.1.0-rc.6`, the session log
+  format is at version 0, and the project says compatibility-breaking changes
+  are expected. A plugin binds to far more of that surface than an ACP client
+  does.
+- **We would own a protocol.** The plugin's output is our own format, so there
+  is no upstream definition to conform to and no other client to catch drift.
+  That is also the advantage: it can be shaped to what the Agent Tab already
+  models, so the adapter stays small.
+- **The Windows sandbox failure in section 11 is unaffected.** It belongs to the
+  profile composition, not the transport, and has to be resolved either way.
+
+#### 12.6.1 A composition can be packaged as one executable
+
+Found while checking the Python SDK. `scripts/build-exe-for-python-sdk.ts`
+bundles a whole Cordis composition into a single self-contained binary using
+`@yao-pkg/pkg`, which is how the Python SDK ships a runtime without asking the
+user for Node. Section 2's "not a self-contained executable" describes how `dsh`
+is normally launched, not a limit of what can be built from it.
+
+This matters because our plugin is just another entry in a composition, so the
+same route would produce one Windows executable carrying the harness, our
+plugin, and Node together. That answers section 7.5's Node dependency and makes
+a DeepSeek tab ship like the Codex and Claude tabs do.
+
+It has not been done, and two things stand between:
+
+- `PLATFORMS = ['linux', 'macos']` is the script's own allowlist. `@yao-pkg/pkg`
+  builds `win` targets, and the script already recognizes a `win32` host when
+  choosing a package manager, so this looks like a target nobody needed rather
+  than one that was refused.
+- Native modules are handled per platform and Windows has no branch: macOS
+  copies `node-pty`'s `spawn-helper` beside the product, and Linux stages a
+  `pty.node` that must be built on the target architecture. Windows `node-pty`
+  uses ConPTY and publishes prebuilds, so this is likely to be work rather than
+  a wall, but it is unproven and it is the piece most likely to fail.
+
+Worth an experiment on its own, and cheap: the build script takes explicit
+`--targets`, so trying `node24-win-x64` costs one run.
+
+### 12.7 How this changes the options
+
+The choice is no longer capability against convenience, because the plugin and
+the Web interface reach the same data. They differ in what NiumaTerm has to
+carry:
+
+- **Web `/api`.** No TypeScript to maintain, but HTTP plus two WebSockets,
+  bypassing `JsonLineProcess` and `AgentCli` entirely, against roughly forty
+  unary methods and a four-quadrant union that is versioned only by a host
+  version string, on an interface with no authentication beyond a loopback
+  check.
+- **Our own plugin.** A TypeScript component to build and ship, but the
+  transport is newline-delimited JSON over stdio, which the existing plumbing
+  already handles, and the shape of the data is ours to choose, so the Rust
+  adapter is smaller than a general client of somebody else's forty methods.
+
+The plugin trades a Rust-side integration cost for a TypeScript-side
+maintenance cost. Which is cheaper depends on a question section 10 already
+asks and nothing here answers: how long DeepSeek support has to stay working
+without attention.
+
+### 12.8 Measured by writing one (all three confirmed)
+
+A plugin was written and run on 2026-08-15 against packages at `0.1.0-rc.6`,
+composed with the DeepSeek provider, the local sandbox and its policy, the local
+subprocess manager, the local filesystem, the string-replace editor, the
+filesystem tool, the approval service, and the demo agent spine. It spends no
+model call: the plugin drives the tool registry itself, so the call, its result,
+and its `meta` are all real.
+
+All three hold. The first two were reached without spending a model call; the
+third needed one prompted turn, which was then run against the real DeepSeek
+provider.
+
+**Claim 1 — a plugin composed by relative path loads: CONFIRMED.** Its `apply`
+ran and `ctx.tools` resolved. One detail matters for packaging: the loader hands
+the specifier to an ESM import, so it must name the file (`./nmt-probe/index.js`)
+and not the directory. A directory fails with `ERR_UNSUPPORTED_DIR_IMPORT`
+despite a valid `package.json` beside it.
+
+**Claim 2 — a plugin computes the render card: CONFIRMED.** `ctx.tools.get('edit')`
+returned a definition carrying both presenters, and they produced real cards.
+`presentCall` on the arguments alone:
+
+```json
+{ "card": "diff", "title": "Edit .../nmt-probe-target.txt",
+  "diffs": [{ "path": "...", "oldText": "before", "newText": "after" }] }
+```
+
+`presentResult`, given the arguments plus `{content, isError, meta}`, returned
+the same `diff` card with the *contextual* diff rather than the argument
+fragments:
+
+```json
+{ "diffs": [{ "oldText": "line one\nbefore\nline three",
+              "newText": "line one\nafter\nline three" }] }
+```
+
+That difference is the point: HR-004 wants the file change, and the presenter
+supplies surrounding context that the raw arguments do not contain.
+
+The same computation was then repeated against a real prompted turn, taking
+arguments from `tool/call` and `{content, isError, meta}` from the matching
+`tool/result` — the inputs a client reading the durable log actually holds. It
+produced the same `diff` card, and a `read` card for the read call:
+
+```json
+{ "card": "read", "path": "...", "offset": 1, "totalLines": 3,
+  "lines": [{ "number": 2, "text": "before" }, "..."] }
+```
+
+Two details a real adapter has to handle. A tool call that FAILED carries no
+`meta` and its `presentResult` returns null, so the generic fallback is not an
+edge case but the normal path for every denied or errored call. And the event's
+`message.content` wraps the model-facing blocks inside one `tool-result` block;
+the presenter is declared against the inner blocks, so passing the wrapper
+returns null and looks like a missing card.
+
+Which tools carry presenters is per tool, and worth knowing before promising a
+card: `read`, `write`, and `edit` each declare `presentCall`, `presentResult`,
+and `presentationMeta`, while `str_replace_editor` declares only `presentCall`.
+
+**Claim 3 — an approval answerer sees the tool call identity: CONFIRMED.** It
+needed the sandboxing filesystem backend (`dsh-fs-sandbox` in place of
+`dsh-fs-local`, which applies no approval policy at all) and one prompted turn,
+because the approval service refuses a question raised outside an open turn:
+
+> `approval.request()` outside an open turn: the `approval/asked` +
+> `approval/decided` audit pair must be turn-enclosed. Ask from inside the turn
+> that needs the decision.
+
+Under `workspace-write`, the model's edit to a path outside the workspace was
+denied with `FS_SANDBOX_DENIED`, the model retried once with
+`sandbox_permissions` and a justification, and the answerer this plugin
+registered received:
+
+```json
+{ "toolName": "edit",
+  "callId": "call_00_ET_YqTkrV7kgexqFUfbItsd8863",
+  "reason": "escalate sandbox to danger-full-access: I need danger-full-access to apply the requested single-word edit ...",
+  "agent": "present" }
+```
+
+That `callId` is one the plugin had already observed on a `tool/call`, which is
+the whole claim: an approval card can be attached to the tool call it already
+rendered. The plugin's answer was honored — `approval/decided` reported
+`allowed-once` and the edit then applied — so a plugin is a real decision
+maker here, not just an observer.
+
+One trap in that path: the outcome vocabulary is
+`allowed-once | rejected | cancelled | unavailable`. ACP's `allow-once` spelling
+is not a member, and returning it does not fail loudly; the waterfall simply
+falls through to the fail-closed `unavailable` and the escalation is refused.
+The first run of this experiment did exactly that.
+
+Smaller results worth carrying into any real plugin:
+
+- The `session/event` listener is called as `(session, event)`, with the event
+  shaped `{type, seq, time, data}`. It delivers the full vocabulary: one turn
+  here produced `turn/start`, `step/start`, `user/message`, `session/title`,
+  `request/header`, `request/context`, 665 `assistant/chunk`, 5
+  `assistant/message`, 4 `tool/call`, 4 `tool/result`, `approval/asked`,
+  `approval/decided`, `step/end`, `turn/end`.
+- The DeepSeek provider registers as `deepseek-official`, not `deepseek`. An
+  unknown provider does not fail at boot: the agent is created, the turn opens,
+  and it ends with `NO_ADAPTER` inside `turn/end`.
+
+- `inject` takes an array in this Cordis build. The `{required, optional}` object
+  form is read as two services literally named `required` and `optional`, and
+  the plugin then hangs pending forever.
+- Reading a service key the plugin did not inject throws rather than returning
+  `undefined`, so capability probing needs a guard.
+- `ctx.agents.create()` succeeds without prompting and yields a handle with a
+  live session, which is how an adapter can prepare a tab before the first
+  message.

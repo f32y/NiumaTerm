@@ -1,0 +1,8 @@
+# Everything a run produces: the installed composition, the probe's log, and the
+# files it edits to have something real to present.
+node_modules/
+package.json
+package-lock.json
+nmt-probe.log
+nmt-probe-target.txt
+.sessions/
