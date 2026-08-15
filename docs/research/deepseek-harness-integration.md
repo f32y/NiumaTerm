@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Research; no implementation decision recorded yet |
+| Status | Research; Phase 0 measured on Windows (section 11) |
 | Date | 2026-08-14 |
 | Scope | Adding DeepSeek Harness (`dsh`) as a third Agent Tab harness |
 | Companion | [`docs/agent-harness-integration-requirements.md`](../agent-harness-integration-requirements.md) |
@@ -334,3 +334,71 @@ Web interface for the reasons in section 6.
   migration, and the project states that compatibility-breaking changes are
   expected. What version range does the adapter declare support for, and what
   does the tab show when the installed version falls outside it?
+
+## 11. Phase 0 results
+
+Measured 2026-08-15 on Windows 11, Node 24.13, against
+`@deepseek-ai/dsh-acp-demo@0.1.0-rc.6` installed from npm. No repository build.
+The published `examples/acp-agent/cordis.yml` pulls in `dsh-hooks-claude-code`
+and `dsh-hooks-codex`, which are not published, so the run used a reduced
+eleven-plugin composition: the DeepSeek adapter, the local sandbox and its
+policy, the local subprocess manager, sandboxed bash, one-shot approvals, the
+ACP app itself, the token meter, session projections, the sandboxed filesystem
+with its observation policy, and the filesystem tool.
+
+### It runs on Windows
+
+| Step | Elapsed from process spawn |
+| --- | --- |
+| `initialize` response | 261–287 ms |
+| `session/new` response | +2–3 ms |
+| First `agent_message_chunk`, text-only turn | 1.8 s |
+| First `agent_message_chunk`, turn that runs bash | 7.1 s |
+| `session/cancel` to `stopReason: "cancelled"` | 3 ms |
+
+`initialize` reports `agentInfo` `deepseek-harness-acp/0.0.1`, empty
+`authMethods`, and `promptCapabilities` with image, audio, and embedded context
+all false. Stdout carried nothing but JSON-RPC; Node's SQLite experimental
+warning went to stderr, so `JsonLineProcess` framing holds without a filter.
+
+### Four findings that change the adapter
+
+- **HR-002 is satisfied and it is fast.** `session/cancel` is a notification, and
+  the in-flight `session/prompt` resolved with `stopReason: "cancelled"` 3 ms
+  later. But because `agent_message_chunk` only carries committed messages, a
+  cancelled turn emits **nothing at all** — the tab would show an interrupted
+  turn with no text whatsoever, where Codex and Claude both leave the partial
+  answer visible.
+- **The approval request has nothing to approve.** `session/request_permission`
+  arrived carrying only `{ toolCallId }` plus the two options. No tool name, no
+  command line, no file path, no diff. An approval card built from this can only
+  say "the agent wants to run something". This is worse than section 4 implied
+  and it is the strongest argument that the §7 minimum will feel broken.
+- **Stdin EOF does not shut the server down after a turn has run.** The README
+  states EOF disposes the context and flushes sessions. It does, but only if no
+  turn happened: a bare handshake exited 39 ms after EOF, while every session
+  that ran a prompt was still alive 5 s later and had to be killed. The pane's
+  shutdown already escalates to a kill, so this costs a timeout rather than a
+  hang, but the adapter should not wait long for a graceful exit.
+- **The sandbox is broken for bash on Windows.** Under `workspace-write` with
+  `dsh-sandbox-local` and `dsh-bash-sandbox`, every bash invocation died before
+  running anything: `fatal error - CreateFileMapping … Win32 error 5`, exit code
+  256. The model retried, escalated to wider permissions, and only then got its
+  output. A DeepSeek tab shipped with the sandbox on would fail every command on
+  Windows until the first escalation, so the profile NiumaTerm ships needs this
+  resolved or a different sandbox mode.
+
+### The Web upgrade path is real
+
+`dsh web --port 0` auto-initialized a profile under `$DSH_HOME/profiles/web`
+with no pnpm invocation, bound a port, and served the browser UI (`200
+text/html`). It prints its own URL on stdout as `dsh web: http://127.0.0.1:PORT`,
+which is the discovery mechanism a launcher would use for port 0. The `/api`
+route shape was not mapped; that belongs to Phase 2.
+
+### What this does not answer
+
+Time to first output is not comparable to the native harnesses yet — the same
+prompts were not run against Codex and Claude on this machine. The 1.8 s
+text-only figure includes 280 ms of Node startup, which is the part that is
+structurally different from a native binary.
