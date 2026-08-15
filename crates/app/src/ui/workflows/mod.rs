@@ -159,7 +159,7 @@ impl WorkflowsView {
             );
         };
         // Only Claude Code reports workflows; every other pane has none.
-        if pane.read(cx).claude_session_id().is_none() {
+        if pane.read(cx).workflow_session_id().is_none() {
             return empty_state(
                 i18n("workflows-no-session"),
                 i18n("workflows-no-session-detail"),

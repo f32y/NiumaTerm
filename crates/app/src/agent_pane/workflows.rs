@@ -140,10 +140,10 @@ impl AgentPane {
         cx.notify();
     }
 
-    /// Session id when this pane runs Claude Code, the only provider that
-    /// reports workflows.
-    pub(crate) fn claude_session_id(&self) -> Option<String> {
-        if self.kind != AgentKind::Claude {
+    /// Session id when this pane runs a harness that reports workflows, which
+    /// is what scopes runs to the conversation they belong to.
+    pub(crate) fn workflow_session_id(&self) -> Option<String> {
+        if !self.kind.caps().workflows {
             return None;
         }
         self.session

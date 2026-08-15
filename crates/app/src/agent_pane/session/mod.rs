@@ -120,7 +120,7 @@ impl AgentPane {
             unanswered_prompt: None,
             pending_interrupt: None,
             palette: SlashPalette {
-                provider_commands_ready: kind == AgentKind::Codex,
+                provider_commands_ready: !kind.caps().async_command_discovery,
                 ..SlashPalette::default()
             },
             queued_user_messages: VecDeque::new(),
@@ -161,12 +161,12 @@ impl AgentPane {
         })
         .detach();
 
-        // Claude's history comes from scanning the CLI's transcript
-        // directory (Codex delivers its history over the protocol instead,
-        // via `Event::History`). Two passes, both off-thread: a cheap count
-        // first, so the list can reserve its final height with placeholder
-        // rows, then title parsing, which swaps in the real rows.
-        if kind == AgentKind::Claude {
+        // History read from the CLI's transcript directory, for a harness that
+        // does not deliver it over the protocol as `Event::History`. Two
+        // passes, both off-thread: a cheap count first, so the list can reserve
+        // its final height with placeholder rows, then title parsing, which
+        // swaps in the real rows.
+        if kind.caps().filesystem_session_history {
             let cwd = this.cwd.clone();
 
             cx.spawn(async move |this, cx| {
@@ -343,10 +343,16 @@ impl AgentPane {
         let name = kind.display();
         let cwd = self.cwd.clone();
 
-        self.seed_thread_defaults =
-            !preserve_thread_settings && (recovery.is_none() || kind == AgentKind::Claude);
-        self.seed_approval_reviewer =
-            !preserve_thread_settings && recovery.is_some() && kind == AgentKind::Codex;
+        let caps = kind.caps();
+        // A resume into a backend that replays its own thread controls keeps
+        // them; anything else starts from the remembered picks. The reviewer is
+        // seeded separately because a backend can replay the rest without it.
+        self.seed_thread_defaults = !preserve_thread_settings
+            && (recovery.is_none() || !caps.resume_restores_thread_settings);
+        self.seed_approval_reviewer = !preserve_thread_settings
+            && recovery.is_some()
+            && caps.resume_restores_thread_settings
+            && !caps.resume_restores_approval_reviewer;
         self.restore_thread_settings_on_ready =
             preserve_thread_settings.then(|| self.settings.clone());
 
@@ -363,13 +369,14 @@ impl AgentPane {
             let _ = tx.unbounded_send(message);
         };
         let mut launch = agent_launch(&self.profile);
-        // Claude builds its system prompt from the model it resolves during the
-        // handshake, so a pick that only reached the CLI afterwards would leave
-        // that prompt describing a different model than the one serving the
-        // turns. The pane already knows the pick here: the profile assigned it
-        // above, or it is the one remembered for this profile. A tab with
-        // neither leaves the flag off and starts on the CLI's configured model.
-        if kind == AgentKind::Claude {
+        // A backend that builds its system prompt from the model it resolves at
+        // launch would otherwise describe a different model than the one
+        // serving the turns, because the pick would only reach the CLI
+        // afterwards. The pane already knows the pick here: the profile
+        // assigned it above, or it is the one remembered for this profile. A
+        // tab with neither leaves the flag off and starts on the CLI's
+        // configured model.
+        if caps.model_baked_into_launch {
             launch.model = self.settings.model.clone().or_else(|| {
                 self.stored_thread_settings(cx)
                     .and_then(|stored| stored.model.clone())
@@ -749,7 +756,7 @@ impl AgentPane {
         self.palette.skill_catalog = None;
         self.palette.skill_binding = None;
         reset_command_runtime(
-            self.kind == AgentKind::Codex,
+            !self.kind.caps().async_command_discovery,
             &mut self.pending_approval,
             &mut self.palette.provider_commands,
             &mut self.palette.provider_commands_ready,
@@ -918,10 +925,13 @@ impl AgentPane {
         self.history_ui.selected = index;
         self.history_ui.pending_resume_replay = None;
         self.status = Status::Starting;
-        // Claude controls remain local profile preferences. Codex resumes the
-        // thread controls reported by the backend except for its reviewer.
-        self.seed_thread_defaults = self.kind == AgentKind::Claude;
-        self.seed_approval_reviewer = self.kind == AgentKind::Codex;
+        // A backend that replays the resumed conversation's controls owns them;
+        // otherwise they stay local profile preferences. The reviewer is seeded
+        // separately because a backend can replay the rest without it.
+        let caps = self.kind.caps();
+        self.seed_thread_defaults = !caps.resume_restores_thread_settings;
+        self.seed_approval_reviewer =
+            caps.resume_restores_thread_settings && !caps.resume_restores_approval_reviewer;
         self.set_command_feedback(
             CommandFeedbackKind::Notice,
             i18n("agent-session-opening-recent").to_string(),

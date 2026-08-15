@@ -380,7 +380,7 @@ pub(super) fn is_current_session_epoch(current: u64, event_epoch: u64) -> bool {
 /// Reset command-only session state while keeping provider history and the
 /// tab's history-dismissal choice outside this function untouched.
 pub(super) fn reset_command_runtime<A, T>(
-    is_codex: bool,
+    commands_ready: bool,
     pending_approval: &mut Option<A>,
     provider_commands: &mut Vec<SlashCommandInfo>,
     provider_commands_ready: &mut bool,
@@ -391,7 +391,7 @@ pub(super) fn reset_command_runtime<A, T>(
 ) {
     *pending_approval = None;
     provider_commands.clear();
-    *provider_commands_ready = is_codex;
+    *provider_commands_ready = commands_ready;
     queue.clear();
     *awaiting_turn = false;
     *palette_selected = 0;
