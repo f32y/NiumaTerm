@@ -73,6 +73,26 @@ decide how to react.
   the existing list unless the list has an established ordering rule or a
   specific position was requested.
 
+## Frame scheduling
+
+GPUI's frame pump is demand-driven. It wakes on a clean-to-dirty transition
+(`cx.notify`, `window.refresh`) or when a frame ends with work still
+outstanding. `window.on_next_frame` only pushes a callback onto a queue;
+pushing one does not wake a parked pump.
+
+Anything that starts an animation or defers work from *outside* a frame —
+a mouse or key handler, a timer, a channel receiver — must therefore call
+`cx.notify` too, not just queue a next-frame callback. A callback queued
+from inside `prepaint`/`paint` is already covered by the end-of-frame
+re-arm and needs nothing extra.
+
+The failure mode is silent and easy to misread: the deferred work still
+runs, but only once some unrelated repaint happens to arrive, so the input
+looks dropped rather than late. It also hides during development, because
+a blinking cursor or a running animation keeps the pump awake; it shows up
+on a quiet window. GPUI's test harness does not model the pump, so a unit
+test cannot catch this either.
+
 ## Commit message conventions
 
 The repository uses hooks from `.githooks`. Do not bypass them with
