@@ -1,5 +1,5 @@
 name = "niumaterm-relay"
-main = "src/index.ts"
+main = "relay/src/index.ts"
 compatibility_date = "2025-01-01"
 
 # One Durable Object instance per host_id (idFromName), so every socket for a

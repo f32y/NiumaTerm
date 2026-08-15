@@ -10,10 +10,14 @@ One Durable Object instance per `host_id` (`idFromName`), so every socket for a
 host lands on the same instance regardless of which edge accepted the
 connection. Sockets use the hibernation API, so an idle host costs nothing.
 
+The worker's `package.json`, `package-lock.json`, `tsconfig.json`,
+`wrangler.toml`, and `.dev.vars` live in the repository root, so every command
+below runs from there rather than from this directory. Only the source stays
+here, and `wrangler.toml` points at it.
+
 ## Deploy
 
 ```bash
-cd relay
 npm install
 npx wrangler deploy
 ```
@@ -36,10 +40,14 @@ provides the TLS certificate automatically):
 ## Local development
 
 ```bash
-cd relay
-echo 'ACCESS_TOKEN=test-token' > .dev.vars   # git-ignored
-npm run dev                                   # wrangler dev on 127.0.0.1:8787
+npm run dev   # wrangler dev on 127.0.0.1:8787
 ```
+
+`.dev.vars` in the repository root already holds the `ACCESS_TOKEN` the local
+instance uses. It is committed on purpose: the value is a fixed local-dev
+string that the ignored Rust integration tests hardcode, so the two sides
+cannot drift. Production tokens are set with `wrangler secret put ACCESS_TOKEN`
+and never enter the repository.
 
 The Rust integration tests connect to this local instance:
 
