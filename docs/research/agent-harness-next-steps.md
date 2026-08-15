@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | R1–R3 landed; the DeepSeek path is still unvalidated |
+| Status | R1–R3 landed, Phase 0 measured; work paused before any adapter code |
 | Date | 2026-08-15 |
 | Purpose | Pick the work back up without re-reading the long documents |
 
@@ -62,27 +62,38 @@ encoded as identity checks and written down nowhere.
 
 No behavior changed and the 376 existing tests pass unmodified.
 
+**Phase 0 is also done**, measured on Windows against the published
+`dsh-acp-demo`. Full numbers and findings are in section 11 of the DeepSeek
+document; the short version is that the transport works and `session/cancel` is
+fast, but the ACP server is thinner than section 4 suggested:
+`session/request_permission` carries only a `toolCallId` with no tool name or
+command, a cancelled turn emits no text at all, and sandboxed bash fails on
+Windows until the model escalates its own permissions.
+
+Reproduction lives in `.scratch/dsh-acp/` (uncommitted): a reduced
+`cordis.yml`, a `drive.mjs` stdio driver, and one log per scenario. It needs
+`DEEPSEEK_API_KEY` in a sibling `.env`. The npm dependency that installs the
+server is the untracked root `package.json`.
+
 ## Next
 
-**Option A — validate the DeepSeek path (about half a day, no Rust).**
+Work is **paused here by choice**, with nothing half-finished: the refactor is
+committed, Phase 0 is measured, and no adapter code was started.
 
-```sh
-npx @deepseek-ai/dsh-acp-demo@next --config <cordis.yml>
-```
+When it resumes, the open fork is which transport the third harness speaks:
 
-Drive `initialize`, `session/new`, and `session/prompt` by hand over stdio.
-Answers: does it run on Windows, what does a real turn actually emit, and how
-long to first output compared to the native harness binaries. Then try
-`dsh web --port 0` to check the upgrade path is real. Node 24.13 is already
-installed and no repository build is needed. A starting `cordis.yml` can be
-copied from `examples/acp-agent/cordis.yml` in the DeepSeek Harness tree.
+- **ACP.** Small, reuses `JsonLineProcess`, and covers other ACP agents rather
+  than DeepSeek alone. The two findings above are limits of *this* ACP server,
+  not of ACP — the protocol does define `tool_call`, `tool_call_update`, and
+  `plan`. Worth half an hour against a second ACP agent to see whether those
+  arrive in practice, which decides how wide the event mapping should be. Name
+  the identity `Acp`, not the vendor.
+- **Web `/api`.** Full fidelity for DeepSeek, but HTTP plus two WebSockets, so
+  `JsonLineProcess` does not apply and roughly forty unary methods do. A much
+  larger adapter serving one vendor.
 
-It is cheap, and if the ACP path turns out not to work on Windows or to be
-unacceptably slow, the whole DeepSeek plan changes.
-
-Then land the third harness against the refactored shape. R5 (data-drive the two
-hand-written UI kind lists) is what still keeps a registered kind from appearing
-in settings at all, so it comes with that work rather than before it.
+Either way, R5 (data-drive the two hand-written UI kind lists) ships with that
+work: without it a registered kind cannot be selected in settings at all.
 
 ## Decisions still open
 
