@@ -2,7 +2,7 @@ use crate::agent_pane::*;
 
 /// Which agent backs this pane; the persisted tab snapshot stores the agent
 /// name so future kinds can slot in without a schema change.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AgentKind {
     Codex,
     Claude,

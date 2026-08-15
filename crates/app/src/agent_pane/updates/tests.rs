@@ -10,7 +10,7 @@ use nmt_agent_utils::update::{
 use semver::Version;
 
 use crate::agent_pane::updates::*;
-use crate::agent_pane::{RecoveryIdentity, RecoveryReadiness, RecoverySnapshot};
+use crate::agent_pane::{AgentKind, RecoveryIdentity, RecoveryReadiness, RecoverySnapshot};
 
 fn snapshot(phase: UpdatePhase) -> InstallationSnapshot {
     let launcher = AgentCli::new("fake-codex", []);
@@ -216,12 +216,12 @@ fn preflight_retains_every_ready_tab_and_aggregates_partial_resume_failure() {
     let assessments = vec![
         RecoveryReadiness::Ready(RecoverySnapshot {
             installation: installation.clone(),
-            identity: RecoveryIdentity::ClaudeSession("session-a".into()),
+            identity: Some(RecoveryIdentity::new(AgentKind::Claude, "session-a")),
             profile_name: "Claude A".into(),
         }),
         RecoveryReadiness::Ready(RecoverySnapshot {
             installation,
-            identity: RecoveryIdentity::ClaudeSession("session-b".into()),
+            identity: Some(RecoveryIdentity::new(AgentKind::Claude, "session-b")),
             profile_name: "Claude B".into(),
         }),
     ];

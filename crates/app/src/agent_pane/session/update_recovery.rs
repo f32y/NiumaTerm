@@ -6,7 +6,9 @@ use crate::agent_pane::*;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RecoverySnapshot {
     pub(crate) installation: InstallationKey,
-    pub(crate) identity: RecoveryIdentity,
+    /// `None` for an untouched conversation, which has nothing to resume and
+    /// so restarts as a new one rather than failing the update.
+    pub(crate) identity: Option<RecoveryIdentity>,
     pub(crate) profile_name: String,
 }
 
@@ -79,9 +81,9 @@ impl AgentPane {
 
     pub(crate) fn recovery_identity_snapshot(&self, cx: &App) -> RecoveryReadiness {
         let identity = if self.transcript.read(cx).is_empty() {
-            RecoveryIdentity::NewConversation
+            None
         } else if let Some(identity) = self.session.as_ref().and_then(Backend::recovery_identity) {
-            identity
+            Some(identity)
         } else {
             return RecoveryReadiness::MissingIdentity(
                 i18n("agent-update-profile-missing-identity")
@@ -179,11 +181,7 @@ impl AgentPane {
     ) -> bool {
         self.update_suspension = Some(UpdateSuspension::Reconnecting);
         self.last_recovery_snapshot = Some(snapshot.clone());
-        let recovery = match &snapshot.identity {
-            RecoveryIdentity::NewConversation => None,
-            identity => Some(identity.clone()),
-        };
-        let started = self.start_session_with_options(recovery, true, cx);
+        let started = self.start_session_with_options(snapshot.identity.clone(), true, cx);
         if !started {
             self.update_suspension = Some(UpdateSuspension::Failed(
                 i18n("agent-update-recovery-restart-failed").to_string(),

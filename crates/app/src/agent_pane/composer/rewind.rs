@@ -560,7 +560,8 @@ impl AgentPane {
             input.set_selected_range(prompt.len()..prompt.len(), cx);
         });
         let started = self.start_session_with_options(
-            fork.session_id.map(RecoveryIdentity::ClaudeSession),
+            fork.session_id
+                .map(|id| RecoveryIdentity::new(AgentKind::Claude, id)),
             true,
             cx,
         );

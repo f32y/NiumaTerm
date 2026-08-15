@@ -298,7 +298,11 @@ impl AgentPane {
     /// the EOF signal (the sender is owned by the reader thread). Does not
     /// notify — callers decide whether a repaint is due.
     pub(super) fn start_session(&mut self, resume: Option<String>, cx: &mut Context<Self>) -> bool {
-        self.start_session_with_options(resume.map(RecoveryIdentity::ClaudeSession), false, cx)
+        self.start_session_with_options(
+            resume.map(|id| RecoveryIdentity::new(AgentKind::Claude, id)),
+            false,
+            cx,
+        )
     }
 
     pub(super) fn start_session_with_options(
@@ -384,35 +388,7 @@ impl AgentPane {
                 .collect::<Vec<_>>()
                 .join(", ")
         );
-        let spawned = match (kind, recovery) {
-            (AgentKind::Codex, Some(RecoveryIdentity::CodexThread(thread_id))) => {
-                app_server::Session::spawn_resuming(
-                    &launch,
-                    cwd,
-                    thread_id,
-                    true,
-                    deliver,
-                    |line| warn!("codex app-server: {line}"),
-                )
-                .map(Backend::Codex)
-            }
-            (AgentKind::Codex, _) => app_server::Session::spawn(&launch, cwd, deliver, |line| {
-                warn!("codex app-server: {line}")
-            })
-            .map(Backend::Codex),
-            (AgentKind::Claude, recovery) => {
-                let session_id = match recovery {
-                    Some(RecoveryIdentity::ClaudeSession(id)) => Some(id),
-                    _ => None,
-                };
-                stream_json::Session::spawn(&launch, cwd, session_id, deliver, |line| {
-                    warn!("claude: {line}")
-                })
-                .map(Backend::Claude)
-            }
-        };
-
-        match spawned {
+        match Backend::spawn(kind, &launch, cwd, recovery, deliver) {
             Ok(session) => {
                 self.session = Some(session);
                 self.status = Status::Starting;
@@ -650,10 +626,12 @@ impl AgentPane {
     /// read runs on a background thread and its failure never blocks the
     /// parent transcript or composer.
     pub(in crate::agent_pane) fn restore_background_tasks(&mut self, cx: &mut Context<Self>) {
-        let Some(Backend::Claude(session)) = self.session.as_ref() else {
-            return;
-        };
-        let Some(session_id) = session.session_id().map(str::to_owned) else {
+        let Some(session_id) = self
+            .session
+            .as_ref()
+            .and_then(|session| session.session_id())
+            .map(str::to_owned)
+        else {
             return;
         };
         if self.restored_task_session.as_deref() == Some(session_id.as_str()) {
@@ -661,7 +639,7 @@ impl AgentPane {
         }
         self.restored_task_session = Some(session_id.clone());
 
-        let Some(Backend::Claude(session)) = self.session.as_mut() else {
+        let Some(session) = self.session.as_mut() else {
             return;
         };
         // Captured before the read starts so live updates that land while it
@@ -680,7 +658,7 @@ impl AgentPane {
                 if this.session_epoch != epoch {
                     return;
                 }
-                let Some(Backend::Claude(session)) = this.session.as_mut() else {
+                let Some(session) = this.session.as_mut() else {
                     return;
                 };
                 for event in session.finish_task_restoration(restored, starting_sequence) {
@@ -702,11 +680,11 @@ impl AgentPane {
     /// `None` until the backend reports a thread or session id, which is what
     /// disables the title-bar `Background Tasks` button.
     pub(crate) fn background_task_parent(&self) -> Option<BackgroundTaskKey> {
-        match self.session.as_ref()?.recovery_identity()? {
-            RecoveryIdentity::CodexThread(id) => Some(BackgroundTaskKey::codex(id)),
-            RecoveryIdentity::ClaudeSession(id) => Some(BackgroundTaskKey::claude_code(id)),
-            RecoveryIdentity::NewConversation => None,
-        }
+        let identity = self.session.as_ref()?.recovery_identity()?;
+        Some(match identity.kind {
+            AgentKind::Codex => BackgroundTaskKey::codex(identity.id),
+            AgentKind::Claude => BackgroundTaskKey::claude_code(identity.id),
+        })
     }
 
     /// Ask the provider for one child's conversation. A provider that already
@@ -952,9 +930,11 @@ impl AgentPane {
 
         match self.kind {
             AgentKind::Codex => {
-                if let Some(Backend::Codex(session)) = self.session.as_mut() {
-                    session.resume_thread(&id);
-                } else {
+                if !self
+                    .session
+                    .as_mut()
+                    .is_some_and(|session| session.resume_thread(&id))
+                {
                     self.history_ui.mode = RecentSessionsMode::Open;
                     self.status = previous_status;
                     self.set_command_feedback(
