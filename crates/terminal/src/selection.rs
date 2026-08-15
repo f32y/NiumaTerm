@@ -11,12 +11,10 @@ use std::cmp::min;
 use std::mem;
 use std::ops::{self, Bound, Range, RangeBounds};
 
-use crate::ansi::CursorShape;
 use crate::render_buffer::RenderBuffer;
 use crate::selection_search::VisibleGrid;
-use crate::terminal::grid::{Dimensions, Indexed};
+use crate::terminal::grid::Dimensions;
 use crate::terminal::pos::{Column, Line, Pos, Side};
-use crate::terminal::square::{Square, Wide};
 
 /// Characters that split words for semantic selection. Matches Windows
 /// Terminal's default so paths, flags, and punctuation select predictably.
@@ -88,36 +86,6 @@ impl SelectionRange {
             && self.end.row >= point.row
             && (self.start.col <= point.col || (self.start.row != point.row && !self.is_block))
             && (self.end.col >= point.col || (self.end.row != point.row && !self.is_block))
-    }
-
-    /// Check if the square at a point is part of the selection.
-    #[allow(unused)]
-    pub fn contains_square(
-        &self,
-        indexed: &Indexed<&Square>,
-        point: Pos,
-        shape: CursorShape,
-    ) -> bool {
-        // Do not invert block cursor at selection boundaries.
-        if shape == CursorShape::Block
-            && point == indexed.pos
-            && (self.start == indexed.pos
-                || self.end == indexed.pos
-                || (self.is_block
-                    && ((self.start.row == indexed.pos.row && self.end.col == indexed.pos.col)
-                        || (self.end.row == indexed.pos.row && self.start.col == indexed.pos.col))))
-        {
-            return false;
-        }
-
-        // Pos itself is selected.
-        if self.contains(indexed.pos) {
-            return true;
-        }
-
-        // Check if a wide char's trailing spacer is selected.
-        matches!(indexed.square.wide(), Wide::Wide)
-            && self.contains(Pos::new(indexed.pos.row, indexed.pos.col + 1))
     }
 }
 
@@ -278,24 +246,6 @@ impl Selection {
         };
 
         range_bottom >= start && range_top <= end
-    }
-
-    /// Expand selection sides to include all square.
-    pub fn include_all(&mut self) {
-        let (start, end) = (self.region.start.point, self.region.end.point);
-        let (start_side, end_side) = match self.ty {
-            SelectionType::Block
-                if start.col > end.col || (start.col == end.col && start.row > end.row) =>
-            {
-                (Side::Right, Side::Left)
-            }
-            SelectionType::Block => (Side::Left, Side::Right),
-            _ if start > end => (Side::Right, Side::Left),
-            _ => (Side::Left, Side::Right),
-        };
-
-        self.region.start.side = start_side;
-        self.region.end.side = end_side;
     }
 
     /// Convert a selection to a grid range. Anchors are SCREEN

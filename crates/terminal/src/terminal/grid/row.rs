@@ -75,20 +75,6 @@ impl<T: Clone + Default> Row<T> {
         }
     }
 
-    /// Copy `src` into `self` in place, reusing the existing `inner` Vec
-    /// allocation. Equivalent to `*self = src.clone()` but skips the
-    /// per-call `Vec` allocation when `self.inner.capacity() >=
-    /// src.inner.len()` (the common case for renderer frame buffers).
-    /// Does not touch `self.dirty` — the snapshot path manages that
-    /// flag on the source row, not on the destination buffer.
-    #[inline]
-    pub fn copy_from(&mut self, src: &Self) {
-        self.inner.clone_from(&src.inner);
-        self.occ = src.occ;
-        self.kitty_virtual_placeholder = src.kitty_virtual_placeholder;
-        self.has_extras = src.has_extras;
-    }
-
     /// Increase the number of columns in the row.
     #[inline]
     pub fn grow(&mut self, columns: usize) {
@@ -155,17 +141,6 @@ impl<T: Clone + Default> Row<T> {
 #[allow(clippy::len_without_is_empty)]
 impl<T> Row<T> {
     #[inline]
-    pub fn from_vec(vec: Vec<T>, occ: usize) -> Row<T> {
-        Row {
-            inner: vec,
-            occ,
-            kitty_virtual_placeholder: false,
-            has_extras: true,
-            dirty: true,
-        }
-    }
-
-    #[inline]
     pub fn len(&self) -> usize {
         self.inner.len()
     }
@@ -196,17 +171,6 @@ impl<T> Row<T> {
     }
 
     #[inline]
-    pub fn append_front(&mut self, mut vec: Vec<T>) {
-        self.occ += vec.len();
-        self.dirty = true;
-        self.has_extras = true;
-
-        vec.append(&mut self.inner);
-
-        self.inner = vec;
-    }
-
-    #[inline]
     pub fn front_split_off(&mut self, at: usize) -> Vec<T> {
         self.occ = self.occ.saturating_sub(at);
         self.dirty = true;
@@ -216,14 +180,6 @@ impl<T> Row<T> {
         mem::swap(&mut split, &mut self.inner);
 
         split
-    }
-
-    #[inline]
-    pub fn is_clear(&self) -> bool
-    where
-        T: GridSquare,
-    {
-        self.inner.iter().all(GridSquare::is_empty)
     }
 }
 

@@ -17,15 +17,7 @@ pub enum Direction {
     Right,
 }
 
-impl Direction {
-    #[allow(unused)]
-    pub fn opposite(self) -> Self {
-        match self {
-            Side::Right => Side::Left,
-            Side::Left => Side::Right,
-        }
-    }
-}
+impl Direction {}
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Cursor<T> {
@@ -54,12 +46,7 @@ impl CursorState {
             content: CursorShape::from_char(cursor),
         }
     }
-    pub fn new_from_self(&self) -> CursorState {
-        CursorState {
-            pos: Pos::default(),
-            content: self.content,
-        }
-    }
+
     pub fn is_visible(&self) -> bool {
         self.content != CursorShape::Hidden
     }

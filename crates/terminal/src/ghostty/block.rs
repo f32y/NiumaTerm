@@ -7,10 +7,9 @@ use libghostty_vt_sys::{
     ghostty_block_ref_format_alloc, ghostty_block_ref_grid_ref, ghostty_block_ref_handle,
     ghostty_block_ref_kitty_graphics, ghostty_block_ref_release, ghostty_block_ref_row_count,
     ghostty_free, ghostty_terminal_block_acquire, ghostty_terminal_block_at,
-    ghostty_terminal_block_bytes, ghostty_terminal_block_cols, ghostty_terminal_block_count,
-    ghostty_terminal_block_grid_ref, ghostty_terminal_block_row_count,
-    ghostty_terminal_blocks_bytes, ghostty_terminal_clear_blocks, ghostty_terminal_finish_block,
-    ghostty_terminal_reflow_block, ghostty_terminal_remove_block, ghostty_terminal_set,
+    ghostty_terminal_block_cols, ghostty_terminal_block_count, ghostty_terminal_block_grid_ref,
+    ghostty_terminal_block_row_count, ghostty_terminal_blocks_bytes, ghostty_terminal_clear_blocks,
+    ghostty_terminal_finish_block, ghostty_terminal_remove_block, ghostty_terminal_set,
     sized as vt_sized,
 };
 
@@ -275,17 +274,6 @@ impl GhosttyTerminal {
             .then_some(cols)
     }
 
-    /// The memory retained by a block's page storage in bytes (the input
-    /// for enforcing the finished-block byte budget. `None` for a stale
-    /// handle.
-    pub fn block_bytes(&self, handle: BlockHandle) -> Option<usize> {
-        let mut bytes: usize = 0;
-
-        (unsafe { ghostty_terminal_block_bytes(self.terminal, handle, &mut bytes) }
-            == VtResult::SUCCESS)
-            .then_some(bytes)
-    }
-
     /// Total page-storage bytes of all finished blocks — the value the
     /// block byte budget is enforced against.
     pub fn blocks_bytes(&self) -> usize {
@@ -303,21 +291,6 @@ impl GhosttyTerminal {
                 (&bytes as *const usize).cast(),
             )
         })
-    }
-
-    /// Reflow one finished block to `cols` (the lazy-reflow driver;
-    /// `resize` already reflows all blocks eagerly). Bumps the block's
-    /// data generation — re-fetch via [`Self::block_at`]. Returns `false`
-    /// for a stale handle.
-    pub fn reflow_block(&mut self, handle: BlockHandle, cols: u16) -> Result<bool> {
-        match unsafe { ghostty_terminal_reflow_block(self.terminal, handle, cols) } {
-            VtResult::SUCCESS => Ok(true),
-            VtResult::NO_VALUE => Ok(false),
-            other => {
-                Error::from_code(other)?;
-                Ok(false)
-            }
-        }
     }
 
     /// Take a read reference on a finished block (engine-refcounted; any

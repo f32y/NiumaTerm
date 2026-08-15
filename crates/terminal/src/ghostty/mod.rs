@@ -277,24 +277,6 @@ impl GhosttyTerminal {
         }
     }
 
-    /// Set the working directory directly. OSC 7 populates the same engine state;
-    /// this direct setter is
-    /// kept for tests and programmatic cwd updates.
-    pub fn set_pwd(&mut self, pwd: &str) {
-        let s = VtString {
-            ptr: pwd.as_ptr(),
-            len: pwd.len(),
-        };
-
-        unsafe {
-            ghostty_terminal_set(
-                self.terminal,
-                VtTerminalOption::PWD,
-                (&s as *const VtString).cast(),
-            );
-        }
-    }
-
     /// Read a `GhosttyString`-typed terminal datum as an owned `String`. The
     /// borrowed pointer is only valid until the next mutating call, so we copy
     /// immediately.

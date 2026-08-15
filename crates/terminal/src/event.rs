@@ -123,13 +123,6 @@ impl MsgSender {
         }
     }
 
-    /// A sender with no live loop behind it (dead/placeholder context). Sends fail
-    /// silently (the receiver is already dropped) and never wake anything.
-    pub fn disconnected() -> Self {
-        let (tx, _rx) = sync::mpsc::channel();
-        Self { tx, waker: None }
-    }
-
     pub fn send(&self, msg: Msg) -> Result<(), sync::mpsc::SendError<Msg>> {
         self.tx.send(msg)?;
 
@@ -140,37 +133,6 @@ impl MsgSender {
 
         Ok(())
     }
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub enum ClickState {
-    None,
-    Click,
-    DoubleClick,
-    TripleClick,
-}
-
-/// Terminal damage hint — coarse signal for the renderer's update path.
-/// The actual per-row decision lives on the snapshot's `Row::dirty`
-/// (post-`snapshot_visible`); this enum just gates `update` itself
-/// (skip vs incremental vs full rebuild). Variants:
-/// - `Noop` — no terminal-side change worth rendering for
-/// - `Full` — global state changed (resize, palette, mode flip),
-///   force a full rebuild even if no individual row is dirty
-/// - `Partial` — at least one row's content changed; the snapshot's
-///   per-row dirty bits identify which rows
-/// - `CursorOnly` — cursor moved/blinked, no cell content changed
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum TerminalDamage {
-    /// Nothing changed — skip rendering entirely
-    #[default]
-    Noop,
-    /// The entire terminal needs to be redrawn
-    Full,
-    /// At least one row changed; consult per-row dirty bits
-    Partial,
-    /// Only the cursor position has changed
-    CursorOnly,
 }
 
 #[derive(Clone)]
@@ -434,10 +396,6 @@ impl Debug for TerminalEvent {
     }
 }
 
-pub trait OnResize {
-    fn on_resize(&mut self, window_size: WinsizeBuilder);
-}
-
 /// Event Loop for notifying the renderer about terminal events.
 ///
 /// `send_event` may be called from the PTY reader thread while it still holds
@@ -509,17 +467,6 @@ impl SearchState {
     /// Focused match during vi-less search.
     pub fn focused_match(&self) -> Option<&Match> {
         self.focused_match.as_ref()
-    }
-
-    /// Clear the focused match.
-    pub fn clear_focused_match(&mut self) {
-        self.focused_match = None;
-    }
-
-    /// Search regex text if a search is active.
-    pub fn regex_mut(&mut self) -> Option<&mut String> {
-        self.history_index
-            .and_then(move |index| self.history.get_mut(index))
     }
 }
 
