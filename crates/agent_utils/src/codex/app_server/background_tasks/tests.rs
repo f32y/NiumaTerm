@@ -280,6 +280,105 @@ fn subagent_activity_moves_a_known_child_without_naming_a_new_one() {
     );
 }
 
+fn can_stop(tasks: &CodexTasks, child: &str) -> bool {
+    tasks
+        .snapshot()
+        .expect("registry exists")
+        .tasks
+        .into_iter()
+        .find(|task| task.key == BackgroundTaskKey::codex(child))
+        .expect("child row exists")
+        .can_stop
+}
+
+/// `turn/interrupt` refuses a turn id that is not the thread's active one, so a
+/// child is stoppable exactly while its current turn is known. The row's own
+/// lifecycle state is not that signal: a child can read as Working from a
+/// collaboration item before any turn of its own has been announced.
+#[test]
+fn a_child_is_stoppable_only_while_its_active_turn_is_known() {
+    let mut tasks = rooted();
+    tasks.observe_parent_item(&spawn_item("thr_child"));
+    assert_eq!(
+        state_of(&tasks, "thr_child"),
+        Some(BackgroundTaskState::Working)
+    );
+    assert!(
+        !can_stop(&tasks, "thr_child"),
+        "a Working row with no announced turn has nothing to name"
+    );
+    assert!(tasks.interrupt_request(1, "thr_child").is_none());
+
+    // The turn arriving is a change even though the state does not move, or the
+    // panel would keep rendering a row it could now stop.
+    assert!(tasks.apply_descendant_notification(
+        "thr_child",
+        "turn/started",
+        &json!({"threadId": "thr_child", "turn": {"id": "turn-1", "status": "inProgress"}}),
+    ));
+    assert!(can_stop(&tasks, "thr_child"));
+
+    let request = tasks
+        .interrupt_request(7, "thr_child")
+        .expect("a known turn can be interrupted");
+    assert_eq!(request["id"], 7);
+    assert_eq!(request["method"], "turn/interrupt");
+    assert_eq!(request["params"]["threadId"], "thr_child");
+    assert_eq!(request["params"]["turnId"], "turn-1");
+
+    // A child waiting on an approval is still mid-turn, so Stop still applies.
+    assert!(tasks.apply_descendant_notification(
+        "thr_child",
+        "thread/status/changed",
+        &json!({"status": {"type": "active", "activeFlags": ["waitingOnApproval"]}}),
+    ));
+    assert_eq!(
+        state_of(&tasks, "thr_child"),
+        Some(BackgroundTaskState::NeedsInput)
+    );
+    assert!(can_stop(&tasks, "thr_child"));
+
+    assert!(tasks.apply_descendant_notification(
+        "thr_child",
+        "turn/completed",
+        &json!({"turn": {"status": "interrupted"}}),
+    ));
+    assert_eq!(
+        state_of(&tasks, "thr_child"),
+        Some(BackgroundTaskState::Interrupted)
+    );
+    assert!(!can_stop(&tasks, "thr_child"));
+    assert!(tasks.interrupt_request(8, "thr_child").is_none());
+}
+
+/// Going idle ends the turn without being an outcome of its own: the row keeps
+/// the lifecycle it had, but there is no longer a turn to interrupt.
+#[test]
+fn an_idle_child_keeps_its_state_and_loses_its_stop_control() {
+    let mut tasks = rooted();
+    tasks.observe_parent_item(&spawn_item("thr_child"));
+    tasks.apply_descendant_notification(
+        "thr_child",
+        "turn/started",
+        &json!({"threadId": "thr_child", "turn": {"id": "turn-1", "status": "inProgress"}}),
+    );
+    assert!(can_stop(&tasks, "thr_child"));
+
+    assert!(
+        tasks.apply_descendant_notification(
+            "thr_child",
+            "thread/status/changed",
+            &json!({"status": {"type": "idle"}}),
+        ),
+        "losing the turn is reported even though the status maps to no state"
+    );
+    assert_eq!(
+        state_of(&tasks, "thr_child"),
+        Some(BackgroundTaskState::Working)
+    );
+    assert!(!can_stop(&tasks, "thr_child"));
+}
+
 #[test]
 fn child_transcript_items_only_update_the_row_preview() {
     let mut tasks = rooted();

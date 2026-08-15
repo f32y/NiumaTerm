@@ -68,6 +68,10 @@ pub(super) struct CodexTasks {
     pending_order: Vec<String>,
     launch_messages: LaunchMessages,
     queries: HashMap<u64, DescendantQuery>,
+    /// Turn each descendant is currently running, by thread id. `turn/interrupt`
+    /// names both the thread and the turn and refuses a turn id that is not the
+    /// active one, so stopping a child is only possible while this is known.
+    active_turns: HashMap<String, String>,
     /// Pagination cursors already requested for the current root.
     seen_cursors: HashSet<String>,
     /// In-flight `thread/read` requests, by the descendant they will deliver.
@@ -93,6 +97,7 @@ impl CodexTasks {
         self.pending_order.clear();
         self.launch_messages.clear();
         self.queries.clear();
+        self.active_turns.clear();
         self.seen_cursors.clear();
         self.reads.clear();
         true
@@ -111,7 +116,17 @@ impl CodexTasks {
     }
 
     pub(super) fn snapshot(&self) -> Option<BackgroundTaskSnapshot> {
-        self.registry.as_ref().map(BackgroundTaskRegistry::snapshot)
+        let mut snapshot = self
+            .registry
+            .as_ref()
+            .map(BackgroundTaskRegistry::snapshot)?;
+        // Stoppability is derived here rather than merged through an update:
+        // it is exactly "an active turn is known right now", which a patch that
+        // only ever fills missing fields could not express when the turn ends.
+        for task in &mut snapshot.tasks {
+            task.can_stop = self.active_turns.contains_key(task.key.id.as_str());
+        }
+        Some(snapshot)
     }
 
     /// Classify a thread id against the selected root. Before a root is known
@@ -373,6 +388,12 @@ impl CodexTasks {
         method: &str,
         params: &Value,
     ) -> bool {
+        // Whether the row can be stopped changes with the child's turn, not with
+        // its summary fields, so it is reported alongside the update's own
+        // verdict: a repeated Working state is not a change, but gaining or
+        // losing the turn id behind the Stop control is.
+        let turn_changed = self.track_active_turn(thread_id, method, params);
+
         let update = match method {
             "turn/started" => BackgroundTaskUpdate {
                 state: Some(BackgroundTaskState::Working),
@@ -399,7 +420,7 @@ impl CodexTasks {
             "thread/status/changed" => {
                 let status = &params["status"];
                 let Some(state) = thread_status_state(status) else {
-                    return false;
+                    return turn_changed;
                 };
                 BackgroundTaskUpdate {
                     state: Some(state),
@@ -428,10 +449,36 @@ impl CodexTasks {
                 updated_at: Some(SystemTime::now()),
                 ..BackgroundTaskUpdate::default()
             },
-            _ => return false,
+            _ => return turn_changed,
         };
 
-        self.record(thread_id, update, true)
+        self.record(thread_id, update, true) || turn_changed
+    }
+
+    /// Follow one descendant's turn so a Stop control has something to name.
+    /// Returns whether the known turn changed.
+    fn track_active_turn(&mut self, thread_id: &str, method: &str, params: &Value) -> bool {
+        let ended = match method {
+            "turn/started" => {
+                let Some(turn_id) = params["turn"]["id"].as_str() else {
+                    return false;
+                };
+                return self
+                    .active_turns
+                    .insert(thread_id.to_owned(), turn_id.to_owned())
+                    .as_deref()
+                    != Some(turn_id);
+            }
+            "turn/completed" | "error" => true,
+            // `active` is the only status with a turn behind it; a child that
+            // went idle, unloaded, or errored has nothing left to interrupt. A
+            // child waiting on an approval is still `active` and still
+            // interruptible, so it deliberately keeps its turn.
+            "thread/status/changed" => params["status"]["type"].as_str() != Some("active"),
+            _ => false,
+        };
+
+        ended && self.active_turns.remove(thread_id).is_some()
     }
 
     /// Hold the newest state of a thread whose relationship is still unknown.
@@ -587,6 +634,21 @@ impl CodexTasks {
             changed |= registry.set_discovery(BackgroundTaskDiscoveryState::Ready);
         }
         (changed, next_cursor)
+    }
+
+    /// Build a request that stops one descendant. `turn/interrupt` is scoped to
+    /// the thread it names, so interrupting a child ends only that child's turn
+    /// and leaves the parent's running. `None` when no turn is known for the
+    /// child, which is also when the row offers no Stop control.
+    pub(super) fn interrupt_request(&self, rpc_id: u64, thread_id: &str) -> Option<Value> {
+        let turn_id = self.active_turns.get(thread_id)?;
+
+        Some(json!({
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "method": "turn/interrupt",
+            "params": {"threadId": thread_id, "turnId": turn_id},
+        }))
     }
 
     /// Build a request for one descendant's stored conversation. `thread/read`

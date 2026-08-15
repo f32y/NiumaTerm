@@ -86,7 +86,33 @@ pub(crate) struct ClaudeTasks {
 
 impl ClaudeTasks {
     pub(crate) fn snapshot(&self) -> Option<BackgroundTaskSnapshot> {
-        self.registry.as_ref().map(BackgroundTaskRegistry::snapshot)
+        let mut snapshot = self
+            .registry
+            .as_ref()
+            .map(BackgroundTaskRegistry::snapshot)?;
+        // A child is stoppable while it is still running and the stream has
+        // named the task the CLI registered it under. A row built only from the
+        // parent's tool-use block has no such id yet, and a settled one has
+        // nothing left to stop.
+        for task in &mut snapshot.tasks {
+            task.can_stop = task.state.is_active() && stop_target(&task.refs).is_some();
+        }
+        Some(snapshot)
+    }
+
+    /// The task id to name when stopping one child, resolving the row's key
+    /// through the alias table first so a row keyed by its tool-use id still
+    /// finds the task id the CLI knows it by.
+    pub(crate) fn stop_target(&self, key: &BackgroundTaskKey) -> Option<&str> {
+        let registry = self.registry.as_ref()?;
+        let canonical = self.aliases.get(key.id.as_str()).map(String::as_str);
+        let task = registry
+            .get(&BackgroundTaskKey::claude_code(
+                canonical.unwrap_or(&key.id),
+            ))
+            .or_else(|| registry.get(key))?;
+        task.state.is_active().then_some(())?;
+        stop_target(&task.refs)
     }
 
     pub(crate) fn session_id(&self) -> Option<&str> {
@@ -612,6 +638,19 @@ fn record_identifiers(record: &Value) -> Vec<String> {
         }
     }
     ids
+}
+
+/// The identifier `stop_task` accepts. The CLI registers a delegated agent
+/// under its task id and an agent task's id is that same value, so either names
+/// the child; a tool-use id belongs to the parent's tool call instead and would
+/// not be found in the task registry.
+fn stop_target(refs: &BackgroundTaskRefs) -> Option<&str> {
+    match refs {
+        BackgroundTaskRefs::ClaudeCode {
+            task_id, agent_id, ..
+        } => task_id.as_deref().or(agent_id.as_deref()),
+        BackgroundTaskRefs::Codex { .. } => None,
+    }
 }
 
 fn refs_from(record: &Value) -> BackgroundTaskRefs {

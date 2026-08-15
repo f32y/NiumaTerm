@@ -710,6 +710,16 @@ impl AgentPane {
         }
     }
 
+    /// Stop one child agent, leaving this tab's own turn running. Reports
+    /// whether the request was accepted, so the view can say so when a child
+    /// turns out not to be stoppable after all — the snapshot a row was drawn
+    /// from can be a moment behind the child finishing on its own.
+    pub(crate) fn interrupt_background_task(&mut self, key: &BackgroundTaskKey) -> bool {
+        self.session
+            .as_mut()
+            .is_some_and(|session| session.interrupt_background_task(key))
+    }
+
     /// One child's conversation, only while the pane still holds the session
     /// that child belongs to.
     pub(crate) fn background_task_transcript(
