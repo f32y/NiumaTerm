@@ -223,7 +223,6 @@
 "settings-system-workspace" = "Workspace"
 "settings-system-confirm-closing" = "Confirm before closing"
 "settings-system-confirm-closing-description" = "Ask for confirmation when closing a workspace, Agent tab, or window."
-"settings-system-process" = "Process"
 "settings-system-manage-job" = "Manage subprocess by Windows Job API"
 "settings-system-manage-job-description" = "Closing a tab kills the shell's entire process tree. Applies to newly opened tabs."
 "settings-system-warn-terminate" = "Warn before terminating shell"

@@ -59,22 +59,6 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
         )
         .group(
             SettingGroup::new()
-                .title(i18n("settings-system-process"))
-                .item(
-                    SettingItem::new(
-                        i18n("settings-system-manage-job"),
-                        SettingField::switch(
-                            |cx| cx.global::<AppSettings>().manage_subprocess_job,
-                            |value, cx| {
-                                cx.global_mut::<AppSettings>().manage_subprocess_job = value;
-                            },
-                        ),
-                    )
-                    .description(i18n("settings-system-manage-job-description")),
-                ),
-        )
-        .group(
-            SettingGroup::new()
                 .title(i18n("settings-system-windows"))
                 .item(SettingItem::new(
                     if shell_integration_mismatched {
@@ -119,6 +103,18 @@ pub(super) fn system_page(shell_integration_mismatched: bool) -> SettingPage {
                         ),
                     )
                     .description(i18n("settings-system-open-best-workspace-description")),
+                )
+                .item(
+                    SettingItem::new(
+                        i18n("settings-system-manage-job"),
+                        SettingField::switch(
+                            |cx| cx.global::<AppSettings>().manage_subprocess_job,
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().manage_subprocess_job = value;
+                            },
+                        ),
+                    )
+                    .description(i18n("settings-system-manage-job-description")),
                 ),
         )
         .group(
