@@ -7,7 +7,7 @@ use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
-use std::{env, thread};
+use std::{env, fmt, thread};
 
 use nmt_platform::{ChildEvent, EventedPty as _, ProcessReadWrite as _};
 use reqwest::StatusCode;
@@ -33,7 +33,6 @@ const MAX_CREDENTIALS_BYTES: u64 = 128 * 1024;
 const OAUTH_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 const OAUTH_BETA_HEADER: &str = "oauth-2025-04-20";
 const CLAUDE_CODE_USER_AGENT: &str = "claude-code/2.1.0";
-const CANCELLED_ERROR: &str = "Claude usage request cancelled";
 const CLI_STOP_MARKERS: &[&str] = &[
     "current week (all models)",
     "current week (opus)",
@@ -47,10 +46,40 @@ const CLI_STOP_MARKERS: &[&str] = &[
     "failed to load usage data",
 ];
 
+/// Why a usage fetch produced no snapshot. Cancellation is its own variant
+/// because callers treat it differently from failure: a cancelled fetch was
+/// abandoned deliberately and may be worth restarting, while a failed one is
+/// worth reporting. A message string cannot carry that distinction without the
+/// caller comparing against its exact wording, which then breaks silently the
+/// first time the wording changes.
+#[derive(Debug)]
+pub enum UsageFetchError {
+    Cancelled,
+    Failed(String),
+}
+
+impl fmt::Display for UsageFetchError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            UsageFetchError::Cancelled => formatter.write_str("Claude usage request cancelled"),
+            UsageFetchError::Failed(message) => formatter.write_str(message),
+        }
+    }
+}
+
+/// Lets the `?` operator lift this module's `Result<_, String>` helpers, whose
+/// failures are all genuine failures rather than cancellations.
+impl From<String> for UsageFetchError {
+    fn from(message: String) -> Self {
+        UsageFetchError::Failed(message)
+    }
+}
+
 #[derive(Debug)]
 enum OAuthFetchError {
     Fallback(String),
     Final(String),
+    Cancelled,
 }
 
 #[derive(Deserialize)]
@@ -160,7 +189,7 @@ fn remaining_percentage(window: Option<&OAuthUsageWindow>) -> Option<u8> {
 
 fn fetch_via_oauth(cancelled: &AtomicBool) -> Result<UsageSnapshot, OAuthFetchError> {
     if cancelled.load(Ordering::Relaxed) {
-        return Err(OAuthFetchError::Final(CANCELLED_ERROR.to_string()));
+        return Err(OAuthFetchError::Cancelled);
     }
 
     let token = read_oauth_token().map_err(OAuthFetchError::Fallback)?;
@@ -180,7 +209,7 @@ fn fetch_via_oauth(cancelled: &AtomicBool) -> Result<UsageSnapshot, OAuthFetchEr
         .map_err(|_| OAuthFetchError::Fallback("Claude OAuth usage request failed".to_string()))?;
 
     if cancelled.load(Ordering::Relaxed) {
-        return Err(OAuthFetchError::Final(CANCELLED_ERROR.to_string()));
+        return Err(OAuthFetchError::Cancelled);
     }
 
     let status = response.status();
@@ -203,35 +232,34 @@ fn fetch_via_oauth(cancelled: &AtomicBool) -> Result<UsageSnapshot, OAuthFetchEr
     )
     .map_err(OAuthFetchError::Fallback)?;
     if cancelled.load(Ordering::Relaxed) {
-        return Err(OAuthFetchError::Final(CANCELLED_ERROR.to_string()));
+        return Err(OAuthFetchError::Cancelled);
     }
 
     parse_oauth_usage(&bytes).map_err(OAuthFetchError::Fallback)
 }
 
-pub fn fetch() -> Result<UsageSnapshot, String> {
-    fetch_with_cancel(&AtomicBool::new(false))
-}
-
-pub fn fetch_with_cancel(cancelled: &AtomicBool) -> Result<UsageSnapshot, String> {
+pub fn fetch_with_cancel(cancelled: &AtomicBool) -> Result<UsageSnapshot, UsageFetchError> {
     let result = match fetch_via_oauth(cancelled) {
         Ok(usage) => Ok(usage),
-        Err(OAuthFetchError::Final(error)) => Err(error),
+        Err(OAuthFetchError::Cancelled) => Err(UsageFetchError::Cancelled),
+        Err(OAuthFetchError::Final(error)) => Err(UsageFetchError::Failed(error)),
         Err(OAuthFetchError::Fallback(oauth_error)) => match fetch_via_cli(cancelled) {
             Ok(usage) => Ok(usage),
-            Err(cli_error) if cli_error == CANCELLED_ERROR => Err(cli_error),
-            Err(cli_error) => Err(format!(
+            // Only the OAuth path's own diagnosis is worth pairing with the CLI
+            // fallback's; a cancellation says nothing about either.
+            Err(UsageFetchError::Cancelled) => Err(UsageFetchError::Cancelled),
+            Err(UsageFetchError::Failed(cli_error)) => Err(UsageFetchError::Failed(format!(
                 "Claude OAuth usage unavailable: {oauth_error}; interactive CLI fallback failed: {cli_error}"
-            )),
+            ))),
         },
     };
 
     result.map(UsageSnapshot::with_updated_now)
 }
 
-fn fetch_via_cli(cancelled: &AtomicBool) -> Result<UsageSnapshot, String> {
+fn fetch_via_cli(cancelled: &AtomicBool) -> Result<UsageSnapshot, UsageFetchError> {
     if cancelled.load(Ordering::Relaxed) {
-        return Err(CANCELLED_ERROR.to_string());
+        return Err(UsageFetchError::Cancelled);
     }
 
     let working_directory = Some(env::temp_dir().to_string_lossy().into_owned());
@@ -260,7 +288,7 @@ fn fetch_via_cli(cancelled: &AtomicBool) -> Result<UsageSnapshot, String> {
 
     loop {
         if cancelled.load(Ordering::Relaxed) {
-            return Err(CANCELLED_ERROR.to_string());
+            return Err(UsageFetchError::Cancelled);
         }
 
         let pipe_closed = drain_pty_output(&mut pty, &mut output)?;
@@ -308,17 +336,21 @@ fn fetch_via_cli(cancelled: &AtomicBool) -> Result<UsageSnapshot, String> {
         }
 
         if settle_at.is_some_and(|settle| now >= settle) {
-            return parse_output(&clean);
+            return parse_output(&clean).map_err(UsageFetchError::Failed);
         }
 
         if pipe_closed || matches!(pty.next_child_event(), Some(ChildEvent::Exited)) {
-            return parse_output(&clean)
-                .map_err(|_| "Claude exited before the usage panel rendered".to_string());
+            return parse_output(&clean).map_err(|_| {
+                UsageFetchError::Failed("Claude exited before the usage panel rendered".to_string())
+            });
         }
 
         if now >= deadline {
-            return parse_output(&clean)
-                .map_err(|_| "Claude usage panel did not render before timeout".to_string());
+            return parse_output(&clean).map_err(|_| {
+                UsageFetchError::Failed(
+                    "Claude usage panel did not render before timeout".to_string(),
+                )
+            });
         }
 
         thread::sleep(CLI_POLL_INTERVAL);
@@ -680,5 +712,19 @@ mod tests {
         let mut output = b"old".to_vec();
         append_bounded(&mut output, b"-new-data", 8);
         assert_eq!(output, b"new-data");
+    }
+
+    /// An already-cancelled request must report cancellation rather than a
+    /// failure message: the caller restarts the first and only reports the
+    /// second, and it reaches neither the network nor an interactive CLI here.
+    #[test]
+    fn a_cancelled_request_reports_cancellation_not_failure() {
+        let error = fetch_with_cancel(&AtomicBool::new(true))
+            .err()
+            .expect("a cancelled fetch produces no snapshot");
+        assert!(
+            matches!(error, UsageFetchError::Cancelled),
+            "expected Cancelled, got {error:?}"
+        );
     }
 }
