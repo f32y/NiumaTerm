@@ -68,16 +68,18 @@ impl AgentPane {
                 let effort = settings.effort.clone().or(self.settings.effort.clone());
                 let mut next = ThreadSettings { effort, ..settings };
 
-                // Fresh conversations and resumed Claude conversations seed
-                // all remembered picks. Claude emits another Ready during
-                // first-turn initialization, so later confirmations preserve
-                // the current controls instead of restoring CLI defaults.
+                // Fresh conversations, and resumes into a harness that does not
+                // replay its own controls, seed all remembered picks. Where
+                // another Ready arrives during first-turn initialization, that
+                // later confirmation preserves the controls in use instead of
+                // restoring the ones the CLI reports.
                 let seed_thread_defaults = take(&mut self.seed_thread_defaults);
                 let seed_approval_reviewer = take(&mut self.seed_approval_reviewer);
                 let stored = (seed_thread_defaults || seed_approval_reviewer)
                     .then(|| self.stored_thread_settings(cx))
                     .flatten();
-                let preserve_current = self.kind == AgentKind::Claude && !seed_thread_defaults;
+                let preserve_current =
+                    self.kind.caps().repeats_ready_during_init && !seed_thread_defaults;
                 let local = if preserve_current {
                     Some(&self.settings)
                 } else {

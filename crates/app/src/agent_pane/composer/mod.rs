@@ -113,7 +113,7 @@ impl AgentPane {
         }
 
         reconcile_skill_binding(&text, &mut self.palette.skill_binding);
-        let skill = if self.kind == AgentKind::Codex {
+        let skill = if self.kind.caps().skill_references {
             match validate_skill_binding(
                 &text,
                 self.palette.skill_binding.as_ref(),
@@ -265,7 +265,7 @@ impl AgentPane {
                 self.show_status(cx);
                 true
             }
-            "rewind" if self.kind == AgentKind::Claude => self.open_rewind(cx),
+            "rewind" if self.kind.caps().file_rewind => self.open_rewind(cx),
             "model" | "permissions" => false,
             _ => self.route_backend_command(
                 PendingSlashCommand {

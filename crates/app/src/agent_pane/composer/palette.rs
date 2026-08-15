@@ -115,7 +115,7 @@ impl AgentPane {
         let input = self.input.read(cx);
         let text = input.text().to_string();
 
-        if self.kind == AgentKind::Codex {
+        if self.kind.caps().skill_references {
             if let Some(query) = parse_skill_prefix(&text) {
                 return Some(self.skill_palette_model(&query));
             }
@@ -124,11 +124,11 @@ impl AgentPane {
         let parsed = parse_slash_command(&text)?;
         let cursor = input.cursor();
         let catalog = self.command_catalog();
-        // Codex reaches skills through `$name`. Listing them under `/` too is
-        // a convenience for users who expect one command key, so it follows
-        // the compatibility setting instead of the agent kind alone.
-        let slash_skills =
-            self.kind == AgentKind::Codex && cx.global::<AppSettings>().codex_skill_command_compat;
+        // A harness with `$name` skill references reaches them that way.
+        // Listing them under `/` too is a convenience for users who expect one
+        // command key, so it follows the compatibility setting as well.
+        let slash_skills = self.kind.caps().skill_references
+            && cx.global::<AppSettings>().codex_skill_command_compat;
 
         if parsed.has_argument_separator {
             let command = catalog.iter().find(|command| command.name == parsed.name)?;
@@ -243,7 +243,8 @@ impl AgentPane {
             } else {
                 Some(i18n("agent-composer-no-matching-commands").to_string())
             }
-        } else if self.kind == AgentKind::Claude && !self.palette.provider_commands_ready {
+        } else if self.kind.caps().async_command_discovery && !self.palette.provider_commands_ready
+        {
             Some(i18n("agent-composer-claude-command-loading").to_string())
         } else if slash_skills && self.palette.skill_catalog.is_none() {
             Some(i18n("agent-composer-skill-discovery-loading").to_string())

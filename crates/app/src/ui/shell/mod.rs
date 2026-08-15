@@ -433,7 +433,7 @@ impl Shell {
     fn sync_workflow_panel_target(&mut self, cx: &mut Context<Self>) {
         let target = self
             .active_agent()
-            .filter(|pane| pane.read(cx).claude_session_id().is_some());
+            .filter(|pane| pane.read(cx).workflow_session_id().is_some());
 
         let handle = target.map(|pane| pane.downgrade());
         let workflows = self.right_panel.read(cx).workflows().clone();

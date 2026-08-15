@@ -292,7 +292,7 @@ pub(in crate::agent_pane) fn compaction_label(detail: &Compaction) -> &'static s
 }
 
 pub(in crate::agent_pane) fn compaction_row_is_expandable(kind: AgentKind) -> bool {
-    kind == AgentKind::Claude
+    kind.caps().expandable_compaction_rows
 }
 
 pub(in crate::agent_pane) fn compaction_trigger_label(trigger: CompactionTrigger) -> &'static str {

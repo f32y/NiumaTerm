@@ -2,6 +2,7 @@ pub(crate) mod input_history;
 pub(crate) mod updates;
 pub(super) mod usage;
 
+mod capabilities;
 mod commands;
 mod composer;
 mod context_usage;
