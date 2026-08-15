@@ -123,15 +123,34 @@ fn remaining_context_percent(usage: ContextWindowUsage) -> Option<u64> {
     Some((remaining_tokens as f64 * 100.0 / max_tokens as f64).round() as u64)
 }
 
-/// Share of the request's input the provider served from its cache. Claude
-/// folds cache reads and writes into `input_tokens`, so the read is a share of
-/// that total; a provider that instead reports its cached tokens outside the
-/// input count would exceed 100%, which the clamp keeps out of the readout.
-pub(super) fn cache_hit_percent(usage: TokenUsageBreakdown) -> Option<u64> {
-    let input_tokens = usage.input_tokens.filter(|tokens| *tokens > 0)?;
-    let cache_read = usage.cache_read_input_tokens?;
+/// Share of input the provider served from its cache, measured over the widest
+/// scope it reports rather than over the newest request alone.
+///
+/// A single request is the wrong denominator: every request in a tool loop
+/// replays the whole conversation, and only the first one pays to write the new
+/// content into the cache. The last request of a turn therefore reads near 100%
+/// however much that turn actually cost. Aggregating over the provider's own
+/// turn or thread scope keeps those cache writes in the denominator, so the
+/// readout moves when the work does.
+///
+/// Both providers report cached tokens inside `input_tokens` — Claude by
+/// folding its read and write counts into the total, Codex natively — so the
+/// share cannot exceed 100% and needs no clamp.
+pub(super) fn cache_hit_percent(usage: ContextWindowUsage) -> Option<u64> {
+    // Older protocol revisions and post-compaction snapshots report a
+    // cumulative total without categories; the newest request is then the only
+    // breakdown there is.
+    usage
+        .cumulative
+        .and_then(|scoped| cache_hit_of(scoped.breakdown))
+        .or_else(|| cache_hit_of(usage.current))
+}
 
-    Some(((cache_read as f64 * 100.0 / input_tokens as f64).round() as u64).min(100))
+fn cache_hit_of(breakdown: TokenUsageBreakdown) -> Option<u64> {
+    let input_tokens = breakdown.input_tokens.filter(|tokens| *tokens > 0)?;
+    let cache_read = breakdown.cache_read_input_tokens?;
+
+    Some((cache_read as f64 * 100.0 / input_tokens as f64).round() as u64)
 }
 
 fn context_indicator_label(usage: ContextWindowUsage) -> String {
@@ -380,6 +399,8 @@ impl RenderOnce for ContextUsageIndicator {
 
 #[cfg(test)]
 mod tests {
+    use nmt_agent_utils::chat::ScopedTokenUsage;
+
     use super::*;
 
     fn context_usage(used_tokens: u64, max_tokens: Option<u64>) -> ContextWindowUsage {
@@ -406,6 +427,59 @@ mod tests {
             raw_max_tokens: None,
             auto_compact_threshold: None,
         }
+    }
+
+    #[test]
+    fn the_cache_share_is_measured_over_the_turn_not_its_last_request() {
+        // The shape a tool loop produces: the turn wrote 30k tokens into the
+        // cache up front, while its final request replayed an almost entirely
+        // cached prefix.
+        let last_request = TokenUsageBreakdown {
+            total_tokens: 101_000,
+            input_tokens: Some(100_000),
+            cache_read_input_tokens: Some(99_800),
+            cache_write_input_tokens: Some(200),
+            output_tokens: Some(1_000),
+            reasoning_output_tokens: None,
+        };
+        let turn = TokenUsageBreakdown {
+            total_tokens: 310_000,
+            input_tokens: Some(300_000),
+            cache_read_input_tokens: Some(270_000),
+            cache_write_input_tokens: Some(30_000),
+            output_tokens: Some(10_000),
+            reasoning_output_tokens: None,
+        };
+
+        let usage = ContextWindowUsage {
+            current: last_request,
+            cumulative: Some(ScopedTokenUsage {
+                scope: ContextUsageScope::LastTurn,
+                breakdown: turn,
+            }),
+            max_tokens: Some(200_000),
+        };
+        assert_eq!(cache_hit_percent(usage), Some(90));
+
+        // Without an aggregate — a sparse or post-compaction snapshot — the
+        // newest request is still worth reporting.
+        assert_eq!(
+            cache_hit_percent(ContextWindowUsage {
+                cumulative: None,
+                ..usage
+            }),
+            Some(100)
+        );
+        assert_eq!(
+            cache_hit_percent(ContextWindowUsage {
+                cumulative: Some(ScopedTokenUsage {
+                    scope: ContextUsageScope::Thread,
+                    breakdown: TokenUsageBreakdown::total_only(500_000),
+                }),
+                ..usage
+            }),
+            Some(100)
+        );
     }
 
     #[test]
