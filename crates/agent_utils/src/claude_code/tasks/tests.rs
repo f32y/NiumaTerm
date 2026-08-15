@@ -187,6 +187,58 @@ fn lifecycle_records_map_onto_the_shared_states() {
     }
 }
 
+/// `stop_task` names a child by the task id the CLI registered it under. A row
+/// that exists only from the parent's tool-use block has not been given one, so
+/// it offers no Stop control until a lifecycle record supplies the id — and the
+/// tool-use id is never substituted, because it belongs to the parent's tool
+/// call rather than to the task registry.
+#[test]
+fn a_child_is_stoppable_once_a_lifecycle_record_names_its_task() {
+    let mut tasks = reducer();
+    tasks.observe(&launch("toolu_1"));
+
+    let snapshot = tasks.snapshot().expect("session is known");
+    assert_eq!(snapshot.tasks[0].state, BackgroundTaskState::Starting);
+    assert!(
+        !snapshot.tasks[0].can_stop,
+        "a row known only by its tool-use id names nothing to stop"
+    );
+    let key = snapshot.tasks[0].key.clone();
+    assert_eq!(tasks.stop_target(&key), None);
+
+    tasks.observe(&json!({
+        "type": "system",
+        "subtype": "task_started",
+        "session_id": SESSION,
+        "task_id": "task-9",
+        "tool_use_id": "toolu_1",
+        "task_type": "local_agent",
+    }));
+
+    let snapshot = tasks.snapshot().expect("session is known");
+    assert_eq!(snapshot.tasks.len(), 1, "the ids describe one child");
+    assert!(snapshot.tasks[0].can_stop);
+    // The row keeps its original key, so the lookup has to resolve the alias
+    // rather than assume the key is the task id.
+    assert_eq!(tasks.stop_target(&key), Some("task-9"));
+
+    tasks.observe(&json!({
+        "type": "system",
+        "subtype": "task_notification",
+        "session_id": SESSION,
+        "task_id": "task-9",
+        "status": "stopped",
+    }));
+
+    let snapshot = tasks.snapshot().expect("session is known");
+    assert!(snapshot.tasks[0].state.is_terminal());
+    assert!(
+        !snapshot.tasks[0].can_stop,
+        "a settled child has nothing left to stop"
+    );
+    assert_eq!(tasks.stop_target(&key), None);
+}
+
 #[test]
 fn only_agent_work_becomes_a_row() {
     // Background shells, monitors, and workflows travel through the same

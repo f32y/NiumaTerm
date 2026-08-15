@@ -406,6 +406,7 @@
 "tasks-background-state-stopped" = "Stopped"
 "tasks-background-state-failed" = "Failed"
 "tasks-background-running-agents" = "Background Tasks — {count} agents running"
+"tasks-background-stop-tooltip" = "Stop this agent"
 
 # Daily token usage
 "usage-token-unavailable" = "Daily token usage unavailable"

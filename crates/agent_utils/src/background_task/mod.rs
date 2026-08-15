@@ -203,6 +203,11 @@ pub struct BackgroundTaskSummary {
     pub depth: Option<u32>,
     /// Most recent child output excerpt, for later hierarchical presentation.
     pub last_preview: Option<String>,
+    /// Whether this child can be stopped right now. Only the adapter knows
+    /// whether its provider exposes an operation that reaches this child, so the
+    /// view renders a Stop control from this rather than inferring one from the
+    /// provider and the lifecycle state.
+    pub can_stop: bool,
 }
 
 impl BackgroundTaskSummary {
@@ -375,6 +380,7 @@ impl BackgroundTaskRegistry {
                     model: None,
                     depth: None,
                     last_preview: None,
+                    can_stop: false,
                 };
                 merge_update(&mut summary, &update, sequence);
                 self.tasks.insert(key, summary);

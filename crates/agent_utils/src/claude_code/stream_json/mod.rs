@@ -567,6 +567,21 @@ impl Session {
         self.send_control(json!({"subtype": "interrupt"}));
     }
 
+    /// Stop one child agent, leaving this session's own turn running. Returns
+    /// whether the request went out: a row the stream has not yet given a task
+    /// id names nothing the CLI's task registry could find.
+    ///
+    /// The CLI answers a task it cannot find, or one already settled, as a
+    /// success, so the response says only that the request was understood. The
+    /// child's own lifecycle record is what reports it stopped.
+    pub fn interrupt_background_task(&mut self, key: &BackgroundTaskKey) -> bool {
+        let Some(task_id) = self.tasks.stop_target(key).map(str::to_owned) else {
+            return false;
+        };
+        self.send_control(json!({"subtype": "stop_task", "task_id": task_id}));
+        true
+    }
+
     /// The CLI's session id, known immediately for a resumed process and
     /// otherwise populated by its `init` message. This is what `spawn`'s
     /// `resume` takes to reopen the conversation later.

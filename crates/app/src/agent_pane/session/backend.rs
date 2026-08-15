@@ -194,6 +194,31 @@ impl Backend {
         }
     }
 
+    /// Stop one child agent without ending the parent's turn. Both harnesses
+    /// can do it, by different means: a Codex child is a thread of its own and
+    /// takes a thread-scoped `turn/interrupt`, while Claude Code registers each
+    /// delegated agent under a task id that `stop_task` names.
+    ///
+    /// Returns whether the request went out. A key belonging to another harness
+    /// reaches no session, because its ids mean nothing there.
+    pub(in crate::agent_pane) fn interrupt_background_task(
+        &mut self,
+        key: &BackgroundTaskKey,
+    ) -> bool {
+        match self {
+            Backend::Codex(session) => match key.provider {
+                BackgroundTaskProvider::Codex => session.interrupt_background_task(&key.id),
+                BackgroundTaskProvider::ClaudeCode => false,
+            },
+            Backend::Claude(session) => match key.provider {
+                BackgroundTaskProvider::ClaudeCode => session.interrupt_background_task(key),
+                BackgroundTaskProvider::Codex => false,
+            },
+            #[cfg(test)]
+            Backend::Test(_) => false,
+        }
+    }
+
     /// Take the sequence number a child-agent history read must not overwrite
     /// past. Live updates that land while the read runs keep their newer state.
     /// Only Claude Code rebuilds children from files, so Codex has no read to

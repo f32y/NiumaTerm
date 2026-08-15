@@ -447,6 +447,21 @@ impl Session {
         self.start_descendant_discovery();
     }
 
+    /// Stop one child agent, leaving the parent's turn running. Returns whether
+    /// the request went out: a child whose active turn is not known cannot be
+    /// named in `turn/interrupt`, and the caller reports that rather than
+    /// pretending the child was stopped.
+    pub fn interrupt_background_task(&mut self, thread_id: &str) -> bool {
+        let rpc_id = self.alloc_rpc_id();
+        let Some(request) = self.background.interrupt_request(rpc_id, thread_id) else {
+            return false;
+        };
+        // The child's own `turn/completed` reports the interruption, so the row
+        // moves to Interrupted through the same path as any other outcome.
+        self.send(request);
+        true
+    }
+
     /// Read one descendant's stored conversation. A read already in flight for
     /// the same child is left to finish, and an unknown thread is ignored.
     pub fn load_background_task_transcript(&mut self, thread_id: &str) -> Vec<Event> {

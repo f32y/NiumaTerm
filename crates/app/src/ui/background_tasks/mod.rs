@@ -1,7 +1,8 @@
-//! Read-only `Background Tasks` view: the child agents a Codex or Claude Code
-//! parent session spawned. Provider adapters own child lifecycle, so this
-//! component only reads the latest snapshot from the active Agent pane and
-//! never dispatches an operation to a child.
+//! `Background Tasks` view: the child agents a Codex or Claude Code parent
+//! session spawned. Provider adapters own child lifecycle, so this component
+//! reads the latest snapshot from the active Agent pane and dispatches nothing
+//! to a child beyond the one operation a snapshot reports as available — a row
+//! offers Stop only while its adapter says that child can be stopped.
 
 use std::cmp::Ordering;
 use std::time::{Duration, SystemTime};
@@ -12,7 +13,7 @@ use gpui::{
     px,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::{ActiveTheme as _, IconName, Sizable as _, h_flex, v_flex};
+use gpui_component::{ActiveTheme as _, IconName, IconNamed, Sizable as _, h_flex, v_flex};
 use nmt_agent_utils::background_task::{
     BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskState,
     BackgroundTaskSummary, BackgroundTaskTranscriptState,
@@ -31,6 +32,17 @@ const COMPACT_FINISHED_ROWS: usize = 10;
 /// Elapsed labels are recomputed from stored times rather than counted, so one
 /// tick per second is enough to keep a seconds display truthful.
 const ELAPSED_TICK: Duration = Duration::from_secs(1);
+
+/// The square the composer's own Stop control uses, so stopping one child reads
+/// as the same action as stopping a turn.
+#[derive(Clone, Copy)]
+struct StopTaskIcon;
+
+impl IconNamed for StopTaskIcon {
+    fn path(self) -> SharedString {
+        "icons/stop.svg".into()
+    }
+}
 
 /// What the panel is showing. One child at a time replaces the list rather
 /// than opening beside it, so the shared right-side area still holds one view.
@@ -215,6 +227,16 @@ impl BackgroundTasksView {
             pane.load_background_task_transcript(&key, cx);
         });
         cx.notify();
+    }
+
+    /// Ask the provider to stop one child. A refusal means the child settled
+    /// between the snapshot this row was drawn from and the click, so the next
+    /// snapshot reports the outcome either way and nothing is said here.
+    fn stop_task(&mut self, key: &BackgroundTaskKey, cx: &mut Context<Self>) {
+        let Some(pane) = self.target.as_ref().and_then(WeakEntity::upgrade) else {
+            return;
+        };
+        pane.update(cx, |pane, _| pane.interrupt_background_task(key));
     }
 
     fn close_detail(&mut self, cx: &mut Context<Self>) {
@@ -429,35 +451,69 @@ fn render_row(
     .into();
 
     let key = task.key.clone();
+    let stop_key = task.key.clone();
 
-    v_flex()
-        // Activating a row opens that child's own conversation. It carries no
-        // control that acts on the child: inspection only.
+    // Whether a child can be stopped depends on identifiers the provider may
+    // not have published yet, not on the lifecycle state alone, so the control
+    // follows what the snapshot reports rather than being inferred here.
+    let stop = task.can_stop.then(|| {
+        // Keyed by the child rather than by row position: the two sections
+        // enumerate independently, so a positional id is not unique across them.
+        Button::new(SharedString::from(format!(
+            "background-task-stop-{}",
+            task.key.id
+        )))
+        .ghost()
+        .xsmall()
+        .icon(StopTaskIcon)
+        .tooltip(i18n("tasks-background-stop-tooltip"))
+        .aria_label(i18n("tasks-background-stop-tooltip"))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            // The row opens the child's conversation, so a click that was
+            // meant for Stop must not also navigate.
+            cx.stop_propagation();
+            this.stop_task(&stop_key, cx);
+        }))
+    });
+
+    h_flex()
+        // Activating a row opens that child's own conversation.
         .id(("background-task-row", index))
         .px_2()
         .py_1()
-        .gap_0p5()
+        .gap_2()
+        // The control is centred against the row as a whole rather than aligned
+        // to either text line, which keeps it steady whether the row has a
+        // timing label or not.
+        .items_center()
         .cursor_pointer()
         .hover(|this| this.bg(theme.list_hover))
         .aria_label(description)
         .on_click(cx.listener(move |this, _, _, cx| this.open_detail(key.clone(), cx)))
         .child(
-            h_flex()
-                .gap_2()
-                .items_center()
-                .child(div().flex_1().truncate().text_sm().child(name))
-                .child(div().text_xs().text_color(color).child(state_label)),
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .gap_0p5()
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .child(div().flex_1().truncate().text_sm().child(name))
+                        .child(div().text_xs().text_color(color).child(state_label)),
+                )
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(div().flex_none().child(task.key.provider.label()))
+                        .child(div().flex_1().truncate().child(detail))
+                        .children(timing.map(|timing| div().flex_none().child(timing))),
+                ),
         )
-        .child(
-            h_flex()
-                .gap_2()
-                .items_center()
-                .text_xs()
-                .text_color(theme.muted_foreground)
-                .child(div().flex_none().child(task.key.provider.label()))
-                .child(div().flex_1().truncate().child(detail))
-                .children(timing.map(|timing| div().flex_none().child(timing))),
-        )
+        .children(stop.map(|stop| div().flex_none().child(stop)))
         .into_any_element()
 }
 
