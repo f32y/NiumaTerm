@@ -12,7 +12,6 @@ use gpui::{
     px,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::tooltip::Tooltip;
 use gpui_component::{ActiveTheme as _, IconName, Sizable as _, h_flex, v_flex};
 use nmt_agent_utils::background_task::{
     BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskState,
@@ -417,7 +416,10 @@ fn render_row(
     let detail = row_detail(task);
     let timing = row_timing(task, now);
     let state_label = background_task_state_label(task.state);
-    let tooltip: SharedString = format!(
+    // Everything the row shows visually, in one string. A screen reader
+    // announces the row as a whole, so it needs the parts the layout separates
+    // into two lines plus the child id, which is not rendered anywhere.
+    let description: SharedString = format!(
         "{} · {} · {}\n{}",
         task.key.provider.label(),
         task.key.id,
@@ -437,7 +439,7 @@ fn render_row(
         .gap_0p5()
         .cursor_pointer()
         .hover(|this| this.bg(theme.list_hover))
-        .aria_label(tooltip.clone())
+        .aria_label(description)
         .on_click(cx.listener(move |this, _, _, cx| this.open_detail(key.clone(), cx)))
         .child(
             h_flex()
@@ -456,7 +458,6 @@ fn render_row(
                 .child(div().flex_1().truncate().child(detail))
                 .children(timing.map(|timing| div().flex_none().child(timing))),
         )
-        .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
         .into_any_element()
 }
 
