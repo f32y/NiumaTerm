@@ -506,8 +506,7 @@ struct GraphicsProbes {
 }
 
 fn rgba_update(route_id: usize, image_id: u32, w: usize, h: usize) -> TerminalEvent {
-    use nmt_terminal::ansi::graphics::UpdateQueues;
-    use nmt_terminal::graphics::{ColorType, GraphicData, GraphicId};
+    use nmt_terminal::graphics::{ColorType, GraphicData, GraphicId, UpdateQueues};
     let data = GraphicData {
         id: GraphicId(image_id as u64),
         width: w,

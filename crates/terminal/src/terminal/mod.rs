@@ -27,9 +27,6 @@ pub type NamedColor = colors::NamedColor;
 pub const MIN_COLUMNS: usize = 2;
 pub const MIN_LINES: usize = 1;
 
-// Max. number of graphics stored in a single cell.
-// const MAX_GRAPHICS_PER_CELL: usize = 20;
-
 bitflags! {
      #[derive(Debug, Copy, Clone)]
      pub struct Mode: u32 {

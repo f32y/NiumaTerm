@@ -15,7 +15,7 @@ use crate::event::{self, EventListener, Msg, MsgSender, TerminalEvent, WindowId}
 use crate::ghostty::{self, GhosttyTerminal, mode};
 use crate::prompt_sniffer::PromptSniffer;
 use crate::render_buffer::RenderBuffer;
-use crate::{ansi, terminal, vt_trace};
+use crate::{terminal, vt_trace};
 
 mod conpty_realign;
 mod marks;
@@ -666,12 +666,12 @@ where
         let (pending_images, removed_ids) = image_delta;
 
         if !pending_images.is_empty() || !removed_ids.is_empty() {
-            use crate::graphics::GraphicId;
+            use crate::graphics::{GraphicId, UpdateQueues};
 
             self.event_proxy.send_event(
                 TerminalEvent::UpdateGraphics {
                     route_id: self.route_id,
-                    queues: ansi::graphics::UpdateQueues {
+                    queues: UpdateQueues {
                         pending: Vec::new(),
                         pending_images,
                         remove_queue: removed_ids
