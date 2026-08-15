@@ -1204,6 +1204,12 @@ impl StateInner {
             last_position: current,
             curve: SmoothWheelCurve::for_motion(velocity, distance, duration),
         });
+        // Wheel events arrive outside a frame, and queuing a next-frame
+        // callback does not by itself wake the demand-driven frame pump; only
+        // a clean-to-dirty transition does. Without this notify the first
+        // frame of the motion waits for some unrelated repaint, so a wheel
+        // nudge on a quiet window appears to do nothing.
+        cx.notify(current_view);
         window.on_next_frame(move |_, cx| cx.notify(current_view));
     }
 
