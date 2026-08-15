@@ -15,7 +15,7 @@ fn latency_readout(latency: Duration) -> String {
 
 /// The composer's one-line account of the conversation: how many turns it has
 /// run, how many actions the newest turn took, how long that turn waited for
-/// its first output, and how much of its input the provider had cached. Each
+/// its first output, and how much of the input the provider had cached. Each
 /// part is dropped rather than shown as a zero when nothing reports it, and a
 /// conversation that has not run a turn yet reports nothing at all.
 pub(in crate::agent_pane::view) fn composer_stats_label(
@@ -355,8 +355,7 @@ impl AgentPane {
             self.turn_seq,
             self.transcript.read(cx).turn_steps(self.turn_seq),
             self.first_output_latency,
-            self.context_window_usage
-                .and_then(|usage| cache_hit_percent(usage.current)),
+            self.context_window_usage.and_then(cache_hit_percent),
         );
 
         v_flex()
