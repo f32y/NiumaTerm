@@ -1,12 +1,24 @@
+use nmt_agent_utils::claude_code::sessions::RestoredTask;
 use nmt_i18n::i18n;
 
 use crate::agent_pane::*;
 
+/// The conversation a restarted backend should continue, qualified by the
+/// harness that issued the id. Ids are only meaningful to the harness that
+/// minted them, so a mismatched pair starts a fresh conversation instead.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum RecoveryIdentity {
-    NewConversation,
-    ClaudeSession(String),
-    CodexThread(String),
+pub(crate) struct RecoveryIdentity {
+    pub(crate) kind: AgentKind,
+    pub(crate) id: String,
+}
+
+impl RecoveryIdentity {
+    pub(crate) fn new(kind: AgentKind, id: impl Into<String>) -> Self {
+        Self {
+            kind,
+            id: id.into(),
+        }
+    }
 }
 
 /// The pane's protocol session, one variant per agent kind. Both backends
@@ -42,6 +54,44 @@ impl TestBackend {
 }
 
 impl Backend {
+    /// Start the harness process for `kind` and wrap it in the matching
+    /// variant. Resume differs by harness — Codex asks the running app-server
+    /// to reopen a thread, Claude Code takes a session id as a launch flag —
+    /// so the caller passes an identity and this decides how to use it.
+    pub(in crate::agent_pane) fn spawn(
+        kind: AgentKind,
+        launch: &LaunchConfig,
+        cwd: Option<String>,
+        recovery: Option<RecoveryIdentity>,
+        deliver: impl Fn(Value) + Send + 'static,
+    ) -> Result<Self, String> {
+        let resume = recovery
+            .filter(|identity| identity.kind == kind)
+            .map(|identity| identity.id);
+        match kind {
+            AgentKind::Codex => match resume {
+                Some(thread_id) => app_server::Session::spawn_resuming(
+                    launch,
+                    cwd,
+                    thread_id,
+                    true,
+                    deliver,
+                    |line| warn!("codex app-server: {line}"),
+                ),
+                None => app_server::Session::spawn(launch, cwd, deliver, |line| {
+                    warn!("codex app-server: {line}")
+                }),
+            }
+            .map(Backend::Codex),
+            AgentKind::Claude => {
+                stream_json::Session::spawn(launch, cwd, resume, deliver, |line| {
+                    warn!("claude: {line}")
+                })
+                .map(Backend::Claude)
+            }
+        }
+    }
+
     pub(in crate::agent_pane) fn process(&mut self, message: Value) -> Vec<SessionEvent> {
         match self {
             Backend::Codex(session) => session.process(message),
@@ -126,14 +176,76 @@ impl Backend {
         key: &BackgroundTaskKey,
         cwd: Option<&str>,
     ) -> Vec<SessionEvent> {
-        match (self, key.provider) {
-            (Backend::Codex(session), BackgroundTaskProvider::Codex) => {
-                session.load_background_task_transcript(&key.id)
+        // A key names the provider that published the task, so a key belonging
+        // to another harness reaches no session: its ids mean nothing here.
+        match self {
+            Backend::Codex(session) => match key.provider {
+                BackgroundTaskProvider::Codex => session.load_background_task_transcript(&key.id),
+                BackgroundTaskProvider::ClaudeCode => Vec::new(),
+            },
+            Backend::Claude(session) => match key.provider {
+                BackgroundTaskProvider::ClaudeCode => {
+                    session.load_background_task_transcript(&key.id, cwd)
+                }
+                BackgroundTaskProvider::Codex => Vec::new(),
+            },
+            #[cfg(test)]
+            Backend::Test(_) => Vec::new(),
+        }
+    }
+
+    /// Take the sequence number a child-agent history read must not overwrite
+    /// past. Live updates that land while the read runs keep their newer state.
+    /// Only Claude Code rebuilds children from files, so Codex has no read to
+    /// bracket and its sequence is unused.
+    pub(in crate::agent_pane) fn begin_task_restoration(&mut self) -> u64 {
+        match self {
+            Backend::Claude(session) => session.begin_task_restoration(),
+            Backend::Codex(_) => 0,
+            #[cfg(test)]
+            Backend::Test(_) => 0,
+        }
+    }
+
+    pub(in crate::agent_pane) fn finish_task_restoration(
+        &mut self,
+        restored: Result<Vec<RestoredTask>, String>,
+        starting_sequence: u64,
+    ) -> Vec<SessionEvent> {
+        match self {
+            Backend::Claude(session) => {
+                session.finish_task_restoration(restored, starting_sequence)
             }
-            (Backend::Claude(session), BackgroundTaskProvider::ClaudeCode) => {
-                session.load_background_task_transcript(&key.id, cwd)
+            Backend::Codex(_) => Vec::new(),
+            #[cfg(test)]
+            Backend::Test(_) => Vec::new(),
+        }
+    }
+
+    /// Continue an earlier conversation inside the running session. Returns
+    /// whether the request reached a backend that can do it: Claude Code has no
+    /// in-session resume and must respawn with the session id instead, so the
+    /// caller keeps the recent-sessions list open and reports why.
+    pub(in crate::agent_pane) fn resume_thread(&mut self, thread_id: &str) -> bool {
+        match self {
+            Backend::Codex(session) => {
+                session.resume_thread(thread_id);
+                true
             }
-            _ => Vec::new(),
+            Backend::Claude(_) => false,
+            #[cfg(test)]
+            Backend::Test(_) => false,
+        }
+    }
+
+    /// Fetch the next page of recent sessions. Only Codex pages its history
+    /// from the backend; Claude Code reads whole directories from disk.
+    pub(in crate::agent_pane) fn request_more_history(&mut self) {
+        match self {
+            Backend::Codex(session) => session.request_more_history(),
+            Backend::Claude(_) => {}
+            #[cfg(test)]
+            Backend::Test(_) => {}
         }
     }
 
@@ -150,10 +262,10 @@ impl Backend {
         match self {
             Backend::Claude(session) => session
                 .session_id()
-                .map(|id| RecoveryIdentity::ClaudeSession(id.to_string())),
+                .map(|id| RecoveryIdentity::new(AgentKind::Claude, id)),
             Backend::Codex(session) => session
                 .thread_id()
-                .map(|id| RecoveryIdentity::CodexThread(id.to_string())),
+                .map(|id| RecoveryIdentity::new(AgentKind::Codex, id)),
             #[cfg(test)]
             Backend::Test(_) => None,
         }

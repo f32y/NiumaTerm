@@ -87,7 +87,7 @@ impl AgentPane {
                             // the next one (no-op without a cursor, and
                             // only Codex pages from the backend).
                             if visible_range.end >= this.history_ui.sessions.len()
-                                && let Some(Backend::Codex(session)) = this.session.as_mut()
+                                && let Some(session) = this.session.as_mut()
                             {
                                 session.request_more_history();
                             }
