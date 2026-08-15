@@ -4,6 +4,7 @@ Repo-level guidance for AI coding agents working in this repository.
 
 ## Basic rules
 
+- You are not the only agent that works in this repo. Do not touch files that you don't need to modify. Do not restore changes that are not made by you.
 - YOU ARE FORBIDDEN TO USE FOLLOWING AI SLOP WORDS: ponytail, seam, fact, parity, envelope, wire, contract
 - Always write documents, specs, tests and comments in English.
 
