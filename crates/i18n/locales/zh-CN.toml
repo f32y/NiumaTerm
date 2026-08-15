@@ -222,7 +222,6 @@
 "settings-system-workspace" = "工作区"
 "settings-system-confirm-closing" = "关闭前确认"
 "settings-system-confirm-closing-description" = "关闭工作区、智能体标签页或窗口时请求确认。"
-"settings-system-process" = "进程"
 "settings-system-manage-job" = "通过 Windows Job API 管理子进程"
 "settings-system-manage-job-description" = "关闭标签页时终止 Shell 的整个进程树。仅对新打开的标签页生效。"
 "settings-system-warn-terminate" = "终止 Shell 前警告"
