@@ -1,6 +1,5 @@
 use bitflags::bitflags;
 
-pub mod graphics;
 pub mod kitty_virtual;
 
 // CursorShape moved to the `config` crate (it is a deserialized config value);

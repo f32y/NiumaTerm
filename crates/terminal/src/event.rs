@@ -7,9 +7,9 @@ use std::{option, path, time};
 use nmt_config::colors::ColorRgb;
 use nmt_platform::{Waker, WinsizeBuilder};
 
-use crate::ansi::graphics::UpdateQueues;
 use crate::clipboard::ClipboardType;
 use crate::ghostty;
+use crate::graphics::UpdateQueues;
 use crate::terminal::Match;
 use crate::terminal::pos::{Direction, Pos};
 

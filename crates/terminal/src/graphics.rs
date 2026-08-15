@@ -77,6 +77,21 @@ pub struct GraphicData {
     pub transmit_time: time::Instant,
 }
 
+/// One batch of image changes handed to the renderer's image store. The engine
+/// reports pixels and removals together so a re-transmission under an id the
+/// grid still references cannot be applied in the wrong order.
+#[derive(Debug, Clone)]
+pub struct UpdateQueues {
+    /// Atlas graphics (sixel/iTerm2) read from the PTY.
+    pub pending: Vec<GraphicData>,
+
+    /// Image textures (kitty) keyed by image_id.
+    pub pending_images: Vec<(u32, GraphicData)>,
+
+    /// Graphics removed from the grid.
+    pub remove_queue: Vec<GraphicId>,
+}
+
 impl GraphicData {
     /// Check if the image may contain transparent pixels. If it returns
     /// `false`, it is guaranteed that there are no transparent pixels.
