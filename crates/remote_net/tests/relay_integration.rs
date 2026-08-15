@@ -2,7 +2,7 @@
 //! through the real Cloudflare Worker running locally.
 //!
 //! Requires `wrangler dev` listening on 127.0.0.1:8787 (run `npm run dev` in
-//! `relay/`), so these are `#[ignore]` by default:
+//! the repo root), so these are `#[ignore]` by default:
 //!
 //! ```text
 //! cargo test -p nmt_remote_net --test relay_integration -- --ignored
@@ -58,7 +58,7 @@ async fn next_json(socket: &mut Socket) -> serde_json::Value {
 }
 
 #[tokio::test]
-#[ignore = "requires `wrangler dev` running in relay/ (npm run dev)"]
+#[ignore = "requires `wrangler dev` running (npm run dev in the repo root)"]
 async fn noise_echo_through_relay() {
     let host_keys = generate_keypair().unwrap();
     let client_keys = generate_keypair().unwrap();
@@ -141,7 +141,7 @@ async fn noise_echo_through_relay() {
 }
 
 #[tokio::test]
-#[ignore = "requires `wrangler dev` running in relay/ (npm run dev)"]
+#[ignore = "requires `wrangler dev` running (npm run dev in the repo root)"]
 async fn invalid_token_rejected() {
     let err = connect("host_id=deadbeef00000000&role=host", Some("wrong-token"))
         .await
@@ -155,7 +155,7 @@ async fn invalid_token_rejected() {
 }
 
 #[tokio::test]
-#[ignore = "requires `wrangler dev` running in relay/ (npm run dev)"]
+#[ignore = "requires `wrangler dev` running (npm run dev in the repo root)"]
 async fn client_rejected_when_host_offline() {
     let err = connect("host_id=0000000000000000&role=client", None)
         .await
@@ -166,7 +166,7 @@ async fn client_rejected_when_host_offline() {
 /// Client sockets carry no token, so the per-host ceiling is what stops anyone
 /// who learns a host_id from making the host handshake on demand.
 #[tokio::test]
-#[ignore = "requires `wrangler dev` running in relay/ (npm run dev)"]
+#[ignore = "requires `wrangler dev` running (npm run dev in the repo root)"]
 async fn client_socket_cap_enforced() {
     let host_keys = generate_keypair().unwrap();
     let host_id = derive_host_id(&host_keys.public);
@@ -192,7 +192,7 @@ async fn client_socket_cap_enforced() {
 }
 
 #[tokio::test]
-#[ignore = "requires `wrangler dev` running in relay/ (npm run dev)"]
+#[ignore = "requires `wrangler dev` running (npm run dev in the repo root)"]
 async fn buffer_overflow_closes_client() {
     let host_keys = generate_keypair().unwrap();
     let host_id = derive_host_id(&host_keys.public);

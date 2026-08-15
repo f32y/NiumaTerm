@@ -2,7 +2,7 @@
 //! client through the real relay Worker, including pairing, encrypted
 //! terminal I/O, and detach/reattach-from-checkpoint after a disconnect.
 //!
-//! Requires `wrangler dev` on 127.0.0.1:8787 (run `npm run dev` in `relay/`):
+//! Requires `wrangler dev` on 127.0.0.1:8787 (run `npm run dev` in the repo root):
 //!
 //! ```text
 //! cargo test -p nmt_remote_net --test host_e2e -- --ignored
@@ -28,7 +28,7 @@ const TOKEN: &str = "test-token";
 const MARKER: &str = "remote-e2e-marker";
 
 #[tokio::test]
-#[ignore = "requires `wrangler dev` running in relay/ (npm run dev)"]
+#[ignore = "requires `wrangler dev` running (npm run dev in the repo root)"]
 async fn pair_open_shell_reconnect() {
     let data_dir = env::temp_dir().join(format!("nmt-host-e2e-{}", process::id()));
     let host = HostHandle::start(HostConfig {
@@ -141,7 +141,7 @@ async fn pair_open_shell_reconnect() {
 /// via `open_remote_session`, drive it through the std byte-stream API, and
 /// list sessions over a separate short-lived connection.
 #[tokio::test]
-#[ignore = "requires `wrangler dev` running in relay/ (npm run dev)"]
+#[ignore = "requires `wrangler dev` running (npm run dev in the repo root)"]
 async fn client_runtime_byte_stream() {
     let data_dir = env::temp_dir().join(format!("nmt-host-e2e-client-{}", process::id()));
     let host = HostHandle::start(HostConfig {
@@ -320,7 +320,7 @@ async fn client_runtime_resumes_after_transport_loss() {
 }
 
 #[tokio::test]
-#[ignore = "requires `wrangler dev` running in relay/ (npm run dev)"]
+#[ignore = "requires `wrangler dev` running (npm run dev in the repo root)"]
 async fn unpaired_device_rejected() {
     let data_dir = env::temp_dir().join(format!("nmt-host-e2e-rej-{}", process::id()));
     let host = HostHandle::start(HostConfig {

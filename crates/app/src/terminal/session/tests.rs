@@ -19,14 +19,14 @@ use crate::utils::POWERSHELL_INTEGRATION;
 /// End-to-end proof that a remote session renders through `NetPty`: start a
 /// host, pair, attach, type a command, and confirm its output reaches the
 /// engine's screen state. Requires `wrangler dev` on 127.0.0.1:8787
-/// (`npm run dev` in relay/), so it is ignored by default:
+/// (`npm run dev` in the repo root), so it is ignored by default:
 ///
 /// ```text
 /// cargo test -p app remote_session_renders_through_net_pty -- --ignored
 /// ```
 #[cfg(windows)]
 #[test]
-#[ignore = "requires `wrangler dev` running in relay/ (npm run dev)"]
+#[ignore = "requires `wrangler dev` running (npm run dev in the repo root)"]
 fn remote_session_renders_through_net_pty() {
     use nmt_remote_net::{
         AttachTarget, HostConfig, HostHandle, ProtocolSessionOptions, StaticKeypair,
