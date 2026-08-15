@@ -7,7 +7,7 @@ use gpui::{AnyElement, Context, FontWeight, Hsla, SharedString, Window, div, px,
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::hover_card::HoverCard;
 use gpui_component::{ActiveTheme as _, Icon, IconNamed, Sizable as _, h_flex, v_flex};
-use nmt_agent_utils::claude_code::usage_fetcher as claude_usage;
+use nmt_agent_utils::claude_code::usage_fetcher::{self as claude_usage, UsageFetchError};
 use nmt_agent_utils::codex::usage_fetcher as codex_usage;
 use nmt_agent_utils::usage::{UsageSnapshot, UsageWindow, now_unix_millis};
 use nmt_i18n::i18n;
@@ -37,7 +37,6 @@ impl IconNamed for ClaudeIcon {
 struct ProviderRefresh {
     refreshing: bool,
     failed: bool,
-    cancel: Arc<AtomicBool>,
 }
 
 pub(crate) struct AgentUsageView {
@@ -45,13 +44,16 @@ pub(crate) struct AgentUsageView {
     claude: UsageSnapshot,
     codex_refresh: ProviderRefresh,
     claude_refresh: ProviderRefresh,
+    /// Abandons the in-flight Claude fetch. Only Claude has one: it drives an
+    /// interactive CLI session for up to 25 seconds, while the Codex fetch
+    /// reads local state and returns before a cancellation could reach it.
+    claude_cancel: Arc<AtomicBool>,
     enabled: bool,
 }
 
 impl Drop for AgentUsageView {
     fn drop(&mut self) {
-        self.codex_refresh.cancel.store(true, Ordering::Relaxed);
-        self.claude_refresh.cancel.store(true, Ordering::Relaxed);
+        self.claude_cancel.store(true, Ordering::Relaxed);
     }
 }
 
@@ -63,6 +65,7 @@ impl AgentUsageView {
             claude: UsageSnapshot::default(),
             codex_refresh: ProviderRefresh::default(),
             claude_refresh: ProviderRefresh::default(),
+            claude_cancel: Arc::new(AtomicBool::new(false)),
             enabled,
         };
 
@@ -73,8 +76,7 @@ impl AgentUsageView {
                 this.refresh_all(cx);
             } else if !enabled && this.enabled {
                 this.enabled = false;
-                this.codex_refresh.cancel.store(true, Ordering::Relaxed);
-                this.claude_refresh.cancel.store(true, Ordering::Relaxed);
+                this.claude_cancel.store(true, Ordering::Relaxed);
             }
         })
         .detach();
@@ -114,8 +116,6 @@ impl AgentUsageView {
         }
 
         self.codex_refresh.refreshing = true;
-        self.codex_refresh.cancel.store(true, Ordering::Relaxed);
-        self.codex_refresh.cancel = Arc::new(AtomicBool::new(false));
         cx.notify();
 
         let fetch = cx
@@ -150,9 +150,9 @@ impl AgentUsageView {
         }
 
         self.claude_refresh.refreshing = true;
-        self.claude_refresh.cancel.store(true, Ordering::Relaxed);
-        self.claude_refresh.cancel = Arc::new(AtomicBool::new(false));
-        let cancelled = self.claude_refresh.cancel.clone();
+        self.claude_cancel.store(true, Ordering::Relaxed);
+        self.claude_cancel = Arc::new(AtomicBool::new(false));
+        let cancelled = self.claude_cancel.clone();
         cx.notify();
 
         let fetch = cx
@@ -168,13 +168,18 @@ impl AgentUsageView {
                             this.claude = usage;
                             this.claude_refresh.failed = false;
                         }
-                        Err(err) => {
-                            let retry = this.enabled && err == "Claude usage request cancelled";
+                        // A cancelled fetch was abandoned because the view was
+                        // switched off mid-flight; if it has since been switched
+                        // back on, nothing else will start the fetch it skipped.
+                        Err(UsageFetchError::Cancelled) => {
                             this.claude_refresh.failed = true;
-                            warn!("Claude usage refresh failed: {err}");
-                            if retry {
+                            if this.enabled {
                                 this.refresh_claude(cx);
                             }
+                        }
+                        Err(UsageFetchError::Failed(message)) => {
+                            this.claude_refresh.failed = true;
+                            warn!("Claude usage refresh failed: {message}");
                         }
                     }
                     cx.notify();
@@ -587,6 +592,7 @@ mod tests {
             },
             codex_refresh: ProviderRefresh::default(),
             claude_refresh: ProviderRefresh::default(),
+            claude_cancel: Arc::new(AtomicBool::new(false)),
             enabled: true,
         };
 
