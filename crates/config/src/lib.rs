@@ -21,7 +21,9 @@ use builtin_themes::{THEMES as BUILTIN_THEMES, get as get_builtin_theme};
 use colors::Colors;
 use dirs::home_dir;
 use serde::{Deserialize, Serialize};
-use theme::{AppearanceTheme, Theme, UiTheme};
+#[cfg(test)]
+use theme::AppearanceTheme;
+use theme::{Theme, UiTheme};
 use toml::de::Error as TomlDeError;
 use toml::from_str as parse_toml;
 use toml_edit::{DocumentMut, Item, Table, value};
@@ -40,26 +42,6 @@ pub struct Shell {
     pub args: Vec<String>,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct Developer {
-    #[serde(default = "bool::default", rename = "enable-fps-counter")]
-    pub enable_fps_counter: bool,
-    #[serde(default = "default_log_level", rename = "log-level")]
-    pub log_level: String,
-    #[serde(rename = "enable-log-file", default)]
-    pub enable_log_file: bool,
-}
-
-impl Default for Developer {
-    fn default() -> Developer {
-        Developer {
-            log_level: default_log_level(),
-            enable_log_file: false,
-            enable_fps_counter: false,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Config {
     #[serde(default)]
@@ -72,41 +54,11 @@ pub struct Config {
     pub theme: String,
     #[serde(default = "default_editor")]
     pub editor: Shell,
-    #[serde(default = "Vec::default", rename = "env-vars")]
-    pub env_vars: Vec<String>,
     #[serde(skip)]
     pub colors: Colors,
     /// UI theme loaded from the selected file in `themes/`.
     #[serde(skip)]
     pub ui_theme: Option<UiTheme>,
-    #[serde(default = "Option::default", rename = "force-theme")]
-    pub force_theme: Option<AppearanceTheme>,
-    #[serde(default = "Developer::default")]
-    pub developer: Developer,
-    #[serde(
-        default = "bool::default",
-        rename = "ignore-selection-foreground-color"
-    )]
-    pub ignore_selection_fg_color: bool,
-    #[serde(default = "default_bool_true", rename = "confirm-before-quit")]
-    pub confirm_before_quit: bool,
-    #[serde(default = "bool::default", rename = "copy-on-select")]
-    pub copy_on_select: bool,
-    #[serde(
-        default = "bool::default",
-        rename = "hide-mouse-cursor-when-typing",
-        alias = "hide-cursor-when-typing"
-    )]
-    pub hide_cursor_when_typing: bool,
-    #[serde(default = "bool::default", rename = "draw-bold-text-with-light-colors")]
-    pub draw_bold_text_with_light_colors: bool,
-    #[serde(default = "default_bool_true", rename = "enable-scroll-bar")]
-    pub enable_scroll_bar: bool,
-    #[serde(
-        default = "default_scrollback_history_limit",
-        rename = "scrollback-history-limit"
-    )]
-    pub scrollback_history_limit: usize,
     /// Visual settings (settings dialog, Terminal/Appearance pages).
     #[serde(default = "appearance::AppearanceConfig::default")]
     pub appearance: appearance::AppearanceConfig,
@@ -350,21 +302,11 @@ impl Default for Config {
         Config {
             cursor: CursorConfig::default(),
             editor: default_editor(),
-            force_theme: None,
             colors: Colors::default(),
             ui_theme: None,
-            developer: Developer::default(),
-            env_vars: vec![],
             shell: default_shell(),
             theme: default_theme(),
             working_dir: default_working_dir(),
-            ignore_selection_fg_color: false,
-            confirm_before_quit: true,
-            copy_on_select: false,
-            hide_cursor_when_typing: false,
-            draw_bold_text_with_light_colors: false,
-            enable_scroll_bar: true,
-            scrollback_history_limit: default_scrollback_history_limit(),
             appearance: appearance::AppearanceConfig::default(),
             profiles: profile::ProfilesConfig::default(),
             agent_profiles: profile::AgentProfilesConfig::default(),
@@ -982,8 +924,6 @@ api-key = "sk-legacy"
         // An empty config file must resolve to the explicit defaults.
         let result = create_temporary_config("defaults", "");
 
-        let env_vars: Vec<String> = vec![];
-        assert_eq!(result.env_vars, env_vars);
         assert_eq!(result.cursor.shape, default_cursor());
         assert_eq!(result.theme, default_theme());
         assert_eq!(result.cursor.shape, default_cursor());
@@ -991,8 +931,6 @@ api-key = "sk-legacy"
 
         // Colors
         assert_eq!(result.colors, default_theme_colors());
-        // Developer
-        assert_eq!(result.developer, Developer::default());
     }
 
     #[test]
@@ -1017,22 +955,6 @@ api-key = "sk-legacy"
         assert_eq!(result.colors.foreground, colors::defaults::foreground());
         assert_eq!(result.colors.tabs_active, colors::defaults::tabs_active());
         assert_eq!(result.colors.cursor, colors::defaults::cursor());
-    }
-
-    #[test]
-    fn test_change_config_environment_variables() {
-        let result = create_temporary_config(
-            "change-env-vars",
-            r#"
-            env-vars = ['A=5', 'B=8']
-        "#,
-        );
-
-        assert_eq!(result.env_vars, [String::from("A=5"), String::from("B=8")]);
-        assert_eq!(result.cursor.shape, default_cursor());
-        assert_eq!(result.theme, default_theme());
-        // Colors
-        assert_eq!(result.colors, default_theme_colors());
     }
 
     #[test]
@@ -1209,40 +1131,31 @@ api-key = "sk-legacy"
         assert_eq!(result.shell.args, Vec::<&str>::new());
     }
 
+    const EXAMPLE_CONFIG_PATH: &str = "../../assets/config-example.toml";
+
+    /// `assets/config-example.toml` documents every key with its built-in
+    /// default. Nothing regenerates it, so this compares it against the real
+    /// serialized default: a key added, removed, or renamed on `Config` fails
+    /// here instead of leaving the example advertising settings that no longer
+    /// exist. Run with `--nocapture` to print the replacement content.
     #[test]
-    fn test_change_developer_and_performance() {
-        let result = create_temporary_config(
-            "change-developer",
-            r#"
-            [developer]
-            enable-fps-counter = true
-            log-level = "INFO"
-        "#,
+    fn example_config_matches_the_serialized_defaults() {
+        let generated = toml::to_string_pretty(&Config::default()).expect("defaults serialize");
+        let shipped =
+            fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(EXAMPLE_CONFIG_PATH))
+                .expect("example config is readable");
+        let body = shipped
+            .split_once("\n\n")
+            .map(|(_, body)| body)
+            .unwrap_or(shipped.as_str());
+        if body.trim() != generated.trim() {
+            println!("---- regenerated assets/config-example.toml body ----");
+            println!("{generated}");
+        }
+        assert_eq!(
+            body.trim(),
+            generated.trim(),
+            "assets/config-example.toml is out of date"
         );
-
-        // Developer
-        assert_eq!(result.developer.log_level, String::from("INFO"));
-        assert!(result.developer.enable_fps_counter);
-
-        // Colors
-        assert_eq!(result.colors, default_theme_colors());
-    }
-
-    #[test]
-    fn test_scrollback_history_limit_default() {
-        let result = create_temporary_config("scrollback-default", "");
-        assert_eq!(result.scrollback_history_limit, 10_000);
-    }
-
-    #[test]
-    fn test_scrollback_history_limit_zero_disables() {
-        // A value of 0 disables scrollback. Must round-trip cleanly.
-        let result = create_temporary_config(
-            "scrollback-zero",
-            r#"
-            scrollback-history-limit = 0
-        "#,
-        );
-        assert_eq!(result.scrollback_history_limit, 0);
     }
 }

@@ -11,11 +11,6 @@ pub fn default_cursor_interval() -> u64 {
 }
 
 #[inline]
-pub fn default_scrollback_history_limit() -> usize {
-    10_000
-}
-
-#[inline]
 pub fn default_shell() -> Shell {
     #[cfg(not(target_os = "windows"))]
     {
@@ -37,11 +32,6 @@ pub fn default_shell() -> Shell {
 #[inline]
 pub fn default_working_dir() -> Option<String> {
     None
-}
-
-#[inline]
-pub fn default_log_level() -> String {
-    String::from("OFF")
 }
 
 #[inline]
