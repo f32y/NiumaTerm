@@ -413,11 +413,6 @@ impl Square {
     }
 
     #[inline]
-    pub fn is_default(self) -> bool {
-        self.0 == 0
-    }
-
-    #[inline]
     pub fn is_wide(self) -> bool {
         matches!(self.wide(), Wide::Wide)
     }
@@ -425,11 +420,6 @@ impl Square {
     #[inline]
     pub fn is_spacer(self) -> bool {
         matches!(self.wide(), Wide::Spacer)
-    }
-
-    #[inline]
-    pub fn is_leading_spacer(self) -> bool {
-        matches!(self.wide(), Wide::LeadingSpacer)
     }
 
     #[inline]

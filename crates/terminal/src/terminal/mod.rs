@@ -24,9 +24,6 @@ use crate::ansi::KeyboardModes;
 
 pub type NamedColor = colors::NamedColor;
 
-pub const MIN_COLUMNS: usize = 2;
-pub const MIN_LINES: usize = 1;
-
 bitflags! {
      #[derive(Debug, Copy, Clone)]
      pub struct Mode: u32 {
