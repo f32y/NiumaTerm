@@ -2,8 +2,8 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Research complete, nothing implemented |
-| Date | 2026-08-14 |
+| Status | R1–R3 landed; the DeepSeek path is still unvalidated |
+| Date | 2026-08-15 |
 | Purpose | Pick the work back up without re-reading the long documents |
 
 ## The three documents
@@ -44,11 +44,27 @@ The real problem is one layer up: **93 branch sites on harness identity, 41 of
 which fail silently** for a new harness. Twenty distinct capabilities are
 encoded as identity checks and written down nowhere.
 
-## Tomorrow's first choice
+## What has been done
 
-Two independent starting points. They do not block each other.
+**Option B is complete through R1.** Three commits on `dev`:
 
-**Option A — validate the DeepSeek path first (about half a day, no Rust).**
+- **R2 + R3** — the pane no longer names a `Backend` variant anywhere.
+  `begin_task_restoration`, `finish_task_restoration`, `resume_thread` (now
+  returning whether it was accepted), and `request_more_history` are Backend
+  methods; `Backend::spawn` owns construction, the stderr sink, and how a
+  recovery id is used; `RecoveryIdentity` is `{ kind, id }` with the
+  empty-conversation case moved into an `Option`; the background-task match is
+  exhaustive on both enums.
+- **R1** — `agent_pane/capabilities.rs` holds a `Capabilities` struct with one
+  `const` per kind and no `Default`. Ten capabilities are named there, and no
+  production `AgentKind` equality comparison remains in the crate. Every
+  surviving `AgentKind::` use is an exhaustive match or a constructor.
+
+No behavior changed and the 376 existing tests pass unmodified.
+
+## Next
+
+**Option A — validate the DeepSeek path (about half a day, no Rust).**
 
 ```sh
 npx @deepseek-ai/dsh-acp-demo@next --config <cordis.yml>
@@ -61,16 +77,12 @@ long to first output compared to the native harness binaries. Then try
 installed and no repository build is needed. A starting `cordis.yml` can be
 copied from `examples/acp-agent/cordis.yml` in the DeepSeek Harness tree.
 
-**Option B — start the refactor (mechanical, behavior-preserving).**
+It is cheap, and if the ACP path turns out not to work on Windows or to be
+unacceptably slow, the whole DeepSeek plan changes.
 
-In order: R2 (close the five `Backend` enum leaks), R3 (extract the spawn
-factory), then R1 (the capability table). R1 is where the silent-behavior risk
-lives, but R2 and R3 are the smaller, more self-contained ones to warm up on.
-Existing Codex and Claude tests cover all three.
-
-Recommendation: **Option A first.** It is cheap, and if the ACP path turns out
-not to work on Windows or to be unacceptably slow, the whole DeepSeek plan
-changes and the refactor priorities change with it.
+Then land the third harness against the refactored shape. R5 (data-drive the two
+hand-written UI kind lists) is what still keeps a registered kind from appearing
+in settings at all, so it comes with that work rather than before it.
 
 ## Decisions still open
 
@@ -87,5 +99,5 @@ changes and the refactor priorities change with it.
 
 ## Not done
 
-Nothing was implemented. The three research documents are new and uncommitted;
-no source file was modified.
+Nothing DeepSeek-specific: no `dsh` interface has been exercised, and no adapter
+code exists. R4 through R7 from the refactor document remain open.

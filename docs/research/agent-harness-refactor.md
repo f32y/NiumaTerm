@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Research; no implementation decision recorded yet |
+| Status | R1, R2, and R3 landed on 2026-08-15; R4–R7 open |
 | Date | 2026-08-14 |
 | Scope | Reducing the cost of adding a third and later agent harness |
 | Companions | [`agent-harness-integration-requirements.md`](../agent-harness-integration-requirements.md), [`deepseek-harness-integration.md`](./deepseek-harness-integration.md) |
@@ -97,7 +97,7 @@ differs between harnesses, and none of it is written down anywhere today.
 
 ## 3. Recommended refactors
 
-### R1 — A capability table (highest value)
+### R1 — A capability table (highest value) — landed
 
 Replace the capability checks with a struct returned per harness kind:
 
@@ -124,7 +124,13 @@ asking.
 Cost: 28 call sites edited, one new file. No behavior change, and the existing
 Codex and Claude tests cover it.
 
-### R2 — Close the `Backend` enum leaks
+Landed as `agent_pane/capabilities.rs` with ten fields, one `const` per kind,
+and no `Default`. The list is shorter than section 2.3 because the capabilities
+that already had a compiler-checked arm in `backend.rs` stayed there; a field
+nothing reads would only rot. No production `AgentKind` equality comparison
+remains in the crate.
+
+### R2 — Close the `Backend` enum leaks — landed
 
 Five production sites pattern-match the `Backend` enum outside `backend.rs`, in
 each case to reach a method the enum does not expose:
@@ -147,7 +153,12 @@ rather than falling through a catch-all.
 
 Cost: about 40 lines, one file plus five call sites.
 
-### R3 — Extract the spawn factory
+Landed. `resume_thread` returns whether the request was accepted, which is what
+the recent-sessions list already needed to decide between opening and reporting
+why it could not. `session_id()` was already on `Backend` and returns `None` for
+Codex, so the restoration guard collapsed to it.
+
+### R3 — Extract the spawn factory — landed
 
 `session/mod.rs:387-413` builds the backend inline, and the per-harness
 preparation around it is spread over `:342-347` (seed flags) and `:368-373`
@@ -168,6 +179,13 @@ protocol request for Codex — so an explicit factory is the right shape.
 While there, collapse `RecoveryIdentity` (`backend.rs:6`) from one variant per
 harness to `{ kind, id }`. It currently needs a new variant per harness for no
 reason beyond spelling.
+
+Landed as `Backend::spawn(kind, launch, cwd, recovery, deliver)`, which also
+took over the per-harness stderr sink. `RecoveryIdentity::NewConversation`
+became the `None` of `RecoverySnapshot::identity`, since that is the only place
+that asked. Pre-resolving `launch.model` stayed at the call site because it
+reads pane state; it is now gated on the `model_baked_into_launch` capability
+rather than on the kind.
 
 ### R4 — Collapse the identity enums (bigger, decide later)
 
@@ -278,8 +296,8 @@ Claude tests cover them. R4 is the one that benefits from waiting.
 
 Suggested order:
 
-1. R2 and R3 — mechanical, self-contained, make the pane genuinely
-   harness-agnostic.
-2. R1 — the capability table, which is where the silent-behavior risk is.
-3. Land the third harness against the refactored shape.
-4. Re-evaluate R4, R5, R6, and R7 with three harnesses in hand.
+1. ~~R2 and R3~~ — done; the pane no longer names a `Backend` variant.
+2. ~~R1~~ — done; the capability table carries the silent-behavior risk.
+3. Land the third harness against the refactored shape, taking R5 with it so a
+   registered kind is reachable from the UI at all.
+4. Re-evaluate R4, R6, and R7 with three harnesses in hand.
