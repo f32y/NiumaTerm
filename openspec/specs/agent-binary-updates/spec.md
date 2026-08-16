@@ -33,7 +33,7 @@ The system SHALL use the configured launcher and effective agent environment to 
 - **THEN** the system reports any safely discovered current version and marks available-version discovery unsupported without guessing an installer or channel mapping
 
 ### Requirement: Update status and user control
-The system SHALL present update controls under Agent General, with one automatic-check switch, one manual Check action covering all effective installations referenced by agent profiles, and one status and Update row per distinct installation.
+The system SHALL present update controls under Agent General, with one automatic-check switch, one manual Check action covering all effective installations referenced by agent profiles, and one status and Update row per distinct installation. An agent profile whose harness has no vendor-managed installation SHALL contribute no installation to those controls.
 
 #### Scenario: Automatic checking is enabled
 - **WHEN** the automatic-check switch is on
@@ -62,6 +62,10 @@ The system SHALL present update controls under Agent General, with one automatic
 #### Scenario: User has not approved installation
 - **WHEN** an automatic or manual check reports an available version
 - **THEN** the system shows the version-keyed update notification and MUST NOT execute the update until the user approves an Update action
+
+#### Scenario: A harness updates outside the application
+- **WHEN** an agent profile references a harness the user installs and updates through their own package manager
+- **THEN** Agent General shows no status or Update row for it, and the shared Check action does not probe it
 
 ### Requirement: Top-right update notification lifecycle
 The system SHALL present an available provider update as a persistent in-app notification at the top-right of the window and SHALL update that same notification in place as the installation transaction progresses.
