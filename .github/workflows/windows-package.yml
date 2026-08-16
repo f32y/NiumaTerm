@@ -51,8 +51,6 @@ jobs:
             "target/release/OpenConsole.exe"
           ) $package
 
-          Copy-Item "target/release/assets" $package -Recurse
-
           Compress-Archive `
             -Path "$package/*" `
             -DestinationPath "$package.zip"
