@@ -39,7 +39,7 @@ use gpui_component::input::{
     Enter, Escape, IndentInline, Input, InputEvent, InputState, MoveDown, MoveUp,
 };
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
-use gpui_component::radio::RadioGroup;
+use gpui_component::radio::Radio;
 use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 use gpui_component::skeleton::Skeleton;
 use gpui_component::spinner::Spinner;
@@ -166,6 +166,11 @@ struct UnansweredPrompt {
 struct QuestionPrompt {
     questions: Vec<Question>,
     selected: Vec<Vec<usize>>,
+    /// The option the arrow keys are on, as `(question, option)`. The composer
+    /// input keeps the real focus while the card is up, so this is a highlight
+    /// the pane draws rather than a focused widget, the same way the command
+    /// palette tracks its own row.
+    focus: (usize, usize),
 }
 
 impl QuestionPrompt {
@@ -175,11 +180,56 @@ impl QuestionPrompt {
         Self {
             questions,
             selected,
+            focus: (0, 0),
         }
     }
 
     fn is_selected(&self, question: usize, option: usize) -> bool {
         self.selected[question].contains(&option)
+    }
+
+    fn is_focused(&self, question: usize, option: usize) -> bool {
+        self.focus == (question, option)
+    }
+
+    /// Every option of every question, in the order they are drawn. Moving
+    /// across question boundaries rather than stopping at them is what lets one
+    /// pair of keys answer a whole card.
+    fn options_in_order(&self) -> Vec<(usize, usize)> {
+        self.questions
+            .iter()
+            .enumerate()
+            .flat_map(|(question, entry)| {
+                (0..entry.options.len()).map(move |option| (question, option))
+            })
+            .collect()
+    }
+
+    /// Move the highlight by one, wrapping at both ends. A card holds at most
+    /// four questions of four options, so wrapping is quicker than reversing
+    /// direction and cannot hide an option off-screen.
+    fn move_focus(&mut self, forward: bool) -> bool {
+        let order = self.options_in_order();
+        if order.is_empty() {
+            return false;
+        }
+
+        // A highlight that names no drawn option lands on the first one instead
+        // of stepping past it, which is what happens when the leading question
+        // carries no options at all.
+        let Some(current) = order.iter().position(|entry| *entry == self.focus) else {
+            self.focus = order[0];
+            return true;
+        };
+
+        let next = if forward {
+            (current + 1) % order.len()
+        } else {
+            (current + order.len() - 1) % order.len()
+        };
+
+        self.focus = order[next];
+        true
     }
 
     /// Single-select replaces the pick; multi-select toggles it. Multi-select
@@ -307,6 +357,51 @@ mod question_prompt_tests {
         prompt.toggle(1, 2);
         assert!(!prompt.is_complete());
         assert_eq!(prompt.answers()[1], Vec::<String>::new());
+    }
+
+    #[test]
+    fn the_highlight_walks_every_option_across_questions_and_wraps() {
+        let mut prompt = QuestionPrompt::new(vec![
+            question("Which database?", false, &["Postgres", "SQLite"]),
+            question("Which extras?", true, &["Metrics", "Tracing"]),
+        ]);
+
+        assert!(prompt.is_focused(0, 0));
+
+        // Down crosses the question boundary rather than stopping at it, so one
+        // pair of keys reaches every option on the card.
+        let walked: Vec<(usize, usize)> = (0..4)
+            .map(|_| {
+                prompt.move_focus(true);
+                prompt.focus
+            })
+            .collect();
+        assert_eq!(walked, vec![(0, 1), (1, 0), (1, 1), (0, 0)]);
+
+        // Up from the first option wraps to the last.
+        prompt.move_focus(false);
+        assert_eq!(prompt.focus, (1, 1));
+    }
+
+    #[test]
+    fn a_question_with_no_options_cannot_trap_the_highlight() {
+        // The provider caps options at four but does not promise a minimum, and
+        // a card that swallows the arrow keys would leave the user no way to
+        // reach the options that do exist.
+        let mut prompt = QuestionPrompt::new(vec![
+            question("Nothing to pick", false, &[]),
+            question("Which database?", false, &["Postgres", "SQLite"]),
+        ]);
+
+        // The first press reaches the first drawn option rather than stepping
+        // over it, which is what an out-of-range starting highlight would do.
+        assert!(prompt.move_focus(true));
+        assert_eq!(prompt.focus, (1, 0));
+
+        // A card with nothing to pick consumes no keys, so they still reach
+        // whatever else is listening.
+        let empty = &mut QuestionPrompt::new(vec![question("Nothing at all", false, &[])]);
+        assert!(!empty.move_focus(true));
     }
 }
 

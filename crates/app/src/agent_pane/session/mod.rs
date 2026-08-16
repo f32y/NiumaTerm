@@ -7,7 +7,8 @@ mod update_recovery;
 use nmt_i18n::i18n;
 
 use crate::agent_pane::composer::{
-    CommandFeedbackKind, restored_input_after_interruption, rewind_blocks_submission,
+    CommandFeedbackKind, PaletteControl, restored_input_after_interruption,
+    rewind_blocks_submission,
 };
 use crate::agent_pane::profile::{ANTHROPIC_MODEL_ENV, launch_env_value};
 pub(super) use crate::agent_pane::session::backend::Backend;
@@ -902,7 +903,50 @@ impl AgentPane {
     ) {
         if let Some(prompt) = self.pending_questions.as_mut() {
             prompt.toggle(question, option);
+            // Clicking also moves the highlight, so a switch to the keyboard
+            // continues from the option the user just touched rather than from
+            // wherever the arrows were left.
+            prompt.focus = (question, option);
             cx.notify();
+        }
+    }
+
+    /// Drive the question card from the keyboard. Returns whether the card
+    /// consumed the key, so the caller can fall through to the surfaces that
+    /// share these keys when no card is up.
+    ///
+    /// Enter answers the highlighted option rather than submitting the card:
+    /// with several questions, or a multi-select one, the user is rarely done
+    /// after one press, and a key that sometimes submits and sometimes selects
+    /// cannot be predicted from what is on screen.
+    pub(in crate::agent_pane) fn handle_question_control(
+        &mut self,
+        control: PaletteControl,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(prompt) = self.pending_questions.as_mut() else {
+            return false;
+        };
+
+        match control {
+            PaletteControl::Previous | PaletteControl::Next => {
+                if prompt.move_focus(matches!(control, PaletteControl::Next)) {
+                    cx.stop_propagation();
+                    cx.notify();
+                    return true;
+                }
+                false
+            }
+            PaletteControl::Activate => {
+                let (question, option) = prompt.focus;
+                cx.stop_propagation();
+                self.toggle_question_option(question, option, cx);
+                true
+            }
+            // Completion belongs to the composer, and dismissing the card would
+            // answer the question by refusing it, which needs the visible
+            // control rather than a keystroke.
+            PaletteControl::Complete | PaletteControl::Dismiss => false,
         }
     }
 

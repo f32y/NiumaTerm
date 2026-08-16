@@ -268,6 +268,12 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) {
         let Some(model) = self.palette_model(cx) else {
+            // The card is answered before the recent-sessions list or the input
+            // history get a look, because the turn is blocked on it and neither
+            // of those can lead anywhere until it is.
+            if self.handle_question_control(control, cx) {
+                return;
+            }
             if self.handle_recent_sessions_control(control, cx) {
                 return;
             }
