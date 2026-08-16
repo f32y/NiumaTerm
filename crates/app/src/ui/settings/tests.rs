@@ -5,6 +5,7 @@ use gpui::{
     ScrollWheelEvent, TestAppContext, list, point, size,
 };
 
+use crate::agent_pane::AgentKind;
 use crate::ui::settings::*;
 
 #[test]
@@ -224,7 +225,9 @@ fn profile_mutations_keep_default_valid() {
 #[test]
 fn agent_profile_mutations_keep_default_valid() {
     let mut settings = AppSettings::default();
-    assert_eq!(settings.agent_profiles.len(), 2);
+    // One seeded profile per registered harness, the first of which is the
+    // default a new installation launches.
+    assert_eq!(settings.agent_profiles.len(), AgentKind::ALL.len());
     assert_eq!(settings.default_agent_profile, "Claude Code");
 
     // Unique-name resolution: an empty desired name takes the kind
@@ -256,7 +259,9 @@ fn agent_profile_mutations_keep_default_valid() {
     assert_eq!(settings.default_agent_profile, "Codex");
 
     // Every profile can be removed; an empty list clears the default.
-    settings.remove_agent_profile(0);
+    while !settings.agent_profiles.is_empty() {
+        settings.remove_agent_profile(0);
+    }
     assert!(settings.agent_profiles.is_empty());
     assert_eq!(settings.default_agent_profile, "");
 
@@ -403,4 +408,30 @@ fn smooth_scrolling_mode_updates_an_open_terminal_list(cx: &mut TestAppContext) 
     cx.executor().advance_clock(Duration::from_millis(400));
     draw_settings_aware_list(cx, &view);
     assert!((list_pixel_position(&state) - stopped_at).abs() < 0.1);
+}
+
+#[test]
+fn every_registered_harness_can_be_named_seeded_and_launched() {
+    // A kind that is selectable in one surface and missing from another is
+    // invisible in practice: the add dialog's picker, the seeded list, and the
+    // built-in profile all have to agree on the same registry.
+    for kind in AgentKind::ALL {
+        let profile = builtin_agent_profile(kind.profile_kind());
+
+        assert_eq!(profile.kind, kind.profile_kind(), "{}", kind.id());
+        assert!(!profile.executable.trim().is_empty(), "{}", kind.id());
+        assert!(!profile.name.trim().is_empty(), "{}", kind.id());
+        assert!(
+            !agent_kind_display_label(kind.profile_kind()).is_empty(),
+            "{} has no display label",
+            kind.id()
+        );
+    }
+
+    // Round-tripping catches a conversion that quietly maps a new kind onto an
+    // existing one, which would make its profiles open the wrong backend.
+    for kind in AgentKind::ALL {
+        assert_eq!(AgentKind::from_profile(kind.profile_kind()), kind);
+        assert_eq!(AgentKind::from_id(kind.id()), Some(kind));
+    }
 }

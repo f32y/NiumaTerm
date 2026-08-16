@@ -137,6 +137,7 @@
 "settings-agent-title" = "智能体"
 "settings-agent-kind-claude-code" = "Claude Code"
 "settings-agent-kind-codex" = "Codex"
+"settings-agent-kind-deepseek" = "DeepSeek Harness"
 "settings-agent-description" = "配置智能体事件处理和每个智能体的 Hook 安装。"
 "settings-agent-general" = "常规"
 "settings-agent-show-usage" = "显示智能体用量"
@@ -195,6 +196,7 @@
 "settings-agent-profile-model" = "模型"
 "settings-agent-profile-model-claude-description" = "初始模型；通过 ANTHROPIC_MODEL 传给 Claude Code。"
 "settings-agent-profile-model-codex-description" = "初始模型；在 Codex 的 app-server 线程启动时传入。"
+"settings-agent-profile-model-deepseek-description" = "初始模型。选择模型尚未接入该智能体，因此此处填写的值会被保存但不会生效。"
 "settings-agent-profile-replace-sub-models" = "用主模型替换所有子模型配置"
 "settings-agent-profile-replace-sub-models-description" = "同时将上方模型设置为 ANTHROPIC_DEFAULT_OPUS_MODEL、ANTHROPIC_DEFAULT_SONNET_MODEL 和 ANTHROPIC_DEFAULT_HAIKU_MODEL，让仅提供一个模型的端点处理所有层级。下方表格中的同名变量仍然优先。"
 "settings-agent-profile-effort" = "推理强度"
@@ -210,9 +212,11 @@
 "settings-agent-profile-api-url" = "API URL"
 "settings-agent-profile-api-url-claude-description" = "启用自定义端点时导出为 ANTHROPIC_BASE_URL。"
 "settings-agent-profile-api-url-codex-description" = "作为当前配置专用的 Codex 模型提供方基础 URL 注入。"
+"settings-agent-profile-api-url-deepseek-description" = "未使用：DeepSeek Harness 读取自己的端点配置。"
 "settings-agent-profile-api-key" = "API 密钥"
 "settings-agent-profile-api-key-claude-description" = "启用自定义端点时导出为 {key}。URL 和密钥在 config.toml 中加密存储，可避免读取该文件的程序直接看到它们；检查 NiumaTerm 可执行文件或智能体进程仍可能恢复这些信息。"
 "settings-agent-profile-api-key-codex-description" = "导出为 {key} 并由当前配置专用的提供方引用。URL 和密钥在 config.toml 中加密存储，可避免读取该文件的程序直接看到它们；检查 NiumaTerm 可执行文件或智能体进程仍可能恢复这些信息。"
+"settings-agent-profile-api-key-deepseek-description" = "导出为 {key}。DeepSeek Harness 优先使用自己保存的凭据，找不到时回退到该变量。它在 config.toml 中加密存储，可避免读取该文件的程序直接看到它；检查 NiumaTerm 可执行文件或智能体进程仍可能恢复该信息。"
 
 # 系统设置
 "settings-system-title" = "系统"

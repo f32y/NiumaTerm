@@ -45,15 +45,18 @@ pub(crate) struct AgentUpdates {
 impl Global for AgentUpdates {}
 
 impl AgentUpdates {
-    fn register_profile(&self, profile: &AgentProfile) -> InstallationKey {
-        let provider = provider_for_profile(profile.kind);
+    /// `None` for a profile whose harness has no vendor-managed installation:
+    /// it registers nothing, so it never reaches the status rows or the shared
+    /// Check action.
+    fn register_profile(&self, profile: &AgentProfile) -> Option<InstallationKey> {
+        let provider = provider_for_profile(profile.kind)?;
         let launch = agent_launch(profile);
         let launcher = AgentCli::from_launch(&launch, provider.default_executable());
         let maintenance = match provider {
             ProviderKind::Claude => self.claude.clone(),
             ProviderKind::Codex => self.codex.clone(),
         };
-        self.coordinator.register(provider, launcher, maintenance)
+        Some(self.coordinator.register(provider, launcher, maintenance))
     }
 
     pub(crate) fn testing(&self) -> bool {
@@ -133,7 +136,7 @@ pub(crate) fn installations_for_profiles(
     distinct_installation_keys(
         profiles
             .iter()
-            .map(|profile| updates.register_profile(profile)),
+            .filter_map(|profile| updates.register_profile(profile)),
     )
     .into_iter()
     .filter_map(|key| updates.coordinator.snapshot(&key))
@@ -149,7 +152,7 @@ pub(crate) fn manual_check_profiles(profiles: &[AgentProfile], cx: &mut App) {
     let keys = distinct_installation_keys(
         profiles
             .iter()
-            .map(|profile| updates.register_profile(profile)),
+            .filter_map(|profile| updates.register_profile(profile)),
     );
     let coordinator = updates.coordinator.clone();
     cx.spawn(async move |cx| {

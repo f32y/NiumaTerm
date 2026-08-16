@@ -1,4 +1,5 @@
 use gpui::{Global, SharedString};
+use nmt_agent_utils::deepseek;
 use nmt_config::agent::AgentConfig;
 use nmt_config::appearance::{AppearanceConfig, SmoothScrollingMode};
 pub use nmt_config::appearance::{InputStyle, Language, WindowBackdrop};
@@ -11,6 +12,7 @@ use nmt_config::{CursorShape, SettingsPatch, get, save_settings};
 use nmt_i18n::i18n;
 use tracing::warn;
 
+use crate::agent_pane::AgentKind;
 use crate::ui::settings::MAX_TAB_WIDTH;
 use crate::ui::settings::theme::load_theme_choices;
 
@@ -232,6 +234,7 @@ pub(super) fn agent_kind_label(kind: AgentProfileKind) -> &'static str {
     match kind {
         AgentProfileKind::ClaudeCode => "Claude Code",
         AgentProfileKind::Codex => "Codex",
+        AgentProfileKind::DeepSeek => "DeepSeek Harness",
     }
 }
 
@@ -239,6 +242,7 @@ pub(super) fn agent_kind_display_label(kind: AgentProfileKind) -> &'static str {
     match kind {
         AgentProfileKind::ClaudeCode => i18n("settings-agent-kind-claude-code"),
         AgentProfileKind::Codex => i18n("settings-agent-kind-codex"),
+        AgentProfileKind::DeepSeek => i18n("settings-agent-kind-deepseek"),
     }
 }
 
@@ -249,6 +253,7 @@ pub(crate) fn builtin_agent_profile(kind: AgentProfileKind) -> AgentProfile {
     let executable = match kind {
         AgentProfileKind::ClaudeCode => "claude",
         AgentProfileKind::Codex => "codex",
+        AgentProfileKind::DeepSeek => deepseek::DEFAULT_EXECUTABLE,
     };
 
     AgentProfile {
@@ -260,12 +265,13 @@ pub(crate) fn builtin_agent_profile(kind: AgentProfileKind) -> AgentProfile {
 }
 
 /// The agent profiles seeded when the config file defines none: one per
-/// supported agent CLI.
+/// harness. Reading the registered kinds is what keeps a newly added harness
+/// from needing this list edited too.
 fn builtin_agent_profiles() -> Vec<AgentProfile> {
-    vec![
-        builtin_agent_profile(AgentProfileKind::ClaudeCode),
-        builtin_agent_profile(AgentProfileKind::Codex),
-    ]
+    AgentKind::ALL
+        .into_iter()
+        .map(|kind| builtin_agent_profile(kind.profile_kind()))
+        .collect()
 }
 
 /// Snap a persisted refresh interval to the allowed set, falling back to 30.

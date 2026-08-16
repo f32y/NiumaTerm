@@ -12,6 +12,10 @@ impl AgentPane {
         match self.kind {
             AgentKind::Codex => self.render_codex_settings_row(cx).into_any_element(),
             AgentKind::Claude => self.render_claude_settings_row(cx).into_any_element(),
+            // Model, permission, and effort selection are all unmapped for
+            // DeepSeek, and a row of pickers that change nothing would read as
+            // broken rather than as unfinished.
+            AgentKind::DeepSeek => div().into_any_element(),
         }
     }
 

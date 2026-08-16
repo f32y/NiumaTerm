@@ -105,14 +105,19 @@ impl AgentPane {
                                     this.respond_approval("decline", cx)
                                 })),
                         )
-                        .child(
-                            Button::new("approval-session")
-                                .outline()
-                                .label(i18n("agent-approval-allow-session"))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.respond_approval("acceptForSession", cx)
-                                })),
-                        )
+                        // Offered only where it means something. A harness that
+                        // can answer just this one call would quietly turn a
+                        // session-wide grant into a single-use one.
+                        .when(self.kind.caps().session_scoped_approval, |this| {
+                            this.child(
+                                Button::new("approval-session")
+                                    .outline()
+                                    .label(i18n("agent-approval-allow-session"))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.respond_approval("acceptForSession", cx)
+                                    })),
+                            )
+                        })
                         .child(
                             Button::new("approval-accept")
                                 .primary()

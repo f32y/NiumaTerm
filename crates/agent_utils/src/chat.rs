@@ -630,7 +630,7 @@ impl ReplayTurn {
 }
 
 /// Outcome of a session's `send_user_message`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SendOutcome {
     /// A new turn was started.
     StartedTurn,
@@ -638,6 +638,11 @@ pub enum SendOutcome {
     Steered,
     /// The handshake has not produced a thread yet.
     NotReady,
+    /// The backend understood the message and refused it, in its own words.
+    /// Only backends that admit a prompt over a request-response call can tell
+    /// the difference between this and [`Self::NotReady`]; one that writes to a
+    /// pipe learns nothing at send time and never reports it.
+    Rejected { message: String },
 }
 
 #[cfg(test)]

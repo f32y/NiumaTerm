@@ -41,6 +41,11 @@ pub(crate) struct Capabilities {
     /// Compaction is reported with enough detail for the transcript row to
     /// expand into what was summarized.
     pub(crate) expandable_compaction_rows: bool,
+    /// An approval can be granted for the rest of the session, not just for the
+    /// one call that asked. A harness whose answer vocabulary has no such
+    /// outcome offers no button for it, because a button that silently degrades
+    /// to allow-once would misreport what the user just agreed to.
+    pub(crate) session_scoped_approval: bool,
 }
 
 const CODEX: Capabilities = Capabilities {
@@ -54,6 +59,7 @@ const CODEX: Capabilities = Capabilities {
     resume_restores_approval_reviewer: false,
     model_baked_into_launch: false,
     expandable_compaction_rows: false,
+    session_scoped_approval: true,
 };
 
 const CLAUDE: Capabilities = Capabilities {
@@ -67,6 +73,25 @@ const CLAUDE: Capabilities = Capabilities {
     resume_restores_approval_reviewer: false,
     model_baked_into_launch: true,
     expandable_compaction_rows: true,
+    session_scoped_approval: true,
+};
+
+/// The DeepSeek host publishes tool activity, approvals, usage projections,
+/// history, and subagents, so these are false because this integration does not
+/// map them yet rather than because the harness lacks them. The exception is
+/// `file_rewind`: DeepSeek Harness has no equivalent operation at all.
+const DEEPSEEK: Capabilities = Capabilities {
+    skill_references: false,
+    file_rewind: false,
+    workflows: false,
+    async_command_discovery: false,
+    repeats_ready_during_init: false,
+    filesystem_session_history: false,
+    resume_restores_thread_settings: false,
+    resume_restores_approval_reviewer: false,
+    model_baked_into_launch: false,
+    expandable_compaction_rows: false,
+    session_scoped_approval: false,
 };
 
 impl AgentKind {
@@ -74,6 +99,7 @@ impl AgentKind {
         match self {
             AgentKind::Codex => &CODEX,
             AgentKind::Claude => &CLAUDE,
+            AgentKind::DeepSeek => &DEEPSEEK,
         }
     }
 }

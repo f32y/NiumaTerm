@@ -68,7 +68,7 @@ use nmt_agent_utils::update::{InstallationKey, ProviderKind};
 use nmt_agent_utils::workflow::{WorkflowAgentState, WorkflowRun, WorkflowSnapshot};
 use nmt_agent_utils::{
     AgentEvent, AgentEventKind, AgentRoute, CodexProviderConfig, LaunchConfig, agent_process,
-    normalize_body, normalize_title,
+    deepseek, normalize_body, normalize_title,
 };
 use nmt_config::local_state::{self, AgentDefaults as StoredAgentDefaults};
 use nmt_config::profile::{AgentProfile, AgentProfileKind};

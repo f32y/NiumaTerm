@@ -17,7 +17,6 @@ use nmt_terminal::event::{ProgressReport, ProgressState};
 use super::Shell;
 use super::shell::TabSurface;
 use crate::agent_pane::AgentKind;
-use crate::agent_pane::usage::{ClaudeIcon, CodexIcon};
 use crate::tabs::{TabId, TabManager};
 use crate::ui::terminal_status::{terminal_dot, terminal_presentation};
 use crate::ui::{AppSettings, UI_RADIUS};
@@ -196,8 +195,7 @@ fn agent_tab_indicator(busy: bool, unread: bool) -> Option<AgentTabIndicator> {
 /// the settings tab, a terminal mark otherwise.
 fn tab_icon(agent_kind: Option<AgentKind>, settings: bool) -> Icon {
     match agent_kind {
-        Some(AgentKind::Codex) => Icon::new(CodexIcon),
-        Some(AgentKind::Claude) => Icon::new(ClaudeIcon),
+        Some(kind) => kind.icon(),
         None if settings => Icon::new(IconName::Settings),
         None => Icon::new(IconName::SquareTerminal),
     }

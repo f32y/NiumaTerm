@@ -5,7 +5,6 @@ use crate::agent_pane::*;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RecoverySnapshot {
-    pub(crate) installation: InstallationKey,
     /// `None` for an untouched conversation, which has nothing to resume and
     /// so restarts as a new one rather than failing the update.
     pub(crate) identity: Option<RecoveryIdentity>,
@@ -36,14 +35,14 @@ pub(in crate::agent_pane) enum UpdateSuspension {
 }
 
 impl AgentPane {
-    pub(crate) fn installation_key(&self) -> InstallationKey {
-        let provider = match self.kind {
-            AgentKind::Claude => ProviderKind::Claude,
-            AgentKind::Codex => ProviderKind::Codex,
-        };
+    /// `None` when this tab's harness has no vendor-managed installation, which
+    /// is also what keeps such a tab out of every update transaction: it
+    /// matches no installation being updated.
+    pub(crate) fn installation_key(&self) -> Option<InstallationKey> {
+        let provider = self.kind.provider_kind()?;
         let launch = agent_launch(&self.profile);
         let launcher = AgentCli::from_launch(&launch, provider.default_executable());
-        InstallationKey::derive(provider, &launcher).key
+        Some(InstallationKey::derive(provider, &launcher).key)
     }
 
     /// Assess both quiescence and recoverability before any related backend
@@ -93,7 +92,6 @@ impl AgentPane {
         };
 
         RecoveryReadiness::Ready(RecoverySnapshot {
-            installation: self.installation_key(),
             identity,
             profile_name: self.profile.name.clone(),
         })

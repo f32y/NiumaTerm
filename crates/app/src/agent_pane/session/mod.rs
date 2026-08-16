@@ -559,14 +559,17 @@ impl AgentPane {
             None => SendOutcome::NotReady,
         };
 
-        if outcome == SendOutcome::NotReady {
-            self.push_item(
-                SessionItem::Error {
-                    text: i18n("agent-session-still-starting")
-                        .replace("{name}", self.kind.display()),
-                },
-                cx,
-            );
+        // Both refusals keep the composed text recoverable; they differ only in
+        // whether the backend could say why.
+        let refusal = match &outcome {
+            SendOutcome::NotReady => {
+                Some(i18n("agent-session-still-starting").replace("{name}", self.kind.display()))
+            }
+            SendOutcome::Rejected { message } => Some(message.clone()),
+            SendOutcome::StartedTurn | SendOutcome::Steered => None,
+        };
+        if let Some(text) = refusal {
+            self.push_item(SessionItem::Error { text }, cx);
             return false;
         }
 
@@ -590,7 +593,7 @@ impl AgentPane {
                 self.queued_user_messages.push_back(text);
                 cx.notify();
             }
-            SendOutcome::NotReady => unreachable!(),
+            SendOutcome::NotReady | SendOutcome::Rejected { .. } => unreachable!(),
         }
 
         true
@@ -691,6 +694,9 @@ impl AgentPane {
         Some(match identity.kind {
             AgentKind::Codex => BackgroundTaskKey::codex(identity.id),
             AgentKind::Claude => BackgroundTaskKey::claude_code(identity.id),
+            // Child agents are not mapped for DeepSeek yet, so there is no
+            // parent to name and the Background Tasks button stays disabled.
+            AgentKind::DeepSeek => return None,
         })
     }
 
@@ -991,6 +997,13 @@ impl AgentPane {
                 })
                 .detach();
             }
+            // Neither history source is mapped for DeepSeek, so its list is
+            // always empty and nothing can be picked from it. Restoring the
+            // previous state keeps that reachable-by-accident case harmless.
+            AgentKind::DeepSeek => {
+                self.history_ui.mode = RecentSessionsMode::Open;
+                self.status = previous_status;
+            }
         }
     }
 
@@ -1023,6 +1036,10 @@ impl AgentPane {
         match self.kind {
             AgentKind::Claude => launch_env_value(&launch, ANTHROPIC_MODEL_ENV),
             AgentKind::Codex => launch.model,
+            // DeepSeek takes a model through a per-session call rather than the
+            // launch, and that call is not mapped yet, so the profile field
+            // cannot describe what the session will actually run.
+            AgentKind::DeepSeek => None,
         }
     }
 
