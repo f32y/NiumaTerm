@@ -26,8 +26,13 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
 
+      # Stamps the linked outputs with the HEAD commit time, so a package's file
+      # timestamps identify the revision instead of the runner's clock. Only the
+      # last-write time survives Copy-Item and Compress-Archive; creation time is
+      # reassigned by the copy and again by whoever extracts the archive.
       - name: Build
-        run: cargo build --release --locked
+        shell: pwsh
+        run: ./scripts/build.ps1 --release --locked
 
       - name: Package
         shell: pwsh
