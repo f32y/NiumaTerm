@@ -204,6 +204,22 @@ fn tab_icon(agent_kind: Option<AgentKind>, settings: bool) -> Icon {
     .xsmall()
 }
 
+/// The glyph a restored-but-not-yet-spawned tab leads with instead of its own
+/// mark. A moon is the sleeping cue browsers use for discarded tabs, and it
+/// occupies the icon slot every tab already reserves, so the fixed tab width
+/// keeps all of its remaining room for the title. It renders unfaded on purpose:
+/// the faded title says "asleep" only once you have another tab to compare it
+/// against, while the glyph says it on its own.
+fn pending_icon(id: u64) -> AnyElement {
+    div()
+        .id(("tab-pending-icon", id as usize))
+        .aria_label(i18n("tabbar-tooltip-pending"))
+        .flex()
+        .items_center()
+        .child(Icon::new(IconName::Moon).xsmall())
+        .into_any_element()
+}
+
 fn progress_bar_width(tab_width: Pixels) -> Pixels {
     (tab_width - UI_RADIUS * 2.0).max(Pixels::ZERO)
 }
@@ -590,7 +606,12 @@ impl TabStrip {
                                                         this.invisible()
                                                     })
                                                 })
-                                                .child(tab_icon(agent_kind, is_settings)),
+                                                .child(if pending {
+                                                    pending_icon(id)
+                                                } else {
+                                                    tab_icon(agent_kind, is_settings)
+                                                        .into_any_element()
+                                                }),
                                         )
                                         .children(slot_close),
                                 );
@@ -668,7 +689,11 @@ impl TabStrip {
                                 .flex()
                                 .items_center()
                                 .gap_1()
-                                .child(tab_icon(None, is_settings))
+                                .child(if pending {
+                                    pending_icon(id)
+                                } else {
+                                    tab_icon(None, is_settings).into_any_element()
+                                })
                                 .when_some(
                                     terminal_presentation(terminal),
                                     |this, (visual, label)| {
@@ -697,7 +722,11 @@ impl TabStrip {
                                 .flex()
                                 .items_center()
                                 .gap_1()
-                                .child(tab_icon(Some(agent_kind), false))
+                                .child(if pending {
+                                    pending_icon(id)
+                                } else {
+                                    tab_icon(Some(agent_kind), false).into_any_element()
+                                })
                                 .when_some(indicator, |this, indicator| {
                                     this.child(
                                         div()

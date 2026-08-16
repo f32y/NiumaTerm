@@ -349,6 +349,7 @@
 "tabbar-menu-close" = "Close"
 "tabbar-tooltip-agent-busy" = "Agent busy"
 "tabbar-tooltip-agent-ready" = "Agent ready"
+"tabbar-tooltip-pending" = "Not started yet"
 "sidebar-workspace-status-running" = "Running"
 "sidebar-workspace-status-needs-input" = "Needs input"
 "sidebar-workspace-status-idle" = "Idle"

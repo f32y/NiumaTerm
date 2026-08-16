@@ -348,6 +348,7 @@
 "tabbar-menu-close" = "关闭"
 "tabbar-tooltip-agent-busy" = "智能体正忙"
 "tabbar-tooltip-agent-ready" = "智能体就绪"
+"tabbar-tooltip-pending" = "尚未启动"
 "sidebar-workspace-status-running" = "运行中"
 "sidebar-workspace-status-needs-input" = "需要输入"
 "sidebar-workspace-status-idle" = "空闲"
