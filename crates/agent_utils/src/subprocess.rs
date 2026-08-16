@@ -29,6 +29,12 @@ pub(crate) struct KillOnCloseJob(HANDLE);
 // equivalent to moving any other owned Windows kernel handle.
 unsafe impl Send for KillOnCloseJob {}
 
+// Sharing a reference exposes no operation at all: the handle is private and
+// the only thing done with it, closing, happens in Drop and therefore requires
+// ownership. A job shared behind an `Arc` is what lets several agent tabs hold
+// one contained host process.
+unsafe impl Sync for KillOnCloseJob {}
+
 impl KillOnCloseJob {
     pub(crate) fn attach(child: &Child) -> Result<Self, String> {
         unsafe {

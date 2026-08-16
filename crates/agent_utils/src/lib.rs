@@ -2,6 +2,10 @@ pub mod background_task;
 pub mod chat;
 pub mod claude_code;
 pub mod codex;
+/// The DeepSeek adapter drives a host process and a loopback interface, both of
+/// which the shared launcher provides only on Windows.
+#[cfg(target_os = "windows")]
+pub mod deepseek;
 #[cfg(target_os = "windows")]
 pub mod launcher;
 #[cfg(target_os = "windows")]

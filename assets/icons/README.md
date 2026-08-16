@@ -10,11 +10,12 @@ under the ISC License. The required notice is retained in `LICENSE-Lucide`.
 
 ## Provider icons
 
-`codex.svg` and `claude.svg` are derived from Lobe Icons' static SVG package,
-version 1.94.0:
+`codex.svg`, `claude.svg`, and `deepseek.svg` are derived from Lobe Icons'
+static SVG package, version 1.94.0:
 
 - https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/codex.svg
 - https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/claude.svg
+- https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/deepseek.svg
 
 Lobe Icons is Copyright © 2023 LobeHub and distributed under the MIT License:
 https://github.com/lobehub/lobe-icons/blob/master/LICENSE

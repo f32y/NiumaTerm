@@ -21,12 +21,13 @@ impl RecoveryIdentity {
     }
 }
 
-/// The pane's protocol session, one variant per agent kind. Both backends
-/// share the [`nmt_agent_utils::chat`] event vocabulary and method surface,
+/// The pane's protocol session, one variant per agent kind. Every backend
+/// shares the [`nmt_agent_utils::chat`] event vocabulary and method surface,
 /// so the pane dispatches here and stays protocol-agnostic.
 pub(in crate::agent_pane) enum Backend {
     Codex(app_server::Session),
     Claude(stream_json::Session),
+    DeepSeek(deepseek::Session),
     #[cfg(test)]
     Test(TestBackend),
 }
@@ -63,7 +64,7 @@ impl Backend {
         launch: &LaunchConfig,
         cwd: Option<String>,
         recovery: Option<RecoveryIdentity>,
-        deliver: impl Fn(Value) + Send + 'static,
+        deliver: impl Fn(Value) + Send + Sync + 'static,
     ) -> Result<Self, String> {
         let resume = recovery
             .filter(|identity| identity.kind == kind)
@@ -89,6 +90,13 @@ impl Backend {
                 })
                 .map(Backend::Claude)
             }
+            // No process is started per tab here: the harness host is shared by
+            // every DeepSeek tab, and this attaches a conversation to it,
+            // starting it only if no tab holds one yet. `resume` is unused
+            // because continuing an earlier conversation is not mapped yet.
+            AgentKind::DeepSeek => deepseek::Session::create(launch, cwd, deliver)
+                .map(Backend::DeepSeek)
+                .map_err(|error| error.message().to_string()),
         }
     }
 
@@ -96,6 +104,7 @@ impl Backend {
         match self {
             Backend::Codex(session) => session.process(message),
             Backend::Claude(session) => session.process(message),
+            Backend::DeepSeek(session) => session.process(message),
             #[cfg(test)]
             Backend::Test(_) => Vec::new(),
         }
@@ -110,6 +119,12 @@ impl Backend {
         match self {
             Backend::Codex(session) => session.send_user_message_with_skill(text, settings, skill),
             Backend::Claude(session) => session.send_user_message(text, settings),
+            // Skills are not mapped for DeepSeek, so a reference cannot reach
+            // it and the prompt goes as the user wrote it.
+            Backend::DeepSeek(session) => match session.send_user_message(text) {
+                Ok(()) => SendOutcome::StartedTurn,
+                Err(message) => SendOutcome::Rejected { message },
+            },
             #[cfg(test)]
             Backend::Test(session) => session
                 .send_outcomes
@@ -122,6 +137,7 @@ impl Backend {
         match self {
             Backend::Codex(_) => app_server::Session::adapter_commands(),
             Backend::Claude(_) => stream_json::Session::adapter_commands(),
+            Backend::DeepSeek(_) => Vec::new(),
             #[cfg(test)]
             Backend::Test(session) => session.commands.clone(),
         }
@@ -135,6 +151,9 @@ impl Backend {
         match self {
             Backend::Codex(session) => session.execute_slash_command(name, arguments),
             Backend::Claude(session) => session.execute_slash_command(name, arguments),
+            // The harness runs its own commands, but that registry is not
+            // mapped, so only the local commands work in a DeepSeek tab.
+            Backend::DeepSeek(_) => SlashCommandOutcome::NotReady,
             #[cfg(test)]
             Backend::Test(session) => session.slash_outcome.clone(),
         }
@@ -146,7 +165,7 @@ impl Backend {
     ) -> SlashCommandOutcome {
         match self {
             Backend::Claude(session) => session.rewind_files(user_message_id),
-            Backend::Codex(_) => SlashCommandOutcome::Rejected {
+            Backend::Codex(_) | Backend::DeepSeek(_) => SlashCommandOutcome::Rejected {
                 message: i18n("agent-session-file-rewind-claude-only").to_string(),
             },
             #[cfg(test)]
@@ -163,6 +182,7 @@ impl Backend {
             // Claude Code rebuilds tasks from session history rather than a
             // provider query, so there is nothing to re-request live.
             Backend::Claude(_) => {}
+            Backend::DeepSeek(_) => {}
             #[cfg(test)]
             Backend::Test(_) => {}
         }
@@ -189,6 +209,7 @@ impl Backend {
                 }
                 BackgroundTaskProvider::Codex => Vec::new(),
             },
+            Backend::DeepSeek(_) => Vec::new(),
             #[cfg(test)]
             Backend::Test(_) => Vec::new(),
         }
@@ -214,6 +235,7 @@ impl Backend {
                 BackgroundTaskProvider::ClaudeCode => session.interrupt_background_task(key),
                 BackgroundTaskProvider::Codex => false,
             },
+            Backend::DeepSeek(_) => false,
             #[cfg(test)]
             Backend::Test(_) => false,
         }
@@ -226,7 +248,7 @@ impl Backend {
     pub(in crate::agent_pane) fn begin_task_restoration(&mut self) -> u64 {
         match self {
             Backend::Claude(session) => session.begin_task_restoration(),
-            Backend::Codex(_) => 0,
+            Backend::Codex(_) | Backend::DeepSeek(_) => 0,
             #[cfg(test)]
             Backend::Test(_) => 0,
         }
@@ -241,7 +263,7 @@ impl Backend {
             Backend::Claude(session) => {
                 session.finish_task_restoration(restored, starting_sequence)
             }
-            Backend::Codex(_) => Vec::new(),
+            Backend::Codex(_) | Backend::DeepSeek(_) => Vec::new(),
             #[cfg(test)]
             Backend::Test(_) => Vec::new(),
         }
@@ -257,7 +279,7 @@ impl Backend {
                 session.resume_thread(thread_id);
                 true
             }
-            Backend::Claude(_) => false,
+            Backend::Claude(_) | Backend::DeepSeek(_) => false,
             #[cfg(test)]
             Backend::Test(_) => false,
         }
@@ -269,6 +291,7 @@ impl Backend {
         match self {
             Backend::Codex(session) => session.request_more_history(),
             Backend::Claude(_) => {}
+            Backend::DeepSeek(_) => {}
             #[cfg(test)]
             Backend::Test(_) => {}
         }
@@ -277,6 +300,7 @@ impl Backend {
     pub(in crate::agent_pane) fn session_id(&self) -> Option<&str> {
         match self {
             Backend::Claude(session) => session.session_id(),
+            Backend::DeepSeek(session) => session.session_id(),
             Backend::Codex(_) => None,
             #[cfg(test)]
             Backend::Test(_) => None,
@@ -291,6 +315,11 @@ impl Backend {
             Backend::Codex(session) => session
                 .thread_id()
                 .map(|id| RecoveryIdentity::new(AgentKind::Codex, id)),
+            // The id names the conversation on the harness host, which is worth
+            // reporting even though resuming into it is not mapped yet.
+            Backend::DeepSeek(session) => session
+                .session_id()
+                .map(|id| RecoveryIdentity::new(AgentKind::DeepSeek, id)),
             #[cfg(test)]
             Backend::Test(_) => None,
         }
@@ -300,6 +329,7 @@ impl Backend {
         match self {
             Backend::Claude(session) => session.has_active_operation(),
             Backend::Codex(session) => session.has_active_operation(),
+            Backend::DeepSeek(session) => session.has_active_operation(),
             #[cfg(test)]
             Backend::Test(_) => false,
         }
@@ -313,6 +343,9 @@ impl Backend {
         match self {
             Backend::Claude(session) => session.shutdown(timeout, force),
             Backend::Codex(session) => session.shutdown(timeout, force),
+            // Dropping this session releases its hold on the shared host, and
+            // the last tab to let go stops it. Nothing here has to wait.
+            Backend::DeepSeek(_) => Ok(()),
             #[cfg(test)]
             Backend::Test(_) => Ok(()),
         }
@@ -321,7 +354,7 @@ impl Backend {
     pub(in crate::agent_pane) fn process_exit(&mut self) -> Vec<SessionEvent> {
         match self {
             Backend::Claude(session) => session.process_exit(),
-            Backend::Codex(_) => Vec::new(),
+            Backend::Codex(_) | Backend::DeepSeek(_) => Vec::new(),
             #[cfg(test)]
             Backend::Test(_) => Vec::new(),
         }
@@ -331,6 +364,7 @@ impl Backend {
         match self {
             Backend::Codex(session) => session.interrupt(),
             Backend::Claude(session) => session.interrupt(),
+            Backend::DeepSeek(session) => session.interrupt(),
             #[cfg(test)]
             Backend::Test(_) => {}
         }
@@ -340,6 +374,7 @@ impl Backend {
         match self {
             Backend::Codex(session) => session.respond_approval(decision),
             Backend::Claude(session) => session.respond_approval(decision),
+            Backend::DeepSeek(session) => session.respond_approval(decision),
             #[cfg(test)]
             Backend::Test(_) => {}
         }
@@ -350,7 +385,7 @@ impl Backend {
     pub(in crate::agent_pane) fn workflow_refresh_requests(&self) -> Vec<WorkflowRefreshRequest> {
         match self {
             Backend::Claude(session) => session.workflow_refresh_requests(),
-            Backend::Codex(_) => Vec::new(),
+            Backend::Codex(_) | Backend::DeepSeek(_) => Vec::new(),
             #[cfg(test)]
             Backend::Test(_) => Vec::new(),
         }
@@ -362,7 +397,7 @@ impl Backend {
     ) -> Vec<SessionEvent> {
         match self {
             Backend::Claude(session) => session.apply_workflow_refresh(result),
-            Backend::Codex(_) => Vec::new(),
+            Backend::Codex(_) | Backend::DeepSeek(_) => Vec::new(),
             #[cfg(test)]
             Backend::Test(_) => Vec::new(),
         }
@@ -374,7 +409,7 @@ impl Backend {
     ) -> Vec<SessionEvent> {
         match self {
             Backend::Claude(session) => session.restore_workflows(restored),
-            Backend::Codex(_) => Vec::new(),
+            Backend::Codex(_) | Backend::DeepSeek(_) => Vec::new(),
             #[cfg(test)]
             Backend::Test(_) => Vec::new(),
         }
@@ -385,7 +420,7 @@ impl Backend {
     pub(in crate::agent_pane) fn respond_questions(&mut self, answers: Option<Vec<Vec<String>>>) {
         match self {
             Backend::Claude(session) => session.respond_questions(answers),
-            Backend::Codex(_) => {}
+            Backend::Codex(_) | Backend::DeepSeek(_) => {}
             #[cfg(test)]
             Backend::Test(_) => {}
         }

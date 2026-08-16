@@ -147,7 +147,14 @@ fn mixed_installations_select_only_tabs_for_the_target_transaction() {
         InstallationKey::derive(ProviderKind::Claude, &AgentCli::new("shared-claude", [])).key;
     let unrelated =
         InstallationKey::derive(ProviderKind::Claude, &AgentCli::new("other-claude", [])).key;
-    let installations = vec![shared.clone(), unrelated, shared.clone()];
+    // The `None` stands for a tab whose harness updates outside the
+    // application; it must not be suspended by anyone else's transaction.
+    let installations = vec![
+        Some(shared.clone()),
+        Some(unrelated),
+        Some(shared.clone()),
+        None,
+    ];
     assert_eq!(
         affected_installation_indices(&shared, &installations),
         vec![0, 2]
@@ -212,15 +219,12 @@ fn preflight_waits_or_interrupts_without_skipping_recovery_validation() {
 
 #[test]
 fn preflight_retains_every_ready_tab_and_aggregates_partial_resume_failure() {
-    let installation = snapshot(UpdatePhase::Available).identity.key;
     let assessments = vec![
         RecoveryReadiness::Ready(RecoverySnapshot {
-            installation: installation.clone(),
             identity: Some(RecoveryIdentity::new(AgentKind::Claude, "session-a")),
             profile_name: "Claude A".into(),
         }),
         RecoveryReadiness::Ready(RecoverySnapshot {
-            installation,
             identity: Some(RecoveryIdentity::new(AgentKind::Claude, "session-b")),
             profile_name: "Claude B".into(),
         }),

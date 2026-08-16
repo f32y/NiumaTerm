@@ -186,14 +186,16 @@ fn matching_panes(key: &InstallationKey, cx: &mut App) -> Vec<Entity<AgentPane>>
         .collect()
 }
 
+/// A tab whose harness has no vendor-managed installation carries no key, so it
+/// matches no target and is never suspended by another harness's update.
 pub(in crate::agent_pane::updates) fn affected_installation_indices(
     target: &InstallationKey,
-    installations: &[InstallationKey],
+    installations: &[Option<InstallationKey>],
 ) -> Vec<usize> {
     installations
         .iter()
         .enumerate()
-        .filter_map(|(index, key)| (key == target).then_some(index))
+        .filter_map(|(index, key)| (key.as_ref() == Some(target)).then_some(index))
         .collect()
 }
 
@@ -452,9 +454,13 @@ async fn restore_tabs(
     failures
 }
 
-pub(crate) fn provider_for_profile(kind: AgentProfileKind) -> ProviderKind {
+/// The updatable installation this profile resolves to. `None` means the
+/// harness is installed and updated through the user's own package manager, so
+/// there is nothing for the update surface to probe or replace.
+pub(crate) fn provider_for_profile(kind: AgentProfileKind) -> Option<ProviderKind> {
     match kind {
-        AgentProfileKind::ClaudeCode => ProviderKind::Claude,
-        AgentProfileKind::Codex => ProviderKind::Codex,
+        AgentProfileKind::ClaudeCode => Some(ProviderKind::Claude),
+        AgentProfileKind::Codex => Some(ProviderKind::Codex),
+        AgentProfileKind::DeepSeek => None,
     }
 }

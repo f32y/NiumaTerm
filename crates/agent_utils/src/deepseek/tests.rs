@@ -1,0 +1,623 @@
+//! Frame payloads here are trimmed copies of ones a real host emitted, so a
+//! mapping that passes these matches what the harness actually sends rather
+//! than what its declarations suggest.
+
+use serde_json::{Value, json};
+
+use crate::chat::{Event, Item};
+use crate::deepseek::mapping::{ToolTracker, map_frame};
+
+const SESSION: &str = "session-debb6efc";
+
+fn session_frame(event: Value) -> Value {
+    json!({
+        "type": "server-request",
+        "rpcId": "frame-1",
+        "method": "session/event",
+        "payload": { "type": "session/event", "sessionId": SESSION, "event": event },
+    })
+}
+
+fn chunk(chunk: Value) -> Value {
+    json!({
+        "type": "assistant/chunk",
+        "seq": 16,
+        "data": { "turn": 1, "step": 1, "chunk": chunk },
+    })
+}
+
+#[test]
+fn text_and_reasoning_stream_as_separate_rows() {
+    let started = map_frame(
+        &session_frame(chunk(
+            json!({ "type": "block-start", "index": 0, "blockType": "reasoning" }),
+        )),
+        SESSION,
+        &mut ToolTracker::default(),
+    );
+    assert_eq!(
+        started,
+        vec![Event::ItemStarted(Item::Reasoning {
+            id: "1:1:0".into(),
+            summary: None,
+        })]
+    );
+
+    let reasoning = map_frame(
+        &session_frame(chunk(
+            json!({ "type": "reasoning-delta", "index": 0, "text": "thinking" }),
+        )),
+        SESSION,
+        &mut ToolTracker::default(),
+    );
+    assert_eq!(
+        reasoning,
+        vec![Event::ReasoningSummaryDelta {
+            item_id: "1:1:0".into(),
+            delta: "thinking".into(),
+        }]
+    );
+
+    let text = map_frame(
+        &session_frame(chunk(
+            json!({ "type": "text-delta", "index": 1, "text": "answer" }),
+        )),
+        SESSION,
+        &mut ToolTracker::default(),
+    );
+    assert_eq!(
+        text,
+        vec![Event::AgentMessageDelta {
+            item_id: "1:1:1".into(),
+            delta: "answer".into(),
+        }]
+    );
+}
+
+#[test]
+fn a_completed_message_reconciles_with_the_blocks_that_streamed() {
+    // The completed message carries its blocks in the same order the chunks
+    // announced, which is the only thing tying the two together.
+    let events = map_frame(
+        &session_frame(json!({
+            "type": "assistant/message",
+            "data": {
+                "turn": 1,
+                "step": 1,
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        { "type": "reasoning", "text": "the whole thought" },
+                        { "type": "tool-call", "id": "call_1", "name": "read" },
+                        { "type": "text", "text": "the whole answer" },
+                    ],
+                },
+            },
+        })),
+        SESSION,
+        &mut ToolTracker::default(),
+    );
+
+    // The tool call sits between them and is skipped without shifting the
+    // positions of the blocks around it.
+    assert_eq!(
+        events,
+        vec![
+            Event::ItemCompleted(Item::Reasoning {
+                id: "1:1:0".into(),
+                summary: Some("the whole thought".into()),
+            }),
+            Event::ItemCompleted(Item::AgentMessage {
+                id: "1:1:2".into(),
+                text: Some("the whole answer".into()),
+            }),
+        ]
+    );
+}
+
+#[test]
+fn only_the_users_own_message_becomes_a_transcript_row() {
+    let prompt = json!({
+        "type": "user/message",
+        "data": {
+            "content": [{ "type": "text", "text": "do the thing" }],
+            "source": { "kind": "user" },
+        },
+    });
+    assert_eq!(
+        map_frame(&session_frame(prompt), SESSION, &mut ToolTracker::default()),
+        vec![Event::ItemStarted(Item::UserMessage {
+            text: Some("do the thing".into()),
+        })]
+    );
+
+    // One prompt also emits these three, and rendering them would put messages
+    // the user never wrote into every turn.
+    for injected in ["agent-instructions", "plugin", "skill-catalog"] {
+        let frame = session_frame(json!({
+            "type": "user/message",
+            "data": {
+                "content": [{ "type": "text", "text": "injected context" }],
+                "source": { "kind": injected },
+            },
+        }));
+        assert_eq!(
+            map_frame(&frame, SESSION, &mut ToolTracker::default()),
+            Vec::new(),
+            "{injected}"
+        );
+    }
+}
+
+#[test]
+fn turn_end_reasons_separate_a_failure_from_a_stop() {
+    let aborted = json!({
+        "type": "turn/end",
+        "data": { "turn": 1, "reason": { "kind": "aborted", "reason": { "kind": "user" } } },
+    });
+    assert_eq!(
+        map_frame(
+            &session_frame(aborted),
+            SESSION,
+            &mut ToolTracker::default()
+        ),
+        vec![Event::TurnCompleted { error: None }]
+    );
+
+    let completed = json!({
+        "type": "turn/end",
+        "data": { "turn": 1, "reason": { "kind": "completed" } },
+    });
+    assert_eq!(
+        map_frame(
+            &session_frame(completed),
+            SESSION,
+            &mut ToolTracker::default()
+        ),
+        vec![Event::TurnCompleted { error: None }]
+    );
+
+    let failed = json!({
+        "type": "turn/end",
+        "data": { "turn": 1, "reason": { "kind": "failed", "message": "NO_ADAPTER" } },
+    });
+    assert_eq!(
+        map_frame(&session_frame(failed), SESSION, &mut ToolTracker::default()),
+        vec![Event::TurnCompleted {
+            error: Some("NO_ADAPTER".into()),
+        }]
+    );
+}
+
+#[test]
+fn frames_for_another_session_are_ignored() {
+    // The stream is aggregated across every attached session and replays each
+    // one when it opens, so a tab sees other tabs' activity constantly.
+    let frame = session_frame(json!({
+        "type": "assistant/chunk",
+        "data": { "turn": 1, "step": 1, "chunk": { "type": "text-delta", "index": 0, "text": "x" } },
+    }));
+
+    assert_eq!(
+        map_frame(&frame, "session-someone-else", &mut ToolTracker::default()),
+        Vec::new()
+    );
+}
+
+#[test]
+fn unknown_types_produce_nothing_rather_than_failing() {
+    // The harness adds event types between releases, and one this build has
+    // never seen must not break a tab.
+    let unknown_event = session_frame(json!({
+        "type": "quantum/entanglement",
+        "data": { "turn": 1 },
+    }));
+    assert_eq!(
+        map_frame(&unknown_event, SESSION, &mut ToolTracker::default()),
+        Vec::new()
+    );
+
+    let unknown_frame = json!({
+        "type": "server-request",
+        "payload": { "type": "session/telepathy", "sessionId": SESSION },
+    });
+    assert_eq!(
+        map_frame(&unknown_frame, SESSION, &mut ToolTracker::default()),
+        Vec::new()
+    );
+
+    // A chunk kind that is not one of the two that stream text.
+    let unknown_chunk = session_frame(chunk(
+        json!({ "type": "signature-delta", "index": 0, "text": "x" }),
+    ));
+    assert_eq!(
+        map_frame(&unknown_chunk, SESSION, &mut ToolTracker::default()),
+        Vec::new()
+    );
+}
+
+#[test]
+fn host_and_stream_failures_reach_the_transcript() {
+    let agent_error = json!({
+        "type": "server-request",
+        "payload": {
+            "type": "host/agent-error",
+            "sessionId": SESSION,
+            "message": "the model provider refused the request",
+        },
+    });
+    assert_eq!(
+        map_frame(&agent_error, SESSION, &mut ToolTracker::default()),
+        vec![Event::ItemStarted(Item::Error {
+            text: "the model provider refused the request".into(),
+        })]
+    );
+
+    // An agent error for another tab's session belongs to that tab.
+    assert_eq!(
+        map_frame(&agent_error, "session-other", &mut ToolTracker::default()),
+        Vec::new()
+    );
+
+    let stream_error = json!({
+        "type": "server-request",
+        "payload": {
+            "type": "stream/error",
+            "error": { "code": "internal", "message": "the stream ended" },
+        },
+    });
+    assert_eq!(
+        map_frame(&stream_error, SESSION, &mut ToolTracker::default()),
+        vec![Event::ItemStarted(Item::Error {
+            text: "the stream ended".into(),
+        })]
+    );
+}
+
+#[test]
+fn the_tested_release_is_inside_the_supported_range() {
+    use semver::Version;
+
+    use crate::deepseek::version::{VersionSupport, classify};
+
+    // A pre-release only satisfies a requirement when some comparator carries
+    // the same triple and its own pre-release, which is why the lower bound is
+    // written as a pre-release rather than as a plain `0.1.0`.
+    for inside in ["0.1.0-rc.6", "0.1.0", "0.1.4"] {
+        assert_eq!(
+            classify(&Version::parse(inside).unwrap()),
+            VersionSupport::Supported,
+            "{inside}"
+        );
+    }
+
+    for outside in ["0.1.0-rc.5", "0.2.0", "1.0.0"] {
+        assert!(
+            matches!(
+                classify(&Version::parse(outside).unwrap()),
+                VersionSupport::Unsupported { .. }
+            ),
+            "{outside}"
+        );
+    }
+}
+
+#[test]
+fn an_unresolvable_harness_is_reported_as_missing_rather_than_as_a_failed_start() {
+    use crate::LaunchConfig;
+    use crate::deepseek::{HostError, Session};
+
+    // The two failures have different answers for the user, so the adapter has
+    // to tell them apart before any process is spawned.
+    let launch = LaunchConfig {
+        executable: "dsh-that-is-not-installed".to_string(),
+        ..LaunchConfig::default()
+    };
+
+    assert!(matches!(
+        Session::create(&launch, None, |_| {}),
+        Err(HostError::NotInstalled(_))
+    ));
+}
+
+#[test]
+fn an_approval_request_carries_what_answering_it_needs() {
+    use crate::deepseek::mapping::approval_request;
+
+    // Shape copied from a real blocked turn: the harness waits here, so a
+    // client that cannot recognize this leaves the agent stalled with no
+    // visible reason.
+    let frame = json!({
+        "type": "server-request",
+        "rpcId": "3fcb9bcf-614d-414e-9041-ada82f9a0fad",
+        "method": "approval/requested",
+        "payload": {
+            "type": "approval/requested",
+            "sessionId": SESSION,
+            "approvalId": "5cc446e3-8026-44f7-9fc5-e62d5213d18a",
+            "toolName": "pwsh",
+            "callId": "call_00_pv6xOxJBe6Cqa5rx1Xkb7091",
+            "reason": "escalate sandbox to danger-full-access: the target is outside the workspace",
+        },
+    });
+
+    let request = approval_request(&frame, SESSION).expect("the request should be recognized");
+    assert_eq!(request.rpc_id, "3fcb9bcf-614d-414e-9041-ada82f9a0fad");
+    assert_eq!(request.approval_id, "5cc446e3-8026-44f7-9fc5-e62d5213d18a");
+    assert!(
+        request.description.contains("pwsh"),
+        "{}",
+        request.description
+    );
+    assert!(
+        request.description.contains("outside the workspace"),
+        "{}",
+        request.description
+    );
+
+    // Another tab's question belongs to that tab; answering it here would
+    // resolve a decision this user never saw.
+    assert_eq!(approval_request(&frame, "session-other"), None);
+}
+
+#[test]
+fn a_resolved_approval_takes_the_card_down() {
+    let frame = json!({
+        "type": "server-request",
+        "payload": {
+            "type": "approval/resolved",
+            "sessionId": SESSION,
+            "approvalId": "5cc446e3",
+            "outcome": "allowed-once",
+        },
+    });
+
+    assert_eq!(
+        map_frame(&frame, SESSION, &mut ToolTracker::default()),
+        vec![Event::ApprovalResolved]
+    );
+    assert_eq!(
+        map_frame(&frame, "session-other", &mut ToolTracker::default()),
+        Vec::new()
+    );
+}
+
+/// A tool frame carries the host-computed card alongside the logged event.
+fn tool_frame(event: Value, view: Value) -> Value {
+    json!({
+        "type": "server-request",
+        "payload": {
+            "type": "session/event",
+            "sessionId": SESSION,
+            "event": event,
+            "view": view,
+        },
+    })
+}
+
+#[test]
+fn a_shell_command_becomes_a_command_row_with_its_output_and_exit_code() {
+    let mut tools = ToolTracker::default();
+
+    let started = map_frame(
+        &tool_frame(
+            json!({
+                "type": "tool/call",
+                "data": { "turn": 1, "step": 1, "callId": "call_1", "name": "pwsh" },
+            }),
+            json!({ "for": "call", "view": {
+                "card": "terminal",
+                "title": "echo hello",
+                "description": "Greet",
+            }}),
+        ),
+        SESSION,
+        &mut tools,
+    );
+    assert_eq!(
+        started,
+        vec![Event::ItemStarted(Item::CommandExecution {
+            id: "call_1".into(),
+            command: "echo hello".into(),
+            purpose: Some("Greet".into()),
+            aggregated_output: None,
+            status: Some("inProgress".into()),
+            exit_code: None,
+        })]
+    );
+
+    let completed = map_frame(
+        &tool_frame(
+            json!({
+                "type": "tool/result",
+                "data": { "message": {
+                    "source": { "kind": "tool", "callId": "call_1" },
+                    "content": [{ "type": "tool-result", "toolCallId": "call_1", "isError": false,
+                                  "content": [{ "type": "text", "text": "hello" }] }],
+                }},
+            }),
+            json!({ "for": "result", "view": {
+                "card": "terminal",
+                "output": "hello\n",
+                "exitCode": 0,
+            }}),
+        ),
+        SESSION,
+        &mut tools,
+    );
+    // The command line survives from the call: the result names only the id.
+    assert_eq!(
+        completed,
+        vec![Event::ItemCompleted(Item::CommandExecution {
+            id: "call_1".into(),
+            command: "echo hello".into(),
+            purpose: None,
+            aggregated_output: Some("hello\n".into()),
+            status: Some("completed".into()),
+            exit_code: Some(0),
+        })]
+    );
+}
+
+#[test]
+fn an_edit_becomes_a_file_row_whose_result_diff_carries_context() {
+    let mut tools = ToolTracker::default();
+
+    let started = map_frame(
+        &tool_frame(
+            json!({
+                "type": "tool/call",
+                "data": { "turn": 1, "step": 2, "callId": "call_2", "name": "edit" },
+            }),
+            json!({ "for": "call", "view": {
+                "card": "diff",
+                "title": "Edit probe-target.txt",
+                "diffs": [{ "path": "probe-target.txt", "oldText": "before", "newText": "after" }],
+            }}),
+        ),
+        SESSION,
+        &mut tools,
+    );
+    let Some(Event::ItemStarted(Item::FileChange { paths, diff, .. })) = started.first() else {
+        panic!("a diff card should open a file row, got {started:?}");
+    };
+    assert_eq!(paths, "probe-target.txt");
+    assert!(diff.as_deref().unwrap_or_default().contains("-before"));
+
+    let completed = map_frame(
+        &tool_frame(
+            json!({
+                "type": "tool/result",
+                "data": { "message": {
+                    "source": { "kind": "tool", "callId": "call_2" },
+                    "content": [{ "type": "tool-result", "toolCallId": "call_2", "isError": false,
+                                  "content": [{ "type": "text", "text": "ok" }] }],
+                }},
+            }),
+            json!({ "for": "result", "view": {
+                "card": "diff",
+                "diffs": [{ "path": "probe-target.txt",
+                            "oldText": "line one\nbefore\nline three",
+                            "newText": "line one\nafter\nline three" }],
+            }}),
+        ),
+        SESSION,
+        &mut tools,
+    );
+    let Some(Event::ItemCompleted(Item::FileChange { diff, status, .. })) = completed.first()
+    else {
+        panic!("the result should complete the file row, got {completed:?}");
+    };
+    // The result diff carries surrounding lines the arguments never had.
+    let body = diff.as_deref().unwrap_or_default();
+    assert!(body.contains("-line one"), "{body}");
+    assert!(body.contains("+after"), "{body}");
+    assert_eq!(status.as_deref(), Some("completed"));
+}
+
+#[test]
+fn a_card_this_build_does_not_model_still_shows_the_call() {
+    let mut tools = ToolTracker::default();
+
+    // read, search, and web cards all land here, as does any card a later
+    // harness release adds. None of them may vanish from the transcript.
+    let started = map_frame(
+        &tool_frame(
+            json!({
+                "type": "tool/call",
+                "data": { "callId": "call_3", "name": "read" },
+            }),
+            json!({ "for": "call", "view": {
+                "card": "generic",
+                "title": "Read probe-target.txt",
+                "kind": "read",
+            }}),
+        ),
+        SESSION,
+        &mut tools,
+    );
+    assert_eq!(
+        started,
+        vec![Event::ItemStarted(Item::Other {
+            id: "call_3".into(),
+            kind: "read".into(),
+            title: "Read probe-target.txt".into(),
+            output: None,
+            status: Some("inProgress".into()),
+        })]
+    );
+}
+
+#[test]
+fn a_failed_call_reports_the_text_the_model_saw() {
+    let mut tools = ToolTracker::default();
+
+    map_frame(
+        &tool_frame(
+            json!({
+                "type": "tool/call",
+                "data": { "callId": "call_4", "name": "pwsh" },
+            }),
+            json!({ "for": "call", "view": { "card": "terminal", "title": "write outside" }}),
+        ),
+        SESSION,
+        &mut tools,
+    );
+
+    // A failed call produces no result view at all, so the model-facing text is
+    // the only thing left to show. That is the normal path for every denial.
+    let completed = map_frame(
+        &tool_frame(
+            json!({
+                "type": "tool/result",
+                "data": { "message": {
+                    "source": { "kind": "tool", "callId": "call_4" },
+                    "content": [{ "type": "tool-result", "toolCallId": "call_4", "isError": true,
+                                  "content": [{ "type": "text", "text": "Access to the path is denied" }] }],
+                }},
+            }),
+            json!({ "for": "result" }),
+        ),
+        SESSION,
+        &mut tools,
+    );
+    let Some(Event::ItemCompleted(Item::CommandExecution {
+        aggregated_output,
+        status,
+        ..
+    })) = completed.first()
+    else {
+        panic!("the failure should still complete the row, got {completed:?}");
+    };
+    assert_eq!(status.as_deref(), Some("failed"));
+    assert!(
+        aggregated_output
+            .as_deref()
+            .unwrap_or_default()
+            .contains("denied")
+    );
+}
+
+#[test]
+fn a_result_for_a_call_this_session_never_saw_is_ignored() {
+    // Attaching to a session mid-turn delivers results whose calls arrived
+    // before the stream was open; inventing a row for them would show a
+    // command row with no command in it.
+    let completed = map_frame(
+        &tool_frame(
+            json!({
+                "type": "tool/result",
+                "data": { "message": {
+                    "source": { "kind": "tool", "callId": "call-never-seen" },
+                    "content": [{ "type": "tool-result", "toolCallId": "call-never-seen",
+                                  "content": [{ "type": "text", "text": "x" }] }],
+                }},
+            }),
+            json!({ "for": "result", "view": { "card": "terminal", "output": "x" }}),
+        ),
+        SESSION,
+        &mut ToolTracker::default(),
+    );
+
+    assert_eq!(completed, Vec::new());
+}

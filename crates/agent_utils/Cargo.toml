@@ -28,4 +28,5 @@ reqwest = { workspace = true, features = [
     "rustls-tls-native-roots",
     "system-proxy",
 ] }
+tungstenite.workspace = true
 windows-sys.workspace = true

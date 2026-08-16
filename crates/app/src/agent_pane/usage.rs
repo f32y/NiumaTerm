@@ -33,6 +33,14 @@ impl IconNamed for ClaudeIcon {
     }
 }
 
+pub(crate) struct DeepSeekIcon;
+
+impl IconNamed for DeepSeekIcon {
+    fn path(self) -> SharedString {
+        "icons/deepseek.svg".into()
+    }
+}
+
 #[derive(Default)]
 struct ProviderRefresh {
     refreshing: bool,

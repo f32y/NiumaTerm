@@ -15,7 +15,6 @@ use gpui_component::{
 use nmt_i18n::i18n;
 
 use crate::agent_pane::AgentKind;
-use crate::agent_pane::usage::{ClaudeIcon, CodexIcon};
 use crate::ui::settings::agent_profile_dialog::open_agent_profile_dialog;
 use crate::ui::settings::state::{AgentProfile, AppSettings};
 use crate::ui::settings::table::{
@@ -33,11 +32,7 @@ const MAX_VISIBLE_ROWS: f32 = 8.0;
 
 /// The agent's mark, matching the glyph its tabs carry.
 fn agent_icon(profile: &AgentProfile) -> Icon {
-    match AgentKind::from_profile(profile.kind) {
-        AgentKind::Claude => Icon::new(ClaudeIcon),
-        AgentKind::Codex => Icon::new(CodexIcon),
-    }
-    .small()
+    AgentKind::from_profile(profile.kind).icon().small()
 }
 
 fn profile_label(ix: usize, profile: &AgentProfile) -> String {

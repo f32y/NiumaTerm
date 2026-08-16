@@ -138,6 +138,7 @@
 "settings-agent-title" = "Agent"
 "settings-agent-kind-claude-code" = "Claude Code"
 "settings-agent-kind-codex" = "Codex"
+"settings-agent-kind-deepseek" = "DeepSeek Harness"
 "settings-agent-description" = "Configure Agent event handling and per-Agent Hook installation."
 "settings-agent-general" = "General"
 "settings-agent-show-usage" = "Show Agent Usage"
@@ -196,6 +197,7 @@
 "settings-agent-profile-model" = "Model"
 "settings-agent-profile-model-claude-description" = "Initial model; passed to Claude Code as ANTHROPIC_MODEL."
 "settings-agent-profile-model-codex-description" = "Initial model; passed to Codex when its app-server thread starts."
+"settings-agent-profile-model-deepseek-description" = "Initial model. Selecting one does not reach the harness yet, so this field is recorded but not applied."
 "settings-agent-profile-replace-sub-models" = "Replace all sub-model config with primary"
 "settings-agent-profile-replace-sub-models-description" = "Also send the model above as ANTHROPIC_DEFAULT_OPUS_MODEL, ANTHROPIC_DEFAULT_SONNET_MODEL, and ANTHROPIC_DEFAULT_HAIKU_MODEL, so an endpoint serving one model answers every tier. An entry for the same variable in the table below still wins."
 "settings-agent-profile-effort" = "Effort"
@@ -211,9 +213,11 @@
 "settings-agent-profile-api-url" = "API URL"
 "settings-agent-profile-api-url-claude-description" = "Exported as ANTHROPIC_BASE_URL while the custom endpoint is enabled."
 "settings-agent-profile-api-url-codex-description" = "Injected as a profile-scoped Codex model provider base URL."
+"settings-agent-profile-api-url-deepseek-description" = "Unused: DeepSeek Harness reads its own endpoint configuration."
 "settings-agent-profile-api-key" = "API Key"
 "settings-agent-profile-api-key-claude-description" = "Exported as {key} while the custom endpoint is enabled. URL and key are stored encrypted in config.toml, which hides them from programs reading the file; inspecting the NiumaTerm executable or the agent process can still recover them."
 "settings-agent-profile-api-key-codex-description" = "Exported as {key} and referenced by the profile-scoped provider. URL and key are stored encrypted in config.toml, which hides them from programs reading the file; inspecting the NiumaTerm executable or the agent process can still recover them."
+"settings-agent-profile-api-key-deepseek-description" = "Exported as {key}. DeepSeek Harness prefers its own stored credential and falls back to this variable. It is stored encrypted in config.toml, which hides it from programs reading the file; inspecting the NiumaTerm executable or the agent process can still recover it."
 
 # System settings
 "settings-system-title" = "System"

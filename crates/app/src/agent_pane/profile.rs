@@ -1,3 +1,4 @@
+use crate::agent_pane::usage::{ClaudeIcon, CodexIcon, DeepSeekIcon};
 use crate::agent_pane::*;
 
 /// Which agent backs this pane; the persisted tab snapshot stores the agent
@@ -6,13 +7,24 @@ use crate::agent_pane::*;
 pub(crate) enum AgentKind {
     Codex,
     Claude,
+    DeepSeek,
 }
 
 impl AgentKind {
+    /// Every kind a profile can select. Adding a kind here is what puts it in
+    /// front of the user; the settings lists read this instead of repeating
+    /// their own literals.
+    ///
+    /// The order is the order profiles are seeded in, and the first entry
+    /// becomes a new installation's default profile, so a kind is appended
+    /// rather than inserted.
+    pub(crate) const ALL: [Self; 3] = [Self::Claude, Self::Codex, Self::DeepSeek];
+
     pub(crate) fn id(self) -> &'static str {
         match self {
             AgentKind::Codex => "codex",
             AgentKind::Claude => "claude",
+            AgentKind::DeepSeek => "deepseek",
         }
     }
 
@@ -20,23 +32,21 @@ impl AgentKind {
         match self {
             AgentKind::Codex => "Codex",
             AgentKind::Claude => "Claude",
+            AgentKind::DeepSeek => "DeepSeek",
         }
     }
 
     /// `None` for unknown kinds (a newer snapshot), which degrade to a plain
     /// terminal tab instead of losing the tab.
     pub(crate) fn from_id(id: &str) -> Option<Self> {
-        match id {
-            "codex" => Some(AgentKind::Codex),
-            "claude" => Some(AgentKind::Claude),
-            _ => None,
-        }
+        Self::ALL.into_iter().find(|kind| kind.id() == id)
     }
 
     pub(crate) fn from_profile(kind: AgentProfileKind) -> Self {
         match kind {
             AgentProfileKind::ClaudeCode => AgentKind::Claude,
             AgentProfileKind::Codex => AgentKind::Codex,
+            AgentProfileKind::DeepSeek => AgentKind::DeepSeek,
         }
     }
 
@@ -44,12 +54,39 @@ impl AgentKind {
         match self {
             AgentKind::Claude => AgentProfileKind::ClaudeCode,
             AgentKind::Codex => AgentProfileKind::Codex,
+            AgentKind::DeepSeek => AgentProfileKind::DeepSeek,
+        }
+    }
+
+    /// The harness's own mark. Tabs and the profile list read it from here so
+    /// one kind cannot end up wearing another's glyph in one of them.
+    pub(crate) fn icon(self) -> Icon {
+        match self {
+            AgentKind::Codex => Icon::new(CodexIcon),
+            AgentKind::Claude => Icon::new(ClaudeIcon),
+            AgentKind::DeepSeek => Icon::new(DeepSeekIcon),
+        }
+    }
+
+    /// The updatable installation this kind resolves to, or `None` when the
+    /// harness is installed and updated outside the application. DeepSeek
+    /// Harness is an npm package on a Node runtime with no probe-and-update
+    /// path, so it contributes no installation to the update surface.
+    pub(crate) fn provider_kind(self) -> Option<ProviderKind> {
+        match self {
+            AgentKind::Claude => Some(ProviderKind::Claude),
+            AgentKind::Codex => Some(ProviderKind::Codex),
+            AgentKind::DeepSeek => None,
         }
     }
 }
 
 pub(super) const ANTHROPIC_MODEL_ENV: &str = "ANTHROPIC_MODEL";
 pub(super) const OPENAI_API_KEY_ENV: &str = "OPENAI_API_KEY";
+/// DeepSeek Harness resolves a credential from its own configuration before
+/// falling back to this variable, so supplying it is enough to authenticate a
+/// host started from a profile that carries a key.
+pub(super) const DEEPSEEK_API_KEY_ENV: &str = "DEEPSEEK_API_KEY";
 
 /// The per-tier model overrides Claude Code reads when it dispatches work to
 /// something other than the primary model. A profile that pins every tier to
@@ -101,6 +138,7 @@ pub(crate) fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
             let key_env = match profile.kind {
                 AgentProfileKind::ClaudeCode => "ANTHROPIC_API_KEY",
                 AgentProfileKind::Codex => OPENAI_API_KEY_ENV,
+                AgentProfileKind::DeepSeek => DEEPSEEK_API_KEY_ENV,
             };
             env.push((key_env.to_string(), key.to_string()));
         }

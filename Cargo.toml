@@ -319,6 +319,12 @@ iovec = "0.1.4"
 tracing = { version = "0.1.44", default-features = false, features = ["log"] }
 tracing-subscriber = { version = "0.3.23", features = ["fmt", "env-filter", "chrono"] }
 tracing-appender = "0.2.5"
+# The blocking core of tokio-tungstenite, already in the tree through it. The
+# agent adapters run on reader threads rather than an async runtime, so they
+# take the synchronous client and stay consistent with that shape. Only the
+# client handshake is needed; the sockets it opens are loopback, so none of the
+# TLS backends are.
+tungstenite = { version = "0.29", default-features = false, features = ["handshake"] }
 objc = { package = "objc-rs", version = "0.3.1" }
 memmap2 = "0.9.11"
 url = "2.5.8"

@@ -55,6 +55,10 @@ pub enum AgentProfileKind {
     #[default]
     ClaudeCode,
     Codex,
+    /// DeepSeek Harness, driven through the local HTTP and WebSocket interface
+    /// its `dsh web` host serves rather than through a stdio CLI protocol.
+    #[serde(rename = "deepseek")]
+    DeepSeek,
 }
 
 impl AgentProfileKind {
@@ -62,6 +66,7 @@ impl AgentProfileKind {
         match self {
             AgentProfileKind::ClaudeCode => "claude-code",
             AgentProfileKind::Codex => "codex",
+            AgentProfileKind::DeepSeek => "deepseek",
         }
     }
 }

@@ -497,6 +497,9 @@ impl AgentPane {
             .unwrap_or_else(|| match self.kind {
                 AgentKind::Codex => app_server::Session::adapter_commands(),
                 AgentKind::Claude => stream_json::Session::adapter_commands(),
+                // DeepSeek's commands live behind its own registry and are not
+                // mapped yet, so the palette offers only the local ones.
+                AgentKind::DeepSeek => Vec::new(),
             });
 
         merge_catalog(
@@ -522,6 +525,9 @@ impl AgentPane {
                     .iter()
                     .map(|value| (value.to_string(), setting_value_label(value)))
                     .collect(),
+                // Changing the DeepSeek sandbox preset mid-session is part of
+                // the approval work, so the command offers no choices yet.
+                AgentKind::DeepSeek => Vec::new(),
             },
             _ => Vec::new(),
         }
