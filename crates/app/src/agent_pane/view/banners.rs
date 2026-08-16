@@ -234,28 +234,43 @@ impl AgentPane {
         // One id namespace per question, so option ids stay unique across the
         // card without assuming how many options a question carries.
         let group: SharedString = format!("agent-question-{question_index}").into();
+        let multi_select = question.multi_select;
 
-        if question.multi_select {
-            return v_flex()
-                .gap_1()
-                .children(question.options.iter().enumerate().map(|(index, option)| {
+        // Each option is drawn on its own so the row the arrow keys are on can
+        // carry the highlight. A radio group would render its own children and
+        // leave no way to mark one of them.
+        v_flex()
+            .gap_1()
+            .children(question.options.iter().enumerate().map(|(index, option)| {
+                let control: AnyElement = if multi_select {
                     Checkbox::new((group.clone(), index))
                         .label(describe(option))
                         .checked(prompt.is_selected(question_index, index))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.toggle_question_option(question_index, index, cx)
                         }))
-                }))
-                .into_any_element();
-        }
+                        .into_any_element()
+                } else {
+                    // One answer only, which the pick itself enforces by
+                    // replacing rather than adding.
+                    Radio::new((group.clone(), index))
+                        .label(describe(option))
+                        .checked(prompt.is_selected(question_index, index))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_question_option(question_index, index, cx)
+                        }))
+                        .into_any_element()
+                };
 
-        // Single-select maps onto a radio group, which owns the
-        // one-of-N invariant instead of leaving it to the click handler.
-        RadioGroup::vertical(group)
-            .children(question.options.iter().map(describe))
-            .selected_index(prompt.selected[question_index].first().copied())
-            .on_click(cx.listener(move |this, index: &usize, _, cx| {
-                this.toggle_question_option(question_index, *index, cx)
+                div()
+                    .w_full()
+                    .px_1p5()
+                    .py_0p5()
+                    .rounded(UI_RADIUS)
+                    .when(prompt.is_focused(question_index, index), |this| {
+                        this.bg(cx.theme().list_active)
+                    })
+                    .child(control)
             }))
             .into_any_element()
     }
