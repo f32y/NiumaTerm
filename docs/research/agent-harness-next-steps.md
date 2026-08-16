@@ -2,8 +2,8 @@
 
 | Field | Value |
 | --- | --- |
-| Status | R1–R3 landed, Phase 0 measured; work paused before any adapter code |
-| Date | 2026-08-15 |
+| Status | R1–R3 landed; DeepSeek transport decided and mapped; no adapter code yet |
+| Date | 2026-08-15; revised 2026-08-16 |
 | Purpose | Pick the work back up without re-reading the long documents |
 
 ## The three documents
@@ -18,22 +18,31 @@ This page is the short version of the last two.
 
 ## What we concluded
 
-**On connecting `dsh`.** It exposes three machine-drivable interfaces, not one:
+**On connecting `dsh`.** The scope narrowed on 2026-08-16: users install `dsh`
+themselves, and NiumaTerm supplies only the GUI. That single constraint decides
+the transport, because the ACP server, the SDK server, and any plugin of ours
+all require NiumaTerm to author and maintain a `cordis.yml` composition — which
+is shipping a DeepSeek distribution, not integrating one. Only the `web` and
+`headless` profiles auto-initialize, and `headless` cannot carry an interactive
+turn.
 
-- **Web `/api`** (`dsh web`) — everything the requirements list, including tool
-  render cards with file diffs and command exit codes, and the usage and
-  context-window projections. HTTP plus two WebSockets.
+So the answer is the **Web `/api` interface** served by `dsh web`, which section
+13 of the DeepSeek document measured end to end against a stock npm install. It
+carries everything the requirements ask for: streamed text and reasoning as
+separate deltas, tool render cards with contextual diffs computed by the host,
+fully described approvals, token and context projections, model and effort
+selection, history, and a designed reconnect path.
+
+The three interfaces ruled out, and why:
+
+- **ACP** (`dsh-acp-demo`) — committed assistant text and one-shot approvals
+  only. A cancelled turn emits nothing, and its approval carries a bare
+  `toolCallId`. Also needs a composition we would own.
 - **SDK stdio JSON-RPC** (`dsh-jsonrpc-agent`) — rich events, but only three
-  client methods and **no way to cancel a turn**, which fails HR-002 outright.
-  Ruled out.
-- **ACP** (`dsh-acp-demo`) — committed assistant text and one-shot tool
-  approvals only, but it does have `session/cancel`.
-
-Plan: start on **ACP**, which lands the §7 minimum with no DeepSeek-side code,
-reuses `JsonLineProcess`, and also covers other ACP agents. Name the harness
-identity after the protocol, not the vendor. If the tab later needs tool
-activity, usage, or resume, that means adopting **Web `/api`** as a second
-adapter, not extending the ACP one.
+  client methods and no way to cancel a turn, failing HR-002 outright.
+- **Our own Cordis plugin** — reaches everything (proven by writing one), but it
+  is a TypeScript component to build, ship, and keep working against a
+  pre-release plugin runtime, and it needs a composition too.
 
 **On the refactor.** A trait for `Backend` is not worth it — only 6 of its 18
 methods have matching signatures, 9 already carry stub arms, `adapter_commands`
@@ -62,53 +71,53 @@ encoded as identity checks and written down nowhere.
 
 No behavior changed and the 376 existing tests pass unmodified.
 
-**Phase 0 is also done**, measured on Windows against the published
-`dsh-acp-demo`. Full numbers and findings are in section 11 of the DeepSeek
-document; the short version is that the transport works and `session/cancel` is
-fast, but the ACP server is thinner than section 4 suggested:
-`session/request_permission` carries only a `toolCallId` with no tool name or
-command, a cancelled turn emits no text at all, and sandboxed bash fails on
-Windows until the model escalates its own permissions.
+**Phase 0 (ACP) is measured**, on Windows against the published `dsh-acp-demo`.
+Full numbers in section 11 of the DeepSeek document. It is now background: the
+transport works and `session/cancel` is fast, but the server is too thin to
+build a tab on, and it needs a composition we would own.
 
-Reproduction lives in `.scratch/dsh-acp/` (uncommitted): a reduced
-`cordis.yml`, a `drive.mjs` stdio driver, and one log per scenario. It needs
-`DEEPSEEK_API_KEY` in a sibling `.env`. The npm dependency that installs the
-server is the untracked root `package.json`.
+**The Web `/api` surface is mapped**, section 13. Three real prompted turns
+against a stock `dsh web`, covering tool cards, cancel, and approvals. The
+reproduction lives in `.scratch/dsh-web/` (uncommitted): an isolated
+`package.json`, `drive.mjs` with three scenarios, and one frame log per
+scenario. It needs `DEEPSEEK_API_KEY` in the environment.
 
 ## Next
 
-Work is **paused here by choice**, with nothing half-finished: the refactor is
-committed, Phase 0 is measured, and no adapter code was started.
+The transport question is settled and the frames are mapped (section 14 of the
+DeepSeek document), so the remaining work is Rust.
 
-When it resumes, the open fork is which transport the third harness speaks:
-
-- **ACP.** Small, reuses `JsonLineProcess`, and covers other ACP agents rather
-  than DeepSeek alone. The two findings above are limits of *this* ACP server,
-  not of ACP — the protocol does define `tool_call`, `tool_call_update`, and
-  `plan`. Worth half an hour against a second ACP agent to see whether those
-  arrive in practice, which decides how wide the event mapping should be. Name
-  the identity `Acp`, not the vendor.
-- **Web `/api`.** Full fidelity for DeepSeek, but HTTP plus two WebSockets, so
-  `JsonLineProcess` does not apply and roughly forty unary methods do. A much
-  larger adapter serving one vendor.
-
-Either way, R5 (data-drive the two hand-written UI kind lists) ships with that
-work: without it a registered kind cannot be selected in settings at all.
+1. **The adapter.** One `dsh web --port 0` process for the whole application
+   (the mux stream is all-session aggregated, so one host serves every tab),
+   URL discovered from its stdout line, two WebSocket downlinks, and six unary
+   methods for a first release: `host.describe`, `session.create`,
+   `session.prompt`, `session.cancel`, `session.history`, `session.models`.
+   `JsonLineProcess` does not apply; `tokio-tungstenite` is already a workspace
+   dependency via `crates/remote_net`.
+2. **R5 ships with it** — data-drive the two hand-written UI kind lists.
+   Without it a registered kind cannot be selected in settings at all.
+3. **Teach `Item::task_tally` DeepSeek's todo tool name.** It matches only
+   Claude's `TodoWrite` (`crates/agent_utils/src/chat.rs:248`); DeepSeek's is
+   `todo_write`, so the plan tally stays dark until both are recognized.
 
 ## Decisions still open
 
-- Is the §7 minimum acceptable as a first release for this harness, or will a
-  tab with no visible tool activity feel broken next to the Codex and Claude
-  tabs? This decides whether Web `/api` is optional or mandatory.
 - R4 (collapsing the five identity enums into one) needs a new dependency edge
   from `nmt_config` to `nmt_agent_utils`. Worth about 20 fewer sites. Deferrable.
-- Does NiumaTerm create and populate the DeepSeek profile on first use? Doing so
-  means running pnpm on the user's behalf, since `dsh plugin` shells out to it.
 - `dsh` is at `0.1.0-rc.6` with an explicit expectation of breaking changes and
-  a session log format at version 0 with no migration. What version range does
-  the adapter support, and what does the tab show outside it?
+  a session log format at version 0 with no migration. `host.describe.version`
+  cannot serve as the gate — it reports the web app plugin's own `0.0.1` — so a
+  supported-version check has to read the installed package instead, and the tab
+  needs something to show when the installed version falls outside the range.
+- `dsh web` has no authentication beyond a loopback `Host` check, and loopback
+  callers reach the privileged settings and credentials methods. Whether
+  NiumaTerm should bind it more narrowly, or simply document that a `dsh web`
+  host is as exposed as the browser UI users already run, is undecided.
+- Section 11's Windows sandbox failure was never re-tested against the web
+  profile's own composition, because no bash tool ran in the section 13
+  scenarios. If it reproduces there it is upstream's to fix, but it decides how
+  a first release behaves on the first command the model runs.
 
 ## Not done
 
-Nothing DeepSeek-specific: no `dsh` interface has been exercised, and no adapter
-code exists. R4 through R7 from the refactor document remain open.
+No adapter code exists. R4 through R7 from the refactor document remain open.

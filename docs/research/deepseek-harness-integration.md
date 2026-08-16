@@ -2,8 +2,8 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Research; Phase 0 measured on Windows (section 11); plugin path proven by writing one (section 12) |
-| Date | 2026-08-14; revised 2026-08-15 |
+| Status | Web `/api` chosen and mapped against a running host (sections 13–14); sections 1–12 are the superseded research that led there |
+| Date | 2026-08-14; revised 2026-08-15, 2026-08-16 |
 | Scope | Adding DeepSeek Harness (`dsh`) as a third Agent Tab harness |
 | Companion | [`docs/agent-harness-integration-requirements.md`](../agent-harness-integration-requirements.md) |
 
@@ -15,6 +15,13 @@ paths always start with `crates/`.
 
 `dsh` exposes three machine-drivable interfaces, not one. They differ enormously
 in fidelity, and the choice between them is the whole design decision.
+
+**Superseded by section 13.** The ranking below assumes NiumaTerm may ship
+DeepSeek-side composition. Once users install `dsh` themselves and NiumaTerm
+supplies only the GUI, ACP and the plugin both require us to author and maintain
+a `cordis.yml` composition, and `dsh web` is the only interface that a
+stock installation exposes. Section 13 measured it and every objection this
+section raises against it is either wrong or now priced.
 
 - **Start on ACP.** It satisfies the requirements document's §7 minimum
   integration scope exactly, needs no DeepSeek-side code, reuses the existing
@@ -712,3 +719,258 @@ Smaller results worth carrying into any real plugin:
 - `ctx.agents.create()` succeeds without prompting and yields a handle with a
   live session, which is how an adapter can prepare a tab before the first
   message.
+
+## 13. The Web `/api` interface, measured
+
+Measured 2026-08-16 on Windows 11, Node 24.13, against `@deepseek-ai/dsh@0.1.0-rc.6`
+installed fresh from npm into an isolated directory. No repository build, no
+profile authoring, no pnpm, and no DeepSeek-side code of ours. This is the
+mapping section 11 deferred, and it was run under a narrower premise than
+sections 1–12 assumed: users install `dsh` themselves and NiumaTerm supplies
+only the GUI.
+
+### 13.1 That premise eliminates every option but this one
+
+Sections 1 and 12 rank ACP and our own plugin above the Web interface, but both
+rankings assume NiumaTerm may ship DeepSeek-side composition. It cannot under
+this premise. The ACP and SDK servers are separate packages that exit 1 without
+an explicit `cordis.yml` (section 2), and section 11 found the published example
+composition names two packages that were never published — so shipping ACP means
+authoring and maintaining a composition, which is a DeepSeek distribution rather
+than a GUI. Only `web` and `headless` auto-initialize, and `headless` cannot
+carry an interactive turn.
+
+`dsh web --port 0` bootstrapped its own profile with no pnpm invocation, bound a
+port, and answered every method below. Nothing else was installed.
+
+### 13.2 Transport
+
+WebSocket, confirming section 5: a plain `GET /api/events.mux` answers
+`426 Upgrade Required`. The SSE branch visible in `toFetchHandler` belongs to the
+in-process carrier and is not what `dsh web` serves, so an adapter cannot take
+the simpler streaming-GET route.
+
+Unary calls are `POST /api/<method>` with `{type, rpcId, method, payload}` and
+answer `{type: server-response, rpcId, result}` where `result` is
+`{ok: true, value}` or `{ok: false, error}`. The registry holds **51** methods,
+not the "roughly forty" section 5 estimated; `RpcMethodMap` in
+`dsh-host-apiproxy/lib/types/api/rpc-map.d.ts` is the authoritative list. A
+first release needs six of them: `host.describe`, `session.create`,
+`session.prompt`, `session.cancel`, `session.history`, `session.models`.
+
+`content-type: application/json` is mandatory — anything else answers 415. That
+is a deliberate cross-site write fence: browsers send simple POSTs without a
+CORS preflight, so restricting the media type forces a preflight the server
+never answers.
+
+### 13.3 Timings
+
+| Step | Elapsed |
+| --- | --- |
+| Process spawn to the URL line on stdout | 1104 ms |
+| First answered `host.describe` after that | 56 ms |
+| `session.create` | ~10 ms |
+| `session.prompt` accepted | ~5 ms |
+| First `reasoning-delta` after `turn/start` | 720–830 ms |
+| First `text-delta` after `turn/start` | 2.5–3.0 s |
+| First `tool/call` after `turn/start` | 0.9–1.3 s |
+| `session.cancel` accepted | 4 ms |
+
+The Node startup cost that section 11 measured inside every ACP figure is paid
+once here, at host spawn, because the host is persistent. Per-turn latency
+excludes it entirely.
+
+### 13.4 Every Phase 0 objection to ACP is answered here
+
+**A cancelled turn keeps its text.** Section 11's strongest objection was that
+ACP emits nothing for a cancelled turn. Cancelling 6 s into a long turn returned
+`accepted` in 4 ms, and `turn/end` carried
+`reason: {kind: aborted, reason: {kind: user}}` — an explicit user-cancel
+discriminant, distinguishable from completion and from failure. 590
+`assistant/chunk` events had already streamed, folding to 1451 characters of
+partial answer, and `session.history` still returned all 590 afterwards even
+though the turn produced zero `assistant/message` events. Live and on reconnect,
+the partial answer survives, which is what Codex and Claude do.
+
+**The approval request is fully described.** `approval/requested` carries
+`toolName`, `callId`, and the asker's `reason`:
+
+```json
+{ "type": "approval/requested", "sessionId": "session-...",
+  "approvalId": "d8dfffbd-...", "toolName": "edit",
+  "callId": "call_00_ET_6w6KKvKWqBCuJj9wkPYC1165",
+  "reason": "escalate sandbox to danger-full-access: The target file lives outside the session workspace, so editing it requires full file access as the user directly requested." }
+```
+
+The `callId` matches a `tool/call` the client rendered one frame earlier, so the
+approval card attaches to a tool call already on screen. That is the capability
+section 12.4 said required writing a plugin; the Web host already publishes it.
+
+**Tool render views arrive on the frame.** `session/event` frames carry an
+optional `view`, so section 12.2's derivation through `ctx.tools` is unnecessary
+for this transport — the host computed it. A `read` call produced a `generic`
+card with `kind: read` and source locations, its result a `read` card with
+numbered lines. An `edit` call produced a `diff` card holding the argument
+fragments, and its result the same card holding the *contextual* diff:
+
+```json
+{ "card": "diff", "title": "Edit ...\\probe-target.txt",
+  "diffs": [{ "path": "...", "oldText": "line one\nbefore\nline three",
+              "newText": "line one\nafter\nline three" }] }
+```
+
+That is HR-004 satisfied off the stream with no reconstruction.
+
+### 13.5 Usage, models, and history
+
+`session/projection` frames deliver HR-010 whole, keyed and higher-seq-wins:
+
+```text
+tokenUsage       {uncachedInputTokens, outputTokens, cacheReadTokens, cacheWriteTokens}
+contextPressure  {pressureTokens, projectedTokens, contextWindow: 1000000}
+contextBreakdown {systemTokens, toolsTokens, messageTokens}
+sessionStats     {turns, steps, llmMs, toolMs, ttftMs, decodeMs, decodeTokens}
+title, permissions, sessionListMetadata, goal
+```
+
+HR-007: `session.models` returns provider groups with per-model reasoning
+efforts (`off`/`high`/`max` for both `deepseek-v4-flash` and `deepseek-v4-pro`),
+and `session.selectModel` sets provider, model, and effort together.
+`agentPreset.list` returns the preset roster; its names and descriptions come
+back localized, so the tab shows the harness's own strings rather than ours.
+
+HR-009: `session.list` carries each session's summary with its projections
+inline, including the title, and `session.history` pages the events with their
+computed views. Resume is reading history against a session id, not a distinct
+operation.
+
+### 13.6 Reconnect is a designed path
+
+Opening the mux stream emits one `session/subscribed {sessionId, lastSeq}` per
+attached session, then replays each session's still-pending approval and
+question frames with their `rpcId` reused verbatim.
+
+This was confirmed by accident and is stronger for it: a run that failed to
+answer an approval left it pending, and the *next* run's stream open replayed
+that stale request, which the driver then answered — unblocking the earlier
+turn. A tab that is closed mid-approval and reopened recovers the question.
+
+### 13.7 One host serves every tab
+
+The mux stream is all-session aggregated; a single open replayed four sessions
+from earlier scenarios. So the natural mapping is one `dsh web` process for all
+DeepSeek tabs, with `session.create` per tab and the adapter filtering frames by
+`sessionId` — not one Node process per tab. That also means the 1.1 s cold start
+is paid once per application run rather than once per tab.
+
+### 13.8 Traps for the adapter
+
+- **A malformed answer to an answerable frame fails silently.** The approval
+  answer needs `{sessionId, approvalId, outcome}`; sending only `outcome`
+  returned `{accepted: false, reason: bad-response}` and nothing else happened —
+  the turn simply hung until the 120 s driver timeout. The carrier receipt is the
+  only signal, so it must be checked rather than fired and forgotten.
+- **`outcome` accepts only `allowed-once` and `rejected`** from a client;
+  `cancelled` and `unavailable` are host-side outcomes.
+- **`host.describe.version` is useless as a compatibility gate.** It reported
+  `0.0.1` against `dsh` `0.1.0-rc.6` — it is the web app plugin's own version,
+  not the harness release. There is no protocol version field, so a version
+  check has to read the installed package instead.
+- **There is no authentication.** Every scenario here was driven by plain `curl`
+  and a Node script with no credential of any kind, including a real prompted
+  turn that edited a file outside the project directory. The only fence is the
+  loopback/trusted-`Host` check, which any local process passes, and section 5
+  notes loopback callers also reach the privileged settings and credentials
+  methods.
+- **`assistant/chunk` carries `reasoning-delta` and `text-delta` separately**
+  under a `block-start`, so HR-003's reasoning stream maps directly rather than
+  needing separation.
+
+### 13.9 What this still does not answer
+
+- Section 11's Windows sandbox failure was not re-tested. These scenarios ran
+  `read` and `edit`; no bash tool ever executed, so whether the web profile's
+  default composition hits the same `CreateFileMapping` failure is unknown.
+- First-token latency is still not compared against Codex and Claude on this
+  machine, so "how much slower does a Node harness feel" remains unmeasured.
+- Shutdown was not characterized. The hosts were killed by PID; whether the
+  process exits cleanly on its own is untested, and section 11 found the ACP
+  server would not exit after a turn had run.
+
+## 14. Folding the frames onto `chat::Item`
+
+Derived 2026-08-16 from the section 13 captures, so every row below is a real
+observed payload rather than a reading of the declarations. This is the paper
+step that sizes the adapter.
+
+### 14.1 The transcript mapping
+
+| dsh event (plus its frame `view`) | `chat::Item` |
+| --- | --- |
+| `assistant/chunk` `reasoning-delta` | `Reasoning { summary }`, appended |
+| `assistant/chunk` `text-delta` | `AgentMessage { text }`, appended |
+| `assistant/message` | authoritative completion for that step's blocks, folded through `merge_completed` |
+| `tool/call` + `view.card == "terminal"` | `CommandExecution { command, purpose }` |
+| `tool/call` + `view.card == "diff"` | `FileChange { paths, diff }` |
+| `tool/call`, any other card | `Other { kind: name, title: view.title }` |
+| `tool/result` + view | same id, merged: contextual diff, output, status |
+| `user/message` with `source.kind == "user"` | `UserMessage` |
+| `compaction/*` | `Compaction` |
+| `host/agent-error`, `stream/error` | `Error` |
+
+**Dispatch on the card, not the tool name.** The presenter union is
+`generic | terminal | diff | search | read | web`, and it is the host's own
+statement of how a call should render. Keying on it means a tool this build has
+never heard of still lands in the right transcript row — `bash` produces
+`terminal`, `dsh-tool-fs` produces `read` and `diff`, and anything else falls to
+`Other`, which is exactly what `Item::Other` exists for.
+
+**`callId` is the item identity.** `tool/call`, `tool/result`, and
+`approval/asked` all carry the same `callId`, so the approval card attaches to a
+row already on screen with no correlation table of our own.
+
+**Streamed blocks need a synthetic id.** `assistant/chunk` carries
+`{turn, step, chunk:{index, blockType}}` and no message id, while
+`assistant/message` carries the message id and its blocks in the same index
+order. So `turn:step:index` is the id that lets a streamed row and its
+completion meet in `merge_completed`.
+
+### 14.2 Three traps this mapping has to encode
+
+- **Only one of the four `user/message` events is the user's.** A single prompt
+  emitted four, with `source.kind` of `user`, `agent-instructions`, `plugin`,
+  and `skill-catalog`. The last three are injected context; rendering them
+  produces three phantom user turns per prompt. Filter on `source.kind`.
+- **`Item::task_tally` will not match.** It keys on the tool name `TodoWrite`
+  (`crates/agent_utils/src/chat.rs:248`), which is Claude's spelling; DeepSeek's
+  is `todo_write`. The plan tally stays dark for this harness until that name is
+  recognized too.
+- **A cancelled turn produces no `assistant/message`.** The 590 chunks are the
+  only record of the partial answer, so the streamed row must stand on its own
+  rather than waiting for a completion that never arrives.
+
+### 14.3 Events that are not transcript rows
+
+`turn/start` and `turn/end` drive run status, with `turn/end.reason`
+discriminating `completed` from `aborted` and its user/other cause.
+`step/start` and `step/end` carry the HR-006 step label. `request/header` and
+`request/context` carry model, effort, `maxTokens`, and the context window, so
+they seed `ThreadSettings` and the usage gauge before the first projection
+arrives. `sandbox/mode`, `permission/preset`, and `approval/policy` are the
+sandbox and approval settings. `session/title` is the tab title, with a
+`source.kind` of `fallback`, an LLM-generated title, or `user` when pinned.
+`agent/inbox/spliced` restates the queue and duplicates `user/message`, so the
+transcript ignores it.
+
+### 14.4 What the mapping implies about size
+
+Every requirement lands on an existing `Item` variant or on `Other`. No new
+transcript variant is needed, which was the reason section 7.4 named
+`Item::Other` as the escape route for a third harness.
+
+The adapter is therefore: a WebSocket reader per downlink, a per-session frame
+router keyed on `sessionId`, one `match` over the event type producing `Item`s,
+six unary calls, and the approval round trip. The vendor-stream interpretation
+that makes the Codex adapter 3,500 lines and the Claude adapter 6,600 is absent
+here, because the host already normalized both the events and their render
+cards.
