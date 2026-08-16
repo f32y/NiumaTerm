@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
 use crate::{
-    ActiveTheme, AxisExt, FocusableExt as _, Sizable, Size, StyledExt,
-    checkbox::checkbox_check_icon, h_flex, text::Text, tooltip::ComponentTooltip, v_flex,
+    ActiveTheme, AxisExt, FocusableExt as _, Sizable, Size, StyledExt, h_flex, text::Text,
+    tooltip::ComponentTooltip, v_flex,
 };
 use gpui::{
     AnyElement, App, Axis, Div, ElementId, InteractiveElement, IntoElement, ParentElement,
@@ -213,9 +213,27 @@ impl RenderOnce for Radio {
                             true if disabled => this.bg(bg),
                             true => this.bg(cx.theme().tokens.primary),
                         })
-                        .child(checkbox_check_icon(
-                            self.id, self.size, checked, disabled, window, cx,
-                        )),
+                        // A filled dot rather than a check mark: the check is
+                        // what a checkbox draws, and a round control wearing one
+                        // reads as "one of several allowed" even where only one
+                        // answer is.
+                        .when(checked, |this| {
+                            this.flex().items_center().justify_center().child(
+                                div()
+                                    .map(|dot| match self.size {
+                                        Size::XSmall => dot.size(px(4.)),
+                                        Size::Small => dot.size(px(5.)),
+                                        Size::Large => dot.size(px(7.)),
+                                        _ => dot.size(px(6.)),
+                                    })
+                                    .rounded_full()
+                                    .bg(if disabled {
+                                        cx.theme().primary_foreground.opacity(0.5)
+                                    } else {
+                                        cx.theme().primary_foreground
+                                    }),
+                            )
+                        }),
                 )
                 .when(!self.children.is_empty() || self.label.is_some(), |this| {
                     this.child(
