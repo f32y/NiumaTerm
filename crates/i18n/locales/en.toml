@@ -190,7 +190,7 @@
 "settings-agent-profile-environment-description" = "Extra environment variables applied to the agent process. Double-click a cell to edit it."
 "settings-agent-profile-add-variable" = "Add Variable"
 "settings-agent-profile-name-description" = "Display name; it keys the default selector and per-profile settings."
-"settings-agent-profile-base-agent" = "Base Agent"
+"settings-agent-profile-base-agent" = "Agent Type"
 "settings-agent-profile-base-agent-description" = "Which agent CLI this profile launches."
 "settings-agent-profile-executable" = "Executable Path"
 "settings-agent-profile-executable-description" = "Executable name or full path; a bare name resolves via PATH."
