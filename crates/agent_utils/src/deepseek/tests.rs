@@ -360,6 +360,92 @@ fn an_approval_request_carries_what_answering_it_needs() {
     assert_eq!(approval_request(&frame, "session-other"), None);
 }
 
+#[test]
+fn the_model_directory_addresses_a_pick_as_a_provider_and_model_pair() {
+    use crate::deepseek::models::ModelDirectory;
+
+    let directory = ModelDirectory::parse(&json!({
+        "current": { "provider": "deepseek", "model": "deepseek-chat", "reasoningEffort": "high" },
+        "routable": true,
+        "groups": [
+            {
+                "id": "deepseek",
+                "name": "DeepSeek",
+                "models": [
+                    {
+                        "id": "deepseek-chat",
+                        "name": "DeepSeek Chat",
+                        "reasoning": {
+                            "efforts": [{ "id": "low", "name": "Low" }, { "id": "high", "name": "High" }],
+                            "defaultEffort": "low",
+                        },
+                    },
+                    { "id": "deepseek-coder", "name": "DeepSeek Coder" },
+                ],
+            },
+            {
+                "id": "openrouter",
+                "name": "OpenRouter",
+                "models": [{ "id": "deepseek-chat", "name": "DeepSeek Chat" }],
+            },
+        ],
+        "failures": [],
+    }));
+
+    let catalog = directory.catalog();
+    let keys: Vec<&str> = catalog.iter().map(|m| m.model.as_str()).collect();
+    // A model id two providers serve cannot address either one alone, while an
+    // id only one serves stays bare so a profile can name it the plain way.
+    assert_eq!(
+        keys,
+        vec![
+            "deepseek/deepseek-chat",
+            "deepseek-coder",
+            "openrouter/deepseek-chat",
+        ]
+    );
+    assert_eq!(catalog[0].display, "DeepSeek Chat (DeepSeek)");
+    assert_eq!(catalog[1].display, "DeepSeek Coder");
+    assert_eq!(
+        catalog[0].efforts,
+        vec!["low".to_string(), "high".to_string()]
+    );
+    assert!(catalog[1].efforts.is_empty());
+
+    assert_eq!(directory.selected(), Some("deepseek/deepseek-chat"));
+    assert_eq!(directory.effort(), Some("high"));
+    assert_eq!(
+        directory.route("openrouter/deepseek-chat"),
+        Some(("openrouter", "deepseek-chat"))
+    );
+    assert_eq!(directory.route("nothing-like-this"), None);
+}
+
+#[test]
+fn a_selection_outside_the_catalog_still_shows_in_the_picker() {
+    use crate::deepseek::models::ModelDirectory;
+
+    // Catalog membership is advisory: a route can serve a model it stopped
+    // advertising, and that session runs perfectly well.
+    let directory = ModelDirectory::parse(&json!({
+        "current": { "provider": "deepseek", "model": "deepseek-retired" },
+        "routable": true,
+        "groups": [{
+            "id": "deepseek",
+            "name": "DeepSeek",
+            "models": [{ "id": "deepseek-chat", "name": "DeepSeek Chat" }],
+        }],
+        "failures": [],
+    }));
+
+    assert_eq!(directory.selected(), Some("deepseek-retired"));
+    assert_eq!(
+        directory.route("deepseek-retired"),
+        Some(("deepseek", "deepseek-retired"))
+    );
+    assert_eq!(directory.effort(), None);
+}
+
 /// One projection unit's whole current value.
 fn projection_frame(key: &str, value: Value) -> Value {
     json!({

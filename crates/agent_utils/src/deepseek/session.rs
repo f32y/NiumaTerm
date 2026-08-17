@@ -5,6 +5,7 @@
 //! threads feeding the pane.
 
 use std::sync::Arc;
+use std::thread;
 
 use serde_json::{Value, json};
 
@@ -13,6 +14,7 @@ use crate::deepseek::api::ApiClient;
 use crate::deepseek::events::Downlinks;
 use crate::deepseek::host::{self, Host, HostError};
 use crate::deepseek::mapping::{self, ApprovalRequest, QuestionRequest, ToolTracker};
+use crate::deepseek::models::ModelDirectory;
 use crate::deepseek::usage::UsageTracker;
 
 pub struct Session {
@@ -39,6 +41,82 @@ pub struct Session {
     /// The usage projections seen so far. Each arrives as its own frame, and
     /// the pane's snapshot is assembled from more than one of them.
     usage: UsageTracker,
+    /// What the picker offers, and what a pick from it addresses. Empty until
+    /// the catalog arrives, which is a background call rather than part of
+    /// opening the conversation.
+    models: ModelDirectory,
+}
+
+/// Frame type this adapter mints locally to carry the model catalog.
+///
+/// The catalog is a unary call, not a downlink push, but the pane only reacts
+/// to what arrives on the delivery channel — a result parked anywhere else
+/// would sit unread until some unrelated frame happened to wake the tab. The
+/// `nmt/` prefix keeps it out of the harness's own type space.
+const MODELS_FRAME: &str = "nmt/models";
+
+/// Read the session's model directory and reconcile it with the profile's pick,
+/// then deliver the result.
+///
+/// This runs off the create path because provider lookups reach the network,
+/// and a tab must not wait on a slow provider before it can be typed in. The
+/// selection is applied here rather than reported and applied later, so what
+/// the pane displays is what the harness will actually route.
+fn load_models(
+    client: ApiClient,
+    session_id: String,
+    wanted_model: Option<String>,
+    wanted_effort: Option<String>,
+    deliver: Arc<impl Fn(Value) + Send + Sync + 'static>,
+) {
+    thread::spawn(move || {
+        let mut catalog =
+            match client.call("session.models", json!({ "sessionId": session_id.clone() })) {
+                Ok(catalog) => catalog,
+                Err(error) => {
+                    tracing::warn!(
+                        "deepseek model directory could not be read: {}",
+                        error.message()
+                    );
+                    return;
+                }
+            };
+
+        if let Some(model) = wanted_model {
+            let directory = ModelDirectory::parse(&catalog);
+            let already = directory.selected() == Some(model.as_str())
+                && (wanted_effort.is_none() || directory.effort() == wanted_effort.as_deref());
+
+            // A profile naming a model this deployment does not serve leaves
+            // the harness on its own selection, which the catalog already
+            // describes; overriding it with a route that does not exist would
+            // only fail the next turn.
+            if let Some((provider, id)) = directory.route(&model)
+                && !already
+            {
+                let mut payload = json!({
+                    "sessionId": session_id,
+                    "provider": provider,
+                    "model": id,
+                });
+                if let Some(effort) = &wanted_effort {
+                    payload["reasoningEffort"] = json!(effort);
+                }
+
+                match client.call("session.selectModel", payload) {
+                    Ok(selected) => catalog["current"] = selected["selected"].clone(),
+                    Err(error) => tracing::warn!(
+                        "deepseek could not select the profile's model: {}",
+                        error.message()
+                    ),
+                }
+            }
+        }
+
+        deliver(json!({
+            "payload": { "type": MODELS_FRAME, "sessionId": session_id, "models": catalog },
+        }));
+    });
 }
 
 impl Session {
@@ -74,7 +152,21 @@ impl Session {
         // Opening the downlinks after the session exists means its first frames
         // cannot be missed: the stream replays a baseline for every attached
         // session when it opens.
-        let downlinks = Downlinks::open(host.base(), Arc::downgrade(&host), deliver);
+        let deliver = Arc::new(deliver);
+        let downlinks = {
+            let deliver = Arc::clone(&deliver);
+            Downlinks::open(host.base(), Arc::downgrade(&host), move |frame| {
+                deliver(frame)
+            })
+        };
+
+        load_models(
+            client.clone(),
+            session_id.clone(),
+            launch.model.clone(),
+            launch.effort.clone(),
+            deliver,
+        );
 
         Ok(Self {
             client,
@@ -86,6 +178,7 @@ impl Session {
             pending_questions: None,
             tools: ToolTracker::default(),
             usage: UsageTracker::default(),
+            models: ModelDirectory::default(),
         })
     }
 
@@ -126,6 +219,20 @@ impl Session {
         // mapping that has to remember what the earlier frames said.
         if let Some(events) = self.usage.apply(&frame, &self.session_id) {
             return events;
+        }
+
+        if frame["payload"]["type"] == MODELS_FRAME {
+            self.models = ModelDirectory::parse(&frame["payload"]["models"]);
+            // The catalog and the selection travel together, so the pickers
+            // gain their options and their current value in one repaint.
+            return vec![
+                Event::Models(self.models.catalog()),
+                Event::Ready(ThreadSettings {
+                    model: self.models.selected().map(str::to_string),
+                    effort: self.models.effort().map(str::to_string),
+                    ..ThreadSettings::default()
+                }),
+            ];
         }
 
         let events = mapping::map_frame(&frame, &self.session_id, &mut self.tools);
@@ -234,6 +341,49 @@ impl Session {
         }
     }
 
+    /// Point the session at another model, optionally pinning a reasoning
+    /// effort. Returns why the harness refused, because a picker that silently
+    /// keeps showing a value the session never adopted is worse than an error.
+    ///
+    /// An absent `effort` is how the adapter's own default is asked for, which
+    /// is what a model switch wants: the levels belong to the exact model, so
+    /// carrying the previous one over could pin a level this route rejects.
+    pub fn select_model(&mut self, model: &str, effort: Option<&str>) -> Result<(), String> {
+        let Some((provider, id)) = self.models.route(model) else {
+            return Err(format!("{model} is not one of this session's models"));
+        };
+
+        let mut payload = json!({
+            "sessionId": self.session_id,
+            "provider": provider,
+            "model": id,
+        });
+        if let Some(effort) = effort {
+            payload["reasoningEffort"] = json!(effort);
+        }
+
+        let selected = self
+            .client
+            .call("session.selectModel", payload)
+            .map_err(|error| error.message().to_string())?;
+
+        // The harness answers with the selection it committed, which is what
+        // the directory records: an effort it declined to pin is absent there.
+        self.models.set_selected(
+            model.to_string(),
+            selected["selected"]["reasoningEffort"]
+                .as_str()
+                .map(str::to_string),
+        );
+        Ok(())
+    }
+
+    /// What the session is actually set to, for a caller restoring its pickers
+    /// after a refused pick.
+    pub fn selection(&self) -> (Option<&str>, Option<&str>) {
+        (self.models.selected(), self.models.effort())
+    }
+
     /// Send a prompt. Returns why it was refused, so the composer can keep the
     /// text the user typed rather than losing it to a failed send.
     pub fn send_user_message(&mut self, text: &str) -> Result<(), String> {
@@ -271,12 +421,5 @@ impl Session {
 
     pub fn has_active_operation(&self) -> bool {
         self.running
-    }
-
-    /// The thread controls this integration can report. Model and effort
-    /// selection is not mapped yet, so the pickers stay empty rather than
-    /// showing a value the tab cannot change.
-    pub fn initial_settings() -> ThreadSettings {
-        ThreadSettings::default()
     }
 }

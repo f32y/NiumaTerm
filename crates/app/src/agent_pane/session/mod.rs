@@ -968,6 +968,49 @@ impl AgentPane {
         cx.notify();
     }
 
+    /// Push the current model and effort picks to a harness that applies them
+    /// as their own request.
+    ///
+    /// A refusal restores both pickers from what the session is actually set
+    /// to, because a picker left showing a value the harness never adopted
+    /// would misreport which model the next turn runs on.
+    pub(super) fn apply_model_selection(&mut self, cx: &mut Context<Self>) {
+        let Some(model) = self.settings.model.clone() else {
+            return;
+        };
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+
+        // The levels belong to the exact model route, so an effort picked for
+        // the previous model could be one the new route rejects. A model change
+        // therefore travels alone and lets the adapter apply its own default,
+        // which is also why no caller has to clear the effort itself.
+        let effort = (session.selection().0 == Some(model.as_str()))
+            .then(|| self.settings.effort.clone())
+            .flatten();
+
+        // Seeding the pickers from a remembered pick reaches here too, and it
+        // usually names what the session already has.
+        if session.selection() == (Some(model.as_str()), effort.as_deref()) {
+            return;
+        }
+
+        let outcome = session.select_model(&model, effort.as_deref());
+
+        // Whether it was taken or refused, the pickers now show what the
+        // session is actually set to: the harness answers a model change with
+        // the effort it chose, and a refusal leaves the previous pair standing.
+        let (model, effort) = session.selection();
+        self.settings.model = model.map(str::to_string);
+        self.settings.effort = effort.map(str::to_string);
+
+        match outcome {
+            Ok(()) => cx.notify(),
+            Err(error) => self.set_command_feedback(CommandFeedbackKind::Error, error, cx),
+        }
+    }
+
     /// Resume the picked history entry without discarding the visible
     /// conversation until the target confirms it can be opened.
     pub(super) fn resume_session(&mut self, index: usize, cx: &mut Context<Self>) {

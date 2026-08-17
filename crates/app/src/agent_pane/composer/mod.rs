@@ -225,6 +225,13 @@ impl AgentPane {
                         i18n("agent-composer-model-set").replace("{value}", &value),
                         cx,
                     );
+                    // Where the harness adopts a model through its own request,
+                    // recording the pick is not applying it. This runs after the
+                    // notice so a refusal replaces it rather than hiding under
+                    // a confirmation of something that did not happen.
+                    if self.kind.caps().model_selection_is_a_request {
+                        self.apply_model_selection(cx);
+                    }
                     return true;
                 }
                 Ok(value) if command.name == "permissions" => {
