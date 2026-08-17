@@ -243,7 +243,9 @@ fn host_events_map_from_terminal_events() {
 fn osc_notification_drains_into_shared_exact_notification_lifecycle() {
     use std::time::Instant;
 
-    use nmt_agent_utils::{AgentMonitor, AgentRoute, AgentRuntimeStatus, request_native_delivery};
+    use nmt_agent_utils::{
+        AgentActivityPolicy, AgentMonitor, AgentRoute, AgentRuntimeStatus, request_native_delivery,
+    };
     use nmt_terminal::event::{EventListener, TerminalEvent, WindowId};
 
     let events: HostEventQueue = Arc::new(Mutex::new(collections::VecDeque::new()));
@@ -269,7 +271,11 @@ fn osc_notification_drains_into_shared_exact_notification_lifecycle() {
 
     let route = AgentRoute::parse("osc-route").unwrap();
     let mut monitor = AgentMonitor::new("process");
-    monitor.register_route(route.clone(), Instant::now());
+    monitor.register_route(
+        route.clone(),
+        AgentActivityPolicy::ExpireAfterInactivity,
+        Instant::now(),
+    );
     let event = events.lock().pop_front().unwrap();
     let HostEvent::Notification { title, body } = event else {
         panic!("expected OSC notification host event");

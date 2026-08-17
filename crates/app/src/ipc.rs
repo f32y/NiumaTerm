@@ -70,7 +70,8 @@ mod tests {
     use std::time::Instant;
 
     use nmt_agent_utils::{
-        AgentEventKind, AgentMonitor, AgentRoute, AgentRuntimeStatus, COMPLETION_QUIET_WINDOW,
+        AgentActivityPolicy, AgentEventKind, AgentMonitor, AgentRoute, AgentRuntimeStatus,
+        COMPLETION_QUIET_WINDOW,
     };
     use serde_json::json;
 
@@ -175,7 +176,11 @@ mod tests {
         let now = Instant::now();
         let route = AgentRoute::parse("window-a:pane-1").unwrap();
         let mut monitor = AgentMonitor::new("test-process");
-        assert!(monitor.register_route(route.clone(), now));
+        assert!(monitor.register_route(
+            route.clone(),
+            AgentActivityPolicy::ExpireAfterInactivity,
+            now,
+        ));
 
         apply_raw(
             &mut monitor,
@@ -224,7 +229,11 @@ mod tests {
         let now = Instant::now();
         let route = AgentRoute::parse("window-a:pane-1").unwrap();
         let mut monitor = AgentMonitor::new("test-process");
-        monitor.register_route(route.clone(), now);
+        monitor.register_route(
+            route.clone(),
+            AgentActivityPolicy::ExpireAfterInactivity,
+            now,
+        );
 
         for (event, session, turn) in [
             ("UserPromptSubmit", "session-1", "turn-1"),
@@ -248,7 +257,11 @@ mod tests {
         let now = Instant::now();
         let route = AgentRoute::parse("window-a:pane-1").unwrap();
         let mut monitor = AgentMonitor::new("test-process");
-        monitor.register_route(route.clone(), now);
+        monitor.register_route(
+            route.clone(),
+            AgentActivityPolicy::ExpireAfterInactivity,
+            now,
+        );
         for line in [
             raw_codex_line(
                 route.as_str(),
@@ -274,7 +287,11 @@ mod tests {
         let now = Instant::now();
         let route = AgentRoute::parse("window-a:pane-1").unwrap();
         let mut monitor = AgentMonitor::new("test-process");
-        monitor.register_route(route.clone(), now);
+        monitor.register_route(
+            route.clone(),
+            AgentActivityPolicy::ExpireAfterInactivity,
+            now,
+        );
 
         apply_raw(
             &mut monitor,

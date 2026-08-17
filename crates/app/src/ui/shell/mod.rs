@@ -36,8 +36,8 @@ use gpui_component::{
 };
 use nmt_agent_utils::update::{ProviderKind, UpdatePhase};
 use nmt_agent_utils::{
-    AgentEvent, AgentMonitor, AgentNotification, AgentRoute, AgentRuntimeStatus, agent_process,
-    exact_window_is_active, request_native_delivery,
+    AgentActivityPolicy, AgentEvent, AgentMonitor, AgentNotification, AgentRoute,
+    AgentRuntimeStatus, agent_process, exact_window_is_active, request_native_delivery,
 };
 use nmt_config::get;
 #[cfg(test)]
@@ -281,8 +281,12 @@ impl Shell {
 
         for tabs in workspaces.all_tabs() {
             for tab in tabs.tabs() {
+                let activity_policy = match tab.surface() {
+                    TabSurface::Agent(_) => AgentActivityPolicy::ExplicitLifecycle,
+                    _ => AgentActivityPolicy::ExpireAfterInactivity,
+                };
                 for route in Self::agent_routes_in_surface(tab.surface(), cx) {
-                    agent_monitor.register_route(route, now);
+                    agent_monitor.register_route(route, activity_policy, now);
                 }
             }
         }
@@ -505,12 +509,18 @@ impl Shell {
             return;
         }
 
-        let routes = Self::agent_routes_in_surface(self.workspaces.active_tabs().active(), cx);
+        let surface = self.workspaces.active_tabs().active();
+        let activity_policy = match surface {
+            TabSurface::Agent(_) => AgentActivityPolicy::ExplicitLifecycle,
+            _ => AgentActivityPolicy::ExpireAfterInactivity,
+        };
+        let routes = Self::agent_routes_in_surface(surface, cx);
 
         let now = time::Instant::now();
 
         for route in routes {
-            self.agent_monitor.register_route(route, now);
+            self.agent_monitor
+                .register_route(route, activity_policy, now);
         }
     }
 
