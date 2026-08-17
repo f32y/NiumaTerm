@@ -140,10 +140,28 @@ impl ApiClient {
     /// simply keeps waiting — so this returns the refusal instead of assuming
     /// the answer landed.
     pub(crate) fn respond(&self, rpc_id: &str, value: Value) -> Result<(), CallError> {
+        self.send_response(rpc_id, json!({ "ok": true, "value": value }))
+    }
+
+    /// Refuse a frame the harness is blocked on, which is how a question the
+    /// user dismissed is reported. The harness distinguishes this from a
+    /// malformed answer by the `cancelled` code alone, so whatever raised the
+    /// question fails with its own cancellation rather than waiting on.
+    pub(crate) fn respond_cancelled(&self, rpc_id: &str) -> Result<(), CallError> {
+        self.send_response(
+            rpc_id,
+            json!({
+                "ok": false,
+                "error": { "code": "cancelled", "message": "the user dismissed the question" },
+            }),
+        )
+    }
+
+    fn send_response(&self, rpc_id: &str, result: Value) -> Result<(), CallError> {
         let answer = json!({
             "type": "client-response",
             "rpcId": rpc_id,
-            "result": { "ok": true, "value": value },
+            "result": result,
         });
         let body = self
             .http

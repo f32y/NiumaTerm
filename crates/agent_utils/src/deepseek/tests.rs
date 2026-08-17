@@ -361,6 +361,85 @@ fn an_approval_request_carries_what_answering_it_needs() {
 }
 
 #[test]
+fn a_question_request_carries_the_ids_an_answer_is_matched_against() {
+    use crate::deepseek::mapping::question_request;
+
+    let frame = json!({
+        "type": "server-request",
+        "rpcId": "0f21a6f2-7f52-4b0f-bb2f-9c0e9d2f0a11",
+        "method": "question/requested",
+        "payload": {
+            "type": "question/requested",
+            "sessionId": SESSION,
+            "questions": [
+                {
+                    "id": "q1",
+                    "question": "Which database?",
+                    "detail": "The schema is already written for Postgres.",
+                    "header": "Storage",
+                    "options": [
+                        { "label": "Postgres", "description": "What the schema targets" },
+                        { "label": "SQLite" },
+                    ],
+                },
+                {
+                    "id": "q2",
+                    "question": "Which extras?",
+                    "multiSelect": true,
+                    "options": [{ "label": "Metrics" }, { "label": "Tracing" }],
+                },
+            ],
+        },
+    });
+
+    let (request, questions) =
+        question_request(&frame, SESSION).expect("the request should be recognized");
+    assert_eq!(request.rpc_id, "0f21a6f2-7f52-4b0f-bb2f-9c0e9d2f0a11");
+    // The harness matches each answer against the question at the same
+    // position, so the ask order is what makes the batch answerable.
+    assert_eq!(request.ids, vec!["q1".to_string(), "q2".to_string()]);
+
+    assert_eq!(questions[0].header.as_deref(), Some("Storage"));
+    assert!(
+        questions[0].question.contains("Postgres"),
+        "the detail belongs in front of the user: {}",
+        questions[0].question
+    );
+    assert!(!questions[0].multi_select);
+    assert_eq!(questions[0].options[0].label, "Postgres");
+    assert_eq!(
+        questions[0].options[0].description.as_deref(),
+        Some("What the schema targets")
+    );
+    assert!(questions[1].multi_select);
+
+    // Another tab's question belongs to that tab.
+    assert_eq!(question_request(&frame, "session-other"), None);
+}
+
+#[test]
+fn a_resolved_question_takes_the_card_down() {
+    let frame = json!({
+        "type": "server-request",
+        "payload": {
+            "type": "question/resolved",
+            "sessionId": SESSION,
+            "questionRpcId": "0f21a6f2",
+            "outcome": "answered",
+        },
+    });
+
+    assert_eq!(
+        map_frame(&frame, SESSION, &mut ToolTracker::default()),
+        vec![Event::QuestionsResolved]
+    );
+    assert_eq!(
+        map_frame(&frame, "session-other", &mut ToolTracker::default()),
+        Vec::new()
+    );
+}
+
+#[test]
 fn a_resolved_approval_takes_the_card_down() {
     let frame = json!({
         "type": "server-request",
