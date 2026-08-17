@@ -361,6 +361,40 @@ fn an_approval_request_carries_what_answering_it_needs() {
 }
 
 #[test]
+fn the_command_registry_fills_the_palette() {
+    use crate::chat::{SlashCommandArguments, SlashCommandRunPolicy, SlashCommandSource};
+    use crate::deepseek::commands;
+
+    let listed = json!([
+        { "name": "compact", "description": "Summarize the conversation so far" },
+        {
+            "name": "permission",
+            "description": "Switch the permission preset",
+            "input": { "hint": "preset name" },
+        },
+    ]);
+
+    let catalog = commands::catalog(&listed);
+    assert_eq!(catalog.len(), 2);
+    assert_eq!(catalog[0].name, "compact");
+    assert_eq!(catalog[0].source, SlashCommandSource::Provider);
+    // The registry settles a command itself rather than handing it to the
+    // model, so none of them wait for a turn.
+    assert_eq!(catalog[0].run_policy, SlashCommandRunPolicy::Immediate);
+    // An input hint is what says the name is followed by free text.
+    assert_eq!(catalog[0].arguments, SlashCommandArguments::None);
+    assert_eq!(catalog[1].arguments, SlashCommandArguments::Freeform);
+    assert_eq!(catalog[1].argument_hint.as_deref(), Some("preset name"));
+
+    // The registry resolves the agent from a session id, and the argument is
+    // named by that resolver rather than by the method's own parameter.
+    assert_eq!(
+        commands::agent_args(SESSION),
+        json!({ "args": { "agentId": SESSION } })
+    );
+}
+
+#[test]
 fn the_session_list_offers_only_what_this_tab_can_continue() {
     use std::time::{Duration, UNIX_EPOCH};
 

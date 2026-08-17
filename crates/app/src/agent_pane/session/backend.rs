@@ -151,9 +151,7 @@ impl Backend {
         match self {
             Backend::Codex(session) => session.execute_slash_command(name, arguments),
             Backend::Claude(session) => session.execute_slash_command(name, arguments),
-            // The harness runs its own commands, but that registry is not
-            // mapped, so only the local commands work in a DeepSeek tab.
-            Backend::DeepSeek(_) => SlashCommandOutcome::NotReady,
+            Backend::DeepSeek(session) => session.execute_slash_command(name, arguments),
             #[cfg(test)]
             Backend::Test(session) => session.slash_outcome.clone(),
         }
