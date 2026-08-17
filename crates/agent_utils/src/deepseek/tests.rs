@@ -360,6 +360,110 @@ fn an_approval_request_carries_what_answering_it_needs() {
     assert_eq!(approval_request(&frame, "session-other"), None);
 }
 
+/// One projection unit's whole current value.
+fn projection_frame(key: &str, value: Value) -> Value {
+    json!({
+        "type": "server-request",
+        "payload": {
+            "type": "session/projection",
+            "sessionId": SESSION,
+            "key": key,
+            "value": value,
+            "seq": 42,
+        },
+    })
+}
+
+#[test]
+fn usage_projections_combine_into_one_window_snapshot() {
+    use crate::chat::ContextUsageScope;
+    use crate::deepseek::usage::UsageTracker;
+
+    let mut usage = UsageTracker::default();
+
+    // Cumulative totals alone draw no bar: the occupancy they would be shown
+    // beside is not known until the provider reports a request.
+    assert_eq!(
+        usage.apply(
+            &projection_frame(
+                "tokenUsage",
+                json!({
+                    "uncachedInputTokens": 1200,
+                    "outputTokens": 300,
+                    "cacheReadTokens": 8000,
+                    "cacheWriteTokens": 500,
+                }),
+            ),
+            SESSION,
+        ),
+        Some(Vec::new())
+    );
+
+    let events = usage
+        .apply(
+            &projection_frame(
+                "contextPressure",
+                json!({ "pressureTokens": 9700, "projectedTokens": 9950, "contextWindow": 128000 }),
+            ),
+            SESSION,
+        )
+        .expect("a projection frame for this session should be claimed");
+
+    let [Event::ContextWindowUpdated(window)] = events.as_slice() else {
+        panic!("expected one window snapshot, got {events:?}");
+    };
+    // The projected figure is what reacts to a compaction, so it wins over the
+    // provider's older sample.
+    assert_eq!(window.current.total_tokens, 9950);
+    assert_eq!(window.max_tokens, Some(128_000));
+
+    let cumulative = window.cumulative.expect("the totals should ride along");
+    assert_eq!(cumulative.scope, ContextUsageScope::Thread);
+    assert_eq!(cumulative.breakdown.total_tokens, 10_000);
+    assert_eq!(cumulative.breakdown.cache_read_input_tokens, Some(8000));
+
+    // Another tab's projection is not this tab's accounting.
+    assert_eq!(
+        usage.apply(&projection_frame("tokenUsage", json!({})), "session-other"),
+        None
+    );
+}
+
+#[test]
+fn a_context_breakdown_becomes_the_composition_segments() {
+    use crate::deepseek::usage::UsageTracker;
+
+    let mut usage = UsageTracker::default();
+    usage.apply(
+        &projection_frame(
+            "contextPressure",
+            json!({ "projectedTokens": 900, "contextWindow": 64000 }),
+        ),
+        SESSION,
+    );
+
+    let events = usage
+        .apply(
+            &projection_frame(
+                "contextBreakdown",
+                json!({ "systemTokens": 400, "toolsTokens": 250, "messageTokens": 1000 }),
+            ),
+            SESSION,
+        )
+        .expect("a projection frame for this session should be claimed");
+
+    let [Event::ContextCompositionUpdated(composition)] = events.as_slice() else {
+        panic!("expected one composition, got {events:?}");
+    };
+    assert_eq!(composition.segments.len(), 3);
+    assert_eq!(composition.segments[1].label, "Tools");
+    assert_eq!(composition.segments[1].tokens, 250);
+    // The three figures share one estimator, so their sum is the only total
+    // that describes this split.
+    assert_eq!(composition.used_tokens, 1650);
+    assert_eq!(composition.max_tokens, Some(64_000));
+}
+
 #[test]
 fn a_question_request_carries_the_ids_an_answer_is_matched_against() {
     use crate::deepseek::mapping::question_request;

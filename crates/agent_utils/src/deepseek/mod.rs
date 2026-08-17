@@ -16,6 +16,7 @@ mod events;
 mod host;
 mod mapping;
 mod session;
+mod usage;
 mod version;
 
 #[cfg(test)]
