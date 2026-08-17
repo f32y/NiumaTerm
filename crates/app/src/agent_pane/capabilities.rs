@@ -83,10 +83,10 @@ const CLAUDE: Capabilities = Capabilities {
     model_selection_is_a_request: false,
 };
 
-/// The DeepSeek host publishes commands, skills, history, subagents, and
-/// compaction detail, so these are false because this integration does not map
-/// them yet rather than because the harness lacks them. The exception is
-/// `file_rewind`: DeepSeek Harness has no equivalent operation at all.
+/// The DeepSeek host publishes commands, skills, history, and subagents, so
+/// these are false because this integration does not map them yet rather than
+/// because the harness lacks them. The exception is `file_rewind`: DeepSeek
+/// Harness has no equivalent operation at all.
 const DEEPSEEK: Capabilities = Capabilities {
     skill_references: false,
     file_rewind: false,
@@ -97,7 +97,7 @@ const DEEPSEEK: Capabilities = Capabilities {
     resume_restores_thread_settings: false,
     resume_restores_approval_reviewer: false,
     model_baked_into_launch: false,
-    expandable_compaction_rows: false,
+    expandable_compaction_rows: true,
     session_scoped_approval: false,
     model_selection_is_a_request: true,
 };

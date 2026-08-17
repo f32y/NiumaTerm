@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use crate::chat::{Event, Item, Question, QuestionOption};
+use crate::chat::{Compaction, CompactionTrigger, Event, Item, Question, QuestionOption};
 
 /// The status vocabulary the transcript renders: anything else reads as still
 /// running, and `failed` is what turns a row red.
@@ -366,8 +366,98 @@ fn map_session_event(event: &Value, view: &Value, tools: &mut ToolTracker) -> Ve
         Some("assistant/chunk") => map_chunk(data),
         Some("assistant/message") => map_completed_message(data),
         Some("user/message") => map_user_message(data),
+        Some("compaction/start") => vec![Event::CompactionStarted],
+        Some("compaction/summary") => map_compaction_summary(data),
+        Some("compaction/end") => vec![Event::CompactionFinished {
+            error: data["error"].as_str().map(str::to_string),
+        }],
+        Some("todo/write") => map_todo_write(event, data),
         _ => Vec::new(),
     }
+}
+
+/// The finished compaction boundary.
+///
+/// This is the record, not `compaction/end`: the summary event is written only
+/// once a compaction produced one, so a failed attempt closes its transaction
+/// without leaving a row claiming the conversation was rewritten.
+///
+/// The replacement text the conversation continues from arrives separately as a
+/// `user/message` carrying the checkpoint's plugin source, which the user-message
+/// mapping already declines to render as something the user wrote.
+fn map_compaction_summary(data: &Value) -> Vec<Event> {
+    let Some(id) = data["compactionId"].as_str() else {
+        return Vec::new();
+    };
+
+    let summary = data["summary"]
+        .as_array()
+        .map(|blocks| {
+            blocks
+                .iter()
+                .filter(|block| block["type"] == "text")
+                .filter_map(|block| block["text"].as_str())
+                .collect::<Vec<_>>()
+                .join("")
+        })
+        .filter(|text| !text.is_empty());
+
+    vec![Event::ItemCompleted(Item::Compaction {
+        id: id.to_string(),
+        detail: Compaction {
+            // A manual compaction records the command that asked for it; an
+            // automatic one reaches its own threshold and names nothing.
+            trigger: Some(if data["sourceCommandId"].is_string() {
+                CompactionTrigger::Manual
+            } else {
+                CompactionTrigger::Automatic
+            }),
+            // The harness prices the range it replaced rather than the context
+            // before and after, so only the replaced side is knowable here.
+            pre_tokens: data["shadowedTokenCount"].as_u64(),
+            post_tokens: None,
+            messages_summarized: data["shadowedSeqs"]
+                .as_array()
+                .map(|seqs| seqs.len() as u64),
+            user_context: None,
+            summary,
+        },
+    })]
+}
+
+/// The agent's task list, restated in full on every write.
+///
+/// It is rendered as the same checklist shape the other harnesses' task tool
+/// produces, so the transcript's progress tally reads it without a second
+/// vocabulary. Each write is its own row because the list is a snapshot of a
+/// moment, and an earlier one stays true about the moment it described.
+fn map_todo_write(event: &Value, data: &Value) -> Vec<Event> {
+    let checklist: String = data["todos"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|todo| {
+            let content = todo["content"].as_str()?;
+            let mark = if todo["status"] == "completed" {
+                "x"
+            } else {
+                " "
+            };
+            Some(format!("- [{mark}] {content}\n"))
+        })
+        .collect();
+
+    if checklist.is_empty() {
+        return Vec::new();
+    }
+
+    vec![Event::ItemCompleted(Item::Other {
+        id: format!("todo:{}", event["seq"].as_u64().unwrap_or_default()),
+        kind: "TodoWrite".to_string(),
+        title: "Update todo list".to_string(),
+        output: Some(checklist),
+        status: Some(COMPLETED.to_string()),
+    })]
 }
 
 /// A turn ends completed, aborted by someone, or failed. Only a failure carries
