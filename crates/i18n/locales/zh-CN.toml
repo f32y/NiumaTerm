@@ -562,6 +562,8 @@
 "agent-transcript-interrupted" = "已中断"
 "agent-transcript-timed-status" = "{verb} {duration}"
 "agent-transcript-status-tokens" = "{status} · {tokens} 个词元"
+"agent-transcript-status-detail" = "{detail} · {status}"
+"agent-transcript-retrying" = "第 {attempt}/{total} 次重试，因 {reason}"
 "agent-duration-day" = "{count} 天"
 "agent-duration-days" = "{count} 天"
 "agent-duration-hour" = "{count} 小时"

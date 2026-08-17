@@ -56,7 +56,7 @@ use nmt_agent_utils::chat::{
     Event as SessionEvent, Item as SessionItem, ModelInfo, Question, QuestionOption, ReplayTurn,
     SendOutcome, SessionSummary, SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments,
     SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
-    ThreadSettings,
+    ThreadSettings, TurnActivity,
 };
 use nmt_agent_utils::claude_code::workflows::{
     RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult,

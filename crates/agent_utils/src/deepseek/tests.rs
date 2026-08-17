@@ -763,6 +763,59 @@ fn a_compaction_records_itself_only_once_it_produced_a_summary() {
 }
 
 #[test]
+fn a_retry_says_the_turn_is_waiting_rather_than_thinking() {
+    use crate::chat::TurnActivity;
+
+    let retry = session_frame(json!({
+        "type": "llm/retry",
+        "data": {
+            "retryId": "r-1",
+            "turn": 1,
+            "step": 1,
+            "provider": "deepseek",
+            "mode": "normal",
+            "policyKey": "deepseek-normal",
+            "retry": 1,
+            "maxRetries": 2,
+            "delayMs": 4500,
+            "failure": { "message": "429 rate limited", "code": "rate_limit", "status": 429 },
+        },
+    }));
+    assert_eq!(
+        map_frame(&retry, SESSION, &mut ToolTracker::default()),
+        vec![Event::StatusDetail(Some(TurnActivity::Retrying {
+            attempt: 1,
+            total: 2,
+            reason: "429 rate limited".into(),
+        }))]
+    );
+
+    // The wait is over and the next attempt starts, which is ordinary work.
+    let started = session_frame(json!({
+        "type": "llm/retry-started",
+        "data": { "retryId": "r-1", "turn": 1, "step": 1, "retry": 1 },
+    }));
+    assert_eq!(
+        map_frame(&started, SESSION, &mut ToolTracker::default()),
+        vec![Event::StatusDetail(None)]
+    );
+
+    // A failure with no sentence still separates a rate limit from an outage.
+    let coded = session_frame(json!({
+        "type": "llm/retry",
+        "data": { "retry": 2, "maxRetries": 2, "failure": { "code": "overloaded" } },
+    }));
+    assert_eq!(
+        map_frame(&coded, SESSION, &mut ToolTracker::default()),
+        vec![Event::StatusDetail(Some(TurnActivity::Retrying {
+            attempt: 2,
+            total: 2,
+            reason: "overloaded".into(),
+        }))]
+    );
+}
+
+#[test]
 fn a_todo_write_renders_as_the_shared_checklist_shape() {
     let frame = session_frame(json!({
         "type": "todo/write",

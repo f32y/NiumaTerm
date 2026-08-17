@@ -8,7 +8,9 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use crate::chat::{Compaction, CompactionTrigger, Event, Item, Question, QuestionOption};
+use crate::chat::{
+    Compaction, CompactionTrigger, Event, Item, Question, QuestionOption, TurnActivity,
+};
 
 /// The status vocabulary the transcript renders: anything else reads as still
 /// running, and `failed` is what turns a row red.
@@ -376,8 +378,36 @@ pub(crate) fn map_session_event(
             error: data["error"].as_str().map(str::to_string),
         }],
         Some("todo/write") => map_todo_write(event, data),
+        Some("llm/retry") => map_retry(data),
+        // The wait is over and the next attempt is starting, which looks like
+        // ordinary work again.
+        Some("llm/retry-started") => vec![Event::StatusDetail(None)],
         _ => Vec::new(),
     }
+}
+
+/// A provider request that failed and will be tried again.
+///
+/// This is the one thing the working row cannot show on its own: the turn is
+/// waiting rather than thinking, and the elapsed time climbs identically either
+/// way while the token count sits still. The delay is left out because it is a
+/// countdown, and a figure that stops being true a second after it is drawn
+/// reads as worse information than none.
+fn map_retry(data: &Value) -> Vec<Event> {
+    let attempt = data["retry"].as_u64().unwrap_or(1);
+    let total = data["maxRetries"].as_u64().unwrap_or(attempt);
+    // The provider's own sentence says the most; its neutral code is the
+    // fallback because it at least separates a rate limit from an outage.
+    let reason = data["failure"]["message"]
+        .as_str()
+        .or_else(|| data["failure"]["code"].as_str())
+        .unwrap_or("a provider failure");
+
+    vec![Event::StatusDetail(Some(TurnActivity::Retrying {
+        attempt,
+        total,
+        reason: reason.to_string(),
+    }))]
 }
 
 /// The finished compaction boundary.
