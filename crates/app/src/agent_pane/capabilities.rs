@@ -83,14 +83,14 @@ const CLAUDE: Capabilities = Capabilities {
     model_selection_is_a_request: false,
 };
 
-/// The DeepSeek host publishes skills and workflow runs, so these are false
-/// because this integration does not map them yet rather than because the
-/// harness lacks them. The exception is `file_rewind`: DeepSeek Harness has no
-/// equivalent operation at all.
+/// The DeepSeek host publishes skills, so that one is false because this
+/// integration does not map them yet rather than because the harness lacks
+/// them. The exception is `file_rewind`: DeepSeek Harness has no equivalent
+/// operation at all.
 const DEEPSEEK: Capabilities = Capabilities {
     skill_references: false,
     file_rewind: false,
-    workflows: false,
+    workflows: true,
     async_command_discovery: true,
     repeats_ready_during_init: false,
     filesystem_session_history: false,

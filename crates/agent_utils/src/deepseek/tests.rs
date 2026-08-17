@@ -361,6 +361,72 @@ fn an_approval_request_carries_what_answering_it_needs() {
 }
 
 #[test]
+fn a_workflow_run_is_folded_from_its_own_increments() {
+    use crate::deepseek::workflows::WorkflowTracker;
+    use crate::workflow::{WorkflowAgentState, WorkflowRunState};
+
+    let mut workflows = WorkflowTracker::default();
+    let event = |value: Value| value;
+
+    assert!(workflows.apply(&event(json!({
+        "type": "tool-workflow/run-start",
+        "data": { "runId": "wf-1", "name": "review-changes" },
+    }))));
+    assert_eq!(
+        workflows.snapshot(SESSION).runs[0].state,
+        WorkflowRunState::Starting
+    );
+
+    for (seq, label, phase) in [(1, "review:bugs", "Review"), (2, "review:perf", "Review")] {
+        assert!(workflows.apply(&event(json!({
+            "type": "tool-workflow/agent-start",
+            "data": {
+                "runId": "wf-1",
+                "seq": seq,
+                "label": label,
+                "phase": phase,
+                "childId": format!("child-{seq}"),
+            },
+        }))));
+    }
+
+    let run = workflows.snapshot(SESSION).runs.remove(0);
+    // A member is published only once its session exists, so the run is under
+    // way as soon as one arrives.
+    assert_eq!(run.state, WorkflowRunState::Running);
+    assert_eq!(run.agents.len(), 2);
+    assert_eq!(run.agents[0].agent_id.as_deref(), Some("child-1"));
+    // A member names its group by title alone, so the list is built as members
+    // first mention one and both share the entry.
+    assert_eq!(run.phases.len(), 1);
+    assert_eq!(run.phases[0].title, "Review");
+    assert_eq!(run.agents[1].phase_index, Some(0));
+
+    assert!(workflows.apply(&event(json!({
+        "type": "tool-workflow/agent-end",
+        "data": { "runId": "wf-1", "seq": 1, "outcome": "failed" },
+    }))));
+    assert!(workflows.apply(&event(json!({
+        "type": "tool-workflow/run-end",
+        "data": { "runId": "wf-1", "stopReason": "error" },
+    }))));
+
+    let run = workflows.snapshot(SESSION).runs.remove(0);
+    assert_eq!(run.state, WorkflowRunState::Failed);
+    assert_eq!(run.agents[0].state, WorkflowAgentState::Failed);
+    // The second member never reported an ending of its own, and leaving it
+    // Running under a finished run would claim work still in progress.
+    assert_eq!(run.agents[1].state, WorkflowAgentState::Stopped);
+
+    // A log can be read more than once, and a repeat is not a second run.
+    assert!(!workflows.apply(&event(json!({
+        "type": "tool-workflow/run-start",
+        "data": { "runId": "wf-1", "name": "review-changes" },
+    }))));
+    assert_eq!(workflows.snapshot(SESSION).runs.len(), 1);
+}
+
+#[test]
 fn the_child_catalog_becomes_rows_that_can_be_opened() {
     use crate::background_task::{BackgroundTaskRefs, BackgroundTaskState};
     use crate::deepseek::subagents;

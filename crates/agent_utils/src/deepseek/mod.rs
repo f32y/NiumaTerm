@@ -22,6 +22,7 @@ mod projections;
 mod session;
 mod subagents;
 mod version;
+mod workflows;
 
 #[cfg(test)]
 mod tests;

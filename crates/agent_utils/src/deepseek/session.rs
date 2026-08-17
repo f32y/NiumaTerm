@@ -20,6 +20,7 @@ use crate::deepseek::host::{self, Host, HostError};
 use crate::deepseek::mapping::{self, ApprovalRequest, QuestionRequest, ToolTracker};
 use crate::deepseek::models::ModelDirectory;
 use crate::deepseek::projections::ProjectionTracker;
+use crate::deepseek::workflows::WorkflowTracker;
 use crate::deepseek::{commands, history, subagents};
 
 pub struct Session {
@@ -70,6 +71,10 @@ pub struct Session {
     /// child's conversation addresses it by that kind, and only the catalog
     /// reports it, so the answer is kept from the catalog that named the child.
     subagent_modes: HashMap<String, bool>,
+    /// Workflow runs accumulated from the log. Each event carries only its own
+    /// increment, so the run is what they add up to rather than a value any one
+    /// of them reports.
+    workflows: WorkflowTracker,
 }
 
 /// Frame type this adapter mints locally to carry the model catalog.
@@ -358,6 +363,7 @@ impl Session {
             models: ModelDirectory::default(),
             subagent_activity: 0,
             subagent_modes: HashMap::new(),
+            workflows: WorkflowTracker::default(),
         })
     }
 
@@ -382,6 +388,7 @@ impl Session {
                 self.models = ModelDirectory::default();
                 self.subagent_activity = 0;
                 self.subagent_modes.clear();
+                self.workflows = WorkflowTracker::default();
 
                 // The directory belongs to the session, so the resumed one is
                 // asked afresh and the profile's pick applied to it in turn.
@@ -568,7 +575,16 @@ impl Session {
             self.refresh_background_tasks();
         }
 
-        let events = mapping::map_frame(&frame, &self.session_id, &mut self.tools);
+        let mut events = mapping::map_frame(&frame, &self.session_id, &mut self.tools);
+
+        // Workflow rows are folded from the log rather than mapped one event to
+        // one row, so they are published beside whatever else the frame
+        // produced instead of through the transcript vocabulary.
+        if frame["payload"]["sessionId"].as_str() == Some(&self.session_id)
+            && self.workflows.apply(&frame["payload"]["event"])
+        {
+            events.push(Event::Workflows(self.workflows.snapshot(&self.session_id)));
+        }
 
         for event in &events {
             match event {
