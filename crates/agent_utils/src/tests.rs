@@ -133,7 +133,11 @@ fn event(
 fn monitor(now: Instant, routes: &[AgentRoute]) -> AgentMonitor {
     let mut monitor = AgentMonitor::new("process");
     for route in routes {
-        assert!(monitor.register_route(route.clone(), now));
+        assert!(monitor.register_route(
+            route.clone(),
+            AgentActivityPolicy::ExpireAfterInactivity,
+            now,
+        ));
     }
     monitor
 }
@@ -303,6 +307,37 @@ fn stale_active_state_becomes_idle_without_notification() {
     monitor.process_due(now + ACTIVE_STATE_STALE_AFTER);
     assert_eq!(monitor.pane(&r).unwrap().status, AgentRuntimeStatus::Idle);
     assert!(monitor.notification(&r).is_none());
+}
+
+#[test]
+fn explicit_lifecycle_route_stays_active_until_completion() {
+    let now = Instant::now();
+    let completion = now + ACTIVE_STATE_STALE_AFTER * 2;
+    let r = route("pane-1");
+    let mut monitor = AgentMonitor::new("process");
+    monitor.register_route(r.clone(), AgentActivityPolicy::ExplicitLifecycle, now);
+    monitor.apply(
+        event(&r, "s", Some("t"), AgentEventKind::PromptSubmitted),
+        now,
+    );
+
+    assert_eq!(monitor.next_deadline(), None);
+    assert!(!monitor.process_due(completion).visible_changed);
+    assert_eq!(
+        monitor.pane(&r).unwrap().status,
+        AgentRuntimeStatus::Running
+    );
+
+    monitor.apply(
+        event(&r, "s", Some("t"), AgentEventKind::Stopped),
+        completion,
+    );
+    assert_eq!(
+        monitor.next_deadline(),
+        Some(completion + COMPLETION_QUIET_WINDOW)
+    );
+    monitor.process_due(completion + COMPLETION_QUIET_WINDOW);
+    assert_eq!(monitor.pane(&r).unwrap().status, AgentRuntimeStatus::Idle);
 }
 
 #[test]

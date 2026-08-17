@@ -16,6 +16,16 @@ pub struct PendingCompletion {
     body: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AgentActivityPolicy {
+    /// External Hook delivery can end without a final event, so an inactive
+    /// route eventually returns to idle instead of remaining active forever.
+    ExpireAfterInactivity,
+    /// An in-process backend reports completion and interruption explicitly,
+    /// so quiet work remains active until one of those events arrives.
+    ExplicitLifecycle,
+}
+
 #[derive(Clone, Debug)]
 pub struct AgentPaneState {
     pub current_owner: Option<AgentOwner>,
@@ -25,11 +35,12 @@ pub struct AgentPaneState {
     pub state_started_at: Instant,
     pub updated_at: Instant,
     pub pending_completion: Option<PendingCompletion>,
+    activity_policy: AgentActivityPolicy,
     notification_generation: u64,
 }
 
 impl AgentPaneState {
-    fn new(now: Instant) -> Self {
+    fn new(now: Instant, activity_policy: AgentActivityPolicy) -> Self {
         Self {
             current_owner: None,
             turn_generation: 0,
@@ -38,6 +49,7 @@ impl AgentPaneState {
             state_started_at: now,
             updated_at: now,
             pending_completion: None,
+            activity_policy,
             notification_generation: 0,
         }
     }
@@ -53,6 +65,22 @@ impl AgentPaneState {
         self.updated_at = now;
 
         changed
+    }
+
+    fn active_state_deadline(&self) -> Option<Instant> {
+        if !matches!(
+            self.status,
+            AgentRuntimeStatus::Running | AgentRuntimeStatus::NeedsInput
+        ) {
+            return None;
+        }
+
+        match self.activity_policy {
+            AgentActivityPolicy::ExpireAfterInactivity => {
+                Some(self.updated_at + ACTIVE_STATE_STALE_AFTER)
+            }
+            AgentActivityPolicy::ExplicitLifecycle => None,
+        }
     }
 }
 
@@ -108,11 +136,17 @@ impl AgentMonitor {
         }
     }
 
-    pub fn register_route(&mut self, route: AgentRoute, now: Instant) -> bool {
+    pub fn register_route(
+        &mut self,
+        route: AgentRoute,
+        activity_policy: AgentActivityPolicy,
+        now: Instant,
+    ) -> bool {
         if self.panes.contains_key(&route) {
             false
         } else {
-            self.panes.insert(route, AgentPaneState::new(now));
+            self.panes
+                .insert(route, AgentPaneState::new(now, activity_policy));
             true
         }
     }
@@ -297,12 +331,11 @@ impl AgentMonitor {
                 }
             }
 
-            let stale = self.panes.get(&route).is_some_and(|state| {
-                matches!(
-                    state.status,
-                    AgentRuntimeStatus::Running | AgentRuntimeStatus::NeedsInput
-                ) && state.updated_at + ACTIVE_STATE_STALE_AFTER <= now
-            });
+            let stale = self
+                .panes
+                .get(&route)
+                .and_then(AgentPaneState::active_state_deadline)
+                .is_some_and(|deadline| deadline <= now);
 
             if stale {
                 let state = self.panes.get_mut(&route).expect("route still registered");
@@ -350,11 +383,7 @@ impl AgentMonitor {
             .values()
             .flat_map(|state| {
                 let completion = state.pending_completion.as_ref().map(|p| p.deadline);
-                let stale = matches!(
-                    state.status,
-                    AgentRuntimeStatus::Running | AgentRuntimeStatus::NeedsInput
-                )
-                .then_some(state.updated_at + ACTIVE_STATE_STALE_AFTER);
+                let stale = state.active_state_deadline();
                 completion.into_iter().chain(stale)
             })
             .min()

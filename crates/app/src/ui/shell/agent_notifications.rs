@@ -18,13 +18,19 @@ enum AgentRouteTarget {
 
 impl Shell {
     pub(super) fn register_agent_pane(&mut self, pane: &Entity<TerminalPane>, cx: &App) {
-        self.agent_monitor
-            .register_route(pane.read(cx).agent_route().clone(), time::Instant::now());
+        self.agent_monitor.register_route(
+            pane.read(cx).agent_route().clone(),
+            AgentActivityPolicy::ExpireAfterInactivity,
+            time::Instant::now(),
+        );
     }
 
     pub(super) fn register_agent_tab(&mut self, pane: &Entity<AgentPane>, cx: &App) {
-        self.agent_monitor
-            .register_route(pane.read(cx).agent_route().clone(), time::Instant::now());
+        self.agent_monitor.register_route(
+            pane.read(cx).agent_route().clone(),
+            AgentActivityPolicy::ExplicitLifecycle,
+            time::Instant::now(),
+        );
     }
 
     pub(super) fn remove_agent_route(&mut self, route: &AgentRoute, cx: &mut Context<Self>) {
