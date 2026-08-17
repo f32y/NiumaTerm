@@ -212,6 +212,12 @@ impl AgentPane {
     /// opened before the control exists, so waiting for it would strand every
     /// run recorded before this tab opened.
     pub(super) fn restore_workflows(&mut self, cx: &mut Context<Self>) {
+        // A harness that reports its runs live replays them with the rest of
+        // the conversation, so there is no stored record to go looking for.
+        if !self.kind.caps().workflows_read_from_disk {
+            return;
+        }
+
         let Some(session_id) = self
             .session
             .as_ref()
@@ -310,7 +316,10 @@ impl AgentPane {
     }
 
     fn should_refresh_workflows(&self) -> bool {
-        self.workflows.visible
+        // A run that reports itself as it goes leaves nothing for a poll to
+        // find: every tick would re-read what the events already delivered.
+        self.kind.caps().workflows_read_from_disk
+            && self.workflows.visible
             && self
                 .workflows
                 .snapshot
@@ -385,6 +394,18 @@ impl AgentPane {
         let Some(open) = self.workflows.open.as_ref() else {
             return;
         };
+
+        // A harness that reports its runs live has no stored record to read:
+        // the member is a conversation of its own on the host, and asking for
+        // it is one request whose answer arrives as an ordinary event.
+        if !self.kind.caps().workflows_read_from_disk {
+            let (task_id, agent_id) = (open.task_id.clone(), open.agent_id.clone());
+            if let Some(session) = self.session.as_mut() {
+                session.request_workflow_agent_transcript(&task_id, &agent_id);
+            }
+            return;
+        }
+
         let Some(session_id) = self
             .session
             .as_ref()

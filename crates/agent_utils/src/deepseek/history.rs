@@ -10,7 +10,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use serde_json::Value;
 
-use crate::chat::{Event, ReplayItem, ReplayTurn, SessionSummary};
+use crate::chat::{Event, Item, ReplayItem, ReplayTurn, SessionSummary};
 use crate::deepseek::mapping::{ToolTracker, map_session_event};
 
 /// Read a `session.list` result into the resumable conversations of one
@@ -128,4 +128,17 @@ pub(crate) fn replay(value: &Value) -> Vec<ReplayTurn> {
     }
 
     turns
+}
+
+/// Flatten a rebuilt page into one stream of items.
+///
+/// A panel that shows a child's conversation beside its parent's has no room
+/// for turn folds and no second turn counter to hang them from, so the turns
+/// are read for their contents alone.
+pub(crate) fn items(value: &Value) -> Vec<Item> {
+    replay(value)
+        .into_iter()
+        .flat_map(|turn| turn.items)
+        .map(|entry| entry.item)
+        .collect()
 }
