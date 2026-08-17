@@ -4,11 +4,15 @@
 //! outlives every tab, and this holds a session id on it plus the reader
 //! threads feeding the pane.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::thread;
 
 use serde_json::{Value, json};
 
+use crate::background_task::{
+    BackgroundTaskKey, BackgroundTaskRefs, BackgroundTaskTranscriptUpdate,
+};
 use crate::chat::{Event, SlashCommandOutcome, ThreadSettings};
 use crate::deepseek::api::{ApiClient, CallError};
 use crate::deepseek::events::Downlinks;
@@ -16,7 +20,7 @@ use crate::deepseek::host::{self, Host, HostError};
 use crate::deepseek::mapping::{self, ApprovalRequest, QuestionRequest, ToolTracker};
 use crate::deepseek::models::ModelDirectory;
 use crate::deepseek::projections::ProjectionTracker;
-use crate::deepseek::{commands, history};
+use crate::deepseek::{commands, history, subagents};
 
 pub struct Session {
     client: ApiClient,
@@ -58,6 +62,14 @@ pub struct Session {
     /// the catalog arrives, which is a background call rather than part of
     /// opening the conversation.
     models: ModelDirectory,
+    /// Counter carried by each child-agent catalog read. The catalog is a call
+    /// and several can be in flight, so this is what tells a stale answer from
+    /// the newest one.
+    subagent_activity: u64,
+    /// Which of the harness's two child kinds each known child is. Reading a
+    /// child's conversation addresses it by that kind, and only the catalog
+    /// reports it, so the answer is kept from the catalog that named the child.
+    subagent_modes: HashMap<String, bool>,
 }
 
 /// Frame type this adapter mints locally to carry the model catalog.
@@ -70,6 +82,8 @@ const MODELS_FRAME: &str = "nmt/models";
 const HISTORY_FRAME: &str = "nmt/history";
 const REPLAY_FRAME: &str = "nmt/replay";
 const COMMANDS_FRAME: &str = "nmt/commands";
+const SUBAGENTS_FRAME: &str = "nmt/subagents";
+const SUBAGENT_TRANSCRIPT_FRAME: &str = "nmt/subagent-transcript";
 
 /// How much of a resumed conversation is rebuilt. The harness pages history at
 /// whole-message boundaries, so this is a count of messages rather than of
@@ -139,6 +153,64 @@ fn load_commands(client: ApiClient, session_id: String, deliver: Arc<dyn Fn(Valu
             Err(error) => {
                 tracing::warn!("deepseek commands could not be listed: {}", error.message())
             }
+        }
+    });
+}
+
+/// Read the direct children this conversation spawned.
+fn load_subagents(
+    client: ApiClient,
+    session_id: String,
+    activity: u64,
+    deliver: Arc<dyn Fn(Value) + Send + Sync>,
+) {
+    thread::spawn(move || {
+        let payload = json!({ "parentSessionId": session_id });
+        match client.call("subagent.list", payload) {
+            Ok(catalog) => deliver(json!({
+                "payload": {
+                    "type": SUBAGENTS_FRAME,
+                    "sessionId": session_id,
+                    "catalog": catalog,
+                    "activity": activity,
+                },
+            })),
+            Err(error) => tracing::warn!(
+                "deepseek child agents could not be listed: {}",
+                error.message()
+            ),
+        }
+    });
+}
+
+/// Read one child's own conversation.
+fn load_subagent_transcript(
+    client: ApiClient,
+    parent_session_id: String,
+    child: String,
+    continuable: bool,
+    deliver: Arc<dyn Fn(Value) + Send + Sync>,
+) {
+    thread::spawn(move || {
+        let payload = json!({
+            "parentSessionId": parent_session_id,
+            "childSessionId": child,
+            "mode": if continuable { "continuable" } else { "one-shot" },
+            "maxMessages": REPLAY_MESSAGES,
+        });
+        match client.call("subagent.history", payload) {
+            Ok(page) => deliver(json!({
+                "payload": {
+                    "type": SUBAGENT_TRANSCRIPT_FRAME,
+                    "sessionId": parent_session_id,
+                    "childSessionId": child,
+                    "page": page,
+                },
+            })),
+            Err(error) => tracing::warn!(
+                "deepseek child conversation could not be read: {}",
+                error.message()
+            ),
         }
     });
 }
@@ -284,6 +356,8 @@ impl Session {
             tools: ToolTracker::default(),
             usage: ProjectionTracker::default(),
             models: ModelDirectory::default(),
+            subagent_activity: 0,
+            subagent_modes: HashMap::new(),
         })
     }
 
@@ -306,6 +380,8 @@ impl Session {
                 self.tools = ToolTracker::default();
                 self.usage = ProjectionTracker::default();
                 self.models = ModelDirectory::default();
+                self.subagent_activity = 0;
+                self.subagent_modes.clear();
 
                 // The directory belongs to the session, so the resumed one is
                 // asked afresh and the profile's pick applied to it in turn.
@@ -381,6 +457,46 @@ impl Session {
             return events;
         }
 
+        if frame["payload"]["type"] == SUBAGENTS_FRAME {
+            let payload = &frame["payload"];
+            let activity = payload["activity"].as_u64().unwrap_or_default();
+            // Several reads can be in flight, and an older answer describes a
+            // moment the panel has already moved past.
+            if payload["sessionId"].as_str() != Some(&self.session_id)
+                || activity < self.subagent_activity
+            {
+                return Vec::new();
+            }
+            let snapshot = subagents::snapshot(&payload["catalog"], &self.session_id, activity);
+            self.subagent_modes = snapshot
+                .tasks
+                .iter()
+                .filter_map(|task| match &task.refs {
+                    BackgroundTaskRefs::DeepSeek { continuable, .. } => {
+                        Some((task.key.id.clone(), *continuable))
+                    }
+                    _ => None,
+                })
+                .collect();
+            return vec![Event::BackgroundTasks(snapshot)];
+        }
+
+        if frame["payload"]["type"] == SUBAGENT_TRANSCRIPT_FRAME {
+            let payload = &frame["payload"];
+            if payload["sessionId"].as_str() != Some(&self.session_id) {
+                return Vec::new();
+            }
+            let Some(child) = payload["childSessionId"].as_str() else {
+                return Vec::new();
+            };
+            return vec![Event::BackgroundTaskTranscript {
+                key: BackgroundTaskKey::deepseek(child),
+                update: BackgroundTaskTranscriptUpdate::loaded(subagents::transcript(
+                    &payload["page"],
+                )),
+            }];
+        }
+
         if frame["payload"]["type"] == COMMANDS_FRAME {
             // A registry read for the conversation this tab has since left
             // describes an agent it no longer talks to.
@@ -437,6 +553,19 @@ impl Session {
                     ..ThreadSettings::default()
                 }),
             ];
+        }
+
+        // A child announces itself in the parent's own log, and the catalog is
+        // a call the pane would otherwise have no reason to make: the panel
+        // that would ask for one is hidden until a child is known to exist.
+        // A finished turn re-reads it because a child's activity is sampled
+        // when asked rather than pushed.
+        let event_type = frame["payload"]["event"]["type"].as_str();
+        if frame["payload"]["sessionId"].as_str() == Some(&self.session_id)
+            && (event_type == Some("subagent/descriptor")
+                || (event_type == Some("turn/end") && !self.subagent_modes.is_empty()))
+        {
+            self.refresh_background_tasks();
         }
 
         let events = mapping::map_frame(&frame, &self.session_id, &mut self.tools);
@@ -542,6 +671,64 @@ impl Session {
                 "deepseek question answer was not accepted: {}",
                 error.message()
             );
+        }
+    }
+
+    /// Ask the harness for a fresher child-agent catalog.
+    ///
+    /// The catalog is a call rather than a stream, so it reports what was true
+    /// when it was asked. The counter travels with it and is what stops a slow
+    /// answer from replacing a newer one.
+    pub fn refresh_background_tasks(&mut self) {
+        self.subagent_activity += 1;
+        load_subagents(
+            self.client.clone(),
+            self.session_id.clone(),
+            self.subagent_activity,
+            Arc::clone(&self.deliver),
+        );
+    }
+
+    /// Ask for one child's conversation.
+    ///
+    /// A child this session's catalog never named cannot be addressed: the read
+    /// selects a transport by the child's kind, and only the catalog reports
+    /// which kind a child is.
+    pub fn load_background_task_transcript(&mut self, child: &str) {
+        let Some(continuable) = self.subagent_modes.get(child).copied() else {
+            return;
+        };
+
+        load_subagent_transcript(
+            self.client.clone(),
+            self.session_id.clone(),
+            child.to_string(),
+            continuable,
+            Arc::clone(&self.deliver),
+        );
+    }
+
+    /// Stop a continuable child's current turn.
+    ///
+    /// The request rides the parent's durable authority rather than a live
+    /// parent agent, and it acknowledges the signal rather than the child
+    /// having stopped, so the row can stay visibly running for a moment.
+    pub fn interrupt_background_task(&mut self, child: &str) -> bool {
+        let payload = json!({
+            "parentSessionId": self.session_id,
+            "childSessionId": child,
+            "mode": "continuable",
+        });
+
+        match self.client.call("subagent.interrupt", payload) {
+            Ok(_) => true,
+            Err(error) => {
+                tracing::warn!(
+                    "deepseek child agent could not be stopped: {}",
+                    error.message()
+                );
+                false
+            }
         }
     }
 

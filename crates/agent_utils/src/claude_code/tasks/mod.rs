@@ -649,7 +649,7 @@ fn stop_target(refs: &BackgroundTaskRefs) -> Option<&str> {
         BackgroundTaskRefs::ClaudeCode {
             task_id, agent_id, ..
         } => task_id.as_deref().or(agent_id.as_deref()),
-        BackgroundTaskRefs::Codex { .. } => None,
+        BackgroundTaskRefs::Codex { .. } | BackgroundTaskRefs::DeepSeek { .. } => None,
     }
 }
 

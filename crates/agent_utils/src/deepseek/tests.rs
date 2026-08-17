@@ -361,6 +361,59 @@ fn an_approval_request_carries_what_answering_it_needs() {
 }
 
 #[test]
+fn the_child_catalog_becomes_rows_that_can_be_opened() {
+    use crate::background_task::{BackgroundTaskRefs, BackgroundTaskState};
+    use crate::deepseek::subagents;
+
+    let catalog = json!({
+        "parentAvailable": true,
+        "entries": [
+            {
+                "kind": "child",
+                "id": "child-1",
+                "activity": "running",
+                "hasChildren": false,
+                "mode": "continuable",
+                "label": "Review the diff",
+            },
+            {
+                "kind": "child",
+                "id": "child-2",
+                "activity": "inactive",
+                "hasChildren": false,
+                "mode": "one-shot",
+            },
+            // Names a child the harness could not read, so nothing about it can
+            // be opened and a row would only report its own unreadability.
+            { "kind": "diagnostic", "id": "child-3", "reason": "corrupt" },
+        ],
+    });
+
+    let snapshot = subagents::snapshot(&catalog, SESSION, 7);
+    assert_eq!(snapshot.tasks.len(), 2);
+    assert_eq!(snapshot.parent_session.id, SESSION);
+
+    let first = &snapshot.tasks[0];
+    assert_eq!(first.key.id, "child-1");
+    assert_eq!(first.display_name.as_deref(), Some("Review the diff"));
+    assert_eq!(first.state, BackgroundTaskState::Working);
+    // Only a running continuable child has anything a stop can reach.
+    assert!(first.can_stop);
+    assert!(!snapshot.tasks[1].can_stop);
+    assert_eq!(snapshot.tasks[1].state, BackgroundTaskState::Done);
+
+    // The pair is what addresses a child's conversation, so the row carries the
+    // parent as well as which of the two child kinds it is.
+    assert_eq!(
+        first.refs,
+        BackgroundTaskRefs::DeepSeek {
+            parent_session_id: SESSION.to_string(),
+            continuable: true,
+        }
+    );
+}
+
+#[test]
 fn the_command_registry_fills_the_palette() {
     use crate::chat::{SlashCommandArguments, SlashCommandRunPolicy, SlashCommandSource};
     use crate::deepseek::commands;

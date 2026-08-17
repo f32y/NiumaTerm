@@ -20,6 +20,7 @@ mod mapping;
 mod models;
 mod projections;
 mod session;
+mod subagents;
 mod version;
 
 #[cfg(test)]
