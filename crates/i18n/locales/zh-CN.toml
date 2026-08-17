@@ -189,7 +189,7 @@
 "settings-agent-profile-environment-description" = "应用于智能体进程的额外环境变量。双击单元格可编辑。"
 "settings-agent-profile-add-variable" = "添加变量"
 "settings-agent-profile-name-description" = "显示名称；它用于默认选择器和各配置的设置。"
-"settings-agent-profile-base-agent" = "基础智能体"
+"settings-agent-profile-base-agent" = "智能体类型"
 "settings-agent-profile-base-agent-description" = "此配置要启动的智能体 CLI。"
 "settings-agent-profile-executable" = "可执行文件路径"
 "settings-agent-profile-executable-description" = "可执行文件名或完整路径；仅填写名称时会通过 PATH 查找。"

@@ -143,38 +143,26 @@ fn save_agent_profile_draft(cx: &mut App) {
     }
 }
 
-/// One Base Agent choice button in the add dialog; the selected kind renders
-/// as the primary variant.
-fn kind_choice_button(kind: AgentKind, current: AgentProfileKind) -> Button {
-    let profile_kind = kind.profile_kind();
-    let id = SharedString::from(format!("agent-profile-kind-{}", kind.id()));
-    let button = Button::new(id).label(agent_kind_display_label(profile_kind));
-    let button = if profile_kind == current {
-        button.primary()
-    } else {
-        button.outline()
-    };
+/// Point the draft at another agent type, as picked in the add dialog.
+fn select_profile_kind(profile_kind: AgentProfileKind, cx: &mut App) {
+    let draft = cx.global_mut::<AgentProfileDraft>();
+    if draft.profile.kind == profile_kind {
+        return;
+    }
 
-    button.on_click(move |_, _, cx: &mut App| {
-        let draft = cx.global_mut::<AgentProfileDraft>();
-        if draft.profile.kind == profile_kind {
-            return;
-        }
-
-        // The executable follows the kind while it still holds any harness's
-        // built-in default; a hand-typed path survives the switch. Comparing
-        // against every registered default is what keeps a newly added harness
-        // from stranding its own default in the field.
-        let executable = draft.profile.executable.trim();
-        let follows_default = executable.is_empty()
-            || AgentKind::ALL
-                .into_iter()
-                .any(|other| builtin_agent_profile(other.profile_kind()).executable == executable);
-        if follows_default {
-            draft.profile.executable = builtin_agent_profile(profile_kind).executable;
-        }
-        draft.profile.kind = profile_kind;
-    })
+    // The executable follows the kind while it still holds any harness's
+    // built-in default; a hand-typed path survives the switch. Comparing
+    // against every registered default is what keeps a newly added harness
+    // from stranding its own default in the field.
+    let executable = draft.profile.executable.trim();
+    let follows_default = executable.is_empty()
+        || AgentKind::ALL
+            .into_iter()
+            .any(|other| builtin_agent_profile(other.profile_kind()).executable == executable);
+    if follows_default {
+        draft.profile.executable = builtin_agent_profile(profile_kind).executable;
+    }
+    draft.profile.kind = profile_kind;
 }
 
 /// One editable cell of the environment-variable table. It shows plain text
@@ -428,12 +416,26 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
         Label::new(kind_label).text_sm().into_any_element()
     } else {
         // Reading the registered kinds is what puts a newly added harness in
-        // front of the user; a hand-written pair here is why one could be
+        // front of the user; a hand-written list here is why one could be
         // selectable everywhere else and still impossible to create.
-        AgentKind::ALL
-            .into_iter()
-            .fold(h_flex().gap_2(), |row, kind| {
-                row.child(kind_choice_button(kind, profile.kind))
+        let current = profile.kind;
+        Button::new("agent-profile-dialog-kind")
+            .outline()
+            .w_64()
+            .label(kind_label)
+            .dropdown_caret(true)
+            .dropdown_menu(move |menu, _, _| {
+                AgentKind::ALL.into_iter().fold(menu, |menu, kind| {
+                    let profile_kind = kind.profile_kind();
+
+                    menu.item(
+                        PopupMenuItem::new(agent_kind_display_label(profile_kind))
+                            .checked(profile_kind == current)
+                            .on_click(move |_, _, cx: &mut App| {
+                                select_profile_kind(profile_kind, cx)
+                            }),
+                    )
+                })
             })
             .into_any_element()
     };
