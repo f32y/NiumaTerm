@@ -103,6 +103,13 @@ impl AgentPane {
                 }
 
                 self.settings = next;
+                // Seeding only fills in the pickers. Where the harness adopts a
+                // model through its own request, a remembered or profile pick
+                // still has to be pushed, or the row would name a model the
+                // session was never switched to.
+                if self.kind.caps().model_selection_is_a_request {
+                    self.apply_model_selection(cx);
+                }
                 info!(
                     "agent thread ready: profile=\"{}\", model={:?}, profile_model={:?}",
                     self.profile.name,

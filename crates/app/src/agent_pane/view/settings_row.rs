@@ -12,10 +12,7 @@ impl AgentPane {
         match self.kind {
             AgentKind::Codex => self.render_codex_settings_row(cx).into_any_element(),
             AgentKind::Claude => self.render_claude_settings_row(cx).into_any_element(),
-            // Model, permission, and effort selection are all unmapped for
-            // DeepSeek, and a row of pickers that change nothing would read as
-            // broken rather than as unfinished.
-            AgentKind::DeepSeek => div().into_any_element(),
+            AgentKind::DeepSeek => self.render_deepseek_settings_row(cx).into_any_element(),
         }
     }
 
@@ -111,6 +108,86 @@ impl AgentPane {
                 },
             )
             .into_any_element();
+            row = row.child(Self::settings_group(
+                i18n("agent-settings-quality-cost"),
+                vec![effort],
+                cx,
+            ));
+        }
+
+        row
+    }
+
+    /// DeepSeek settings: model and reasoning effort. Both are one request the
+    /// harness answers immediately, so a pick takes effect on the session
+    /// rather than riding along with the next turn.
+    ///
+    /// Permission presets are not mapped yet and get no picker here: a control
+    /// that changes nothing would read as broken rather than as unfinished.
+    fn render_deepseek_settings_row(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let model_options: Vec<(String, String)> = self
+            .models
+            .iter()
+            .map(|m| (m.model.clone(), m.display.clone()))
+            .collect();
+        // The levels belong to the exact model route, so a model that
+        // advertises none simply has no effort control.
+        let effort_options: Vec<(String, String)> = self
+            .models
+            .iter()
+            .find(|m| Some(&m.model) == self.settings.model.as_ref())
+            .map(|m| {
+                m.efforts
+                    .iter()
+                    .map(|v| (v.clone(), setting_value_label(v)))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let model = Self::setting_picker(
+            cx,
+            "agent-model",
+            i18n("agent-setting-model"),
+            IconName::Cpu,
+            self.settings.model.clone(),
+            model_options,
+            true,
+            |this, value, cx| {
+                this.settings.model = Some(value);
+                this.remember_thread_defaults(cx);
+                this.apply_model_selection(cx);
+            },
+        )
+        .into_any_element();
+
+        let mut row = h_flex()
+            .w_full()
+            .gap_1()
+            .flex_wrap()
+            .text_color(cx.theme().muted_foreground)
+            .child(Self::settings_group(
+                i18n("agent-settings-model"),
+                vec![model],
+                cx,
+            ));
+
+        if !effort_options.is_empty() {
+            let effort = Self::setting_picker(
+                cx,
+                "agent-effort",
+                i18n("agent-setting-effort"),
+                IconName::Gauge,
+                self.settings.effort.clone(),
+                effort_options,
+                false,
+                |this, value, cx| {
+                    this.settings.effort = Some(value);
+                    this.remember_thread_defaults(cx);
+                    this.apply_model_selection(cx);
+                },
+            )
+            .into_any_element();
+
             row = row.child(Self::settings_group(
                 i18n("agent-settings-quality-cost"),
                 vec![effort],

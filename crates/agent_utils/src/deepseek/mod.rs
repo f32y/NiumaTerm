@@ -15,6 +15,7 @@ mod api;
 mod events;
 mod host;
 mod mapping;
+mod models;
 mod session;
 mod usage;
 mod version;

@@ -46,6 +46,11 @@ pub(crate) struct Capabilities {
     /// outcome offers no button for it, because a button that silently degrades
     /// to allow-once would misreport what the user just agreed to.
     pub(crate) session_scoped_approval: bool,
+    /// The model pick is its own request the harness answers immediately, so a
+    /// remembered pick seeded into the picker has to be pushed to reach the
+    /// session at all. Where the pick instead rides the launch or the next
+    /// turn, seeding the picker is the whole of applying it.
+    pub(crate) model_selection_is_a_request: bool,
 }
 
 const CODEX: Capabilities = Capabilities {
@@ -60,6 +65,7 @@ const CODEX: Capabilities = Capabilities {
     model_baked_into_launch: false,
     expandable_compaction_rows: false,
     session_scoped_approval: true,
+    model_selection_is_a_request: false,
 };
 
 const CLAUDE: Capabilities = Capabilities {
@@ -74,11 +80,12 @@ const CLAUDE: Capabilities = Capabilities {
     model_baked_into_launch: true,
     expandable_compaction_rows: true,
     session_scoped_approval: true,
+    model_selection_is_a_request: false,
 };
 
-/// The DeepSeek host publishes tool activity, approvals, usage projections,
-/// history, and subagents, so these are false because this integration does not
-/// map them yet rather than because the harness lacks them. The exception is
+/// The DeepSeek host publishes commands, skills, history, subagents, and
+/// compaction detail, so these are false because this integration does not map
+/// them yet rather than because the harness lacks them. The exception is
 /// `file_rewind`: DeepSeek Harness has no equivalent operation at all.
 const DEEPSEEK: Capabilities = Capabilities {
     skill_references: false,
@@ -92,6 +99,7 @@ const DEEPSEEK: Capabilities = Capabilities {
     model_baked_into_launch: false,
     expandable_compaction_rows: false,
     session_scoped_approval: false,
+    model_selection_is_a_request: true,
 };
 
 impl AgentKind {

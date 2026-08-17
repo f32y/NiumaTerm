@@ -415,6 +415,33 @@ impl Backend {
         }
     }
 
+    /// Point the session at another model. Only DeepSeek applies a pick as its
+    /// own request: Codex carries thread settings as overrides on the next
+    /// turn, and Claude bakes the model into the launch.
+    pub(in crate::agent_pane) fn select_model(
+        &mut self,
+        model: &str,
+        effort: Option<&str>,
+    ) -> Result<(), String> {
+        match self {
+            Backend::DeepSeek(session) => session.select_model(model, effort),
+            Backend::Codex(_) | Backend::Claude(_) => Ok(()),
+            #[cfg(test)]
+            Backend::Test(_) => Ok(()),
+        }
+    }
+
+    /// What the session is actually set to, for restoring the pickers after a
+    /// refused pick.
+    pub(in crate::agent_pane) fn selection(&self) -> (Option<&str>, Option<&str>) {
+        match self {
+            Backend::DeepSeek(session) => session.selection(),
+            Backend::Codex(_) | Backend::Claude(_) => (None, None),
+            #[cfg(test)]
+            Backend::Test(_) => (None, None),
+        }
+    }
+
     /// Answer an `AskUserQuestion` card. Codex has no equivalent request, so
     /// there is nothing to answer there.
     pub(in crate::agent_pane) fn respond_questions(&mut self, answers: Option<Vec<Vec<String>>>) {
