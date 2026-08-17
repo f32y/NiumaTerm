@@ -361,6 +361,119 @@ fn an_approval_request_carries_what_answering_it_needs() {
 }
 
 #[test]
+fn the_session_list_offers_only_what_this_tab_can_continue() {
+    use std::time::{Duration, UNIX_EPOCH};
+
+    use crate::deepseek::history;
+
+    let listed = json!({
+        "items": [
+            {
+                "sessionId": "s-1",
+                "updatedAt": 1_770_000_000_000u64,
+                "running": false,
+                "blank": false,
+                "cwd": "C:/Workspace/NiumaTerm",
+                "projections": { "asOfSeq": 40, "values": { "title": "Map the harness" } },
+            },
+            // Never ran a turn, so there is nothing to continue into.
+            { "sessionId": "s-2", "updatedAt": 1, "running": false, "blank": true, "cwd": "C:/Workspace/NiumaTerm" },
+            // Belongs to a parent conversation rather than to this list.
+            {
+                "sessionId": "s-3",
+                "updatedAt": 2,
+                "running": false,
+                "blank": false,
+                "origin": "subagent",
+                "cwd": "C:/Workspace/NiumaTerm",
+            },
+            // Another project entirely.
+            { "sessionId": "s-4", "updatedAt": 3, "running": false, "blank": false, "cwd": "C:/Other" },
+            // Real, but too new to have been titled.
+            { "sessionId": "s-5", "updatedAt": 4, "running": false, "blank": false, "cwd": "C:/Workspace/NiumaTerm" },
+        ],
+    });
+
+    let sessions = history::sessions(&listed, Some("C:/Workspace/NiumaTerm"));
+    let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, vec!["s-1", "s-5"]);
+    assert_eq!(sessions[0].title, "Map the harness");
+    assert_eq!(
+        sessions[0].last_active,
+        UNIX_EPOCH + Duration::from_millis(1_770_000_000_000)
+    );
+    // An untitled row still names what picking it will open.
+    assert_eq!(sessions[1].title, "s-5");
+}
+
+#[test]
+fn a_replayed_page_rebuilds_turns_from_the_same_events_the_stream_carries() {
+    use crate::deepseek::history;
+
+    let entry = |event: Value| json!({ "event": event });
+    let page = json!({
+        "hasMore": false,
+        "events": [
+            entry(json!({ "type": "turn/start", "seq": 1, "time": 1_770_000_000_000u64, "data": { "turn": 1 } })),
+            entry(json!({
+                "type": "user/message",
+                "seq": 2,
+                "time": 1_770_000_000_000u64,
+                "data": {
+                    "content": [{ "type": "text", "text": "do the thing" }],
+                    "source": { "kind": "user" },
+                },
+            })),
+            entry(json!({
+                "type": "assistant/chunk",
+                "seq": 3,
+                "time": 1_770_000_001_000u64,
+                "data": { "turn": 1, "step": 1, "chunk": { "type": "block-start", "index": 0, "blockType": "text" } },
+            })),
+            entry(json!({
+                "type": "assistant/message",
+                "seq": 4,
+                "time": 1_770_000_004_000u64,
+                "data": {
+                    "turn": 1,
+                    "step": 1,
+                    "message": { "role": "assistant", "content": [{ "type": "text", "text": "done" }] },
+                },
+            })),
+            entry(json!({
+                "type": "turn/end",
+                "seq": 5,
+                "time": 1_770_000_009_000u64,
+                "data": { "turn": 1, "reason": { "kind": "aborted", "reason": { "kind": "user" } } },
+            })),
+        ],
+    });
+
+    let turns = history::replay(&page);
+    assert_eq!(turns.len(), 1);
+    // The item stream cannot express either, so both come from the boundary
+    // events themselves.
+    assert!(turns[0].interrupted);
+    assert_eq!(turns[0].seconds, Some(9));
+
+    // The streamed row and its completed payload are one row, not two.
+    let items: Vec<&Item> = turns[0].items.iter().map(|entry| &entry.item).collect();
+    assert_eq!(
+        items,
+        vec![
+            &Item::UserMessage {
+                text: Some("do the thing".into()),
+            },
+            &Item::AgentMessage {
+                id: "1:1:0".into(),
+                text: Some("done".into()),
+            },
+        ]
+    );
+    assert_eq!(turns[0].items[0].at, Some(1_770_000_000));
+}
+
+#[test]
 fn a_compaction_records_itself_only_once_it_produced_a_summary() {
     use crate::chat::{Compaction, CompactionTrigger};
 

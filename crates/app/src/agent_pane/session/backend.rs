@@ -279,19 +279,22 @@ impl Backend {
                 session.resume_thread(thread_id);
                 true
             }
-            Backend::Claude(_) | Backend::DeepSeek(_) => false,
+            // The harness answers whether it attached, because a conversation
+            // rooted in another directory is one this tab cannot adopt.
+            Backend::DeepSeek(session) => session.resume_thread(thread_id),
+            Backend::Claude(_) => false,
             #[cfg(test)]
             Backend::Test(_) => false,
         }
     }
 
     /// Fetch the next page of recent sessions. Only Codex pages its history
-    /// from the backend; Claude Code reads whole directories from disk.
+    /// from the backend; Claude Code reads whole directories from disk, and the
+    /// DeepSeek host answers with every visible session at once.
     pub(in crate::agent_pane) fn request_more_history(&mut self) {
         match self {
             Backend::Codex(session) => session.request_more_history(),
-            Backend::Claude(_) => {}
-            Backend::DeepSeek(_) => {}
+            Backend::Claude(_) | Backend::DeepSeek(_) => {}
             #[cfg(test)]
             Backend::Test(_) => {}
         }
