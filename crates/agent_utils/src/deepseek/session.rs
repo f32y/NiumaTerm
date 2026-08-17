@@ -9,14 +9,14 @@ use std::thread;
 
 use serde_json::{Value, json};
 
-use crate::chat::{Event, ThreadSettings};
-use crate::deepseek::api::ApiClient;
+use crate::chat::{Event, SlashCommandOutcome, ThreadSettings};
+use crate::deepseek::api::{ApiClient, CallError};
 use crate::deepseek::events::Downlinks;
-use crate::deepseek::history;
 use crate::deepseek::host::{self, Host, HostError};
 use crate::deepseek::mapping::{self, ApprovalRequest, QuestionRequest, ToolTracker};
 use crate::deepseek::models::ModelDirectory;
 use crate::deepseek::usage::UsageTracker;
+use crate::deepseek::{commands, history};
 
 pub struct Session {
     client: ApiClient,
@@ -69,6 +69,7 @@ pub struct Session {
 const MODELS_FRAME: &str = "nmt/models";
 const HISTORY_FRAME: &str = "nmt/history";
 const REPLAY_FRAME: &str = "nmt/replay";
+const COMMANDS_FRAME: &str = "nmt/commands";
 
 /// How much of a resumed conversation is rebuilt. The harness pages history at
 /// whole-message boundaries, so this is a count of messages rather than of
@@ -121,6 +122,24 @@ fn load_sessions(
             "deepseek recent conversations could not be read: {}",
             error.message()
         ),
+    });
+}
+
+/// Read the session's command registry and deliver the palette it fills.
+///
+/// Discovery is asynchronous for the same reason the model directory's is: it
+/// is a call rather than a push, and a tab that waited on it would be unusable
+/// until the host answered.
+fn load_commands(client: ApiClient, session_id: String, deliver: Arc<dyn Fn(Value) + Send + Sync>) {
+    thread::spawn(move || {
+        match client.call(commands::LIST_METHOD, commands::agent_args(&session_id)) {
+            Ok(listed) => deliver(json!({
+                "payload": { "type": COMMANDS_FRAME, "sessionId": session_id, "commands": listed },
+            })),
+            Err(error) => {
+                tracing::warn!("deepseek commands could not be listed: {}", error.message())
+            }
+        }
     });
 }
 
@@ -245,6 +264,7 @@ impl Session {
         // The list is read now rather than when the picker opens, because the
         // picker refuses to open on an empty list and cannot wait for one.
         load_sessions(client.clone(), cwd.clone(), Arc::clone(&deliver));
+        load_commands(client.clone(), session_id.clone(), Arc::clone(&deliver));
 
         Ok(Self {
             client,
@@ -303,6 +323,13 @@ impl Session {
                     self.cwd.clone(),
                     Arc::clone(&self.deliver),
                 );
+                // Commands are scoped to the agent, and a resumed conversation
+                // may have been composed from a different preset.
+                load_commands(
+                    self.client.clone(),
+                    self.session_id.clone(),
+                    Arc::clone(&self.deliver),
+                );
                 true
             }
             Err(error) => {
@@ -349,6 +376,17 @@ impl Session {
         // mapping that has to remember what the earlier frames said.
         if let Some(events) = self.usage.apply(&frame, &self.session_id) {
             return events;
+        }
+
+        if frame["payload"]["type"] == COMMANDS_FRAME {
+            // A registry read for the conversation this tab has since left
+            // describes an agent it no longer talks to.
+            if frame["payload"]["sessionId"].as_str() != Some(&self.session_id) {
+                return Vec::new();
+            }
+            return vec![Event::Commands(commands::catalog(
+                &frame["payload"]["commands"],
+            ))];
         }
 
         if frame["payload"]["type"] == HISTORY_FRAME {
@@ -542,17 +580,42 @@ impl Session {
     /// Send a prompt. Returns why it was refused, so the composer can keep the
     /// text the user typed rather than losing it to a failed send.
     pub fn send_user_message(&mut self, text: &str) -> Result<(), String> {
-        self.client
-            .call(
-                "session.prompt",
-                json!({
-                    "sessionId": self.session_id,
-                    "mode": "queue",
-                    "content": [{ "type": "text", "text": text }],
-                }),
-            )
+        self.prompt(text)
             .map(|_| ())
             .map_err(|error| error.message().to_string())
+    }
+
+    /// Run one of the harness's own commands.
+    ///
+    /// A prompt whose whole text is a slash line is executed by the command
+    /// registry and never reaches the model, so this needs no second transport.
+    /// The registry settles before answering, which is why the outcome is
+    /// complete rather than merely accepted.
+    pub fn execute_slash_command(&mut self, name: &str, arguments: &str) -> SlashCommandOutcome {
+        let line = match arguments.trim() {
+            "" => format!("/{name}"),
+            arguments => format!("/{name} {arguments}"),
+        };
+
+        match self.prompt(&line) {
+            Ok(answer) => SlashCommandOutcome::Completed {
+                message: answer["command"]["text"].as_str().map(str::to_string),
+            },
+            Err(error) => SlashCommandOutcome::Rejected {
+                message: error.message().to_string(),
+            },
+        }
+    }
+
+    fn prompt(&self, text: &str) -> Result<Value, CallError> {
+        self.client.call(
+            "session.prompt",
+            json!({
+                "sessionId": self.session_id,
+                "mode": "queue",
+                "content": [{ "type": "text", "text": text }],
+            }),
+        )
     }
 
     /// Stop the running turn. The harness keeps whatever the turn already
