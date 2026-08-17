@@ -718,9 +718,9 @@ fn projection_frame(key: &str, value: Value) -> Value {
 #[test]
 fn usage_projections_combine_into_one_window_snapshot() {
     use crate::chat::ContextUsageScope;
-    use crate::deepseek::usage::UsageTracker;
+    use crate::deepseek::projections::ProjectionTracker;
 
-    let mut usage = UsageTracker::default();
+    let mut usage = ProjectionTracker::default();
 
     // Cumulative totals alone draw no bar: the occupancy they would be shown
     // beside is not known until the provider reports a request.
@@ -771,10 +771,62 @@ fn usage_projections_combine_into_one_window_snapshot() {
 }
 
 #[test]
-fn a_context_breakdown_becomes_the_composition_segments() {
-    use crate::deepseek::usage::UsageTracker;
+fn the_permission_presets_come_from_the_deployment_rather_than_from_here() {
+    use crate::deepseek::projections::ProjectionTracker;
 
-    let mut usage = UsageTracker::default();
+    let mut projections = ProjectionTracker::default();
+    let events = projections
+        .apply(
+            &projection_frame(
+                "permissions",
+                json!({
+                    "options": [
+                        { "value": "read-only", "name": "Read Only", "description": "No writes" },
+                        { "value": "workspace-write", "name": "Workspace Write" },
+                        { "value": "custom", "name": "Custom" },
+                    ],
+                    "currentValue": "custom",
+                }),
+            ),
+            SESSION,
+        )
+        .expect("a projection frame for this session should be claimed");
+
+    let [Event::ApprovalPresets { presets, current }] = events.as_slice() else {
+        panic!("expected one preset snapshot, got {events:?}");
+    };
+    assert_eq!(presets.len(), 3);
+    assert_eq!(presets[0].value, "read-only");
+    assert_eq!(presets[0].label, "Read Only");
+    assert_eq!(presets[0].description.as_deref(), Some("No writes"));
+    // The derived entry is offered only while it is what the session is on.
+    assert_eq!(current.as_deref(), Some("custom"));
+}
+
+#[test]
+fn the_history_page_baseline_seeds_what_a_live_push_would_not() {
+    use crate::deepseek::projections::ProjectionTracker;
+
+    // A push reports only what changed after the tab attached, so a session
+    // that has been running since before it opened would show nothing.
+    let mut projections = ProjectionTracker::default();
+    let events = projections.apply_baseline(&json!({
+        "contextPressure": { "projectedTokens": 4200, "contextWindow": 64000 },
+        "title": "Map the harness",
+    }));
+
+    let [Event::ContextWindowUpdated(window)] = events.as_slice() else {
+        panic!("expected one window snapshot, got {events:?}");
+    };
+    assert_eq!(window.current.total_tokens, 4200);
+    assert_eq!(window.max_tokens, Some(64_000));
+}
+
+#[test]
+fn a_context_breakdown_becomes_the_composition_segments() {
+    use crate::deepseek::projections::ProjectionTracker;
+
+    let mut usage = ProjectionTracker::default();
     usage.apply(
         &projection_frame(
             "contextPressure",

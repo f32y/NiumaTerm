@@ -23,6 +23,17 @@ pub(super) struct PendingSlashCommand {
     arguments: String,
 }
 
+impl PendingSlashCommand {
+    /// One command a control runs directly, without the composer's parsing
+    /// stage: the caller already knows the name and the value it is passing.
+    pub(super) fn new(name: &str, arguments: String) -> Self {
+        Self {
+            name: name.to_string(),
+            arguments,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum CommandFeedbackKind {
     Notice,

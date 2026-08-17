@@ -28,6 +28,20 @@ pub struct ThreadSettings {
     pub tier: Option<String>,
 }
 
+/// One selectable execution-permission preset a backend advertises.
+///
+/// A backend whose presets are fixed needs none of this, because the UI can
+/// name them itself. This exists for one whose preset table is part of the
+/// deployment, where a hard-coded list would offer values the deployment does
+/// not serve and hide the ones it does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApprovalPreset {
+    /// Submitted back verbatim when the user picks it.
+    pub value: String,
+    pub label: String,
+    pub description: Option<String>,
+}
+
 /// One entry of a backend's model catalog.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModelInfo {
@@ -491,6 +505,13 @@ pub enum Event {
     /// can seed its pickers with real values.
     Ready(ThreadSettings),
     Models(Vec<ModelInfo>),
+    /// Replacement snapshot of the execution-permission presets this thread can
+    /// switch between, and the one it is on. Reported only by a backend whose
+    /// preset table belongs to its deployment rather than to this UI.
+    ApprovalPresets {
+        presets: Vec<ApprovalPreset>,
+        current: Option<String>,
+    },
     /// Replacement snapshot of provider-discovered slash commands.
     Commands(Vec<SlashCommandInfo>),
     /// Replacement snapshot of provider-discovered skills and load errors.
