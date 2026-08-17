@@ -12,7 +12,7 @@ use crate::chat::{Event, ThreadSettings};
 use crate::deepseek::api::ApiClient;
 use crate::deepseek::events::Downlinks;
 use crate::deepseek::host::{self, Host, HostError};
-use crate::deepseek::mapping::{self, ApprovalRequest, ToolTracker};
+use crate::deepseek::mapping::{self, ApprovalRequest, QuestionRequest, ToolTracker};
 
 pub struct Session {
     client: ApiClient,
@@ -29,6 +29,9 @@ pub struct Session {
     /// The approval the harness is currently blocked on. Held because the
     /// answer has to carry identities the transcript vocabulary does not.
     pending_approval: Option<ApprovalRequest>,
+    /// The question batch the harness is currently blocked on, held for the
+    /// same reason: the answer is matched against the asked question ids.
+    pending_questions: Option<QuestionRequest>,
     /// Tool calls awaiting their result, so a result can complete the row its
     /// call opened rather than starting a second one.
     tools: ToolTracker,
@@ -76,6 +79,7 @@ impl Session {
             _downlinks: downlinks,
             running: false,
             pending_approval: None,
+            pending_questions: None,
             tools: ToolTracker::default(),
         })
     }
@@ -105,6 +109,13 @@ impl Session {
             return vec![Event::ApprovalRequested { description }];
         }
 
+        // Questions replay on reconnect exactly as approvals do, so the same
+        // rule applies: recognizing the frame is what makes it answerable.
+        if let Some((request, questions)) = mapping::question_request(&frame, &self.session_id) {
+            self.pending_questions = Some(request);
+            return vec![Event::QuestionsRequested { questions }];
+        }
+
         let events = mapping::map_frame(&frame, &self.session_id, &mut self.tools);
 
         for event in &events {
@@ -114,8 +125,10 @@ impl Session {
                     self.running = false;
                     // A turn that ended cannot still be waiting on an answer.
                     self.pending_approval = None;
+                    self.pending_questions = None;
                 }
                 Event::ApprovalResolved => self.pending_approval = None,
+                Event::QuestionsResolved => self.pending_questions = None,
                 _ => {}
             }
         }
@@ -157,6 +170,55 @@ impl Session {
 
         if decision == "cancel" {
             self.interrupt();
+        }
+    }
+
+    /// Answer the question batch the harness is blocked on, or dismiss it when
+    /// `answers` is `None`.
+    ///
+    /// The harness validates the batch as a whole against what it asked: one
+    /// answer per question, in ask order, carrying only labels it offered. So a
+    /// batch that does not line up is dropped here rather than sent to be
+    /// rejected, which would leave the turn waiting with the card already gone.
+    pub fn respond_questions(&mut self, answers: Option<Vec<Vec<String>>>) {
+        let Some(request) = self.pending_questions.take() else {
+            return;
+        };
+
+        let result = match answers {
+            Some(answers) if answers.len() == request.ids.len() => {
+                let answers: Vec<Value> = request
+                    .ids
+                    .iter()
+                    .zip(answers)
+                    .map(|(id, selected)| json!({ "id": id, "selected": selected }))
+                    .collect();
+                self.client.respond(
+                    &request.rpc_id,
+                    json!({
+                        "sessionId": self.session_id,
+                        "answer": { "answers": answers },
+                    }),
+                )
+            }
+            Some(answers) => {
+                tracing::warn!(
+                    "deepseek question answers covered {} of {} questions and were dropped",
+                    answers.len(),
+                    request.ids.len(),
+                );
+                return;
+            }
+            None => self.client.respond_cancelled(&request.rpc_id),
+        };
+
+        if let Err(error) = result {
+            // Nothing else reports this: a refused answer leaves the turn
+            // waiting exactly as an unanswered one does.
+            tracing::warn!(
+                "deepseek question answer was not accepted: {}",
+                error.message()
+            );
         }
     }
 

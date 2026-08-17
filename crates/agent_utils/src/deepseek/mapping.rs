@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use crate::chat::{Event, Item};
+use crate::chat::{Event, Item, Question, QuestionOption};
 
 /// The status vocabulary the transcript renders: anything else reads as still
 /// running, and `failed` is what turns a row red.
@@ -60,6 +60,83 @@ pub(crate) fn approval_request(frame: &Value, session_id: &str) -> Option<Approv
     })
 }
 
+/// A batch of questions the harness is blocked on.
+///
+/// `ids` is kept because the harness matches an answer positionally against the
+/// question ids it asked, while the transcript vocabulary carries only the
+/// question text. Answering therefore needs the ask order preserved, which is
+/// also why this holds the whole batch rather than one question at a time.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct QuestionRequest {
+    pub(crate) rpc_id: String,
+    pub(crate) ids: Vec<String>,
+}
+
+/// Recognize an answerable question frame addressed to this session.
+///
+/// Separate from [`map_frame`] for the same reason [`approval_request`] is: the
+/// identities an answer has to carry outlive the event that raised the card.
+pub(crate) fn question_request(
+    frame: &Value,
+    session_id: &str,
+) -> Option<(QuestionRequest, Vec<Question>)> {
+    let payload = &frame["payload"];
+    if payload["type"] != "question/requested" || payload["sessionId"].as_str() != Some(session_id)
+    {
+        return None;
+    }
+
+    let asked = payload["questions"].as_array()?;
+    let mut ids = Vec::with_capacity(asked.len());
+    let mut questions = Vec::with_capacity(asked.len());
+
+    for item in asked {
+        // A question with no id cannot be answered — the harness rejects the
+        // whole batch when one answer fails to name the question it settles —
+        // so the card is not raised at all rather than raised unanswerable.
+        let id = item["id"].as_str()?;
+        ids.push(id.to_string());
+        questions.push(Question {
+            header: item["header"].as_str().map(str::to_string),
+            // `detail` is supporting text the harness deliberately keeps out of
+            // the option labels; folding it into the question text is what puts
+            // it in front of the user, because the card has no separate slot.
+            question: match item["detail"].as_str() {
+                Some(detail) if !detail.is_empty() => {
+                    format!(
+                        "{}\n\n{detail}",
+                        item["question"].as_str().unwrap_or_default()
+                    )
+                }
+                _ => item["question"].as_str().unwrap_or_default().to_string(),
+            },
+            multi_select: item["multiSelect"].as_bool().unwrap_or(false),
+            options: item["options"]
+                .as_array()
+                .map(|options| {
+                    options
+                        .iter()
+                        .filter_map(|option| {
+                            Some(QuestionOption {
+                                label: option["label"].as_str()?.to_string(),
+                                description: option["description"].as_str().map(str::to_string),
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+        });
+    }
+
+    Some((
+        QuestionRequest {
+            rpc_id: frame["rpcId"].as_str()?.to_string(),
+            ids,
+        },
+        questions,
+    ))
+}
+
 /// Frames belonging to a session this client does not own, or carrying a type
 /// this build does not know, produce no events. Both are normal: the mux stream
 /// is aggregated across every attached session, and the harness adds event
@@ -88,6 +165,9 @@ pub(crate) fn map_frame(frame: &Value, session_id: &str, tools: &mut ToolTracker
         // resolved by another client, or by the turn ending under it.
         Some("approval/resolved") if payload["sessionId"].as_str() == Some(session_id) => {
             vec![Event::ApprovalResolved]
+        }
+        Some("question/resolved") if payload["sessionId"].as_str() == Some(session_id) => {
+            vec![Event::QuestionsResolved]
         }
         Some("stream/error") => match payload["error"]["message"].as_str() {
             Some(message) => vec![Event::ItemStarted(Item::Error {

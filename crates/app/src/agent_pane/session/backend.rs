@@ -415,12 +415,13 @@ impl Backend {
         }
     }
 
-    /// Answer an `AskUserQuestion` card. Only Claude asks structured questions;
-    /// Codex has no equivalent request, so there is nothing to answer there.
+    /// Answer an `AskUserQuestion` card. Codex has no equivalent request, so
+    /// there is nothing to answer there.
     pub(in crate::agent_pane) fn respond_questions(&mut self, answers: Option<Vec<Vec<String>>>) {
         match self {
             Backend::Claude(session) => session.respond_questions(answers),
-            Backend::Codex(_) | Backend::DeepSeek(_) => {}
+            Backend::DeepSeek(session) => session.respond_questions(answers),
+            Backend::Codex(_) => {}
             #[cfg(test)]
             Backend::Test(_) => {}
         }
