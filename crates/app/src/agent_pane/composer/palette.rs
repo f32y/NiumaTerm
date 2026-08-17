@@ -126,9 +126,12 @@ impl AgentPane {
         let catalog = self.command_catalog();
         // A harness with `$name` skill references reaches them that way.
         // Listing them under `/` too is a convenience for users who expect one
-        // command key, so it follows the compatibility setting as well.
-        let slash_skills = self.kind.caps().skill_references
-            && cx.global::<AppSettings>().codex_skill_command_compat;
+        // command key, so it follows the compatibility setting as well. Where
+        // `/name` is instead the only way to reach a skill, the listing is not
+        // a convenience and follows nothing.
+        let caps = self.kind.caps();
+        let slash_skills = caps.slash_skills_are_prompts
+            || (caps.skill_references && cx.global::<AppSettings>().codex_skill_command_compat);
 
         if parsed.has_argument_separator {
             let command = catalog.iter().find(|command| command.name == parsed.name)?;
@@ -429,6 +432,20 @@ impl AgentPane {
                 )
             }
             PaletteAction::Choice { command, value } => (format!("/{command} {value}"), true),
+            // Where a skill is written into the prompt, picking one lands the
+            // token the harness will recognize and leaves the caret after it,
+            // because what follows is the request the skill serves.
+            PaletteAction::Skill(skill) if self.kind.caps().slash_skills_are_prompts => {
+                let text = format!("/{} ", skill.name);
+                self.input.update(cx, |input, cx| {
+                    input.set_value(text.clone(), window, cx);
+                    input.set_selected_range(text.len()..text.len(), cx);
+                });
+                self.palette.selected = 0;
+                self.palette.dismissed = true;
+                cx.notify();
+                return;
+            }
             PaletteAction::Skill(skill) => {
                 let Ok((text, binding)) = prepare_skill_selection(&skill) else {
                     self.set_command_feedback(
