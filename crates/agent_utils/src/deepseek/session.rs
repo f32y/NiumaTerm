@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 use crate::chat::{Event, ThreadSettings};
 use crate::deepseek::api::ApiClient;
 use crate::deepseek::events::Downlinks;
+use crate::deepseek::history;
 use crate::deepseek::host::{self, Host, HostError};
 use crate::deepseek::mapping::{self, ApprovalRequest, QuestionRequest, ToolTracker};
 use crate::deepseek::models::ModelDirectory;
@@ -20,12 +21,24 @@ use crate::deepseek::usage::UsageTracker;
 pub struct Session {
     client: ApiClient,
     session_id: String,
+    /// The project directory this tab works in. Held because it decides which
+    /// persisted conversations the tab can continue, and because reattaching to
+    /// one requires naming the same directory it was rooted in.
+    cwd: Option<String>,
     /// Every open session holds the shared host, which stops when the last one
     /// drops. This is what makes the host outlive individual tabs without
     /// outliving all of them.
     host: Arc<Host>,
     /// Reader threads for both downlinks; dropping them ends the delivery.
     _downlinks: Downlinks,
+    /// The pane's delivery channel, for results of unary calls. Whatever a
+    /// background read produces has to arrive the same way a pushed frame does,
+    /// because that is the only path that wakes the tab.
+    deliver: Arc<dyn Fn(Value) + Send + Sync>,
+    /// The profile's model and effort, reapplied to a conversation this tab
+    /// continues later: the directory belongs to the session, not to the tab.
+    model: Option<String>,
+    effort: Option<String>,
     /// The turn state this side knows about, so a stop is only offered while a
     /// turn is actually running.
     running: bool,
@@ -54,6 +67,81 @@ pub struct Session {
 /// would sit unread until some unrelated frame happened to wake the tab. The
 /// `nmt/` prefix keeps it out of the harness's own type space.
 const MODELS_FRAME: &str = "nmt/models";
+const HISTORY_FRAME: &str = "nmt/history";
+const REPLAY_FRAME: &str = "nmt/replay";
+
+/// How much of a resumed conversation is rebuilt. The harness pages history at
+/// whole-message boundaries, so this is a count of messages rather than of
+/// events; one page is what the pane shows, and older turns stay in the log.
+const REPLAY_MESSAGES: u64 = 200;
+
+/// Open a conversation on the host, or reattach to an existing one.
+///
+/// The same call serves both: naming an existing id returns that session
+/// unchanged when the directory matches, and refuses when it does not, which is
+/// what makes reattaching safe to attempt without a separate probe.
+fn open_conversation(
+    client: &ApiClient,
+    cwd: Option<&str>,
+    session_id: Option<&str>,
+) -> Result<String, String> {
+    let mut payload = json!({});
+    if let Some(cwd) = cwd {
+        payload["cwd"] = json!(cwd);
+    }
+    if let Some(session_id) = session_id {
+        payload["sessionId"] = json!(session_id);
+    }
+
+    let created = client
+        .call("session.create", payload)
+        .map_err(|error| error.message().to_string())?;
+
+    created["sessionId"]
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| "the harness answered without a conversation id".to_string())
+}
+
+/// Read the conversations this tab's directory can continue.
+///
+/// The result is one page: the harness returns every visible session and
+/// reserves its cursor for a future version, so there is nothing further to ask
+/// for and no paging to drive.
+fn load_sessions(
+    client: ApiClient,
+    cwd: Option<String>,
+    deliver: Arc<dyn Fn(Value) + Send + Sync>,
+) {
+    thread::spawn(move || match client.call("session.list", json!({})) {
+        Ok(listed) => deliver(json!({
+            "payload": { "type": HISTORY_FRAME, "sessions": listed, "cwd": cwd },
+        })),
+        Err(error) => tracing::warn!(
+            "deepseek recent conversations could not be read: {}",
+            error.message()
+        ),
+    });
+}
+
+/// Read a resumed conversation's tail page and deliver the turns it rebuilds.
+fn load_replay(client: ApiClient, session_id: String, deliver: Arc<dyn Fn(Value) + Send + Sync>) {
+    thread::spawn(move || {
+        let payload = json!({ "sessionId": session_id, "maxMessages": REPLAY_MESSAGES });
+        // A failure is delivered rather than only logged: the pane holds the
+        // conversation picker open until the replay settles, so a read that
+        // reported nothing would leave it waiting on a page never coming.
+        let payload = match client.call("session.history", payload) {
+            Ok(page) => json!({ "type": REPLAY_FRAME, "sessionId": session_id, "page": page }),
+            Err(error) => json!({
+                "type": REPLAY_FRAME,
+                "sessionId": session_id,
+                "error": error.message(),
+            }),
+        };
+        deliver(json!({ "payload": payload }));
+    });
+}
 
 /// Read the session's model directory and reconcile it with the profile's pick,
 /// then deliver the result.
@@ -67,7 +155,7 @@ fn load_models(
     session_id: String,
     wanted_model: Option<String>,
     wanted_effort: Option<String>,
-    deliver: Arc<impl Fn(Value) + Send + Sync + 'static>,
+    deliver: Arc<dyn Fn(Value) + Send + Sync>,
 ) {
     thread::spawn(move || {
         let mut catalog =
@@ -130,29 +218,16 @@ impl Session {
     ) -> Result<Self, HostError> {
         let host = host::shared(launch)?;
         let client = host.client().clone();
-        let payload = match cwd {
-            Some(cwd) => json!({ "cwd": cwd }),
-            None => json!({}),
-        };
-        let created = client.call("session.create", payload).map_err(|error| {
+        let session_id = open_conversation(&client, cwd.as_deref(), None).map_err(|error| {
             HostError::FailedToStart(format!(
-                "the harness could not open a conversation: {}",
-                error.message()
+                "the harness could not open a conversation: {error}"
             ))
         })?;
-        let session_id = created["sessionId"]
-            .as_str()
-            .ok_or_else(|| {
-                HostError::FailedToStart(
-                    "the harness created a conversation without an id".to_string(),
-                )
-            })?
-            .to_string();
 
         // Opening the downlinks after the session exists means its first frames
         // cannot be missed: the stream replays a baseline for every attached
         // session when it opens.
-        let deliver = Arc::new(deliver);
+        let deliver: Arc<dyn Fn(Value) + Send + Sync> = Arc::new(deliver);
         let downlinks = {
             let deliver = Arc::clone(&deliver);
             Downlinks::open(host.base(), Arc::downgrade(&host), move |frame| {
@@ -165,14 +240,21 @@ impl Session {
             session_id.clone(),
             launch.model.clone(),
             launch.effort.clone(),
-            deliver,
+            Arc::clone(&deliver),
         );
+        // The list is read now rather than when the picker opens, because the
+        // picker refuses to open on an empty list and cannot wait for one.
+        load_sessions(client.clone(), cwd.clone(), Arc::clone(&deliver));
 
         Ok(Self {
             client,
             session_id,
+            cwd,
             host,
             _downlinks: downlinks,
+            deliver,
+            model: launch.model.clone(),
+            effort: launch.effort.clone(),
             running: false,
             pending_approval: None,
             pending_questions: None,
@@ -180,6 +262,54 @@ impl Session {
             usage: UsageTracker::default(),
             models: ModelDirectory::default(),
         })
+    }
+
+    /// Continue an earlier conversation in place.
+    ///
+    /// The tab keeps its host and both downlinks: the mux stream is aggregated
+    /// across every attached session, so switching which one this tab owns is a
+    /// change of address rather than a reconnection. Returns whether the
+    /// harness attached, because a session rooted in another directory is one
+    /// this tab cannot adopt.
+    pub fn resume_thread(&mut self, thread_id: &str) -> bool {
+        match open_conversation(&self.client, self.cwd.as_deref(), Some(thread_id)) {
+            Ok(session_id) => {
+                self.session_id = session_id;
+                // Everything below describes the conversation this tab just
+                // left; carrying it over would attribute it to the new one.
+                self.running = false;
+                self.pending_approval = None;
+                self.pending_questions = None;
+                self.tools = ToolTracker::default();
+                self.usage = UsageTracker::default();
+                self.models = ModelDirectory::default();
+
+                // The directory belongs to the session, so the resumed one is
+                // asked afresh and the profile's pick applied to it in turn.
+                load_models(
+                    self.client.clone(),
+                    self.session_id.clone(),
+                    self.model.clone(),
+                    self.effort.clone(),
+                    Arc::clone(&self.deliver),
+                );
+                load_replay(
+                    self.client.clone(),
+                    self.session_id.clone(),
+                    Arc::clone(&self.deliver),
+                );
+                load_sessions(
+                    self.client.clone(),
+                    self.cwd.clone(),
+                    Arc::clone(&self.deliver),
+                );
+                true
+            }
+            Err(error) => {
+                tracing::warn!("deepseek could not continue {thread_id}: {error}");
+                false
+            }
+        }
     }
 
     /// Whether the shared host is still serving. A host that exited takes every
@@ -219,6 +349,31 @@ impl Session {
         // mapping that has to remember what the earlier frames said.
         if let Some(events) = self.usage.apply(&frame, &self.session_id) {
             return events;
+        }
+
+        if frame["payload"]["type"] == HISTORY_FRAME {
+            let payload = &frame["payload"];
+            return vec![Event::History(history::sessions(
+                &payload["sessions"],
+                payload["cwd"].as_str(),
+            ))];
+        }
+
+        if frame["payload"]["type"] == REPLAY_FRAME {
+            // A page belonging to the conversation this tab has since left
+            // would replace the visible transcript with another one's.
+            if frame["payload"]["sessionId"].as_str() != Some(&self.session_id) {
+                return Vec::new();
+            }
+            return match frame["payload"]["error"].as_str() {
+                Some(message) => vec![Event::Error {
+                    message: message.to_string(),
+                    // The conversation was attached before the page was read,
+                    // so the tab works; only its earlier turns are missing.
+                    fatal: false,
+                }],
+                None => vec![Event::Replay(history::replay(&frame["payload"]["page"]))],
+            };
         }
 
         if frame["payload"]["type"] == MODELS_FRAME {

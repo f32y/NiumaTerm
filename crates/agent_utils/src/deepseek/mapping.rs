@@ -353,7 +353,11 @@ fn map_tool_result(data: &Value, view: &Value, tools: &mut ToolTracker) -> Vec<E
     ))]
 }
 
-fn map_session_event(event: &Value, view: &Value, tools: &mut ToolTracker) -> Vec<Event> {
+pub(crate) fn map_session_event(
+    event: &Value,
+    view: &Value,
+    tools: &mut ToolTracker,
+) -> Vec<Event> {
     let data = &event["data"];
 
     match event["type"].as_str() {

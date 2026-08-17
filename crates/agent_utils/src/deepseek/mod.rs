@@ -13,6 +13,7 @@
 
 mod api;
 mod events;
+mod history;
 mod host;
 mod mapping;
 mod models;

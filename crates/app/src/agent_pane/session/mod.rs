@@ -1042,7 +1042,9 @@ impl AgentPane {
         );
 
         match self.kind {
-            AgentKind::Codex => {
+            // Both continue an earlier conversation inside the running session,
+            // and both answer whether the request reached a backend that could.
+            AgentKind::Codex | AgentKind::DeepSeek => {
                 if !self
                     .session
                     .as_mut()
@@ -1083,13 +1085,6 @@ impl AgentPane {
                     });
                 })
                 .detach();
-            }
-            // Neither history source is mapped for DeepSeek, so its list is
-            // always empty and nothing can be picked from it. Restoring the
-            // previous state keeps that reachable-by-accident case harmless.
-            AgentKind::DeepSeek => {
-                self.history_ui.mode = RecentSessionsMode::Open;
-                self.status = previous_status;
             }
         }
     }
