@@ -53,10 +53,20 @@ mod prompt_truncation_tests {
 
     #[test]
     fn working_status_adds_compact_live_output_tokens() {
-        assert_eq!(working_status_label(4, None), "Working for 4 s");
+        assert_eq!(working_status_label(4, None, None), "Working for 4 s");
         assert_eq!(
-            working_status_label(12, Some(1_250)),
+            working_status_label(12, Some(1_250), None),
             "Working for 12 s · 1.2k tokens"
+        );
+    }
+
+    #[test]
+    fn a_reported_activity_leads_the_working_row() {
+        // The elapsed time reads the same every second, so what changed is
+        // what belongs first.
+        assert_eq!(
+            working_status_label(12, Some(1_250), Some("Retrying 1/2 after 429 rate limited")),
+            "Retrying 1/2 after 429 rate limited · Working for 12 s · 1.2k tokens"
         );
     }
 

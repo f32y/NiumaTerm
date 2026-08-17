@@ -475,6 +475,20 @@ pub struct ContextComposition {
     pub auto_compact_threshold: Option<u64>,
 }
 
+/// Something a turn is doing that produces no output while it lasts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TurnActivity {
+    /// A provider request failed and is being tried again. The turn is waiting
+    /// rather than working, which is otherwise indistinguishable: elapsed time
+    /// climbs the same either way and the token count sits still for both.
+    Retrying {
+        attempt: u64,
+        total: u64,
+        /// The provider's own account of the failure, already user-facing.
+        reason: String,
+    },
+}
+
 /// One selectable answer of a [`Question`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QuestionOption {
@@ -602,7 +616,11 @@ pub enum Event {
     History(Vec<SessionSummary>),
     /// Reconstructed transcript of a resumed session, to pre-fill the UI.
     Replay(Vec<ReplayTurn>),
-    StatusDetail(Option<String>),
+    /// What the running turn is doing beyond producing output, when the backend
+    /// reports something the elapsed time and token count cannot show. `None`
+    /// clears it. The words belong to the view: an adapter reports the facts it
+    /// was given and does not know the reader's language.
+    StatusDetail(Option<TurnActivity>),
     Error {
         message: String,
         /// The handshake itself failed; the session will not become usable.

@@ -92,7 +92,11 @@ impl TranscriptView {
                     div()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground.opacity(0.55))
-                        .child(working_label(started, self.working_output_tokens)),
+                        .child(working_label(
+                            started,
+                            self.working_output_tokens,
+                            self.working_detail.as_deref(),
+                        )),
                 )
                 .into_any_element();
         }
@@ -107,7 +111,11 @@ impl TranscriptView {
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground.opacity(0.7))
-                    .child(working_label(started, self.working_output_tokens)),
+                    .child(working_label(
+                        started,
+                        self.working_output_tokens,
+                        self.working_detail.as_deref(),
+                    )),
             )
             .into_any_element()
     }

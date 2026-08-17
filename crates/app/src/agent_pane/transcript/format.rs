@@ -21,12 +21,29 @@ pub(in crate::agent_pane) fn should_show_jump_to_latest(
 }
 
 /// The live turn-duration and generated-token label.
-pub(in crate::agent_pane) fn working_label(started: Instant, output_tokens: Option<u64>) -> String {
-    working_status_label(started.elapsed().as_secs(), output_tokens)
+pub(in crate::agent_pane) fn working_label(
+    started: Instant,
+    output_tokens: Option<u64>,
+    detail: Option<&str>,
+) -> String {
+    working_status_label(started.elapsed().as_secs(), output_tokens, detail)
 }
 
-pub(super) fn working_status_label(seconds: u64, output_tokens: Option<u64>) -> String {
-    timed_token_label(i18n("agent-transcript-working"), seconds, output_tokens)
+pub(super) fn working_status_label(
+    seconds: u64,
+    output_tokens: Option<u64>,
+    detail: Option<&str>,
+) -> String {
+    let status = timed_token_label(i18n("agent-transcript-working"), seconds, output_tokens);
+
+    // The detail leads, because it is the part that changed and the part the
+    // user has to react to; the elapsed time is the same every second.
+    match detail {
+        Some(detail) => i18n("agent-transcript-status-detail")
+            .replace("{detail}", detail)
+            .replace("{status}", &status),
+        None => status,
+    }
 }
 
 pub(super) fn worked_status_label(seconds: u64, output_tokens: Option<u64>) -> String {

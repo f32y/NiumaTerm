@@ -473,9 +473,24 @@ impl AgentPane {
                 }
                 self.apply_replay(items, cx);
             }
-            // No status line in the UI anymore; the live working row and the
-            // Stop button carry the running state.
-            SessionEvent::StatusDetail(_) => {}
+            // The working row carries it: a turn waiting out a provider retry
+            // is indistinguishable from one thinking slowly, and the elapsed
+            // time and token count say nothing about which it is.
+            SessionEvent::StatusDetail(detail) => {
+                let detail = detail.map(|activity| match activity {
+                    TurnActivity::Retrying {
+                        attempt,
+                        total,
+                        reason,
+                    } => i18n("agent-transcript-retrying")
+                        .replace("{attempt}", &attempt.to_string())
+                        .replace("{total}", &total.to_string())
+                        .replace("{reason}", &reason),
+                });
+                self.transcript.update(cx, |transcript, cx| {
+                    transcript.set_working_detail(detail, cx)
+                });
+            }
         }
     }
 

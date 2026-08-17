@@ -58,6 +58,11 @@ pub(crate) struct TranscriptView {
     pub(in crate::agent_pane) working_started: Option<Instant>,
     /// Output tokens reported for the running turn.
     pub(in crate::agent_pane) working_output_tokens: Option<u64>,
+    /// What the backend says the running turn is currently doing, when that is
+    /// something the elapsed time and token count do not show. A turn waiting
+    /// out a provider retry looks identical to one thinking slowly, and the two
+    /// call for opposite reactions from the user.
+    pub(in crate::agent_pane) working_detail: Option<String>,
     /// The backend is rewriting the conversation to reclaim context. Turn
     /// output pauses for the duration, so the live progress row explains the
     /// wait instead of leaving a bare seconds counter that looks stalled.
@@ -97,6 +102,7 @@ impl TranscriptView {
             interrupted_turns: HashSet::new(),
             working_started: None,
             working_output_tokens: None,
+            working_detail: None,
             compacting: false,
             cwd,
             kind,
@@ -153,6 +159,7 @@ impl TranscriptView {
         self.virtual_transcripts.clear();
         self.working_started = None;
         self.working_output_tokens = None;
+        self.working_detail = None;
         self.compacting = false;
     }
 
@@ -297,7 +304,22 @@ impl TranscriptView {
     pub(in crate::agent_pane) fn start_working(&mut self, cx: &mut Context<Self>) {
         self.working_started = Some(Instant::now());
         self.working_output_tokens = None;
+        // Whatever the last turn was doing has nothing to say about this one.
+        self.working_detail = None;
         cx.notify();
+    }
+
+    /// Report what the running turn is doing, or clear it once the backend has
+    /// nothing further to add.
+    pub(in crate::agent_pane) fn set_working_detail(
+        &mut self,
+        detail: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.working_detail != detail {
+            self.working_detail = detail;
+            cx.notify();
+        }
     }
 
     pub(in crate::agent_pane) fn set_working_output_tokens(
@@ -316,6 +338,7 @@ impl TranscriptView {
     /// stay outside the shared item stream.
     pub(in crate::agent_pane) fn settle_turn(&mut self, turn: u64, cx: &mut Context<Self>) {
         let output_tokens = self.working_output_tokens.take();
+        self.working_detail = None;
         if let Some(started) = self.working_started.take() {
             self.settled_turns.insert(turn);
             if !self.interrupted_turns.contains(&turn) {
@@ -335,6 +358,7 @@ impl TranscriptView {
     pub(in crate::agent_pane) fn discard_turn(&mut self, turn: u64, cx: &mut Context<Self>) {
         self.working_started = None;
         self.working_output_tokens = None;
+        self.working_detail = None;
         self.settled_turns.remove(&turn);
         self.completed_turn_seconds.remove(&turn);
         self.completed_turn_output_tokens.remove(&turn);

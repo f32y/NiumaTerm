@@ -903,9 +903,11 @@ impl Session {
                     fatal: false,
                 }]
             }
-            "thread/status/changed" => vec![Event::StatusDetail(
-                params["status"]["type"].as_str().map(str::to_owned),
-            )],
+            // The status carries a protocol token rather than a sentence, and
+            // the working row it would reach shows text to the user. Child-agent
+            // rows read the same notification through their own reducer, which
+            // maps it to a lifecycle state instead of showing the word.
+            "thread/status/changed" => Vec::new(),
             _ => Vec::new(),
         }
     }

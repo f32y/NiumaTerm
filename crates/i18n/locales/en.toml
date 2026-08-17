@@ -563,6 +563,8 @@
 "agent-transcript-interrupted" = "Interrupted"
 "agent-transcript-timed-status" = "{verb} for {duration}"
 "agent-transcript-status-tokens" = "{status} · {tokens} tokens"
+"agent-transcript-status-detail" = "{detail} · {status}"
+"agent-transcript-retrying" = "Retrying {attempt}/{total} after {reason}"
 "agent-duration-day" = "{count} day"
 "agent-duration-days" = "{count} days"
 "agent-duration-hour" = "{count} hour"
