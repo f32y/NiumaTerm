@@ -19,6 +19,7 @@ pub use crate::background_task::transcript::{
 pub enum BackgroundTaskProvider {
     Codex,
     ClaudeCode,
+    DeepSeek,
 }
 
 impl BackgroundTaskProvider {
@@ -26,6 +27,7 @@ impl BackgroundTaskProvider {
         match self {
             Self::Codex => "Codex",
             Self::ClaudeCode => "Claude Code",
+            Self::DeepSeek => "DeepSeek Harness",
         }
     }
 }
@@ -54,6 +56,10 @@ impl BackgroundTaskKey {
     pub fn claude_code(id: impl Into<String>) -> Self {
         Self::new(BackgroundTaskProvider::ClaudeCode, id)
     }
+
+    pub fn deepseek(id: impl Into<String>) -> Self {
+        Self::new(BackgroundTaskProvider::DeepSeek, id)
+    }
 }
 
 /// Provider-specific identifiers kept beside the shared summary. These live in
@@ -74,6 +80,15 @@ pub enum BackgroundTaskRefs {
         tool_use_id: Option<String>,
         /// Agent identifier some notification records carry instead of a task id.
         agent_id: Option<String>,
+    },
+    DeepSeek {
+        /// Session the child hangs off. Reading a child's conversation is
+        /// addressed by the pair, not by the child alone.
+        parent_session_id: String,
+        /// Whether the child accepts further prompts or was one execution. The
+        /// two are read through different transports, so the row carries which
+        /// one it is rather than probing.
+        continuable: bool,
     },
 }
 
@@ -452,6 +467,12 @@ fn default_refs(key: &BackgroundTaskKey) -> BackgroundTaskRefs {
             task_id: None,
             tool_use_id: None,
             agent_id: None,
+        },
+        // A child is addressed by the pair, so a reference built without its
+        // parent names nothing readable; the snapshot always supplies one.
+        BackgroundTaskProvider::DeepSeek => BackgroundTaskRefs::DeepSeek {
+            parent_session_id: String::new(),
+            continuable: false,
         },
     }
 }

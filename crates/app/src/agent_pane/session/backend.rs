@@ -180,7 +180,7 @@ impl Backend {
             // Claude Code rebuilds tasks from session history rather than a
             // provider query, so there is nothing to re-request live.
             Backend::Claude(_) => {}
-            Backend::DeepSeek(_) => {}
+            Backend::DeepSeek(session) => session.refresh_background_tasks(),
             #[cfg(test)]
             Backend::Test(_) => {}
         }
@@ -199,15 +199,22 @@ impl Backend {
         match self {
             Backend::Codex(session) => match key.provider {
                 BackgroundTaskProvider::Codex => session.load_background_task_transcript(&key.id),
-                BackgroundTaskProvider::ClaudeCode => Vec::new(),
+                BackgroundTaskProvider::ClaudeCode | BackgroundTaskProvider::DeepSeek => Vec::new(),
             },
             Backend::Claude(session) => match key.provider {
                 BackgroundTaskProvider::ClaudeCode => {
                     session.load_background_task_transcript(&key.id, cwd)
                 }
-                BackgroundTaskProvider::Codex => Vec::new(),
+                BackgroundTaskProvider::Codex | BackgroundTaskProvider::DeepSeek => Vec::new(),
             },
-            Backend::DeepSeek(_) => Vec::new(),
+            // The harness answers this one asynchronously, so the read starts
+            // here and its result reaches the pane as an ordinary event.
+            Backend::DeepSeek(session) => {
+                if key.provider == BackgroundTaskProvider::DeepSeek {
+                    session.load_background_task_transcript(&key.id);
+                }
+                Vec::new()
+            }
             #[cfg(test)]
             Backend::Test(_) => Vec::new(),
         }
@@ -227,13 +234,16 @@ impl Backend {
         match self {
             Backend::Codex(session) => match key.provider {
                 BackgroundTaskProvider::Codex => session.interrupt_background_task(&key.id),
-                BackgroundTaskProvider::ClaudeCode => false,
+                BackgroundTaskProvider::ClaudeCode | BackgroundTaskProvider::DeepSeek => false,
             },
             Backend::Claude(session) => match key.provider {
                 BackgroundTaskProvider::ClaudeCode => session.interrupt_background_task(key),
-                BackgroundTaskProvider::Codex => false,
+                BackgroundTaskProvider::Codex | BackgroundTaskProvider::DeepSeek => false,
             },
-            Backend::DeepSeek(_) => false,
+            Backend::DeepSeek(session) => match key.provider {
+                BackgroundTaskProvider::DeepSeek => session.interrupt_background_task(&key.id),
+                BackgroundTaskProvider::Codex | BackgroundTaskProvider::ClaudeCode => false,
+            },
             #[cfg(test)]
             Backend::Test(_) => false,
         }
