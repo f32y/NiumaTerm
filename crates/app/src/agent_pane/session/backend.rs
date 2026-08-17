@@ -391,6 +391,24 @@ impl Backend {
         }
     }
 
+    /// Ask for one workflow member's conversation. Only a harness that reports
+    /// its runs live answers this; the disk-backed one reads a stored record
+    /// through its own refresh path instead.
+    pub(in crate::agent_pane) fn request_workflow_agent_transcript(
+        &mut self,
+        task_id: &str,
+        agent_id: &str,
+    ) {
+        match self {
+            Backend::DeepSeek(session) => {
+                session.request_workflow_agent_transcript(task_id, agent_id)
+            }
+            Backend::Codex(_) | Backend::Claude(_) => {}
+            #[cfg(test)]
+            Backend::Test(_) => {}
+        }
+    }
+
     /// What each still-running workflow run needs read on the next refresh
     /// tick. Only Claude reports workflows, so Codex has nothing to read.
     pub(in crate::agent_pane) fn workflow_refresh_requests(&self) -> Vec<WorkflowRefreshRequest> {

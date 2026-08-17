@@ -10,8 +10,6 @@ use crate::background_task::{
     BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskRefs, BackgroundTaskSnapshot,
     BackgroundTaskState, BackgroundTaskSummary,
 };
-use crate::chat::Item;
-use crate::deepseek::history;
 
 /// Read a `subagent.list` result into the snapshot the panel renders.
 ///
@@ -76,17 +74,4 @@ pub(crate) fn snapshot(
         discovery: BackgroundTaskDiscoveryState::Ready,
         activity,
     }
-}
-
-/// Read a `subagent.history` page into the child's own conversation.
-///
-/// A child's page carries the same events and render cards the parent's does,
-/// so the rebuild is the parent's, flattened: the panel shows one stream rather
-/// than the turn folds the main transcript draws.
-pub(crate) fn transcript(value: &Value) -> Vec<Item> {
-    history::replay(value)
-        .into_iter()
-        .flat_map(|turn| turn.items)
-        .map(|entry| entry.item)
-        .collect()
 }

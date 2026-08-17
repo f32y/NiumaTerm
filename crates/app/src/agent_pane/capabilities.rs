@@ -16,6 +16,12 @@ pub(crate) struct Capabilities {
     pub(crate) file_rewind: bool,
     /// The harness reports workflow runs the pane can scope to its session.
     pub(crate) workflows: bool,
+    /// A run's record lives on disk and is polled while the view is open,
+    /// because the harness reports nothing about it once it has started. Where
+    /// a run instead reports itself as it goes, polling would only re-read what
+    /// the events already said, and a member's conversation is read once when
+    /// the user opens it.
+    pub(crate) workflows_read_from_disk: bool,
     /// Provider commands are discovered after startup rather than known at
     /// once, so an empty palette means "still loading" and says so instead of
     /// looking broken.
@@ -62,6 +68,7 @@ const CODEX: Capabilities = Capabilities {
     skill_references: true,
     file_rewind: false,
     workflows: false,
+    workflows_read_from_disk: false,
     async_command_discovery: false,
     repeats_ready_during_init: false,
     filesystem_session_history: false,
@@ -78,6 +85,7 @@ const CLAUDE: Capabilities = Capabilities {
     skill_references: false,
     file_rewind: true,
     workflows: true,
+    workflows_read_from_disk: true,
     async_command_discovery: true,
     repeats_ready_during_init: true,
     filesystem_session_history: true,
@@ -98,6 +106,7 @@ const DEEPSEEK: Capabilities = Capabilities {
     skill_references: false,
     file_rewind: false,
     workflows: true,
+    workflows_read_from_disk: false,
     async_command_discovery: true,
     repeats_ready_during_init: false,
     filesystem_session_history: false,

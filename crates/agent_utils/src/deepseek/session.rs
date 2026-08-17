@@ -90,6 +90,7 @@ const COMMANDS_FRAME: &str = "nmt/commands";
 const SUBAGENTS_FRAME: &str = "nmt/subagents";
 const SUBAGENT_TRANSCRIPT_FRAME: &str = "nmt/subagent-transcript";
 const SKILLS_FRAME: &str = "nmt/skills";
+const WORKFLOW_TRANSCRIPT_FRAME: &str = "nmt/workflow-transcript";
 
 /// How much of a resumed conversation is rebuilt. The harness pages history at
 /// whole-message boundaries, so this is a count of messages rather than of
@@ -229,6 +230,38 @@ fn load_subagent_transcript(
             })),
             Err(error) => tracing::warn!(
                 "deepseek child conversation could not be read: {}",
+                error.message()
+            ),
+        }
+    });
+}
+
+/// Read one workflow member's own conversation.
+///
+/// A member is published as a session of its own, so its log is read the same
+/// way any session's is. That is deliberately not the child-agent read: the
+/// catalog that read is addressed through covers what a turn delegated, and a
+/// workflow member reached through it would depend on the workflow tool
+/// registering there as well.
+fn load_workflow_transcript(
+    client: ApiClient,
+    task_id: String,
+    child: String,
+    deliver: Arc<dyn Fn(Value) + Send + Sync>,
+) {
+    thread::spawn(move || {
+        let payload = json!({ "sessionId": child, "maxMessages": REPLAY_MESSAGES });
+        match client.call("session.history", payload) {
+            Ok(page) => deliver(json!({
+                "payload": {
+                    "type": WORKFLOW_TRANSCRIPT_FRAME,
+                    "taskId": task_id,
+                    "agentId": child,
+                    "page": page,
+                },
+            })),
+            Err(error) => tracing::warn!(
+                "deepseek workflow member conversation could not be read: {}",
                 error.message()
             ),
         }
@@ -520,9 +553,21 @@ impl Session {
             };
             return vec![Event::BackgroundTaskTranscript {
                 key: BackgroundTaskKey::deepseek(child),
-                update: BackgroundTaskTranscriptUpdate::loaded(subagents::transcript(
-                    &payload["page"],
-                )),
+                update: BackgroundTaskTranscriptUpdate::loaded(history::items(&payload["page"])),
+            }];
+        }
+
+        if frame["payload"]["type"] == WORKFLOW_TRANSCRIPT_FRAME {
+            let payload = &frame["payload"];
+            let (Some(task_id), Some(agent_id)) =
+                (payload["taskId"].as_str(), payload["agentId"].as_str())
+            else {
+                return Vec::new();
+            };
+            return vec![Event::WorkflowAgentTranscript {
+                task_id: task_id.to_string(),
+                agent_id: agent_id.to_string(),
+                items: history::items(&payload["page"]),
             }];
         }
 
@@ -573,6 +618,18 @@ impl Session {
             // attached, so accounting and the permission preset would otherwise
             // stay blank until one of them happened to move.
             let mut events = self.usage.apply_baseline(&page["projections"]["values"]);
+
+            // A run's rows are folded from the same events the log carries, so
+            // a resumed conversation rebuilds them from its own history rather
+            // than from a record kept beside it.
+            let mut folded = false;
+            for entry in page["events"].as_array().into_iter().flatten() {
+                folded |= self.workflows.apply(&entry["event"]);
+            }
+            if folded {
+                events.push(Event::Workflows(self.workflows.snapshot(&self.session_id)));
+            }
+
             events.push(Event::Replay(history::replay(page)));
             return events;
         }
@@ -717,6 +774,20 @@ impl Session {
                 error.message()
             );
         }
+    }
+
+    /// Ask for one workflow member's conversation.
+    ///
+    /// A live run reports its members as they are published, so there is
+    /// nothing to poll: the read happens when a member is opened, and the run's
+    /// own events say when it changed.
+    pub fn request_workflow_agent_transcript(&mut self, task_id: &str, agent_id: &str) {
+        load_workflow_transcript(
+            self.client.clone(),
+            task_id.to_string(),
+            agent_id.to_string(),
+            Arc::clone(&self.deliver),
+        );
     }
 
     /// Ask the harness for a fresher child-agent catalog.
