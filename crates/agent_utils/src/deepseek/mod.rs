@@ -18,8 +18,8 @@ mod history;
 mod host;
 mod mapping;
 mod models;
+mod projections;
 mod session;
-mod usage;
 mod version;
 
 #[cfg(test)]

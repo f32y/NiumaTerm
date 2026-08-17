@@ -118,12 +118,14 @@ impl AgentPane {
         row
     }
 
-    /// DeepSeek settings: model and reasoning effort. Both are one request the
-    /// harness answers immediately, so a pick takes effect on the session
-    /// rather than riding along with the next turn.
+    /// DeepSeek settings: model, reasoning effort, and permission preset. Each
+    /// takes effect on the session immediately rather than riding along with
+    /// the next turn.
     ///
-    /// Permission presets are not mapped yet and get no picker here: a control
-    /// that changes nothing would read as broken rather than as unfinished.
+    /// The presets come from the harness because its preset table belongs to
+    /// the deployment; a list written here would offer values a deployment does
+    /// not serve and hide the ones it does. A composition with no permission
+    /// service reports none, and then the control is absent rather than empty.
     fn render_deepseek_settings_row(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let model_options: Vec<(String, String)> = self
             .models
@@ -170,6 +172,37 @@ impl AgentPane {
                 vec![model],
                 cx,
             ));
+
+        if !self.approval_presets.is_empty() {
+            let preset_options: Vec<(String, String)> = self
+                .approval_presets
+                .iter()
+                .map(|preset| (preset.value.clone(), preset.label.clone()))
+                .collect();
+
+            let permission = Self::setting_picker(
+                cx,
+                "agent-permission",
+                i18n("agent-setting-permissions"),
+                permission_icon(self.settings.approval.as_deref()),
+                self.settings.approval.clone(),
+                preset_options,
+                false,
+                |this, value, cx| {
+                    // The harness owns the switch, and its own command is what
+                    // performs it; the projection that follows is what moves
+                    // the row, so nothing is recorded here in advance.
+                    this.execute_backend_command(PendingSlashCommand::new("permission", value), cx);
+                },
+            )
+            .into_any_element();
+
+            row = row.child(Self::settings_group(
+                i18n("agent-settings-execution-policy"),
+                vec![permission],
+                cx,
+            ));
+        }
 
         if !effort_options.is_empty() {
             let effort = Self::setting_picker(

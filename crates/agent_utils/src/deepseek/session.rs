@@ -15,7 +15,7 @@ use crate::deepseek::events::Downlinks;
 use crate::deepseek::host::{self, Host, HostError};
 use crate::deepseek::mapping::{self, ApprovalRequest, QuestionRequest, ToolTracker};
 use crate::deepseek::models::ModelDirectory;
-use crate::deepseek::usage::UsageTracker;
+use crate::deepseek::projections::ProjectionTracker;
 use crate::deepseek::{commands, history};
 
 pub struct Session {
@@ -53,7 +53,7 @@ pub struct Session {
     tools: ToolTracker,
     /// The usage projections seen so far. Each arrives as its own frame, and
     /// the pane's snapshot is assembled from more than one of them.
-    usage: UsageTracker,
+    usage: ProjectionTracker,
     /// What the picker offers, and what a pick from it addresses. Empty until
     /// the catalog arrives, which is a background call rather than part of
     /// opening the conversation.
@@ -265,6 +265,9 @@ impl Session {
         // picker refuses to open on an empty list and cannot wait for one.
         load_sessions(client.clone(), cwd.clone(), Arc::clone(&deliver));
         load_commands(client.clone(), session_id.clone(), Arc::clone(&deliver));
+        // A new conversation has no turns to replay, but its tail page still
+        // carries the projection baseline the pane's gauges start from.
+        load_replay(client.clone(), session_id.clone(), Arc::clone(&deliver));
 
         Ok(Self {
             client,
@@ -279,7 +282,7 @@ impl Session {
             pending_approval: None,
             pending_questions: None,
             tools: ToolTracker::default(),
-            usage: UsageTracker::default(),
+            usage: ProjectionTracker::default(),
             models: ModelDirectory::default(),
         })
     }
@@ -301,7 +304,7 @@ impl Session {
                 self.pending_approval = None;
                 self.pending_questions = None;
                 self.tools = ToolTracker::default();
-                self.usage = UsageTracker::default();
+                self.usage = ProjectionTracker::default();
                 self.models = ModelDirectory::default();
 
                 // The directory belongs to the session, so the resumed one is
@@ -403,15 +406,23 @@ impl Session {
             if frame["payload"]["sessionId"].as_str() != Some(&self.session_id) {
                 return Vec::new();
             }
-            return match frame["payload"]["error"].as_str() {
-                Some(message) => vec![Event::Error {
+            if let Some(message) = frame["payload"]["error"].as_str() {
+                return vec![Event::Error {
                     message: message.to_string(),
                     // The conversation was attached before the page was read,
                     // so the tab works; only its earlier turns are missing.
                     fatal: false,
-                }],
-                None => vec![Event::Replay(history::replay(&frame["payload"]["page"]))],
-            };
+                }];
+            }
+
+            let page = &frame["payload"]["page"];
+            // The tail page is also where a projection's current value can be
+            // read: a live push reports only what changed after the tab
+            // attached, so accounting and the permission preset would otherwise
+            // stay blank until one of them happened to move.
+            let mut events = self.usage.apply_baseline(&page["projections"]["values"]);
+            events.push(Event::Replay(history::replay(page)));
+            return events;
         }
 
         if frame["payload"]["type"] == MODELS_FRAME {

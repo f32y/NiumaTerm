@@ -115,6 +115,7 @@ impl AgentPane {
             seed_approval_reviewer: false,
             restore_thread_settings_on_ready: None,
             models: Vec::new(),
+            approval_presets: Vec::new(),
             turn_seq: 0,
             turn_submitted_at: None,
             first_output_latency: None,

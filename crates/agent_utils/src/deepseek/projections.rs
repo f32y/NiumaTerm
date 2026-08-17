@@ -1,21 +1,20 @@
-//! Folding the host's usage projections into the pane's usage snapshots.
+//! Folding the host's projection units into the snapshots the pane renders.
 //!
-//! The host publishes each projection unit as its own frame carrying that
-//! unit's whole current value, so accounting the pane shows as one figure
-//! arrives here as several independent updates. This holds the latest of each
-//! and republishes the combined snapshot, which is why it is a tracker rather
-//! than a pure mapping function.
+//! The host publishes each unit as its own frame carrying that unit's whole
+//! current value, so a figure the pane shows as one thing arrives here as
+//! several independent updates. This holds the latest of each and republishes
+//! the combination, which is why it is a tracker rather than a pure mapping.
 
 use serde_json::Value;
 
 use crate::chat::{
-    ContextComposition, ContextSegment, ContextUsageScope, ContextWindowUsage, Event,
-    ScopedTokenUsage, TokenUsageBreakdown,
+    ApprovalPreset, ContextComposition, ContextSegment, ContextUsageScope, ContextWindowUsage,
+    Event, ScopedTokenUsage, TokenUsageBreakdown,
 };
 
 /// The projection values this session has seen so far.
 #[derive(Default)]
-pub(crate) struct UsageTracker {
+pub(crate) struct ProjectionTracker {
     /// Provider-reported totals over the whole log.
     cumulative: Option<TokenUsageBreakdown>,
     /// What the next request's prompt is expected to cost.
@@ -24,10 +23,10 @@ pub(crate) struct UsageTracker {
     context_window: Option<u64>,
 }
 
-impl UsageTracker {
-    /// Fold one frame. Returns `None` for anything that is not a usage
-    /// projection addressed to this session, so a caller can go on to try the
-    /// frame against the other mappings.
+impl ProjectionTracker {
+    /// Fold one frame. Returns `None` for anything that is not a projection
+    /// addressed to this session, so a caller can go on to try the frame
+    /// against the other mappings.
     pub(crate) fn apply(&mut self, frame: &Value, session_id: &str) -> Option<Vec<Event>> {
         let payload = &frame["payload"];
         if payload["type"] != "session/projection"
@@ -36,11 +35,28 @@ impl UsageTracker {
             return None;
         }
 
-        let value = &payload["value"];
-        match payload["key"].as_str()? {
+        Some(self.apply_unit(payload["key"].as_str()?, &payload["value"]))
+    }
+
+    /// Fold the whole baseline a history page carries.
+    ///
+    /// A live push only reports what changed since the session started, so a
+    /// tab that read nothing else would show no accounting and no permission
+    /// preset until one of them happened to move.
+    pub(crate) fn apply_baseline(&mut self, values: &Value) -> Vec<Event> {
+        values
+            .as_object()
+            .into_iter()
+            .flatten()
+            .flat_map(|(key, value)| self.apply_unit(key, value))
+            .collect()
+    }
+
+    fn apply_unit(&mut self, key: &str, value: &Value) -> Vec<Event> {
+        match key {
             "tokenUsage" => {
                 self.cumulative = Some(cumulative_usage(value));
-                Some(self.window_event().into_iter().collect())
+                self.window_event().into_iter().collect()
             }
             "contextPressure" => {
                 // `projectedTokens` re-prices what the surface gained since the
@@ -51,16 +67,13 @@ impl UsageTracker {
                     .as_u64()
                     .or_else(|| value["pressureTokens"].as_u64());
                 self.context_window = value["contextWindow"].as_u64().filter(|max| *max > 0);
-                Some(self.window_event().into_iter().collect())
+                self.window_event().into_iter().collect()
             }
-            "contextBreakdown" => Some(
-                self.composition_event(value)
-                    .map(|event| vec![event])
-                    .unwrap_or_default(),
-            ),
+            "contextBreakdown" => self.composition_event(value).into_iter().collect(),
+            "permissions" => permission_presets(value).into_iter().collect(),
             // The host registers whatever projection units the deployment
             // composed; the ones this build does not read are normal traffic.
-            _ => Some(Vec::new()),
+            _ => Vec::new(),
         }
     }
 
@@ -113,6 +126,33 @@ impl UsageTracker {
             segments,
         }))
     }
+}
+
+/// The presets this session can switch between, and the one it is on.
+///
+/// The options are the deployment's own preset table rather than a list this
+/// build knows, so both travel: a picker built from a hard-coded set would
+/// offer values a deployment does not serve and hide the ones it does. The
+/// derived `custom` entry appears only while the knobs match no preset, which
+/// is why it can be the current value without being switchable to.
+fn permission_presets(value: &Value) -> Option<Event> {
+    let presets: Vec<ApprovalPreset> = value["options"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|option| {
+            Some(ApprovalPreset {
+                value: option["value"].as_str()?.to_string(),
+                label: option["name"].as_str().unwrap_or_default().to_string(),
+                description: option["description"].as_str().map(str::to_string),
+            })
+        })
+        .collect();
+
+    (!presets.is_empty()).then(|| Event::ApprovalPresets {
+        presets,
+        current: value["currentValue"].as_str().map(str::to_string),
+    })
 }
 
 /// The four buckets are disjoint — reasoning tokens are already inside the

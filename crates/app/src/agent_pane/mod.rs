@@ -52,9 +52,9 @@ use nmt_agent_utils::background_task::{
     BackgroundTaskKey, BackgroundTaskProvider, BackgroundTaskSnapshot, BackgroundTaskTranscript,
 };
 use nmt_agent_utils::chat::{
-    Compaction, CompactionTrigger, ContextComposition, ContextWindowUsage, Event as SessionEvent,
-    Item as SessionItem, ModelInfo, Question, QuestionOption, ReplayTurn, SendOutcome,
-    SessionSummary, SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments,
+    ApprovalPreset, Compaction, CompactionTrigger, ContextComposition, ContextWindowUsage,
+    Event as SessionEvent, Item as SessionItem, ModelInfo, Question, QuestionOption, ReplayTurn,
+    SendOutcome, SessionSummary, SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments,
     SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
     ThreadSettings,
 };
@@ -534,6 +534,9 @@ pub(crate) struct AgentPane {
     /// Model catalog; service tiers are per model, so the tier dropdown lists
     /// the selected model's tiers.
     models: Vec<ModelInfo>,
+    /// Execution-permission presets, for a harness whose preset table belongs
+    /// to its deployment. Empty for one whose presets this UI can name itself.
+    approval_presets: Vec<ApprovalPreset>,
     /// Monotonic turn counter; entries are tagged with the turn they arrived
     /// in so a settled turn can fold as one unit.
     turn_seq: u64,

@@ -135,6 +135,14 @@ impl AgentPane {
                 self.models = models;
                 cx.notify();
             }
+            SessionEvent::ApprovalPresets { presets, current } => {
+                // The harness owns this control: it reports the presets its
+                // deployment serves and which one is in force, so a remembered
+                // pick has no say and the row shows what actually applies.
+                self.approval_presets = presets;
+                self.settings.approval = current;
+                cx.notify();
+            }
             SessionEvent::Commands(commands) => {
                 self.palette.provider_commands = commands;
                 self.palette.provider_commands_ready = true;
