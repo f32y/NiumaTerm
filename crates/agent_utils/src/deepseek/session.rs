@@ -13,6 +13,7 @@ use crate::deepseek::api::ApiClient;
 use crate::deepseek::events::Downlinks;
 use crate::deepseek::host::{self, Host, HostError};
 use crate::deepseek::mapping::{self, ApprovalRequest, QuestionRequest, ToolTracker};
+use crate::deepseek::usage::UsageTracker;
 
 pub struct Session {
     client: ApiClient,
@@ -35,6 +36,9 @@ pub struct Session {
     /// Tool calls awaiting their result, so a result can complete the row its
     /// call opened rather than starting a second one.
     tools: ToolTracker,
+    /// The usage projections seen so far. Each arrives as its own frame, and
+    /// the pane's snapshot is assembled from more than one of them.
+    usage: UsageTracker,
 }
 
 impl Session {
@@ -81,6 +85,7 @@ impl Session {
             pending_approval: None,
             pending_questions: None,
             tools: ToolTracker::default(),
+            usage: UsageTracker::default(),
         })
     }
 
@@ -114,6 +119,13 @@ impl Session {
         if let Some((request, questions)) = mapping::question_request(&frame, &self.session_id) {
             self.pending_questions = Some(request);
             return vec![Event::QuestionsRequested { questions }];
+        }
+
+        // A projection frame carries one unit's whole value, and the snapshots
+        // the pane renders are folded from several of them, so this is the one
+        // mapping that has to remember what the earlier frames said.
+        if let Some(events) = self.usage.apply(&frame, &self.session_id) {
+            return events;
         }
 
         let events = mapping::map_frame(&frame, &self.session_id, &mut self.tools);
