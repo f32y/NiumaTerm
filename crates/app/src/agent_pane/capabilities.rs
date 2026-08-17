@@ -46,6 +46,11 @@ pub(crate) struct Capabilities {
     /// outcome offers no button for it, because a button that silently degrades
     /// to allow-once would misreport what the user just agreed to.
     pub(crate) session_scoped_approval: bool,
+    /// A skill is invoked by writing `/name` into an ordinary prompt, which the
+    /// harness recognizes before the step runs. There is no invocation request,
+    /// so a slash line naming a skill is a message rather than a command, and
+    /// rejecting it as an unknown command would block the only way to use one.
+    pub(crate) slash_skills_are_prompts: bool,
     /// The model pick is its own request the harness answers immediately, so a
     /// remembered pick seeded into the picker has to be pushed to reach the
     /// session at all. Where the pick instead rides the launch or the next
@@ -65,6 +70,7 @@ const CODEX: Capabilities = Capabilities {
     model_baked_into_launch: false,
     expandable_compaction_rows: false,
     session_scoped_approval: true,
+    slash_skills_are_prompts: false,
     model_selection_is_a_request: false,
 };
 
@@ -80,13 +86,14 @@ const CLAUDE: Capabilities = Capabilities {
     model_baked_into_launch: true,
     expandable_compaction_rows: true,
     session_scoped_approval: true,
+    slash_skills_are_prompts: false,
     model_selection_is_a_request: false,
 };
 
-/// The DeepSeek host publishes skills, so that one is false because this
-/// integration does not map them yet rather than because the harness lacks
-/// them. The exception is `file_rewind`: DeepSeek Harness has no equivalent
-/// operation at all.
+/// `skill_references` is false because the harness has no structured skill
+/// reference at all: a skill is named inside the prompt text, which
+/// `slash_skills_are_prompts` is what carries. `file_rewind` is false for the
+/// same kind of reason — DeepSeek Harness has no equivalent operation.
 const DEEPSEEK: Capabilities = Capabilities {
     skill_references: false,
     file_rewind: false,
@@ -99,6 +106,7 @@ const DEEPSEEK: Capabilities = Capabilities {
     model_baked_into_launch: false,
     expandable_compaction_rows: true,
     session_scoped_approval: false,
+    slash_skills_are_prompts: true,
     model_selection_is_a_request: true,
 };
 

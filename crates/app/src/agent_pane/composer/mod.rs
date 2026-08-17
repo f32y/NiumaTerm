@@ -160,6 +160,14 @@ impl AgentPane {
         }
     }
 
+    /// Whether the discovered skill catalog carries this name.
+    fn names_a_skill(&self, name: &str) -> bool {
+        self.palette
+            .skill_catalog
+            .as_ref()
+            .is_some_and(|catalog| catalog.skills.iter().any(|skill| skill.name == name))
+    }
+
     /// Route a leading slash before ordinary message handling. Every failure
     /// returns false so the user's input stays available for correction.
     pub(super) fn submit_slash_input(&mut self, input: &str, cx: &mut Context<Self>) -> bool {
@@ -180,6 +188,14 @@ impl AgentPane {
             .into_iter()
             .find(|command| command.name == parsed.name)
         else {
+            // Where a skill is invoked by writing its name into the prompt, a
+            // slash line naming one is a message the harness expands, so
+            // refusing it as an unknown command would block the only way to
+            // reach a skill at all.
+            if self.kind.caps().slash_skills_are_prompts && self.names_a_skill(&parsed.name) {
+                return self.send_text(input.to_string(), cx);
+            }
+
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-composer-unknown-command").replace("{name}", &parsed.name),

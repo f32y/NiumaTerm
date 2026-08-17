@@ -122,6 +122,11 @@ impl ApiClient {
 
         match (answer.result.ok, answer.result.value, answer.result.error) {
             (true, Some(value), _) => Ok(value),
+            // A method that answered with nothing omits the value entirely,
+            // because JSON has no way to write "no answer" as one. Null is the
+            // closest thing this side has, and every caller that can receive it
+            // already has to decide what an absent answer means.
+            (true, None, _) => Ok(Value::Null),
             (false, _, Some(error)) => Err(CallError::Business {
                 code: error.code,
                 message: error.message,

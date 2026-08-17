@@ -361,6 +361,74 @@ fn an_approval_request_carries_what_answering_it_needs() {
 }
 
 #[test]
+fn a_command_result_reports_what_the_registry_settled() {
+    use crate::chat::SlashCommandOutcome;
+    use crate::deepseek::commands;
+
+    assert_eq!(
+        commands::execute_args(SESSION, "/compact keep the design"),
+        json!({ "args": { "agentId": SESSION, "line": "/compact keep the design" } })
+    );
+
+    assert_eq!(
+        commands::outcome(
+            "compact",
+            &json!({ "commandId": "cmd-1", "result": { "kind": "success", "text": "compacted" } }),
+        ),
+        SlashCommandOutcome::Completed {
+            message: Some("compacted".into()),
+        }
+    );
+    assert_eq!(
+        commands::outcome(
+            "permission",
+            &json!({ "commandId": "cmd-2", "result": { "kind": "error", "text": "no such preset" } }),
+        ),
+        SlashCommandOutcome::Rejected {
+            message: "no such preset".into(),
+        }
+    );
+
+    // A name the registry could not resolve produces no answer at all, and
+    // nothing ran, so the caller reports the refusal itself.
+    let SlashCommandOutcome::Rejected { message } = commands::outcome("nope", &Value::Null) else {
+        panic!("an unresolved name should be refused");
+    };
+    assert!(message.contains("/nope"), "{message}");
+}
+
+#[test]
+fn the_skill_catalog_names_what_a_prompt_can_write() {
+    use crate::deepseek::commands;
+
+    let catalog = commands::skills(&json!({
+        "skills": [
+            {
+                "name": "diagnose",
+                "description": "Disciplined diagnosis loop",
+                "whenToUse": "when a bug resists the obvious fix",
+                "modelInvocable": true,
+            },
+            { "name": "handoff", "description": "Compact the conversation", "modelInvocable": false },
+        ],
+    }));
+
+    assert_eq!(catalog.skills.len(), 2);
+    assert!(
+        catalog.skills[0]
+            .description
+            .contains("resists the obvious"),
+        "{}",
+        catalog.skills[0].description
+    );
+    // The catalog lists what a user can invoke, so a row on it is reachable
+    // whether or not the model may reach for it too.
+    assert!(catalog.skills[1].enabled);
+    assert_eq!(catalog.skills[0].path, "diagnose");
+    assert!(catalog.errors.is_empty());
+}
+
+#[test]
 fn a_workflow_run_is_folded_from_its_own_increments() {
     use crate::deepseek::workflows::WorkflowTracker;
     use crate::workflow::{WorkflowAgentState, WorkflowRunState};

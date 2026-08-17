@@ -89,6 +89,7 @@ const REPLAY_FRAME: &str = "nmt/replay";
 const COMMANDS_FRAME: &str = "nmt/commands";
 const SUBAGENTS_FRAME: &str = "nmt/subagents";
 const SUBAGENT_TRANSCRIPT_FRAME: &str = "nmt/subagent-transcript";
+const SKILLS_FRAME: &str = "nmt/skills";
 
 /// How much of a resumed conversation is rebuilt. The harness pages history at
 /// whole-message boundaries, so this is a count of messages rather than of
@@ -157,6 +158,20 @@ fn load_commands(client: ApiClient, session_id: String, deliver: Arc<dyn Fn(Valu
             })),
             Err(error) => {
                 tracing::warn!("deepseek commands could not be listed: {}", error.message())
+            }
+        }
+    });
+}
+
+/// Read the skills a prompt in this conversation can name.
+fn load_skills(client: ApiClient, session_id: String, deliver: Arc<dyn Fn(Value) + Send + Sync>) {
+    thread::spawn(move || {
+        match client.call("skill.list", json!({ "sessionId": session_id.clone() })) {
+            Ok(listed) => deliver(json!({
+                "payload": { "type": SKILLS_FRAME, "sessionId": session_id, "skills": listed },
+            })),
+            Err(error) => {
+                tracing::warn!("deepseek skills could not be listed: {}", error.message())
             }
         }
     });
@@ -342,6 +357,7 @@ impl Session {
         // picker refuses to open on an empty list and cannot wait for one.
         load_sessions(client.clone(), cwd.clone(), Arc::clone(&deliver));
         load_commands(client.clone(), session_id.clone(), Arc::clone(&deliver));
+        load_skills(client.clone(), session_id.clone(), Arc::clone(&deliver));
         // A new conversation has no turns to replay, but its tail page still
         // carries the projection baseline the pane's gauges start from.
         load_replay(client.clone(), session_id.clone(), Arc::clone(&deliver));
@@ -409,9 +425,15 @@ impl Session {
                     self.cwd.clone(),
                     Arc::clone(&self.deliver),
                 );
-                // Commands are scoped to the agent, and a resumed conversation
-                // may have been composed from a different preset.
+                // Commands and skills are scoped to the agent and its project,
+                // and a resumed conversation may have been composed from a
+                // different preset or rooted elsewhere.
                 load_commands(
+                    self.client.clone(),
+                    self.session_id.clone(),
+                    Arc::clone(&self.deliver),
+                );
+                load_skills(
                     self.client.clone(),
                     self.session_id.clone(),
                     Arc::clone(&self.deliver),
@@ -502,6 +524,13 @@ impl Session {
                     &payload["page"],
                 )),
             }];
+        }
+
+        if frame["payload"]["type"] == SKILLS_FRAME {
+            if frame["payload"]["sessionId"].as_str() != Some(&self.session_id) {
+                return Vec::new();
+            }
+            return vec![Event::Skills(commands::skills(&frame["payload"]["skills"]))];
         }
 
         if frame["payload"]["type"] == COMMANDS_FRAME {
@@ -801,20 +830,20 @@ impl Session {
 
     /// Run one of the harness's own commands.
     ///
-    /// A prompt whose whole text is a slash line is executed by the command
-    /// registry and never reaches the model, so this needs no second transport.
-    /// The registry settles before answering, which is why the outcome is
-    /// complete rather than merely accepted.
+    /// The registry is reached directly rather than through a prompt: the host
+    /// admits a prompt to the agent whatever it starts with, so a slash line
+    /// sent that way would reach the model as text instead of running.
     pub fn execute_slash_command(&mut self, name: &str, arguments: &str) -> SlashCommandOutcome {
         let line = match arguments.trim() {
             "" => format!("/{name}"),
             arguments => format!("/{name} {arguments}"),
         };
 
-        match self.prompt(&line) {
-            Ok(answer) => SlashCommandOutcome::Completed {
-                message: answer["command"]["text"].as_str().map(str::to_string),
-            },
+        match self.client.call(
+            commands::EXECUTE_METHOD,
+            commands::execute_args(&self.session_id, &line),
+        ) {
+            Ok(value) => commands::outcome(name, &value),
             Err(error) => SlashCommandOutcome::Rejected {
                 message: error.message().to_string(),
             },
