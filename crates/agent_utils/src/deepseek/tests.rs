@@ -361,6 +361,114 @@ fn an_approval_request_carries_what_answering_it_needs() {
 }
 
 #[test]
+fn a_compaction_records_itself_only_once_it_produced_a_summary() {
+    use crate::chat::{Compaction, CompactionTrigger};
+
+    let start = session_frame(json!({
+        "type": "compaction/start",
+        "data": { "compactionId": "cmp-1", "turn": 3 },
+    }));
+    assert_eq!(
+        map_frame(&start, SESSION, &mut ToolTracker::default()),
+        vec![Event::CompactionStarted]
+    );
+
+    let summary = session_frame(json!({
+        "type": "compaction/summary",
+        "data": {
+            "compactionId": "cmp-1",
+            "sourceCommandId": "cmd-9",
+            "summary": [{ "type": "text", "text": "what happened so far" }],
+            "shadowedRange": { "start": 4, "end": 40 },
+            "shadowedSeqs": [4, 9, 12],
+            "shadowedTokenCount": 8400,
+            "provider": "deepseek",
+            "model": "deepseek-chat",
+        },
+    }));
+    assert_eq!(
+        map_frame(&summary, SESSION, &mut ToolTracker::default()),
+        vec![Event::ItemCompleted(Item::Compaction {
+            id: "cmp-1".into(),
+            detail: Compaction {
+                // The command that asked for it is what makes it manual.
+                trigger: Some(CompactionTrigger::Manual),
+                pre_tokens: Some(8400),
+                post_tokens: None,
+                messages_summarized: Some(3),
+                user_context: None,
+                summary: Some("what happened so far".into()),
+            },
+        })]
+    );
+
+    let end = session_frame(json!({
+        "type": "compaction/end",
+        "data": { "compactionId": "cmp-1", "turn": 3, "error": "the summarizer failed" },
+    }));
+    assert_eq!(
+        map_frame(&end, SESSION, &mut ToolTracker::default()),
+        vec![Event::CompactionFinished {
+            error: Some("the summarizer failed".into()),
+        }]
+    );
+
+    // The replacement the conversation continues from rides a checkpoint
+    // source, so it must not read as something the user typed.
+    let replacement = session_frame(json!({
+        "type": "user/message",
+        "data": {
+            "content": [{ "type": "text", "text": "what happened so far" }],
+            "source": { "kind": "plugin", "plugin": "compact", "compactionId": "cmp-1" },
+        },
+    }));
+    assert_eq!(
+        map_frame(&replacement, SESSION, &mut ToolTracker::default()),
+        Vec::new()
+    );
+}
+
+#[test]
+fn a_todo_write_renders_as_the_shared_checklist_shape() {
+    let frame = session_frame(json!({
+        "type": "todo/write",
+        "seq": 88,
+        "data": {
+            "todos": [
+                { "content": "read the spec", "status": "completed" },
+                { "content": "write the mapping", "status": "in_progress" },
+                { "content": "cover it", "status": "pending" },
+            ],
+        },
+    }));
+
+    let events = map_frame(&frame, SESSION, &mut ToolTracker::default());
+    let [Event::ItemCompleted(item)] = events.as_slice() else {
+        panic!("expected one todo row, got {events:?}");
+    };
+    // The tally the transcript shows reads this shape, so the row has to speak
+    // it rather than a second vocabulary of its own.
+    assert_eq!(item.task_tally(), Some((1, 3)));
+
+    let Item::Other { id, kind, .. } = item else {
+        panic!("expected a generic row, got {item:?}");
+    };
+    assert_eq!(kind, "TodoWrite");
+    // Each write describes its own moment, so rows do not collapse into one.
+    assert_eq!(id, "todo:88");
+
+    let empty = session_frame(json!({
+        "type": "todo/write",
+        "seq": 89,
+        "data": { "todos": [] },
+    }));
+    assert_eq!(
+        map_frame(&empty, SESSION, &mut ToolTracker::default()),
+        Vec::new()
+    );
+}
+
+#[test]
 fn the_model_directory_addresses_a_pick_as_a_provider_and_model_pair() {
     use crate::deepseek::models::ModelDirectory;
 
