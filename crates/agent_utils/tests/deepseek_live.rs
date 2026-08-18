@@ -12,8 +12,21 @@ use std::time::{Duration, Instant};
 use std::{env, fs};
 
 use nmt_agent_utils::LaunchConfig;
-use nmt_agent_utils::chat::{Event, Item};
+use nmt_agent_utils::chat::{Event, Item, SendOutcome};
 use nmt_agent_utils::deepseek::Session;
+
+/// A prompt into an idle conversation starts a turn of its own. Steering means
+/// this side thought a turn was running, and a refusal means the harness would
+/// not take the prompt at all; either way the scenario below cannot continue.
+trait StartsATurn {
+    fn assert_started_a_turn(self);
+}
+
+impl StartsATurn for SendOutcome {
+    fn assert_started_a_turn(self) {
+        assert_eq!(self, SendOutcome::StartedTurn);
+    }
+}
 
 /// A turn long enough that there is always partial output to lose when the
 /// cancel lands, which is the property this is checking.
@@ -81,7 +94,7 @@ fn a_turn_streams_and_survives_being_stopped() {
 
     session
         .send_user_message(LONG_PROMPT)
-        .expect("the harness should accept a prompt");
+        .assert_started_a_turn();
 
     let (started, saw_start) = collect_until(&mut session, &frames, Duration::from_secs(60), |e| {
         matches!(e, Event::TurnStarted)
@@ -135,7 +148,9 @@ fn a_turn_streams_and_survives_being_stopped() {
         .send_user_message(
             "Abandon the counting task completely. Do not count. Reply with exactly: ok",
         )
-        .expect("the harness should accept another prompt after a stop");
+        // The stop settled before this line, so the conversation is idle and
+        // the prompt starts its own turn rather than steering the old one.
+        .assert_started_a_turn();
     let (second, restarted) = collect_until(&mut session, &frames, Duration::from_secs(180), |e| {
         matches!(e, Event::TurnCompleted { .. })
     });
@@ -167,7 +182,7 @@ fn two_sessions_share_one_host_and_do_not_see_each_other() {
 
     first
         .send_user_message("Reply with exactly: first")
-        .expect("the first conversation should accept a prompt");
+        .assert_started_a_turn();
 
     let (own, ended) = collect_until(&mut first, &first_frames, Duration::from_secs(60), |e| {
         matches!(e, Event::TurnCompleted { .. })
@@ -221,7 +236,7 @@ fn an_approval_is_raised_answered_and_the_turn_continues() {
              If it is denied, escalate permissions and try again.",
             outside.display()
         ))
-        .expect("the harness should accept a prompt");
+        .assert_started_a_turn();
 
     let (before, asked) = collect_until(&mut session, &frames, Duration::from_secs(180), |e| {
         matches!(e, Event::ApprovalRequested { .. })
@@ -296,7 +311,7 @@ fn a_real_turn_shows_its_commands_and_file_changes() {
              tool-probe-ok. Second, edit {} replacing the word before with after.",
             target.display()
         ))
-        .expect("the harness should accept a prompt");
+        .assert_started_a_turn();
 
     // A real tab has a user behind it, so anything the harness stops to ask is
     // answered here too; otherwise the turn blocks and this measures nothing.

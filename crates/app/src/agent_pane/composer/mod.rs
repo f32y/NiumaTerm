@@ -300,6 +300,27 @@ impl AgentPane {
                 true
             }
             "rewind" if self.kind.caps().file_rewind => self.open_rewind(cx),
+            "rename" if self.kind.caps().session_rename => {
+                self.rename_conversation(&parsed.arguments, cx)
+            }
+            // The branch is cut at the last completed turn, and the backend
+            // falls back to that cut rather than refusing, so a fork requested
+            // mid-turn would quietly leave the running turn out of the copy.
+            "fork" if self.kind.caps().session_fork => {
+                if self.is_command_busy() {
+                    self.set_command_feedback(
+                        CommandFeedbackKind::Error,
+                        i18n("agent-composer-command-idle-only").replace("{name}", &command.name),
+                        cx,
+                    );
+                    false
+                } else {
+                    self.fork_conversation(cx)
+                }
+            }
+            "find" if self.kind.caps().session_search => {
+                self.search_conversations(&parsed.arguments, cx)
+            }
             "model" | "permissions" => false,
             _ => self.route_backend_command(
                 PendingSlashCommand {
@@ -531,9 +552,7 @@ impl AgentPane {
             .unwrap_or_else(|| match self.kind {
                 AgentKind::Codex => app_server::Session::adapter_commands(),
                 AgentKind::Claude => stream_json::Session::adapter_commands(),
-                // DeepSeek's commands live behind its own registry and are not
-                // mapped yet, so the palette offers only the local ones.
-                AgentKind::DeepSeek => Vec::new(),
+                AgentKind::DeepSeek => deepseek::Session::adapter_commands(),
             });
 
         merge_catalog(

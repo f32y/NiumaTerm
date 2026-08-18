@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use crate::chat::{
     ApprovalPreset, ContextComposition, ContextSegment, ContextUsageScope, ContextWindowUsage,
-    Event, ScopedTokenUsage, TokenUsageBreakdown,
+    Event, GoalStatus, ScopedTokenUsage, SessionStats, TokenUsageBreakdown,
 };
 
 /// The projection values this session has seen so far.
@@ -71,6 +71,23 @@ impl ProjectionTracker {
             }
             "contextBreakdown" => self.composition_event(value).into_iter().collect(),
             "permissions" => permission_presets(value).into_iter().collect(),
+            // A cleared goal is reported as a null value rather than by the
+            // key disappearing, so the absent case is a value to publish and
+            // not a frame to ignore.
+            "goal" => vec![Event::GoalUpdated(goal_status(value))],
+            // `pending` is a selection the host has admitted but not yet
+            // recorded, so the state the user is heading for is the pending
+            // one's opposite of `active`.
+            "plan" => vec![Event::PlanModeUpdated(match value["pending"].as_bool() {
+                Some(true) => !value["active"].as_bool().unwrap_or_default(),
+                _ => value["active"].as_bool().unwrap_or_default(),
+            })],
+            "sessionStats" => vec![Event::SessionStatsUpdated(SessionStats {
+                turns: value["turns"].as_u64().unwrap_or_default(),
+                steps: value["steps"].as_u64().unwrap_or_default(),
+                model_ms: value["llmMs"].as_u64().unwrap_or_default(),
+                tool_ms: value["toolMs"].as_u64().unwrap_or_default(),
+            })],
             // The host registers whatever projection units the deployment
             // composed; the ones this build does not read are normal traffic.
             _ => Vec::new(),
@@ -152,6 +169,22 @@ fn permission_presets(value: &Value) -> Option<Event> {
     (!presets.is_empty()).then(|| Event::ApprovalPresets {
         presets,
         current: value["currentValue"].as_str().map(str::to_string),
+    })
+}
+
+/// The session's standing objective, or `None` once it has been cleared.
+///
+/// The projection carries the goal's replay counters beside the snapshot the
+/// user wrote, because how many rounds a goal has already spent is what says
+/// whether it is close to its own cap.
+fn goal_status(value: &Value) -> Option<GoalStatus> {
+    let goal = &value["goal"];
+
+    Some(GoalStatus {
+        objective: goal["objective"].as_str()?.to_string(),
+        phase: goal["phase"].as_str().unwrap_or_default().to_string(),
+        rounds_started: value["roundsStarted"].as_u64().unwrap_or_default(),
+        max_rounds: goal["maxGoalRounds"].as_u64().unwrap_or_default(),
     })
 }
 

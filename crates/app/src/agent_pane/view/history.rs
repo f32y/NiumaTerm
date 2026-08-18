@@ -3,21 +3,70 @@ use nmt_i18n::i18n;
 use crate::agent_pane::transcript::relative_time;
 use crate::agent_pane::*;
 
-pub(in crate::agent_pane::view) fn queued_message_label(
-    messages: &VecDeque<String>,
-) -> Option<String> {
-    (!messages.is_empty()).then(|| {
-        let text = messages
-            .iter()
-            .map(|message| message.lines().collect::<Vec<_>>().join(" "))
-            .collect::<Vec<_>>()
-            .join(" · ");
+/// One queued prompt on one line. A prompt spanning several lines is folded
+/// into one so every waiting row costs the composer the same height.
+pub(in crate::agent_pane::view) fn queued_message_label(prompt: &QueuedPrompt) -> String {
+    let text = prompt.text.lines().collect::<Vec<_>>().join(" ");
 
-        i18n("agent-history-queued-message").replace("{text}", &text)
-    })
+    i18n("agent-history-queued-message").replace("{text}", &text)
 }
 
 impl AgentPane {
+    /// The prompts waiting behind the running turn, one row each, above the
+    /// composer. A row whose backend named it carries a control that drops it
+    /// again; one this side is only remembering does not, because there is
+    /// nothing on the backend such a control could address.
+    pub(in crate::agent_pane::view) fn render_queued_prompts(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<impl IntoElement + use<>> {
+        if self.queued_user_messages.is_empty() {
+            return None;
+        }
+
+        Some(
+            v_flex()
+                .w_full()
+                .px_3()
+                .py_1p5()
+                .gap_0p5()
+                .border_b_1()
+                .border_color(cx.theme().border.opacity(0.6))
+                .bg(cx.theme().muted.opacity(0.3))
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .children(
+                    self.queued_user_messages
+                        .iter()
+                        .enumerate()
+                        .map(|(index, prompt)| {
+                            h_flex()
+                                .w_full()
+                                .gap_1()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .truncate()
+                                        .child(queued_message_label(prompt)),
+                                )
+                                .children(prompt.id.clone().map(|id| {
+                                    Button::new(("queued-prompt-remove", index))
+                                        .ghost()
+                                        .xsmall()
+                                        .icon(IconName::Close)
+                                        .tooltip(i18n("agent-history-queued-remove"))
+                                        .aria_label(i18n("agent-history-queued-remove"))
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.remove_queued_prompt(&id, cx)
+                                        }))
+                                }))
+                        }),
+                ),
+        )
+    }
+
     /// Height of one history row; all rows are uniform, which is what lets
     /// the virtual list precompute its scroll geometry.
     const HISTORY_ROW_HEIGHT: f32 = 28.0;
@@ -179,13 +228,31 @@ impl AgentPane {
             .hover(move |style| style.bg(hover_bg))
             .on_click(cx.listener(move |this, _, _, cx| this.resume_session(index, cx)))
             .child(
-                div()
+                h_flex()
                     .flex_1()
                     .min_w_0()
-                    .truncate()
-                    .text_sm()
-                    .text_color(cx.theme().foreground.opacity(0.82))
-                    .child(session.title.clone()),
+                    .gap_2()
+                    .items_baseline()
+                    .child(
+                        div()
+                            .flex_none()
+                            .max_w(relative(0.5))
+                            .truncate()
+                            .text_sm()
+                            .text_color(cx.theme().foreground.opacity(0.82))
+                            .child(session.title.clone()),
+                    )
+                    // A search excerpt is why this row is on screen at all, so
+                    // it shares the title's line rather than adding a second
+                    // one that would change the list's fixed row height.
+                    .children(session.snippet.clone().map(|snippet| {
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground.opacity(0.7))
+                            .child(snippet.lines().collect::<Vec<_>>().join(" "))
+                    })),
             )
             .children(session.branch.clone().map(|branch| {
                 h_flex()

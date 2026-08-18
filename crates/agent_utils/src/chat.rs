@@ -387,6 +387,57 @@ pub struct SessionSummary {
     pub title: String,
     pub branch: Option<String>,
     pub last_active: SystemTime,
+    /// Why a search returned this row. Present only in a list produced by a
+    /// content search, because the excerpt describes the query rather than the
+    /// session, and an ordinary list has no query to describe.
+    pub snippet: Option<String>,
+}
+
+/// One prompt the backend accepted but has not started working on, in the
+/// order it will be claimed.
+///
+/// `id` is what a removal addresses. A backend that reports its pending work
+/// without naming the individual messages leaves it absent, and the row is
+/// then read-only rather than carrying a control that could not address
+/// anything.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueuedPrompt {
+    pub id: Option<String>,
+    pub text: String,
+}
+
+impl QueuedPrompt {
+    /// A prompt this side queued optimistically, before the backend has said
+    /// anything about it.
+    pub fn local(text: String) -> Self {
+        Self { id: None, text }
+    }
+}
+
+/// The session's standing objective, when the backend runs one.
+///
+/// A goal outlives the turn that created it and drives further turns on its
+/// own, so it is session state rather than transcript content.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GoalStatus {
+    pub objective: String,
+    /// The backend's own lifecycle word for the goal, shown as it was given.
+    pub phase: String,
+    pub rounds_started: u64,
+    pub max_rounds: u64,
+}
+
+/// Whole-log conversation counters, independent of how much history has been
+/// paged in. Reported only by a backend that folds them from its complete log;
+/// a count derived from the visible transcript would disagree with it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SessionStats {
+    pub turns: u64,
+    pub steps: u64,
+    /// Summed model wall time over the steps that produced a message.
+    pub model_ms: u64,
+    /// Summed tool wall time over matched call/result pairs.
+    pub tool_ms: u64,
 }
 
 /// Token accounting from one provider reporting scope. The total is
@@ -614,6 +665,24 @@ pub enum Event {
     },
     /// Resumable sessions for the tab's working directory, newest first.
     History(Vec<SessionSummary>),
+    /// The conversations one content search matched, in the backend's own rank
+    /// order. Separate from [`Self::History`] because history pages accumulate
+    /// while an answer to a query replaces what an earlier query answered.
+    SessionSearchResults(Vec<SessionSummary>),
+    /// Replacement snapshot of the prompts the backend has accepted but not
+    /// started. Reported only by a backend that owns the pending queue itself;
+    /// where the queue is this side's own bookkeeping, sending it back would
+    /// overwrite what this side already knows with a copy of it.
+    QueuedPrompts(Vec<QueuedPrompt>),
+    /// Replacement value of the session's standing objective. `None` is a
+    /// session with no goal, which is also what a backend that runs none
+    /// reports by never sending this.
+    GoalUpdated(Option<GoalStatus>),
+    /// Whether the backend is currently collaborating on a plan rather than
+    /// carrying out work.
+    PlanModeUpdated(bool),
+    /// Replacement whole-log conversation counters.
+    SessionStatsUpdated(SessionStats),
     /// Reconstructed transcript of a resumed session, to pre-fill the UI.
     Replay(Vec<ReplayTurn>),
     /// What the running turn is doing beyond producing output, when the backend

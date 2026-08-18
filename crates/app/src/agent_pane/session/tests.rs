@@ -181,3 +181,60 @@ fn no_pinned_effort_leaves_the_remembered_pick_in_place() {
 
     assert_eq!(resolved.effort.as_deref(), Some("medium"));
 }
+
+#[test]
+fn a_pending_snapshot_claims_only_the_prompts_it_stopped_naming() {
+    use std::collections::VecDeque;
+
+    use nmt_agent_utils::chat::QueuedPrompt;
+
+    use crate::agent_pane::session::conversation::claimed_prompts;
+
+    let backend = |id: &str, text: &str| QueuedPrompt {
+        id: Some(id.into()),
+        text: text.into(),
+    };
+
+    let held = VecDeque::from([
+        backend("msg-1", "run the tests"),
+        backend("msg-2", "then push"),
+        // Sent a moment ago; the backend has not named it yet.
+        QueuedPrompt::local("and tag it".into()),
+    ]);
+
+    // The snapshot that first names the local row must not read as a claim:
+    // the prompt is still waiting, and publishing it would show it as sent.
+    assert_eq!(
+        claimed_prompts(
+            &held,
+            &[
+                backend("msg-1", "run the tests"),
+                backend("msg-2", "then push"),
+                backend("msg-3", "and tag it"),
+            ],
+        ),
+        Vec::<String>::new(),
+    );
+
+    // The agent took the head of the queue; that row is now due.
+    assert_eq!(
+        claimed_prompts(
+            &held,
+            &[
+                backend("msg-2", "then push"),
+                backend("msg-3", "and tag it")
+            ],
+        ),
+        vec!["run the tests".to_string()],
+    );
+
+    // An emptied queue claims everything still held, in queue order.
+    assert_eq!(
+        claimed_prompts(&held, &[]),
+        vec![
+            "run the tests".to_string(),
+            "then push".to_string(),
+            "and tag it".to_string(),
+        ],
+    );
+}

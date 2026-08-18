@@ -5,6 +5,7 @@
 //! replays. The events are the same ones the live stream carries, so the
 //! rebuild reuses the live mapping rather than describing the vocabulary twice.
 
+use std::collections::HashMap;
 use std::mem::take;
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -51,7 +52,44 @@ pub(crate) fn sessions(value: &Value, cwd: Option<&str>) -> Vec<SessionSummary> 
                     .as_u64()
                     .map(|millis| UNIX_EPOCH + Duration::from_millis(millis))
                     .unwrap_or(UNIX_EPOCH),
+                snippet: None,
             })
+        })
+        .collect()
+}
+
+/// Read a `session.search` result into the same rows the recent list uses.
+///
+/// The search answers with matching session ids and an excerpt each, and
+/// nothing else: titles, timestamps, and the working directory a row is
+/// filtered by all belong to the list. So the two are read together and joined
+/// here, which also applies the list's own exclusions to the results — a
+/// subagent's session or one rooted elsewhere is no more resumable for having
+/// matched a query.
+pub(crate) fn search_results(
+    matches: &Value,
+    listed: &Value,
+    cwd: Option<&str>,
+) -> Vec<SessionSummary> {
+    let excerpts: HashMap<&str, &str> = matches["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|item| Some((item["sessionId"].as_str()?, item["snippet"].as_str()?)))
+        .collect();
+
+    // The search ranks its answers and the list is ordered by recency, so the
+    // rows are emitted in the search's order rather than the list's.
+    let rows = sessions(listed, cwd);
+    matches["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item["sessionId"].as_str())
+        .filter_map(|id| {
+            let mut row = rows.iter().find(|row| row.id == id)?.clone();
+            row.snippet = excerpts.get(id).map(|snippet| snippet.to_string());
+            Some(row)
         })
         .collect()
 }

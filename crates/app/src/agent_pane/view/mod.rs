@@ -1,5 +1,6 @@
 mod banners;
 mod history;
+mod session_state;
 mod settings_row;
 
 #[cfg(test)]
@@ -10,7 +11,6 @@ use nmt_i18n::i18n;
 use crate::agent_pane::composer::{
     CommandFeedbackKind, ComposerAction, PaletteControl, composer_action,
 };
-use crate::agent_pane::view::history::queued_message_label;
 use crate::agent_pane::*;
 use crate::terminal::frame::theme_default_background;
 use crate::ui::main_view_background_opacity;
@@ -86,18 +86,8 @@ impl Render for AgentPane {
                         .child(feedback.message.clone()),
                 )
         });
-        let queued_message = queued_message_label(&self.queued_user_messages).map(|label| {
-            h_flex()
-                .w_full()
-                .px_3()
-                .py_1p5()
-                .border_b_1()
-                .border_color(cx.theme().border.opacity(0.6))
-                .bg(cx.theme().muted.opacity(0.3))
-                .text_xs()
-                .text_color(cx.theme().muted_foreground)
-                .child(div().min_w_0().truncate().child(label))
-        });
+        let queued_message = self.render_queued_prompts(cx);
+        let session_state = self.render_session_state(cx);
 
         let approval = self.render_approval_panel(cx);
         let questions = self.render_question_panel(cx);
@@ -230,6 +220,7 @@ impl Render for AgentPane {
                                 .children(approval)
                                 .children(questions)
                                 .children(command_feedback)
+                                .children(session_state)
                                 .children(queued_message)
                                 .child(
                                     div()

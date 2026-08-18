@@ -1,4 +1,5 @@
 mod backend;
+mod conversation;
 mod events;
 #[cfg(test)]
 mod tests;
@@ -130,6 +131,9 @@ impl AgentPane {
             git_branch_poll: GitBranchPoll::default(),
             context_window_usage: None,
             context_composition: None,
+            goal: None,
+            plan_mode: false,
+            session_stats: None,
             update_suspension: None,
             last_recovery_snapshot: None,
             restored_task_session: None,
@@ -592,7 +596,11 @@ impl AgentPane {
                 self.start_working(cx);
             }
             SendOutcome::Steered => {
-                self.queued_user_messages.push_back(text);
+                // The backend may republish this row with an identity of its
+                // own a moment later; until then it is this side's record that
+                // the message is pending, and it carries no removal control.
+                self.queued_user_messages
+                    .push_back(QueuedPrompt::local(text));
                 cx.notify();
             }
             SendOutcome::NotReady | SendOutcome::Rejected { .. } => unreachable!(),
@@ -613,6 +621,9 @@ impl AgentPane {
         self.pending_interrupt = None;
         self.context_window_usage = None;
         self.context_composition = None;
+        self.goal = None;
+        self.plan_mode = false;
+        self.session_stats = None;
         self.queued_user_messages.clear();
         self.rewind.state = None;
         self.rewind.file_completion = None;

@@ -57,6 +57,23 @@ pub(crate) struct Capabilities {
     /// so a slash line naming a skill is a message rather than a command, and
     /// rejecting it as an unknown command would block the only way to use one.
     pub(crate) slash_skills_are_prompts: bool,
+    /// The backend republishes its own pending inbox, so a prompt waiting
+    /// behind the running turn is known rather than guessed at. Where it is
+    /// guessed at, the guess is that assistant output means the steered
+    /// message landed; a backend that says so itself needs no such rule, and
+    /// applying one anyway would show a message as sent while it is still
+    /// waiting.
+    pub(crate) reports_pending_queue: bool,
+    /// The conversation can be branched at its last completed turn, which is
+    /// what the `/fork` command offers.
+    pub(crate) session_fork: bool,
+    /// A title can be pinned on the conversation, which is what `/rename`
+    /// offers. Where titles are derived from the transcript and regenerated,
+    /// there is nothing to pin them against.
+    pub(crate) session_rename: bool,
+    /// The harness indexes its own conversations and can be asked which of
+    /// them mention a phrase, which is what `/find` offers.
+    pub(crate) session_search: bool,
     /// The model pick is its own request the harness answers immediately, so a
     /// remembered pick seeded into the picker has to be pushed to reach the
     /// session at all. Where the pick instead rides the launch or the next
@@ -78,6 +95,10 @@ const CODEX: Capabilities = Capabilities {
     expandable_compaction_rows: false,
     session_scoped_approval: true,
     slash_skills_are_prompts: false,
+    reports_pending_queue: false,
+    session_fork: false,
+    session_rename: false,
+    session_search: false,
     model_selection_is_a_request: false,
 };
 
@@ -95,6 +116,10 @@ const CLAUDE: Capabilities = Capabilities {
     expandable_compaction_rows: true,
     session_scoped_approval: true,
     slash_skills_are_prompts: false,
+    reports_pending_queue: false,
+    session_fork: false,
+    session_rename: false,
+    session_search: false,
     model_selection_is_a_request: false,
 };
 
@@ -116,6 +141,10 @@ const DEEPSEEK: Capabilities = Capabilities {
     expandable_compaction_rows: true,
     session_scoped_approval: false,
     slash_skills_are_prompts: true,
+    reports_pending_queue: true,
+    session_fork: true,
+    session_rename: true,
+    session_search: true,
     model_selection_is_a_request: true,
 };
 

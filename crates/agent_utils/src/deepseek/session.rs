@@ -13,7 +13,10 @@ use serde_json::{Value, json};
 use crate::background_task::{
     BackgroundTaskKey, BackgroundTaskRefs, BackgroundTaskTranscriptUpdate,
 };
-use crate::chat::{Event, SlashCommandOutcome, ThreadSettings};
+use crate::chat::{
+    Event, QueuedPrompt, SendOutcome, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
+    SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
+};
 use crate::deepseek::api::{ApiClient, CallError};
 use crate::deepseek::events::Downlinks;
 use crate::deepseek::host::{self, Host, HostError};
@@ -85,6 +88,7 @@ pub struct Session {
 /// `nmt/` prefix keeps it out of the harness's own type space.
 const MODELS_FRAME: &str = "nmt/models";
 const HISTORY_FRAME: &str = "nmt/history";
+const SEARCH_FRAME: &str = "nmt/search";
 const REPLAY_FRAME: &str = "nmt/replay";
 const COMMANDS_FRAME: &str = "nmt/commands";
 const SUBAGENTS_FRAME: &str = "nmt/subagents";
@@ -143,6 +147,65 @@ fn load_sessions(
             "deepseek recent conversations could not be read: {}",
             error.message()
         ),
+    });
+}
+
+/// Read a pending-inbox snapshot into the prompts a composer can show.
+///
+/// A `context` occurrence is something the harness inserted for the model and
+/// stays invisible until it is claimed, so it is not one of the user's own
+/// pending messages and listing it would describe work nobody queued.
+pub(crate) fn queued_prompts(items: &Value) -> Vec<QueuedPrompt> {
+    items
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| matches!(item["placement"].as_str(), Some("queued" | "steering")))
+        .filter_map(|item| {
+            let text: String = item["message"]["content"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|block| block["text"].as_str())
+                .collect::<Vec<_>>()
+                .join("");
+
+            (!text.trim().is_empty()).then(|| QueuedPrompt {
+                id: item["id"].as_str().map(str::to_string),
+                text,
+            })
+        })
+        .collect()
+}
+
+/// Run one content search and deliver the conversations it matched.
+///
+/// The list is read alongside the search because the search answers with ids
+/// and excerpts only; everything a row displays comes from the list, and the
+/// two have to describe the same moment for the join to be complete.
+fn load_search(
+    client: ApiClient,
+    cwd: Option<String>,
+    query: String,
+    deliver: Arc<dyn Fn(Value) + Send + Sync>,
+) {
+    thread::spawn(move || {
+        let payload = match client.call("session.search", json!({ "query": query })) {
+            Ok(matches) => match client.call("session.list", json!({})) {
+                Ok(listed) => json!({
+                    "type": SEARCH_FRAME,
+                    "matches": matches,
+                    "sessions": listed,
+                    "cwd": cwd,
+                }),
+                Err(error) => json!({ "type": SEARCH_FRAME, "error": error.message() }),
+            },
+            Err(error) => json!({ "type": SEARCH_FRAME, "error": error.message() }),
+        };
+        // A failure is delivered rather than only logged: the search takes over
+        // the recent list, so one that reported nothing would leave the user
+        // looking at rows that no longer answer the question they asked.
+        deliver(json!({ "payload": payload }));
     });
 }
 
@@ -352,6 +415,44 @@ fn load_models(
 }
 
 impl Session {
+    /// Commands this adapter serves itself, beside the ones the harness's own
+    /// registry reports.
+    ///
+    /// Each one addresses a session-management method rather than the command
+    /// registry, so none of them can arrive through discovery; the harness
+    /// serves them to its own browser UI as ordinary buttons, which this
+    /// composer has no equivalent of.
+    pub fn adapter_commands() -> Vec<SlashCommandInfo> {
+        vec![
+            SlashCommandInfo {
+                name: "rename".to_string(),
+                description: "Pin a title on this conversation".to_string(),
+                argument_hint: Some("<title>".to_string()),
+                source: SlashCommandSource::Adapter,
+                arguments: SlashCommandArguments::Freeform,
+                run_policy: SlashCommandRunPolicy::Immediate,
+            },
+            SlashCommandInfo {
+                name: "fork".to_string(),
+                description: "Branch this conversation and continue in the copy".to_string(),
+                argument_hint: None,
+                source: SlashCommandSource::Adapter,
+                arguments: SlashCommandArguments::None,
+                // The branch is cut at the last completed turn, so a fork
+                // requested mid-turn would silently drop the turn in progress.
+                run_policy: SlashCommandRunPolicy::IdleOnly,
+            },
+            SlashCommandInfo {
+                name: "find".to_string(),
+                description: "Search earlier conversations for a phrase".to_string(),
+                argument_hint: Some("<text>".to_string()),
+                source: SlashCommandSource::Adapter,
+                arguments: SlashCommandArguments::Freeform,
+                run_policy: SlashCommandRunPolicy::Immediate,
+            },
+        ]
+    }
+
     /// Create a conversation on the running host and start delivering its
     /// frames. `cwd` is the project directory this tab works in; the host's own
     /// working directory applies when it is absent.
@@ -594,6 +695,33 @@ impl Session {
             return vec![Event::History(history::sessions(
                 &payload["sessions"],
                 payload["cwd"].as_str(),
+            ))];
+        }
+
+        if frame["payload"]["type"] == SEARCH_FRAME {
+            let payload = &frame["payload"];
+            if let Some(message) = payload["error"].as_str() {
+                return vec![Event::Error {
+                    message: message.to_string(),
+                    // Only the search failed; the conversation is untouched.
+                    fatal: false,
+                }];
+            }
+            return vec![Event::SessionSearchResults(history::search_results(
+                &payload["matches"],
+                &payload["sessions"],
+                payload["cwd"].as_str(),
+            ))];
+        }
+
+        // The harness republishes its whole pending inbox after every change,
+        // so this replaces what the tab holds rather than amending it: an
+        // increment would have to guess at removals another client made.
+        if frame["payload"]["type"] == "session/queue"
+            && frame["payload"]["sessionId"].as_str() == Some(&self.session_id)
+        {
+            return vec![Event::QueuedPrompts(queued_prompts(
+                &frame["payload"]["items"],
             ))];
         }
 
@@ -891,12 +1019,112 @@ impl Session {
         (self.models.selected(), self.models.effort())
     }
 
-    /// Send a prompt. Returns why it was refused, so the composer can keep the
-    /// text the user typed rather than losing it to a failed send.
-    pub fn send_user_message(&mut self, text: &str) -> Result<(), String> {
-        self.prompt(text)
-            .map(|_| ())
-            .map_err(|error| error.message().to_string())
+    /// Send a prompt.
+    ///
+    /// A message sent while a turn is running is steered into that turn rather
+    /// than queued behind it, which is what makes a correction land before the
+    /// work it is correcting finishes. The harness treats a steer whose window
+    /// has already closed as the next queued message, so both outcomes leave
+    /// the message pending and the reply is reported as steered either way.
+    pub fn send_user_message(&mut self, text: &str) -> SendOutcome {
+        let steering = self.running;
+        let mode = if steering { "steer" } else { "queue" };
+
+        match self.prompt(text, mode) {
+            Ok(_) if steering => SendOutcome::Steered,
+            Ok(_) => SendOutcome::StartedTurn,
+            Err(error) => SendOutcome::Rejected {
+                message: error.message().to_string(),
+            },
+        }
+    }
+
+    /// Drop one prompt the harness has accepted but not started.
+    ///
+    /// Returns whether the harness took the removal, because a message it has
+    /// already claimed is one the transcript is about to show as sent and the
+    /// row must not disappear as though it never was.
+    pub fn remove_queued_prompt(&mut self, item_id: &str) -> bool {
+        let payload = json!({
+            "sessionId": self.session_id,
+            "itemId": item_id,
+            "action": { "kind": "remove" },
+        });
+
+        match self.client.call("session.updateQueue", payload) {
+            Ok(_) => true,
+            Err(error) => {
+                tracing::warn!(
+                    "deepseek queued prompt could not be removed: {}",
+                    error.message()
+                );
+                false
+            }
+        }
+    }
+
+    /// Pin this conversation's title.
+    ///
+    /// The harness normalizes what it accepts and regenerates a title it chose
+    /// itself, so the accepted title is read back rather than assumed. The
+    /// recent list is re-read afterwards because the row it holds for this
+    /// conversation still carries the old one.
+    pub fn rename(&mut self, title: &str) -> Result<String, String> {
+        let payload = json!({ "sessionId": self.session_id, "title": title });
+        let renamed = self
+            .client
+            .call("session.rename", payload)
+            .map_err(|error| error.message().to_string())?;
+
+        load_sessions(
+            self.client.clone(),
+            self.cwd.clone(),
+            Arc::clone(&self.deliver),
+        );
+
+        Ok(renamed["title"]
+            .as_str()
+            .unwrap_or(title)
+            .trim()
+            .to_string())
+    }
+
+    /// Branch this conversation at its last completed turn and continue in the
+    /// copy.
+    ///
+    /// The cut is left to the harness: naming a position would mean choosing
+    /// one from the transcript, and the harness anchors a fork on whole turns
+    /// rather than on the messages a transcript is addressed by. The tab then
+    /// moves to the child the same way it moves to any other conversation, so
+    /// the parent is left exactly as it was.
+    pub fn fork(&mut self) -> Result<(), String> {
+        let forked = self
+            .client
+            .call("session.fork", json!({ "sessionId": self.session_id }))
+            .map_err(|error| error.message().to_string())?;
+
+        let child = forked["sessionId"]
+            .as_str()
+            .ok_or_else(|| "the harness answered without a conversation id".to_string())?
+            .to_string();
+
+        self.resume_thread(&child)
+            .then_some(())
+            .ok_or_else(|| "the harness would not open the branched conversation".to_string())
+    }
+
+    /// Search the conversations this tab could resume for a phrase.
+    ///
+    /// The read runs off the caller's thread for the same reason the recent
+    /// list does: it reaches the harness's own index and a composer that waited
+    /// on it would be unusable until the answer came back.
+    pub fn search_sessions(&mut self, query: &str) {
+        load_search(
+            self.client.clone(),
+            self.cwd.clone(),
+            query.to_string(),
+            Arc::clone(&self.deliver),
+        );
     }
 
     /// Run one of the harness's own commands.
@@ -921,12 +1149,12 @@ impl Session {
         }
     }
 
-    fn prompt(&self, text: &str) -> Result<Value, CallError> {
+    fn prompt(&self, text: &str, mode: &str) -> Result<Value, CallError> {
         self.client.call(
             "session.prompt",
             json!({
                 "sessionId": self.session_id,
-                "mode": "queue",
+                "mode": mode,
                 "content": [{ "type": "text", "text": text }],
             }),
         )
