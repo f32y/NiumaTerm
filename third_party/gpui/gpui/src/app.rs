@@ -672,6 +672,7 @@ pub struct App {
     pub(crate) restart_path: Option<PathBuf>,
     pub(crate) layout_id_buffer: Vec<LayoutId>, // We recycle this memory across layout requests.
     pub(crate) propagate_event: bool,
+    pub(crate) smooth_wheel_scrolling: bool,
     pub(crate) prompt_builder: Option<PromptBuilder>,
     pub(crate) window_invalidators_by_entity:
         FxHashMap<EntityId, FxHashMap<WindowId, WindowInvalidator>>,
@@ -770,6 +771,7 @@ impl App {
                 window_closed_observers: SubscriberSet::new(),
                 layout_id_buffer: Default::default(),
                 propagate_event: true,
+                smooth_wheel_scrolling: false,
                 prompt_builder: Some(PromptBuilder::Default),
                 #[cfg(any(feature = "inspector", debug_assertions))]
                 inspector_renderer: None,
@@ -2026,6 +2028,22 @@ impl App {
                 }
             }));
         self
+    }
+
+    /// Animate wheel scrolling in scrollable containers rather than applying
+    /// each detent in one jump. Off by default, because how far a notch should
+    /// travel and whether the motion is wanted at all is a decision for the
+    /// application rather than for the framework.
+    ///
+    /// Elements with their own scrolling, such as [`crate::List`], are not
+    /// covered by this and are switched over individually.
+    pub fn set_smooth_wheel_scrolling(&mut self, enabled: bool) {
+        self.smooth_wheel_scrolling = enabled;
+    }
+
+    /// Whether wheel scrolling in scrollable containers is animated.
+    pub fn smooth_wheel_scrolling(&self) -> bool {
+        self.smooth_wheel_scrolling
     }
 
     /// Event handlers propagate events by default. Call this method to stop dispatching to

@@ -46,6 +46,7 @@ pub mod profiler;
 pub mod queue;
 mod scene;
 mod shared_uri;
+mod smooth_scroll;
 mod style;
 mod styled;
 mod subscription;
