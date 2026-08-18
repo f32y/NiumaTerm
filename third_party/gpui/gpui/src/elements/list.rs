@@ -7,6 +7,7 @@
 //!
 //! If all of your elements are the same height, see [`crate::UniformList`] for a simpler API
 
+use crate::smooth_scroll::{SmoothWheel, SmoothWheelMotion};
 use crate::{
     AnyElement, App, AvailableSpace, Bounds, ContentMask, DispatchPhase, Edges, Element, EntityId,
     FocusHandle, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, IntoElement,
@@ -16,11 +17,13 @@ use crate::{
 use collections::VecDeque;
 use refineable::Refineable as _;
 use scheduler::Instant;
-use std::{cell::RefCell, ops::Range, rc::Rc, time::Duration};
+use std::{cell::RefCell, ops::Range, rc::Rc};
 use sum_tree::{Bias, Dimensions, SumTree};
 
+/// How far one wheel line moves the list. The list measures its own scrolling
+/// in pixels rather than in rows, so this is a fixed travel per line instead
+/// of a row height.
 const SMOOTH_WHEEL_LINE_PIXELS: f32 = 100. / 3.;
-const SMOOTH_WHEEL_DURATION_EPSILON: f32 = 0.01;
 
 type RenderItemFn = dyn FnMut(usize, &mut Window, &mut App) -> AnyElement + 'static;
 
@@ -79,86 +82,6 @@ struct StateInner {
     follow_state: FollowState,
     smooth_wheel_enabled: bool,
     smooth_wheel_motion: Option<SmoothWheelMotion>,
-}
-
-struct SmoothWheelMotion {
-    start_time: Instant,
-    duration: Duration,
-    start_position: f32,
-    destination: f32,
-    last_position: f32,
-    curve: SmoothWheelCurve,
-}
-
-#[derive(Clone, Copy)]
-struct SmoothWheelCurve {
-    x1: f32,
-    y1: f32,
-}
-
-impl SmoothWheelCurve {
-    fn for_motion(velocity: f32, distance: f32, duration: Duration) -> Self {
-        let slope = if distance.abs() < f32::EPSILON {
-            0.
-        } else {
-            (velocity * duration.as_secs_f32() / distance).clamp(-1000., 1000.)
-        };
-        Self {
-            x1: 0.42,
-            y1: 0.42 * slope,
-        }
-    }
-
-    fn sample(self, progress: f32) -> (f32, f32) {
-        let progress = progress.clamp(0., 1.);
-        let mut low = 0.;
-        let mut high = 1.;
-        for _ in 0..16 {
-            let parameter = (low + high) * 0.5;
-            if cubic_value(parameter, self.x1, 0.58) < progress {
-                low = parameter;
-            } else {
-                high = parameter;
-            }
-        }
-
-        let parameter = (low + high) * 0.5;
-        let value = cubic_value(parameter, self.y1, 1.);
-        let x_derivative = cubic_derivative(parameter, self.x1, 0.58);
-        let derivative = if x_derivative.abs() < f32::EPSILON {
-            0.
-        } else {
-            cubic_derivative(parameter, self.y1, 1.) / x_derivative
-        };
-        (value, derivative)
-    }
-}
-
-fn smooth_wheel_duration(distance: f32) -> Duration {
-    const RAMP_START_PX: f32 = 120.;
-    const RAMP_END_PX: f32 = 480.;
-    const MIN_FRAMES: f32 = 6.;
-    const MAX_FRAMES: f32 = 12.;
-    const FRAMES_PER_SECOND: f32 = 60.;
-
-    let slope = (MIN_FRAMES - MAX_FRAMES) / (RAMP_END_PX - RAMP_START_PX);
-    let offset = MAX_FRAMES - RAMP_START_PX * slope;
-    let frames = (offset + distance.abs() * slope).clamp(MIN_FRAMES, MAX_FRAMES);
-    Duration::from_secs_f32(frames / FRAMES_PER_SECOND)
-}
-
-fn cubic_value(parameter: f32, first: f32, second: f32) -> f32 {
-    let inverse = 1. - parameter;
-    3. * inverse * inverse * parameter * first
-        + 3. * inverse * parameter * parameter * second
-        + parameter * parameter * parameter
-}
-
-fn cubic_derivative(parameter: f32, first: f32, second: f32) -> f32 {
-    let inverse = 1. - parameter;
-    3. * inverse * inverse * first
-        + 6. * inverse * parameter * (second - first)
-        + 3. * parameter * parameter * (1. - second)
 }
 
 /// Deferred scroll adjustment applied after the scroll-top item has been remeasured.
@@ -1099,6 +1022,9 @@ impl StateInner {
         cx.notify(current_view);
     }
 
+    /// Move the list one frame along its wheel animation, answering with the
+    /// speed the content is travelling at so a detent arriving now can inherit
+    /// it.
     fn advance_smooth_wheel(
         &mut self,
         now: Instant,
@@ -1111,40 +1037,18 @@ impl StateInner {
             return 0.;
         };
 
-        let actual_position = self.pixel_scroll_top(height).0;
-        let layout_shift = actual_position - motion.last_position;
-        motion.start_position += layout_shift;
-        motion.destination += layout_shift;
+        let step = motion.advance(
+            now,
+            self.pixel_scroll_top(height).0,
+            self.scroll_max_for_height(height).0,
+        );
+        self.set_pixel_scroll_top(px(step.position), height, current_view, window, cx);
 
-        let scroll_max = self.scroll_max_for_height(height).0;
-        motion.destination = motion.destination.clamp(0., scroll_max);
-        let elapsed = now.duration_since(motion.start_time);
-        let progress = elapsed.as_secs_f32() / motion.duration.as_secs_f32();
-        let finished = progress >= 1.;
-        let (eased, derivative) = motion.curve.sample(progress);
-        let distance = motion.destination - motion.start_position;
-        let unclamped_position = motion.start_position + distance * eased;
-        let position = if finished {
-            motion.destination
-        } else {
-            unclamped_position.clamp(0., scroll_max)
-        };
-        let mut velocity = if finished {
-            0.
-        } else {
-            distance * derivative / motion.duration.as_secs_f32()
-        };
-        if (position <= 0. && velocity < 0.) || (position >= scroll_max && velocity > 0.) {
-            velocity = 0.;
-        }
-
-        self.set_pixel_scroll_top(px(position), height, current_view, window, cx);
-        motion.last_position = position;
-        if !finished && (position - motion.destination).abs() > 0.01 {
+        if !step.finished {
             self.smooth_wheel_motion = Some(motion);
             window.on_next_frame(move |_, cx| cx.notify(current_view));
         }
-        velocity
+        step.velocity
     }
 
     fn start_smooth_wheel(
@@ -1162,55 +1066,35 @@ impl StateInner {
         if lines.y > 0. {
             self.follow_state.stop_following();
         }
-        let mut velocity = self.advance_smooth_wheel(now, height, current_view, window, cx);
 
+        let velocity = self.advance_smooth_wheel(now, height, current_view, window, cx);
         let scroll_max = self.scroll_max_for_height(height).0;
-        let current = self.pixel_scroll_top(height).0;
-        if (current <= 0. && velocity < 0.) || (current >= scroll_max && velocity > 0.) {
-            velocity = 0.;
-        }
-        let prior_destination = self
+        let position = self.pixel_scroll_top(height).0;
+        // A detent lands past where the motion in flight is headed, not past
+        // where the content has reached, so a fast series of them accumulates.
+        let destination = self
             .smooth_wheel_motion
             .as_ref()
-            .map_or(current, |motion| motion.destination);
-        let destination =
-            (prior_destination - lines.y * SMOOTH_WHEEL_LINE_PIXELS).clamp(0., scroll_max);
+            .map_or(position, SmoothWheelMotion::destination)
+            - lines.y * SMOOTH_WHEEL_LINE_PIXELS;
 
-        if (destination - current).abs() < 0.01 {
-            self.smooth_wheel_motion = None;
-            return;
-        }
-
-        let distance = destination - current;
-        let mut duration = smooth_wheel_duration(distance).as_secs_f32();
-        if velocity.abs() >= f32::EPSILON {
-            let velocity_bound = distance / velocity * 2.5;
-            if velocity_bound >= 0. {
-                duration = duration.min(velocity_bound);
+        match SmoothWheelMotion::start(now, position, destination, velocity, scroll_max) {
+            SmoothWheel::Motion(motion) => {
+                self.smooth_wheel_motion = Some(motion);
+                // Wheel events arrive outside a frame, and queuing a next-frame
+                // callback does not by itself wake the demand-driven frame pump;
+                // only a clean-to-dirty transition does. Without this notify the
+                // first frame of the motion waits for some unrelated repaint, so
+                // a wheel nudge on a quiet window appears to do nothing.
+                cx.notify(current_view);
+                window.on_next_frame(move |_, cx| cx.notify(current_view));
             }
+            SmoothWheel::Jump(destination) => {
+                self.smooth_wheel_motion = None;
+                self.set_pixel_scroll_top(px(destination), height, current_view, window, cx);
+            }
+            SmoothWheel::Settled => self.smooth_wheel_motion = None,
         }
-        if duration < SMOOTH_WHEEL_DURATION_EPSILON {
-            self.set_pixel_scroll_top(px(destination), height, current_view, window, cx);
-            self.smooth_wheel_motion = None;
-            return;
-        }
-        let duration = Duration::from_secs_f32(duration);
-
-        self.smooth_wheel_motion = Some(SmoothWheelMotion {
-            start_time: now,
-            duration,
-            start_position: current,
-            destination,
-            last_position: current,
-            curve: SmoothWheelCurve::for_motion(velocity, distance, duration),
-        });
-        // Wheel events arrive outside a frame, and queuing a next-frame
-        // callback does not by itself wake the demand-driven frame pump; only
-        // a clean-to-dirty transition does. Without this notify the first
-        // frame of the motion waits for some unrelated repaint, so a wheel
-        // nudge on a quiet window appears to do nothing.
-        cx.notify(current_view);
-        window.on_next_frame(move |_, cx| cx.notify(current_view));
     }
 
     fn logical_scroll_top(&self) -> ListOffset {
@@ -2172,7 +2056,7 @@ mod test {
             .smooth_wheel_motion
             .as_ref()
             .unwrap()
-            .destination
+            .destination()
     }
 
     fn test_wheel(cx: &mut crate::VisualTestContext, delta: ScrollDelta) {
@@ -2255,7 +2139,7 @@ mod test {
                 .smooth_wheel_motion
                 .as_ref()
                 .unwrap()
-                .duration
+                .duration()
                 < Duration::from_millis(200)
         );
 
@@ -2263,25 +2147,6 @@ mod test {
         draw_test_list(cx, &state, 100.);
         assert!((test_scroll_position(&state, 100.) - destination).abs() < 0.1);
         assert!(state.0.borrow().smooth_wheel_motion.is_none());
-    }
-
-    #[test]
-    fn test_chromium_curve_preserves_initial_velocity() {
-        assert_eq!(super::smooth_wheel_duration(120.).as_millis(), 200);
-        assert_eq!(super::smooth_wheel_duration(300.).as_millis(), 150);
-        assert_eq!(super::smooth_wheel_duration(480.).as_millis(), 100);
-
-        let velocity = 120.;
-        let distance = 240.;
-        let duration = Duration::from_millis(160);
-        let curve = super::SmoothWheelCurve::for_motion(velocity, distance, duration);
-        let (_, derivative) = curve.sample(0.0001);
-        let sampled_velocity = distance * derivative / duration.as_secs_f32();
-        assert!((sampled_velocity - velocity).abs() < 2.);
-
-        let idle = super::SmoothWheelCurve::for_motion(0., distance, duration);
-        assert_eq!(idle.x1, 0.42);
-        assert_eq!(idle.y1, 0.);
     }
 
     #[gpui::test]
@@ -2430,7 +2295,7 @@ mod test {
                 .smooth_wheel_motion
                 .as_ref()
                 .unwrap()
-                .destination
+                .destination()
                 - (200. - 100. / 3.))
                 .abs()
                 < 0.1
@@ -2450,7 +2315,7 @@ mod test {
                 .smooth_wheel_motion
                 .as_ref()
                 .unwrap()
-                .destination
+                .destination()
                 - (230. - 100. / 3.))
                 .abs()
                 < 0.1

@@ -16,13 +16,14 @@
 //! constructed by combining these two systems into an all-in-one element.
 
 use crate::PinchEvent;
+use crate::smooth_scroll::SmoothWheelState;
 use crate::{
     Action, AnyDrag, AnyElement, AnyTooltip, AnyView, App, Bounds, ClickEvent, DispatchPhase,
     Display, Element, ElementId, Entity, EntityId, FocusHandle, Global, GlobalElementId, Hitbox,
     HitboxBehavior, HitboxId, InspectorElementId, IntoElement, IsZero, KeyContext, KeyDownEvent,
     KeyUpEvent, KeyboardButton, KeyboardClickEvent, LayoutId, ModifiersChangedEvent, MouseButton,
     MouseClickEvent, MouseDownEvent, MouseMoveEvent, MousePressureEvent, MouseUpEvent, Overflow,
-    ParentElement, Pixels, Point, Render, ScrollWheelEvent, SharedString, Size, Style,
+    ParentElement, Pixels, Point, Render, ScrollDelta, ScrollWheelEvent, SharedString, Size, Style,
     StyleRefinement, Styled, Task, TooltipId, Visibility, Window, WindowControlArea, point, px,
     size,
 };
@@ -1887,6 +1888,7 @@ pub struct Interactivity {
     pub(crate) tracked_scroll_handle: Option<ScrollHandle>,
     pub(crate) scroll_anchor: Option<ScrollAnchor>,
     pub(crate) scroll_offset: Option<Rc<RefCell<Point<Pixels>>>>,
+    pub(crate) smooth_wheel: Option<Rc<RefCell<SmoothWheelState>>>,
     pub(crate) group: Option<SharedString>,
     /// The base style of the element, before any modifications are applied
     /// by focus, active, etc.
@@ -2024,7 +2026,9 @@ impl Interactivity {
                 }
 
                 if let Some(scroll_handle) = self.tracked_scroll_handle.as_ref() {
-                    self.scroll_offset = Some(scroll_handle.0.borrow().offset.clone());
+                    let scroll_handle = scroll_handle.0.borrow();
+                    self.scroll_offset = Some(scroll_handle.offset.clone());
+                    self.smooth_wheel = Some(scroll_handle.smooth_wheel.clone());
                 } else if (self.base_style.overflow.x == Some(Overflow::Scroll)
                     || self.base_style.overflow.y == Some(Overflow::Scroll))
                     && let Some(element_state) = element_state.as_mut()
@@ -2032,6 +2036,12 @@ impl Interactivity {
                     self.scroll_offset = Some(
                         element_state
                             .scroll_offset
+                            .get_or_insert_with(Rc::default)
+                            .clone(),
+                    );
+                    self.smooth_wheel = Some(
+                        element_state
+                            .smooth_wheel
                             .get_or_insert_with(Rc::default)
                             .clone(),
                     );
@@ -2167,7 +2177,7 @@ impl Interactivity {
         bounds: Bounds<Pixels>,
         style: &Style,
         window: &mut Window,
-        _cx: &mut App,
+        cx: &mut App,
     ) -> Point<Pixels> {
         fn round_to_two_decimals(pixels: Pixels) -> Pixels {
             const ROUNDING_FACTOR: f32 = 100.0;
@@ -2201,6 +2211,27 @@ impl Interactivity {
             // Clamp scroll offset in case scroll max is smaller now (e.g., if children
             // were removed or the bounds became larger).
             let mut scroll_offset = scroll_offset.borrow_mut();
+
+            // A wheel animation is advanced here because this is where the
+            // frame measures how far the content can travel; the wheel handler
+            // runs between frames and has no viewport to clamp against.
+            if let Some(smooth_wheel) = self.smooth_wheel.as_ref() {
+                let mut smooth_wheel = smooth_wheel.borrow_mut();
+                smooth_wheel.set_scroll_max(scroll_max);
+
+                if smooth_wheel.is_animating() {
+                    *scroll_offset = smooth_wheel.advance(
+                        cx.background_executor().now(),
+                        *scroll_offset,
+                        scroll_max,
+                    );
+
+                    if smooth_wheel.is_animating() {
+                        let current_view = window.current_view();
+                        window.on_next_frame(move |_, cx| cx.notify(current_view));
+                    }
+                }
+            }
 
             scroll_offset.x = scroll_offset.x.clamp(-scroll_max.x, px(0.));
             if scroll_to_bottom {
@@ -2993,6 +3024,7 @@ impl Interactivity {
             let allow_concurrent_scroll = style.allow_concurrent_scroll;
             let restrict_scroll_to_axis = style.restrict_scroll_to_axis;
             let line_height = window.line_height();
+            let smooth_wheel = self.smooth_wheel.clone();
             let hitbox = hitbox.clone();
             let current_view = window.current_view();
             window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
@@ -3024,10 +3056,42 @@ impl Interactivity {
                             delta_x = Pixels::ZERO;
                         }
                     }
-                    scroll_offset.y += delta_y;
-                    scroll_offset.x += delta_x;
-                    if *scroll_offset != old_scroll_offset {
-                        cx.notify(current_view);
+                    // A trackpad reports a continuous pixel delta that is
+                    // already smooth, so only the discrete jump of a wheel line
+                    // is worth animating.
+                    let animate =
+                        cx.smooth_wheel_scrolling() && matches!(event.delta, ScrollDelta::Lines(_));
+
+                    match smooth_wheel.as_ref().filter(|_| animate) {
+                        Some(smooth_wheel) => {
+                            let mut smooth_wheel = smooth_wheel.borrow_mut();
+                            *scroll_offset = smooth_wheel.steer(
+                                cx.background_executor().now(),
+                                *scroll_offset,
+                                point(delta_x, delta_y),
+                            );
+
+                            if smooth_wheel.is_animating() {
+                                window.on_next_frame(move |_, cx| cx.notify(current_view));
+                            }
+                            // Wheel events arrive outside a frame, and queuing a
+                            // next-frame callback does not by itself wake the
+                            // demand-driven frame pump; only a clean-to-dirty
+                            // transition does. Without this the first frame of
+                            // the motion waits for some unrelated repaint, so a
+                            // wheel nudge on a quiet window appears to do nothing.
+                            cx.notify(current_view);
+                        }
+                        None => {
+                            if let Some(smooth_wheel) = smooth_wheel.as_ref() {
+                                smooth_wheel.borrow_mut().cancel();
+                            }
+                            scroll_offset.y += delta_y;
+                            scroll_offset.x += delta_x;
+                            if *scroll_offset != old_scroll_offset {
+                                cx.notify(current_view);
+                            }
+                        }
                     }
                 }
             });
@@ -3258,6 +3322,7 @@ pub struct InteractiveElementState {
     /// blur). `None` means no activation key is pending.
     pub(crate) pending_keyboard_down: Option<Rc<RefCell<Option<u64>>>>,
     pub(crate) scroll_offset: Option<Rc<RefCell<Point<Pixels>>>>,
+    pub(crate) smooth_wheel: Option<Rc<RefCell<SmoothWheelState>>>,
     pub(crate) active_tooltip: Option<Rc<RefCell<Option<ActiveTooltip>>>>,
 }
 
@@ -3793,6 +3858,7 @@ impl ScrollAnchor {
 #[derive(Default, Debug)]
 struct ScrollHandleState {
     offset: Rc<RefCell<Point<Pixels>>>,
+    smooth_wheel: Rc<RefCell<SmoothWheelState>>,
     bounds: Bounds<Pixels>,
     max_offset: Point<Pixels>,
     child_bounds: Vec<Bounds<Pixels>>,
@@ -3897,6 +3963,7 @@ impl ScrollHandle {
             index: ix,
             strategy: ScrollStrategy::default(),
         });
+        state.smooth_wheel.borrow_mut().cancel();
     }
 
     /// Update [ScrollHandleState]'s active item for scrolling to in prepaint
@@ -3907,6 +3974,7 @@ impl ScrollHandle {
             index: ix,
             strategy: ScrollStrategy::Top,
         });
+        state.smooth_wheel.borrow_mut().cancel();
     }
 
     /// Scrolls the minimal amount to either ensure that the child is
@@ -3964,6 +4032,7 @@ impl ScrollHandle {
     pub fn scroll_to_bottom(&self) {
         let mut state = self.0.borrow_mut();
         state.scroll_to_bottom = true;
+        state.smooth_wheel.borrow_mut().cancel();
     }
 
     /// Set the offset explicitly. The offset is the distance from the top left of the
@@ -3971,6 +4040,7 @@ impl ScrollHandle {
     /// As you scroll further down the offset becomes more negative.
     pub fn set_offset(&self, mut position: Point<Pixels>) {
         let state = self.0.borrow();
+        state.smooth_wheel.borrow_mut().cancel();
         *state.offset.borrow_mut() = position;
     }
 
@@ -4015,9 +4085,93 @@ mod tests {
     use super::*;
     use crate::{
         AnyWindowHandle, AppContext as _, Context, InputEvent, Keystroke, MouseMoveEvent,
-        TestAppContext, util::FluentBuilder as _,
+        ScrollDelta, TestAppContext, size, util::FluentBuilder as _,
     };
     use std::rc::Weak;
+
+    struct ScrollingView(ScrollHandle);
+
+    impl Render for ScrollingView {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .id("scrolling")
+                .size_full()
+                .overflow_y_scroll()
+                .track_scroll(&self.0)
+                .child(div().w_full().h(px(1000.)))
+        }
+    }
+
+    fn draw_scrolling_view(cx: &mut crate::VisualTestContext, handle: &ScrollHandle) {
+        cx.draw(point(px(0.), px(0.)), size(px(100.), px(100.)), |_, cx| {
+            cx.new(|_| ScrollingView(handle.clone())).into_any_element()
+        });
+    }
+
+    fn wheel_down(cx: &mut crate::VisualTestContext) {
+        cx.simulate_event(ScrollWheelEvent {
+            position: point(px(1.), px(1.)),
+            delta: ScrollDelta::Lines(point(0., -1.)),
+            ..Default::default()
+        });
+    }
+
+    #[gpui::test]
+    fn a_wheel_line_is_carried_to_its_destination_over_several_frames(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        cx.update(|_, cx| cx.set_smooth_wheel_scrolling(true));
+
+        let handle = ScrollHandle::new();
+        draw_scrolling_view(cx, &handle);
+        wheel_down(cx);
+
+        // The detent has been accepted but none of it has been applied yet,
+        // which is the whole difference from the unanimated path below.
+        assert_eq!(handle.offset().y, px(0.));
+
+        cx.executor().advance_clock(Duration::from_millis(50));
+        draw_scrolling_view(cx, &handle);
+        let partway = handle.offset().y;
+        assert!(partway < px(0.));
+
+        cx.executor().advance_clock(Duration::from_millis(300));
+        draw_scrolling_view(cx, &handle);
+        let arrived = handle.offset().y;
+        assert!(arrived < partway);
+
+        // Nothing is left in flight, so a quiet window stops being repainted.
+        cx.executor().advance_clock(Duration::from_millis(300));
+        draw_scrolling_view(cx, &handle);
+        assert_eq!(handle.offset().y, arrived);
+    }
+
+    #[gpui::test]
+    fn a_wheel_line_lands_at_once_when_the_animation_is_off(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+
+        let handle = ScrollHandle::new();
+        draw_scrolling_view(cx, &handle);
+        wheel_down(cx);
+
+        assert!(handle.offset().y < px(0.));
+    }
+
+    #[gpui::test]
+    fn a_programmatic_scroll_overrules_the_animation(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        cx.update(|_, cx| cx.set_smooth_wheel_scrolling(true));
+
+        let handle = ScrollHandle::new();
+        draw_scrolling_view(cx, &handle);
+        wheel_down(cx);
+        handle.set_offset(point(px(0.), px(-400.)));
+
+        // The wheel motion would have eased back towards its own destination
+        // and dragged the view off the position that was just set.
+        cx.executor().advance_clock(Duration::from_millis(300));
+        draw_scrolling_view(cx, &handle);
+        assert_eq!(handle.offset().y, px(-400.));
+    }
 
     struct TestTooltipView;
 
