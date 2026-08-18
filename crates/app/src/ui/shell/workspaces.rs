@@ -166,6 +166,29 @@ impl Shell {
         cx.notify();
     }
 
+    /// Move a tab within the workspace that owns it. The tab id picks the tab
+    /// manager, so this reaches a workspace the user is not currently in.
+    pub(in crate::ui) fn reorder_tab(
+        &mut self,
+        tab: TabId,
+        from: usize,
+        to: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(tabs) = self.workspaces.tab_manager_for_mut(tab) else {
+            return;
+        };
+
+        tabs.reorder(from, to);
+
+        self.focus_active(window, cx);
+
+        self.sync_session_memory(cx);
+
+        cx.notify();
+    }
+
     pub(super) fn on_next_tab(&mut self, _: &NextTab, window: &mut Window, cx: &mut Context<Self>) {
         self.workspaces.active_tabs_mut().focus_next();
 

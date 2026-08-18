@@ -480,6 +480,7 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) -> 
         value(appearance.git_status_refresh_interval as i64);
     doc["appearance"]["tab-width"] = value(appearance.tab_width);
     doc["appearance"]["tab-auto-size"] = value(appearance.tab_auto_size);
+    doc["appearance"]["tab-bar-style"] = value(appearance.tab_bar_style.as_str());
     doc["appearance"]["ui-font"] = value(&appearance.ui_font);
     doc["appearance"]["terminal-font-family"] = value(&appearance.terminal_font_family);
     doc["appearance"]["terminal-font-size"] = value(appearance.terminal_font_size);
@@ -547,6 +548,7 @@ mod tests {
             git_status_refresh_interval: 15,
             tab_width: 150.0,
             tab_auto_size: true,
+            tab_bar_style: appearance::TabBarStyle::Vertical,
             ui_font: "Arial".to_string(),
             terminal_font_family: "Cascadia Code".to_string(),
             terminal_font_size: 16.0,

@@ -5,16 +5,20 @@ use gpui::{
 };
 use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants};
 use gpui_component::input::{Input, InputState};
-use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
+use gpui_component::menu::{ContextMenuExt, DropdownMenu as _, PopupMenuItem};
 use gpui_component::progress::ProgressCircle;
 use gpui_component::scroll::{Scrollbar, ScrollbarShow};
-use gpui_component::{ActiveTheme, Icon, IconNamed, Selectable, Sizable, h_flex, v_flex};
+use gpui_component::{ActiveTheme, Icon, IconName, IconNamed, Selectable, Sizable, h_flex, v_flex};
 use nmt_agent_utils::AgentRuntimeStatus;
 use nmt_i18n::i18n;
+use nmt_terminal::event::ProgressReport;
 
 use super::{AppSettings, NewWorkspace, Shell};
+use crate::agent_pane::AgentKind;
 use crate::agent_pane::usage::AgentUsageView;
+use crate::tabs::TabId;
 use crate::ui::sidebar_resize::{self, ResizeDrag};
+use crate::ui::tab_bar::{new_tab_menu, progress_visual, tab_icon};
 use crate::ui::terminal_status::{terminal_dot, terminal_presentation};
 use crate::ui::{UI_RADIUS, floating_surface};
 use crate::window::WindowRegistry;
@@ -172,6 +176,72 @@ impl IconNamed for PinIcon {
     }
 }
 
+/// One tab rendered as a child row of its workspace, in the vertical tab-bar
+/// style. Snapshotted out of the tab manager before the render closures borrow
+/// the shell.
+pub(crate) struct SidebarTab {
+    pub(crate) id: TabId,
+    pub(crate) label: SharedString,
+    pub(crate) active: bool,
+    pub(crate) unread: bool,
+    pub(crate) busy: bool,
+    pub(crate) bell: bool,
+    pub(crate) agent_kind: Option<AgentKind>,
+    pub(crate) settings: bool,
+    /// Restored but not yet spawned.
+    pub(crate) pending: bool,
+    pub(crate) exited: bool,
+    pub(crate) progress: Option<ProgressReport>,
+    pub(crate) terminal: TerminalActivity,
+}
+
+/// A tab row picked up for reordering. The workspace travels with it so a drop
+/// on another workspace's rows can be refused: moving a tab between workspaces
+/// means moving it between tab managers, which reordering cannot express.
+struct SidebarTabDrag {
+    workspace: usize,
+    from: usize,
+    /// Identifies the tab manager to reorder, which the row position alone
+    /// cannot: positions repeat across workspaces.
+    tab: TabId,
+}
+
+/// The floating preview under the cursor while a tab row is dragged: the row's
+/// label on an opaque fill, because the ghost floats over arbitrary content.
+struct SidebarTabDragPreview {
+    label: SharedString,
+    width: f32,
+}
+
+impl Render for SidebarTabDragPreview {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex()
+            .w(px(self.width))
+            .h(px(TAB_ROW_HEIGHT))
+            .px_2()
+            .items_center()
+            .rounded(UI_RADIUS)
+            .overflow_hidden()
+            .text_xs()
+            .bg(cx
+                .theme()
+                .background
+                .blend(cx.theme().sidebar)
+                .blend(cx.theme().sidebar_accent))
+            .text_color(cx.theme().sidebar_accent_foreground)
+            .child(div().truncate().child(self.label.clone()))
+    }
+}
+
+/// Height of a tab row. A workspace item stacks a name and a path line, so a
+/// row stays visibly shorter than one and the two tiers read as ranked, while
+/// leaving the row a comfortable click target.
+const TAB_ROW_HEIGHT: f32 = 30.0;
+
+/// Diameter of a tab row's status dot. Smaller than the workspace column's,
+/// which keeps the two tiers apart at a glance.
+const TAB_ROW_DOT: f32 = 6.0;
+
 struct WorkspaceDrag {
     from: usize,
 }
@@ -270,6 +340,10 @@ pub(super) struct Sidebar {
     /// Source item hidden with zero opacity during a drag so its layout slot
     /// remains stable while the floating preview follows the pointer.
     dragging: Option<usize>,
+    /// The same make-way/hide pair for tab rows, keyed by workspace position
+    /// and row position so rows of different workspaces cannot collide.
+    tab_drag_over: Option<(usize, usize)>,
+    tab_dragging: Option<(usize, usize)>,
 }
 
 /// How far a workspace item slides down to open the insertion gap while a
@@ -285,6 +359,8 @@ impl Sidebar {
             scroll: ScrollHandle::new(),
             drag_over: None,
             dragging: None,
+            tab_drag_over: None,
+            tab_dragging: None,
         }
     }
 
@@ -620,13 +696,289 @@ impl Sidebar {
             .into_any_element()
     }
 
+    /// One tab of a workspace, rendered as a child row under it. Clicking it
+    /// switches to that workspace *and* that tab, so a row under an inactive
+    /// workspace is a single-click jump rather than a two-step one.
+    fn render_tab_row(
+        &self,
+        ws_idx: usize,
+        tab_idx: usize,
+        tab: &SidebarTab,
+        closeable: bool,
+        rename: Option<&(TabId, Entity<InputState>)>,
+        cx: &mut Context<Shell>,
+    ) -> AnyElement {
+        let tab_id = tab.id;
+        let key = tab_id.0 as usize;
+        let active = tab.active;
+
+        let close = div()
+            .id(("sidebar-tab-close", key))
+            .px_1()
+            .invisible()
+            .group_hover("sidebar-tab", |this| this.visible())
+            .child("\u{00d7}")
+            .on_click(cx.listener(move |this, _, window, cx| {
+                cx.stop_propagation();
+                this.request_close_tab(tab_id, window, cx);
+            }));
+
+        let dot = |color| {
+            div()
+                .flex_none()
+                .size(px(TAB_ROW_DOT))
+                .rounded_full()
+                .bg(color)
+        };
+
+        // The agent's own marks replace the generic unread dot, the way the
+        // horizontal strip does it: a spinner while the turn runs, an accent
+        // dot once it has something to read.
+        let agent_mark: Option<AnyElement> = match (tab.agent_kind.is_some(), tab.busy, tab.unread)
+        {
+            (true, true, _) => Some(
+                ProgressCircle::new(("sidebar-tab-busy", key))
+                    .small()
+                    .loading(true)
+                    .color(cx.theme().warning)
+                    .into_any_element(),
+            ),
+            (_, _, true) => Some(dot(cx.theme().primary).into_any_element()),
+            _ => None,
+        };
+
+        let renaming = rename
+            .filter(|(id, _)| *id == tab_id)
+            .map(|(_, input)| input.clone());
+
+        let label: AnyElement = match renaming {
+            Some(input) => div()
+                .flex_1()
+                .overflow_hidden()
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .capture_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| {
+                    if e.keystroke.key == "escape" {
+                        cx.stop_propagation();
+                        this.finish_tab_rename(false, window, cx);
+                    }
+                }))
+                .child(
+                    Input::new(&input)
+                        .xsmall()
+                        .p_0()
+                        .text_xs()
+                        .appearance(false),
+                )
+                .into_any_element(),
+            None => div()
+                .flex_1()
+                .overflow_hidden()
+                .truncate()
+                .when(tab.exited, |this| this.text_color(cx.theme().danger))
+                .child(tab.label.clone())
+                .into_any_element(),
+        };
+
+        let menu_shell = cx.entity();
+        let drag_shell = cx.entity();
+        let drag_label = tab.label.clone();
+        // The row spans the list column: sidebar width minus the card gutter,
+        // the card's inner padding, and the scrollbar lane.
+        let drag_width = (self.width - 36.0).max(80.0);
+
+        let row = h_flex()
+            .id(("sidebar-tab", key))
+            .group("sidebar-tab")
+            .relative()
+            .w_full()
+            .h(px(TAB_ROW_HEIGHT))
+            // Indent past the workspace item's status column so the rows read
+            // as belonging to the workspace above them.
+            .pl_6()
+            .pr_1()
+            .gap_1()
+            .items_center()
+            .rounded(UI_RADIUS)
+            .text_xs()
+            // A restored-but-not-yet-spawned tab renders faded, the same
+            // "sleeping tab" cue the horizontal strip uses.
+            .when(tab.pending, |this| this.opacity(0.6))
+            .when(active, |this| {
+                this.bg(cx.theme().sidebar_accent)
+                    .text_color(cx.theme().sidebar_accent_foreground)
+            })
+            .when(!active, |this| {
+                this.text_color(cx.theme().sidebar_foreground.opacity(0.75))
+                    .hover(|this| this.bg(cx.theme().sidebar_accent.opacity(0.4)))
+            })
+            .child(div().flex_none().flex().child(match tab.pending {
+                true => Icon::new(IconName::Moon).xsmall().into_any_element(),
+                false => tab_icon(tab.agent_kind, tab.settings).into_any_element(),
+            }))
+            .when_some(
+                terminal_presentation(tab.terminal),
+                |this, (visual, aria)| {
+                    this.child(
+                        div()
+                            .id(("sidebar-tab-terminal", key))
+                            .aria_label(aria)
+                            .flex_none()
+                            .flex()
+                            .child(terminal_dot(visual, TAB_ROW_DOT, cx)),
+                    )
+                },
+            )
+            .child(label)
+            .children(agent_mark)
+            // Bell dot, in the warning color so it reads apart from the unread
+            // dot when a tab carries both.
+            .children(tab.bell.then(|| dot(cx.theme().warning)))
+            .when(closeable, |this| this.child(close))
+            .children(tab.progress.map(|report| {
+                let (color, fraction) = progress_visual(report, cx);
+                div()
+                    .absolute()
+                    .bottom_0()
+                    .left(UI_RADIUS)
+                    .right(UI_RADIUS)
+                    .h(px(2.0))
+                    .child(
+                        div()
+                            .h_full()
+                            .w(relative(fraction))
+                            .rounded_full()
+                            .bg(color),
+                    )
+            }))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.workspaces.activate(ws_idx);
+                this.workspaces.active_tabs_mut().activate(tab_idx);
+                this.focus_active(window, cx);
+                this.sync_session_memory(cx);
+                cx.notify();
+            }));
+
+        div()
+            .id(("sidebar-tab-menu", key))
+            .w_full()
+            .when(self.tab_dragging == Some((ws_idx, tab_idx)), |this| {
+                this.opacity(0.0)
+            })
+            // Make way for the dragged row: the hovered row slides down,
+            // opening an insertion gap at the pointer.
+            .when(self.tab_drag_over == Some((ws_idx, tab_idx)), |this| {
+                this.mt(px(TAB_ROW_HEIGHT))
+            })
+            .on_drag(
+                SidebarTabDrag {
+                    workspace: ws_idx,
+                    from: tab_idx,
+                    tab: tab_id,
+                },
+                move |_, _, _, cx| {
+                    drag_shell.update(cx, |this, cx| {
+                        this.sidebar.tab_dragging = Some((ws_idx, tab_idx));
+                        cx.notify();
+                    });
+                    cx.new(|_| SidebarTabDragPreview {
+                        label: drag_label.clone(),
+                        width: drag_width,
+                    })
+                },
+            )
+            .on_drag_move(
+                cx.listener(move |this, e: &DragMoveEvent<SidebarTabDrag>, _, cx| {
+                    if !e.bounds.contains(&e.event.position) {
+                        return;
+                    }
+                    let drag = e.drag(cx);
+                    // No gap over the drag's own row, and none over another
+                    // workspace's rows, where the drop would be refused.
+                    let target = (drag.workspace == ws_idx && drag.from != tab_idx)
+                        .then_some((ws_idx, tab_idx));
+
+                    if this.sidebar.tab_drag_over != target {
+                        this.sidebar.tab_drag_over = target;
+                        cx.notify();
+                    }
+                }),
+            )
+            .on_drop(cx.listener(move |this, drag: &SidebarTabDrag, window, cx| {
+                // The list-level fallback handler must not also reorder this
+                // drop.
+                cx.stop_propagation();
+
+                this.sidebar.tab_drag_over = None;
+                this.sidebar.tab_dragging = None;
+
+                if drag.workspace == ws_idx {
+                    this.reorder_tab(drag.tab, drag.from, tab_idx, window, cx);
+                }
+
+                cx.notify();
+            }))
+            .context_menu(move |menu, _, _| {
+                let rename_shell = menu_shell.clone();
+                let close_shell = menu_shell.clone();
+
+                menu.item(PopupMenuItem::new(i18n("tabbar-menu-rename")).on_click(
+                    move |_, window, cx| {
+                        rename_shell
+                            .update(cx, |this, cx| this.start_tab_rename(tab_id, window, cx));
+                    },
+                ))
+                .item(
+                    PopupMenuItem::new(i18n("tabbar-menu-close"))
+                        .disabled(!closeable)
+                        .on_click(move |_, window, cx| {
+                            close_shell
+                                .update(cx, |this, cx| this.request_close_tab(tab_id, window, cx));
+                        }),
+                )
+            })
+            .child(row)
+            .into_any_element()
+    }
+
+    /// The new-tab row that closes out the active workspace's tab list. Only
+    /// the active workspace gets one: the title bar's `+` is gone in this
+    /// style, and a new tab always opens where the user is looking. Clicking it
+    /// opens the same profile menu the horizontal strip's `+` does, so the two
+    /// styles offer the same choices; Ctrl+Shift+T still opens the default
+    /// profile directly.
+    fn render_new_tab_row(&self, cx: &mut Context<Shell>) -> AnyElement {
+        let menu_shell = cx.entity();
+
+        Button::new("sidebar-tab-new")
+            .ghost()
+            .aria_label(i18n("sidebar-tab-new"))
+            .w_full()
+            .h(px(TAB_ROW_HEIGHT))
+            .px_0()
+            .child(
+                h_flex()
+                    .w_full()
+                    .items_center()
+                    .justify_center()
+                    .text_xs()
+                    .text_color(cx.theme().sidebar_foreground.opacity(0.6))
+                    .child("+"),
+            )
+            .dropdown_menu(move |menu, _, cx| new_tab_menu(menu, &menu_shell, cx))
+            .into_any_element()
+    }
+
     /// The workspace sidebar: one themed button per workspace (active = selected),
     /// plus a new-workspace button and bottom status bar. Toggled by
     /// `ToggleSidebar` (Ctrl+Shift+B).
     pub(super) fn render(
         &mut self,
         summaries: Vec<WorkspaceSummary>,
+        // One entry per summary in the vertical tab-bar style, empty in the
+        // horizontal one where the title bar still owns the tabs.
+        tabs: Vec<Vec<SidebarTab>>,
         rename: Option<&(WorkspaceId, Entity<InputState>)>,
+        tab_rename: Option<&(TabId, Entity<InputState>)>,
         agent_usage: Entity<AgentUsageView>,
         cx: &mut Context<Shell>,
     ) -> AnyElement {
@@ -637,6 +989,8 @@ impl Sidebar {
         if !cx.has_active_drag() {
             self.drag_over = None;
             self.dragging = None;
+            self.tab_drag_over = None;
+            self.tab_dragging = None;
         }
 
         let width = self.width;
@@ -683,12 +1037,34 @@ impl Sidebar {
 
                         cx.notify();
                     }))
-                    .children(
-                        summaries
-                            .iter()
-                            .enumerate()
-                            .map(|(idx, ws)| self.render_item(idx, ws, rename, cx)),
-                    )
+                    .on_drop(cx.listener(|this, drag: &SidebarTabDrag, window, cx| {
+                        this.sidebar.tab_dragging = None;
+
+                        if let Some((ws, to)) = this.sidebar.tab_drag_over.take() {
+                            if drag.workspace == ws {
+                                this.reorder_tab(drag.tab, drag.from, to, window, cx);
+                            }
+                        }
+
+                        cx.notify();
+                    }))
+                    .children(summaries.iter().enumerate().flat_map(|(idx, ws)| {
+                        let mut rows = vec![self.render_item(idx, ws, rename, cx)];
+                        let ws_tabs = tabs.get(idx).map(Vec::as_slice).unwrap_or_default();
+                        // A workspace refuses to close its last tab, so the
+                        // row withholds the control the manager would ignore.
+                        let closeable = ws_tabs.len() > 1;
+
+                        rows.extend(ws_tabs.iter().enumerate().map(|(tab_idx, tab)| {
+                            self.render_tab_row(idx, tab_idx, tab, closeable, tab_rename, cx)
+                        }));
+
+                        if ws.active && !ws_tabs.is_empty() {
+                            rows.push(self.render_new_tab_row(cx));
+                        }
+
+                        rows
+                    }))
                     .child(workspace_list_scrollbar(&self.scroll)),
             )
             .children(cx.global::<AppSettings>().show_agent_usage.then(|| {

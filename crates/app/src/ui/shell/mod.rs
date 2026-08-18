@@ -67,7 +67,7 @@ use crate::ui::floating_surface;
 use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::git_status::{GitStatusModel, GitStatusView};
 use crate::ui::right_panel::{RightPanel, RightPanelKind};
-use crate::ui::settings::{AgentProfile, AppSettings};
+use crate::ui::settings::{AgentProfile, AppSettings, TabBarStyle};
 pub(crate) use crate::ui::shell::actions::{
     CloseTab, NewAgentTab, NewRemoteTab, NewTab, NewWindow, NewWorkspace, NextTab, NextWorkspace,
     PrevTab, PrevWorkspace, ResizePaneDown, ResizePaneLeft, ResizePaneRight, ResizePaneUp,
@@ -81,7 +81,7 @@ pub(crate) use crate::ui::shell::tab_surface::{TabSurface, TerminalPaneTree};
 use crate::ui::tab_bar::TabStrip;
 use crate::ui::token_usage::TokenUsageView;
 use crate::ui::workflows::WorkflowsView;
-use crate::ui::workspace_sidebar::{self, Sidebar};
+use crate::ui::workspace_sidebar::{self, Sidebar, SidebarTab};
 use crate::window::{AppWindow, LastActiveWindow, ShellEntry, ShellRegistry, WindowRegistry};
 use crate::workspace::{
     self, ProgressTally, TerminalActivity, WorkspaceId, WorkspaceKind, WorkspaceManager,
@@ -661,6 +661,10 @@ impl Shell {
     /// limited to the dedicated Agent surface: a terminal tab reports its own
     /// activity through [`Self::tab_terminal_activity`], which is driven by
     /// OSC 133 rather than by an agent route.
+    ///
+    /// Every workspace takes part, not just the active one: the vertical
+    /// tab-bar style shows every workspace's tabs at once. Tab ids are unique
+    /// across workspaces, so the wider sets answer the same lookups.
     fn tab_agent_indicators(
         &self,
         cx: &App,
@@ -668,7 +672,7 @@ impl Shell {
         let mut unread_tabs = collections::HashSet::new();
         let mut busy_agent_tabs = collections::HashSet::new();
 
-        for tab in self.workspaces.active_tabs().tabs() {
+        for tab in self.workspaces.all_tabs().flat_map(TabManager::tabs) {
             let routes = Self::agent_routes_in_surface(tab.surface(), cx);
             let projection = self.agent_monitor.project(&routes);
 
