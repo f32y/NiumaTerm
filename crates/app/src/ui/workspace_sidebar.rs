@@ -1015,56 +1015,66 @@ impl Sidebar {
                     })),
             )
             .child(
-                v_flex()
-                    .id("workspace-list")
+                // The scrollbar sits in this non-scrolling wrapper: an absolute
+                // child of the scrolling list would be laid out against the
+                // content origin and slide out of the viewport as the list
+                // scrolls.
+                div()
+                    .relative()
                     .flex_1()
                     .min_h_0()
-                    .gap_1()
-                    .relative()
-                    .pr_3()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
-                    // Fallback drop target for the whole list: a drop released
-                    // over the make-way gap (a margin, outside every item's
-                    // hitbox) still lands on the tracked insertion position
-                    // instead of silently ending the drag.
-                    .on_drop(cx.listener(|this, drag: &WorkspaceDrag, window, cx| {
-                        this.sidebar.dragging = None;
+                    .child(
+                        v_flex()
+                            .id("workspace-list")
+                            .size_full()
+                            .gap_1()
+                            .pr_3()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.scroll)
+                            // Fallback drop target for the whole list: a drop released
+                            // over the make-way gap (a margin, outside every item's
+                            // hitbox) still lands on the tracked insertion position
+                            // instead of silently ending the drag.
+                            .on_drop(cx.listener(|this, drag: &WorkspaceDrag, window, cx| {
+                                this.sidebar.dragging = None;
 
-                        if let Some(to) = this.sidebar.drag_over.take() {
-                            this.reorder_workspaces(drag.from, to, window, cx);
-                        }
+                                if let Some(to) = this.sidebar.drag_over.take() {
+                                    this.reorder_workspaces(drag.from, to, window, cx);
+                                }
 
-                        cx.notify();
-                    }))
-                    .on_drop(cx.listener(|this, drag: &SidebarTabDrag, window, cx| {
-                        this.sidebar.tab_dragging = None;
+                                cx.notify();
+                            }))
+                            .on_drop(cx.listener(|this, drag: &SidebarTabDrag, window, cx| {
+                                this.sidebar.tab_dragging = None;
 
-                        if let Some((ws, to)) = this.sidebar.tab_drag_over.take() {
-                            if drag.workspace == ws {
-                                this.reorder_tab(drag.tab, drag.from, to, window, cx);
-                            }
-                        }
+                                if let Some((ws, to)) = this.sidebar.tab_drag_over.take() {
+                                    if drag.workspace == ws {
+                                        this.reorder_tab(drag.tab, drag.from, to, window, cx);
+                                    }
+                                }
 
-                        cx.notify();
-                    }))
-                    .children(summaries.iter().enumerate().flat_map(|(idx, ws)| {
-                        let mut rows = vec![self.render_item(idx, ws, rename, cx)];
-                        let ws_tabs = tabs.get(idx).map(Vec::as_slice).unwrap_or_default();
-                        // A workspace refuses to close its last tab, so the
-                        // row withholds the control the manager would ignore.
-                        let closeable = ws_tabs.len() > 1;
+                                cx.notify();
+                            }))
+                            .children(summaries.iter().enumerate().flat_map(|(idx, ws)| {
+                                let mut rows = vec![self.render_item(idx, ws, rename, cx)];
+                                let ws_tabs = tabs.get(idx).map(Vec::as_slice).unwrap_or_default();
+                                // A workspace refuses to close its last tab, so the
+                                // row withholds the control the manager would ignore.
+                                let closeable = ws_tabs.len() > 1;
 
-                        rows.extend(ws_tabs.iter().enumerate().map(|(tab_idx, tab)| {
-                            self.render_tab_row(idx, tab_idx, tab, closeable, tab_rename, cx)
-                        }));
+                                rows.extend(ws_tabs.iter().enumerate().map(|(tab_idx, tab)| {
+                                    self.render_tab_row(
+                                        idx, tab_idx, tab, closeable, tab_rename, cx,
+                                    )
+                                }));
 
-                        if ws.active && !ws_tabs.is_empty() {
-                            rows.push(self.render_new_tab_row(cx));
-                        }
+                                if ws.active && !ws_tabs.is_empty() {
+                                    rows.push(self.render_new_tab_row(cx));
+                                }
 
-                        rows
-                    }))
+                                rows
+                            })),
+                    )
                     .child(workspace_list_scrollbar(&self.scroll)),
             )
             .children(cx.global::<AppSettings>().show_agent_usage.then(|| {
