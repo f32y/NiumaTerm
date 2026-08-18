@@ -1,22 +1,18 @@
-use std::collections::VecDeque;
 use std::time::Duration;
 
 use gpui_component::input::Enter;
+use nmt_agent_utils::chat::QueuedPrompt;
 use nmt_config::system::NewlineShortcut;
 
 use crate::agent_pane::view::banners::composer_stats_label;
-use crate::agent_pane::view::{
-    ComposerEnterBehavior, composer_enter_behavior, queued_message_label,
-};
+use crate::agent_pane::view::history::queued_message_label;
+use crate::agent_pane::view::{ComposerEnterBehavior, composer_enter_behavior};
 
 #[test]
-fn queued_message_label_keeps_order_and_flattens_lines() {
-    let messages = VecDeque::from(["first\nline".to_string(), "second".to_string()]);
+fn queued_message_label_flattens_a_multi_line_prompt() {
+    let prompt = QueuedPrompt::local("first\nline".to_string());
 
-    assert_eq!(
-        queued_message_label(&messages).as_deref(),
-        Some("Queued message: first line · second")
-    );
+    assert_eq!(queued_message_label(&prompt), "Queued message: first line");
 }
 
 #[test]

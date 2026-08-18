@@ -1,6 +1,7 @@
 use nmt_i18n::i18n;
 
 use crate::agent_pane::composer::CommandFeedbackKind;
+use crate::agent_pane::session::conversation::claimed_prompts;
 use crate::agent_pane::session::{Status, UpdateSuspension};
 use crate::agent_pane::transcript::hidden;
 use crate::agent_pane::*;
@@ -225,7 +226,12 @@ impl AgentPane {
                 // would leave the indicator spinning with nothing behind it.
                 self.transcript
                     .update(cx, |transcript, cx| transcript.set_compacting(false, cx));
-                self.publish_queued_user_messages(cx);
+                // A backend that keeps its pending inbox across a turn's end
+                // will run those prompts in the next one, so the end of this
+                // turn is not what makes them sent.
+                if !self.kind.caps().reports_pending_queue {
+                    self.publish_queued_user_messages(cx);
+                }
                 self.finish_working(cx);
                 self.refresh_git_branch(cx);
                 if self.status == Status::Running {
@@ -415,6 +421,13 @@ impl AgentPane {
                 }
             }
             SessionEvent::History(sessions) => {
+                // A list of what is recent answers a different question than
+                // the search currently on screen, so it replaces those rows
+                // rather than being appended to them.
+                if take(&mut self.history_ui.showing_search) {
+                    self.history_ui.sessions.clear();
+                }
+
                 // Pages accumulate: the first page lands in an empty list,
                 // later cursor pages extend it. A /new backend may publish
                 // the first page again, so ids are deduplicated in place.
@@ -430,6 +443,7 @@ impl AgentPane {
                 }
                 cx.notify();
             }
+            SessionEvent::SessionSearchResults(results) => self.show_search_results(results, cx),
             SessionEvent::ContextCompositionUpdated(composition) => {
                 self.context_composition = Some(composition);
                 cx.notify();
@@ -463,6 +477,37 @@ impl AgentPane {
                 {
                     cx.emit(AgentPaneEvent::BackgroundTaskActivity);
                 }
+                cx.notify();
+            }
+            // The backend owns its pending inbox, so its snapshot replaces
+            // whatever this side queued optimistically. Anything it dropped is
+            // gone from the list by being absent rather than by a second event
+            // saying so, and a dropped prompt was claimed into the running
+            // turn — which is when its transcript row is due.
+            //
+            // The backend's own echo of that message claims the row too, and
+            // either can arrive first. Both read the same list and remove what
+            // they publish, so whichever loses the race finds nothing left to
+            // publish and the row appears exactly once.
+            SessionEvent::QueuedPrompts(prompts) => {
+                let claimed = claimed_prompts(&self.queued_user_messages, &prompts);
+
+                self.queued_user_messages = prompts.into();
+                for text in claimed {
+                    self.push_item(SessionItem::UserMessage { text: Some(text) }, cx);
+                }
+                cx.notify();
+            }
+            SessionEvent::GoalUpdated(goal) => {
+                self.goal = goal;
+                cx.notify();
+            }
+            SessionEvent::PlanModeUpdated(active) => {
+                self.plan_mode = active;
+                cx.notify();
+            }
+            SessionEvent::SessionStatsUpdated(stats) => {
+                self.session_stats = Some(stats);
                 cx.notify();
             }
             SessionEvent::Replay(items) => {
@@ -519,7 +564,7 @@ impl AgentPane {
                 && self
                     .queued_user_messages
                     .front()
-                    .is_some_and(|queued| queued == text)
+                    .is_some_and(|queued| &queued.text == text)
             {
                 self.queued_user_messages.pop_front();
                 self.push_item(item, cx);
@@ -531,7 +576,13 @@ impl AgentPane {
             self.note_visible_agent_output();
         }
 
-        if matches!(item, SessionItem::AgentMessage { .. }) {
+        // Assistant output is the only sign most backends give that a steered
+        // message joined the running turn. A backend that publishes its own
+        // pending inbox says so exactly, and guessing beside it would show a
+        // message as sent while its snapshot still lists it as waiting.
+        if matches!(item, SessionItem::AgentMessage { .. })
+            && !self.kind.caps().reports_pending_queue
+        {
             self.publish_queued_user_messages(cx);
         }
 
@@ -542,8 +593,13 @@ impl AgentPane {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        while let Some(text) = self.queued_user_messages.pop_front() {
-            self.push_item(SessionItem::UserMessage { text: Some(text) }, cx);
+        while let Some(queued) = self.queued_user_messages.pop_front() {
+            self.push_item(
+                SessionItem::UserMessage {
+                    text: Some(queued.text),
+                },
+                cx,
+            );
         }
     }
 

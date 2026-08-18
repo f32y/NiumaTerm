@@ -5,7 +5,8 @@ use gpui::{App, FontWeight, IntoElement, RenderOnce, Window, div, px};
 use gpui_component::hover_card::HoverCard;
 use gpui_component::{ActiveTheme as _, Icon, IconName, h_flex, v_flex};
 use nmt_agent_utils::chat::{
-    ContextComposition, ContextSegment, ContextUsageScope, ContextWindowUsage, TokenUsageBreakdown,
+    ContextComposition, ContextSegment, ContextUsageScope, ContextWindowUsage, SessionStats,
+    TokenUsageBreakdown,
 };
 use nmt_i18n::i18n;
 
@@ -17,11 +18,36 @@ pub(super) struct ContextUsageIndicator {
     /// What fills the window, when the provider measures it. Codex reports
     /// only accounting, so its card shows the accounting alone.
     composition: Option<ContextComposition>,
+    /// Whole-log figures for the conversation, when the provider folds them.
+    /// They belong beside the accounting because both answer what the
+    /// conversation has cost, one in tokens and one in turns and time.
+    stats: Option<SessionStats>,
 }
 
 impl ContextUsageIndicator {
-    pub(super) fn new(usage: ContextWindowUsage, composition: Option<ContextComposition>) -> Self {
-        Self { usage, composition }
+    pub(super) fn new(
+        usage: ContextWindowUsage,
+        composition: Option<ContextComposition>,
+        stats: Option<SessionStats>,
+    ) -> Self {
+        Self {
+            usage,
+            composition,
+            stats,
+        }
+    }
+}
+
+/// Wall time as the largest unit that still reads as a duration rather than as
+/// a number: a tool that ran for two minutes is more legible as `2m 5s` than as
+/// either `125s` or `0.03h`.
+fn wall_time_readout(millis: u64) -> String {
+    let seconds = millis / 1000;
+
+    match (seconds / 3600, (seconds % 3600) / 60, seconds % 60) {
+        (0, 0, seconds) => format!("{seconds}s"),
+        (0, minutes, seconds) => format!("{minutes}m {seconds}s"),
+        (hours, minutes, _) => format!("{hours}h {minutes}m"),
     }
 }
 
@@ -289,6 +315,9 @@ impl RenderOnce for ContextUsageIndicator {
             .as_ref()
             .map(context_segment_rows)
             .unwrap_or_default();
+        // A conversation that has not closed a step yet reports zeroes, which
+        // describe nothing; the section appears once there is something in it.
+        let stats = self.stats.filter(|stats| stats.steps > 0);
 
         let trigger = h_flex()
             .id("agent-context-trigger")
@@ -372,6 +401,50 @@ impl RenderOnce for ContextUsageIndicator {
                                         .child(i18n("agent-context-current")),
                                 )
                                 .children(current_rows.iter().copied()),
+                        )
+                    })
+                    .when_some(stats, |this, stats| {
+                        let rows = [
+                            ("agent-context-session-turns", stats.turns.to_string()),
+                            ("agent-context-session-steps", stats.steps.to_string()),
+                            (
+                                "agent-context-session-model-time",
+                                wall_time_readout(stats.model_ms),
+                            ),
+                            (
+                                "agent-context-session-tool-time",
+                                wall_time_readout(stats.tool_ms),
+                            ),
+                        ];
+
+                        this.child(
+                            v_flex()
+                                .gap_1()
+                                .pt_2()
+                                .border_t_1()
+                                .border_color(cx.theme().border.opacity(0.6))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(muted.opacity(0.72))
+                                        .child(i18n("agent-context-session-heading")),
+                                )
+                                .children(rows.map(|(label, value)| {
+                                    h_flex()
+                                        .w_full()
+                                        .justify_between()
+                                        .gap_3()
+                                        .text_xs()
+                                        .child(
+                                            div()
+                                                .text_color(muted.opacity(0.86))
+                                                .child(i18n(label)),
+                                        )
+                                        .child(
+                                            div().text_color(foreground.opacity(0.86)).child(value),
+                                        )
+                                })),
                         )
                     })
                     .when_some(cumulative, |this, cumulative| {

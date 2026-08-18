@@ -53,10 +53,10 @@ use nmt_agent_utils::background_task::{
 };
 use nmt_agent_utils::chat::{
     ApprovalPreset, Compaction, CompactionTrigger, ContextComposition, ContextWindowUsage,
-    Event as SessionEvent, Item as SessionItem, ModelInfo, Question, QuestionOption, ReplayTurn,
-    SendOutcome, SessionSummary, SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments,
-    SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
-    ThreadSettings, TurnActivity,
+    Event as SessionEvent, GoalStatus, Item as SessionItem, ModelInfo, Question, QuestionOption,
+    QueuedPrompt, ReplayTurn, SendOutcome, SessionStats, SessionSummary, SkillCatalog, SkillInfo,
+    SkillReference, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
+    SlashCommandRunPolicy, SlashCommandSource, ThreadSettings, TurnActivity,
 };
 use nmt_agent_utils::claude_code::workflows::{
     RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult,
@@ -438,6 +438,10 @@ struct SessionHistoryUi {
     /// Blank conversations show the list automatically; `/resume` can reopen
     /// the same list after a conversation has started.
     mode: RecentSessionsMode,
+    /// The rows answer a search rather than list what is recent. History pages
+    /// accumulate, so without this the next page would be appended to the
+    /// matches and the strip would mix two different questions' answers.
+    showing_search: bool,
     selected: usize,
     /// Claude replay is loaded before process replacement and published only
     /// after the resumed process confirms readiness.
@@ -451,6 +455,7 @@ impl Default for SessionHistoryUi {
             sessions: Vec::new(),
             pending: None,
             mode: RecentSessionsMode::Automatic,
+            showing_search: false,
             selected: 0,
             pending_resume_replay: None,
             scroll: VirtualListScrollHandle::new(),
@@ -558,14 +563,27 @@ pub(crate) struct AgentPane {
     pending_interrupt: Option<u64>,
     palette: SlashPalette,
     /// Mid-turn inputs stay near the composer until provider activity confirms
-    /// they have joined the running response.
-    queued_user_messages: VecDeque<String>,
+    /// they have joined the running response. A backend that owns its own
+    /// pending queue republishes this whole list, which is what gives the rows
+    /// the identities a removal needs.
+    queued_user_messages: VecDeque<QueuedPrompt>,
     rewind: RewindFlow,
     git_branch_poll: GitBranchPoll,
     context_window_usage: Option<ContextWindowUsage>,
     /// How that window is currently filled, when the provider measures it.
     /// Codex reports only accounting, so this stays empty there.
     context_composition: Option<ContextComposition>,
+    /// The standing objective the backend is working towards, when it runs
+    /// one. It outlives the turn that created it, so it belongs beside the
+    /// composer rather than in the transcript.
+    goal: Option<GoalStatus>,
+    /// Whether the backend is collaborating on a plan rather than carrying out
+    /// work. Backends that have no such mode never set it.
+    plan_mode: bool,
+    /// Whole-log counters the backend folds from its own log. Absent where the
+    /// backend reports none, because counting the visible transcript instead
+    /// would disagree with the conversation's real length.
+    session_stats: Option<SessionStats>,
     /// Process replacement for a provider update is pane state rather than a
     /// terminal exit. Keeping it separate retains transcript and composer
     /// contents while preventing input from reaching a missing backend.

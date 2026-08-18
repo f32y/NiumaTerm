@@ -121,10 +121,7 @@ impl Backend {
             Backend::Claude(session) => session.send_user_message(text, settings),
             // Skills are not mapped for DeepSeek, so a reference cannot reach
             // it and the prompt goes as the user wrote it.
-            Backend::DeepSeek(session) => match session.send_user_message(text) {
-                Ok(()) => SendOutcome::StartedTurn,
-                Err(message) => SendOutcome::Rejected { message },
-            },
+            Backend::DeepSeek(session) => session.send_user_message(text),
             #[cfg(test)]
             Backend::Test(session) => session
                 .send_outcomes
@@ -137,9 +134,63 @@ impl Backend {
         match self {
             Backend::Codex(_) => app_server::Session::adapter_commands(),
             Backend::Claude(_) => stream_json::Session::adapter_commands(),
-            Backend::DeepSeek(_) => Vec::new(),
+            Backend::DeepSeek(_) => deepseek::Session::adapter_commands(),
             #[cfg(test)]
             Backend::Test(session) => session.commands.clone(),
+        }
+    }
+
+    /// Drop one prompt the backend accepted but has not started. Answers
+    /// whether the backend took the removal, so a row it has already claimed
+    /// stays where the transcript is about to confirm it.
+    pub(in crate::agent_pane) fn remove_queued_prompt(&mut self, item_id: &str) -> bool {
+        match self {
+            Backend::DeepSeek(session) => session.remove_queued_prompt(item_id),
+            // The other backends report no identity for their pending work, so
+            // nothing here can name a message to remove.
+            Backend::Codex(_) | Backend::Claude(_) => false,
+            #[cfg(test)]
+            Backend::Test(_) => false,
+        }
+    }
+
+    /// Pin a title on the conversation, answering with the title the backend
+    /// actually accepted after its own normalization.
+    pub(in crate::agent_pane) fn rename_conversation(
+        &mut self,
+        title: &str,
+    ) -> Result<String, String> {
+        match self {
+            Backend::DeepSeek(session) => session.rename(title),
+            Backend::Codex(_) | Backend::Claude(_) => {
+                Err(i18n("agent-session-rename-unsupported").to_string())
+            }
+            #[cfg(test)]
+            Backend::Test(_) => Err(i18n("agent-session-rename-unsupported").to_string()),
+        }
+    }
+
+    /// Branch the conversation and move this session into the copy.
+    pub(in crate::agent_pane) fn fork_conversation(&mut self) -> Result<(), String> {
+        match self {
+            Backend::DeepSeek(session) => session.fork(),
+            Backend::Codex(_) | Backend::Claude(_) => {
+                Err(i18n("agent-session-fork-unsupported").to_string())
+            }
+            #[cfg(test)]
+            Backend::Test(_) => Err(i18n("agent-session-fork-unsupported").to_string()),
+        }
+    }
+
+    /// Ask the backend which earlier conversations mention a phrase. The
+    /// answer arrives as a replacement history list, so there is nothing to
+    /// return here.
+    pub(in crate::agent_pane) fn search_sessions(&mut self, query: &str) {
+        match self {
+            Backend::DeepSeek(session) => session.search_sessions(query),
+            Backend::Codex(_) | Backend::Claude(_) => {}
+            #[cfg(test)]
+            Backend::Test(_) => {}
         }
     }
 

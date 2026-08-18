@@ -1437,3 +1437,180 @@ fn a_result_for_a_call_this_session_never_saw_is_ignored() {
 
     assert_eq!(completed, Vec::new());
 }
+
+#[test]
+fn a_pending_inbox_snapshot_becomes_the_queued_prompt_rows() {
+    use crate::chat::QueuedPrompt;
+    use crate::deepseek::session::queued_prompts;
+
+    let items = json!([
+        {
+            "id": "msg-1",
+            "placement": "queued",
+            "message": { "content": [{ "type": "text", "text": "and then run the tests" }] },
+        },
+        {
+            "id": "msg-2",
+            "placement": "steering",
+            "message": { "content": [
+                { "type": "text", "text": "actually, " },
+                { "type": "text", "text": "stop at the parser" },
+            ]},
+        },
+        // Injected for the model rather than queued by the user; listing it
+        // would describe pending work nobody asked for.
+        {
+            "id": "msg-3",
+            "placement": "context",
+            "message": { "content": [{ "type": "text", "text": "goal changed" }] },
+        },
+    ]);
+
+    assert_eq!(
+        queued_prompts(&items),
+        vec![
+            QueuedPrompt {
+                id: Some("msg-1".into()),
+                text: "and then run the tests".into(),
+            },
+            QueuedPrompt {
+                id: Some("msg-2".into()),
+                text: "actually, stop at the parser".into(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_search_answer_takes_its_display_from_the_list_and_keeps_the_rank_order() {
+    use crate::deepseek::history::search_results;
+
+    let matches = json!({
+        "items": [
+            { "sessionId": "s-2", "snippet": "…the parser rewrite…" },
+            { "sessionId": "s-1", "snippet": "…parser notes…" },
+            // Matched, but rooted in another project, so this tab cannot open it.
+            { "sessionId": "s-3", "snippet": "…parser…" },
+        ],
+        "hasMore": false,
+    });
+    let listed = json!({
+        "items": [
+            { "sessionId": "s-1", "updatedAt": 1_000, "blank": false, "cwd": "C:/p",
+              "projections": { "values": { "title": "Older" } } },
+            { "sessionId": "s-2", "updatedAt": 2_000, "blank": false, "cwd": "C:/p",
+              "projections": { "values": { "title": "Newer" } } },
+            { "sessionId": "s-3", "updatedAt": 3_000, "blank": false, "cwd": "C:/other" },
+        ],
+    });
+
+    let rows = search_results(&matches, &listed, Some("C:/p"));
+
+    assert_eq!(rows.len(), 2);
+    // The list is ordered by recency and the search by relevance; the rows
+    // follow the search, because that is the question being answered.
+    assert_eq!(rows[0].id, "s-2");
+    assert_eq!(rows[0].title, "Newer");
+    assert_eq!(rows[0].snippet.as_deref(), Some("…the parser rewrite…"));
+    assert_eq!(rows[1].id, "s-1");
+    assert_eq!(rows[1].snippet.as_deref(), Some("…parser notes…"));
+}
+
+#[test]
+fn the_goal_projection_carries_the_objective_and_how_much_of_its_budget_is_spent() {
+    use crate::deepseek::projections::ProjectionTracker;
+
+    let mut projections = ProjectionTracker::default();
+    let events = projections
+        .apply(
+            &projection_frame(
+                "goal",
+                json!({
+                    "goal": {
+                        "objective": "Get the suite green",
+                        "phase": "active",
+                        "maxGoalRounds": 12,
+                    },
+                    "roundsStarted": 3,
+                    "createdAt": 1,
+                    "updatedAt": 2,
+                }),
+            ),
+            SESSION,
+        )
+        .expect("a projection frame for this session should be claimed");
+
+    let [Event::GoalUpdated(Some(goal))] = events.as_slice() else {
+        panic!("expected one goal snapshot, got {events:?}");
+    };
+    assert_eq!(goal.objective, "Get the suite green");
+    assert_eq!(goal.phase, "active");
+    assert_eq!(goal.rounds_started, 3);
+    assert_eq!(goal.max_rounds, 12);
+
+    // A cleared goal arrives as a null value rather than as a missing key, so
+    // the absent case has to be published rather than ignored.
+    let cleared = projections
+        .apply(&projection_frame("goal", Value::Null), SESSION)
+        .expect("a null goal is still this session's frame");
+    assert_eq!(cleared, vec![Event::GoalUpdated(None)]);
+}
+
+#[test]
+fn a_pending_plan_selection_reports_the_state_it_is_heading_for() {
+    use crate::deepseek::projections::ProjectionTracker;
+
+    let mut projections = ProjectionTracker::default();
+
+    // Recorded and settled: the logged state is the answer.
+    assert_eq!(
+        projections.apply(
+            &projection_frame("plan", json!({ "active": true, "pending": false })),
+            SESSION,
+        ),
+        Some(vec![Event::PlanModeUpdated(true)]),
+    );
+
+    // A `/plan off` the host admitted but has not yet recorded. Reporting the
+    // logged state here would leave the chip up after the user turned it off.
+    assert_eq!(
+        projections.apply(
+            &projection_frame("plan", json!({ "active": true, "pending": true })),
+            SESSION,
+        ),
+        Some(vec![Event::PlanModeUpdated(false)]),
+    );
+}
+
+#[test]
+fn the_session_stats_projection_reports_whole_log_counters() {
+    use crate::deepseek::projections::ProjectionTracker;
+
+    let mut projections = ProjectionTracker::default();
+    let events = projections
+        .apply(
+            &projection_frame(
+                "sessionStats",
+                json!({
+                    "turns": 7,
+                    "steps": 23,
+                    "llmMs": 61_000,
+                    "toolMs": 4_500,
+                    "ttftMs": 900,
+                    "ttftSteps": 23,
+                    "decodeMs": 55_000,
+                    "decodeTokens": 12_000,
+                }),
+            ),
+            SESSION,
+        )
+        .expect("a projection frame for this session should be claimed");
+
+    let [Event::SessionStatsUpdated(stats)] = events.as_slice() else {
+        panic!("expected one stats snapshot, got {events:?}");
+    };
+    assert_eq!(stats.turns, 7);
+    assert_eq!(stats.steps, 23);
+    assert_eq!(stats.model_ms, 61_000);
+    assert_eq!(stats.tool_ms, 4_500);
+}

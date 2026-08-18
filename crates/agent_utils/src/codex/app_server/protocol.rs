@@ -344,6 +344,7 @@ pub(super) fn parse_thread_summaries(
                         title,
                         branch,
                         last_active: UNIX_EPOCH + Duration::from_secs(seconds),
+                        snippet: None,
                     })
                 })
                 .collect()

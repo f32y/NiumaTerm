@@ -58,6 +58,7 @@ pub fn list_sessions(cwd: Option<&str>) -> Vec<SessionSummary> {
                 id,
                 branch,
                 last_active,
+                snippet: None,
             })
         })
         .collect();

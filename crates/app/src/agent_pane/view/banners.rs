@@ -367,12 +367,20 @@ impl AgentPane {
     ) -> AnyElement {
         let (branch, branch_opacity) = self.git_branch_poll.presentation();
 
-        let usage = self
-            .context_window_usage
-            .map(|usage| ContextUsageIndicator::new(usage, self.context_composition.clone()));
+        let usage = self.context_window_usage.map(|usage| {
+            ContextUsageIndicator::new(usage, self.context_composition.clone(), self.session_stats)
+        });
+
+        // A backend that folds the count from its whole log is authoritative:
+        // this side's counter sees only the turns it replayed, and a replay is
+        // one page rather than the conversation.
+        let turns = self
+            .session_stats
+            .map(|stats| stats.turns)
+            .unwrap_or(self.turn_seq);
 
         let stats = composer_stats_label(
-            self.turn_seq,
+            turns,
             self.transcript.read(cx).turn_steps(self.turn_seq),
             self.first_output_latency,
             self.context_window_usage.and_then(cache_hit_percent),

@@ -400,6 +400,7 @@ fn pane_navigation_keeps_palette_and_recent_sessions_ahead_of_history(cx: &mut T
                 title: "Earlier session".into(),
                 branch: None,
                 last_active: SystemTime::now(),
+                snippet: None,
             }];
             pane.handle_palette_control(PaletteControl::Previous, window, cx);
             assert_eq!(pane.input.read(cx).text().len(), 0);
