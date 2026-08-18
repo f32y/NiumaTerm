@@ -220,6 +220,12 @@ fn run_app(argv_url: Option<String>, testing: bool) {
 
             set_job_management(cx.global::<AppSettings>().manage_subprocess_job);
 
+            // Terminal and agent scrolling are their own elements carrying
+            // their own switch; this one covers every container that scrolls
+            // through a plain scroll handle, which is the rest of the app.
+            let smooth_panels = cx.global::<AppSettings>().smooth_scrolling.panels_enabled();
+            cx.set_smooth_wheel_scrolling(smooth_panels);
+
             // The platform remembers the choice and applies it to the vsync
             // thread when that spawns (after this closure returns).
             if cx.global::<AppSettings>().prioritize_ui_threads {
@@ -234,6 +240,9 @@ fn run_app(argv_url: Option<String>, testing: bool) {
                 let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
                 agent_pane::updates::reconcile_profiles(&agent_profiles, cx);
                 set_job_management(cx.global::<AppSettings>().manage_subprocess_job);
+
+                let smooth_panels = cx.global::<AppSettings>().smooth_scrolling.panels_enabled();
+                cx.set_smooth_wheel_scrolling(smooth_panels);
 
                 // Opacity changes retint the theme and switch each window
                 // between acrylic composition and opaque presentation.

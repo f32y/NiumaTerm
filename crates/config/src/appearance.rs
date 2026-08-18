@@ -59,6 +59,13 @@ impl SmoothScrollingMode {
     pub fn agent_enabled(self) -> bool {
         matches!(self, Self::All | Self::OnlyAgent)
     }
+
+    /// Every other scrollable surface: sidebars, settings pages, pickers and
+    /// the lists inside panels. Only `All` covers them, because each of the
+    /// two narrow modes names one surface and means that one.
+    pub fn panels_enabled(self) -> bool {
+        matches!(self, Self::All)
+    }
 }
 
 #[derive(Deserialize)]
