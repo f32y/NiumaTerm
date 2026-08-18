@@ -4,7 +4,7 @@ use gpui::{
     uniform_list,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::scroll::{Scrollbar, ScrollbarShow};
+use gpui_component::scroll::Scrollbar;
 use gpui_component::{ActiveTheme, IconName, Sizable as _, h_flex, v_flex};
 use nmt_i18n::i18n;
 
@@ -269,8 +269,7 @@ impl GitSidebar {
 /// Right-edge overlay scrollbar for a `uniform_list`. The `Scrollbar` element
 /// marks itself `position: absolute` but sets no inset, so on its own it lands
 /// at the static flex position — after the list, outside the clip. This wrapper
-/// pins it to the right edge explicitly. Always visible: the sidebar is narrow
-/// and the bar doubles as the "there is more" cue.
+/// pins it to the right edge explicitly.
 fn scrollbar(handle: &UniformListScrollHandle) -> impl IntoElement {
     div()
         .absolute()
@@ -278,7 +277,7 @@ fn scrollbar(handle: &UniformListScrollHandle) -> impl IntoElement {
         .right_0()
         .bottom_0()
         .w(px(16.0))
-        .child(Scrollbar::vertical(handle).scrollbar_show(ScrollbarShow::Always))
+        .child(Scrollbar::vertical(handle))
 }
 
 impl Render for GitSidebar {

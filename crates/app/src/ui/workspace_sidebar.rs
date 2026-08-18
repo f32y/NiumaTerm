@@ -7,7 +7,7 @@ use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants};
 use gpui_component::input::{Input, InputState};
 use gpui_component::menu::{ContextMenuExt, DropdownMenu as _, PopupMenuItem};
 use gpui_component::progress::ProgressCircle;
-use gpui_component::scroll::{Scrollbar, ScrollbarShow};
+use gpui_component::scroll::Scrollbar;
 use gpui_component::{ActiveTheme, Icon, IconName, IconNamed, Selectable, Sizable, h_flex, v_flex};
 use nmt_agent_utils::AgentRuntimeStatus;
 use nmt_i18n::i18n;
@@ -1206,5 +1206,5 @@ fn workspace_list_scrollbar(handle: &ScrollHandle) -> impl IntoElement {
         .right_0()
         .bottom_0()
         .w(px(16.0))
-        .child(Scrollbar::vertical(handle).scrollbar_show(ScrollbarShow::Always))
+        .child(Scrollbar::vertical(handle))
 }

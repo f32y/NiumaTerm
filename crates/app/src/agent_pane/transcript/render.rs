@@ -563,8 +563,7 @@ impl TranscriptView {
                                 .w(px(16.0))
                                 .child(
                                     Scrollbar::vertical(&scroll)
-                                        .id(("wl-virtual-v-scrollbar", index))
-                                        .scrollbar_show(ScrollbarShow::Always),
+                                        .id(("wl-virtual-v-scrollbar", index)),
                                 ),
                         )
                         .child(
@@ -576,8 +575,7 @@ impl TranscriptView {
                                 .h(px(16.0))
                                 .child(
                                     Scrollbar::horizontal(&scroll)
-                                        .id(("wl-virtual-h-scrollbar", index))
-                                        .scrollbar_show(ScrollbarShow::Always),
+                                        .id(("wl-virtual-h-scrollbar", index)),
                                 ),
                         )
                         .into_any_element()
@@ -637,9 +635,7 @@ impl TranscriptView {
                                 .bottom_0()
                                 .w(px(16.0))
                                 .child(
-                                    Scrollbar::vertical(&detail_scroll)
-                                        .id(("wl-scrollbar", index))
-                                        .scrollbar_show(ScrollbarShow::Always),
+                                    Scrollbar::vertical(&detail_scroll).id(("wl-scrollbar", index)),
                                 ),
                         )
                         .into_any_element()
@@ -831,8 +827,7 @@ impl TranscriptView {
                             .w(px(16.0))
                             .child(
                                 Scrollbar::vertical(&summary_scroll)
-                                    .id(("compaction-scrollbar", index))
-                                    .scrollbar_show(ScrollbarShow::Always),
+                                    .id(("compaction-scrollbar", index)),
                             ),
                     )
             }))
