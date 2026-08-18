@@ -38,6 +38,7 @@ show-git-status-on-title-bar = false
 git-status-refresh-interval = 30
 tab-width = 120.0
 tab-auto-size = false
+tab-bar-style = "horizontal"
 ui-font = "Segoe UI"
 terminal-font-family = "Consolas"
 terminal-font-size = 14.0

@@ -2,12 +2,12 @@ use std::{cell, collections, rc};
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Context, DragMoveEvent, Entity, IsZero as _, KeyDownEvent, MouseButton,
+    AnyElement, App, Context, DragMoveEvent, Entity, Hsla, IsZero as _, KeyDownEvent, MouseButton,
     Pixels, Render, ScrollHandle, SharedString, Window, div, px, relative,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputState};
-use gpui_component::menu::{ContextMenuExt, DropdownMenu as _, PopupMenuItem};
+use gpui_component::menu::{ContextMenuExt, DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_component::progress::ProgressCircle;
 use gpui_component::tab::{Tab, TabBar, TabVariant};
 use gpui_component::{ActiveTheme, ElementExt as _, Icon, IconName, Sizable};
@@ -193,7 +193,7 @@ fn agent_tab_indicator(busy: bool, unread: bool) -> Option<AgentTabIndicator> {
 
 /// The glyph a tab leads with: the agent's own mark on an agent tab, a gear on
 /// the settings tab, a terminal mark otherwise.
-fn tab_icon(agent_kind: Option<AgentKind>, settings: bool) -> Icon {
+pub(super) fn tab_icon(agent_kind: Option<AgentKind>, settings: bool) -> Icon {
     match agent_kind {
         Some(kind) => kind.icon(),
         None if settings => Icon::new(IconName::Settings),
@@ -222,12 +222,12 @@ fn progress_bar_width(tab_width: Pixels) -> Pixels {
     (tab_width - UI_RADIUS * 2.0).max(Pixels::ZERO)
 }
 
-/// Progress bar along the bottom edge of a tab, driven by OSC 9;4. One corner
-/// radius of space at each side keeps the track on the straight bottom edge.
-fn progress_bar(report: ProgressReport, tab_width: f32, cx: &App) -> AnyElement {
+/// Color and fill of an OSC 9;4 progress track. Shared by the title-bar strip
+/// and the sidebar's tab rows so one report reads the same in either style.
+pub(super) fn progress_visual(report: ProgressReport, cx: &App) -> (Hsla, f32) {
     let percent = |default: u8| report.progress.unwrap_or(default) as f32 / 100.0;
 
-    let (color, fraction) = match report.state {
+    match report.state {
         ProgressState::Set => (cx.theme().primary, percent(0)),
         ProgressState::Error => (cx.theme().danger, percent(100)),
         ProgressState::Pause => (cx.theme().warning, percent(100)),
@@ -238,7 +238,13 @@ fn progress_bar(report: ProgressReport, tab_width: f32, cx: &App) -> AnyElement 
         // any background command runs.
         ProgressState::Indeterminate => (cx.theme().muted_foreground, 1.0),
         ProgressState::Remove => (cx.theme().primary, 0.0),
-    };
+    }
+}
+
+/// Progress bar along the bottom edge of a tab, driven by OSC 9;4. One corner
+/// radius of space at each side keeps the track on the straight bottom edge.
+fn progress_bar(report: ProgressReport, tab_width: f32, cx: &App) -> AnyElement {
+    let (color, fraction) = progress_visual(report, cx);
 
     div()
         .absolute()
@@ -254,6 +260,68 @@ fn progress_bar(report: ProgressReport, tab_width: f32, cx: &App) -> AnyElement 
                 .bg(color),
         )
         .into_any_element()
+}
+
+/// The new-tab menu: one entry per configured terminal profile, then one per
+/// agent profile. Shared by the title-bar strip's `+` and the sidebar's, so a
+/// tab opens the same way in either tab-bar style.
+pub(super) fn new_tab_menu(
+    mut menu: PopupMenu,
+    shell: &Entity<Shell>,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
+    for profile in cx.global::<AppSettings>().profiles.clone() {
+        let shell_cmd = profile.shell.trim().to_string();
+
+        // A profile without a command cannot spawn; offering it would silently
+        // fall back to the built-in shell.
+        if shell_cmd.is_empty() {
+            continue;
+        }
+
+        let args: Vec<String> = profile
+            .args
+            .split_whitespace()
+            .map(str::to_string)
+            .collect();
+        let item_shell = shell.clone();
+
+        menu = menu.item(
+            PopupMenuItem::new(profile.name.clone())
+                .icon(tab_icon(None, false))
+                .on_click(move |_, window, cx| {
+                    let launch = (Some(shell_cmd.clone()), args.clone());
+                    item_shell.update(cx, |this, cx| this.open_profile_tab(launch, window, cx));
+                }),
+        );
+    }
+
+    let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
+
+    // No separator over an empty agent section (every agent profile deleted).
+    if !agent_profiles.is_empty() {
+        menu = menu.separator();
+    }
+
+    for (ix, profile) in agent_profiles.into_iter().enumerate() {
+        let label = if profile.name.trim().is_empty() {
+            i18n("tabbar-menu-agent-profile").replace("{index}", &(ix + 1).to_string())
+        } else {
+            profile.name.clone()
+        };
+        let item_shell = shell.clone();
+
+        menu = menu.item(
+            PopupMenuItem::new(label)
+                .icon(tab_icon(Some(AgentKind::from_profile(profile.kind)), false))
+                .on_click(move |_, window, cx| {
+                    let profile = profile.clone();
+                    item_shell.update(cx, |this, cx| this.open_agent_tab(profile, window, cx));
+                }),
+        );
+    }
+
+    menu
 }
 
 impl TabStrip {
@@ -341,67 +409,7 @@ impl TabStrip {
             .ghost()
             .px_2()
             .child("+")
-            .dropdown_menu(move |menu, _, cx| {
-                let mut menu = menu;
-
-                for profile in cx.global::<AppSettings>().profiles.clone() {
-                    let shell_cmd = profile.shell.trim().to_string();
-
-                    // A profile without a command cannot spawn; offering it
-                    // would silently fall back to the built-in shell.
-                    if shell_cmd.is_empty() {
-                        continue;
-                    }
-
-                    let args: Vec<String> = profile
-                        .args
-                        .split_whitespace()
-                        .map(str::to_string)
-                        .collect();
-                    let item_shell = menu_shell.clone();
-
-                    menu = menu.item(
-                        PopupMenuItem::new(profile.name.clone())
-                            .icon(tab_icon(None, false))
-                            .on_click(move |_, window, cx| {
-                                let launch = (Some(shell_cmd.clone()), args.clone());
-                                item_shell.update(cx, |this, cx| {
-                                    this.open_profile_tab(launch, window, cx)
-                                });
-                            }),
-                    );
-                }
-
-                let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
-
-                // No separator over an empty agent section (every agent
-                // profile deleted).
-                if !agent_profiles.is_empty() {
-                    menu = menu.separator();
-                }
-
-                for (ix, profile) in agent_profiles.into_iter().enumerate() {
-                    let label = if profile.name.trim().is_empty() {
-                        i18n("tabbar-menu-agent-profile").replace("{index}", &(ix + 1).to_string())
-                    } else {
-                        profile.name.clone()
-                    };
-                    let item_shell = menu_shell.clone();
-
-                    menu = menu.item(
-                        PopupMenuItem::new(label)
-                            .icon(tab_icon(Some(AgentKind::from_profile(profile.kind)), false))
-                            .on_click(move |_, window, cx| {
-                                let profile = profile.clone();
-                                item_shell.update(cx, |this, cx| {
-                                    this.open_agent_tab(profile, window, cx)
-                                });
-                            }),
-                    );
-                }
-
-                menu
-            });
+            .dropdown_menu(move |menu, _, cx| new_tab_menu(menu, &menu_shell, cx));
 
         let tab_count = items.len();
         // The settings entry presents one tab and no way to add another, so

@@ -190,6 +190,30 @@ pub(super) fn appearance_page(
         .group(
             SettingGroup::new()
                 .title(i18n("settings-appearance-tab-bar"))
+                .item(
+                    SettingItem::new(
+                        i18n("settings-appearance-tab-bar-style"),
+                        SettingField::dropdown(
+                            vec![
+                                (
+                                    "horizontal".into(),
+                                    i18n("settings-appearance-tab-bar-style-horizontal").into(),
+                                ),
+                                (
+                                    "vertical".into(),
+                                    i18n("settings-appearance-tab-bar-style-vertical").into(),
+                                ),
+                            ],
+                            |cx| cx.global::<AppSettings>().tab_bar_style.as_str().into(),
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().tab_bar_style =
+                                    TabBarStyle::from_value(&value);
+                            },
+                        )
+                        .default_value(SharedString::from("horizontal")),
+                    )
+                    .description(i18n("settings-appearance-tab-bar-style-description")),
+                )
                 .item(SettingItem::new(
                     i18n("settings-appearance-tab-auto-size"),
                     SettingField::switch(

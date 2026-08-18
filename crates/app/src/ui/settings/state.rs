@@ -2,7 +2,7 @@ use gpui::{Global, SharedString};
 use nmt_agent_utils::deepseek;
 use nmt_config::agent::AgentConfig;
 use nmt_config::appearance::{AppearanceConfig, SmoothScrollingMode};
-pub use nmt_config::appearance::{InputStyle, Language, WindowBackdrop};
+pub use nmt_config::appearance::{InputStyle, Language, TabBarStyle, WindowBackdrop};
 use nmt_config::defaults::default_theme;
 pub use nmt_config::profile::{AgentProfile, AgentProfileKind, EnvVar, Profile};
 use nmt_config::remote_session::RemoteSessionConfig;
@@ -72,6 +72,9 @@ pub struct AppSettings {
     /// Shrink tabs toward a minimum as the strip fills, rather than holding
     /// `tab_width` and overflowing into the strip's horizontal scroll.
     pub tab_auto_size: bool,
+    /// Tab strip placement: a title-bar row, or rows nested under each
+    /// workspace in the sidebar.
+    pub tab_bar_style: TabBarStyle,
     /// Filter the settings font picker to monospace fonts.
     pub monospace_only: bool,
     /// Window backdrop material: Mica, Acrylic, or Off (see
@@ -160,6 +163,7 @@ impl Default for AppSettings {
             agent_font_size: DEFAULT_FONT_SIZE,
             tab_width: DEFAULT_TAB_WIDTH,
             tab_auto_size: false,
+            tab_bar_style: TabBarStyle::default(),
             monospace_only: true,
             window_backdrop: WindowBackdrop::Acrylic,
             transparent_main_view: true,
@@ -415,6 +419,7 @@ impl AppSettings {
             agent_font_size: clamp_terminal_font_size(appearance.agent_font_size),
             tab_width: clamp_tab_width(appearance.tab_width),
             tab_auto_size: appearance.tab_auto_size,
+            tab_bar_style: appearance.tab_bar_style,
             monospace_only: appearance.monospace_only,
             window_backdrop: appearance.window_backdrop,
             transparent_main_view: appearance.transparent_main_view,
@@ -623,6 +628,7 @@ impl AppSettings {
             git_status_refresh_interval: self.git_status_refresh_interval,
             tab_width: self.tab_width,
             tab_auto_size: self.tab_auto_size,
+            tab_bar_style: self.tab_bar_style,
             ui_font: self.ui_font_family.to_string(),
             terminal_font_family: self.terminal_font_family.to_string(),
             terminal_font_size: self.terminal_font_size,

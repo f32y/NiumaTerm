@@ -268,9 +268,55 @@ impl Render for Shell {
         // The sidebar is always mounted so it can animate its width open/closed.
         let summaries = self.projected_workspace_summaries(cx);
 
+        // Vertical style folds the tab strip into the sidebar as child rows of
+        // each workspace, leaving the title bar's strip slot empty.
+        let vertical_tabs = cx.global::<AppSettings>().tab_bar_style == TabBarStyle::Vertical;
+
+        let (unread_tabs, busy_agent_tabs) = self.tab_agent_indicators(cx);
+
+        let sidebar_tabs: Vec<Vec<SidebarTab>> = match vertical_tabs {
+            false => Vec::new(),
+            true => summaries
+                .iter()
+                .map(|ws| {
+                    let Some(tabs) = self.workspaces.tabs_of(ws.id) else {
+                        return Vec::new();
+                    };
+                    let active_id = tabs.active_id();
+
+                    tabs.tabs()
+                        .iter()
+                        .map(|tab| SidebarTab {
+                            id: tab.id(),
+                            label: match tab.title().is_empty() {
+                                true => SharedString::new_static("PowerShell"),
+                                false => tab.title().to_string().into(),
+                            },
+                            // Every workspace keeps its own active tab, but
+                            // only one of them is the tab on screen. Marking
+                            // the others would put a selection highlight on
+                            // every workspace's list at once.
+                            active: ws.active && tab.id() == active_id,
+                            unread: unread_tabs.contains(&tab.id()),
+                            busy: busy_agent_tabs.contains(&tab.id()),
+                            bell: tab.bell(),
+                            agent_kind: tab.surface().agent_kind(cx),
+                            settings: tab.surface().is_settings(),
+                            pending: matches!(tab.surface(), TabSurface::Pending(_)),
+                            exited: tab.exited(),
+                            progress: tab.progress(),
+                            terminal: Self::tab_terminal_activity(tab, cx),
+                        })
+                        .collect()
+                })
+                .collect(),
+        };
+
         let sidebar = self.sidebar.render(
             summaries,
+            sidebar_tabs,
             self.workspace_rename.as_ref(),
+            self.tab_rename.as_ref(),
             self.agent_usage.clone(),
             cx,
         );
@@ -296,15 +342,16 @@ impl Render for Shell {
 
         self.tab_strip.reveal_active(active_id, active_index, cx);
 
-        let (unread_tabs, busy_agent_tabs) = self.tab_agent_indicators(cx);
-
-        let tab_bar = self.tab_strip.render(
-            self.workspaces.active_tabs(),
-            &unread_tabs,
-            &busy_agent_tabs,
-            self.tab_rename.as_ref(),
-            cx,
-        );
+        let tab_bar = match vertical_tabs {
+            true => div().into_any_element(),
+            false => self.tab_strip.render(
+                self.workspaces.active_tabs(),
+                &unread_tabs,
+                &busy_agent_tabs,
+                self.tab_rename.as_ref(),
+                cx,
+            ),
+        };
 
         self.apply_pending_ratios(cx);
 

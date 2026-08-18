@@ -79,6 +79,35 @@ where
     })
 }
 
+/// Where the tab strip lives. Vertical folds the tabs into the workspace
+/// sidebar as child rows of the workspace that owns them, which frees the
+/// title bar row entirely.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum TabBarStyle {
+    /// A row of tabs across the title bar.
+    #[default]
+    Horizontal,
+    /// Tabs nested under their workspace in the sidebar.
+    Vertical,
+}
+
+impl TabBarStyle {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Horizontal => "horizontal",
+            Self::Vertical => "vertical",
+        }
+    }
+
+    pub fn from_value(value: &str) -> Self {
+        match value {
+            "vertical" => Self::Vertical,
+            _ => Self::Horizontal,
+        }
+    }
+}
+
 /// The window backdrop material. The opacity slider applies in every mode;
 /// the mode only selects what shows through translucent content.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -255,6 +284,10 @@ pub struct AppearanceConfig {
     /// `tab_width`.
     #[serde(default, rename = "tab-auto-size")]
     pub tab_auto_size: bool,
+    /// Tab strip placement: a horizontal row in the title bar, or vertical
+    /// rows nested under each workspace in the sidebar.
+    #[serde(default, rename = "tab-bar-style")]
+    pub tab_bar_style: TabBarStyle,
     /// Font family for the app chrome (titlebar, sidebar, tabs, dialogs).
     #[serde(default = "default_ui_font", rename = "ui-font")]
     pub ui_font: String,
@@ -349,6 +382,7 @@ impl Default for AppearanceConfig {
             git_status_refresh_interval: default_git_status_refresh_interval(),
             tab_width: default_tab_width(),
             tab_auto_size: false,
+            tab_bar_style: TabBarStyle::default(),
             ui_font: default_ui_font(),
             terminal_font_family: default_terminal_font_family(),
             terminal_font_size: default_terminal_font_size(),
