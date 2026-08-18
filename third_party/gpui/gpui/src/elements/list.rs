@@ -356,7 +356,11 @@ impl ListState {
         state.logical_scroll_top = Some(scroll_top);
     }
 
-    /// Enable or disable animated scrolling for line-based wheel input.
+    /// Enable animated scrolling for line-based wheel input on this list
+    /// alone. A list whose owner never calls this still animates whenever
+    /// `App::set_smooth_wheel_scrolling` turned the motion on application
+    /// wide, which is what reaches lists built inside a component the caller
+    /// cannot get a handle to.
     pub fn set_smooth_wheel_enabled(&self, enabled: bool) {
         let state = &mut *self.0.borrow_mut();
         if state.smooth_wheel_enabled == enabled {
@@ -1755,7 +1759,7 @@ impl Element for List {
         window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
             if phase == DispatchPhase::Bubble && hitbox_id.should_handle_scroll(window) {
                 let state = &mut *list_state.0.borrow_mut();
-                if state.smooth_wheel_enabled
+                if (state.smooth_wheel_enabled || cx.smooth_wheel_scrolling())
                     && let ScrollDelta::Lines(lines) = event.delta
                 {
                     state.start_smooth_wheel(
@@ -2187,6 +2191,23 @@ mod test {
         test_wheel(cx, ScrollDelta::Lines(point(0., 1.)));
         state.reset(30);
         assert!(state.0.borrow().smooth_wheel_motion.is_none());
+    }
+
+    #[gpui::test]
+    fn test_application_wide_smooth_wheel_reaches_an_unconfigured_list(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        cx.update(|_, cx| cx.set_smooth_wheel_scrolling(true));
+        let state = ListState::new(30, crate::ListAlignment::Top, px(10.)).measure_all();
+        draw_test_list(cx, &state, 100.);
+        state.scroll_by(px(200.));
+        draw_test_list(cx, &state, 100.);
+
+        test_wheel(cx, ScrollDelta::Lines(point(0., 1.)));
+        assert_eq!(test_scroll_position(&state, 100.), 200.);
+
+        cx.executor().advance_clock(Duration::from_millis(200));
+        draw_test_list(cx, &state, 100.);
+        assert!(test_scroll_position(&state, 100.) < 200.);
     }
 
     #[gpui::test]
