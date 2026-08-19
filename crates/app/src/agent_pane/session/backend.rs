@@ -69,6 +69,9 @@ impl Backend {
         let resume = recovery
             .filter(|identity| identity.kind == kind)
             .map(|identity| identity.id);
+        // Harness stderr is forwarded at trace level: an agent turn emits tens of
+        // thousands of these lines per second, and formatting plus writing them
+        // costs enough main-thread time to drop frames.
         match kind {
             AgentKind::Codex => match resume {
                 Some(thread_id) => app_server::Session::spawn_resuming(
@@ -77,16 +80,16 @@ impl Backend {
                     thread_id,
                     true,
                     deliver,
-                    |line| warn!("codex app-server: {line}"),
+                    |line| trace!("codex app-server: {line}"),
                 ),
                 None => app_server::Session::spawn(launch, cwd, deliver, |line| {
-                    warn!("codex app-server: {line}")
+                    trace!("codex app-server: {line}")
                 }),
             }
             .map(Backend::Codex),
             AgentKind::Claude => {
                 stream_json::Session::spawn(launch, cwd, resume, deliver, |line| {
-                    warn!("claude: {line}")
+                    trace!("claude: {line}")
                 })
                 .map(Backend::Claude)
             }
