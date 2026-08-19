@@ -8,7 +8,9 @@ use std::{env, path, process, ptr, time};
 use clap::{Arg, ArgAction, Command as ClapCommand};
 use futures::StreamExt as _;
 use futures::channel::mpsc::unbounded;
-use gpui::{Anchor, AnyWindowHandle, App, Application, Global, KeyBinding, WeakEntity, px};
+use gpui::{
+    Anchor, AnyWindowHandle, App, Application, Global, KeyBinding, WeakEntity, frame_stats, px,
+};
 use gpui_component::{Theme as ComponentTheme, init as init_components};
 use gpui_windows::WindowsPlatform;
 use nmt_agent_utils::{AgentEvent, AgentRoute, agent_process};
@@ -52,6 +54,7 @@ use crate::window::{
 struct StartupArgs {
     url: Option<String>,
     testing: bool,
+    profiling: bool,
 }
 
 struct StartupFiles {
@@ -65,8 +68,12 @@ pub(crate) struct PlatformHandle(pub(crate) Rc<WindowsPlatform>);
 impl Global for PlatformHandle {}
 
 fn main() {
-    let StartupArgs { url, testing } = parse_startup_args();
-    run_app(url, testing);
+    let StartupArgs {
+        url,
+        testing,
+        profiling,
+    } = parse_startup_args();
+    run_app(url, testing, profiling);
 }
 
 fn parse_startup_args() -> StartupArgs {
@@ -85,6 +92,11 @@ where
         .arg(
             Arg::new("testing")
                 .long("testing")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("enable-profiling")
+                .long("enable-profiling")
                 .action(ArgAction::SetTrue),
         )
         .arg(
@@ -112,6 +124,7 @@ where
 
     StartupArgs {
         testing: matches.get_flag("testing"),
+        profiling: matches.get_flag("enable-profiling"),
         url: matches
             .get_one::<String>("url")
             .cloned()
@@ -128,7 +141,12 @@ where
     }
 }
 
-fn run_app(argv_url: Option<String>, testing: bool) {
+fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
+    // Performance probes across the render chain stay dormant until this is
+    // set, so an ordinary launch pays a single atomic load per recorded event.
+    // Their digest goes to the app log at info level.
+    frame_stats::set_enabled(profiling);
+
     agent_process().set_testing(testing);
     agent_process().set_hook_executable(
         utils::get_exe_dir()
@@ -512,12 +530,22 @@ mod tests {
 
     #[test]
     fn parses_testing_mode() {
-        let StartupArgs { url, testing } = parse_startup_args_from(["NiumaTerm", "--testing"]);
+        let StartupArgs { url, testing, .. } = parse_startup_args_from(["NiumaTerm", "--testing"]);
         assert!(testing);
         assert!(url.is_none());
 
         let StartupArgs { testing, .. } = parse_startup_args_from(["NiumaTerm"]);
         assert!(!testing);
+    }
+
+    #[test]
+    fn parses_profiling_flag() {
+        let StartupArgs { profiling, .. } =
+            parse_startup_args_from(["NiumaTerm", "--enable-profiling"]);
+        assert!(profiling);
+
+        let StartupArgs { profiling, .. } = parse_startup_args_from(["NiumaTerm"]);
+        assert!(!profiling);
     }
 }
 
