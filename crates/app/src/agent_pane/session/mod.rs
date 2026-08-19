@@ -35,6 +35,20 @@ impl Drop for AgentPane {
     }
 }
 
+/// How long the composer's "last response" reading stays accurate, given how
+/// old it already is. Matches the coarsest unit the label shows, so the pane
+/// redraws exactly as often as the words change.
+fn response_age_tick(age: Duration) -> Duration {
+    const MINUTE: u64 = 60;
+    const HOUR: u64 = 60 * MINUTE;
+
+    match age.as_secs() {
+        ..MINUTE => Duration::from_secs(1),
+        MINUTE..HOUR => Duration::from_secs(MINUTE),
+        _ => Duration::from_secs(HOUR),
+    }
+}
+
 /// Whether two recorded working directories name the same place. Compared
 /// case-insensitively with separators normalized, because the two sides come
 /// from different writers: one from the tab's own configuration, the other
@@ -202,6 +216,7 @@ impl AgentPane {
             input_history_scope,
             input_history_navigation: InputHistoryNavigation::default(),
             attachments: PendingAttachments::default(),
+            last_response_at: None,
             conversation_named: false,
             transcript,
             input,
@@ -1093,7 +1108,42 @@ impl AgentPane {
         let turn = self.turn_seq;
         self.transcript
             .update(cx, |transcript, cx| transcript.settle_turn(turn, cx));
+        self.note_response_settled(cx);
         cx.notify();
+    }
+
+    /// Stamp the moment the agent stopped answering and keep the composer's
+    /// reading of it current.
+    ///
+    /// The label's resolution decides the cadence: a reading in seconds has to
+    /// be redrawn every second, one in minutes only every minute. A pane whose
+    /// last answer was an hour ago would otherwise hold the frame pump awake
+    /// for a label that has not changed.
+    fn note_response_settled(&mut self, cx: &mut Context<Self>) {
+        let restart = self.last_response_at.is_none();
+        self.last_response_at = Some(Instant::now());
+
+        if !restart {
+            return;
+        }
+
+        cx.spawn(async move |this, cx| {
+            loop {
+                let Ok(interval) = this.update(cx, |this, cx| {
+                    cx.notify();
+                    this.last_response_at
+                        .map(|at| response_age_tick(at.elapsed()))
+                }) else {
+                    break;
+                };
+                let Some(interval) = interval else {
+                    break;
+                };
+
+                cx.background_executor().timer(interval).await;
+            }
+        })
+        .detach();
     }
 
     fn note_visible_agent_output(&mut self) {

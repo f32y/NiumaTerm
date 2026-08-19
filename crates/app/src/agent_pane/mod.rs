@@ -522,6 +522,10 @@ pub(crate) struct AgentPane {
     /// Images the pending message carries, anchored to the composer text by
     /// their `[Image #N]` placeholders.
     attachments: PendingAttachments,
+    /// When the agent last finished answering, for the composer's idle
+    /// reading of how long the conversation has been waiting on the user.
+    /// `None` until the first turn settles.
+    last_response_at: Option<Instant>,
     /// Whether this conversation has already named its tab. Only the message
     /// that opens a conversation names it: a later one is a follow-up on the
     /// same subject, and renaming on every send would make the tab strip

@@ -9,8 +9,9 @@ mod prompt_truncation_tests {
         USER_TEXT_MEASURE_REMS, VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES, command_execution_detail,
         command_execution_heading, compaction_accounting, compaction_label,
         compaction_row_is_expandable, elapsed_label, entry_copy_text, interrupted_status_label,
-        is_work_row, should_show_jump_to_latest, should_virtualize_transcript, transcript_segments,
-        truncated_user_prompt, turn_summary, worked_status_label, working_status_label,
+        is_work_row, last_response_label, should_show_jump_to_latest, should_virtualize_transcript,
+        transcript_segments, truncated_user_prompt, turn_summary, worked_status_label,
+        working_status_label,
     };
 
     /// The reading measures are expressed in rems but chosen as character
@@ -274,6 +275,19 @@ mod prompt_truncation_tests {
 
         assert_eq!(segments.len(), 10_000);
         assert!(segments.iter().all(|range| &source[range.clone()] == "row"));
+    }
+
+    #[test]
+    fn a_last_response_reading_speaks_a_turn_duration() {
+        // Same units as "Worked for", so the two clocks in the pane agree.
+        assert_eq!(last_response_label(0), "Last response: 0 s ago");
+        assert_eq!(last_response_label(45), "Last response: 45 s ago");
+        assert_eq!(last_response_label(90), "Last response: 1 min 30 s ago");
+        assert_eq!(last_response_label(3_600), "Last response: 1 hour ago");
+        assert_eq!(
+            last_response_label(90_061),
+            "Last response: 1 day 1 hour 1 min 1 s ago"
+        );
     }
 }
 
