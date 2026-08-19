@@ -1,6 +1,7 @@
 use nmt_i18n::i18n;
 
 use crate::agent_pane::RecoveryIdentity;
+use crate::ui::shell::close::begin_window_teardown;
 use crate::ui::shell::*;
 
 /// Width the tab strip keeps once the title bar runs out of room: about one
@@ -52,7 +53,7 @@ impl Shell {
             // shared close confirmation is handled here too.
             .on_close_window(cx.listener(|this, _, window, cx| {
                 if this.confirm_window_close(window, cx) {
-                    window.remove_window();
+                    begin_window_teardown(window, cx);
                 }
             }))
             .child(
