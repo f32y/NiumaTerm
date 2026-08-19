@@ -461,6 +461,7 @@
 "agent-composer-image-remove" = "移除图片"
 "agent-composer-images-label" = "已附加的图片"
 "agent-composer-last-response" = "上次回应：{duration}前"
+"agent-composer-last-response-old" = "上次回应：1 小时前"
 "agent-history-show-all-sessions" = "显示全部会话"
 "agent-history-show-all-sessions-tooltip" = "列出所有目录的会话，而不只是当前标签页的"
 "agent-approval-pending" = "等待审批"
