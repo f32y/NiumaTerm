@@ -399,6 +399,7 @@ fn pane_navigation_keeps_palette_and_recent_sessions_ahead_of_history(cx: &mut T
                 id: "session-1".into(),
                 title: "Earlier session".into(),
                 branch: None,
+                cwd: None,
                 last_active: SystemTime::now(),
                 snippet: None,
             }];

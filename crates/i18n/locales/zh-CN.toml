@@ -456,6 +456,8 @@
 "agent-action-send-message" = "发送消息"
 "agent-history-queued-message" = "已排队消息：{text}"
 "agent-history-recent-sessions" = "最近会话"
+"agent-history-show-all-sessions" = "显示全部会话"
+"agent-history-show-all-sessions-tooltip" = "列出所有目录的会话，而不只是当前标签页的"
 "agent-approval-pending" = "等待审批"
 "agent-approval-cancel-turn" = "取消本轮"
 "agent-approval-decline" = "拒绝"

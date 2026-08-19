@@ -46,8 +46,10 @@ pub(crate) fn sessions(value: &Value, cwd: Option<&str>) -> Vec<SessionSummary> 
             Some(SessionSummary {
                 title,
                 id,
-                // The harness records no branch on a session.
+                // The harness records neither a branch nor a working
+                // directory on a session.
                 branch: None,
+                cwd: None,
                 last_active: item["updatedAt"]
                     .as_u64()
                     .map(|millis| UNIX_EPOCH + Duration::from_millis(millis))

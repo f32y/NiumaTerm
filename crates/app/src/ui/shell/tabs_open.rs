@@ -1,5 +1,6 @@
 use nmt_i18n::i18n;
 
+use crate::agent_pane::RecoveryIdentity;
 use crate::ui::shell::*;
 
 impl Shell {
@@ -142,8 +143,24 @@ impl Shell {
     ) {
         self.leave_settings_workspace();
 
-        let id = Self::alloc_id(&mut self.next_id);
         let cwd = explicit_cwd(self.workspaces.active_cwd());
+
+        self.open_agent_tab_in(&profile, cwd, None, window, cx);
+    }
+
+    /// Open an agent tab rooted at `cwd`, optionally continuing `resume` once
+    /// its session starts. A conversation belongs to the directory it ran in,
+    /// so one listed from another tab opens here rather than in the tab that
+    /// listed it.
+    pub(super) fn open_agent_tab_in(
+        &mut self,
+        profile: &AgentProfile,
+        cwd: Option<String>,
+        resume: Option<RecoveryIdentity>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let id = Self::alloc_id(&mut self.next_id);
 
         // The tab is titled by the profile so multiple profiles of the same
         // agent stay distinguishable; an unnamed profile falls back to the
@@ -154,7 +171,7 @@ impl Shell {
             profile.name.clone()
         };
 
-        let pane = cx.new(|cx| AgentPane::new(profile, cwd, window, cx));
+        let pane = cx.new(|cx| AgentPane::new_resuming(profile.clone(), cwd, resume, window, cx));
 
         Self::watch_agent_tab(&pane, cx);
         self.register_agent_tab(&pane, cx);

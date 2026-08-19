@@ -54,9 +54,9 @@ use nmt_agent_utils::background_task::{
 use nmt_agent_utils::chat::{
     ApprovalPreset, Compaction, CompactionTrigger, ContextComposition, ContextWindowUsage,
     Event as SessionEvent, GoalStatus, Item as SessionItem, ModelInfo, Question, QuestionOption,
-    QueuedPrompt, ReplayTurn, SendOutcome, SessionStats, SessionSummary, SkillCatalog, SkillInfo,
-    SkillReference, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
-    SlashCommandRunPolicy, SlashCommandSource, ThreadSettings, TurnActivity,
+    QueuedPrompt, ReplayTurn, SendOutcome, SessionScope, SessionStats, SessionSummary,
+    SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments, SlashCommandInfo,
+    SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings, TurnActivity,
 };
 use nmt_agent_utils::claude_code::workflows::{
     RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult,
@@ -106,6 +106,13 @@ pub(crate) enum AgentPaneEvent {
     /// This tab's count of running child agents moved. Reported as an event so
     /// the chrome can track it without observing every pane repaint.
     BackgroundTaskActivity,
+    /// A conversation this pane listed but cannot continue: it ran in another
+    /// directory, and a tab is rooted in the one it was opened for. The chrome
+    /// owns tabs, so opening it where it worked is left to the chrome.
+    ResumeElsewhere {
+        cwd: String,
+        session_id: String,
+    },
     /// A name for the conversation this pane is holding, derived from the
     /// message that opened it. The pane does not know which tab owns it, so
     /// naming the tab is left to the chrome that does.
@@ -450,6 +457,10 @@ struct SessionHistoryUi {
     /// Claude replay is loaded before process replacement and published only
     /// after the resumed process confirms readiness.
     pending_resume_replay: Option<Vec<ReplayTurn>>,
+    /// Which directories the rows come from. A conversation belongs to the
+    /// directory it ran in, so widening the list means rows this tab cannot
+    /// resume in place; those open where they worked instead.
+    scope: SessionScope,
     scroll: VirtualListScrollHandle,
 }
 
@@ -462,6 +473,7 @@ impl Default for SessionHistoryUi {
             showing_search: false,
             selected: 0,
             pending_resume_replay: None,
+            scope: SessionScope::default(),
             scroll: VirtualListScrollHandle::new(),
         }
     }

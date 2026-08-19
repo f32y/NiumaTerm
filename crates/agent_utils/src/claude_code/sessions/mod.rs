@@ -41,7 +41,7 @@ pub use task_history::{RestoredTask, load_child_transcript, load_task_history};
 use task_history::{load_child_transcript_at, load_task_history_at, parse_task_history};
 #[cfg(test)]
 use titles::{compaction_summary_text, title_line, user_prompt_text};
-pub use titles::{count_sessions, list_sessions};
+pub use titles::{count_all_sessions, count_sessions, list_all_sessions, list_sessions};
 #[cfg(test)]
 use uuid::Uuid;
 

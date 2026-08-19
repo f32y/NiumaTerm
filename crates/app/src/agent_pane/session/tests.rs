@@ -5,7 +5,9 @@ use nmt_agent_utils::background_task::{
 use nmt_agent_utils::chat::ThreadSettings;
 
 use crate::agent_pane::session::events::resolve_ready_settings;
-use crate::agent_pane::session::{scoped_background_tasks, tab_title_from_prompt};
+use crate::agent_pane::session::{
+    directories_match, directory_label, scoped_background_tasks, tab_title_from_prompt,
+};
 
 fn snapshot_for(parent: BackgroundTaskKey) -> BackgroundTaskSnapshot {
     let mut registry = BackgroundTaskRegistry::new(parent);
@@ -266,4 +268,32 @@ and the retry loop"
         tab_title_from_prompt(&long).map(|t| t.chars().count()),
         Some(60)
     );
+}
+
+#[test]
+fn a_recorded_directory_is_matched_against_the_tab_across_writers() {
+    // The tab's configuration and the agent's own record disagree about
+    // separators and case, and neither is wrong.
+    assert!(directories_match(
+        Some(r"C:\Workspace\NiumaTerm"),
+        Some("c:/workspace/niumaterm")
+    ));
+    assert!(directories_match(
+        Some(r"C:\Workspace\NiumaTerm\"),
+        Some(r"C:\Workspace\NiumaTerm")
+    ));
+    assert!(!directories_match(Some(r"C:\A"), Some(r"C:\B")));
+
+    // A row that records nothing claims nothing, so it stays resumable here.
+    assert!(directories_match(None, Some(r"C:\A")));
+}
+
+#[test]
+fn a_directory_reads_as_its_last_two_components() {
+    assert_eq!(
+        directory_label(r"C:\Workspace\NiumaTerm"),
+        "Workspace/NiumaTerm"
+    );
+    assert_eq!(directory_label("/home/u/projects/app/"), "projects/app");
+    assert_eq!(directory_label("C:/only"), "C:/only");
 }
