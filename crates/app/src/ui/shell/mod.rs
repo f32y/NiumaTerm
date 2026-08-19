@@ -103,6 +103,14 @@ pub(super) fn explicit_cwd(cwd: &str) -> Option<String> {
     (!cwd.is_empty() && cwd != ".").then(|| cwd.to_string())
 }
 
+/// A conversation to reopen in a tab rooted where it ran, carrying the profile
+/// of the tab that listed it so the new tab launches the same agent.
+pub(super) struct PendingAgentResume {
+    pub(super) profile: AgentProfile,
+    pub(super) cwd: String,
+    pub(super) session_id: String,
+}
+
 pub(crate) struct Shell {
     pub(crate) workspaces: WorkspaceManager,
     /// Monotonic surface-id source shared by tabs and workspaces.
@@ -123,6 +131,10 @@ pub(crate) struct Shell {
     /// Focus the active pane on the first render (the window root is `Root`, so
     /// initial focus can't be set from the app entry point).
     needs_focus: bool,
+    /// A conversation from another directory, waiting for a render to open it
+    /// in a tab rooted there. Event subscriptions carry no window, and opening
+    /// a tab needs one.
+    pending_agent_resume: Option<PendingAgentResume>,
     /// Whether any tab has run a workflow. Sticky: the title-bar control
     /// appears the first time one runs and stays, so a finished run remains
     /// reachable after its rows have settled.
@@ -304,6 +316,7 @@ impl Shell {
             workspace_rename: None,
             tab_rename: None,
             needs_focus: true,
+            pending_agent_resume: None,
             workflows_seen: false,
             background_tasks_seen: false,
             root_observed: false,

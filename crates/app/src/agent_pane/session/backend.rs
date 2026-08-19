@@ -375,6 +375,20 @@ impl Backend {
         }
     }
 
+    /// Ask for recent sessions over `scope`, replacing whatever an earlier
+    /// scope produced. Only Codex lists over the protocol, and its server
+    /// takes the scope as a filter it either applies or omits; Claude Code
+    /// reads its own transcript directories, and the DeepSeek host scopes
+    /// nothing by directory.
+    pub(in crate::agent_pane) fn request_history(&mut self, scope: SessionScope) {
+        match self {
+            Backend::Codex(session) => session.request_history(scope),
+            Backend::Claude(_) | Backend::DeepSeek(_) => {}
+            #[cfg(test)]
+            Backend::Test(_) => {}
+        }
+    }
+
     /// Fetch the next page of recent sessions. Only Codex pages its history
     /// from the backend; Claude Code reads whole directories from disk, and the
     /// DeepSeek host answers with every visible session at once.

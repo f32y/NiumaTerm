@@ -22,6 +22,59 @@ pub(crate) use crate::agent_pane::session::update_recovery::{
 };
 use crate::agent_pane::*;
 
+/// Whether two recorded working directories name the same place. Compared
+/// case-insensitively with separators normalized, because the two sides come
+/// from different writers: one from the tab's own configuration, the other
+/// from whatever the agent recorded when it ran.
+pub(in crate::agent_pane) fn directories_match(left: Option<&str>, right: Option<&str>) -> bool {
+    let normalize = |path: &str| {
+        path.trim_end_matches(['/', '\\'])
+            .replace('\\', "/")
+            .to_lowercase()
+    };
+
+    match (left, right) {
+        (Some(left), Some(right)) => normalize(left) == normalize(right),
+        // A row that records no directory says nothing about belonging
+        // elsewhere, so it stays resumable in place.
+        _ => true,
+    }
+}
+
+/// How a session's directory reads in a list: its last two components, which
+/// is enough to tell projects apart without spending the row's width on a
+/// path that is mostly shared prefix.
+pub(in crate::agent_pane) fn directory_label(cwd: &str) -> String {
+    let parts: Vec<&str> = cwd
+        .trim_end_matches(['/', '\\'])
+        .split(['/', '\\'])
+        .filter(|part| !part.is_empty())
+        .collect();
+
+    match parts.len() {
+        0 => cwd.to_string(),
+        1 => parts[0].to_string(),
+        length => format!("{}/{}", parts[length - 2], parts[length - 1]),
+    }
+}
+
+/// The filesystem history a scope covers. Only a backend that reads its own
+/// transcripts takes this route; one that lists over the protocol asks its
+/// server for the scope instead.
+fn count_scoped_sessions(scope: SessionScope, cwd: Option<&str>) -> usize {
+    match scope {
+        SessionScope::CurrentDirectory => sessions::count_sessions(cwd),
+        SessionScope::AllDirectories => sessions::count_all_sessions(),
+    }
+}
+
+fn list_scoped_sessions(scope: SessionScope, cwd: Option<&str>) -> Vec<SessionSummary> {
+    match scope {
+        SessionScope::CurrentDirectory => sessions::list_sessions(cwd),
+        SessionScope::AllDirectories => sessions::list_all_sessions(),
+    }
+}
+
 /// Cap for a tab title taken from a prompt. The strip truncates whatever it is
 /// given, so this only bounds what the tab carries around.
 const TAB_TITLE_CHARS: usize = 60;
@@ -62,6 +115,20 @@ impl AgentPane {
     pub(crate) fn new(
         profile: AgentProfile,
         cwd: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::new_resuming(profile, cwd, None, window, cx)
+    }
+
+    /// A pane whose first session continues `resume` instead of opening a
+    /// fresh conversation. Used to reopen a listed conversation in the
+    /// directory it ran in, which is a different one than the tab that
+    /// listed it.
+    pub(crate) fn new_resuming(
+        profile: AgentProfile,
+        cwd: Option<String>,
+        resume: Option<RecoveryIdentity>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -157,7 +224,7 @@ impl AgentPane {
             workflows: WorkflowUi::default(),
         };
 
-        this.start_session(None, cx);
+        this.start_session_with_options(resume, false, |_, _, _| {}, cx);
         this.refresh_git_branch(cx);
 
         cx.spawn(async move |this, cx| {
@@ -182,58 +249,86 @@ impl AgentPane {
         })
         .detach();
 
-        // History read from the CLI's transcript directory, for a harness that
-        // does not deliver it over the protocol as `Event::History`. Two
-        // passes, both off-thread: a cheap count first, so the list can reserve
-        // its final height with placeholder rows, then title parsing, which
-        // swaps in the real rows.
-        if kind.caps().filesystem_session_history {
-            let cwd = this.cwd.clone();
-
-            cx.spawn(async move |this, cx| {
-                let count_cwd = cwd.clone();
-                let count = cx
-                    .background_executor()
-                    .spawn(async move { sessions::count_sessions(count_cwd.as_deref()) })
-                    .await;
-
-                let proceed = this
-                    .update(cx, |this, cx| {
-                        this.history_ui.pending = Some(count);
-                        cx.notify();
-
-                        count > 0
-                    })
-                    .unwrap_or(false);
-
-                if !proceed {
-                    return;
-                }
-
-                // Title parsing races a short hold: on a warm SSD it
-                // finishes within a frame, so without the hold the skeleton
-                // rows would never be visible and the swap would read as a
-                // flicker.
-                let load = cx
-                    .background_executor()
-                    .spawn(async move { sessions::list_sessions(cwd.as_deref()) });
-
-                cx.background_executor()
-                    .timer(Duration::from_millis(250))
-                    .await;
-
-                let sessions = load.await;
-
-                let _ = this.update(cx, |this, cx| {
-                    this.history_ui.sessions = sessions;
-                    this.history_ui.pending = None;
-                    cx.notify();
-                });
-            })
-            .detach();
-        }
+        this.load_filesystem_history(cx);
 
         this
+    }
+
+    /// Widen the session list to every directory, or narrow it back to this
+    /// tab's. The rows on screen answered the previous scope, so they go; the
+    /// reload republishes what the new one covers. A backend that lists over
+    /// the protocol is asked again, one that reads its own transcripts is
+    /// rescanned.
+    pub(super) fn toggle_history_scope(&mut self, cx: &mut Context<Self>) {
+        self.history_ui.scope = match self.history_ui.scope {
+            SessionScope::CurrentDirectory => SessionScope::AllDirectories,
+            SessionScope::AllDirectories => SessionScope::CurrentDirectory,
+        };
+        self.history_ui.sessions.clear();
+        self.history_ui.showing_search = false;
+        self.history_ui.selected = 0;
+
+        if let Some(session) = self.session.as_mut() {
+            session.request_history(self.history_ui.scope);
+        }
+        self.load_filesystem_history(cx);
+
+        cx.notify();
+    }
+
+    /// History read from the CLI's transcript directory, for a harness that
+    /// does not deliver it over the protocol as `Event::History`. Two passes,
+    /// both off-thread: a cheap count first, so the list can reserve its final
+    /// height with placeholder rows, then title parsing, which swaps in the
+    /// real rows.
+    fn load_filesystem_history(&mut self, cx: &mut Context<Self>) {
+        if !self.kind.caps().filesystem_session_history {
+            return;
+        }
+
+        let cwd = self.cwd.clone();
+        let scope = self.history_ui.scope;
+
+        cx.spawn(async move |this, cx| {
+            let count_cwd = cwd.clone();
+            let count = cx
+                .background_executor()
+                .spawn(async move { count_scoped_sessions(scope, count_cwd.as_deref()) })
+                .await;
+
+            let proceed = this
+                .update(cx, |this, cx| {
+                    this.history_ui.pending = Some(count);
+                    cx.notify();
+
+                    count > 0
+                })
+                .unwrap_or(false);
+
+            if !proceed {
+                return;
+            }
+
+            // Title parsing races a short hold: on a warm SSD it finishes
+            // within a frame, so without the hold the skeleton rows would
+            // never be visible and the swap would read as a flicker.
+            let load = cx
+                .background_executor()
+                .spawn(async move { list_scoped_sessions(scope, cwd.as_deref()) });
+
+            cx.background_executor()
+                .timer(Duration::from_millis(250))
+                .await;
+
+            let sessions = load.await;
+
+            let _ = this.update(cx, |this, cx| {
+                this.history_ui.sessions = sessions;
+                this.history_ui.pending = None;
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     pub(crate) fn agent_route(&self) -> &AgentRoute {
@@ -585,6 +680,12 @@ impl AgentPane {
     /// completed items out of the total, for the workspace entry's bar.
     pub(crate) fn task_tally(&self, cx: &App) -> Option<(u32, u32)> {
         self.transcript.read(cx).task_tally()
+    }
+
+    /// The launch profile this pane runs, so a tab opened from one of its
+    /// rows launches the same agent with the same configuration.
+    pub(crate) fn profile(&self) -> &AgentProfile {
+        &self.profile
     }
 
     /// Name of the launch profile, persisted with the tab snapshot so
@@ -1138,8 +1239,25 @@ impl AgentPane {
             return;
         };
         let id = summary.id.clone();
+        let elsewhere = summary
+            .cwd
+            .clone()
+            .filter(|cwd| !directories_match(Some(cwd.as_str()), self.cwd.as_deref()));
 
         if self.history_ui.mode == RecentSessionsMode::Loading {
+            return;
+        }
+
+        // A conversation belongs to the directory it ran in. Continuing one
+        // from elsewhere in this tab would either fail to find it or run it
+        // against the wrong tree, so it opens where it worked instead.
+        if let Some(cwd) = elsewhere {
+            self.history_ui.selected = index;
+            cx.emit(AgentPaneEvent::ResumeElsewhere {
+                cwd,
+                session_id: id,
+            });
+            cx.notify();
             return;
         }
 

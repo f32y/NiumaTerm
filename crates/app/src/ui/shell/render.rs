@@ -1,5 +1,6 @@
 use nmt_i18n::i18n;
 
+use crate::agent_pane::RecoveryIdentity;
 use crate::ui::shell::*;
 
 /// Width the tab strip keeps once the title bar runs out of room: about one
@@ -256,6 +257,19 @@ impl Render for Shell {
         if self.needs_focus {
             self.needs_focus = false;
             self.focus_active(window, cx);
+        }
+
+        if let Some(request) = self.pending_agent_resume.take() {
+            self.open_agent_tab_in(
+                &request.profile,
+                Some(request.cwd),
+                Some(RecoveryIdentity::new(
+                    AgentKind::from_profile(request.profile.kind),
+                    request.session_id,
+                )),
+                window,
+                cx,
+            );
         }
 
         self.process_native_notifications(cx);

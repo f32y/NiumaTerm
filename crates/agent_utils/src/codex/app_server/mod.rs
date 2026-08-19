@@ -18,9 +18,9 @@ pub use crate::background_task::{
 };
 pub use crate::chat::{
     Compaction, CompactionTrigger, ContextUsageScope, ContextWindowUsage, Event, Item, ModelInfo,
-    ScopedTokenUsage, SendOutcome, SessionSummary, SkillCatalog, SkillInfo, SkillReference,
-    SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy,
-    SlashCommandSource, ThreadSettings, TokenUsageBreakdown,
+    ScopedTokenUsage, SendOutcome, SessionScope, SessionSummary, SkillCatalog, SkillInfo,
+    SkillReference, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
+    SlashCommandRunPolicy, SlashCommandSource, ThreadSettings, TokenUsageBreakdown,
 };
 use crate::launcher::AgentCli;
 use crate::subprocess::JsonLineProcess;
@@ -152,6 +152,7 @@ pub struct Session {
     /// Command RPC responses are independent of turn ids. Tracking their
     /// request ids keeps command failures non-fatal to the live thread.
     pending_commands: HashMap<u64, String>,
+    history_scope: SessionScope,
     skill_refresh: SkillRefreshState,
     compaction: CompactionState,
     turn_output_usage: TurnOutputUsage,
@@ -263,6 +264,7 @@ impl Session {
             pending_approval: None,
             history_cursor: None,
             pending_commands: HashMap::new(),
+            history_scope: SessionScope::default(),
             skill_refresh: SkillRefreshState::default(),
             compaction: CompactionState::default(),
             turn_output_usage: TurnOutputUsage::default(),
@@ -444,13 +446,29 @@ impl Session {
         }));
     }
 
+    /// Ask for the first page of session history over `scope`. Replaces
+    /// whatever an earlier scope was paging through, so the caller drops the
+    /// rows it already holds.
+    pub fn request_history(&mut self, scope: SessionScope) {
+        self.history_scope = scope;
+        self.history_cursor = None;
+
+        let params = thread_list_params(&self.thread_profile, None, scope);
+        self.send(json!({
+            "jsonrpc": "2.0",
+            "id": THREAD_LIST_RPC_ID,
+            "method": "thread/list",
+            "params": params,
+        }));
+    }
+
     /// Request the next history page; a no-op when the final page arrived.
     pub fn request_more_history(&mut self) {
         let Some(cursor) = self.history_cursor.take() else {
             return;
         };
 
-        let params = thread_list_params(&self.thread_profile, Some(&cursor));
+        let params = thread_list_params(&self.thread_profile, Some(&cursor), self.history_scope);
         self.send(json!({
             "jsonrpc": "2.0",
             "id": THREAD_LIST_RPC_ID,
@@ -723,17 +741,9 @@ impl Session {
                     "method": "model/list",
                     "params": {"limit": 100},
                 }));
-                // History for the empty-tab session list. `"."` resolves
-                // against the app-server process cwd — the same directory
-                // the started thread runs in — and the exact-match filter
-                // keeps other projects' threads out.
-                let history_params = thread_list_params(&self.thread_profile, None);
-                self.send(json!({
-                    "jsonrpc": "2.0",
-                    "id": THREAD_LIST_RPC_ID,
-                    "method": "thread/list",
-                    "params": history_params,
-                }));
+                // History for the empty-tab session list, over whatever scope
+                // the tab last asked for.
+                self.request_history(self.history_scope);
                 self.start_descendant_discovery();
 
                 vec![Event::Ready(parse_thread_settings(result))]

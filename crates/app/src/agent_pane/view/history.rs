@@ -1,5 +1,6 @@
 use nmt_i18n::i18n;
 
+use crate::agent_pane::session::{directories_match, directory_label};
 use crate::agent_pane::transcript::relative_time;
 use crate::agent_pane::*;
 
@@ -188,17 +189,45 @@ impl AgentPane {
                     .bg(cx.theme().muted.alpha(1.0))
                     .pb(px(20.))
                     .child(
-                        div()
+                        h_flex()
+                            .w_full()
                             .px_4()
                             .pt_2()
                             .pb_1()
-                            .text_xs()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(cx.theme().muted_foreground)
-                            .child(i18n("agent-history-recent-sessions")),
+                            .gap_2()
+                            .items_center()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_xs()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(i18n("agent-history-recent-sessions")),
+                            )
+                            .child(
+                                Checkbox::new("history-scope")
+                                    .label(i18n("agent-history-show-all-sessions"))
+                                    .checked(self.history_ui.scope == SessionScope::AllDirectories)
+                                    .tooltip(i18n("agent-history-show-all-sessions-tooltip"))
+                                    .on_click(
+                                        cx.listener(|this, _, _, cx| this.toggle_history_scope(cx)),
+                                    ),
+                            ),
                     )
                     .child(body),
             )
+    }
+
+    /// The directory a listed conversation ran in, when that is not this
+    /// tab's. A row from this tab's own directory says nothing by repeating
+    /// it, so only the ones that will open elsewhere carry it.
+    fn foreign_directory(&self, session: &SessionSummary) -> Option<String> {
+        let cwd = session.cwd.as_deref()?;
+
+        (!directories_match(Some(cwd), self.working_directory().as_deref()))
+            .then(|| directory_label(cwd))
     }
 
     /// One history row: title, branch, and relative time, in the settings
@@ -254,6 +283,29 @@ impl AgentPane {
                             .child(snippet.lines().collect::<Vec<_>>().join(" "))
                     })),
             )
+            // Where the conversation ran, on rows that ran somewhere else.
+            // Clicking one opens it there rather than continuing it here, so
+            // the directory is the row's most load-bearing detail.
+            .children(self.foreign_directory(session).map(|directory| {
+                h_flex()
+                    .flex_none()
+                    .gap_1()
+                    .items_center()
+                    .max_w(px(180.))
+                    .child(
+                        Icon::new(IconName::Folder)
+                            .size_3()
+                            .text_color(cx.theme().muted_foreground.opacity(0.7)),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground.opacity(0.7))
+                            .child(directory),
+                    )
+            }))
             .children(session.branch.clone().map(|branch| {
                 h_flex()
                     .flex_none()

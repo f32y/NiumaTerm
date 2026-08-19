@@ -20,6 +20,11 @@ pub(super) fn munge_cwd(cwd: &str) -> String {
         .collect()
 }
 
+/// The directory holding one transcript directory per project.
+pub(super) fn projects_root() -> Option<PathBuf> {
+    Some(home_dir()?.join(".claude").join("projects"))
+}
+
 /// The transcript directory for `cwd` (falling back to the process cwd, which
 /// is what a spawned `claude` without an explicit working directory uses).
 pub(in crate::claude_code) fn project_dir(cwd: Option<&str>) -> Option<PathBuf> {

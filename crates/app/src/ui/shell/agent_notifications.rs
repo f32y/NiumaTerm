@@ -341,6 +341,17 @@ impl Shell {
                     cx.notify();
                     return;
                 }
+                AgentPaneEvent::ResumeElsewhere { cwd, session_id } => {
+                    // Opening a tab needs a window, which an event
+                    // subscription has none of; the next render has one.
+                    this.pending_agent_resume = Some(PendingAgentResume {
+                        profile: pane.read(cx).profile().clone(),
+                        cwd: cwd.clone(),
+                        session_id: session_id.clone(),
+                    });
+                    cx.notify();
+                    return;
+                }
                 AgentPaneEvent::TitleSuggested(title) => {
                     // A user-authored rename outranks this, so a tab the user
                     // has named keeps its name.

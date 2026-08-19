@@ -402,9 +402,14 @@ fn custom_profile_filters_history_and_adds_an_unknown_selected_model() {
             ..CodexProviderConfig::default()
         }),
     };
+    let scoped = thread_list_params(&profile, Some("next"), SessionScope::CurrentDirectory);
+    assert_eq!(scoped["modelProviders"], json!(["niumaterm-a1"]));
+    // The exact-match filter is what keeps other projects out; asking for
+    // every directory is expressed by leaving it off.
+    assert_eq!(scoped["cwd"], json!("."));
     assert_eq!(
-        thread_list_params(&profile, Some("next"))["modelProviders"],
-        json!(["niumaterm-a1"])
+        thread_list_params(&profile, None, SessionScope::AllDirectories)["cwd"],
+        Value::Null
     );
 
     let models = parse_models(

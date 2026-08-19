@@ -378,6 +378,16 @@ impl Item {
     }
 }
 
+/// Which directories a session listing covers. A conversation is recorded
+/// against the directory it ran in, and the tab that lists them is rooted in
+/// one, so the two answers a list can give are "this one" and "every one".
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SessionScope {
+    #[default]
+    CurrentDirectory,
+    AllDirectories,
+}
+
 /// One resumable persisted session, for the history list an empty chat tab
 /// shows above its composer. Ordered newest-first by `last_active`.
 #[derive(Clone, Debug, PartialEq)]
@@ -386,6 +396,10 @@ pub struct SessionSummary {
     /// First user prompt of the session (or an id prefix when none exists).
     pub title: String,
     pub branch: Option<String>,
+    /// Working directory the session ran in. Carried because a list can span
+    /// directories, and resuming a session outside the current one has to
+    /// happen where it worked. `None` for a source that does not record it.
+    pub cwd: Option<String>,
     pub last_active: SystemTime,
     /// Why a search returned this row. Present only in a list produced by a
     /// content search, because the excerpt describes the query rather than the

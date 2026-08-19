@@ -1,11 +1,11 @@
 use std::fs;
 use std::io::{BufRead, BufReader, Read as _};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
 use crate::chat::SessionSummary;
-use crate::claude_code::sessions::paths::project_dir;
+use crate::claude_code::sessions::paths::{project_dir, projects_root};
 
 /// Head window scanned for the first user prompt. Sessions can open with
 /// kilobytes of hook output and queue records before the first prompt, but
@@ -16,9 +16,15 @@ const TITLE_SCAN_BYTES: u64 = 64 * 1024;
 /// can reserve its final height (placeholder rows) before any transcript
 /// head is parsed for titles.
 pub fn count_sessions(cwd: Option<&str>) -> usize {
-    let Some(dir) = project_dir(cwd) else {
-        return 0;
-    };
+    project_dir(cwd).map(|dir| count_in_dir(&dir)).unwrap_or(0)
+}
+
+/// The same cheap first pass across every project the CLI has recorded.
+pub fn count_all_sessions() -> usize {
+    project_dirs().iter().map(|dir| count_in_dir(dir)).sum()
+}
+
+fn count_in_dir(dir: &Path) -> usize {
     let Ok(entries) = fs::read_dir(dir) else {
         return 0;
     };
@@ -29,6 +35,26 @@ pub fn count_sessions(cwd: Option<&str>) -> usize {
         .count()
 }
 
+/// Every project directory the CLI has recorded a session in. The directory
+/// name encodes the project's path with every non-alphanumeric character
+/// replaced, which cannot be decoded back, so the working directory a listing
+/// reports comes from inside each transcript instead.
+fn project_dirs() -> Vec<PathBuf> {
+    let Some(root) = projects_root() else {
+        return Vec::new();
+    };
+    let Ok(entries) = fs::read_dir(root) else {
+        return Vec::new();
+    };
+
+    entries
+        .filter_map(|entry| {
+            let path = entry.ok()?.path();
+            path.is_dir().then_some(path)
+        })
+        .collect()
+}
+
 /// Sessions resumable from `cwd`, newest first. Title extraction reads only
 /// the head of each file, so listing a directory of multi-megabyte
 /// transcripts stays cheap; still meant for a background thread.
@@ -36,11 +62,34 @@ pub fn list_sessions(cwd: Option<&str>) -> Vec<SessionSummary> {
     let Some(dir) = project_dir(cwd) else {
         return Vec::new();
     };
+
+    sorted_newest_first(sessions_in_dir(&dir))
+}
+
+/// Sessions resumable from any project the CLI has recorded, newest first.
+/// Each carries the working directory it ran in, because resuming one outside
+/// the current directory has to happen where it worked.
+pub fn list_all_sessions() -> Vec<SessionSummary> {
+    sorted_newest_first(
+        project_dirs()
+            .iter()
+            .flat_map(|dir| sessions_in_dir(dir))
+            .collect(),
+    )
+}
+
+fn sorted_newest_first(mut sessions: Vec<SessionSummary>) -> Vec<SessionSummary> {
+    sessions.sort_by(|a, b| b.last_active.cmp(&a.last_active));
+
+    sessions
+}
+
+fn sessions_in_dir(dir: &Path) -> Vec<SessionSummary> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
     };
 
-    let mut sessions: Vec<SessionSummary> = entries
+    entries
         .filter_map(|entry| {
             let entry = entry.ok()?;
             let path = entry.path();
@@ -51,28 +100,43 @@ pub fn list_sessions(cwd: Option<&str>) -> Vec<SessionSummary> {
 
             let id = path.file_stem()?.to_str()?.to_string();
             let last_active = entry.metadata().ok()?.modified().ok()?;
-            let (title, branch) = head_title(&path);
+            let head = head_summary(&path);
 
             Some(SessionSummary {
-                title: title.unwrap_or_else(|| id.chars().take(8).collect()),
+                title: head.title.unwrap_or_else(|| id.chars().take(8).collect()),
                 id,
-                branch,
+                branch: head.branch,
+                cwd: head.cwd,
                 last_active,
                 snippet: None,
             })
         })
-        .collect();
-
-    sessions.sort_by(|a, b| b.last_active.cmp(&a.last_active));
-
-    sessions
+        .collect()
 }
 
-/// First user prompt (and its recorded git branch) from the head of a
-/// transcript file.
-fn head_title(path: &Path) -> (Option<String>, Option<String>) {
+/// What the head of a transcript file says about its session.
+struct HeadSummary {
+    title: Option<String>,
+    branch: Option<String>,
+    cwd: Option<String>,
+}
+
+/// Read the first user prompt, its recorded git branch, and the session's
+/// working directory from the head of a transcript file.
+///
+/// The working directory is taken from whichever record carries it first,
+/// which is usually earlier than the first prompt: the directory the CLI ran
+/// in is the only record of it, since the project directory's name encodes it
+/// irreversibly.
+fn head_summary(path: &Path) -> HeadSummary {
+    let mut summary = HeadSummary {
+        title: None,
+        branch: None,
+        cwd: None,
+    };
+
     let Ok(file) = fs::File::open(path) else {
-        return (None, None);
+        return summary;
     };
 
     for line in BufReader::new(file.take(TITLE_SCAN_BYTES))
@@ -82,6 +146,14 @@ fn head_title(path: &Path) -> (Option<String>, Option<String>) {
         let Ok(record) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
+
+        if summary.cwd.is_none() {
+            summary.cwd = record["cwd"]
+                .as_str()
+                .filter(|cwd| !cwd.is_empty())
+                .map(str::to_owned);
+        }
+
         let Some(text) = user_prompt_text(&record) else {
             continue;
         };
@@ -89,15 +161,16 @@ fn head_title(path: &Path) -> (Option<String>, Option<String>) {
             continue;
         };
 
-        let branch = record["gitBranch"]
+        summary.branch = record["gitBranch"]
             .as_str()
-            .filter(|s| !s.is_empty())
+            .filter(|branch| !branch.is_empty())
             .map(str::to_owned);
+        summary.title = Some(title);
 
-        return (Some(title), branch);
+        return summary;
     }
 
-    (None, None)
+    summary
 }
 
 /// The prompt text of a `user` record, or `None` for records that carry no

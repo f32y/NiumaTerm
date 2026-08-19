@@ -5,8 +5,8 @@ use serde_json::{Value, json};
 use crate::CodexProviderConfig;
 use crate::chat::{
     Compaction, ContextUsageScope, ContextWindowUsage, Event, Item, ModelInfo, ReplayItem,
-    ReplayTurn, ScopedTokenUsage, SessionSummary, SkillReference, SlashCommandOutcome,
-    ThreadSettings, TokenUsageBreakdown,
+    ReplayTurn, ScopedTokenUsage, SessionScope, SessionSummary, SkillReference,
+    SlashCommandOutcome, ThreadSettings, TokenUsageBreakdown,
 };
 use crate::codex::app_server::{
     PROVIDER_API_FIELD, THREAD_LIST_LIMIT, THREAD_RESUME_RPC_ID, THREAD_START_RPC_ID, ThreadProfile,
@@ -176,12 +176,21 @@ pub(super) fn thread_resume_params(thread_id: &str, profile: &ThreadProfile) -> 
     params
 }
 
-pub(super) fn thread_list_params(profile: &ThreadProfile, cursor: Option<&str>) -> Value {
+pub(super) fn thread_list_params(
+    profile: &ThreadProfile,
+    cursor: Option<&str>,
+    scope: SessionScope,
+) -> Value {
     let mut params = json!({
-        "cwd": ".",
         "sortKey": "recency_at",
         "limit": THREAD_LIST_LIMIT,
     });
+    // `"."` resolves against the app-server process cwd, which is the
+    // directory the started thread runs in; the server treats the filter as an
+    // exact match. Omitting it is how the protocol asks for every directory.
+    if scope == SessionScope::CurrentDirectory {
+        params["cwd"] = json!(".");
+    }
     if let Some(provider) = profile.provider.as_ref() {
         params["modelProviders"] = json!([provider.id.as_str()]);
     }
@@ -343,6 +352,10 @@ pub(super) fn parse_thread_summaries(
                         id,
                         title,
                         branch,
+                        cwd: thread["cwd"]
+                            .as_str()
+                            .filter(|cwd| !cwd.is_empty())
+                            .map(str::to_owned),
                         last_active: UNIX_EPOCH + Duration::from_secs(seconds),
                         snippet: None,
                     })
