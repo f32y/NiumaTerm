@@ -46,6 +46,13 @@ pub(super) fn working_status_label(
     }
 }
 
+/// How long ago the agent last answered, for the composer's info bar. Reads in
+/// the same units as a turn's duration, so the two times in the pane are
+/// spoken the same way.
+pub(in crate::agent_pane) fn last_response_label(seconds: u64) -> String {
+    i18n("agent-composer-last-response").replace("{duration}", &elapsed_label(seconds))
+}
+
 pub(super) fn worked_status_label(seconds: u64, output_tokens: Option<u64>) -> String {
     timed_token_label(i18n("agent-transcript-worked"), seconds, output_tokens)
 }

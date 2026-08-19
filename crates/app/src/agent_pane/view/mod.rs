@@ -1,6 +1,7 @@
 mod attachments;
 mod banners;
 mod history;
+mod last_response;
 mod session_state;
 mod settings_row;
 
@@ -336,6 +337,7 @@ impl Render for AgentPane {
                                                 .min_w_0()
                                                 .child(self.render_settings_row(cx)),
                                         )
+                                        .children(self.render_last_response(cx))
                                         // Stop replaces Send in place while a
                                         // turn runs.
                                         .child(if running {

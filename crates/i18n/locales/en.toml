@@ -461,6 +461,7 @@
 "agent-composer-images-full" = "A message carries at most {count} images"
 "agent-composer-image-remove" = "Remove image"
 "agent-composer-images-label" = "Attached images"
+"agent-composer-last-response" = "Last response: {duration} ago"
 "agent-history-show-all-sessions" = "Show all sessions"
 "agent-history-show-all-sessions-tooltip" = "List sessions from every directory, not just this tab's"
 "agent-approval-pending" = "PENDING APPROVAL"

@@ -17,7 +17,7 @@ pub(super) use crate::agent_pane::transcript::format::{
     command_execution_detail, command_execution_heading, compact_token_count,
     compaction_accounting, compaction_label, compaction_row_is_expandable,
     compaction_trigger_label, detect_output_language, entry_copy_text, fenced_code_block_as,
-    file_extension_lang, hidden, is_work_row, permission_icon, relative_time,
+    file_extension_lang, hidden, is_work_row, last_response_label, permission_icon, relative_time,
     should_show_jump_to_latest, strip_read_gutter, truncated_user_prompt, working_label,
 };
 #[cfg(test)]
