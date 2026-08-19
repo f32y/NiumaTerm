@@ -10,6 +10,7 @@ use gpui_component::progress::ProgressCircle;
 use gpui_component::scroll::Scrollbar;
 use gpui_component::{ActiveTheme, Icon, IconName, IconNamed, Selectable, Sizable, h_flex, v_flex};
 use nmt_agent_utils::AgentRuntimeStatus;
+use nmt_config::appearance::TabBarStyle;
 use nmt_i18n::i18n;
 use nmt_terminal::event::ProgressReport;
 
@@ -267,15 +268,19 @@ impl Render for WorkspaceDragPreview {
             cx,
         );
 
+        // Matches the item it replicates: the vertical tab-bar style leaves
+        // this column empty and the tab rows use the lane for their own marks.
+        let vertical_tabs = cx.global::<AppSettings>().tab_bar_style == TabBarStyle::Vertical;
         let indicator = v_flex()
             .id("workspace-drag-status")
-            .aria_label(status_label)
             .w_4()
             .flex_none()
             .gap_0p5()
             .items_center()
             .justify_center()
-            .children(glyphs);
+            .when(!vertical_tabs, |this| {
+                this.aria_label(status_label).children(glyphs)
+            });
 
         let background = cx
             .theme()
@@ -376,6 +381,12 @@ impl Sidebar {
         cx: &mut Context<Shell>,
     ) -> AnyElement {
         let settings_entry = ws.kind == WorkspaceKind::Settings;
+        // In the vertical tab-bar style every tab of this workspace is on
+        // screen as its own row carrying its own status mark and progress, so
+        // the workspace's aggregate of them would say the same thing twice.
+        // The status column keeps its width either way: the tab rows place
+        // their marks in that lane.
+        let vertical_tabs = cx.global::<AppSettings>().tab_bar_style == TabBarStyle::Vertical;
         let (glyphs, status_label) = workspace_status_glyphs(
             ws.agent_status,
             ws.terminal_activity,
@@ -385,7 +396,6 @@ impl Sidebar {
 
         let indicator = v_flex()
             .id(("workspace-status", idx))
-            .aria_label(status_label.clone())
             // The column's width is fixed so an idle workspace can suppress its
             // glyphs without shifting its name relative to active neighbours;
             // the height follows its contents so a stacked pair centers as a
@@ -395,7 +405,9 @@ impl Sidebar {
             .gap_0p5()
             .items_center()
             .justify_center()
-            .children(glyphs)
+            .when(!vertical_tabs, |this| {
+                this.aria_label(status_label.clone()).children(glyphs)
+            })
             .into_any_element();
 
         let ws_id = ws.id;
@@ -582,9 +594,9 @@ impl Sidebar {
         let cwd = ws.cwd.clone();
         let temporary = ws.temporary;
 
-        let progress = ws
-            .progress
-            .fraction()
+        let progress = (!vertical_tabs)
+            .then(|| ws.progress.fraction())
+            .flatten()
             .map(|fraction| workspace_progress_bar(fraction, cx));
 
         div()
@@ -829,7 +841,21 @@ impl Sidebar {
                 },
             )
             .child(label)
-            .children(agent_mark)
+            // The status mark sits in the lane the workspace item's status
+            // column occupies — between that item's horizontal padding and
+            // this row's indent — so every tab's mark lines up under it. Out
+            // of the flow, because that lane is this row's left padding.
+            .children(agent_mark.map(|mark| {
+                div()
+                    .absolute()
+                    .left_2()
+                    .w_4()
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(mark)
+            }))
             // Bell dot, in the warning color so it reads apart from the unread
             // dot when a tab carries both.
             .children(tab.bell.then(|| dot(cx.theme().warning)))
