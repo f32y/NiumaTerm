@@ -380,16 +380,15 @@ async fn restore_tabs(
             total: suspended.len(),
         }),
     );
+    // A restart failure now surfaces through `restoration_readiness` below,
+    // because the backend process comes up off the UI thread.
     let mut failures = 0;
     for index in suspended.iter().copied() {
-        let restored = cx.update(|cx| {
+        cx.update(|cx| {
             panes[index].update(cx, |pane, cx| {
                 pane.restore_after_update(&snapshots[index], cx)
             })
         });
-        if !restored {
-            failures += 1;
-        }
     }
 
     let started = Instant::now();

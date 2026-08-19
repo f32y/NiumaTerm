@@ -559,26 +559,28 @@ impl AgentPane {
             input.set_value(prompt.clone(), window, cx);
             input.set_selected_range(prompt.len()..prompt.len(), cx);
         });
-        let started = self.start_session_with_options(
+        self.start_session_with_options(
             fork.session_id
                 .map(|id| RecoveryIdentity::new(AgentKind::Claude, id)),
             true,
-            cx,
-        );
-        self.set_command_feedback(
-            if started {
-                CommandFeedbackKind::Notice
-            } else {
-                CommandFeedbackKind::Error
-            },
-            if !started && files_restored {
-                i18n("agent-rewind-start-failed-after-files").to_string()
-            } else if !started {
-                i18n("agent-rewind-start-failed").to_string()
-            } else if files_restored {
-                i18n("agent-rewind-complete-with-files").to_string()
-            } else {
-                i18n("agent-rewind-complete").to_string()
+            move |this, started, cx| {
+                this.set_command_feedback(
+                    if started {
+                        CommandFeedbackKind::Notice
+                    } else {
+                        CommandFeedbackKind::Error
+                    },
+                    if !started && files_restored {
+                        i18n("agent-rewind-start-failed-after-files").to_string()
+                    } else if !started {
+                        i18n("agent-rewind-start-failed").to_string()
+                    } else if files_restored {
+                        i18n("agent-rewind-complete-with-files").to_string()
+                    } else {
+                        i18n("agent-rewind-complete").to_string()
+                    },
+                    cx,
+                );
             },
             cx,
         );
