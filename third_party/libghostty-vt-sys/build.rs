@@ -426,12 +426,7 @@ fn build_vendored(link_mode: LinkMode) {
             .arg(&zig_global_cache_dir);
     }
 
-    // Only pass -Dtarget when cross-compiling. For native builds, let zig
-    // auto-detect the host (matches how ghostty's own CMakeLists.txt works).
-    if target != host {
-        let zig_target = zig_target(&target);
-        build.arg(format!("-Dtarget={zig_target}"));
-    }
+    configure_zig_target(&mut build, &target, &host);
 
     run(build, "zig build");
 
@@ -885,6 +880,22 @@ fn zig_target(target: &str) -> String {
     value.to_owned()
 }
 
+fn configure_zig_target(build: &mut Command, target: &str, host: &str) {
+    let is_windows_target = target.contains("-windows-");
+
+    // Windows binaries run beyond the build machine. Leaving the Zig target
+    // implicit can place AVX-512 in compiler_rt, including the memset used by
+    // the static CRT before main. x86_64 Windows intentionally requires AVX2.
+    if target != host || is_windows_target {
+        let zig_target = zig_target(target);
+        build.arg(format!("-Dtarget={zig_target}"));
+    }
+
+    if is_windows_target && target.starts_with("x86_64-") {
+        build.arg("-Dcpu=baseline+avx2");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -913,5 +924,25 @@ mod tests {
     fn prebuilt_install_prefix_is_target_specific() {
         let prefix = prebuilt_install_prefix("x86_64-pc-windows-msvc");
         assert!(prefix.ends_with(Path::new("prebuilt").join("x86_64-pc-windows-msvc")));
+    }
+
+    #[test]
+    fn native_windows_build_pins_zig_target_and_avx2() {
+        let mut command = Command::new("zig");
+
+        configure_zig_target(
+            &mut command,
+            "x86_64-pc-windows-msvc",
+            "x86_64-pc-windows-msvc",
+        );
+
+        let command_args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            command_args,
+            ["-Dtarget=x86_64-windows-msvc", "-Dcpu=baseline+avx2"]
+        );
     }
 }
