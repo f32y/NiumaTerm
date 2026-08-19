@@ -106,6 +106,10 @@ pub(crate) enum AgentPaneEvent {
     /// This tab's count of running child agents moved. Reported as an event so
     /// the chrome can track it without observing every pane repaint.
     BackgroundTaskActivity,
+    /// A name for the conversation this pane is holding, derived from the
+    /// message that opened it. The pane does not know which tab owns it, so
+    /// naming the tab is left to the chrome that does.
+    TitleSuggested(String),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -502,6 +506,11 @@ pub(crate) struct AgentPane {
     cwd: Option<String>,
     input_history_scope: InputHistoryScope,
     input_history_navigation: InputHistoryNavigation,
+    /// Whether this conversation has already named its tab. Only the message
+    /// that opens a conversation names it: a later one is a follow-up on the
+    /// same subject, and renaming on every send would make the tab strip
+    /// churn under a working agent.
+    conversation_named: bool,
     /// The conversation as the user reads it. Presentation lives in its own
     /// view so a child agent's conversation renders through the same code.
     transcript: Entity<TranscriptView>,

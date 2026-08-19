@@ -22,6 +22,20 @@ pub(crate) use crate::agent_pane::session::update_recovery::{
 };
 use crate::agent_pane::*;
 
+/// Cap for a tab title taken from a prompt. The strip truncates whatever it is
+/// given, so this only bounds what the tab carries around.
+const TAB_TITLE_CHARS: usize = 60;
+
+/// The name a composed prompt gives its tab: its first non-empty line. A slash
+/// command names nothing — it instructs the CLI rather than stating a subject,
+/// and the settings controls send some of them on the user's behalf — so a
+/// conversation that opens with one waits for the message that follows.
+fn tab_title_from_prompt(text: &str) -> Option<String> {
+    let line = text.lines().find(|line| !line.trim().is_empty())?.trim();
+
+    (!line.starts_with('/')).then(|| line.chars().take(TAB_TITLE_CHARS).collect())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Status {
     Starting,
@@ -103,6 +117,7 @@ impl AgentPane {
             cwd,
             input_history_scope,
             input_history_navigation: InputHistoryNavigation::default(),
+            conversation_named: false,
             transcript,
             input,
             session: None,
@@ -372,6 +387,9 @@ impl AgentPane {
         // associated with the previous backend before the new epoch can emit.
         cx.emit(AgentPaneEvent::Interrupted);
         self.session_epoch = next_session_epoch(self.session_epoch);
+        // A replacement conversation names the tab again from its own opening
+        // message; the previous one's subject no longer describes the tab.
+        self.conversation_named = false;
         self.palette.skill_catalog = None;
         self.palette.skill_binding = None;
         let epoch = self.session_epoch;
@@ -591,6 +609,30 @@ impl AgentPane {
         self.send_text_inner(text, skill, true, cx)
     }
 
+    /// Ask the backend what to call this conversation. Claude's CLI names it
+    /// with a model call on the whole prompt; Codex stores names but writes
+    /// none of its own, so it is told `opening_line`.
+    ///
+    /// Asked again for every message until a name arrives, because a request
+    /// can come back empty: Claude's CLI refuses to name a conversation from
+    /// under ten characters, which a short opening question can be. The
+    /// adapter drops a request made while one is outstanding, so the repeat
+    /// costs nothing once one is on its way.
+    fn request_conversation_title(
+        &mut self,
+        text: &str,
+        opening_line: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+
+        for event in session.request_title(text, opening_line) {
+            self.apply_event(event, cx);
+        }
+    }
+
     fn send_text_inner(
         &mut self,
         text: String,
@@ -638,6 +680,16 @@ impl AgentPane {
         // The first message commits this tab to its conversation; the
         // history list is no longer offered.
         self.history_ui.mode = RecentSessionsMode::Hidden;
+
+        // A slash command names nothing — it instructs the CLI rather than
+        // stating a subject, and the settings controls send some of them on
+        // the user's behalf — so a conversation that opens with one waits for
+        // the message that follows.
+        if !self.conversation_named
+            && let Some(opening_line) = tab_title_from_prompt(&text)
+        {
+            self.request_conversation_title(&text, opening_line, cx);
+        }
 
         match outcome {
             SendOutcome::StartedTurn => {

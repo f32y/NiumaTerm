@@ -471,6 +471,38 @@ impl Session {
             .insert(request_id, PendingControlOperation::ContextComposition);
     }
 
+    /// Ask the CLI to name this conversation. The CLI summarizes `description`
+    /// with a model call, so the answer is a name for the subject rather than
+    /// a truncation of the prompt, and it arrives later as
+    /// [`Event::TitleUpdated`]. `persist` writes the name into the session
+    /// file, so resuming the conversation finds it under the same name.
+    ///
+    /// The CLI answers with a null title when `description` is under ten
+    /// characters, and a build without this request answers with an error;
+    /// both leave the conversation unnamed rather than reporting anything.
+    pub fn request_session_title(&mut self, description: &str) {
+        if !self.ready || !self.process.has_stdin() {
+            return;
+        }
+        // One outstanding request is enough: a second would name the same
+        // conversation twice.
+        if self
+            .pending_control_operations
+            .values()
+            .any(|operation| *operation == PendingControlOperation::SessionTitle)
+        {
+            return;
+        }
+
+        let request_id = self.send_control(json!({
+            "subtype": "generate_session_title",
+            "description": description,
+            "persist": true,
+        }));
+        self.pending_control_operations
+            .insert(request_id, PendingControlOperation::SessionTitle);
+    }
+
     pub fn rewind_files(&mut self, user_message_id: &str) -> SlashCommandOutcome {
         if !self.ready || !self.process.has_stdin() {
             return SlashCommandOutcome::NotReady;

@@ -211,6 +211,31 @@ impl Backend {
         }
     }
 
+    /// Ask for a name for this conversation. Claude's CLI summarizes
+    /// `description` with a model call and answers later through
+    /// `TitleUpdated`; Codex has no naming of its own, so `opening_line` is
+    /// stored on the thread and reported straight back. Returning the events
+    /// lets one call site serve both without knowing which it is talking to.
+    pub(in crate::agent_pane) fn request_title(
+        &mut self,
+        description: &str,
+        opening_line: String,
+    ) -> Vec<SessionEvent> {
+        match self {
+            Backend::Claude(session) => {
+                session.request_session_title(description);
+                Vec::new()
+            }
+            Backend::Codex(session) => {
+                session.set_thread_name(&opening_line);
+                vec![SessionEvent::TitleUpdated(opening_line)]
+            }
+            Backend::DeepSeek(_) => Vec::new(),
+            #[cfg(test)]
+            Backend::Test(_) => Vec::new(),
+        }
+    }
+
     pub(in crate::agent_pane) fn rewind_files(
         &mut self,
         user_message_id: &str,

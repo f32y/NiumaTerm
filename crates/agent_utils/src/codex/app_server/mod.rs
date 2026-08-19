@@ -425,6 +425,25 @@ impl Session {
         }));
     }
 
+    /// Name this thread. The server has no naming of its own — it stores what
+    /// a client tells it and echoes the change to other clients — so the name
+    /// comes from the caller. Fire and forget: the response says only whether
+    /// the name was stored, which changes nothing this side shows.
+    pub fn set_thread_name(&mut self, name: &str) {
+        let Some(thread_id) = self.thread_id.clone() else {
+            return;
+        };
+
+        let rpc_id = self.alloc_rpc_id();
+
+        self.send(json!({
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "method": "thread/name/set",
+            "params": {"threadId": thread_id, "name": name},
+        }));
+    }
+
     /// Request the next history page; a no-op when the final page arrived.
     pub fn request_more_history(&mut self) {
         let Some(cursor) = self.history_cursor.take() else {
