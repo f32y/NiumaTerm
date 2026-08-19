@@ -1,3 +1,7 @@
+use std::sync::Arc;
+
+use gpui::Image;
+
 use crate::agent_pane::transcript::view::TranscriptView;
 use crate::agent_pane::transcript::{
     compaction_accounting, hidden, is_work_row, should_show_jump_to_latest,
@@ -11,6 +15,10 @@ pub(in crate::agent_pane) struct Entry {
     pub(in crate::agent_pane) at: String,
     pub(in crate::agent_pane) turn: u64,
     pub(in crate::agent_pane) item: SessionItem,
+    /// Images a user message carried. Held here rather than on the protocol
+    /// item because they are this side's own record: a harness reports what a
+    /// message said, not the pixels the person attached to it.
+    pub(in crate::agent_pane) images: Vec<Arc<Image>>,
 }
 
 /// One transcript row for the virtualized list. `PartialEq` powers the
@@ -158,7 +166,15 @@ impl TranscriptView {
         self.transcript_list.set_follow_mode(FollowMode::Tail);
     }
 
-    pub(crate) fn push(&mut self, turn: u64, item: SessionItem, cx: &mut Context<Self>) {
+    /// Append an item and the images it carries, which only a user message
+    /// has any of.
+    pub(crate) fn push(
+        &mut self,
+        turn: u64,
+        item: SessionItem,
+        images: Vec<Arc<Image>>,
+        cx: &mut Context<Self>,
+    ) {
         // Submitting a user message explicitly returns to the live tail.
         // Agent output preserves a manually chosen reading position via the
         // list's own tail-follow state.
@@ -170,6 +186,7 @@ impl TranscriptView {
             at: Local::now().format("%H:%M").to_string(),
             turn,
             item,
+            images,
         });
         cx.notify();
     }

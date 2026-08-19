@@ -1,6 +1,11 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use nmt_agent_utils::chat::MessageImage;
 use nmt_agent_utils::claude_code::sessions::RestoredTask;
 use nmt_i18n::i18n;
 
+use crate::agent_pane::composer::attachments::PendingAttachments;
 use crate::agent_pane::*;
 
 /// The conversation a restarted backend should continue, qualified by the
@@ -113,15 +118,35 @@ impl Backend {
         }
     }
 
+    /// Send a message and the images it carries. Each harness takes them in
+    /// its own shape: Codex reads files from disk, so the attachments are
+    /// written under `scratch` first, while Claude Code takes the bytes
+    /// inline. A harness with no image input is sent the text alone, which is
+    /// all a pane without `image_input` can have composed.
     pub(in crate::agent_pane) fn send_user_message(
         &mut self,
         text: &str,
         settings: &ThreadSettings,
         skill: Option<&SkillReference>,
+        attachments: &PendingAttachments,
+        scratch: &Path,
     ) -> SendOutcome {
         match self {
-            Backend::Codex(session) => session.send_user_message_with_skill(text, settings, skill),
-            Backend::Claude(session) => session.send_user_message(text, settings),
+            Backend::Codex(session) => {
+                let paths = write_attachments(attachments, scratch);
+                session.send_user_message_with_skill(text, settings, skill, &paths)
+            }
+            Backend::Claude(session) => {
+                let images: Vec<MessageImage> = attachments
+                    .iter()
+                    .map(|attachment| MessageImage {
+                        bytes: attachment.bytes().to_vec(),
+                        media_type: attachment.format().mime_type().to_string(),
+                    })
+                    .collect();
+
+                session.send_user_message(text, settings, &images)
+            }
             // Skills are not mapped for DeepSeek, so a reference cannot reach
             // it and the prompt goes as the user wrote it.
             Backend::DeepSeek(session) => session.send_user_message(text),
@@ -575,4 +600,26 @@ impl Backend {
             Backend::Test(_) => {}
         }
     }
+}
+
+/// Write each attachment into `scratch`, returning the paths that could be
+/// written. A file that cannot be written is left out rather than failing the
+/// message: the text and the images that did land are still worth sending.
+fn write_attachments(attachments: &PendingAttachments, scratch: &Path) -> Vec<PathBuf> {
+    if attachments.is_empty() || fs::create_dir_all(scratch).is_err() {
+        return Vec::new();
+    }
+
+    attachments
+        .iter()
+        .enumerate()
+        .filter_map(|(index, attachment)| {
+            // Named by position within the message, and rewritten on every
+            // send, so a pane's scratch directory never grows past one
+            // message's worth of files.
+            let path = scratch.join(format!("image-{}.png", index + 1));
+
+            fs::write(&path, attachment.bytes()).ok().map(|()| path)
+        })
+        .collect()
 }

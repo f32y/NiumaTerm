@@ -135,6 +135,7 @@ impl TranscriptView {
                 at: String::new(),
                 turn: 0,
                 item: item.clone(),
+                images: Vec::new(),
             })
             .collect();
         if follow {
@@ -184,6 +185,7 @@ impl TranscriptView {
                     .unwrap_or_default(),
                 turn,
                 item: entry.item,
+                images: Vec::new(),
             });
         }
 
@@ -209,6 +211,7 @@ impl TranscriptView {
             at: Local::now().format("%H:%M").to_string(),
             turn,
             item,
+            images: Vec::new(),
         });
     }
 

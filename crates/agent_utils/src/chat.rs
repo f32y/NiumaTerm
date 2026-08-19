@@ -378,6 +378,16 @@ impl Item {
     }
 }
 
+/// One image a message carries, already encoded. Harnesses differ in what
+/// they want done with it - one reads a file, another takes the bytes inline -
+/// so this carries the bytes and lets each adapter decide.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MessageImage {
+    pub bytes: Vec<u8>,
+    /// IANA media type of `bytes`, for a harness that must declare it.
+    pub media_type: String,
+}
+
 /// Which directories a session listing covers. A conversation is recorded
 /// against the directory it ran in, and the tab that lists them is rooted in
 /// one, so the two answers a list can give are "this one" and "every one".

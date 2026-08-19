@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 use std::mem::take;
+use std::path::PathBuf;
 use std::time::Duration;
 #[cfg(test)]
 use std::time::UNIX_EPOCH;
@@ -315,23 +316,28 @@ impl Session {
     /// interjection); otherwise it starts the next turn carrying the settings
     /// as overrides.
     pub fn send_user_message(&mut self, text: &str, settings: &ThreadSettings) -> SendOutcome {
-        self.send_user_message_with_skill(text, settings, None)
+        self.send_user_message_with_skill(text, settings, None, &[])
     }
 
     /// Send text plus the exact skill identity selected by a client picker.
     /// Text-only callers keep the original one-item request shape.
+    /// Send text plus the exact skill identity selected by a client picker,
+    /// and the local images the message carries. The server reads each image
+    /// from the path given, so the caller keeps the file readable until the
+    /// request has been written.
     pub fn send_user_message_with_skill(
         &mut self,
         text: &str,
         settings: &ThreadSettings,
         skill: Option<&SkillReference>,
+        images: &[PathBuf],
     ) -> SendOutcome {
         let Some(thread_id) = self.thread_id.clone() else {
             return SendOutcome::NotReady;
         };
 
         let rpc_id = self.alloc_rpc_id();
-        let input = codex_user_input(text, skill);
+        let input = codex_user_input(text, skill, images);
 
         if let Some(turn_id) = self.current_turn.clone() {
             self.send(json!({

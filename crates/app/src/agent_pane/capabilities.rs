@@ -33,6 +33,9 @@ pub(crate) struct Capabilities {
     /// Recent conversations are read from the CLI's transcript directory
     /// instead of arriving over the protocol.
     pub(crate) filesystem_session_history: bool,
+    /// A message can carry images beside its text. A harness without this
+    /// refuses a pasted image rather than attaching one it cannot deliver.
+    pub(crate) image_input: bool,
     /// Resuming replays the conversation's own thread controls, so remembered
     /// picks must not be seeded over them.
     pub(crate) resume_restores_thread_settings: bool,
@@ -89,6 +92,7 @@ const CODEX: Capabilities = Capabilities {
     async_command_discovery: false,
     repeats_ready_during_init: false,
     filesystem_session_history: false,
+    image_input: true,
     resume_restores_thread_settings: true,
     resume_restores_approval_reviewer: false,
     model_baked_into_launch: false,
@@ -110,6 +114,7 @@ const CLAUDE: Capabilities = Capabilities {
     async_command_discovery: true,
     repeats_ready_during_init: true,
     filesystem_session_history: true,
+    image_input: true,
     resume_restores_thread_settings: false,
     resume_restores_approval_reviewer: false,
     model_baked_into_launch: true,
@@ -135,6 +140,7 @@ const DEEPSEEK: Capabilities = Capabilities {
     async_command_discovery: true,
     repeats_ready_during_init: false,
     filesystem_session_history: false,
+    image_input: false,
     resume_restores_thread_settings: false,
     resume_restores_approval_reviewer: false,
     model_baked_into_launch: false,

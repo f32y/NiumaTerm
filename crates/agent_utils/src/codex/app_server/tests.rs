@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::codex::app_server::protocol::{command_purpose, turn_start_params};
 use crate::codex::app_server::*;
 
@@ -208,7 +210,7 @@ fn skill_catalog_rpc_errors_are_nonfatal_catalog_state() {
 #[test]
 fn structured_skill_input_extends_the_original_text_shape() {
     assert_eq!(
-        codex_user_input("plain text", None),
+        codex_user_input("plain text", None, &[]),
         json!([{"type": "text", "text": "plain text"}])
     );
 
@@ -217,7 +219,7 @@ fn structured_skill_input_extends_the_original_text_shape() {
         path: "C:\\skills\\browser\\SKILL.md".into(),
     };
     assert_eq!(
-        codex_user_input("$browser:control inspect", Some(&skill)),
+        codex_user_input("$browser:control inspect", Some(&skill), &[]),
         json!([
             {"type": "text", "text": "$browser:control inspect"},
             {
@@ -226,6 +228,30 @@ fn structured_skill_input_extends_the_original_text_shape() {
                 "path": "C:\\skills\\browser\\SKILL.md"
             }
         ])
+    );
+}
+
+#[test]
+fn local_images_follow_the_text_in_the_order_the_message_names_them() {
+    let images = [
+        PathBuf::from(r"C:\tmp\one.png"),
+        PathBuf::from(r"C:\tmp\two.png"),
+    ];
+
+    assert_eq!(
+        codex_user_input("compare [Image #1] with [Image #2]", None, &images),
+        json!([
+            {"type": "text", "text": "compare [Image #1] with [Image #2]"},
+            {"type": "localImage", "path": r"C:\tmp\one.png"},
+            {"type": "localImage", "path": r"C:\tmp\two.png"}
+        ])
+    );
+
+    // A message with no images produces exactly the request shape it did
+    // before images existed.
+    assert_eq!(
+        codex_user_input("plain text", None, &[]),
+        json!([{"type": "text", "text": "plain text"}])
     );
 }
 

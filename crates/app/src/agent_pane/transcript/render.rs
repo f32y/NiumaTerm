@@ -1,5 +1,7 @@
+use gpui::{ObjectFit, img};
 use nmt_i18n::i18n;
 
+use crate::agent_pane::composer::attachments::MAX_ATTACHMENTS;
 use crate::agent_pane::transcript::disclosure_row::{
     AGENT_DISCLOSURE_DETAIL_INSET, AGENT_TEXT_MEASURE_REMS, AgentDisclosureRow,
     USER_TEXT_MEASURE_REMS,
@@ -12,6 +14,10 @@ use crate::agent_pane::transcript::{
     should_virtualize_transcript, strip_read_gutter, truncated_user_prompt, working_label,
 };
 use crate::agent_pane::*;
+
+/// Edge of a transcript thumbnail, matching the composer strip so an image
+/// does not change size when the message it belongs to is sent.
+const TRANSCRIPT_THUMBNAIL: f32 = 56.0;
 
 impl TranscriptView {
     /// Build the element for one visible row. Row indices come from the list
@@ -249,9 +255,43 @@ impl TranscriptView {
                     // Plain, not markdown: the prompt is user-authored text and
                     // must render verbatim, but stays drag-selectable.
                     .child(text::TextView::plain(("user-text", index), shown).selectable(true))
-                    .children(toggle),
+                    .children(toggle)
+                    .children(self.render_entry_images(index, cx)),
             )
             .into_any_element()
+    }
+
+    /// The images a message carried, under its text. A reader who scrolls back
+    /// should see what was sent, not the placeholder that stood in for it while
+    /// the message was being written.
+    fn render_entry_images(&self, index: usize, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let images = &self.items.get(index)?.images;
+        if images.is_empty() {
+            return None;
+        }
+
+        Some(
+            h_flex()
+                .mt_2()
+                .gap_2()
+                .flex_wrap()
+                .justify_end()
+                .children(images.iter().enumerate().map(|(position, image)| {
+                    div()
+                        .size(px(TRANSCRIPT_THUMBNAIL))
+                        .flex_none()
+                        .rounded(UI_RADIUS)
+                        .overflow_hidden()
+                        .border_1()
+                        .border_color(cx.theme().border)
+                        // Unique across rows: a row carries at most
+                        // `MAX_ATTACHMENTS` images, so its band cannot overlap
+                        // the next row's.
+                        .id(("entry-image", index * MAX_ATTACHMENTS + position))
+                        .child(img(image.clone()).size_full().object_fit(ObjectFit::Cover))
+                }))
+                .into_any_element(),
+        )
     }
 
     /// Assistant reply: full-width bare markdown — no bubble, no border;
