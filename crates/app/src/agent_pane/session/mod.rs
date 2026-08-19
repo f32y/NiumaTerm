@@ -5,6 +5,10 @@ mod events;
 mod tests;
 mod update_recovery;
 
+use std::fs;
+use std::sync::Arc;
+
+use gpui::Image;
 use nmt_i18n::i18n;
 
 use crate::agent_pane::composer::{
@@ -21,6 +25,15 @@ pub(crate) use crate::agent_pane::session::update_recovery::{
     RecoveryReadiness, RecoverySnapshot, RestorationReadiness,
 };
 use crate::agent_pane::*;
+
+/// A pane's attachment files live only as long as the pane: the harness that
+/// reads them has already read what it was sent, and nothing else refers to
+/// them. A directory that was never created removes cleanly.
+impl Drop for AgentPane {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(scratch_dir(self.agent_route.as_str()));
+    }
+}
 
 /// Whether two recorded working directories name the same place. Compared
 /// case-insensitively with separators normalized, because the two sides come
@@ -156,6 +169,10 @@ impl AgentPane {
                 this.send_user_message(window, cx);
             } else if matches!(event, InputEvent::Change) {
                 let text = this.input.read(cx).text().to_string();
+                // The text is the record of which images the message still
+                // carries, so an edit that removed a placeholder removes its
+                // image here, whichever way the text was edited.
+                this.sync_attachments(&text, window, cx);
                 this.input_history_navigation.reset();
                 reconcile_skill_binding(&text, &mut this.palette.skill_binding);
                 this.palette.selected = 0;
@@ -184,6 +201,7 @@ impl AgentPane {
             cwd,
             input_history_scope,
             input_history_navigation: InputHistoryNavigation::default(),
+            attachments: PendingAttachments::default(),
             conversation_named: false,
             transcript,
             input,
@@ -347,9 +365,20 @@ impl AgentPane {
     /// Append one item to the conversation, tagged with the current turn so
     /// settled turns fold as one unit.
     pub(in crate::agent_pane) fn push_item(&mut self, item: SessionItem, cx: &mut Context<Self>) {
+        self.push_item_with_images(item, Vec::new(), cx);
+    }
+
+    /// Append an item along with the images it carried, which only a sent
+    /// user message has.
+    pub(in crate::agent_pane) fn push_item_with_images(
+        &mut self,
+        item: SessionItem,
+        images: Vec<Arc<Image>>,
+        cx: &mut Context<Self>,
+    ) {
         let turn = self.turn_seq;
         self.transcript
-            .update(cx, |transcript, cx| transcript.push(turn, item, cx));
+            .update(cx, |transcript, cx| transcript.push(turn, item, images, cx));
         cx.notify();
     }
 
@@ -759,8 +788,11 @@ impl AgentPane {
         }
 
         let settings = self.settings.clone();
+        let scratch = scratch_dir(self.agent_route.as_str());
         let outcome = match self.session.as_mut() {
-            Some(session) => session.send_user_message(&text, &settings, skill),
+            Some(session) => {
+                session.send_user_message(&text, &settings, skill, &self.attachments, &scratch)
+            }
             None => SendOutcome::NotReady,
         };
 
@@ -777,6 +809,16 @@ impl AgentPane {
             self.push_item(SessionItem::Error { text }, cx);
             return false;
         }
+
+        // Accepted: the images went with it, so the transcript keeps them and
+        // the composer lets them go. A refusal above keeps them pending, so
+        // the message stays as recoverable as its text.
+        let sent_images: Vec<Arc<Image>> = self
+            .attachments
+            .iter()
+            .map(|attachment| attachment.image())
+            .collect();
+        self.attachments.clear();
 
         // The first message commits this tab to its conversation; the
         // history list is no longer offered.
@@ -800,7 +842,11 @@ impl AgentPane {
                     text: text.clone(),
                     skill: skill.cloned(),
                 });
-                self.push_item(SessionItem::UserMessage { text: Some(text) }, cx);
+                self.push_item_with_images(
+                    SessionItem::UserMessage { text: Some(text) },
+                    sent_images,
+                    cx,
+                );
                 self.unanswered_prompt = unanswered_prompt;
                 self.start_working(cx);
             }

@@ -1,3 +1,4 @@
+mod attachments;
 mod banners;
 mod history;
 mod session_state;
@@ -6,6 +7,7 @@ mod settings_row;
 #[cfg(test)]
 mod tests;
 
+use gpui_component::input::Paste;
 use nmt_i18n::i18n;
 
 use crate::agent_pane::composer::{
@@ -222,6 +224,7 @@ impl Render for AgentPane {
                                 .children(command_feedback)
                                 .children(session_state)
                                 .children(queued_message)
+                                .children(self.render_attachments(cx))
                                 .child(
                                     div()
                                         .px_3()
@@ -234,6 +237,16 @@ impl Render for AgentPane {
                                         // own navigation while visible;
                                         // the handler propagates them
                                         // unchanged when it is closed.
+                                        // The composer's own paste inserts
+                                        // text; an image on the clipboard has
+                                        // to be taken before it gets there.
+                                        .capture_action(cx.listener(
+                                            |this, _: &Paste, window, cx| {
+                                                if this.paste_image(window, cx) {
+                                                    cx.stop_propagation();
+                                                }
+                                            },
+                                        ))
                                         .capture_action(cx.listener(
                                             |this, _: &MoveUp, window, cx| {
                                                 this.handle_palette_control(

@@ -346,7 +346,7 @@ mod separate_view_state_tests {
             let child = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
 
             parent.update(cx, |transcript, cx| {
-                transcript.push(1, message("a", "parent reply"), cx);
+                transcript.push(1, message("a", "parent reply"), Vec::new(), cx);
                 transcript.expanded_rows.insert(0);
                 transcript.expanded_turns.insert(1);
                 transcript.expanded_groups.insert(0);
@@ -354,7 +354,7 @@ mod separate_view_state_tests {
             });
 
             child.update(cx, |transcript, cx| {
-                transcript.push(1, message("b", "child reply"), cx);
+                transcript.push(1, message("b", "child reply"), Vec::new(), cx);
                 assert!(
                     transcript.expanded_rows.is_empty(),
                     "row expansion belongs to one conversation"
@@ -384,12 +384,12 @@ mod separate_view_state_tests {
 
             parent.update(cx, |transcript, cx| {
                 for index in 0..4 {
-                    transcript.push(1, message(&format!("p{index}"), "row"), cx);
+                    transcript.push(1, message(&format!("p{index}"), "row"), Vec::new(), cx);
                 }
                 transcript.sync_transcript_list(transcript.build_row_specs(false));
             });
             child.update(cx, |transcript, cx| {
-                transcript.push(1, message("c0", "row"), cx);
+                transcript.push(1, message("c0", "row"), Vec::new(), cx);
                 transcript.sync_transcript_list(transcript.build_row_specs(false));
             });
 
@@ -407,10 +407,10 @@ mod separate_view_state_tests {
             let child = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
 
             parent.update(cx, |transcript, cx| {
-                transcript.push(1, message("a", "parent"), cx)
+                transcript.push(1, message("a", "parent"), Vec::new(), cx)
             });
             child.update(cx, |transcript, cx| {
-                transcript.push(1, message("b", "child"), cx)
+                transcript.push(1, message("b", "child"), Vec::new(), cx)
             });
 
             child.update(cx, |transcript, _| transcript.clear());
@@ -471,10 +471,10 @@ mod steered_prompt_rows_tests {
             let transcript = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
 
             transcript.update(cx, |transcript, cx| {
-                transcript.push(1, prompt("open the turn"), cx);
-                transcript.push(1, reply("a"), cx);
-                transcript.push(1, prompt("steered mid-turn"), cx);
-                transcript.push(1, reply("b"), cx);
+                transcript.push(1, prompt("open the turn"), Vec::new(), cx);
+                transcript.push(1, reply("a"), Vec::new(), cx);
+                transcript.push(1, prompt("steered mid-turn"), Vec::new(), cx);
+                transcript.push(1, reply("b"), Vec::new(), cx);
                 settle(transcript, 1, 12);
 
                 // Folded: the work between prompt and answer is hidden, while
@@ -499,8 +499,8 @@ mod steered_prompt_rows_tests {
             let transcript = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
 
             transcript.update(cx, |transcript, cx| {
-                transcript.push(1, prompt("ask"), cx);
-                transcript.push(1, reply("answer"), cx);
+                transcript.push(1, prompt("ask"), Vec::new(), cx);
+                transcript.push(1, reply("answer"), Vec::new(), cx);
                 settle(transcript, 1, 3);
 
                 // A control that would disclose nothing is not rendered; the
@@ -516,9 +516,9 @@ mod steered_prompt_rows_tests {
             let transcript = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
 
             transcript.update(cx, |transcript, cx| {
-                transcript.push(1, prompt("ask"), cx);
-                transcript.push(1, reply("a"), cx);
-                transcript.push(1, reply("b"), cx);
+                transcript.push(1, prompt("ask"), Vec::new(), cx);
+                transcript.push(1, reply("a"), Vec::new(), cx);
+                transcript.push(1, reply("b"), Vec::new(), cx);
 
                 // What a resumed conversation looks like: the turn is over, but
                 // the transcript file recorded no wall time for it.
@@ -540,9 +540,9 @@ mod steered_prompt_rows_tests {
             let transcript = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
 
             transcript.update(cx, |transcript, cx| {
-                transcript.push(1, prompt("ask"), cx);
-                transcript.push(1, reply("a"), cx);
-                transcript.push(1, reply("b"), cx);
+                transcript.push(1, prompt("ask"), Vec::new(), cx);
+                transcript.push(1, reply("a"), Vec::new(), cx);
+                transcript.push(1, reply("b"), Vec::new(), cx);
 
                 // Nothing is hidden while the work is still happening.
                 assert_eq!(order(transcript), vec!["0", "1", "2"]);

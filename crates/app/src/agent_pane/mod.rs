@@ -84,6 +84,7 @@ use crate::agent_pane::commands::{
     prepare_skill_selection, reconcile_skill_binding, reset_command_runtime, resolve_choice,
     setting_value_label, validate_skill_binding,
 };
+use crate::agent_pane::composer::attachments::{PendingAttachments, scratch_dir};
 use crate::agent_pane::composer::{CommandFeedback, PendingSlashCommand, RewindState};
 use crate::agent_pane::input_history::{InputHistoryNavigation, InputHistoryScope};
 pub(crate) use crate::agent_pane::profile::{AgentKind, AgentThreadDefaults, agent_launch};
@@ -518,6 +519,9 @@ pub(crate) struct AgentPane {
     cwd: Option<String>,
     input_history_scope: InputHistoryScope,
     input_history_navigation: InputHistoryNavigation,
+    /// Images the pending message carries, anchored to the composer text by
+    /// their `[Image #N]` placeholders.
+    attachments: PendingAttachments,
     /// Whether this conversation has already named its tab. Only the message
     /// that opens a conversation names it: a later one is a follow-up on the
     /// same subject, and renaming on every send would make the tab strip

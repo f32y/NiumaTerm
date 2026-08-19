@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::{Duration, UNIX_EPOCH};
 
 use serde_json::{Value, json};
@@ -80,8 +81,21 @@ pub(super) fn skills_list_request(rpc_id: u64, force_reload: bool) -> Value {
     })
 }
 
-pub(super) fn codex_user_input(text: &str, skill: Option<&SkillReference>) -> Value {
+pub(super) fn codex_user_input(
+    text: &str,
+    skill: Option<&SkillReference>,
+    images: &[PathBuf],
+) -> Value {
     let mut input = vec![json!({"type": "text", "text": text})];
+
+    // The server reads the files itself, so a turn carries paths rather than
+    // bytes. They follow the text in the order the message names them.
+    input.extend(images.iter().map(|path| {
+        json!({
+            "type": "localImage",
+            "path": path,
+        })
+    }));
 
     if let Some(skill) = skill {
         input.push(json!({

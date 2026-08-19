@@ -18,6 +18,8 @@ use std::fs;
 use std::process::Command;
 use std::time::Duration;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use control::{
     PendingApproval, PendingControlOperation, PendingQuestions, fail_pending_control_operations,
     merge_question_answers, parse_questions, resolve_pending_control_operation,
@@ -46,9 +48,9 @@ use crate::background_task::{BackgroundTaskKey, BackgroundTaskTranscriptUpdate};
 #[cfg(test)]
 use crate::chat::ContextUsageScope;
 use crate::chat::{
-    ContextComposition, ContextWindowUsage, Event, Item, SendOutcome, SlashCommandArguments,
-    SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
-    ThreadSettings, TokenUsageBreakdown,
+    ContextComposition, ContextWindowUsage, Event, Item, MessageImage, SendOutcome,
+    SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy,
+    SlashCommandSource, ThreadSettings, TokenUsageBreakdown,
 };
 use crate::claude_code::sessions::{RestoredTask, load_child_transcript};
 use crate::claude_code::tasks::ClaudeTasks;
@@ -381,7 +383,14 @@ impl Session {
     /// Write the user message, applying changed settings first via control
     /// requests (model and permission mode are session state on the CLI, so
     /// they are set once per change instead of per turn).
-    pub fn send_user_message(&mut self, text: &str, settings: &ThreadSettings) -> SendOutcome {
+    /// Send a user message carrying `images`, which the CLI takes inline as
+    /// content blocks beside the text; it has no path input.
+    pub fn send_user_message(
+        &mut self,
+        text: &str,
+        settings: &ThreadSettings,
+        images: &[MessageImage],
+    ) -> SendOutcome {
         if !self.process.has_stdin() {
             return SendOutcome::NotReady;
         }
@@ -399,9 +408,21 @@ impl Session {
             self.applied_permission = settings.approval.clone();
         }
 
+        let mut content = vec![json!({"type": "text", "text": text})];
+        content.extend(images.iter().map(|image| {
+            json!({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": image.media_type,
+                    "data": BASE64_STANDARD.encode(&image.bytes),
+                },
+            })
+        }));
+
         self.send(json!({
             "type": "user",
-            "message": {"role": "user", "content": [{"type": "text", "text": text}]},
+            "message": {"role": "user", "content": content},
         }));
 
         if self.turn_active {
