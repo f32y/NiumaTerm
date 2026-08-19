@@ -1,7 +1,8 @@
 use gpui::prelude::*;
 use gpui::{
     AnyElement, ClipboardItem, Context, DragMoveEvent, ElementId, Entity, KeyDownEvent,
-    MouseButton, ScrollHandle, SharedString, StatefulInteractiveElement, Window, div, px, relative,
+    MouseButton, Role, ScrollHandle, SharedString, StatefulInteractiveElement, Window, div, px,
+    relative,
 };
 use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants};
 use gpui_component::input::{Input, InputState};
@@ -804,6 +805,14 @@ impl Sidebar {
 
         let row = h_flex()
             .id(("sidebar-tab", key))
+            // The row is the selectable thing in this style: its fill is the
+            // only cue that a tab is the one on screen, so it carries the
+            // selected state assistive technology reads. The label is stated
+            // rather than derived, because the row also holds status marks and
+            // swaps its text for an input while the tab is being renamed.
+            .role(Role::Tab)
+            .aria_label(tab.label.clone())
+            .aria_selected(active)
             .group("sidebar-tab")
             .relative()
             .w_full()
