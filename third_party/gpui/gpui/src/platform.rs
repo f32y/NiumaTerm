@@ -647,6 +647,11 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn set_appearance_override(&self, _appearance: Option<WindowAppearance>) {}
     fn set_background_appearance(&self, background_appearance: WindowBackgroundAppearance);
     fn minimize(&self);
+    /// Take the window off the screen without tearing it down, for a close
+    /// whose teardown is slower than the user should have to watch. The
+    /// default does nothing, so a platform that has not implemented it simply
+    /// keeps the window up until it is dropped.
+    fn hide(&self) {}
     fn zoom(&self);
     fn toggle_fullscreen(&self);
     fn is_fullscreen(&self) -> bool;

@@ -5295,6 +5295,14 @@ impl Window {
         self.platform_window.minimize();
     }
 
+    /// Take this window off the screen while leaving it alive. A window being
+    /// closed is torn down synchronously once the update returns, and that
+    /// teardown can take long enough to watch; hiding first separates when the
+    /// window goes away from how long its contents take to release.
+    pub fn hide_window(&self) {
+        self.platform_window.hide();
+    }
+
     /// Toggle full screen status on the current window at the platform level.
     pub fn toggle_fullscreen(&self) {
         self.platform_window.toggle_fullscreen();
