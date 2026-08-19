@@ -474,21 +474,33 @@ impl Render for TranscriptView {
                         .flex()
                         .justify_center()
                         .child(
-                            // Button::small() hard-codes h_6 during render, which
-                            // would overwrite any height set here; min_h clamps the
-                            // final layout instead. The solid (non-outline) variant
-                            // keeps transcript text from showing through the button.
-                            Button::new("agent-jump-to-bottom")
-                                .small()
-                                .min_h(px(36.))
+                            // The button floats over the conversation, and its
+                            // own fill carries the theme's alpha, so the text
+                            // underneath reads through it. Button paints that
+                            // fill during its own render, after any background
+                            // set from here, so the opaque surface has to be a
+                            // layer behind it rather than a style on it.
+                            div()
                                 .rounded(UI_RADIUS)
-                                .icon(IconName::ArrowDown)
-                                .label(i18n("agent-transcript-scroll-bottom"))
+                                .overflow_hidden()
+                                .bg(cx.theme().background.alpha(1.0))
                                 .shadow_md()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.scroll_to_bottom();
-                                    cx.notify();
-                                })),
+                                .child(
+                                    // Button::small() hard-codes h_6 during
+                                    // render, which would overwrite any height
+                                    // set here; min_h clamps the final layout
+                                    // instead.
+                                    Button::new("agent-jump-to-bottom")
+                                        .small()
+                                        .min_h(px(36.))
+                                        .rounded(UI_RADIUS)
+                                        .icon(IconName::ArrowDown)
+                                        .label(i18n("agent-transcript-scroll-bottom"))
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.scroll_to_bottom();
+                                            cx.notify();
+                                        })),
+                                ),
                         ),
                 )
             })
