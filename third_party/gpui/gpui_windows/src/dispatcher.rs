@@ -2,7 +2,7 @@ use std::{
     sync::Mutex,
     sync::atomic::{AtomicBool, Ordering},
     thread::{ThreadId, current},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::Context;
@@ -22,7 +22,12 @@ use windows::{
 use crate::{HWND, SafeHwnd, WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD};
 use gpui::{
     PlatformDispatcher, Priority, PriorityQueueSender, RunnableVariant, TimerResolutionGuard,
+    frame_stats,
 };
+
+/// A main-thread task running this long delays the next frame past the vsync
+/// interval of a 144Hz display, so it is worth naming in the log.
+const SLOW_MAIN_THREAD_TASK: Duration = Duration::from_millis(5);
 
 pub(crate) struct WindowsDispatcher {
     pub(crate) wake_posted: AtomicBool,
@@ -73,6 +78,28 @@ impl WindowsDispatcher {
             })
         };
         ThreadPoolTimer::CreateTimer(&handler, duration.into()).log_err();
+    }
+
+    /// Runs a runnable on the main thread, reporting the slow ones. The UI
+    /// thread cannot service a frame request while one of these is running, so
+    /// a task that outlasts the frame budget shows up as a dropped frame with
+    /// no time attributable to drawing.
+    pub(crate) fn execute_runnable_on_main(runnable: RunnableVariant) {
+        if !frame_stats::enabled() {
+            Self::execute_runnable(runnable);
+            return;
+        }
+        let location = runnable.metadata().location;
+        let started_at = Instant::now();
+        Self::execute_runnable(runnable);
+        let elapsed = started_at.elapsed();
+        frame_stats::record_main_thread_task(elapsed);
+        if elapsed >= SLOW_MAIN_THREAD_TASK {
+            log::info!(
+                "slow main-thread task: {:.2}ms at {location}",
+                elapsed.as_secs_f64() * 1000.0
+            );
+        }
     }
 
     #[inline(always)]

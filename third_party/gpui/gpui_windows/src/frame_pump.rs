@@ -10,6 +10,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use gpui::frame_stats;
 use parking_lot::RwLock;
 use smallvec::SmallVec;
 use windows::Win32::Foundation::{HANDLE, HWND};
@@ -59,6 +60,7 @@ impl FramePump {
         let pump = Arc::clone(self);
         Arc::new(move || {
             if !flag.swap(true, Ordering::AcqRel) {
+                frame_stats::record_frame_armed();
                 pump.wake();
             }
         })
@@ -68,6 +70,7 @@ impl FramePump {
     /// sustain).
     pub(crate) fn arm(&self, flag: &AtomicBool) {
         if !flag.swap(true, Ordering::AcqRel) {
+            frame_stats::record_frame_armed();
             self.wake();
         }
     }
