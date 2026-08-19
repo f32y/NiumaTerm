@@ -748,20 +748,32 @@ impl Sidebar {
                 .bg(color)
         };
 
-        // The agent's own marks replace the generic unread dot, the way the
-        // horizontal strip does it: a spinner while the turn runs, an accent
-        // dot once it has something to read.
-        let agent_mark: Option<AnyElement> = match (tab.agent_kind.is_some(), tab.busy, tab.unread)
-        {
-            (true, true, _) => Some(
+        // One mark per row, because the lane it sits in is one glyph wide.
+        // Ordered by what is worth acting on first: an agent mid-turn, then
+        // what the shell is doing, then output nobody has read. A tab's own
+        // kind of status therefore outranks the generic unread dot, the way
+        // the horizontal strip orders them too.
+        let status_mark: Option<AnyElement> = match (tab.agent_kind.is_some(), tab.busy) {
+            (true, true) => Some(
                 ProgressCircle::new(("sidebar-tab-busy", key))
                     .small()
                     .loading(true)
                     .color(cx.theme().warning)
                     .into_any_element(),
             ),
-            (_, _, true) => Some(dot(cx.theme().primary).into_any_element()),
-            _ => None,
+            _ => terminal_presentation(tab.terminal)
+                .map(|(visual, aria)| {
+                    div()
+                        .id(("sidebar-tab-terminal", key))
+                        .aria_label(aria)
+                        .flex()
+                        .child(terminal_dot(visual, TAB_ROW_DOT, cx))
+                        .into_any_element()
+                })
+                .or_else(|| {
+                    tab.unread
+                        .then(|| dot(cx.theme().primary).into_any_element())
+                }),
         };
 
         let renaming = rename
@@ -840,25 +852,13 @@ impl Sidebar {
                 true => Icon::new(IconName::Moon).xsmall().into_any_element(),
                 false => tab_icon(tab.agent_kind, tab.settings).into_any_element(),
             }))
-            .when_some(
-                terminal_presentation(tab.terminal),
-                |this, (visual, aria)| {
-                    this.child(
-                        div()
-                            .id(("sidebar-tab-terminal", key))
-                            .aria_label(aria)
-                            .flex_none()
-                            .flex()
-                            .child(terminal_dot(visual, TAB_ROW_DOT, cx)),
-                    )
-                },
-            )
             .child(label)
             // The status mark sits in the lane the workspace item's status
             // column occupies — between that item's horizontal padding and
-            // this row's indent — so every tab's mark lines up under it. Out
-            // of the flow, because that lane is this row's left padding.
-            .children(agent_mark.map(|mark| {
+            // this row's indent — so every tab's mark lines up under it,
+            // whatever kind of tab it is. Out of the flow, because that lane
+            // is this row's left padding.
+            .children(status_mark.map(|mark| {
                 div()
                     .absolute()
                     .left_2()
