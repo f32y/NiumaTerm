@@ -387,6 +387,7 @@ impl Sidebar {
         // The status column keeps its width either way: the tab rows place
         // their marks in that lane.
         let vertical_tabs = cx.global::<AppSettings>().tab_bar_style == TabBarStyle::Vertical;
+        let highlight_active = ws.active && !vertical_tabs;
         let (glyphs, status_label) = workspace_status_glyphs(
             ws.agent_status,
             ws.terminal_activity,
@@ -521,10 +522,13 @@ impl Sidebar {
                     .replace("{path}", &full_path)
                     .replace("{status}", &status_label)
             })
-            .selected(ws.active)
+            // The active tab's own row is highlighted in the vertical tab-bar
+            // style, and it sits under its workspace, so highlighting the
+            // workspace too would fill two rows for one selection.
+            .selected(highlight_active)
             // Button resolves selected colors after element styles, so the
             // sidebar-accent pair must be the selected custom variant itself.
-            .when(ws.active, |this| {
+            .when(highlight_active, |this| {
                 this.custom(
                     ButtonCustomVariant::new(cx)
                         .foreground(cx.theme().sidebar_accent_foreground)
