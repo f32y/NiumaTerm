@@ -23,6 +23,8 @@ mod elements;
 mod executor;
 mod platform_scheduler;
 pub(crate) use platform_scheduler::PlatformScheduler;
+/// Per-second frame pacing digest, logged at debug level.
+pub mod frame_stats;
 mod geometry;
 mod global;
 mod input;

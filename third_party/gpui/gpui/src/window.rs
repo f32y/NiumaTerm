@@ -17,8 +17,8 @@ use crate::{
     SystemWindowTabController, TabStopMap, TaffyLayoutEngine, Task, TextRenderingMode, TextStyle,
     TextStyleRefinement, ThermalState, TransformationMatrix, Underline, UnderlineStyle,
     WindowAppearance, WindowBackgroundAppearance, WindowBounds, WindowControls, WindowDecorations,
-    WindowOptions, WindowParams, WindowTextSystem, point, prelude::*, profiler, px, rems, size,
-    transparent_black,
+    WindowOptions, WindowParams, WindowTextSystem, frame_stats, point, prelude::*, profiler, px,
+    rems, size, transparent_black,
 };
 
 use anyhow::{Context as _, Result, anyhow};
@@ -1504,6 +1504,7 @@ impl Window {
             let next_frame_callbacks = next_frame_callbacks.clone();
             let input_rate_tracker = input_rate_tracker.clone();
             move |request_frame_options| {
+                frame_stats::record_request_serviced();
                 let thermal_state = handle
                     .update(&mut cx, |_, _, cx| cx.thermal_state())
                     .log_err();
@@ -1541,6 +1542,7 @@ impl Window {
                                 window.invalidator.wake_platform();
                             })
                             .log_err();
+                        frame_stats::record_throttled();
                         return;
                     }
                 }
@@ -2716,7 +2718,7 @@ impl Window {
         // Drain unconditionally so a stale first-invalidation timestamp can't
         // leak into a later frame across enable/disable of frame tracing.
         let frame_dirty = self.invalidator.take_frame_dirty();
-        let draw_started_at = profiler::frame_trace_enabled().then(Instant::now);
+        let draw_started_at = Instant::now();
 
         // Set up the per-App arena for element allocation during this draw.
         // This ensures that multiple test Apps have isolated arenas.
@@ -2748,6 +2750,7 @@ impl Window {
         if !cx.mode.skip_drawing() {
             self.draw_roots(cx);
         }
+        let redrawn_views = self.dirty_views.len();
         self.dirty_views.clear();
         self.next_frame.window_active = self.active.get();
 
@@ -2811,13 +2814,15 @@ impl Window {
         self.invalidator.set_phase(DrawPhase::None);
         self.needs_present.set(true);
 
-        if let Some(draw_start) = draw_started_at {
+        let draw_ended_at = Instant::now();
+        frame_stats::record_draw(draw_ended_at - draw_started_at, redrawn_views);
+        if profiler::frame_trace_enabled() {
             profiler::record_frame_timing(profiler::FrameTiming {
                 window_id: self.handle.window_id(),
                 dirty_at: frame_dirty.dirty_at,
                 invalidations: frame_dirty.invalidations,
-                draw_start,
-                draw_end: Instant::now(),
+                draw_start: draw_started_at,
+                draw_end: draw_ended_at,
             });
         }
 
@@ -2856,8 +2861,21 @@ impl Window {
                 .map(|rect| rect.scale(self.scale_factor))
                 .collect()
         });
+        let present_started_at = Instant::now();
         self.platform_window
             .draw(&self.rendered_frame.scene, damage.as_deref());
+        let scene = &self.rendered_frame.scene;
+        frame_stats::record_present(
+            present_started_at.elapsed(),
+            scene.quads.len()
+                + scene.shadows.len()
+                + scene.paths.len()
+                + scene.underlines.len()
+                + scene.monochrome_sprites.len()
+                + scene.subpixel_sprites.len()
+                + scene.polychrome_sprites.len()
+                + scene.surfaces.len(),
+        );
         #[cfg(feature = "input-latency-histogram")]
         self.input_latency_tracker.record_frame_presented();
         self.needs_present.set(false);

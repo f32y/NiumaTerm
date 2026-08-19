@@ -1,4 +1,8 @@
-use std::{rc::Rc, sync::atomic::Ordering};
+use std::{
+    rc::Rc,
+    sync::atomic::Ordering,
+    time::{Duration, Instant},
+};
 
 use anyhow::Context as _;
 use gpui_util::ResultExt;
@@ -31,6 +35,11 @@ pub(crate) const WM_GPUI_KEYDOWN: u32 = WM_USER + 8;
 
 const SIZE_MOVE_LOOP_TIMER_ID: usize = 1;
 
+/// A window message handled for this long pushes the next frame past the vsync
+/// interval of a 144Hz display. Paint messages are excluded: their cost is the
+/// frame itself, already reported as draw time.
+const SLOW_WINDOW_MESSAGE: Duration = Duration::from_millis(5);
+
 impl WindowsWindowInner {
     pub(crate) fn handle_msg(
         self: &Rc<Self>,
@@ -39,6 +48,7 @@ impl WindowsWindowInner {
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> LRESULT {
+        let started_at = frame_stats::enabled().then(Instant::now);
         let handled = match msg {
             // eagerly activate the window, so calls to `active_window` will work correctly
             WM_MOUSEACTIVATE => {
@@ -115,6 +125,19 @@ impl WindowsWindowInner {
             WM_GETOBJECT => self.handle_wm_getobject(wparam, lparam),
             _ => None,
         };
+        // Paint messages carry the frame itself; their cost is draw time.
+        if let Some(started_at) = started_at
+            && !matches!(msg, WM_PAINT | WM_GPUI_FORCE_UPDATE_WINDOW)
+        {
+            let elapsed = started_at.elapsed();
+            frame_stats::record_window_message(elapsed);
+            if elapsed >= SLOW_WINDOW_MESSAGE {
+                log::info!(
+                    "slow window message: {:.2}ms handling 0x{msg:04X}",
+                    elapsed.as_secs_f64() * 1000.0
+                );
+            }
+        }
         if let Some(n) = handled {
             LRESULT(n)
         } else {
@@ -255,7 +278,7 @@ impl WindowsWindowInner {
         if wparam.0 == SIZE_MOVE_LOOP_TIMER_ID {
             let mut runnables = self.main_receiver.clone().try_iter();
             while let Some(Ok(runnable)) = runnables.next() {
-                WindowsDispatcher::execute_runnable(runnable);
+                WindowsDispatcher::execute_runnable_on_main(runnable);
             }
             self.handle_paint_msg(handle)
         } else {

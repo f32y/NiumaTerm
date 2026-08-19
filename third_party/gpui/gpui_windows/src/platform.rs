@@ -380,7 +380,9 @@ impl WindowsPlatform {
                     }
                     // Clear-before-redraw: paint-time notifies arm the next
                     // frame instead of being coalesced into this one.
-                    for hwnd in frame_pump.take_armed() {
+                    let armed = frame_pump.take_armed();
+                    frame_stats::record_redraws_requested(armed.len());
+                    for hwnd in armed {
                         unsafe {
                             let _ = RedrawWindow(Some(hwnd.as_raw()), None, None, RDW_INVALIDATE);
                         }
@@ -1053,7 +1055,7 @@ impl WindowsPlatformInner {
                 }
                 let mut main_receiver = self.main_receiver.clone();
                 match main_receiver.try_pop() {
-                    Ok(Some(runnable)) => WindowsDispatcher::execute_runnable(runnable),
+                    Ok(Some(runnable)) => WindowsDispatcher::execute_runnable_on_main(runnable),
                     _ => break 'timeout_loop,
                 }
             }
@@ -1066,7 +1068,7 @@ impl WindowsPlatformInner {
                 Ok(Some(runnable)) => {
                     self.dispatcher.wake_posted.store(true, Ordering::Release);
 
-                    WindowsDispatcher::execute_runnable(runnable);
+                    WindowsDispatcher::execute_runnable_on_main(runnable);
                 }
                 _ => break 'tasks,
             }

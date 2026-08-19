@@ -4,6 +4,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use gpui::frame_stats;
 use gpui_util::ResultExt;
 use windows::Win32::{
     Foundation::HWND,
@@ -34,6 +35,14 @@ impl VSyncProvider {
             .log_err()
             .unwrap_or(DEFAULT_VSYNC_INTERVAL);
         let f = Box::new(|| unsafe { DwmFlush().is_ok() });
+        frame_stats::set_vsync_interval(interval);
+        if frame_stats::enabled() {
+            log::info!(
+                "vsync provider: composition interval {:?} ({:.1}Hz)",
+                interval,
+                1.0 / interval.as_secs_f64()
+            );
+        }
         Self { interval, f }
     }
 
@@ -48,7 +57,9 @@ impl VSyncProvider {
         // Sleep() if it returns before that. This could happen during normal
         // operation for the first call after the vsync thread becomes non-idle,
         // but it shouldn't happen often.
-        if !wait_succeeded || elapsed < VSYNC_INTERVAL_THRESHOLD {
+        let short_wait = !wait_succeeded || elapsed < VSYNC_INTERVAL_THRESHOLD;
+        frame_stats::record_vsync_tick(short_wait);
+        if short_wait {
             log::trace!("VSyncProvider::wait_for_vsync() took less time than expected");
             std::thread::sleep(self.interval);
         }
