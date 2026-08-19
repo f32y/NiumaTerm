@@ -14,7 +14,7 @@ use crate::agent_pane::transcript::disclosure_row::{
 };
 #[allow(unused_imports)]
 pub(super) use crate::agent_pane::transcript::format::{
-    command_execution_detail, command_execution_heading, compact_token_count,
+    LAST_RESPONSE_LIMIT, command_execution_detail, command_execution_heading, compact_token_count,
     compaction_accounting, compaction_label, compaction_row_is_expandable,
     compaction_trigger_label, detect_output_language, entry_copy_text, fenced_code_block_as,
     file_extension_lang, hidden, is_work_row, last_response_label, permission_icon, relative_time,

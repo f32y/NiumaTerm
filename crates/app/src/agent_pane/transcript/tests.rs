@@ -283,10 +283,20 @@ mod prompt_truncation_tests {
         assert_eq!(last_response_label(0), "Last response: 0 s ago");
         assert_eq!(last_response_label(45), "Last response: 45 s ago");
         assert_eq!(last_response_label(90), "Last response: 1 min 30 s ago");
-        assert_eq!(last_response_label(3_600), "Last response: 1 hour ago");
+        assert_eq!(
+            last_response_label(3_599),
+            "Last response: 59 mins 59 s ago"
+        );
+
+        // Past an hour the reading stops counting: "it has been sitting" is
+        // the whole answer, and the label never changes again.
+        assert_eq!(
+            last_response_label(3_600),
+            "Last response: more than 1 hour ago"
+        );
         assert_eq!(
             last_response_label(90_061),
-            "Last response: 1 day 1 hour 1 min 1 s ago"
+            "Last response: more than 1 hour ago"
         );
     }
 }

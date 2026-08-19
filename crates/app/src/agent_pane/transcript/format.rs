@@ -2,6 +2,10 @@ use nmt_i18n::i18n;
 
 use crate::agent_pane::*;
 
+/// Where the last-response reading stops counting and becomes "more than an
+/// hour".
+pub(in crate::agent_pane) const LAST_RESPONSE_LIMIT: Duration = Duration::from_secs(60 * 60);
+
 pub(in crate::agent_pane) fn should_show_jump_to_latest(
     is_following_tail: bool,
     is_scrolled_to_end: Option<bool>,
@@ -49,7 +53,16 @@ pub(super) fn working_status_label(
 /// How long ago the agent last answered, for the composer's info bar. Reads in
 /// the same units as a turn's duration, so the two times in the pane are
 /// spoken the same way.
+///
+/// Past an hour it stops counting. The reading answers "did this conversation
+/// just settle, or has it been sitting"; once the answer is "it has been
+/// sitting", a more precise number says nothing more, and the label can stop
+/// changing altogether.
 pub(in crate::agent_pane) fn last_response_label(seconds: u64) -> String {
+    if seconds >= LAST_RESPONSE_LIMIT.as_secs() {
+        return i18n("agent-composer-last-response-old").to_string();
+    }
+
     i18n("agent-composer-last-response").replace("{duration}", &elapsed_label(seconds))
 }
 

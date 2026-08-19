@@ -24,6 +24,7 @@ pub(super) use crate::agent_pane::session::update_recovery::UpdateSuspension;
 pub(crate) use crate::agent_pane::session::update_recovery::{
     RecoveryReadiness, RecoverySnapshot, RestorationReadiness,
 };
+use crate::agent_pane::transcript::LAST_RESPONSE_LIMIT;
 use crate::agent_pane::*;
 
 /// A pane's attachment files live only as long as the pane: the harness that
@@ -37,15 +38,15 @@ impl Drop for AgentPane {
 
 /// How long the composer's "last response" reading stays accurate, given how
 /// old it already is. Matches the coarsest unit the label shows, so the pane
-/// redraws exactly as often as the words change.
-fn response_age_tick(age: Duration) -> Duration {
+/// redraws exactly as often as the words change, and `None` once the label has
+/// settled on "more than an hour" and will never change again.
+fn response_age_tick(age: Duration) -> Option<Duration> {
     const MINUTE: u64 = 60;
-    const HOUR: u64 = 60 * MINUTE;
 
     match age.as_secs() {
-        ..MINUTE => Duration::from_secs(1),
-        MINUTE..HOUR => Duration::from_secs(MINUTE),
-        _ => Duration::from_secs(HOUR),
+        ..MINUTE => Some(Duration::from_secs(1)),
+        seconds if seconds < LAST_RESPONSE_LIMIT.as_secs() => Some(Duration::from_secs(MINUTE)),
+        _ => None,
     }
 }
 
@@ -1132,7 +1133,7 @@ impl AgentPane {
                 let Ok(interval) = this.update(cx, |this, cx| {
                     cx.notify();
                     this.last_response_at
-                        .map(|at| response_age_tick(at.elapsed()))
+                        .and_then(|at| response_age_tick(at.elapsed()))
                 }) else {
                     break;
                 };
