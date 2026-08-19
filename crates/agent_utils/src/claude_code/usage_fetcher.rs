@@ -240,7 +240,7 @@ fn fetch_via_oauth(cancelled: &AtomicBool) -> Result<UsageSnapshot, OAuthFetchEr
 
 pub fn fetch_with_cancel(cancelled: &AtomicBool) -> Result<UsageSnapshot, UsageFetchError> {
     let result = match fetch_via_oauth(cancelled) {
-        Ok(usage) => Ok(usage),
+        Ok(usage) => Ok(supplement_from_cli(usage, cancelled)),
         Err(OAuthFetchError::Cancelled) => Err(UsageFetchError::Cancelled),
         Err(OAuthFetchError::Final(error)) => Err(UsageFetchError::Failed(error)),
         Err(OAuthFetchError::Fallback(oauth_error)) => match fetch_via_cli(cancelled) {
@@ -255,6 +255,30 @@ pub fn fetch_with_cancel(cancelled: &AtomicBool) -> Result<UsageSnapshot, UsageF
     };
 
     result.map(UsageSnapshot::with_updated_now)
+}
+
+/// Read the windows the OAuth endpoint does not report from the interactive
+/// `/usage` panel. The endpoint answers with the documented 5-hour and 7-day
+/// windows only, while the panel also shows the separate Fable allowance, so
+/// an account with one is otherwise invisible here.
+///
+/// Runs only after OAuth already answered, and only when it left the Fable
+/// window out while reporting at least one other — an account the endpoint
+/// says nothing about is not one the panel can be trusted to describe either.
+/// A supplement that fails leaves the OAuth reading untouched: it is a
+/// complete answer for the windows it does cover.
+///
+/// The panel costs an interactive Claude process, so this is worth its price
+/// only because a subscription's Fable allowance has no other source.
+fn supplement_from_cli(usage: UsageSnapshot, cancelled: &AtomicBool) -> UsageSnapshot {
+    if usage.fable_weekly.is_some() || (usage.five_hour.is_none() && usage.weekly.is_none()) {
+        return usage;
+    }
+
+    match fetch_via_cli(cancelled) {
+        Ok(panel) => usage.filled_from(&panel),
+        Err(_) => usage,
+    }
 }
 
 fn fetch_via_cli(cancelled: &AtomicBool) -> Result<UsageSnapshot, UsageFetchError> {
@@ -615,6 +639,35 @@ mod tests {
         );
         assert!(parse_oauth_token(br#"{"anthropicApiKey":"api-key"}"#).is_err());
         assert!(parse_oauth_token(br#"{"claudeAiOauth":{"accessToken":" "}}"#).is_err());
+    }
+
+    #[test]
+    fn the_panel_supplement_runs_only_for_a_live_reading_without_fable() {
+        // Cancelled up front, so the guard is exercised without an
+        // interactive Claude process: reaching the panel returns immediately.
+        let cancelled = AtomicBool::new(true);
+        let five_hour = Some(UsageWindow::new(88, FIVE_HOUR_WINDOW_MINUTES));
+        let fable = Some(UsageWindow::new(35, WEEKLY_WINDOW_MINUTES));
+
+        // A reading that already covers Fable has nothing to supplement.
+        let complete = UsageSnapshot {
+            five_hour: five_hour.clone(),
+            fable_weekly: fable,
+            ..UsageSnapshot::default()
+        };
+        assert_eq!(supplement_from_cli(complete.clone(), &cancelled), complete);
+
+        // An endpoint that described no window at all describes an account the
+        // panel cannot be trusted to describe either.
+        let empty = UsageSnapshot::default();
+        assert_eq!(supplement_from_cli(empty.clone(), &cancelled), empty);
+
+        // A supplement that cannot run leaves the reading it was adding to.
+        let partial = UsageSnapshot {
+            five_hour,
+            ..UsageSnapshot::default()
+        };
+        assert_eq!(supplement_from_cli(partial.clone(), &cancelled), partial);
     }
 
     #[test]
