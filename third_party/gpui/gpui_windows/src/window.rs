@@ -894,6 +894,12 @@ impl PlatformWindow for WindowsWindow {
         unsafe { ShowWindowAsync(self.0.hwnd, SW_MINIMIZE).ok().log_err() };
     }
 
+    fn hide(&self) {
+        // Async so the caller is not held behind the compositor: this exists
+        // to return the UI thread to the teardown that follows it.
+        unsafe { ShowWindowAsync(self.0.hwnd, SW_HIDE).ok().log_err() };
+    }
+
     fn zoom(&self) {
         unsafe {
             if IsWindowVisible(self.0.hwnd).as_bool() {
