@@ -5,7 +5,7 @@ use nmt_agent_utils::background_task::{
 use nmt_agent_utils::chat::ThreadSettings;
 
 use crate::agent_pane::session::events::resolve_ready_settings;
-use crate::agent_pane::session::scoped_background_tasks;
+use crate::agent_pane::session::{scoped_background_tasks, tab_title_from_prompt};
 
 fn snapshot_for(parent: BackgroundTaskKey) -> BackgroundTaskSnapshot {
     let mut registry = BackgroundTaskRegistry::new(parent);
@@ -236,5 +236,34 @@ fn a_pending_snapshot_claims_only_the_prompts_it_stopped_naming() {
             "then push".to_string(),
             "and tag it".to_string(),
         ],
+    );
+}
+
+#[test]
+fn a_prompt_names_its_tab_by_its_first_real_line() {
+    assert_eq!(
+        tab_title_from_prompt(
+            "
+  Fix the flaky auth test
+and the retry loop"
+        ),
+        Some("Fix the flaky auth test".to_string())
+    );
+
+    // A slash command instructs the CLI instead of stating a subject, and the
+    // settings controls send some of them for the user.
+    assert_eq!(tab_title_from_prompt("/effort high"), None);
+    assert_eq!(
+        tab_title_from_prompt(
+            "   
+	 "
+        ),
+        None
+    );
+
+    let long = "x".repeat(200);
+    assert_eq!(
+        tab_title_from_prompt(&long).map(|t| t.chars().count()),
+        Some(60)
     );
 }

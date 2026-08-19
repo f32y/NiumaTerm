@@ -50,6 +50,13 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) {
         match event {
+            // The pane does not know which tab holds it, so naming the tab is
+            // left to the chrome that does. Arriving here is what settles the
+            // conversation's name: until then every message asks again.
+            SessionEvent::TitleUpdated(title) => {
+                self.conversation_named = true;
+                cx.emit(AgentPaneEvent::TitleSuggested(title));
+            }
             SessionEvent::Ready(settings) => {
                 if self.history_ui.mode == RecentSessionsMode::Loading
                     && let Some(replay) = self.history_ui.pending_resume_replay.take()

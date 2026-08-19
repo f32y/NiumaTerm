@@ -306,6 +306,16 @@ impl Shell {
         .detach();
     }
 
+    /// The tab holding this agent pane. A pane knows its route but not its
+    /// tab, and the two are only related through the surface the tab owns.
+    fn tab_for_agent_pane(&self, pane: &Entity<AgentPane>) -> Option<TabId> {
+        self.workspaces
+            .all_tabs()
+            .flat_map(|tabs| tabs.tabs())
+            .find(|tab| tab.surface().agent() == Some(pane))
+            .map(|tab| tab.id())
+    }
+
     pub(crate) fn watch_agent_tab(pane: &Entity<AgentPane>, cx: &mut Context<Self>) {
         cx.subscribe(pane, |this, pane, event: &AgentPaneEvent, cx| {
             let route = pane.read(cx).agent_route().clone();
@@ -329,6 +339,17 @@ impl Shell {
                     // title bar.
                     this.background_tasks_seen |= pane.read(cx).background_task_count() > 0;
                     cx.notify();
+                    return;
+                }
+                AgentPaneEvent::TitleSuggested(title) => {
+                    // A user-authored rename outranks this, so a tab the user
+                    // has named keeps its name.
+                    if let Some(tab_id) = this.tab_for_agent_pane(&pane)
+                        && let Some(tabs) = this.workspaces.tab_manager_for_mut(tab_id)
+                        && tabs.set_title(tab_id, title.clone())
+                    {
+                        cx.notify();
+                    }
                     return;
                 }
                 AgentPaneEvent::Interrupted => {

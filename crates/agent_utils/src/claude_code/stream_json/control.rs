@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::mem::take;
 
 use serde_json::Value;
+use tracing::debug;
 
 use crate::chat::{ContextComposition, ContextSegment, Event, Question, QuestionOption};
 
@@ -9,6 +10,7 @@ use crate::chat::{ContextComposition, ContextSegment, Event, Question, QuestionO
 pub(super) enum PendingControlOperation {
     FileRewind,
     ContextComposition,
+    SessionTitle,
 }
 
 /// A `can_use_tool` control request awaiting the user's decision. The original
@@ -129,6 +131,27 @@ pub(super) fn resolve_pending_control_operation(
             .then(|| parse_context_composition(&response["response"]))
             .flatten()
             .map(Event::ContextCompositionUpdated),
+        // The CLI answers with a null title when it had too little to name,
+        // and a build that does not know the request answers with an error.
+        // Neither is worth showing the user: the conversation keeps the name
+        // it already had. Both are worth a line in the log, because nothing
+        // else distinguishes them from a request that was never made.
+        PendingControlOperation::SessionTitle => {
+            let title = error
+                .is_none()
+                .then(|| response["response"]["title"].as_str())
+                .flatten()
+                .map(str::trim)
+                .filter(|title| !title.is_empty());
+
+            match (title, error) {
+                (Some(title), _) => return Some(Event::TitleUpdated(title.to_owned())),
+                (None, Some(error)) => debug!("claude declined to name the session: {error}"),
+                (None, None) => debug!("claude named the session with nothing"),
+            }
+
+            None
+        }
     }
 }
 
@@ -182,6 +205,9 @@ pub(super) fn fail_pending_control_operations(
             // Nothing is waiting on a breakdown, so a lost one is not worth
             // reporting; the next turn asks again.
             PendingControlOperation::ContextComposition => None,
+            // A conversation that lost its naming request keeps the name it
+            // already had, which is what an unnamed one shows anyway.
+            PendingControlOperation::SessionTitle => None,
         })
         .collect()
 }

@@ -681,6 +681,11 @@ pub enum Event {
     /// Whether the backend is currently collaborating on a plan rather than
     /// carrying out work.
     PlanModeUpdated(bool),
+    /// A name for this conversation, for whatever shows it in a list. Backends
+    /// differ in where it comes from — one summarizes the conversation with a
+    /// model call, another is told what to call it — so this reports the
+    /// settled name rather than the material for one.
+    TitleUpdated(String),
     /// Replacement whole-log conversation counters.
     SessionStatsUpdated(SessionStats),
     /// Reconstructed transcript of a resumed session, to pre-fill the UI.
