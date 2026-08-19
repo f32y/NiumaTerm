@@ -59,6 +59,20 @@ impl UsageSnapshot {
         self.updated_at = Some(now_unix_millis());
         self
     }
+
+    /// Fill windows this snapshot is missing from one taken through another
+    /// source. Sources disagree about which windows they report at all rather
+    /// than about their values, so a window already present is never replaced:
+    /// two readings of the same window differ only by the seconds between
+    /// them, and the first one asked is the more authoritative source.
+    pub fn filled_from(mut self, other: &Self) -> Self {
+        self.five_hour = self.five_hour.or_else(|| other.five_hour.clone());
+        self.weekly = self.weekly.or_else(|| other.weekly.clone());
+        self.fable_weekly = self.fable_weekly.or_else(|| other.fable_weekly.clone());
+        self.plan_type = self.plan_type.or_else(|| other.plan_type.clone());
+        self.reset_credits = self.reset_credits.or_else(|| other.reset_credits.clone());
+        self
+    }
 }
 
 pub fn now_unix_millis() -> i64 {
@@ -102,6 +116,27 @@ pub fn format_remaining(window: Option<&UsageWindow>) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn filling_adds_missing_windows_and_keeps_the_ones_already_read() {
+        let panel = super::UsageSnapshot {
+            five_hour: Some(super::UsageWindow::new(10, 300)),
+            weekly: Some(super::UsageWindow::new(20, 10_080)),
+            fable_weekly: Some(super::UsageWindow::new(30, 10_080)),
+            ..super::UsageSnapshot::default()
+        };
+        let endpoint = super::UsageSnapshot {
+            five_hour: Some(super::UsageWindow::new(88, 300)),
+            ..super::UsageSnapshot::default()
+        };
+
+        let filled = endpoint.filled_from(&panel);
+
+        // The window the endpoint read stands; the ones it left out arrive.
+        assert_eq!(filled.five_hour, Some(super::UsageWindow::new(88, 300)));
+        assert_eq!(filled.weekly, panel.weekly);
+        assert_eq!(filled.fable_weekly, panel.fable_weekly);
+    }
+
     use super::*;
 
     #[test]
