@@ -120,14 +120,28 @@ impl Shell {
                     }
                 }
                 HostEvent::CommandFinished { exit_code } => {
-                    // Only a tab the user is not watching records its result: a
-                    // command that ends in front of them already shows its own
-                    // output, and the record would clear on activation anyway.
-                    if let Some(tab_id) = self.tab_for_pane(pane_id)
-                        && self.workspaces.active_tabs().active_id() != tab_id
-                        && let Some(tabs) = self.workspaces.tab_manager_for_mut(tab_id)
-                    {
-                        tabs.record_outcome(tab_id, CommandOutcome::from_exit_code(*exit_code));
+                    if let Some(tab_id) = self.tab_for_pane(pane_id) {
+                        let watched = self.workspaces.active_tabs().active_id() == tab_id;
+
+                        if let Some(tabs) = self.workspaces.tab_manager_for_mut(tab_id) {
+                            // Only a tab the user is not watching records its
+                            // result: a command that ends in front of them
+                            // already shows its own output, and the record
+                            // would clear on activation anyway.
+                            if !watched {
+                                tabs.record_outcome(
+                                    tab_id,
+                                    CommandOutcome::from_exit_code(*exit_code),
+                                );
+                            }
+
+                            // The bar belongs to the command that reported it.
+                            // A command killed before it could finish (Ctrl-C
+                            // during a build) sends no state-0 report, so its
+                            // bar would otherwise sit at the fraction it
+                            // reached until something else reported progress.
+                            tabs.clear_progress(tab_id);
+                        }
                     }
 
                     chrome_changed = true;
