@@ -172,21 +172,29 @@ impl AgentPane {
         cx.notify();
     }
 
+    /// The outcome reaches the caller through [`Self::restoration_readiness`]:
+    /// the process now comes up on a background thread, so a failure lands
+    /// after this returns.
     pub(crate) fn restore_after_update(
         &mut self,
         snapshot: &RecoverySnapshot,
         cx: &mut Context<Self>,
-    ) -> bool {
+    ) {
         self.update_suspension = Some(UpdateSuspension::Reconnecting);
         self.last_recovery_snapshot = Some(snapshot.clone());
-        let started = self.start_session_with_options(snapshot.identity.clone(), true, cx);
-        if !started {
-            self.update_suspension = Some(UpdateSuspension::Failed(
-                i18n("agent-update-recovery-restart-failed").to_string(),
-            ));
-        }
+        self.start_session_with_options(
+            snapshot.identity.clone(),
+            true,
+            |this, started, _| {
+                if !started {
+                    this.update_suspension = Some(UpdateSuspension::Failed(
+                        i18n("agent-update-recovery-restart-failed").to_string(),
+                    ));
+                }
+            },
+            cx,
+        );
         cx.notify();
-        started
     }
 
     pub(in crate::agent_pane) fn retry_update_recovery(&mut self, cx: &mut Context<Self>) {
@@ -212,11 +220,18 @@ impl AgentPane {
 
     pub(in crate::agent_pane) fn start_new_after_update_failure(&mut self, cx: &mut Context<Self>) {
         self.update_suspension = Some(UpdateSuspension::Reconnecting);
-        if !self.start_session_with_options(None, true, cx) {
-            self.update_suspension = Some(UpdateSuspension::Failed(
-                i18n("agent-update-recovery-new-session-failed").to_string(),
-            ));
-        }
+        self.start_session_with_options(
+            None,
+            true,
+            |this, started, _| {
+                if !started {
+                    this.update_suspension = Some(UpdateSuspension::Failed(
+                        i18n("agent-update-recovery-new-session-failed").to_string(),
+                    ));
+                }
+            },
+            cx,
+        );
         cx.notify();
     }
 }

@@ -299,24 +299,30 @@ impl AgentPane {
             .map(str::to_owned)
     }
 
-    /// Spawn the backend process (optionally resuming a persisted Claude
+    /// Request the backend process (optionally resuming a persisted Claude
     /// session) and pump its messages onto the UI thread. Channel closure is
-    /// the EOF signal (the sender is owned by the reader thread). Does not
-    /// notify — callers decide whether a repaint is due.
-    pub(super) fn start_session(&mut self, resume: Option<String>, cx: &mut Context<Self>) -> bool {
+    /// the EOF signal (the sender is owned by the reader thread). Returns
+    /// before the process exists; the pane sits in `Status::Starting` until it
+    /// does. The calling stack sees no repaint — the arrival notifies.
+    pub(super) fn start_session(&mut self, resume: Option<String>, cx: &mut Context<Self>) {
         self.start_session_with_options(
             resume.map(|id| RecoveryIdentity::new(AgentKind::Claude, id)),
             false,
+            |_, _, _| {},
             cx,
         )
     }
 
+    /// `on_result` runs once the backend either came up or failed to, carrying
+    /// whether it did. The spawn no longer answers that on the calling stack,
+    /// so a caller that reports the outcome does it from there.
     pub(super) fn start_session_with_options(
         &mut self,
         recovery: Option<RecoveryIdentity>,
         preserve_thread_settings: bool,
+        on_result: impl FnOnce(&mut Self, bool, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
-    ) -> bool {
+    ) {
         // The pane's profile is a snapshot from when the tab opened; profile
         // edits in settings don't reach into live panes. Re-resolving by
         // name at every (re)start picks them up, so a new conversation
@@ -401,80 +407,130 @@ impl AgentPane {
                 .collect::<Vec<_>>()
                 .join(", ")
         );
-        match Backend::spawn(kind, &launch, cwd, recovery, deliver) {
-            Ok(session) => {
-                self.session = Some(session);
-                self.status = Status::Starting;
+        // Process creation blocks for hundreds of milliseconds on Windows
+        // (cmd.exe, then the CLI's own launcher), which is long enough to drop
+        // frames if it runs on the UI thread. The pane already models the gap
+        // as `Status::Starting` with no backend installed, so the spawn moves
+        // to a background thread and the result arrives in a later update.
+        self.status = Status::Starting;
+        let spawned = cx
+            .background_executor()
+            .spawn(async move { Backend::spawn(kind, &launch, cwd, recovery, deliver) });
 
-                cx.spawn(async move |this, cx| {
-                    while let Some(message) = rx.next().await {
-                        let updated = this.update(cx, |this, cx| {
-                            // A newer session owns the pane now; this pump's
-                            // messages belong to the replaced process.
-                            if !is_current_session_epoch(this.session_epoch, epoch) {
-                                return false;
-                            }
-
-                            let events = match this.session.as_mut() {
-                                Some(session) => session.process(message),
-                                None => Vec::new(),
-                            };
-
-                            for event in events {
-                                this.apply_event(event, cx);
-                            }
-
-                            true
-                        });
-
-                        if !updated.unwrap_or(false) {
-                            return;
+        cx.spawn(async move |this, cx| {
+            let spawned = spawned.await;
+            let started = this
+                .update(cx, |this, cx| {
+                    // A superseded start reports nothing: the newer one owns
+                    // the pane's state, and this caller's outcome no longer
+                    // describes what the pane is doing.
+                    match this.install_started_session(spawned, epoch, name, cx) {
+                        Some(started) => {
+                            on_result(this, started, cx);
+                            cx.notify();
+                            started
                         }
+                        None => false,
+                    }
+                })
+                .unwrap_or(false);
+            if !started {
+                return;
+            }
+
+            while let Some(message) = rx.next().await {
+                let updated = this.update(cx, |this, cx| {
+                    // A newer session owns the pane now; this pump's
+                    // messages belong to the replaced process.
+                    if !is_current_session_epoch(this.session_epoch, epoch) {
+                        return false;
                     }
 
-                    let _ = this.update(cx, |this, cx| {
-                        // A deliberately replaced session exits by design;
-                        // only the live session's death is worth a line.
-                        if !is_current_session_epoch(this.session_epoch, epoch) {
-                            return;
-                        }
-                        let exit_events = this
-                            .session
-                            .as_mut()
-                            .map(Backend::process_exit)
-                            .unwrap_or_default();
-                        for event in exit_events {
-                            this.apply_event(event, cx);
-                        }
-                        cx.emit(AgentPaneEvent::Interrupted);
-                        this.status = Status::Exited;
-                        if matches!(this.update_suspension, Some(UpdateSuspension::Reconnecting)) {
-                            this.update_suspension = Some(UpdateSuspension::Failed(
-                                i18n("agent-session-exited-before-restored")
-                                    .replace("{name}", name),
-                            ));
-                        }
-                        this.palette.awaiting_command_turn = false;
-                        if !this.palette.command_queue.is_empty() {
-                            this.palette.command_queue.clear();
-                            this.set_command_feedback(
-                                CommandFeedbackKind::Error,
-                                i18n("agent-session-queued-cancelled-exited")
-                                    .replace("{name}", name),
-                                cx,
-                            );
-                        }
-                        this.publish_queued_user_messages(cx);
-                        this.finish_working(cx);
-                        this.push_item(
-                            SessionItem::Error {
-                                text: i18n("agent-session-exited").replace("{name}", name),
-                            },
-                            cx,
-                        );
-                    });
-                })
-                .detach();
+                    let events = match this.session.as_mut() {
+                        Some(session) => session.process(message),
+                        None => Vec::new(),
+                    };
+
+                    for event in events {
+                        this.apply_event(event, cx);
+                    }
+
+                    true
+                });
+
+                if !updated.unwrap_or(false) {
+                    return;
+                }
+            }
+
+            let _ = this.update(cx, |this, cx| {
+                // A deliberately replaced session exits by design;
+                // only the live session's death is worth a line.
+                if !is_current_session_epoch(this.session_epoch, epoch) {
+                    return;
+                }
+                let exit_events = this
+                    .session
+                    .as_mut()
+                    .map(Backend::process_exit)
+                    .unwrap_or_default();
+                for event in exit_events {
+                    this.apply_event(event, cx);
+                }
+                cx.emit(AgentPaneEvent::Interrupted);
+                this.status = Status::Exited;
+                if matches!(this.update_suspension, Some(UpdateSuspension::Reconnecting)) {
+                    this.update_suspension = Some(UpdateSuspension::Failed(
+                        i18n("agent-session-exited-before-restored").replace("{name}", name),
+                    ));
+                }
+                this.palette.awaiting_command_turn = false;
+                if !this.palette.command_queue.is_empty() {
+                    this.palette.command_queue.clear();
+                    this.set_command_feedback(
+                        CommandFeedbackKind::Error,
+                        i18n("agent-session-queued-cancelled-exited").replace("{name}", name),
+                        cx,
+                    );
+                }
+                this.publish_queued_user_messages(cx);
+                this.finish_working(cx);
+                this.push_item(
+                    SessionItem::Error {
+                        text: i18n("agent-session-exited").replace("{name}", name),
+                    },
+                    cx,
+                );
+            });
+        })
+        .detach();
+    }
+
+    /// Take ownership of a backend that finished spawning, reporting whether it
+    /// came up. `None` means a newer start superseded this one while the
+    /// process was coming up; that leaves a live CLI behind, so the orphan is
+    /// shut down rather than dropped.
+    fn install_started_session(
+        &mut self,
+        spawned: Result<Backend, String>,
+        epoch: u64,
+        name: &'static str,
+        cx: &mut Context<Self>,
+    ) -> Option<bool> {
+        if !is_current_session_epoch(self.session_epoch, epoch) {
+            if let Ok(mut orphan) = spawned {
+                cx.background_executor()
+                    .spawn(async move {
+                        let _ = orphan.shutdown(Duration::from_secs(5), true);
+                    })
+                    .detach();
+            }
+            return None;
+        }
+
+        Some(match spawned {
+            Ok(session) => {
+                self.session = Some(session);
                 true
             }
             Err(err) => {
@@ -490,13 +546,13 @@ impl AgentPane {
                         SessionItem::Error {
                             text: i18n("agent-session-start-failed")
                                 .replace("{name}", name)
-                                .replace("{error}", &err.to_string()),
+                                .replace("{error}", &err),
                         },
                     );
                 });
                 false
             }
-        }
+        })
     }
 
     pub(crate) fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1089,11 +1145,18 @@ impl AgentPane {
                             return;
                         }
 
-                        if this.start_session(Some(id), cx) {
-                            this.history_ui.pending_resume_replay = Some(replay);
-                        } else {
-                            this.history_ui.mode = RecentSessionsMode::Open;
-                        }
+                        this.start_session_with_options(
+                            Some(RecoveryIdentity::new(AgentKind::Claude, id)),
+                            false,
+                            move |this, started, _| {
+                                if started {
+                                    this.history_ui.pending_resume_replay = Some(replay);
+                                } else {
+                                    this.history_ui.mode = RecentSessionsMode::Open;
+                                }
+                            },
+                            cx,
+                        );
                     });
                 })
                 .detach();
