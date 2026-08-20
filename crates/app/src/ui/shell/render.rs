@@ -177,18 +177,21 @@ impl Shell {
                     }))
                     // The background-task control stays out of the chrome until
                     // a tab has spawned a child to look at.
-                    .children(self.background_tasks_seen().then(|| {
-                        // Scoped to the active tab, because activating the
-                        // control opens that tab's children.
-                        let running = self
-                            .active_agent()
-                            .map(|pane| pane.read(cx).running_background_tasks())
-                            .unwrap_or(0);
+                    .children(if self.background_tasks_seen() {
+                        // The history flag is window-wide, so the active Agent
+                        // gate keeps this Agent-only control off terminal tabs.
+                        self.active_agent().map(|pane| {
+                            // Scoped to the active tab, because activating the
+                            // control opens that tab's children.
+                            let running = pane.read(cx).running_background_tasks();
 
-                        div()
-                            .occlude()
-                            .child(self.render_background_tasks_button(running, cx))
-                    })),
+                            div()
+                                .occlude()
+                                .child(self.render_background_tasks_button(running, cx))
+                        })
+                    } else {
+                        None
+                    }),
             )
     }
 
