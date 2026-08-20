@@ -14,7 +14,7 @@ use crate::{
     TITLE_BAR_HEIGHT, WindowExt as _,
     animation::cubic_bezier,
     button::{Button, ButtonVariant, ButtonVariants as _},
-    dialog::{DialogContent, DialogTitle},
+    dialog::{DIALOG_BUTTON_MIN_WIDTH, DialogContent, DialogTitle},
     scroll::ScrollableElement as _,
     text::{SelectionScope, SelectionScopeElement as _},
     v_flex,
@@ -125,6 +125,7 @@ impl DialogButtonProps {
 
         Button::new("ok")
             .label(ok_text)
+            .min_w(DIALOG_BUTTON_MIN_WIDTH)
             .with_variant(ok_variant)
             .on_click({
                 let on_ok = on_ok.clone();
@@ -151,6 +152,7 @@ impl DialogButtonProps {
 
         Button::new("cancel")
             .label(cancel_text)
+            .min_w(DIALOG_BUTTON_MIN_WIDTH)
             .with_variant(cancel_variant)
             .on_click({
                 let on_cancel = on_cancel.clone();

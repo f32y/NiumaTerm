@@ -1,6 +1,6 @@
 use gpui::{
-    AnyElement, App, InteractiveElement as _, IntoElement, ParentElement, RenderOnce,
-    StatefulInteractiveElement, StyleRefinement, Styled, Window, div, relative,
+    AnyElement, App, InteractiveElement as _, IntoElement, ParentElement, Pixels, RenderOnce,
+    StatefulInteractiveElement, StyleRefinement, Styled, Window, div, px, relative,
 };
 
 use crate::{
@@ -8,6 +8,11 @@ use crate::{
     dialog::{CancelDialog, ConfirmDialog},
     h_flex,
 };
+
+/// Shared width floor for a dialog's action buttons, so a short label like
+/// "OK" does not produce a button visibly smaller than the one beside it. A
+/// label wider than this still sizes to its text.
+pub const DIALOG_BUTTON_MIN_WIDTH: Pixels = px(80.);
 
 /// Footer section of a dialog, typically contains action buttons.
 ///
@@ -89,7 +94,9 @@ impl ParentElement for DialogClose {
 impl RenderOnce for DialogClose {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
         div()
-            .size_full()
+            // Wrapping a footer button in a row that fills the footer would
+            // stretch the button with it; the click target only has to cover
+            // what it wraps.
             .id("dialog-close")
             .on_click(move |_, window, cx| window.dispatch_action(Box::new(CancelDialog), cx))
             .children(self.children)
@@ -118,7 +125,6 @@ impl ParentElement for DialogAction {
 impl RenderOnce for DialogAction {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
         div()
-            .size_full()
             .id("dialog-action")
             .on_click(move |_, window, cx| window.dispatch_action(Box::new(ConfirmDialog), cx))
             .children(self.children)
