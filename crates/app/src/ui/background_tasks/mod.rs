@@ -20,8 +20,8 @@ use nmt_agent_utils::background_task::{
 };
 use nmt_i18n::i18n;
 
-use crate::agent_pane::AgentPane;
-use crate::agent_pane::transcript::TranscriptView;
+use crate::agent::AgentPane;
+use crate::agent::transcript::TranscriptView;
 use crate::ui::AppSettings;
 
 /// Rows shown before the section control offers the rest. Running work is the

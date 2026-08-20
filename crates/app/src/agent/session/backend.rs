@@ -1,0 +1,616 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use nmt_agent_utils::chat::MessageImage;
+use nmt_agent_utils::claude_code::sessions::RestoredTask;
+use nmt_i18n::i18n;
+
+use crate::agent::composer::attachments::PendingAttachments;
+use crate::agent::*;
+
+/// The conversation a restarted backend should continue, qualified by the
+/// harness that issued the id. Ids are only meaningful to the harness that
+/// minted them, so a mismatched pair starts a fresh conversation instead.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RecoveryIdentity {
+    pub(crate) kind: AgentKind,
+    pub(crate) id: String,
+}
+
+impl RecoveryIdentity {
+    pub(crate) fn new(kind: AgentKind, id: impl Into<String>) -> Self {
+        Self {
+            kind,
+            id: id.into(),
+        }
+    }
+}
+
+/// The pane's protocol session, one variant per agent kind. Every backend
+/// shares the [`nmt_agent_utils::chat`] event vocabulary and method surface,
+/// so the pane dispatches here and stays protocol-agnostic.
+pub(in crate::agent) enum Backend {
+    Codex(app_server::Session),
+    Claude(stream_json::Session),
+    DeepSeek(deepseek::Session),
+    #[cfg(test)]
+    Test(TestBackend),
+}
+
+#[cfg(test)]
+pub(in crate::agent) struct TestBackend {
+    send_outcomes: VecDeque<SendOutcome>,
+    slash_outcome: SlashCommandOutcome,
+    commands: Vec<SlashCommandInfo>,
+}
+
+#[cfg(test)]
+impl TestBackend {
+    pub(in crate::agent) fn new(
+        send_outcomes: impl IntoIterator<Item = SendOutcome>,
+        slash_outcome: SlashCommandOutcome,
+        commands: Vec<SlashCommandInfo>,
+    ) -> Self {
+        Self {
+            send_outcomes: send_outcomes.into_iter().collect(),
+            slash_outcome,
+            commands,
+        }
+    }
+}
+
+impl Backend {
+    /// Start the harness process for `kind` and wrap it in the matching
+    /// variant. Resume differs by harness — Codex asks the running app-server
+    /// to reopen a thread, Claude Code takes a session id as a launch flag —
+    /// so the caller passes an identity and this decides how to use it.
+    pub(in crate::agent) fn spawn(
+        kind: AgentKind,
+        launch: &LaunchConfig,
+        cwd: Option<String>,
+        recovery: Option<RecoveryIdentity>,
+        deliver: impl Fn(Value) + Send + Sync + 'static,
+    ) -> Result<Self, String> {
+        let resume = recovery
+            .filter(|identity| identity.kind == kind)
+            .map(|identity| identity.id);
+        // Harness stderr is forwarded at trace level: an agent turn emits tens of
+        // thousands of these lines per second, and formatting plus writing them
+        // costs enough main-thread time to drop frames.
+        match kind {
+            AgentKind::Codex => match resume {
+                Some(thread_id) => app_server::Session::spawn_resuming(
+                    launch,
+                    cwd,
+                    thread_id,
+                    true,
+                    deliver,
+                    |line| trace!("codex app-server: {line}"),
+                ),
+                None => app_server::Session::spawn(launch, cwd, deliver, |line| {
+                    trace!("codex app-server: {line}")
+                }),
+            }
+            .map(Backend::Codex),
+            AgentKind::Claude => {
+                stream_json::Session::spawn(launch, cwd, resume, deliver, |line| {
+                    trace!("claude: {line}")
+                })
+                .map(Backend::Claude)
+            }
+            // No process is started per tab here: the harness host is shared by
+            // every DeepSeek tab, and this attaches a conversation to it,
+            // starting it only if no tab holds one yet. `resume` is unused
+            // because continuing an earlier conversation is not mapped yet.
+            AgentKind::DeepSeek => deepseek::Session::create(launch, cwd, deliver)
+                .map(Backend::DeepSeek)
+                .map_err(|error| error.message().to_string()),
+        }
+    }
+
+    pub(in crate::agent) fn process(&mut self, message: Value) -> Vec<SessionEvent> {
+        match self {
+            Backend::Codex(session) => session.process(message),
+            Backend::Claude(session) => session.process(message),
+            Backend::DeepSeek(session) => session.process(message),
+            #[cfg(test)]
+            Backend::Test(_) => Vec::new(),
+        }
+    }
+
+    /// Send a message and the images it carries. Each harness takes them in
+    /// its own shape: Codex reads files from disk, so the attachments are
+    /// written under `scratch` first, while Claude Code takes the bytes
+    /// inline. A harness with no image input is sent the text alone, which is
+    /// all a pane without `image_input` can have composed.
+    pub(in crate::agent) fn send_user_message(
+        &mut self,
+        text: &str,
+        settings: &ThreadSettings,
+        skill: Option<&SkillReference>,
+        attachments: &PendingAttachments,
+        scratch: &Path,
+    ) -> SendOutcome {
+        match self {
+            Backend::Codex(session) => {
+                let paths = write_attachments(attachments, scratch);
+                session.send_user_message_with_skill(text, settings, skill, &paths)
+            }
+            Backend::Claude(session) => {
+                let images: Vec<MessageImage> = attachments
+                    .iter()
+                    .map(|attachment| MessageImage {
+                        bytes: attachment.bytes().to_vec(),
+                        media_type: attachment.format().mime_type().to_string(),
+                    })
+                    .collect();
+
+                session.send_user_message(text, settings, &images)
+            }
+            // Skills are not mapped for DeepSeek, so a reference cannot reach
+            // it and the prompt goes as the user wrote it.
+            Backend::DeepSeek(session) => session.send_user_message(text),
+            #[cfg(test)]
+            Backend::Test(session) => session
+                .send_outcomes
+                .pop_front()
+                .unwrap_or(SendOutcome::NotReady),
+        }
+    }
+
+    pub(in crate::agent) fn adapter_commands(&self) -> Vec<SlashCommandInfo> {
+        match self {
+            Backend::Codex(_) => app_server::Session::adapter_commands(),
+            Backend::Claude(_) => stream_json::Session::adapter_commands(),
+            Backend::DeepSeek(_) => deepseek::Session::adapter_commands(),
+            #[cfg(test)]
+            Backend::Test(session) => session.commands.clone(),
+        }
+    }
+
+    /// Drop one prompt the backend accepted but has not started. Answers
+    /// whether the backend took the removal, so a row it has already claimed
+    /// stays where the transcript is about to confirm it.
+    pub(in crate::agent) fn remove_queued_prompt(&mut self, item_id: &str) -> bool {
+        match self {
+            Backend::DeepSeek(session) => session.remove_queued_prompt(item_id),
+            // The other backends report no identity for their pending work, so
+            // nothing here can name a message to remove.
+            Backend::Codex(_) | Backend::Claude(_) => false,
+            #[cfg(test)]
+            Backend::Test(_) => false,
+        }
+    }
+
+    /// Pin a title on the conversation, answering with the title the backend
+    /// actually accepted after its own normalization.
+    pub(in crate::agent) fn rename_conversation(&mut self, title: &str) -> Result<String, String> {
+        match self {
+            Backend::DeepSeek(session) => session.rename(title),
+            Backend::Codex(_) | Backend::Claude(_) => {
+                Err(i18n("agent-session-rename-unsupported").to_string())
+            }
+            #[cfg(test)]
+            Backend::Test(_) => Err(i18n("agent-session-rename-unsupported").to_string()),
+        }
+    }
+
+    /// Branch the conversation and move this session into the copy.
+    pub(in crate::agent) fn fork_conversation(&mut self) -> Result<(), String> {
+        match self {
+            Backend::DeepSeek(session) => session.fork(),
+            Backend::Codex(_) | Backend::Claude(_) => {
+                Err(i18n("agent-session-fork-unsupported").to_string())
+            }
+            #[cfg(test)]
+            Backend::Test(_) => Err(i18n("agent-session-fork-unsupported").to_string()),
+        }
+    }
+
+    /// Ask the backend which earlier conversations mention a phrase. The
+    /// answer arrives as a replacement history list, so there is nothing to
+    /// return here.
+    pub(in crate::agent) fn search_sessions(&mut self, query: &str) {
+        match self {
+            Backend::DeepSeek(session) => session.search_sessions(query),
+            Backend::Codex(_) | Backend::Claude(_) => {}
+            #[cfg(test)]
+            Backend::Test(_) => {}
+        }
+    }
+
+    pub(in crate::agent) fn execute_slash_command(
+        &mut self,
+        name: &str,
+        arguments: &str,
+    ) -> SlashCommandOutcome {
+        match self {
+            Backend::Codex(session) => session.execute_slash_command(name, arguments),
+            Backend::Claude(session) => session.execute_slash_command(name, arguments),
+            Backend::DeepSeek(session) => session.execute_slash_command(name, arguments),
+            #[cfg(test)]
+            Backend::Test(session) => session.slash_outcome.clone(),
+        }
+    }
+
+    /// Ask for a name for this conversation. Claude's CLI summarizes
+    /// `description` with a model call and answers later through
+    /// `TitleUpdated`; Codex has no naming of its own, so `opening_line` is
+    /// stored on the thread and reported straight back. Returning the events
+    /// lets one call site serve both without knowing which it is talking to.
+    pub(in crate::agent) fn request_title(
+        &mut self,
+        description: &str,
+        opening_line: String,
+    ) -> Vec<SessionEvent> {
+        match self {
+            Backend::Claude(session) => {
+                session.request_session_title(description);
+                Vec::new()
+            }
+            Backend::Codex(session) => {
+                session.set_thread_name(&opening_line);
+                vec![SessionEvent::TitleUpdated(opening_line)]
+            }
+            Backend::DeepSeek(_) => Vec::new(),
+            #[cfg(test)]
+            Backend::Test(_) => Vec::new(),
+        }
+    }
+
+    pub(in crate::agent) fn rewind_files(&mut self, user_message_id: &str) -> SlashCommandOutcome {
+        match self {
+            Backend::Claude(session) => session.rewind_files(user_message_id),
+            Backend::Codex(_) | Backend::DeepSeek(_) => SlashCommandOutcome::Rejected {
+                message: i18n("agent-session-file-rewind-claude-only").to_string(),
+            },
+            #[cfg(test)]
+            Backend::Test(session) => session.slash_outcome.clone(),
+        }
+    }
+
+    /// Ask the provider for fresher child-agent data. Adapters guard against
+    /// overlapping requests themselves, so opening the panel repeatedly cannot
+    /// queue duplicate discovery passes.
+    pub(in crate::agent) fn refresh_background_tasks(&mut self) {
+        match self {
+            Backend::Codex(session) => session.refresh_background_tasks(),
+            // Claude Code rebuilds tasks from session history rather than a
+            // provider query, so there is nothing to re-request live.
+            Backend::Claude(_) => {}
+            Backend::DeepSeek(session) => session.refresh_background_tasks(),
+            #[cfg(test)]
+            Backend::Test(_) => {}
+        }
+    }
+
+    /// Ask the provider for one child's conversation. Codex reads the stored
+    /// descendant thread; Claude Code reads the file the CLI wrote for that
+    /// child, which is where a child's own turns live.
+    pub(in crate::agent) fn load_background_task_transcript(
+        &mut self,
+        key: &BackgroundTaskKey,
+        cwd: Option<&str>,
+    ) -> Vec<SessionEvent> {
+        // A key names the provider that published the task, so a key belonging
+        // to another harness reaches no session: its ids mean nothing here.
+        match self {
+            Backend::Codex(session) => match key.provider {
+                BackgroundTaskProvider::Codex => session.load_background_task_transcript(&key.id),
+                BackgroundTaskProvider::ClaudeCode | BackgroundTaskProvider::DeepSeek => Vec::new(),
+            },
+            Backend::Claude(session) => match key.provider {
+                BackgroundTaskProvider::ClaudeCode => {
+                    session.load_background_task_transcript(&key.id, cwd)
+                }
+                BackgroundTaskProvider::Codex | BackgroundTaskProvider::DeepSeek => Vec::new(),
+            },
+            // The harness answers this one asynchronously, so the read starts
+            // here and its result reaches the pane as an ordinary event.
+            Backend::DeepSeek(session) => {
+                if key.provider == BackgroundTaskProvider::DeepSeek {
+                    session.load_background_task_transcript(&key.id);
+                }
+                Vec::new()
+            }
+            #[cfg(test)]
+            Backend::Test(_) => Vec::new(),
+        }
+    }
+
+    /// Stop one child agent without ending the parent's turn. Both harnesses
+    /// can do it, by different means: a Codex child is a thread of its own and
+    /// takes a thread-scoped `turn/interrupt`, while Claude Code registers each
+    /// delegated agent under a task id that `stop_task` names.
+    ///
+    /// Returns whether the request went out. A key belonging to another harness
+    /// reaches no session, because its ids mean nothing there.
+    pub(in crate::agent) fn interrupt_background_task(&mut self, key: &BackgroundTaskKey) -> bool {
+        match self {
+            Backend::Codex(session) => match key.provider {
+                BackgroundTaskProvider::Codex => session.interrupt_background_task(&key.id),
+                BackgroundTaskProvider::ClaudeCode | BackgroundTaskProvider::DeepSeek => false,
+            },
+            Backend::Claude(session) => match key.provider {
+                BackgroundTaskProvider::ClaudeCode => session.interrupt_background_task(key),
+                BackgroundTaskProvider::Codex | BackgroundTaskProvider::DeepSeek => false,
+            },
+            Backend::DeepSeek(session) => match key.provider {
+                BackgroundTaskProvider::DeepSeek => session.interrupt_background_task(&key.id),
+                BackgroundTaskProvider::Codex | BackgroundTaskProvider::ClaudeCode => false,
+            },
+            #[cfg(test)]
+            Backend::Test(_) => false,
+        }
+    }
+
+    /// Take the sequence number a child-agent history read must not overwrite
+    /// past. Live updates that land while the read runs keep their newer state.
+    /// Only Claude Code rebuilds children from files, so Codex has no read to
+    /// bracket and its sequence is unused.
+    pub(in crate::agent) fn begin_task_restoration(&mut self) -> u64 {
+        match self {
+            Backend::Claude(session) => session.begin_task_restoration(),
+            Backend::Codex(_) | Backend::DeepSeek(_) => 0,
+            #[cfg(test)]
+            Backend::Test(_) => 0,
+        }
+    }
+
+    pub(in crate::agent) fn finish_task_restoration(
+        &mut self,
+        restored: Result<Vec<RestoredTask>, String>,
+        starting_sequence: u64,
+    ) -> Vec<SessionEvent> {
+        match self {
+            Backend::Claude(session) => {
+                session.finish_task_restoration(restored, starting_sequence)
+            }
+            Backend::Codex(_) | Backend::DeepSeek(_) => Vec::new(),
+            #[cfg(test)]
+            Backend::Test(_) => Vec::new(),
+        }
+    }
+
+    /// Continue an earlier conversation inside the running session. Returns
+    /// whether the request reached a backend that can do it: Claude Code has no
+    /// in-session resume and must respawn with the session id instead, so the
+    /// caller keeps the recent-sessions list open and reports why.
+    pub(in crate::agent) fn resume_thread(&mut self, thread_id: &str) -> bool {
+        match self {
+            Backend::Codex(session) => {
+                session.resume_thread(thread_id);
+                true
+            }
+            // The harness answers whether it attached, because a conversation
+            // rooted in another directory is one this tab cannot adopt.
+            Backend::DeepSeek(session) => session.resume_thread(thread_id),
+            Backend::Claude(_) => false,
+            #[cfg(test)]
+            Backend::Test(_) => false,
+        }
+    }
+
+    /// Ask for recent sessions over `scope`, replacing whatever an earlier
+    /// scope produced. Only Codex lists over the protocol, and its server
+    /// takes the scope as a filter it either applies or omits; Claude Code
+    /// reads its own transcript directories, and the DeepSeek host scopes
+    /// nothing by directory.
+    pub(in crate::agent) fn request_history(&mut self, scope: SessionScope) {
+        match self {
+            Backend::Codex(session) => session.request_history(scope),
+            Backend::Claude(_) | Backend::DeepSeek(_) => {}
+            #[cfg(test)]
+            Backend::Test(_) => {}
+        }
+    }
+
+    /// Fetch the next page of recent sessions. Only Codex pages its history
+    /// from the backend; Claude Code reads whole directories from disk, and the
+    /// DeepSeek host answers with every visible session at once.
+    pub(in crate::agent) fn request_more_history(&mut self) {
+        match self {
+            Backend::Codex(session) => session.request_more_history(),
+            Backend::Claude(_) | Backend::DeepSeek(_) => {}
+            #[cfg(test)]
+            Backend::Test(_) => {}
+        }
+    }
+
+    pub(in crate::agent) fn session_id(&self) -> Option<&str> {
+        match self {
+            Backend::Claude(session) => session.session_id(),
+            Backend::DeepSeek(session) => session.session_id(),
+            Backend::Codex(_) => None,
+            #[cfg(test)]
+            Backend::Test(_) => None,
+        }
+    }
+
+    pub(in crate::agent) fn recovery_identity(&self) -> Option<RecoveryIdentity> {
+        match self {
+            Backend::Claude(session) => session
+                .session_id()
+                .map(|id| RecoveryIdentity::new(AgentKind::Claude, id)),
+            Backend::Codex(session) => session
+                .thread_id()
+                .map(|id| RecoveryIdentity::new(AgentKind::Codex, id)),
+            // The id names the conversation on the harness host, which is worth
+            // reporting even though resuming into it is not mapped yet.
+            Backend::DeepSeek(session) => session
+                .session_id()
+                .map(|id| RecoveryIdentity::new(AgentKind::DeepSeek, id)),
+            #[cfg(test)]
+            Backend::Test(_) => None,
+        }
+    }
+
+    pub(in crate::agent) fn has_active_operation(&self) -> bool {
+        match self {
+            Backend::Claude(session) => session.has_active_operation(),
+            Backend::Codex(session) => session.has_active_operation(),
+            Backend::DeepSeek(session) => session.has_active_operation(),
+            #[cfg(test)]
+            Backend::Test(_) => false,
+        }
+    }
+
+    pub(in crate::agent) fn shutdown(
+        &mut self,
+        timeout: Duration,
+        force: bool,
+    ) -> Result<(), String> {
+        match self {
+            Backend::Claude(session) => session.shutdown(timeout, force),
+            Backend::Codex(session) => session.shutdown(timeout, force),
+            // Dropping this session releases its hold on the shared host, and
+            // the last tab to let go stops it. Nothing here has to wait.
+            Backend::DeepSeek(_) => Ok(()),
+            #[cfg(test)]
+            Backend::Test(_) => Ok(()),
+        }
+    }
+
+    pub(in crate::agent) fn process_exit(&mut self) -> Vec<SessionEvent> {
+        match self {
+            Backend::Claude(session) => session.process_exit(),
+            Backend::Codex(_) | Backend::DeepSeek(_) => Vec::new(),
+            #[cfg(test)]
+            Backend::Test(_) => Vec::new(),
+        }
+    }
+
+    pub(in crate::agent) fn interrupt(&mut self) {
+        match self {
+            Backend::Codex(session) => session.interrupt(),
+            Backend::Claude(session) => session.interrupt(),
+            Backend::DeepSeek(session) => session.interrupt(),
+            #[cfg(test)]
+            Backend::Test(_) => {}
+        }
+    }
+
+    pub(in crate::agent) fn respond_approval(&mut self, decision: &str) {
+        match self {
+            Backend::Codex(session) => session.respond_approval(decision),
+            Backend::Claude(session) => session.respond_approval(decision),
+            Backend::DeepSeek(session) => session.respond_approval(decision),
+            #[cfg(test)]
+            Backend::Test(_) => {}
+        }
+    }
+
+    /// Ask for one workflow member's conversation. Only a harness that reports
+    /// its runs live answers this; the disk-backed one reads a stored record
+    /// through its own refresh path instead.
+    pub(in crate::agent) fn request_workflow_agent_transcript(
+        &mut self,
+        task_id: &str,
+        agent_id: &str,
+    ) {
+        match self {
+            Backend::DeepSeek(session) => {
+                session.request_workflow_agent_transcript(task_id, agent_id)
+            }
+            Backend::Codex(_) | Backend::Claude(_) => {}
+            #[cfg(test)]
+            Backend::Test(_) => {}
+        }
+    }
+
+    /// What each still-running workflow run needs read on the next refresh
+    /// tick. Only Claude reports workflows, so Codex has nothing to read.
+    pub(in crate::agent) fn workflow_refresh_requests(&self) -> Vec<WorkflowRefreshRequest> {
+        match self {
+            Backend::Claude(session) => session.workflow_refresh_requests(),
+            Backend::Codex(_) | Backend::DeepSeek(_) => Vec::new(),
+            #[cfg(test)]
+            Backend::Test(_) => Vec::new(),
+        }
+    }
+
+    pub(in crate::agent) fn apply_workflow_refresh(
+        &mut self,
+        result: WorkflowRefreshResult,
+    ) -> Vec<SessionEvent> {
+        match self {
+            Backend::Claude(session) => session.apply_workflow_refresh(result),
+            Backend::Codex(_) | Backend::DeepSeek(_) => Vec::new(),
+            #[cfg(test)]
+            Backend::Test(_) => Vec::new(),
+        }
+    }
+
+    pub(in crate::agent) fn restore_workflows(
+        &mut self,
+        restored: Vec<RestoredWorkflowRun>,
+    ) -> Vec<SessionEvent> {
+        match self {
+            Backend::Claude(session) => session.restore_workflows(restored),
+            Backend::Codex(_) | Backend::DeepSeek(_) => Vec::new(),
+            #[cfg(test)]
+            Backend::Test(_) => Vec::new(),
+        }
+    }
+
+    /// Point the session at another model. Only DeepSeek applies a pick as its
+    /// own request: Codex carries thread settings as overrides on the next
+    /// turn, and Claude bakes the model into the launch.
+    pub(in crate::agent) fn select_model(
+        &mut self,
+        model: &str,
+        effort: Option<&str>,
+    ) -> Result<(), String> {
+        match self {
+            Backend::DeepSeek(session) => session.select_model(model, effort),
+            Backend::Codex(_) | Backend::Claude(_) => Ok(()),
+            #[cfg(test)]
+            Backend::Test(_) => Ok(()),
+        }
+    }
+
+    /// What the session is actually set to, for restoring the pickers after a
+    /// refused pick.
+    pub(in crate::agent) fn selection(&self) -> (Option<&str>, Option<&str>) {
+        match self {
+            Backend::DeepSeek(session) => session.selection(),
+            Backend::Codex(_) | Backend::Claude(_) => (None, None),
+            #[cfg(test)]
+            Backend::Test(_) => (None, None),
+        }
+    }
+
+    /// Answer an `AskUserQuestion` card. Codex has no equivalent request, so
+    /// there is nothing to answer there.
+    pub(in crate::agent) fn respond_questions(&mut self, answers: Option<Vec<Vec<String>>>) {
+        match self {
+            Backend::Claude(session) => session.respond_questions(answers),
+            Backend::DeepSeek(session) => session.respond_questions(answers),
+            Backend::Codex(_) => {}
+            #[cfg(test)]
+            Backend::Test(_) => {}
+        }
+    }
+}
+
+/// Write each attachment into `scratch`, returning the paths that could be
+/// written. A file that cannot be written is left out rather than failing the
+/// message: the text and the images that did land are still worth sending.
+fn write_attachments(attachments: &PendingAttachments, scratch: &Path) -> Vec<PathBuf> {
+    if attachments.is_empty() || fs::create_dir_all(scratch).is_err() {
+        return Vec::new();
+    }
+
+    attachments
+        .iter()
+        .enumerate()
+        .filter_map(|(index, attachment)| {
+            // Named by position within the message, and rewritten on every
+            // send, so a pane's scratch directory never grows past one
+            // message's worth of files.
+            let path = scratch.join(format!("image-{}.png", index + 1));
+
+            fs::write(&path, attachment.bytes()).ok().map(|()| path)
+        })
+        .collect()
+}

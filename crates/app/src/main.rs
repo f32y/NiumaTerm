@@ -21,7 +21,7 @@ use nmt_platform::windows::ipc as platform_ipc;
 use tracing::warn;
 use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 
-mod agent_pane;
+mod agent;
 mod cli;
 mod error;
 mod ipc;
@@ -36,7 +36,7 @@ mod utils;
 mod window;
 mod workspace;
 
-use crate::agent_pane::AgentThreadDefaults;
+use crate::agent::AgentThreadDefaults;
 use crate::cli::CliAction;
 use crate::terminal::view::{
     CopyBlockCommand, CopyBlockOutput, NextBlock, PreviousBlock, RerunBlock, SendShiftTab, SendTab,
@@ -226,8 +226,8 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
 
             cx.set_global(AppSettings::load());
             let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
-            agent_pane::updates::initialize(testing, &agent_profiles, cx);
-            agent_pane::input_history::initialize(testing, cx);
+            agent::updates::initialize(testing, &agent_profiles, cx);
+            agent::input_history::initialize(testing, cx);
 
             // Bring up the remote host service if it was left enabled. Runs on
             // its own runtime thread; failures only log.
@@ -256,7 +256,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
             // deferred to when the settings dialog closes (see Shell::on_show_settings).
             cx.observe_global::<AppSettings>(|cx| {
                 let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
-                agent_pane::updates::reconcile_profiles(&agent_profiles, cx);
+                agent::updates::reconcile_profiles(&agent_profiles, cx);
                 set_job_management(cx.global::<AppSettings>().manage_subprocess_job);
 
                 let smooth_panels = cx.global::<AppSettings>().smooth_scrolling.panels_enabled();
@@ -407,7 +407,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
             .detach();
 
             cx.on_app_quit(|cx| {
-                if let Err(error) = agent_pane::input_history::flush(cx) {
+                if let Err(error) = agent::input_history::flush(cx) {
                     warn!("failed to flush Agent input history: {error}");
                 }
 
@@ -441,7 +441,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
             for initial in initials {
                 AppWindow::open(cx, initial);
             }
-            agent_pane::updates::schedule_automatic_checks(cx);
+            agent::updates::schedule_automatic_checks(cx);
 
             // Apply CLI actions (argv + forwarded over the IPC pipe) on the
             // foreground; windows above exist before the first poll.

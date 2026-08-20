@@ -5,7 +5,7 @@ use gpui::{
     ScrollWheelEvent, TestAppContext, list, point, size,
 };
 
-use crate::agent_pane::AgentKind;
+use crate::agent::AgentKind;
 use crate::ui::settings::*;
 
 #[test]

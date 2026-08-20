@@ -16,7 +16,7 @@ use nmt_terminal::event::{ProgressReport, ProgressState};
 
 use super::Shell;
 use super::shell::TabSurface;
-use crate::agent_pane::AgentKind;
+use crate::agent::AgentKind;
 use crate::tabs::{TabId, TabManager};
 use crate::ui::terminal_status::{terminal_dot, terminal_presentation};
 use crate::ui::{AppSettings, UI_RADIUS};

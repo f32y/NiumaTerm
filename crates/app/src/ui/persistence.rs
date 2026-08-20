@@ -12,7 +12,7 @@ use tracing::warn;
 use super::Shell;
 use super::settings::{AgentProfile, AppSettings, builtin_agent_profile};
 use super::shell::{TabSurface, explicit_cwd};
-use crate::agent_pane::{AgentKind, AgentPane};
+use crate::agent::{AgentKind, AgentPane};
 use crate::pane_tree::{PaneId, PaneNode, PaneTree};
 use crate::tabs::{TabId, TabManager};
 use crate::terminal::view::TerminalPane;

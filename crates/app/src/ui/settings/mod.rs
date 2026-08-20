@@ -60,7 +60,7 @@ use nmt_platform::{
 };
 use tracing::warn;
 
-use crate::agent_pane::updates as agent_updates;
+use crate::agent::updates as agent_updates;
 use crate::ui::UI_RADIUS;
 use crate::ui::settings::about_page::about_page;
 use crate::ui::settings::agent_page::agent_page;

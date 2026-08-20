@@ -14,7 +14,7 @@ use gpui_component::{
 };
 use nmt_i18n::i18n;
 
-use crate::agent_pane::AgentKind;
+use crate::agent::AgentKind;
 use crate::ui::settings::agent_profile_dialog::open_agent_profile_dialog;
 use crate::ui::settings::state::{AgentProfile, AppSettings};
 use crate::ui::settings::table::{
