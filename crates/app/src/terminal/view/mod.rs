@@ -65,7 +65,7 @@ use crate::terminal::view::mouse::{
     block_gutter_hit, selection_drag_started, selection_type_for_click_count, terminal_scroll_lines,
 };
 use crate::terminal::{metrics, wake};
-use crate::ui::{AppSettings, UI_RADIUS, main_view_background_opacity};
+use crate::ui::{AppSettings, UI_RADIUS, font_with_default_fallback, main_view_background_opacity};
 
 actions!(
     terminal,
@@ -533,7 +533,7 @@ impl Render for TerminalPane {
             // clear of the rounded corners.
             .rounded(UI_RADIUS - px(1.))
             .text_color(rgb(theme_default_foreground().rgb_u32()))
-            .font_family(metrics::font_family(cx))
+            .font(font_with_default_fallback(metrics::font_family(cx)))
             .text_size(px(metrics::font_size_px(cx)))
             .line_height(px(cell.height_px))
             .p(px(metrics::PADDING_PX))

@@ -399,7 +399,9 @@ impl Render for Shell {
             .flex()
             .flex_col()
             // All chrome inherits the configured UI font; terminal panes override it.
-            .font_family(cx.global::<AppSettings>().ui_font_family.clone())
+            .font(ui::font_with_default_fallback(
+                cx.global::<AppSettings>().ui_font_family.clone(),
+            ))
             .key_context("Shell");
 
         Self::bind_actions(shell, cx)

@@ -16,7 +16,7 @@ use crate::agent::composer::{
 };
 use crate::agent::*;
 use crate::terminal::frame::theme_default_background;
-use crate::ui::main_view_background_opacity;
+use crate::ui::{font_with_default_fallback, main_view_background_opacity};
 
 struct StopResponseIcon;
 
@@ -187,7 +187,9 @@ impl Render for AgentPane {
             // The agent tab is a terminal surface stand-in, so it overrides the
             // chrome's UI font with its own configured font (Settings → Agent
             // Font), same as the terminal pane does with the terminal font.
-            .font_family(cx.global::<AppSettings>().agent_font_family.clone())
+            .font(font_with_default_fallback(
+                cx.global::<AppSettings>().agent_font_family.clone(),
+            ))
             .text_size(px(cx.global::<AppSettings>().agent_font_size as f32))
             .children(update_banner)
             .child(
