@@ -94,7 +94,7 @@ pub(crate) use crate::agent::session::{
 };
 use crate::agent::transcript::{Entry, RowSpec, TranscriptView, VirtualTranscriptState};
 use crate::agent::workflows::WorkflowUi;
-use crate::ui::{AppSettings, UI_RADIUS, WorkingIndicator, current_branch};
+use crate::ui::{AppSettings, CollapseRows, UI_RADIUS, WorkingIndicator, current_branch};
 
 #[derive(Clone)]
 pub(crate) enum AgentPaneEvent {

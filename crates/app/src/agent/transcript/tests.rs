@@ -355,6 +355,7 @@ mod separate_view_state_tests {
     use nmt_agent_utils::chat::Item as SessionItem;
 
     use crate::agent::transcript::{AgentKind, TranscriptView};
+    use crate::ui::CollapseRows;
 
     fn message(id: &str, text: &str) -> SessionItem {
         SessionItem::AgentMessage {
@@ -372,7 +373,7 @@ mod separate_view_state_tests {
             parent.update(cx, |transcript, cx| {
                 transcript.push(1, message("a", "parent reply"), Vec::new(), cx);
                 transcript.expanded_rows.insert(0);
-                transcript.expanded_turns.insert(1);
+                transcript.toggled_turns.insert(1);
                 transcript.expanded_groups.insert(0);
                 transcript.mark_interrupted(1);
             });
@@ -383,7 +384,7 @@ mod separate_view_state_tests {
                     transcript.expanded_rows.is_empty(),
                     "row expansion belongs to one conversation"
                 );
-                assert!(transcript.expanded_turns.is_empty());
+                assert!(transcript.toggled_turns.is_empty());
                 assert!(transcript.expanded_groups.is_empty());
                 assert!(
                     !transcript.was_interrupted(1),
@@ -410,11 +411,11 @@ mod separate_view_state_tests {
                 for index in 0..4 {
                     transcript.push(1, message(&format!("p{index}"), "row"), Vec::new(), cx);
                 }
-                transcript.sync_transcript_list(transcript.build_row_specs(false));
+                transcript.sync_transcript_list(transcript.build_row_specs(CollapseRows::Off));
             });
             child.update(cx, |transcript, cx| {
                 transcript.push(1, message("c0", "row"), Vec::new(), cx);
-                transcript.sync_transcript_list(transcript.build_row_specs(false));
+                transcript.sync_transcript_list(transcript.build_row_specs(CollapseRows::Off));
             });
 
             // A shared list state would report one conversation's row count for
@@ -454,6 +455,7 @@ mod steered_prompt_rows_tests {
     use nmt_agent_utils::chat::Item as SessionItem;
 
     use crate::agent::transcript::{AgentKind, RowSpec, TranscriptView};
+    use crate::ui::CollapseRows;
 
     fn reply(id: &str) -> SessionItem {
         SessionItem::AgentMessage {
@@ -478,7 +480,7 @@ mod steered_prompt_rows_tests {
     /// Render order as entry indexes, with the turn's two chrome rows named.
     fn order(transcript: &TranscriptView) -> Vec<String> {
         transcript
-            .build_row_specs(false)
+            .build_row_specs(CollapseRows::WorkAndToolCalls)
             .into_iter()
             .map(|spec| match spec {
                 RowSpec::Entry { index, .. } | RowSpec::Work { index, .. } => index.to_string(),
@@ -507,7 +509,7 @@ mod steered_prompt_rows_tests {
                 // the turn below the reply.
                 assert_eq!(order(transcript), vec!["0", "fold(1)", "2", "3", "summary"]);
 
-                transcript.expanded_turns.insert(1);
+                transcript.toggled_turns.insert(1);
                 assert_eq!(
                     order(transcript),
                     vec!["0", "fold(1)", "1", "2", "3", "summary"],
@@ -552,7 +554,7 @@ mod steered_prompt_rows_tests {
                 // rather than stating a duration the session never reported.
                 assert_eq!(order(transcript), vec!["0", "fold(1)", "2"]);
 
-                transcript.expanded_turns.insert(1);
+                transcript.toggled_turns.insert(1);
                 assert_eq!(order(transcript), vec!["0", "fold(1)", "1", "2"]);
             });
         });
@@ -570,6 +572,83 @@ mod steered_prompt_rows_tests {
 
                 // Nothing is hidden while the work is still happening.
                 assert_eq!(order(transcript), vec!["0", "1", "2"]);
+            });
+        });
+    }
+}
+
+/// The collapse setting has to reach a conversation the tab restored, not only
+/// the turns it watched happen: a resumed turn arrives already settled, which
+/// is the state the setting decides the folding of.
+mod resumed_collapse_tests {
+    use gpui::{AppContext as _, TestAppContext};
+    use nmt_agent_utils::chat::{Item as SessionItem, ReplayItem, ReplayTurn};
+
+    use crate::agent::transcript::{AgentKind, RowSpec, TranscriptView};
+    use crate::ui::CollapseRows;
+
+    fn replayed(items: Vec<SessionItem>) -> ReplayTurn {
+        ReplayTurn {
+            items: items
+                .into_iter()
+                .map(|item| ReplayItem { item, at: None })
+                .collect(),
+            seconds: None,
+            output_tokens: None,
+            interrupted: false,
+        }
+    }
+
+    fn row_count(transcript: &TranscriptView, collapse: CollapseRows) -> usize {
+        transcript
+            .build_row_specs(collapse)
+            .into_iter()
+            .filter(|spec| matches!(spec, RowSpec::Entry { .. } | RowSpec::Work { .. }))
+            .count()
+    }
+
+    #[gpui::test]
+    fn a_resumed_turn_answers_to_the_collapse_setting(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let transcript = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
+
+            transcript.update(cx, |transcript, cx| {
+                transcript.append_replay(
+                    1,
+                    replayed(vec![
+                        SessionItem::UserMessage {
+                            text: Some("ask".into()),
+                        },
+                        SessionItem::CommandExecution {
+                            id: "c1".into(),
+                            command: "ls".into(),
+                            purpose: None,
+                            aggregated_output: None,
+                            status: Some("completed".into()),
+                            exit_code: Some(0),
+                        },
+                        SessionItem::CommandExecution {
+                            id: "c2".into(),
+                            command: "cat".into(),
+                            purpose: None,
+                            aggregated_output: None,
+                            status: Some("completed".into()),
+                            exit_code: Some(0),
+                        },
+                        SessionItem::AgentMessage {
+                            id: "a".into(),
+                            text: Some("answer".into()),
+                        },
+                    ]),
+                    cx,
+                );
+
+                // Folded away: only the prompt and the answer remain.
+                assert_eq!(row_count(transcript, CollapseRows::WorkAndToolCalls), 2);
+                // The work returns, with its two commands behind one run line.
+                assert_eq!(row_count(transcript, CollapseRows::ToolCalls), 2);
+                // Every row on its own line.
+                assert_eq!(row_count(transcript, CollapseRows::Off), 4);
             });
         });
     }

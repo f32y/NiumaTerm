@@ -29,9 +29,13 @@ pub(crate) struct TranscriptView {
     /// Collapsed work-log runs the user has expanded, keyed by the index of
     /// the run's first transcript entry (stable — the list only appends).
     pub(in crate::agent) expanded_groups: HashSet<usize>,
-    /// Completed turns the user has unfolded (completed turns fold their
-    /// intermediate work rows behind a "Worked for Ns" header by default).
-    pub(in crate::agent) expanded_turns: HashSet<u64>,
+    /// Settled turns the user has flipped away from what the collapse setting
+    /// does by default: unfolded where it folds a turn's work behind the
+    /// "Show work" disclosure, folded where it leaves the work on screen.
+    pub(in crate::agent) toggled_turns: HashSet<u64>,
+    /// Collapse setting the rows above were built under, so a change to it can
+    /// retire the per-turn and per-run departures from the mode it replaces.
+    collapse_mode: CollapseRows,
     /// Work-log rows whose detail (command output, reasoning text) is
     /// expanded, keyed by transcript index.
     pub(in crate::agent) expanded_rows: HashSet<usize>,
@@ -93,7 +97,8 @@ impl TranscriptView {
             transcript_font: Default::default(),
             transcript_width: None,
             expanded_groups: HashSet::new(),
-            expanded_turns: HashSet::new(),
+            toggled_turns: HashSet::new(),
+            collapse_mode: CollapseRows::default(),
             expanded_rows: HashSet::new(),
             virtual_transcripts: HashMap::new(),
             settled_turns: HashSet::new(),
@@ -151,7 +156,7 @@ impl TranscriptView {
         self.items.clear();
         self.scroll_to_bottom();
         self.expanded_groups.clear();
-        self.expanded_turns.clear();
+        self.toggled_turns.clear();
         self.expanded_rows.clear();
         self.settled_turns.clear();
         self.completed_turn_seconds.clear();
@@ -370,6 +375,18 @@ impl Render for TranscriptView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let settings = cx.global::<AppSettings>();
         let collapse = settings.collapse_tool_calls;
+
+        // Switching the setting is a directive about the whole transcript, so
+        // it drops the folds and expansions the previous mode collected. They
+        // record a departure from a default that just moved: kept, they would
+        // open exactly the turns the user had folded and fold the ones they
+        // had opened, which reads as the setting doing the opposite of what it
+        // says.
+        if self.collapse_mode != collapse {
+            self.collapse_mode = collapse;
+            self.toggled_turns.clear();
+            self.expanded_groups.clear();
+        }
         self.transcript_list
             .set_smooth_wheel_enabled(settings.smooth_scrolling.agent_enabled());
 

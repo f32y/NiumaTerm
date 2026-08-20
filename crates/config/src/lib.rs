@@ -582,7 +582,7 @@ mod tests {
         AgentConfig {
             enable_agent_hooks: false,
             show_agent_usage: false,
-            collapse_tool_calls: true,
+            collapse_tool_calls: agent::CollapseRows::WorkAndToolCalls,
             check_agent_updates: false,
             codex_skill_command_compat: false,
         }

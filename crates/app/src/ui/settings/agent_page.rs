@@ -59,15 +59,38 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                 },
             ),
         ))
-        .item(SettingItem::new(
-            i18n("settings-agent-collapse-tool-calls"),
-            SettingField::switch(
-                |cx| cx.global::<AppSettings>().collapse_tool_calls,
-                |value, cx| {
-                    cx.global_mut::<AppSettings>().collapse_tool_calls = value;
-                },
-            ),
-        ))
+        .item(
+            SettingItem::new(
+                i18n("settings-agent-collapse-tool-calls"),
+                SettingField::dropdown(
+                    vec![
+                        (
+                            CollapseRows::WorkAndToolCalls.as_str().into(),
+                            i18n("settings-agent-collapse-work-and-tool-calls").into(),
+                        ),
+                        (
+                            CollapseRows::ToolCalls.as_str().into(),
+                            i18n("settings-agent-collapse-only-tool-calls").into(),
+                        ),
+                        (
+                            CollapseRows::Off.as_str().into(),
+                            i18n("settings-common-off").into(),
+                        ),
+                    ],
+                    |cx| {
+                        cx.global::<AppSettings>()
+                            .collapse_tool_calls
+                            .as_str()
+                            .into()
+                    },
+                    |value, cx| {
+                        cx.global_mut::<AppSettings>().collapse_tool_calls =
+                            CollapseRows::from_value(&value);
+                    },
+                ),
+            )
+            .description(i18n("settings-agent-collapse-tool-calls-description")),
+        )
         .item(
             SettingItem::new(
                 i18n("settings-agent-codex-skill-compat"),
