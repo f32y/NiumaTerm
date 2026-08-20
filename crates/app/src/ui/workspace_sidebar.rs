@@ -16,8 +16,8 @@ use nmt_i18n::i18n;
 use nmt_terminal::event::ProgressReport;
 
 use super::{AppSettings, NewWorkspace, Shell};
-use crate::agent_pane::AgentKind;
-use crate::agent_pane::usage::AgentUsageView;
+use crate::agent::AgentKind;
+use crate::agent::usage::AgentUsageView;
 use crate::tabs::TabId;
 use crate::ui::sidebar_resize::{self, ResizeDrag};
 use crate::ui::tab_bar::{new_tab_menu, progress_visual, tab_icon};

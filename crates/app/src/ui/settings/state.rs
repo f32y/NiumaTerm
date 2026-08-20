@@ -12,7 +12,7 @@ use nmt_config::{CursorShape, SettingsPatch, get, save_settings};
 use nmt_i18n::i18n;
 use tracing::warn;
 
-use crate::agent_pane::AgentKind;
+use crate::agent::AgentKind;
 use crate::ui::settings::MAX_TAB_WIDTH;
 use crate::ui::settings::theme::load_theme_choices;
 

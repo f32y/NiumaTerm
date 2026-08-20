@@ -2,7 +2,7 @@ use gpui::{App, Entity};
 use gpui_component::resizable::ResizableState;
 use nmt_config::local_state::TabState;
 
-use crate::agent_pane::{AgentKind, AgentPane};
+use crate::agent::{AgentKind, AgentPane};
 use crate::pane_tree::{PaneId, PaneTree};
 use crate::terminal::view::TerminalPane;
 

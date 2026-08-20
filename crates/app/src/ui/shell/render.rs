@@ -1,6 +1,6 @@
 use nmt_i18n::i18n;
 
-use crate::agent_pane::RecoveryIdentity;
+use crate::agent::RecoveryIdentity;
 use crate::ui::shell::close::begin_window_teardown;
 use crate::ui::shell::*;
 

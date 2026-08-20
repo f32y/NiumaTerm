@@ -51,12 +51,12 @@ use nmt_platform::{
 use tracing::warn;
 use windows_sys::Win32::Foundation::HWND;
 
-use crate::agent_pane::updates::{
+use crate::agent::updates::{
     self as agent_updates, AgentUpdates, FocusedVisibleLifetime, NotificationPrimaryAction,
     NotificationProgress, UpdateNotificationTone, UpdateNotificationView,
 };
-use crate::agent_pane::usage::AgentUsageView;
-use crate::agent_pane::{AgentKind, AgentPane, AgentPaneEvent};
+use crate::agent::usage::AgentUsageView;
+use crate::agent::{AgentKind, AgentPane, AgentPaneEvent};
 use crate::cli::CliAction;
 use crate::pane_tree::{PaneId, PaneNode, PaneTree, RemoveOutcome, SplitDirection, SplitOutcome};
 use crate::tabs::{CommandOutcome, Tab, TabId, TabManager};

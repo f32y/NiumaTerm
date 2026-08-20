@@ -16,8 +16,8 @@ use gpui_component::{ActiveTheme as _, IconName, Sizable as _, h_flex, v_flex};
 use nmt_agent_utils::workflow::{WorkflowAgent, WorkflowAgentState, WorkflowRun, WorkflowRunState};
 use nmt_i18n::i18n;
 
-use crate::agent_pane::AgentPane;
-use crate::agent_pane::transcript::TranscriptView;
+use crate::agent::AgentPane;
+use crate::agent::transcript::TranscriptView;
 use crate::ui::AppSettings;
 
 pub(crate) struct WorkflowsView {
