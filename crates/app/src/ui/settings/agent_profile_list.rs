@@ -3,9 +3,9 @@
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, AppContext as _, Context, DragMoveEvent, Entity, InteractiveElement as _,
-    IntoElement, ParentElement as _, Pixels, Render, SharedString, StatefulInteractiveElement as _,
-    Styled as _, Window, div, px,
+    AnyElement, App, AppContext as _, Context, Div, DragMoveEvent, Entity, Hsla,
+    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::list::{List, ListDelegate, ListItem, ListState};
@@ -27,8 +27,36 @@ use crate::ui::settings::table::{
 const TYPE_COLUMN: Pixels = px(56.0);
 const OPERATION_COLUMN: Pixels = px(56.0);
 
+/// Thickness of the line marking where a dragged profile would be dropped.
+const DROP_LINE_HEIGHT: Pixels = px(2.0);
+
 /// Rows shown before the list starts scrolling instead of growing.
 const MAX_VISIBLE_ROWS: f32 = 8.0;
+
+/// Which edge of a row a line is drawn on.
+#[derive(Clone, Copy, PartialEq)]
+enum RowEdge {
+    Top,
+    Bottom,
+}
+
+/// A line on one edge of a row: the divider to the next row, or the marker for
+/// the gap a drop would insert into. It floats over the row rather than sitting
+/// in the row's box as a border, because a marker that thickened a border would
+/// shrink the space the row centres its contents in and nudge them by a pixel
+/// for as long as the drag hovers there.
+fn row_line(edge: RowEdge, height: Pixels, color: Hsla) -> Div {
+    div()
+        .absolute()
+        .left_0()
+        .right_0()
+        .map(|this| match edge {
+            RowEdge::Top => this.top_0(),
+            RowEdge::Bottom => this.bottom_0(),
+        })
+        .h(height)
+        .bg(color)
+}
 
 /// The agent's mark, matching the glyph its tabs carry.
 fn agent_icon(profile: &AgentProfile) -> Icon {
@@ -95,9 +123,13 @@ impl Render for ProfileDragPreview {
 /// or a delete.
 pub(super) struct AgentProfileList {
     profiles: Vec<AgentProfile>,
-    /// Row a profile drag currently hovers, highlighted as the drop target.
-    /// Dropping there moves the dragged profile to that position.
-    drag_over: Option<usize>,
+    /// Gap a profile drag currently hovers, counted in row edges: `0` is above
+    /// the first row and `profiles.len()` below the last. It is marked with a
+    /// line rather than a highlighted row because the row under the pointer
+    /// says nothing about which side of it the profile ends up on. The gap the
+    /// profile already occupies is marked too, so a drag that would put it back
+    /// where it started still shows where the release lands it.
+    drop_gap: Option<usize>,
 }
 
 impl ListDelegate for AgentProfileList {
@@ -120,26 +152,38 @@ impl ListDelegate for AgentProfileList {
         // The frame around the list supplies the last row's bottom edge, so
         // repeating it here would double the line.
         let ruled = row + 1 < self.profiles.len();
-        let drag_target = self.drag_over == Some(row);
+        // A gap is marked on the bottom edge of the row above it; the gap
+        // before the first row has no such row, so it goes on that row's top
+        // edge instead.
+        let drop_line = if self.drop_gap == Some(row + 1) {
+            Some(RowEdge::Bottom)
+        } else if row == 0 && self.drop_gap == Some(0) {
+            Some(RowEdge::Top)
+        } else {
+            None
+        };
 
         Some(
-            // Stating the row height keeps the divider inside it: without one,
-            // the row measures its content plus the border, and the rows would
-            // then total more than the frame reserves for them.
+            // Stating the row height keeps the rows totalling what the frame
+            // reserves for them; measured rows would each add their content's
+            // own height instead.
             ListItem::new(("agent-profile-row", row))
                 .h(px(TABLE_ROW_HEIGHT))
-                .when(ruled, |this| {
-                    this.border_b_1().border_color(cx.theme().border)
-                })
-                .when(drag_target, |this| this.bg(cx.theme().list_active))
+                // The row's padding moves onto the content below, which then
+                // spans the row exactly, so a line placed on its edge lands on
+                // the row's edge.
+                .p_0()
                 .child(
                     h_flex()
                         .id(("agent-profile-drag", row))
+                        .relative()
                         .w_full()
+                        .h(px(TABLE_ROW_HEIGHT))
+                        .px_3()
                         .items_center()
                         .gap_2()
                         // Drag a row to reorder it; drop moves the dragged
-                        // profile (`from`) to this row's position.
+                        // profile (`from`) into the gap the pointer marks.
                         .on_drag(ProfileDrag { from: row }, move |_, _, _, cx| {
                             cx.new(|_| ProfileDragPreview {
                                 label: drag_label.clone(),
@@ -151,26 +195,39 @@ impl ListDelegate for AgentProfileList {
                                     return;
                                 }
 
-                                // No highlight over the drag's own row:
-                                // dropping there is a no-op.
-                                let target = (e.drag(cx).from != row).then_some(row);
+                                // The pointer's half of the row picks the
+                                // edge it is closest to, which is the gap the
+                                // release inserts into.
+                                let gap = if e.event.position.y < e.bounds.center().y {
+                                    row
+                                } else {
+                                    row + 1
+                                };
 
-                                if this.delegate().drag_over != target {
-                                    this.delegate_mut().drag_over = target;
+                                if this.delegate().drop_gap != Some(gap) {
+                                    this.delegate_mut().drop_gap = Some(gap);
                                     cx.notify();
                                 }
                             },
                         ))
                         .on_drop(cx.listener(move |this, drag: &ProfileDrag, _, cx| {
-                            this.delegate_mut().drag_over = None;
+                            let gap = this.delegate_mut().drop_gap.take();
 
                             let from = drag.from;
                             let profiles = &mut cx.global_mut::<AppSettings>().agent_profiles;
+                            // Removing the profile first shifts every gap below
+                            // it up by one, so a gap past the profile's own
+                            // position lands one row earlier than it reads.
+                            let to = gap.map(|gap| if from < gap { gap - 1 } else { gap });
                             // Stale indices only appear if the list changed
                             // mid-drag; skip the move rather than panic.
-                            if from != row && from < profiles.len() && row < profiles.len() {
+                            if let Some(to) = to
+                                && from != to
+                                && from < profiles.len()
+                                && to < profiles.len()
+                            {
                                 let profile = profiles.remove(from);
-                                profiles.insert(row, profile);
+                                profiles.insert(to, profile);
                             }
 
                             // Refresh the rows directly: the drop lands on
@@ -180,6 +237,12 @@ impl ListDelegate for AgentProfileList {
                                 cx.global::<AppSettings>().agent_profiles.clone();
                             cx.notify();
                         }))
+                        .when(ruled, |this| {
+                            this.child(row_line(RowEdge::Bottom, px(1.0), cx.theme().border))
+                        })
+                        .when_some(drop_line, |this, edge| {
+                            this.child(row_line(edge, DROP_LINE_HEIGHT, cx.theme().primary))
+                        })
                         .child(div().w(TYPE_COLUMN).flex_none().child(agent_icon(profile)))
                         .child(div().flex_1().min_w_0().truncate().child(label))
                         .child(
@@ -262,7 +325,7 @@ pub(super) fn agent_profile_list(window: &mut Window, cx: &mut App) -> AnyElemen
             ListState::new(
                 AgentProfileList {
                     profiles: Vec::new(),
-                    drag_over: None,
+                    drop_gap: None,
                 },
                 window,
                 cx,
@@ -271,11 +334,11 @@ pub(super) fn agent_profile_list(window: &mut Window, cx: &mut App) -> AnyElemen
         });
 
     state.update(cx, |state, cx| {
-        // Drop the target highlight once the drag is gone without a drop on
+        // Drop the insertion line once the drag is gone without a drop on
         // the list (cancelled via Escape, or released elsewhere) — the cancel
         // itself refreshes the window, so this always gets a chance to run.
-        if state.delegate().drag_over.is_some() && !cx.has_active_drag() {
-            state.delegate_mut().drag_over = None;
+        if state.delegate().drop_gap.is_some() && !cx.has_active_drag() {
+            state.delegate_mut().drop_gap = None;
             cx.notify();
         }
 
