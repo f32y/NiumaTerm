@@ -1067,6 +1067,10 @@ impl AgentPane {
         );
         self.palette.feedback = None;
         self.history_ui.mode = RecentSessionsMode::Hidden;
+        // The discarded conversation's subject no longer describes this tab,
+        // so the tab falls back to its profile name until the replacement
+        // conversation names itself.
+        cx.emit(AgentPaneEvent::TitleSuggested(String::new()));
 
         // History records belong to the provider and remain intact; only the
         // live backend and this tab's conversation presentation are reset.

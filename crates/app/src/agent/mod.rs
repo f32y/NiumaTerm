@@ -116,7 +116,9 @@ pub(crate) enum AgentPaneEvent {
     },
     /// A name for the conversation this pane is holding, derived from the
     /// message that opened it. The pane does not know which tab owns it, so
-    /// naming the tab is left to the chrome that does.
+    /// naming the tab is left to the chrome that does. An empty name means the
+    /// pane no longer holds a conversation worth naming, which drops the tab
+    /// back to the name its profile gives it.
     TitleSuggested(String),
 }
 
