@@ -58,7 +58,7 @@ impl gpui::Focusable for AgentPane {
 }
 
 impl Render for AgentPane {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let command_palette = self.render_command_palette(cx);
         let command_feedback = self.visible_command_feedback().map(|feedback| {
             let (color, label) = match feedback.kind {
@@ -122,11 +122,34 @@ impl Render for AgentPane {
             .history_ui
             .pending
             .unwrap_or(self.history_ui.sessions.len());
+        let transcript_empty = self.transcript.read(cx).is_empty();
         let history = self
             .history_ui
             .mode
-            .is_visible(self.transcript.read(cx).is_empty(), history_rows)
+            .is_visible(transcript_empty, history_rows)
             .then(|| self.render_history(cx));
+        // A list opened over a live conversation is a picker, and the
+        // transcript behind it is not what the next click should reach. Blur
+        // pushes it back a layer while keeping the tab recognizable as that
+        // conversation; a blank tab has nothing to push back.
+        let blur_transcript = history.is_some() && !transcript_empty;
+        // The ramp is retargeted from the render rather than from the places
+        // that open and close the list, so every path in and out of it — the
+        // command, Escape, an outside click, resuming a row — animates without
+        // each having to remember to.
+        let now = Instant::now();
+        let blur_target = if blur_transcript { 1.0 } else { 0.0 };
+        if self.history_ui.transcript_blur.to != blur_target {
+            self.history_ui.transcript_blur = BlurFade {
+                from: self.history_ui.transcript_blur.progress(now),
+                to: blur_target,
+                start: now,
+            };
+        }
+        let blur = self.history_ui.transcript_blur.progress(now);
+        if !self.history_ui.transcript_blur.settled(now) {
+            window.request_animation_frame();
+        }
 
         v_flex()
             .size_full()
@@ -180,7 +203,26 @@ impl Render for AgentPane {
                             this.focus(window, cx);
                         }),
                     )
-                    .child(self.transcript.clone()),
+                    .relative()
+                    .child(self.transcript.clone())
+                    .when(blur > 0.0, |this| {
+                        this.child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .size_full()
+                                // Swallows clicks aimed at the transcript; the
+                                // list's outside-click handler still sees them
+                                // and dismisses itself. Only while the list is
+                                // up: the fade out outlives it, and a layer
+                                // still eating clicks after it closed would
+                                // read as the tab having hung.
+                                .when(blur_transcript, |this| this.occlude())
+                                .backdrop_blur(px(16. * blur))
+                                .bg(cx.theme().background.opacity(0.25 * blur)),
+                        )
+                    }),
             )
             .child({
                 // Composer area: auxiliary strips sit outside the bordered,

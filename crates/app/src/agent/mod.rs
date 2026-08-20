@@ -440,6 +440,45 @@ mod git_branch_poll_tests {
     }
 }
 
+/// Ramp driving the transcript blur behind the recent-session list: where it
+/// started, what it is heading for, and when it left. Reversing mid-ramp starts
+/// a fresh one from wherever the previous had reached, so a list dismissed
+/// while it is still opening unblurs from the blur actually on screen instead
+/// of snapping to full.
+#[derive(Clone, Copy)]
+struct BlurFade {
+    from: f32,
+    to: f32,
+    start: Instant,
+}
+
+impl BlurFade {
+    const DURATION: Duration = Duration::from_millis(150);
+
+    fn progress(&self, now: Instant) -> f32 {
+        let elapsed = now.duration_since(self.start).as_secs_f32();
+        let t = (elapsed / Self::DURATION.as_secs_f32()).clamp(0.0, 1.0);
+        // Smoothstep: the ramp leaves and arrives at zero speed, so neither end
+        // of the transition reads as the blur being switched on.
+        let eased = t * t * (3.0 - 2.0 * t);
+        self.from + (self.to - self.from) * eased
+    }
+
+    fn settled(&self, now: Instant) -> bool {
+        now.duration_since(self.start) >= Self::DURATION
+    }
+}
+
+impl Default for BlurFade {
+    fn default() -> Self {
+        Self {
+            from: 0.0,
+            to: 0.0,
+            start: Instant::now(),
+        }
+    }
+}
+
 /// Recent-session list shown above the composer.
 struct SessionHistoryUi {
     /// Resumable sessions for this cwd, newest first; shown above the
@@ -465,6 +504,7 @@ struct SessionHistoryUi {
     /// resume in place; those open where they worked instead.
     scope: SessionScope,
     scroll: VirtualListScrollHandle,
+    transcript_blur: BlurFade,
 }
 
 impl Default for SessionHistoryUi {
@@ -478,6 +518,7 @@ impl Default for SessionHistoryUi {
             pending_resume_replay: None,
             scope: SessionScope::default(),
             scroll: VirtualListScrollHandle::new(),
+            transcript_blur: BlurFade::default(),
         }
     }
 }
