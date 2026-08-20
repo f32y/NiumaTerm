@@ -857,11 +857,14 @@ impl Sidebar {
             // column occupies — between that item's horizontal padding and
             // this row's indent — so every tab's mark lines up under it,
             // whatever kind of tab it is. Out of the flow, because that lane
-            // is this row's left padding.
+            // is this row's left padding. The offset is 2px short of that
+            // item's own padding because the item is a button, and its chrome
+            // shifts the column it draws right of where the padding alone puts
+            // it; matching the drawn column is what the eye reads as one line.
             .children(status_mark.map(|mark| {
                 div()
                     .absolute()
-                    .left_2()
+                    .left(px(6.0))
                     .w_4()
                     .h_full()
                     .flex()
