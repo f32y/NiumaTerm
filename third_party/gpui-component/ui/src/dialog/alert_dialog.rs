@@ -300,13 +300,15 @@ impl AlertDialog {
             })
             .children(self.children)
             .when(!has_footer, |this| {
-                // Default footer for AlertDialog if user doesn't provide one, with OK and optional Cancel button
+                // Default footer for AlertDialog if user doesn't provide one, with OK and optional Cancel button.
+                // Windows puts the affirmative button first and cancel last, which is the order every
+                // other dialog on the desktop the user is dismissing this one over uses.
                 this.footer(
                     DialogFooter::new()
+                        .child(button_props.render_ok(window, cx))
                         .when(button_props.show_cancel, |this| {
                             this.child(button_props.render_cancel(window, cx))
-                        })
-                        .child(button_props.render_ok(window, cx)),
+                        }),
                 )
             })
     }
