@@ -423,6 +423,15 @@ impl AgentPane {
                     self.run_next_queued_command(cx);
                 }
             }
+            SessionEvent::EffortRejected { message, effort } => {
+                // The pick did not take, so the control returns to the level
+                // the session is on. The reason goes to the feedback strip
+                // above the composer: it answers for the control the user just
+                // used, and the transcript is what the conversation said.
+                self.settings.effort = effort;
+                self.remember_thread_defaults(cx);
+                self.set_command_feedback(CommandFeedbackKind::Error, message, cx);
+            }
             SessionEvent::History(sessions) => {
                 // A list of what is recent answers a different question than
                 // the search currently on screen, so it replaces those rows
