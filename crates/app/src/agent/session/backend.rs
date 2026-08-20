@@ -445,6 +445,18 @@ impl Backend {
         }
     }
 
+    /// Name the conversation this backend holds. Only Claude Code keeps a
+    /// name of its own for one; where the harness keeps none, the tab's name
+    /// is this application's alone and there is nothing to tell.
+    pub(in crate::agent) fn rename_session(&mut self, title: &str) {
+        match self {
+            Backend::Claude(session) => session.rename_session(title),
+            Backend::Codex(_) | Backend::DeepSeek(_) => {}
+            #[cfg(test)]
+            Backend::Test(_) => {}
+        }
+    }
+
     pub(in crate::agent) fn has_active_operation(&self) -> bool {
         match self {
             Backend::Claude(session) => session.has_active_operation(),
