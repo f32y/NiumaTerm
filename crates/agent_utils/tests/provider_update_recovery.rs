@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 use std::{env, fs};
 
@@ -233,10 +233,38 @@ fn register_available(
     (coordinator, key)
 }
 
+/// How long a fake agent has to reach its first event. The agent is a
+/// PowerShell process, so this covers interpreter startup rather than any work
+/// the session does, and the whole suite runs alongside every other test binary
+/// in the workspace.
+const READY_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The next message from the agent, or `None` once `deadline` passes.
+///
+/// A single quiet interval is not a failure. Startup here measures ~400 ms on
+/// an idle machine and several seconds when the rest of the workspace's test
+/// binaries are running, so only the deadline decides how long to wait; a
+/// receive window that gave up on its own would make the deadline decorative.
+fn next_message(receiver: &Receiver<Value>, deadline: Instant) -> Option<Value> {
+    loop {
+        let remaining = deadline.checked_duration_since(Instant::now())?;
+        match receiver.recv_timeout(remaining.min(Duration::from_millis(250))) {
+            Ok(message) => return Some(message),
+            Err(RecvTimeoutError::Timeout) => continue,
+            // The sender lives with the reader thread feeding it, so a closed
+            // channel means the agent exited and no later message can arrive.
+            // Waiting out the deadline would only delay the same failure and
+            // report it as a timeout rather than as the exit it is.
+            Err(RecvTimeoutError::Disconnected) => {
+                panic!("the fake agent exited before its session became ready")
+            }
+        }
+    }
+}
+
 fn wait_for_claude_ready(session: &mut stream_json::Session, receiver: &Receiver<Value>) -> String {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while Instant::now() < deadline {
-        let message = receiver.recv_timeout(Duration::from_secs(1)).unwrap();
+    let deadline = Instant::now() + READY_TIMEOUT;
+    while let Some(message) = next_message(receiver, deadline) {
         if session
             .process(message)
             .iter()
@@ -249,9 +277,8 @@ fn wait_for_claude_ready(session: &mut stream_json::Session, receiver: &Receiver
 }
 
 fn wait_for_codex_ready(session: &mut app_server::Session, receiver: &Receiver<Value>) -> String {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while Instant::now() < deadline {
-        let message = receiver.recv_timeout(Duration::from_secs(1)).unwrap();
+    let deadline = Instant::now() + READY_TIMEOUT;
+    while let Some(message) = next_message(receiver, deadline) {
         if session
             .process(message)
             .iter()
