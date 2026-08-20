@@ -775,43 +775,71 @@ impl DirectXRenderer {
                 .max(0.0)
                 .sqrt()
                 / scale;
-            // Every pass covers the whole reduced image rather than the region
-            // plus its kernel margin. At a sixteenth of the pixels that costs a
-            // fraction of a millisecond, and it keeps the edge clamp in the
-            // shaders aligned with the window edge, where extending the border
-            // pixels outward is exactly the wanted behavior.
+            // The reduction reads only the region itself, edge-replicating it
+            // outward: the surrounding frame sits on other surfaces whose
+            // premultiplied color would darken the region's rim. Every later
+            // pass then covers the whole reduced image rather than the region
+            // plus its kernel margin, because at a sixteenth of the pixels the
+            // saving is a fraction of a millisecond and the reduction has
+            // already replaced everything outside the region with its edge.
+            let region_min = [
+                blur.bounds.origin.x.0.clamp(0.5, self.width as f32 - 0.5),
+                blur.bounds.origin.y.0.clamp(0.5, self.height as f32 - 0.5),
+            ];
+            let region_max = [
+                (blur.bounds.origin.x.0 + blur.bounds.size.width.0)
+                    .clamp(region_min[0], self.width as f32 - 0.5),
+                (blur.bounds.origin.y.0 + blur.bounds.size.height.0)
+                    .clamp(region_min[1], self.height as f32 - 0.5),
+            ];
+            let reduced_max = [targets.size[0] - 0.5, targets.size[1] - 0.5];
+            let pass = |direction, sigma, source_size, source_scale, source_min, source_max| {
+                BackdropBlurPass {
+                    bounds: reduced_bounds,
+                    target_size: targets.size,
+                    source_size,
+                    direction,
+                    sigma,
+                    source_scale,
+                    source_min,
+                    source_max,
+                }
+            };
             let passes = [
-                (
-                    // Reduction: no kernel, four taps per output pixel.
-                    [0.0f32, 0.0],
-                    0.0f32,
+                // Reduction: no kernel, four taps per output pixel.
+                pass(
+                    [0.0, 0.0],
+                    0.0,
                     [self.width as f32, self.height as f32],
                     scale,
+                    region_min,
+                    region_max,
                 ),
-                ([1.0, 0.0], sigma, targets.size, 1.0),
-                ([0.0, 1.0], sigma, targets.size, 1.0),
+                pass(
+                    [1.0, 0.0],
+                    sigma,
+                    targets.size,
+                    1.0,
+                    [0.5, 0.5],
+                    reduced_max,
+                ),
+                pass(
+                    [0.0, 1.0],
+                    sigma,
+                    targets.size,
+                    1.0,
+                    [0.5, 0.5],
+                    reduced_max,
+                ),
             ];
 
-            for (index, (direction, sigma, source_size, source_scale)) in
-                passes.into_iter().enumerate()
-            {
+            for (index, pass_params) in passes.into_iter().enumerate() {
                 let pipeline = if index == 0 {
                     &mut self.pipelines.backdrop_downsample_pipeline
                 } else {
                     &mut self.pipelines.backdrop_blur_pipeline
                 };
-                pipeline.update_buffer(
-                    &devices.device,
-                    context,
-                    &[BackdropBlurPass {
-                        bounds: reduced_bounds,
-                        target_size: targets.size,
-                        source_size,
-                        direction,
-                        sigma,
-                        source_scale,
-                    }],
-                )?;
+                pipeline.update_buffer(&devices.device, context, &[pass_params])?;
                 // The previous pass's output becomes this pass's input, so the
                 // shader resource slot has to be released before the same texture
                 // can be bound as a render target.
@@ -1558,6 +1586,8 @@ struct BackdropBlurPass {
     direction: [f32; 2],
     sigma: f32,
     source_scale: f32,
+    source_min: [f32; 2],
+    source_max: [f32; 2],
 }
 
 #[derive(Clone, Copy)]
@@ -1949,6 +1979,12 @@ fn create_blend_state_for_backdrop_pass(device: &ID3D11Device) -> Result<ID3D11B
 /// how much of the desktop a transparent window covers has not changed, and
 /// recomputing it from the coverage this pass writes would push the region
 /// toward opaque.
+///
+/// The shader hands over color scaled by coverage alone, so the source factor
+/// is the destination's alpha: the render target holds color premultiplied by
+/// transparency, and the region has to be written back in that same form at the
+/// transparency it already had. An opaque window clears its alpha to one, where
+/// this factor is the identity.
 #[inline]
 fn create_blend_state_for_backdrop_composite(
     device: &ID3D11Device,
@@ -1958,7 +1994,7 @@ fn create_blend_state_for_backdrop_composite(
     desc.RenderTarget[0].BlendEnable = true.into();
     desc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
     desc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
-    desc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
+    desc.RenderTarget[0].SrcBlend = D3D11_BLEND_DEST_ALPHA;
     desc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
     desc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ZERO;
     desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ONE;
