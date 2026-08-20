@@ -5,13 +5,13 @@ mod prompt_truncation_tests {
     use crate::agent::composer::{ComposerAction, composer_action};
     use crate::agent::transcript::{
         AGENT_DISCLOSURE_DETAIL_INSET, AGENT_DISCLOSURE_GAP, AGENT_DISCLOSURE_PADDING,
-        AGENT_DISCLOSURE_SLOT, AGENT_TEXT_MEASURE_REMS, AgentKind, Status, TurnSummary,
-        USER_TEXT_MEASURE_REMS, VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES, command_execution_detail,
-        command_execution_heading, compaction_accounting, compaction_label,
-        compaction_row_is_expandable, elapsed_label, entry_copy_text, interrupted_status_label,
-        is_work_row, last_response_label, should_show_jump_to_latest, should_virtualize_transcript,
-        transcript_segments, truncated_user_prompt, turn_summary, worked_status_label,
-        working_status_label,
+        AGENT_DISCLOSURE_SLOT, AGENT_TEXT_MEASURE_REMS, AgentKind, Status, TranscriptView,
+        TurnSummary, USER_TEXT_MEASURE_REMS, VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES,
+        command_execution_detail, command_execution_heading, compaction_accounting,
+        compaction_label, compaction_row_is_expandable, elapsed_label, entry_copy_text,
+        interrupted_status_label, is_work_row, last_response_label, should_show_jump_to_latest,
+        should_virtualize_transcript, transcript_segments, truncated_user_prompt, turn_summary,
+        worked_status_label, working_status_label,
     };
 
     /// The reading measures are expressed in rems but chosen as character
@@ -27,6 +27,19 @@ mod prompt_truncation_tests {
             USER_TEXT_MEASURE_REMS < AGENT_TEXT_MEASURE_REMS,
             "a prompt reads as an aside to the reply beside it"
         );
+    }
+
+    #[test]
+    fn transcript_code_style_uses_configured_font_and_size() {
+        let style = TranscriptView::transcript_code_block_style("JetBrains Mono".into(), 12.5);
+        let fallbacks = style
+            .text
+            .font_fallbacks
+            .expect("transcript font should retain the application fallback");
+
+        assert_eq!(style.text.font_family.as_deref(), Some("JetBrains Mono"));
+        assert_eq!(style.text.font_size, Some(px(12.5).into()));
+        assert_eq!(fallbacks.fallback_list(), ["Microsoft YaHei"]);
     }
 
     #[test]

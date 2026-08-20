@@ -50,6 +50,33 @@ fn terminal_font_metrics_clamp_to_allowed_range() {
     assert_eq!(clamp_terminal_line_height(0.1), 0.8);
     assert_eq!(clamp_terminal_line_height(5.0), 3.0);
     assert_eq!(clamp_terminal_line_height(f64::NAN), DEFAULT_LINE_HEIGHT);
+
+    assert_eq!(clamp_agent_transcript_font_size(12.5), 12.5);
+    assert_eq!(clamp_agent_transcript_font_size(1.0), 6.0);
+    assert_eq!(clamp_agent_transcript_font_size(100.0), 72.0);
+    assert_eq!(
+        clamp_agent_transcript_font_size(f64::NAN),
+        DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE
+    );
+}
+
+#[test]
+fn agent_transcript_font_has_first_party_defaults() {
+    let settings = AppSettings::default();
+
+    assert_eq!(settings.agent_transcript_font_family, "Consolas");
+    assert_eq!(
+        settings.agent_transcript_font_size,
+        DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE
+    );
+    assert_eq!(
+        settings.appearance_config().agent_transcript_font_family,
+        "Consolas"
+    );
+    assert_eq!(
+        settings.appearance_config().agent_transcript_font_size,
+        DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE
+    );
 }
 
 #[test]

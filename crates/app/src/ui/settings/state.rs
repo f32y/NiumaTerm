@@ -20,6 +20,7 @@ use crate::ui::settings::theme::load_theme_choices;
 pub const DEFAULT_SHELL: &str = r"C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe";
 pub const DEFAULT_FONT_FAMILY: &str = "Consolas";
 pub const DEFAULT_FONT_SIZE: f64 = 14.0;
+pub const DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE: f64 = 13.0;
 pub const DEFAULT_LINE_HEIGHT: f64 = 1.0;
 pub(super) const DEFAULT_BACKGROUND_IMAGE_OPACITY: f64 = 0.3;
 pub const DEFAULT_UI_FONT: &str = "Segoe UI";
@@ -67,6 +68,10 @@ pub struct AppSettings {
     pub agent_font_family: SharedString,
     /// Font size (px) used by agent (chat) tabs.
     pub agent_font_size: f64,
+    /// Font family used by code-oriented agent transcript content.
+    pub agent_transcript_font_family: SharedString,
+    /// Font size (px) used by code-oriented agent transcript content.
+    pub agent_transcript_font_size: f64,
     /// Fixed tab width in pixels (DEFAULT_TAB_WIDTH..=MAX_TAB_WIDTH). Ignored
     /// while `tab_auto_size` is on.
     pub tab_width: f64,
@@ -161,6 +166,8 @@ impl Default for AppSettings {
             terminal_line_height: DEFAULT_LINE_HEIGHT,
             agent_font_family: initial_font_family(),
             agent_font_size: DEFAULT_FONT_SIZE,
+            agent_transcript_font_family: initial_font_family(),
+            agent_transcript_font_size: DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE,
             tab_width: DEFAULT_TAB_WIDTH,
             tab_auto_size: false,
             tab_bar_style: TabBarStyle::default(),
@@ -328,6 +335,14 @@ pub(super) fn clamp_terminal_font_size(size: f64) -> f64 {
     }
 }
 
+pub(super) fn clamp_agent_transcript_font_size(size: f64) -> f64 {
+    if size.is_finite() {
+        size.clamp(6.0, 72.0)
+    } else {
+        DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE
+    }
+}
+
 pub(super) fn clamp_terminal_line_height(line_height: f64) -> f64 {
     if line_height.is_finite() {
         line_height.clamp(0.8, 3.0)
@@ -422,6 +437,12 @@ impl AppSettings {
             terminal_line_height: clamp_terminal_line_height(appearance.terminal_line_height),
             agent_font_family: terminal_font_or_default(&appearance.agent_font_family),
             agent_font_size: clamp_terminal_font_size(appearance.agent_font_size),
+            agent_transcript_font_family: terminal_font_or_default(
+                &appearance.agent_transcript_font_family,
+            ),
+            agent_transcript_font_size: clamp_agent_transcript_font_size(
+                appearance.agent_transcript_font_size,
+            ),
             tab_width: clamp_tab_width(appearance.tab_width),
             tab_auto_size: appearance.tab_auto_size,
             tab_bar_style: appearance.tab_bar_style,
@@ -648,6 +669,8 @@ impl AppSettings {
             background_image: self.background_image.clone(),
             background_image_opacity: self.background_image_opacity,
             language: self.language,
+            agent_transcript_font_family: self.agent_transcript_font_family.to_string(),
+            agent_transcript_font_size: self.agent_transcript_font_size,
         }
     }
 

@@ -52,6 +52,8 @@ smooth-scrolling = "all"
 background-opacity = 1.0
 background-image-opacity = 0.3
 language = "en"
+agent-transcript-font-family = "Consolas"
+agent-transcript-font-size = 13.0
 
 [profiles]
 default = ""
