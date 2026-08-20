@@ -2,7 +2,7 @@ use std::slice;
 
 use gpui::{App, TextStyle, Window, px};
 
-use crate::ui::AppSettings;
+use crate::ui::{AppSettings, default_font_fallbacks};
 
 pub(crate) const COLS: u16 = 100;
 pub(crate) const ROWS: u16 = 30;
@@ -43,6 +43,7 @@ pub(crate) fn terminal_text_style(window: &Window, cx: &App) -> TextStyle {
     let size = font_size_px(cx);
 
     style.font_family = font_family(cx).into();
+    style.font_fallbacks = Some(default_font_fallbacks());
     style.font_size = px(size).into();
     style.line_height = px(size * line_height_multiplier(cx)).into();
 
