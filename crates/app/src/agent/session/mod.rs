@@ -965,6 +965,14 @@ impl AgentPane {
     }
 
     /// Opening the `Background Tasks` view asks the provider for fresher data.
+    /// Pass a tab rename through to the conversation, so the name reaches the
+    /// harness's own session record rather than living only in this tab.
+    pub(crate) fn rename_session(&mut self, title: &str) {
+        if let Some(session) = self.session.as_mut() {
+            session.rename_session(title);
+        }
+    }
+
     pub(crate) fn refresh_background_tasks(&mut self) {
         if let Some(session) = self.session.as_mut() {
             session.refresh_background_tasks();

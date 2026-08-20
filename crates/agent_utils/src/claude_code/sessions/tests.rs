@@ -907,6 +907,52 @@ fn an_unlinked_sidechain_contributes_no_child_conversation() {
 }
 
 /// Claude persists a child agent beside the parent transcript rather than
+/// Renaming a session leaves a `custom-title` record behind, and the CLI keeps
+/// repeating whichever name is current as the transcript grows. Only the tail
+/// of the file is read, so the name found there is the one in force however
+/// far back the rename happened.
+#[test]
+fn a_session_carries_the_newest_name_it_was_given() {
+    use std::fs;
+
+    use crate::claude_code::sessions::titles::renamed_title;
+
+    let root = env::temp_dir().join(format!("nmt-session-name-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+
+    let filler = format!(
+        "{}\n",
+        serde_json::json!({"type": "user", "padding": "x".repeat(4096)})
+    );
+    let named = |title: &str| {
+        format!(
+            "{}\n",
+            serde_json::json!({"type": "custom-title", "customTitle": title})
+        )
+    };
+
+    let mut transcript = named("first name");
+    // Enough to push the first name out of the window the tail scan reads,
+    // and to make that window start partway through a record.
+    for _ in 0..32 {
+        transcript.push_str(&filler);
+    }
+    transcript.push_str(&named("second name"));
+    transcript.push_str(&filler);
+
+    let renamed = root.join("renamed.jsonl");
+    fs::write(&renamed, transcript).unwrap();
+    assert_eq!(renamed_title(&renamed).as_deref(), Some("second name"));
+
+    // A session nobody named has no such record, and the listing falls back
+    // to the prompt it opened with.
+    let untouched = root.join("untouched.jsonl");
+    fs::write(&untouched, &filler).unwrap();
+    assert_eq!(renamed_title(&untouched), None);
+
+    fs::remove_dir_all(root).unwrap();
+}
+
 /// inside it: `<session-id>/subagents/agent-<id>.jsonl` holds the conversation
 /// and `agent-<id>.meta.json` names the tool call that launched it. The parent
 /// file contains no sidechain records at all, so a scan of it finds nothing.

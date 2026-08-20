@@ -554,6 +554,24 @@ impl Session {
             .insert(request_id, PendingControlOperation::SessionTitle);
     }
 
+    /// Give the conversation the name the user typed. The CLI records it with
+    /// the session, so its own listings show it instead of a title derived
+    /// from the opening prompt -- and so does this application's, which reads
+    /// the same files.
+    ///
+    /// Fire-and-forget, like the model and permission requests: a refusal
+    /// reaches the user through the generic control-error path, and there is
+    /// nothing to put back when a name the tab already carries is rejected.
+    pub fn rename_session(&mut self, title: &str) {
+        let title = title.trim();
+
+        if !self.ready || !self.process.has_stdin() || title.is_empty() {
+            return;
+        }
+
+        self.send_control(json!({"subtype": "rename_session", "title": title}));
+    }
+
     pub fn rewind_files(&mut self, user_message_id: &str) -> SlashCommandOutcome {
         if !self.ready || !self.process.has_stdin() {
             return SlashCommandOutcome::NotReady;

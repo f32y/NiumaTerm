@@ -124,10 +124,20 @@ impl Shell {
             let name = input.read(cx).value().trim().to_string();
 
             if !name.is_empty() {
+                let mut renamed_agent = None;
+
                 if let Some(tabs) = self.workspaces.tab_manager_for_mut(id) {
-                    tabs.rename(id, name);
+                    tabs.rename(id, name.clone());
+                    renamed_agent = tabs.find(id).and_then(|tab| tab.surface().agent().cloned());
 
                     self.sync_session_memory(cx);
+                }
+
+                // An agent tab's name is the conversation's name, so it goes
+                // to the harness too: its session listing is what this
+                // application's own recent-sessions list reads.
+                if let Some(agent) = renamed_agent {
+                    agent.update(cx, |agent, _| agent.rename_session(&name));
                 }
             }
         }

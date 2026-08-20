@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{BufRead, BufReader, Read as _};
+use std::io::{BufRead, BufReader, Read as _, Seek as _, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
@@ -11,6 +11,13 @@ use crate::claude_code::sessions::paths::{project_dir, projects_root};
 /// kilobytes of hook output and queue records before the first prompt, but
 /// they stay well under this; anything past it falls back to the id title.
 const TITLE_SCAN_BYTES: u64 = 64 * 1024;
+
+/// Tail window scanned for the name the user gave a session. The CLI repeats
+/// its `custom-title` record through the file after a rename, so the newest
+/// one sits near the end; a rename followed by one enormous tool result can
+/// still push it past this window, and the listing then falls back to the
+/// prompt the session opened with.
+const NAME_SCAN_BYTES: u64 = 64 * 1024;
 
 /// Cheap first pass for the history UI: how many sessions exist, so the list
 /// can reserve its final height (placeholder rows) before any transcript
@@ -103,7 +110,12 @@ fn sessions_in_dir(dir: &Path) -> Vec<SessionSummary> {
             let head = head_summary(&path);
 
             Some(SessionSummary {
-                title: head.title.unwrap_or_else(|| id.chars().take(8).collect()),
+                // A renamed session lists under the name it was given. The
+                // opening prompt is only what an unnamed one is recognizable
+                // by, and an id prefix only what an empty one is.
+                title: renamed_title(&path)
+                    .or(head.title)
+                    .unwrap_or_else(|| id.chars().take(8).collect()),
                 id,
                 branch: head.branch,
                 cwd: head.cwd,
@@ -112,6 +124,42 @@ fn sessions_in_dir(dir: &Path) -> Vec<SessionSummary> {
             })
         })
         .collect()
+}
+
+/// The name the user gave this session, or `None` for one never renamed.
+///
+/// The last record in the window wins: renaming a session twice leaves both
+/// records behind, and the CLI keeps repeating whichever is current.
+pub(super) fn renamed_title(path: &Path) -> Option<String> {
+    let mut file = fs::File::open(path).ok()?;
+    let size = file.metadata().ok()?.len();
+    let start = size.saturating_sub(NAME_SCAN_BYTES);
+
+    file.seek(SeekFrom::Start(start)).ok()?;
+
+    let mut tail = Vec::new();
+    file.take(NAME_SCAN_BYTES).read_to_end(&mut tail).ok()?;
+
+    let mut lines = tail.split(|byte| *byte == b'\n');
+
+    // A window that did not start at the file's start begins inside a record.
+    // That fragment parses as nothing; the record it belongs to is repeated
+    // further down anyway.
+    if start > 0 {
+        lines.next();
+    }
+
+    lines
+        .filter_map(|line| serde_json::from_slice::<Value>(line).ok())
+        .filter(|record| record["type"].as_str() == Some("custom-title"))
+        .filter_map(|record| {
+            record["customTitle"]
+                .as_str()
+                .map(str::trim)
+                .filter(|title| !title.is_empty())
+                .map(str::to_owned)
+        })
+        .last()
 }
 
 /// What the head of a transcript file says about its session.
