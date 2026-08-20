@@ -98,6 +98,7 @@ impl Render for AgentPane {
         let running = composer_action(self.status) == ComposerAction::Stop;
         let update_suspended = self.update_suspension.is_some();
         let update_banner = self.render_update_banner(cx);
+        let update_overlay = self.render_update_overlay(cx);
         let rewind_active = self.rewind.state.is_some();
         let rewind_processing = self
             .rewind
@@ -129,6 +130,7 @@ impl Render for AgentPane {
 
         v_flex()
             .size_full()
+            .relative()
             // The outer frame matches the window chrome. The Agent surface owns
             // its fill so an opaque main view does not color the rounded frame.
             .bg(background.alpha(main_view_background_opacity(cx)))
@@ -382,6 +384,8 @@ impl Render for AgentPane {
                         })),
                 )
             })
+            // Painted last so it sits over the transcript and the composer.
+            .children(update_overlay)
     }
 }
 
