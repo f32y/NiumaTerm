@@ -2,8 +2,8 @@
 use crate::Inspector;
 use crate::{
     Action, AnyDrag, AnyElement, AnyImageCache, AnyTooltip, AnyView, App, AppContext, Arena, Asset,
-    AsyncWindowContext, AvailableSpace, Background, BorderStyle, Bounds, BoxShadow, Capslock,
-    Context, Corners, CursorHideMode, CursorStyle, Decorations, DevicePixels,
+    AsyncWindowContext, AvailableSpace, BackdropBlur, Background, BorderStyle, Bounds, BoxShadow,
+    Capslock, Context, Corners, CursorHideMode, CursorStyle, Decorations, DevicePixels,
     DispatchActionListener, DispatchNodeId, DispatchTree, DisplayId, Edges, Effect, Entity,
     EntityId, EventEmitter, FileDropEvent, FontId, Global, GlobalElementId, GlyphId, GpuSpecs,
     Hsla, InputHandler, IsZero, KeyBinding, KeyContext, KeyDownEvent, KeyEvent, Keystroke,
@@ -3839,6 +3839,39 @@ impl Window {
                 pad: 0,
             });
         }
+    }
+
+    /// Replace the already-painted backdrop inside `bounds` with a Gaussian-blurred
+    /// copy of itself, rounded by `corner_radii`.
+    ///
+    /// Only content painted earlier in the frame is blurred, so this belongs before
+    /// the element's own background. `blur_radius` follows the CSS `backdrop-filter:
+    /// blur()` convention and is twice the Gaussian standard deviation. A radius at
+    /// or below zero paints nothing.
+    ///
+    /// The primitive goes into the frame currently being built, so this only
+    /// works while that frame is being painted.
+    pub fn paint_backdrop_blur(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        corner_radii: Corners<Pixels>,
+        blur_radius: Pixels,
+    ) {
+        self.invalidator.debug_assert_paint();
+
+        if blur_radius <= Pixels::ZERO {
+            return;
+        }
+        let scale_factor = self.scale_factor();
+        self.next_frame.scene.insert_primitive(BackdropBlur {
+            order: 0,
+            sigma: (blur_radius / 2.).scale(scale_factor),
+            bounds: self.snap_bounds(bounds),
+            content_mask: self.snapped_content_mask(),
+            corner_radii: corner_radii.scale(scale_factor),
+            opacity: self.element_opacity(),
+            pad: 0,
+        });
     }
 
     /// Paint one or more quads into the scene for the next frame at the current stacking context.

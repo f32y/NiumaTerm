@@ -1235,6 +1235,10 @@ impl WgpuRenderer {
                             &mut instance_offset,
                             &mut pass,
                         ),
+                        // Backdrop blur is implemented only in the DirectX
+                        // renderer so far; skipping it leaves the region
+                        // unblurred instead of failing the frame.
+                        PrimitiveBatch::BackdropBlurs(_) => true,
                         PrimitiveBatch::Paths(range) => {
                             let paths = &scene.paths[range];
                             if paths.is_empty() {
