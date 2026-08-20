@@ -100,7 +100,7 @@ pub(super) fn open_agent_profile_dialog(target: Option<usize>, window: &mut Wind
             .title(title)
             .overlay_closable(false)
             .margin_top(dialog_top)
-            .w(px(672.))
+            .w(px(1000.))
             .h(dialog_height)
             .content(|content, window, cx| {
                 content.overflow_hidden().child(
