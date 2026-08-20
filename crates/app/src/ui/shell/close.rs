@@ -417,11 +417,8 @@ impl Shell {
                 .footer(
                     DialogFooter::new()
                         .child(
-                            DialogClose::new()
-                                .child(Button::new("keep-ws").label(i18n("shell-close-cancel"))),
-                        )
-                        .child(
                             Button::new("replace-ws")
+                                .min_w(DIALOG_BUTTON_MIN_WIDTH)
                                 .label(i18n("shell-close-new-default-workspace"))
                                 .primary()
                                 .on_click(move |_, window, cx| {
@@ -433,12 +430,20 @@ impl Shell {
                         )
                         .child(
                             Button::new("quit-app")
+                                .min_w(DIALOG_BUTTON_MIN_WIDTH)
                                 .label(i18n("shell-close-quit"))
                                 .danger()
                                 .on_click(move |_, _, cx| {
                                     quit_shell.update(cx, |this, cx| this.doom_workspace(id, cx));
                                     cx.quit();
                                 }),
+                        )
+                        .child(
+                            DialogClose::new().child(
+                                Button::new("keep-ws")
+                                    .min_w(DIALOG_BUTTON_MIN_WIDTH)
+                                    .label(i18n("shell-close-cancel")),
+                            ),
                         ),
                 )
         });

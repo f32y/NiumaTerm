@@ -5,7 +5,7 @@ use futures::future::join_all;
 use gpui::prelude::*;
 use gpui::{App, Entity, Window, div};
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::dialog::{DialogClose, DialogFooter};
+use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, DialogClose, DialogFooter};
 use gpui_component::{ActiveTheme as _, WindowExt as _};
 use nmt_agent_utils::update::{
     InstallationKey, ProviderKind, UpdateCoordinator, UpdateError, UpdateErrorKind, UpdatePhase,
@@ -127,13 +127,8 @@ pub(crate) fn request_update(key: InstallationKey, window: &mut Window, cx: &mut
             .footer(
                 DialogFooter::new()
                     .child(
-                        DialogClose::new().child(
-                            Button::new("agent-update-cancel")
-                                .label(i18n("agent-update-dialog-cancel")),
-                        ),
-                    )
-                    .child(
                         Button::new("agent-update-when-idle")
+                            .min_w(DIALOG_BUTTON_MIN_WIDTH)
                             .primary()
                             .label(i18n("agent-update-dialog-when-idle"))
                             .on_click(move |_, window, cx| {
@@ -149,6 +144,7 @@ pub(crate) fn request_update(key: InstallationKey, window: &mut Window, cx: &mut
                     )
                     .child(
                         Button::new("agent-update-stop-now")
+                            .min_w(DIALOG_BUTTON_MIN_WIDTH)
                             .danger()
                             .label(i18n("agent-update-dialog-stop-now"))
                             .on_click(move |_, window, cx| {
@@ -156,6 +152,13 @@ pub(crate) fn request_update(key: InstallationKey, window: &mut Window, cx: &mut
                                 let panes = matching_panes(&stop_key, cx);
                                 start_transaction(stop_key.clone(), UpdateMode::StopNow, panes, cx);
                             }),
+                    )
+                    .child(
+                        DialogClose::new().child(
+                            Button::new("agent-update-cancel")
+                                .min_w(DIALOG_BUTTON_MIN_WIDTH)
+                                .label(i18n("agent-update-dialog-cancel")),
+                        ),
                     ),
             )
     });

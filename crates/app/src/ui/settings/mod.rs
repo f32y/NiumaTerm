@@ -32,7 +32,7 @@ use gpui::{
     StatefulInteractiveElement as _, StyleRefinement, Styled as _, Window, div, px, relative,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::dialog::{DialogClose, DialogFooter};
+use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, DialogClose, DialogFooter};
 use gpui_component::group_box::{GroupBox, GroupBoxVariants as _};
 use gpui_component::input::{Input, InputEvent};
 use gpui_component::label::Label;

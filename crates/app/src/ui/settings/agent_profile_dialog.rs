@@ -77,20 +77,24 @@ pub(super) fn open_agent_profile_dialog(target: Option<usize>, window: &mut Wind
 
         // Deleting lives in the profile list's own row control, so this
         // dialog stays an editor: everything in it is reversible by cancelling.
-        let footer =
-            DialogFooter::new()
-                .child(DialogClose::new().child(
-                    Button::new("agent-profile-cancel").label(i18n("settings-common-cancel")),
-                ))
-                .child(
-                    Button::new("agent-profile-save")
-                        .primary()
-                        .label(i18n("settings-common-save"))
-                        .on_click(|_, window, cx: &mut App| {
-                            save_agent_profile_draft(cx);
-                            window.close_dialog(cx);
-                        }),
-                );
+        let footer = DialogFooter::new()
+            .child(
+                Button::new("agent-profile-save")
+                    .min_w(DIALOG_BUTTON_MIN_WIDTH)
+                    .primary()
+                    .label(i18n("settings-common-save"))
+                    .on_click(|_, window, cx: &mut App| {
+                        save_agent_profile_draft(cx);
+                        window.close_dialog(cx);
+                    }),
+            )
+            .child(
+                DialogClose::new().child(
+                    Button::new("agent-profile-cancel")
+                        .min_w(DIALOG_BUTTON_MIN_WIDTH)
+                        .label(i18n("settings-common-cancel")),
+                ),
+            );
 
         dialog
             .title(title)
