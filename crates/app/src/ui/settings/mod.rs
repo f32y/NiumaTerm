@@ -121,7 +121,7 @@ pub(crate) use crate::ui::settings::theme::{
 };
 use crate::{PlatformHandle, ui};
 
-const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+const APP_VERSION: &str = env!("NIUMATERM_VERSION");
 const RELEASE_PAGE_URL: &str = "https://github.com/f32y/NiumaTerm/releases";
 
 pub const MAX_TAB_WIDTH: f64 = DEFAULT_TAB_WIDTH * 3.0;
