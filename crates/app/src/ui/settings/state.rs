@@ -1,6 +1,7 @@
 use gpui::{Global, SharedString};
 use nmt_agent_utils::deepseek;
 use nmt_config::agent::AgentConfig;
+pub use nmt_config::agent::CollapseRows;
 use nmt_config::appearance::{AppearanceConfig, SmoothScrollingMode};
 pub use nmt_config::appearance::{InputStyle, Language, TabBarStyle, WindowBackdrop};
 use nmt_config::defaults::default_theme;
@@ -96,9 +97,8 @@ pub struct AppSettings {
     pub enable_agent_hooks: bool,
     /// Show Agent account usage in the workspace sidebar.
     pub show_agent_usage: bool,
-    /// Collapse consecutive tool-call rows in agent tabs into a one-line
-    /// summary by default.
-    pub collapse_tool_calls: bool,
+    /// Which consecutive rows agent tabs fold into a one-line summary.
+    pub collapse_tool_calls: CollapseRows,
     /// Probe each Agent installation for a newer provider version in the
     /// background.
     pub check_agent_updates: bool,
@@ -174,7 +174,7 @@ impl Default for AppSettings {
             language: Language::default(),
             enable_agent_hooks: true,
             show_agent_usage: true,
-            collapse_tool_calls: false,
+            collapse_tool_calls: CollapseRows::WorkAndToolCalls,
             check_agent_updates: true,
             codex_skill_command_compat: true,
             restore_last_session_when_opening: true,

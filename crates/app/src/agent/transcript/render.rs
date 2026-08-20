@@ -902,8 +902,8 @@ impl TranscriptView {
             ))
             .render(cx)
             .on_click(cx.listener(move |this, _, _, cx| {
-                if !this.expanded_turns.insert(turn) {
-                    this.expanded_turns.remove(&turn);
+                if !this.toggled_turns.insert(turn) {
+                    this.toggled_turns.remove(&turn);
                 }
                 cx.notify();
             }))

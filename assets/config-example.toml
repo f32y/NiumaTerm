@@ -65,7 +65,7 @@ list = []
 [agent]
 enable-agent-hooks = true
 show-agent-usage = true
-collapse-tool-calls = false
+collapse-tool-calls = "work-and-tool-calls"
 check-agent-updates = true
 codex-skill-command-compat = true
 

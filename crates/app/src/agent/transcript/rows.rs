@@ -217,7 +217,7 @@ impl TranscriptView {
     /// Data-only description of every transcript row, in render order. This
     /// is the single source of truth for the transcript's structure; the
     /// virtualized list builds elements only for the visible slice of it.
-    pub(in crate::agent) fn build_row_specs(&self, collapse: bool) -> Vec<RowSpec> {
+    pub(in crate::agent) fn build_row_specs(&self, collapse: CollapseRows) -> Vec<RowSpec> {
         let mut rows = Vec::new();
         let mut start = 0;
 
@@ -249,7 +249,7 @@ impl TranscriptView {
         turn: u64,
         start: usize,
         end: usize,
-        collapse: bool,
+        collapse: CollapseRows,
         rows: &mut Vec<RowSpec>,
     ) {
         // How the turn closes, once it has one. A stopped turn is closed by its
@@ -278,7 +278,12 @@ impl TranscriptView {
             return;
         }
 
-        let folded = !self.expanded_turns.contains(&turn);
+        // Only the mode that names work folds a settled turn's work away by
+        // default. The other two leave it on screen with the same disclosure
+        // above it, so the turn can still be folded by hand — which is what
+        // the toggle records, in whichever direction the default points.
+        let folds_by_default = matches!(collapse, CollapseRows::WorkAndToolCalls);
+        let folded = folds_by_default != self.toggled_turns.contains(&turn);
 
         // The final reply stays visible when the turn folds; everything
         // between the prompt and the answer is what the fold hides.
@@ -364,15 +369,15 @@ impl TranscriptView {
     }
 
     /// Chronological rows for a slice of the transcript, collapsing runs of
-    /// consecutive work-log rows into a "+N tool calls" toggle (when the
-    /// collapse setting is on). Hidden entries are transparent: they neither
+    /// consecutive work-log rows into a "+N tool calls" toggle (unless the
+    /// collapse setting is off). Hidden entries are transparent: they neither
     /// render nor split a run.
     pub(in crate::agent) fn stream_specs(
         &self,
         start: usize,
         end: usize,
         skip: &dyn Fn(usize) -> bool,
-        collapse: bool,
+        collapse: CollapseRows,
         rows: &mut Vec<RowSpec>,
     ) {
         let mut i = start;
@@ -406,7 +411,7 @@ impl TranscriptView {
                 j += 1;
             }
 
-            if collapse && visible.len() > 1 {
+            if !matches!(collapse, CollapseRows::Off) && visible.len() > 1 {
                 let expanded = self.expanded_groups.contains(&run_start);
 
                 rows.push(RowSpec::RunToggle {
