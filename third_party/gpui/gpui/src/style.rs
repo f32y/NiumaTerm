@@ -287,6 +287,12 @@ pub struct Style {
     /// Box shadow of the element
     pub box_shadow: Vec<BoxShadow>,
 
+    /// Gaussian blur applied to whatever is already painted behind this element,
+    /// following the CSS `backdrop-filter: blur()` convention. The element's own
+    /// background is painted over the blurred result, so a translucent fill reads
+    /// as frosted glass.
+    pub backdrop_blur_radius: Option<AbsoluteLength>,
+
     /// The text style of this element
     #[refineable]
     pub text: TextStyleRefinement,
@@ -706,6 +712,10 @@ impl Style {
 
         window.paint_drop_shadows(bounds, corner_radii, &self.box_shadow);
 
+        if let Some(radius) = self.backdrop_blur_radius {
+            window.paint_backdrop_blur(bounds, corner_radii, radius.to_pixels(rem_size));
+        }
+
         let background_color = self.background.as_ref().and_then(Fill::color);
         if background_color.is_some_and(|color| !color.is_transparent()) {
             let mut border_color = match background_color {
@@ -802,6 +812,7 @@ impl Default for Style {
             border_style: BorderStyle::default(),
             corner_radii: Corners::default(),
             box_shadow: Default::default(),
+            backdrop_blur_radius: None,
             text: TextStyleRefinement::default(),
             mouse_cursor: None,
             opacity: None,

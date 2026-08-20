@@ -856,6 +856,10 @@ impl MetalRenderer {
                     viewport_size,
                     command_encoder,
                 ),
+                // Backdrop blur is implemented only in the DirectX renderer so
+                // far; skipping it leaves the region unblurred instead of
+                // failing the frame.
+                PrimitiveBatch::BackdropBlurs(_) => true,
                 PrimitiveBatch::Quads(range) => self.draw_quads(
                     &scene.quads[range],
                     instance_buffer,

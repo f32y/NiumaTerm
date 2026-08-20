@@ -33,6 +33,15 @@ pub trait Styled: Sized {
     gpui_macros::border_style_methods!();
     gpui_macros::box_shadow_style_methods!();
 
+    /// Blurs whatever is already painted behind this element, in the element's own
+    /// rounded shape. Equivalent to CSS `backdrop-filter: blur(radius)`; the element's
+    /// background is painted over the blurred result, so a translucent fill reads as
+    /// frosted glass.
+    fn backdrop_blur(mut self, radius: impl Into<AbsoluteLength>) -> Self {
+        self.style().backdrop_blur_radius = Some(radius.into());
+        self
+    }
+
     /// Sets the display type of the element to `block`.
     /// [Docs](https://tailwindcss.com/docs/display)
     fn block(mut self) -> Self {
