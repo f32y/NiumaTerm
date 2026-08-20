@@ -96,6 +96,8 @@ impl RenderOnce for ContextSegmentRow {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let foreground = cx.theme().foreground;
         let muted = cx.theme().muted_foreground;
+        // A deferred row is dimmed rather than relabelled: its name arrives as
+        // the harness renders it, and Claude's already ends in "(deferred)".
         let label_color = if self.deferred {
             muted.opacity(0.72)
         } else {
@@ -111,11 +113,7 @@ impl RenderOnce for ContextSegmentRow {
                     .min_w_0()
                     .truncate()
                     .text_color(label_color)
-                    .child(if self.deferred {
-                        i18n("agent-context-deferred").replace("{label}", &self.label)
-                    } else {
-                        self.label
-                    }),
+                    .child(self.label),
             )
             .child(
                 h_flex()

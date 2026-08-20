@@ -660,7 +660,8 @@ fn a_context_usage_response_becomes_a_composition_breakdown() {
             "categories": [
                 {"name": "System prompt", "tokens": 3_200, "color": "#aabbcc"},
                 {"name": "Messages", "tokens": 41_000, "color": "#ddeeff"},
-                {"name": "Free space", "tokens": 0, "color": "#101010"},
+                {"name": "Free space", "tokens": 109_900, "color": "#101010"},
+                {"name": "Autocompact buffer", "tokens": 45_000, "color": "#303030"},
                 {"name": "Reserved", "tokens": 900, "color": "#202020", "isDeferred": true},
             ],
             "totalTokens": 45_100,
@@ -687,8 +688,16 @@ fn a_context_usage_response_becomes_a_composition_breakdown() {
         "the model's own window is distinct from the one compaction leaves"
     );
     assert_eq!(composition.auto_compact_threshold, Some(140_000));
-    assert_eq!(composition.segments.len(), 4);
-    assert!(composition.segments[3].deferred);
+    assert_eq!(
+        composition
+            .segments
+            .iter()
+            .map(|segment| segment.label.as_str())
+            .collect::<Vec<_>>(),
+        ["System prompt", "Messages", "Reserved"],
+        "the window's free room is not one of the parts filling it"
+    );
+    assert!(composition.segments[2].deferred);
     assert!(pending.is_empty(), "the request is no longer outstanding");
 }
 
