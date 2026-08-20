@@ -40,6 +40,8 @@ jobs:
       # reassigned by the copy and again by whoever extracts the archive.
       - name: Build
         shell: pwsh
+        env:
+          NIUMATERM_VERSION: ${{ inputs.version }}
         run: ./scripts/build.ps1 --release --locked
 
       - name: Package
