@@ -83,10 +83,15 @@ impl AgentKind {
 
 pub(super) const ANTHROPIC_MODEL_ENV: &str = "ANTHROPIC_MODEL";
 pub(super) const OPENAI_API_KEY_ENV: &str = "OPENAI_API_KEY";
-/// DeepSeek Harness resolves a credential from its own configuration before
-/// falling back to this variable, so supplying it is enough to authenticate a
-/// host started from a profile that carries a key.
+/// DeepSeek Harness layers credential sources by trust and puts the inherited
+/// process environment above its own managed store, so a key exported here
+/// authenticates the host whatever that store holds.
 pub(super) const DEEPSEEK_API_KEY_ENV: &str = "DEEPSEEK_API_KEY";
+/// The endpoint DeepSeek Harness routes to when its own settings document names
+/// none, which is the state a stock installation is in. A `baseURL` written
+/// through the harness's own Models page outranks this, because that document is
+/// a deliberate local override rather than a default.
+pub(super) const DEEPSEEK_BASE_URL_ENV: &str = "DEEPSEEK_BASE_URL";
 
 /// The per-tier model overrides Claude Code reads when it dispatches work to
 /// something other than the primary model. A profile that pins every tier to
@@ -128,9 +133,20 @@ pub(crate) fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
     let model = (!profile.model.trim().is_empty()).then(|| profile.model.trim().to_string());
 
     if profile.use_custom_endpoint {
+        // Codex is absent because it reaches its endpoint through a generated
+        // provider entry rather than an environment variable; that entry is
+        // built from the same field further down.
+        let base_url_env = match profile.kind {
+            AgentProfileKind::ClaudeCode => Some("ANTHROPIC_BASE_URL"),
+            AgentProfileKind::DeepSeek => Some(DEEPSEEK_BASE_URL_ENV),
+            AgentProfileKind::Codex => None,
+        };
+
         let url = profile.api_base_url.trim();
-        if profile.kind == AgentProfileKind::ClaudeCode && !url.is_empty() {
-            env.push(("ANTHROPIC_BASE_URL".to_string(), url.to_string()));
+        if let Some(name) = base_url_env
+            && !url.is_empty()
+        {
+            env.push((name.to_string(), url.to_string()));
         }
 
         let key = profile.api_key.trim();
@@ -273,9 +289,9 @@ impl AgentThreadDefaults {
 mod agent_profile_launch_tests {
     use nmt_config::profile::{AgentProfile, AgentProfileKind, EnvVar};
 
-    use super::{
-        ANTHROPIC_MODEL_ENV, ANTHROPIC_SUB_MODEL_ENVS, OPENAI_API_KEY_ENV, agent_launch,
-        launch_env_value,
+    use crate::agent::profile::{
+        ANTHROPIC_MODEL_ENV, ANTHROPIC_SUB_MODEL_ENVS, DEEPSEEK_API_KEY_ENV, DEEPSEEK_BASE_URL_ENV,
+        OPENAI_API_KEY_ENV, agent_launch, launch_env_value,
     };
 
     #[test]
@@ -430,6 +446,55 @@ mod agent_profile_launch_tests {
             Some("sk-test")
         );
         assert!(launch.provider.is_none());
+    }
+
+    #[test]
+    fn deepseek_custom_endpoint_exports_base_url_and_api_key() {
+        // The harness reads both from the environment it is launched with and
+        // ranks that above its own stored credentials, so exporting them is the
+        // whole of pointing a profile at another provider.
+        let profile = AgentProfile {
+            name: "DeepSeek Proxy".into(),
+            kind: AgentProfileKind::DeepSeek,
+            executable: "dsh".into(),
+            use_custom_endpoint: true,
+            api_base_url: "https://gateway.example.com/v1".into(),
+            api_key: "sk-deepseek".into(),
+            ..AgentProfile::default()
+        };
+
+        let launch = agent_launch(&profile);
+
+        assert_eq!(
+            launch_env_value(&launch, DEEPSEEK_BASE_URL_ENV).as_deref(),
+            Some("https://gateway.example.com/v1")
+        );
+        assert_eq!(
+            launch_env_value(&launch, DEEPSEEK_API_KEY_ENV).as_deref(),
+            Some("sk-deepseek")
+        );
+        // The endpoint is environment rather than a generated provider entry,
+        // which is the shape only Codex needs.
+        assert!(launch.provider.is_none());
+    }
+
+    #[test]
+    fn a_deepseek_profile_without_the_switch_exports_no_endpoint() {
+        // A URL left in the field while the switch is off is a draft the user
+        // did not turn on; exporting it would route the harness somewhere they
+        // did not ask for.
+        let profile = AgentProfile {
+            kind: AgentProfileKind::DeepSeek,
+            executable: "dsh".into(),
+            api_base_url: "https://gateway.example.com/v1".into(),
+            api_key: "sk-deepseek".into(),
+            ..AgentProfile::default()
+        };
+
+        let launch = agent_launch(&profile);
+
+        assert_eq!(launch_env_value(&launch, DEEPSEEK_BASE_URL_ENV), None);
+        assert_eq!(launch_env_value(&launch, DEEPSEEK_API_KEY_ENV), None);
     }
 
     #[test]

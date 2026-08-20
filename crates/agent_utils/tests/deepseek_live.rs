@@ -93,7 +93,7 @@ fn a_turn_streams_and_survives_being_stopped() {
     assert!(session.session_id().is_some());
 
     session
-        .send_user_message(LONG_PROMPT)
+        .send_user_message(LONG_PROMPT, &[])
         .assert_started_a_turn();
 
     let (started, saw_start) = collect_until(&mut session, &frames, Duration::from_secs(60), |e| {
@@ -147,6 +147,7 @@ fn a_turn_streams_and_survives_being_stopped() {
     session
         .send_user_message(
             "Abandon the counting task completely. Do not count. Reply with exactly: ok",
+            &[],
         )
         // The stop settled before this line, so the conversation is idle and
         // the prompt starts its own turn rather than steering the old one.
@@ -181,7 +182,7 @@ fn two_sessions_share_one_host_and_do_not_see_each_other() {
     assert_ne!(first.session_id(), second.session_id());
 
     first
-        .send_user_message("Reply with exactly: first")
+        .send_user_message("Reply with exactly: first", &[])
         .assert_started_a_turn();
 
     let (own, ended) = collect_until(&mut first, &first_frames, Duration::from_secs(60), |e| {
@@ -231,11 +232,14 @@ fn an_approval_is_raised_answered_and_the_turn_continues() {
     // Writing outside the workspace is denied under the default sandbox, and
     // the model escalates, which is what raises the approval.
     session
-        .send_user_message(&format!(
-            "Write the text approval-probe-ok to {} using a shell command. \
+        .send_user_message(
+            &format!(
+                "Write the text approval-probe-ok to {} using a shell command. \
              If it is denied, escalate permissions and try again.",
-            outside.display()
-        ))
+                outside.display()
+            ),
+            &[],
+        )
         .assert_started_a_turn();
 
     let (before, asked) = collect_until(&mut session, &frames, Duration::from_secs(180), |e| {
@@ -306,11 +310,14 @@ fn a_real_turn_shows_its_commands_and_file_changes() {
     .expect("the harness host should start and open a conversation");
 
     session
-        .send_user_message(&format!(
-            "Do exactly two things and then stop. First run a shell command that prints \
+        .send_user_message(
+            &format!(
+                "Do exactly two things and then stop. First run a shell command that prints \
              tool-probe-ok. Second, edit {} replacing the word before with after.",
-            target.display()
-        ))
+                target.display()
+            ),
+            &[],
+        )
         .assert_started_a_turn();
 
     // A real tab has a user behind it, so anything the harness stops to ask is
@@ -388,4 +395,77 @@ fn a_real_turn_shows_its_commands_and_file_changes() {
     );
 
     let _ = fs::remove_dir_all(&workspace);
+}
+
+#[test]
+#[ignore = "starts a real harness host"]
+fn a_profile_pinning_an_unserved_effort_is_told_rather_than_ignored() {
+    // The levels belong to the adapter behind the route, and DeepSeek's are
+    // off/low/high/max, so this names one no route serves. Applying a profile's
+    // pick runs in the background with no control waiting on the answer, which
+    // is exactly where a refusal would otherwise go unreported.
+    let launch = LaunchConfig {
+        effort: Some("medium".to_string()),
+        model: Some("deepseek-chat".to_string()),
+        ..launch()
+    };
+
+    let (tx, frames) = channel();
+    let mut session = Session::create(&launch, None, move |frame| {
+        let _ = tx.send(frame);
+    })
+    .expect("the harness host should start and open a conversation");
+
+    let (seen, refused) = collect_until(&mut session, &frames, Duration::from_secs(60), |e| {
+        matches!(e, Event::EffortRejected { .. })
+    });
+    assert!(refused, "the refusal should reach the pane, got {seen:?}");
+
+    let Some(Event::EffortRejected { message, effort }) = seen
+        .iter()
+        .find(|event| matches!(event, Event::EffortRejected { .. }))
+    else {
+        unreachable!("the refusal was just matched");
+    };
+    assert!(!message.is_empty());
+    // The level reported back is the one the session is on, so the control
+    // lands on something the route actually serves.
+    assert_ne!(effort.as_deref(), Some("medium"));
+}
+
+#[test]
+#[ignore = "starts a real harness host"]
+fn the_agent_preset_roster_reaches_the_picker() {
+    let (tx, frames) = channel();
+    let mut session = Session::create(&launch(), None, move |frame| {
+        let _ = tx.send(frame);
+    })
+    .expect("the harness host should start and open a conversation");
+
+    let (seen, listed) = collect_until(&mut session, &frames, Duration::from_secs(60), |e| {
+        matches!(e, Event::AgentPresets { .. })
+    });
+    assert!(listed, "the roster should reach the pane, got {seen:?}");
+
+    let Some(Event::AgentPresets { presets, current }) = seen
+        .iter()
+        .find(|event| matches!(event, Event::AgentPresets { .. }))
+    else {
+        unreachable!("the roster was just matched");
+    };
+
+    // A deployment composing no presets is a legitimate answer, but then there
+    // is no current one either: the two have to agree.
+    if presets.is_empty() {
+        assert_eq!(current.as_deref(), None);
+        return;
+    }
+
+    let current = current
+        .as_deref()
+        .expect("a composed session names its preset");
+    assert!(
+        presets.iter().any(|preset| preset.value == current),
+        "the conversation's own preset {current} should be one the picker offers",
+    );
 }

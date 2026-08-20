@@ -70,6 +70,17 @@ impl ProjectionTracker {
                 self.window_event().into_iter().collect()
             }
             "contextBreakdown" => self.composition_event(value).into_iter().collect(),
+            // The harness names a conversation itself once it has something to
+            // name it from, and republishes the name whenever it changes, so
+            // this is the only report a pinned or regenerated title makes. A
+            // conversation still waiting for one carries a null value, which
+            // leaves the tab on the name it already shows.
+            "title" => value
+                .as_str()
+                .filter(|title| !title.trim().is_empty())
+                .map(|title| Event::TitleUpdated(title.to_string()))
+                .into_iter()
+                .collect(),
             "permissions" => permission_presets(value).into_iter().collect(),
             // A cleared goal is reported as a null value rather than by the
             // key disappearing, so the absent case is a value to publish and

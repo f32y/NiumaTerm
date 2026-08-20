@@ -140,7 +140,7 @@ const DEEPSEEK: Capabilities = Capabilities {
     async_command_discovery: true,
     repeats_ready_during_init: false,
     filesystem_session_history: false,
-    image_input: false,
+    image_input: true,
     resume_restores_thread_settings: false,
     resume_restores_approval_reviewer: false,
     model_baked_into_launch: false,

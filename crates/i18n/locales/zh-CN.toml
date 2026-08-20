@@ -211,7 +211,7 @@
 "settings-agent-profile-model" = "模型"
 "settings-agent-profile-model-claude-description" = "初始模型；通过 ANTHROPIC_MODEL 传给 Claude Code。"
 "settings-agent-profile-model-codex-description" = "初始模型；在 Codex 的 app-server 线程启动时传入。"
-"settings-agent-profile-model-deepseek-description" = "初始模型。选择模型尚未接入该智能体，因此此处填写的值会被保存但不会生效。"
+"settings-agent-profile-model-deepseek-description" = "初始模型；在智能体上报模型目录后应用到会话。当两个提供方提供同一模型 id 时，请写 `provider/id`。"
 "settings-agent-profile-replace-sub-models" = "用主模型替换所有子模型配置"
 "settings-agent-profile-replace-sub-models-description" = "同时将上方模型设置为 ANTHROPIC_DEFAULT_OPUS_MODEL、ANTHROPIC_DEFAULT_SONNET_MODEL 和 ANTHROPIC_DEFAULT_HAIKU_MODEL，让仅提供一个模型的端点处理所有层级。下方表格中的同名变量仍然优先。"
 "settings-agent-profile-effort" = "推理强度"
@@ -487,6 +487,7 @@
 "agent-settings-model" = "模型"
 "agent-settings-execution-policy" = "执行策略"
 "agent-settings-quality-cost" = "质量与成本"
+"agent-settings-agent-preset" = "智能体"
 
 # 智能体用量
 "agent-usage-accessibility" = "智能体剩余用量。Codex 五小时：{codex_session}；Codex 每周：{codex_week}；Claude 五小时：{claude_session}；Claude 每周：{claude_week}。{refreshing}"
@@ -687,6 +688,7 @@
 "agent-effort-faster" = "更快"
 "agent-effort-smarter" = "更聪明"
 "agent-setting-approval" = "审批"
+"agent-setting-agent-preset" = "预设"
 "agent-setting-sandbox" = "沙箱"
 "agent-setting-approval-reviewer" = "审批审核者"
 "agent-setting-tier" = "服务级别"

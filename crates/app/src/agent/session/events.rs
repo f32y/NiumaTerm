@@ -147,6 +147,15 @@ impl AgentPane {
                 self.settings.approval = current;
                 cx.notify();
             }
+            SessionEvent::AgentPresets { presets, current } => {
+                // The composition is the harness's to report: it is fixed when
+                // the conversation is created, and a resumed one carries
+                // whichever preset built it rather than whichever this tab last
+                // showed.
+                self.agent_presets = presets;
+                self.agent_preset = current;
+                cx.notify();
+            }
             SessionEvent::Commands(commands) => {
                 self.palette.provider_commands = commands;
                 self.palette.provider_commands_ready = true;

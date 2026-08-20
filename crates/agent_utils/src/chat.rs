@@ -42,6 +42,20 @@ pub struct ApprovalPreset {
     pub description: Option<String>,
 }
 
+/// One agent composition a conversation can be built from.
+///
+/// Separate from [`ApprovalPreset`] despite the matching shape: a permission
+/// preset is a policy the session switches between at will, while this decides
+/// which plugins compose the agent and can therefore only be chosen before the
+/// conversation has run anything.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentPreset {
+    /// Submitted back verbatim when the user picks it.
+    pub value: String,
+    pub label: String,
+    pub description: Option<String>,
+}
+
 /// One entry of a backend's model catalog.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModelInfo {
@@ -607,6 +621,14 @@ pub enum Event {
     /// preset table belongs to its deployment rather than to this UI.
     ApprovalPresets {
         presets: Vec<ApprovalPreset>,
+        current: Option<String>,
+    },
+    /// Replacement snapshot of the agent compositions this deployment offers,
+    /// and the one this conversation was built from. An empty list means the
+    /// deployment composes no presets and every conversation shares the host's
+    /// own composition, which is nothing for a picker to offer.
+    AgentPresets {
+        presets: Vec<AgentPreset>,
         current: Option<String>,
     },
     /// Replacement snapshot of provider-discovered slash commands.

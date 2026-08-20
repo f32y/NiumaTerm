@@ -1055,11 +1055,39 @@ fn the_history_page_baseline_seeds_what_a_live_push_would_not() {
         "title": "Map the harness",
     }));
 
-    let [Event::ContextWindowUpdated(window)] = events.as_slice() else {
-        panic!("expected one window snapshot, got {events:?}");
+    let [
+        Event::ContextWindowUpdated(window),
+        Event::TitleUpdated(title),
+    ] = events.as_slice()
+    else {
+        panic!("expected a window snapshot and a title, got {events:?}");
     };
     assert_eq!(window.current.total_tokens, 4200);
     assert_eq!(window.max_tokens, Some(64_000));
+    // The harness names a conversation itself, and a tab that read only live
+    // pushes would keep its own placeholder until the name happened to change.
+    assert_eq!(title, "Map the harness");
+}
+
+#[test]
+fn a_conversation_still_waiting_for_a_name_keeps_the_one_it_shows() {
+    use crate::deepseek::projections::ProjectionTracker;
+
+    // The unit is registered from the moment a session exists and reports null
+    // until the titler has something to work from, so the absent case is a
+    // value that arrives rather than a key that stays missing.
+    let mut projections = ProjectionTracker::default();
+
+    assert!(
+        projections
+            .apply_baseline(&json!({ "title": Value::Null }))
+            .is_empty()
+    );
+    assert!(
+        projections
+            .apply_baseline(&json!({ "title": "   " }))
+            .is_empty()
+    );
 }
 
 #[test]
@@ -1613,4 +1641,34 @@ fn the_session_stats_projection_reports_whole_log_counters() {
     assert_eq!(stats.steps, 23);
     assert_eq!(stats.model_ms, 61_000);
     assert_eq!(stats.tool_ms, 4_500);
+}
+
+#[test]
+fn a_broken_preset_is_listed_by_the_harness_but_not_offered_for_selection() {
+    use crate::deepseek::presets::catalog;
+
+    let presets = catalog(&json!([
+        { "id": "coding", "name": "Coding", "description": "Ships code", "trust": "system" },
+        { "id": "research", "trust": "system" },
+        { "id": "mine", "description": "Mine", "trust": "user" },
+        { "id": "plain", "trust": "user" },
+        { "id": "half-written", "trust": "user", "broken": "names a plugin that will not load" },
+    ]));
+
+    let ids: Vec<&str> = presets.iter().map(|preset| preset.value.as_str()).collect();
+    assert_eq!(ids, ["coding", "research", "mine", "plain"]);
+
+    assert_eq!(presets[0].label, "Coding");
+    assert_eq!(presets[0].description.as_deref(), Some("Ships code"));
+    // A preset that published no name is still addressed by its id, so the id
+    // is what the row shows rather than a blank label.
+    assert_eq!(presets[1].label, "research");
+    assert_eq!(presets[1].description, None);
+    // A locally authored preset is as privileged as the plugins it names, and a
+    // row that read like a shipped one would imply it had been vetted.
+    assert_eq!(
+        presets[2].description.as_deref(),
+        Some("Locally authored — Mine")
+    );
+    assert_eq!(presets[3].description.as_deref(), Some("Locally authored"));
 }

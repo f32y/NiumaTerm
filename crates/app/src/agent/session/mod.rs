@@ -234,6 +234,8 @@ impl AgentPane {
             restore_thread_settings_on_ready: None,
             models: Vec::new(),
             approval_presets: Vec::new(),
+            agent_presets: Vec::new(),
+            agent_preset: None,
             turn_seq: 0,
             turn_submitted_at: None,
             first_output_latency: None,
@@ -1338,6 +1340,29 @@ impl AgentPane {
 
         match outcome {
             Ok(()) => cx.notify(),
+            Err(error) => self.set_command_feedback(CommandFeedbackKind::Error, error, cx),
+        }
+    }
+
+    /// Rebuild this conversation's agent from another composition.
+    ///
+    /// The harness allows this only before the conversation has run anything,
+    /// because the logged history was produced under the previous composition's
+    /// tools. That rule is not repeated here: the picker reports whatever the
+    /// harness answers, and the row stays on the preset still in force.
+    pub(super) fn apply_agent_preset(&mut self, preset: String, cx: &mut Context<Self>) {
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        if self.agent_preset.as_deref() == Some(preset.as_str()) {
+            return;
+        }
+
+        match session.select_agent_preset(&preset) {
+            Ok(()) => {
+                self.agent_preset = Some(preset);
+                cx.notify();
+            }
             Err(error) => self.set_command_feedback(CommandFeedbackKind::Error, error, cx),
         }
     }

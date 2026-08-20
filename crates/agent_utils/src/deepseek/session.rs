@@ -8,14 +8,16 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::thread;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use serde_json::{Value, json};
 
 use crate::background_task::{
     BackgroundTaskKey, BackgroundTaskRefs, BackgroundTaskTranscriptUpdate,
 };
 use crate::chat::{
-    Event, QueuedPrompt, SendOutcome, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
-    SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
+    Event, MessageImage, QueuedPrompt, SendOutcome, SlashCommandArguments, SlashCommandInfo,
+    SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
 };
 use crate::deepseek::api::{ApiClient, CallError};
 use crate::deepseek::events::Downlinks;
@@ -24,7 +26,7 @@ use crate::deepseek::mapping::{self, ApprovalRequest, QuestionRequest, ToolTrack
 use crate::deepseek::models::ModelDirectory;
 use crate::deepseek::projections::ProjectionTracker;
 use crate::deepseek::workflows::WorkflowTracker;
-use crate::deepseek::{commands, history, subagents};
+use crate::deepseek::{commands, history, presets, subagents};
 
 pub struct Session {
     client: ApiClient,
@@ -94,12 +96,21 @@ const COMMANDS_FRAME: &str = "nmt/commands";
 const SUBAGENTS_FRAME: &str = "nmt/subagents";
 const SUBAGENT_TRANSCRIPT_FRAME: &str = "nmt/subagent-transcript";
 const SKILLS_FRAME: &str = "nmt/skills";
+const PRESETS_FRAME: &str = "nmt/agent-presets";
 const WORKFLOW_TRANSCRIPT_FRAME: &str = "nmt/workflow-transcript";
 
 /// How much of a resumed conversation is rebuilt. The harness pages history at
 /// whole-message boundaries, so this is a count of messages rather than of
 /// events; one page is what the pane shows, and older turns stay in the log.
 const REPLAY_MESSAGES: u64 = 200;
+
+/// A conversation this tab has just opened or reattached to.
+struct OpenedConversation {
+    session_id: String,
+    /// The composition it was built from, absent when the deployment composes
+    /// no presets at all and every conversation shares the host's own.
+    agent_preset: Option<String>,
+}
 
 /// Open a conversation on the host, or reattach to an existing one.
 ///
@@ -110,7 +121,7 @@ fn open_conversation(
     client: &ApiClient,
     cwd: Option<&str>,
     session_id: Option<&str>,
-) -> Result<String, String> {
+) -> Result<OpenedConversation, String> {
     let mut payload = json!({});
     if let Some(cwd) = cwd {
         payload["cwd"] = json!(cwd);
@@ -123,10 +134,15 @@ fn open_conversation(
         .call("session.create", payload)
         .map_err(|error| error.message().to_string())?;
 
-    created["sessionId"]
+    let session_id = created["sessionId"]
         .as_str()
         .map(str::to_string)
-        .ok_or_else(|| "the harness answered without a conversation id".to_string())
+        .ok_or_else(|| "the harness answered without a conversation id".to_string())?;
+
+    Ok(OpenedConversation {
+        session_id,
+        agent_preset: created["agentPreset"].as_str().map(str::to_string),
+    })
 }
 
 /// Read the conversations this tab's directory can continue.
@@ -237,6 +253,36 @@ fn load_skills(client: ApiClient, session_id: String, deliver: Arc<dyn Fn(Value)
             Err(error) => {
                 tracing::warn!("deepseek skills could not be listed: {}", error.message())
             }
+        }
+    });
+}
+
+/// Read the agent compositions this deployment offers, and which one built this
+/// conversation.
+///
+/// The roster belongs to the deployment rather than to the session, but the
+/// current pick belongs to the session, so both are read here: reattaching to a
+/// conversation composed from another preset has to move the picker with it.
+fn load_agent_presets(
+    client: ApiClient,
+    session_id: String,
+    current: Option<String>,
+    deliver: Arc<dyn Fn(Value) + Send + Sync>,
+) {
+    thread::spawn(move || match client.call("agentPreset.list", json!({})) {
+        Ok(listed) => deliver(json!({
+            "payload": {
+                "type": PRESETS_FRAME,
+                "sessionId": session_id,
+                "presets": listed["presets"],
+                "current": current,
+            },
+        })),
+        Err(error) => {
+            tracing::warn!(
+                "deepseek agent presets could not be listed: {}",
+                error.message()
+            )
         }
     });
 }
@@ -377,6 +423,12 @@ fn load_models(
                 }
             };
 
+        // Why the harness kept its own selection, when it did. The levels a
+        // route serves are the adapter's, so a profile can name one this
+        // deployment does not offer, and nothing else would ever say so: this
+        // path runs in the background with no control waiting on an answer.
+        let mut refusal = None;
+
         if let Some(model) = wanted_model {
             let directory = ModelDirectory::parse(&catalog);
             let already = directory.selected() == Some(model.as_str())
@@ -400,17 +452,17 @@ fn load_models(
 
                 match client.call("session.selectModel", payload) {
                     Ok(selected) => catalog["current"] = selected["selected"].clone(),
-                    Err(error) => tracing::warn!(
-                        "deepseek could not select the profile's model: {}",
-                        error.message()
-                    ),
+                    Err(error) => refusal = Some(error.message().to_string()),
                 }
             }
         }
 
-        deliver(json!({
-            "payload": { "type": MODELS_FRAME, "sessionId": session_id, "models": catalog },
-        }));
+        let mut payload =
+            json!({ "type": MODELS_FRAME, "sessionId": session_id, "models": catalog });
+        if let Some(message) = refusal {
+            payload["error"] = json!(message);
+        }
+        deliver(json!({ "payload": payload }));
     });
 }
 
@@ -463,11 +515,12 @@ impl Session {
     ) -> Result<Self, HostError> {
         let host = host::shared(launch)?;
         let client = host.client().clone();
-        let session_id = open_conversation(&client, cwd.as_deref(), None).map_err(|error| {
+        let opened = open_conversation(&client, cwd.as_deref(), None).map_err(|error| {
             HostError::FailedToStart(format!(
                 "the harness could not open a conversation: {error}"
             ))
         })?;
+        let session_id = opened.session_id;
 
         // Opening the downlinks after the session exists means its first frames
         // cannot be missed: the stream replays a baseline for every attached
@@ -492,6 +545,12 @@ impl Session {
         load_sessions(client.clone(), cwd.clone(), Arc::clone(&deliver));
         load_commands(client.clone(), session_id.clone(), Arc::clone(&deliver));
         load_skills(client.clone(), session_id.clone(), Arc::clone(&deliver));
+        load_agent_presets(
+            client.clone(),
+            session_id.clone(),
+            opened.agent_preset,
+            Arc::clone(&deliver),
+        );
         // A new conversation has no turns to replay, but its tail page still
         // carries the projection baseline the pane's gauges start from.
         load_replay(client.clone(), session_id.clone(), Arc::clone(&deliver));
@@ -526,8 +585,8 @@ impl Session {
     /// this tab cannot adopt.
     pub fn resume_thread(&mut self, thread_id: &str) -> bool {
         match open_conversation(&self.client, self.cwd.as_deref(), Some(thread_id)) {
-            Ok(session_id) => {
-                self.session_id = session_id;
+            Ok(opened) => {
+                self.session_id = opened.session_id;
                 // Everything below describes the conversation this tab just
                 // left; carrying it over would attribute it to the new one.
                 self.running = false;
@@ -570,6 +629,12 @@ impl Session {
                 load_skills(
                     self.client.clone(),
                     self.session_id.clone(),
+                    Arc::clone(&self.deliver),
+                );
+                load_agent_presets(
+                    self.client.clone(),
+                    self.session_id.clone(),
+                    opened.agent_preset,
                     Arc::clone(&self.deliver),
                 );
                 true
@@ -679,6 +744,17 @@ impl Session {
             return vec![Event::Skills(commands::skills(&frame["payload"]["skills"]))];
         }
 
+        if frame["payload"]["type"] == PRESETS_FRAME {
+            let payload = &frame["payload"];
+            if payload["sessionId"].as_str() != Some(&self.session_id) {
+                return Vec::new();
+            }
+            return vec![Event::AgentPresets {
+                presets: presets::catalog(&payload["presets"]),
+                current: payload["current"].as_str().map(str::to_string),
+            }];
+        }
+
         if frame["payload"]["type"] == COMMANDS_FRAME {
             // A registry read for the conversation this tab has since left
             // describes an agent it no longer talks to.
@@ -766,7 +842,7 @@ impl Session {
             self.models = ModelDirectory::parse(&frame["payload"]["models"]);
             // The catalog and the selection travel together, so the pickers
             // gain their options and their current value in one repaint.
-            return vec![
+            let mut events = vec![
                 Event::Models(self.models.catalog()),
                 Event::Ready(ThreadSettings {
                     model: self.models.selected().map(str::to_string),
@@ -774,6 +850,18 @@ impl Session {
                     ..ThreadSettings::default()
                 }),
             ];
+
+            // A refused selection travels with the catalog that outlived it, so
+            // the level reported alongside the reason is the one the session is
+            // actually on rather than the one that was asked for.
+            if let Some(message) = frame["payload"]["error"].as_str() {
+                events.push(Event::EffortRejected {
+                    message: message.to_string(),
+                    effort: self.models.effort().map(str::to_string),
+                });
+            }
+
+            return events;
         }
 
         // A child announces itself in the parent's own log, and the catalog is
@@ -1019,18 +1107,50 @@ impl Session {
         (self.models.selected(), self.models.effort())
     }
 
-    /// Send a prompt.
+    /// Recompose this conversation's agent from another preset.
+    ///
+    /// The harness allows this only while no turn has run: the logged history
+    /// was produced under the previous composition's tools, and a new one may
+    /// not be able to make the calls that history records. Rather than
+    /// predicting that here, the refusal is returned for the picker to show —
+    /// the harness owns the rule and answers with its own reason.
+    pub fn select_agent_preset(&mut self, preset: &str) -> Result<(), String> {
+        let payload = json!({ "sessionId": self.session_id, "agentPreset": preset });
+
+        self.client
+            .call("agentPreset.select", payload)
+            .map_err(|error| error.message().to_string())?;
+
+        // A preset names the plugins the agent is built from, so the commands
+        // and skills it serves are the ones that just changed. Leaving the
+        // palette on the previous composition's would offer entries the new
+        // agent cannot run.
+        load_commands(
+            self.client.clone(),
+            self.session_id.clone(),
+            Arc::clone(&self.deliver),
+        );
+        load_skills(
+            self.client.clone(),
+            self.session_id.clone(),
+            Arc::clone(&self.deliver),
+        );
+
+        Ok(())
+    }
+
+    /// Send a prompt and the images it carries.
     ///
     /// A message sent while a turn is running is steered into that turn rather
     /// than queued behind it, which is what makes a correction land before the
     /// work it is correcting finishes. The harness treats a steer whose window
     /// has already closed as the next queued message, so both outcomes leave
     /// the message pending and the reply is reported as steered either way.
-    pub fn send_user_message(&mut self, text: &str) -> SendOutcome {
+    pub fn send_user_message(&mut self, text: &str, images: &[MessageImage]) -> SendOutcome {
         let steering = self.running;
         let mode = if steering { "steer" } else { "queue" };
 
-        match self.prompt(text, mode) {
+        match self.prompt(text, mode, images) {
             Ok(_) if steering => SendOutcome::Steered,
             Ok(_) => SendOutcome::StartedTurn,
             Err(error) => SendOutcome::Rejected {
@@ -1149,13 +1269,27 @@ impl Session {
         }
     }
 
-    fn prompt(&self, text: &str, mode: &str) -> Result<Value, CallError> {
+    /// Image bytes travel inline rather than by reference: the harness's
+    /// attachment method reads what a conversation already holds and is no
+    /// route for putting something into one. A model that declines image
+    /// input refuses the whole prompt, which is a business error the composer
+    /// reports, so nothing is dropped silently to make a message fit.
+    fn prompt(&self, text: &str, mode: &str, images: &[MessageImage]) -> Result<Value, CallError> {
+        let mut content = vec![json!({ "type": "text", "text": text })];
+        content.extend(images.iter().map(|image| {
+            json!({
+                "type": "image",
+                "mediaType": image.media_type,
+                "data": BASE64_STANDARD.encode(&image.bytes),
+            })
+        }));
+
         self.client.call(
             "session.prompt",
             json!({
                 "sessionId": self.session_id,
                 "mode": mode,
-                "content": [{ "type": "text", "text": text }],
+                "content": content,
             }),
         )
     }

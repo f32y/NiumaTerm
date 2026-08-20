@@ -67,27 +67,59 @@ pub struct Host {
     child: Mutex<Child>,
 }
 
-/// The one host every DeepSeek tab shares, held weakly so it stops when the
-/// last tab lets go. A strong static would keep Node running for the rest of
-/// the application's life after the last DeepSeek tab closed.
-static SHARED: Mutex<Weak<Host>> = Mutex::new(Weak::new());
+/// What a running host was started from. A host answers for its own launch
+/// only: the endpoint and credential a profile configures are environment the
+/// process reads once at startup, so a tab whose profile differs in any of
+/// these would silently run against another profile's provider.
+#[derive(PartialEq, Eq)]
+struct LaunchKey {
+    executable: String,
+    arguments: Vec<String>,
+    environment: Vec<(String, String)>,
+}
 
-/// Hand out the running host, starting it if no tab currently holds one.
+impl LaunchKey {
+    fn of(launch: &crate::LaunchConfig) -> Self {
+        Self {
+            executable: launch.executable.trim().to_string(),
+            arguments: launch.executable_args.clone(),
+            environment: launch.env.clone(),
+        }
+    }
+}
+
+/// The hosts DeepSeek tabs currently share, one per distinct launch, each held
+/// weakly so it stops when its last tab lets go. A strong static would keep
+/// Node running for the rest of the application's life after the last DeepSeek
+/// tab closed.
+static SHARED: Mutex<Vec<(LaunchKey, Weak<Host>)>> = Mutex::new(Vec::new());
+
+/// Hand out the running host for this launch, starting it if no tab currently
+/// holds one.
 ///
-/// One host serves every tab because its event stream is aggregated across
-/// sessions: a second process would pay the Node start cost again and deliver
-/// the same frames twice.
+/// Tabs sharing a launch share a host because its event stream is aggregated
+/// across sessions: a second process would pay the Node start cost again and
+/// deliver the same frames twice. Tabs whose launches differ cannot share one,
+/// because the launch is what decides where the host routes.
 pub fn shared(launch: &crate::LaunchConfig) -> Result<Arc<Host>, HostError> {
-    let mut slot = SHARED.lock();
+    let key = LaunchKey::of(launch);
+    let mut hosts = SHARED.lock();
 
-    if let Some(running) = slot.upgrade()
-        && running.is_running()
+    // Entries whose host has stopped are dropped on the way past rather than
+    // in a sweep of their own: a launch is looked up whenever a tab opens, and
+    // the list only ever holds as many entries as there are distinct profiles.
+    hosts.retain(|(_, host)| host.upgrade().is_some_and(|host| host.is_running()));
+
+    if let Some(running) = hosts
+        .iter()
+        .find(|(candidate, _)| *candidate == key)
+        .and_then(|(_, host)| host.upgrade())
     {
         return Ok(running);
     }
 
     let host = Arc::new(Host::start(launch)?);
-    *slot = Arc::downgrade(&host);
+    hosts.push((key, Arc::downgrade(&host)));
 
     Ok(host)
 }
