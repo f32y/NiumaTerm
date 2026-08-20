@@ -279,26 +279,14 @@ impl AgentPane {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        self.update_suspension.as_ref().map(|state| {
+        self.update_suspension.as_ref().and_then(|state| {
+            // The phases that tear the backend down and bring it back own the
+            // whole surface through `render_update_overlay`, so the strip only
+            // covers the two states the tab stays usable in.
             let (label, detail, failed) = match state {
                 UpdateSuspension::Waiting => (
                     i18n("agent-update-waiting-label"),
                     i18n("agent-update-waiting-detail"),
-                    false,
-                ),
-                UpdateSuspension::Stopping => (
-                    i18n("agent-update-stopping-label"),
-                    i18n("agent-update-stopping-detail"),
-                    false,
-                ),
-                UpdateSuspension::Updating => (
-                    i18n("agent-update-updating-label"),
-                    i18n("agent-update-updating-detail"),
-                    false,
-                ),
-                UpdateSuspension::Reconnecting => (
-                    i18n("agent-update-reconnecting-label"),
-                    i18n("agent-update-reconnecting-detail"),
                     false,
                 ),
                 UpdateSuspension::Failed(message) => (
@@ -306,9 +294,12 @@ impl AgentPane {
                     message.as_str(),
                     true,
                 ),
+                UpdateSuspension::Stopping
+                | UpdateSuspension::Updating
+                | UpdateSuspension::Reconnecting => return None,
             };
 
-            h_flex()
+            let banner = h_flex()
                 .w_full()
                 .px_4()
                 .py_2()
@@ -357,8 +348,56 @@ impl AgentPane {
                             })),
                     )
                 })
-                .into_any_element()
+                .into_any_element();
+            Some(banner)
         })
+    }
+
+    /// Covers the surface while the update transaction owns the backend: input
+    /// would go nowhere, and the transcript underneath is a stale snapshot of a
+    /// conversation that is about to be replayed.
+    pub(in crate::agent::view) fn render_update_overlay(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let label = match self.update_suspension.as_ref()? {
+            UpdateSuspension::Stopping => i18n("agent-update-stopping-label"),
+            UpdateSuspension::Updating => i18n("agent-update-updating-label"),
+            UpdateSuspension::Reconnecting => i18n("agent-update-reconnecting-label"),
+            UpdateSuspension::Waiting | UpdateSuspension::Failed(_) => return None,
+        };
+
+        Some(
+            v_flex()
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                // Swallows clicks and keys aimed at the suspended transcript
+                // and composer underneath.
+                .occlude()
+                .items_center()
+                .justify_center()
+                .gap_3()
+                // Frosted glass: the transcript stays legible as shape and color
+                // while reading as unavailable, which a flat scrim cannot do.
+                .backdrop_blur(px(24.))
+                .bg(cx.theme().background.opacity(0.45))
+                .child(
+                    Spinner::new()
+                        .icon(IconName::LoaderCircle)
+                        .with_size(px(22.))
+                        .color(cx.theme().primary),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(cx.theme().foreground)
+                        .child(label),
+                )
+                .into_any_element(),
+        )
     }
 
     pub(in crate::agent::view) fn render_composer_status(
