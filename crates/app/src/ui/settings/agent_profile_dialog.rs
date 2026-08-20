@@ -160,7 +160,11 @@ fn select_profile_kind(profile_kind: AgentProfileKind, cx: &mut App) {
             .into_iter()
             .any(|other| builtin_agent_profile(other.profile_kind()).executable == executable);
     if follows_default {
-        draft.profile.executable = builtin_agent_profile(profile_kind).executable;
+        let builtin = builtin_agent_profile(profile_kind);
+        draft.profile.executable = builtin.executable;
+        // How the harness is launched belongs to the harness, so the choice
+        // follows the kind for as long as the executable does.
+        draft.profile.via_npx = builtin.via_npx;
     }
     draft.profile.kind = profile_kind;
 }
@@ -476,6 +480,36 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
             })
         });
 
+    // DeepSeek Harness is published to npm, so a profile can run it straight
+    // from its package; every other harness is launched from a binary the user
+    // installed and has nothing to pick between.
+    let via_npx = profile.kind == AgentProfileKind::DeepSeek && profile.via_npx;
+    let launcher_control = Button::new("agent-profile-dialog-launcher")
+        .outline()
+        .w_64()
+        .label(if via_npx {
+            i18n("settings-agent-profile-launcher-npx")
+        } else {
+            i18n("settings-agent-profile-launcher-custom")
+        })
+        .dropdown_caret(true)
+        .dropdown_menu(move |menu, _, _| {
+            menu.item(
+                PopupMenuItem::new(i18n("settings-agent-profile-launcher-npx"))
+                    .checked(via_npx)
+                    .on_click(|_, _, cx: &mut App| {
+                        cx.global_mut::<AgentProfileDraft>().profile.via_npx = true;
+                    }),
+            )
+            .item(
+                PopupMenuItem::new(i18n("settings-agent-profile-launcher-custom"))
+                    .checked(!via_npx)
+                    .on_click(|_, _, cx: &mut App| {
+                        cx.global_mut::<AgentProfileDraft>().profile.via_npx = false;
+                    }),
+            )
+        });
+
     let sub_models_switch = Switch::new("agent-profile-dialog-sub-models")
         .checked(profile.replace_sub_models)
         .on_click(|checked: &bool, _, cx: &mut App| {
@@ -532,12 +566,24 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
             kind_control,
             cx,
         ))
-        .child(card_row(
-            i18n("settings-agent-profile-executable"),
-            i18n("settings-agent-profile-executable-description"),
-            Input::new(&exe_input).w_64(),
-            cx,
-        ))
+        .when(profile.kind == AgentProfileKind::DeepSeek, |this| {
+            this.child(card_row(
+                i18n("settings-agent-profile-launcher"),
+                i18n("settings-agent-profile-launcher-description"),
+                launcher_control,
+                cx,
+            ))
+        })
+        // The path is what the profile launches, so it is only asked for when
+        // the profile launches a path.
+        .when(!via_npx, |this| {
+            this.child(card_row(
+                i18n("settings-agent-profile-executable"),
+                i18n("settings-agent-profile-executable-description"),
+                Input::new(&exe_input).w_64(),
+                cx,
+            ))
+        })
         .child(card_row(
             i18n("settings-agent-profile-model"),
             match profile.kind {

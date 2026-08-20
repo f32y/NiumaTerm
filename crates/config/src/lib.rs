@@ -601,6 +601,7 @@ mod tests {
             name: "Claude Code".to_string(),
             kind: profile::AgentProfileKind::ClaudeCode,
             executable: "claude".to_string(),
+            via_npx: false,
             model: "claude-opus-4-8".to_string(),
             effort: "high".to_string(),
             replace_sub_models: true,

@@ -264,6 +264,11 @@ pub(crate) fn builtin_agent_profile(kind: AgentProfileKind) -> AgentProfile {
         name: agent_kind_label(kind).to_string(),
         kind,
         executable: executable.to_string(),
+        // DeepSeek Harness is published to npm and has no installer of its
+        // own, so a fresh profile runs it through npx and needs nothing
+        // installed first. The executable stays filled in as what the profile
+        // falls back to once it is pointed at a binary instead.
+        via_npx: kind == AgentProfileKind::DeepSeek,
         ..AgentProfile::default()
     }
 }

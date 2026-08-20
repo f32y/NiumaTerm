@@ -203,6 +203,13 @@ impl Host {
 /// shim npm installs.
 pub const DEFAULT_EXECUTABLE: &str = "dsh";
 
+/// Launcher for a profile that runs the harness from its published package
+/// rather than an installed binary. `-y` is not optional: the host is spawned
+/// with a null stdin, so npx's prompt before fetching a package it does not
+/// have cached could never be answered.
+pub const NPX_EXECUTABLE: &str = "npx";
+pub const NPX_ARGUMENTS: [&str; 2] = ["-y", "@deepseek-ai/dsh"];
+
 fn address_in(line: &str) -> Option<String> {
     let start = line.find(ADDRESS_MARKER)?;
     let address = line[start..].trim();

@@ -23,6 +23,8 @@ const POLL_INTERVAL: Duration = Duration::from_millis(20);
 #[derive(Clone, PartialEq, Eq)]
 pub struct AgentCli {
     executable: String,
+    /// Arguments the executable itself needs, ahead of the command's own.
+    arguments: Vec<String>,
     environment: Vec<(String, String)>,
 }
 
@@ -52,6 +54,7 @@ impl AgentCli {
             } else {
                 executable.to_string()
             },
+            arguments: launch.executable_args.clone(),
             environment: launch.env.clone(),
         }
     }
@@ -62,6 +65,7 @@ impl AgentCli {
     ) -> Self {
         Self {
             executable: executable.into(),
+            arguments: Vec::new(),
             environment: environment.into_iter().collect(),
         }
     }
@@ -111,6 +115,7 @@ impl AgentCli {
         let mut command = Command::new("cmd.exe");
         command
             .args(["/D", "/C", self.executable.as_str()])
+            .args(&self.arguments)
             .args(arguments)
             .envs(self.environment.iter().map(|(name, value)| (name, value)))
             .creation_flags(CREATE_NO_WINDOW);

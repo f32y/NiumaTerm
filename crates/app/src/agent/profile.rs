@@ -184,8 +184,22 @@ pub(crate) fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
             api_key_env,
         });
 
+    // A DeepSeek profile can run the harness from its npm package instead of
+    // an installed binary, which moves the package name into the launcher's
+    // own arguments and leaves the configured path unused.
+    let (executable, executable_args) =
+        if profile.kind == AgentProfileKind::DeepSeek && profile.via_npx {
+            (
+                deepseek::NPX_EXECUTABLE.to_string(),
+                deepseek::NPX_ARGUMENTS.map(str::to_string).to_vec(),
+            )
+        } else {
+            (profile.executable.trim().to_string(), Vec::new())
+        };
+
     LaunchConfig {
-        executable: profile.executable.trim().to_string(),
+        executable,
+        executable_args,
         env,
         model,
         effort: profile_effort(profile),
