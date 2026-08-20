@@ -51,6 +51,10 @@ pub use crate::process::{
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LaunchConfig {
     pub executable: String,
+    /// Arguments belonging to the executable itself, ahead of whatever the
+    /// adapter passes. A harness launched through a package runner takes its
+    /// package name here, where it stays out of the command being run.
+    pub executable_args: Vec<String>,
     pub model: Option<String>,
     /// Reasoning effort the profile pins for every conversation it starts.
     /// `None` leaves the level to the agent and the remembered thread

@@ -93,8 +93,15 @@ pub struct AgentProfile {
     pub kind: AgentProfileKind,
     /// Executable name or path; a bare name resolves via PATH (and PATHEXT on
     /// Windows, so `claude` finds both `claude.exe` and the npm `claude.cmd`).
+    /// Ignored while [`Self::via_npx`] runs the harness from its package.
     #[serde(default)]
     pub executable: String,
+    /// Run the harness through `npx` from its published package instead of an
+    /// installed executable. Only DeepSeek Harness offers this; a profile
+    /// written before the field existed reads as false, which keeps it on the
+    /// executable it was already launching.
+    #[serde(default, rename = "via-npx")]
+    pub via_npx: bool,
     /// Model selected when a new agent conversation starts. Each adapter maps
     /// this to its native configuration surface.
     #[serde(default)]
@@ -131,6 +138,8 @@ struct PersistedAgentProfile {
     kind: AgentProfileKind,
     #[serde(default)]
     executable: String,
+    #[serde(default, rename = "via-npx")]
+    via_npx: bool,
     #[serde(default)]
     model: String,
     #[serde(default)]
@@ -171,6 +180,7 @@ impl TryFrom<PersistedAgentProfile> for AgentProfile {
             name: persisted.name,
             kind: persisted.kind,
             executable: persisted.executable,
+            via_npx: persisted.via_npx,
             model: persisted.model,
             effort: persisted.effort,
             replace_sub_models: persisted.replace_sub_models,
@@ -223,6 +233,7 @@ pub(crate) fn patch_agent_document(
         table["name"] = value(&profile.name);
         table["kind"] = value(profile.kind.as_str());
         table["executable"] = value(&profile.executable);
+        table["via-npx"] = value(profile.via_npx);
         table["model"] = value(&profile.model);
         table["effort"] = value(&profile.effort);
         table["replace-sub-models"] = value(profile.replace_sub_models);
