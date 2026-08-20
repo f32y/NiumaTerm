@@ -120,9 +120,9 @@ impl Backend {
 
     /// Send a message and the images it carries. Each harness takes them in
     /// its own shape: Codex reads files from disk, so the attachments are
-    /// written under `scratch` first, while Claude Code takes the bytes
-    /// inline. A harness with no image input is sent the text alone, which is
-    /// all a pane without `image_input` can have composed.
+    /// written under `scratch` first, while Claude Code and DeepSeek Harness
+    /// take the bytes inline. A harness with no image input is sent the text
+    /// alone, which is all a pane without `image_input` can have composed.
     pub(in crate::agent) fn send_user_message(
         &mut self,
         text: &str,
@@ -137,19 +137,13 @@ impl Backend {
                 session.send_user_message_with_skill(text, settings, skill, &paths)
             }
             Backend::Claude(session) => {
-                let images: Vec<MessageImage> = attachments
-                    .iter()
-                    .map(|attachment| MessageImage {
-                        bytes: attachment.bytes().to_vec(),
-                        media_type: attachment.format().mime_type().to_string(),
-                    })
-                    .collect();
-
-                session.send_user_message(text, settings, &images)
+                session.send_user_message(text, settings, &inline_images(attachments))
             }
             // Skills are not mapped for DeepSeek, so a reference cannot reach
             // it and the prompt goes as the user wrote it.
-            Backend::DeepSeek(session) => session.send_user_message(text),
+            Backend::DeepSeek(session) => {
+                session.send_user_message(text, &inline_images(attachments))
+            }
             #[cfg(test)]
             Backend::Test(session) => session
                 .send_outcomes
@@ -581,6 +575,18 @@ impl Backend {
         }
     }
 
+    /// Rebuild the conversation's agent from another composition. Only DeepSeek
+    /// composes an agent from a preset at all; the other two launch one CLI
+    /// whose capabilities are fixed for the life of the process.
+    pub(in crate::agent) fn select_agent_preset(&mut self, preset: &str) -> Result<(), String> {
+        match self {
+            Backend::DeepSeek(session) => session.select_agent_preset(preset),
+            Backend::Codex(_) | Backend::Claude(_) => Ok(()),
+            #[cfg(test)]
+            Backend::Test(_) => Ok(()),
+        }
+    }
+
     /// What the session is actually set to, for restoring the pickers after a
     /// refused pick.
     pub(in crate::agent) fn selection(&self) -> (Option<&str>, Option<&str>) {
@@ -603,6 +609,18 @@ impl Backend {
             Backend::Test(_) => {}
         }
     }
+}
+
+/// The attachments in the form a harness that takes bytes inline wants them. Nothing reaches disk on this path, so there is no partial outcome to
+/// report: every attachment the composer holds travels with the message.
+fn inline_images(attachments: &PendingAttachments) -> Vec<MessageImage> {
+    attachments
+        .iter()
+        .map(|attachment| MessageImage {
+            bytes: attachment.bytes().to_vec(),
+            media_type: attachment.format().mime_type().to_string(),
+        })
+        .collect()
 }
 
 /// Write each attachment into `scratch`, returning the paths that could be

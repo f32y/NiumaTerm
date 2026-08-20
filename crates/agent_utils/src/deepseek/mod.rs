@@ -18,6 +18,7 @@ mod history;
 mod host;
 mod mapping;
 mod models;
+mod presets;
 mod projections;
 mod session;
 mod subagents;

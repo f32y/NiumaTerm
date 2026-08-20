@@ -212,7 +212,7 @@
 "settings-agent-profile-model" = "Model"
 "settings-agent-profile-model-claude-description" = "Initial model; passed to Claude Code as ANTHROPIC_MODEL."
 "settings-agent-profile-model-codex-description" = "Initial model; passed to Codex when its app-server thread starts."
-"settings-agent-profile-model-deepseek-description" = "Initial model. Selecting one does not reach the harness yet, so this field is recorded but not applied."
+"settings-agent-profile-model-deepseek-description" = "Initial model; applied to the session once the harness reports its catalog. Write `provider/id` when two providers serve the same model id."
 "settings-agent-profile-replace-sub-models" = "Replace all sub-model config with primary"
 "settings-agent-profile-replace-sub-models-description" = "Also send the model above as ANTHROPIC_DEFAULT_OPUS_MODEL, ANTHROPIC_DEFAULT_SONNET_MODEL, and ANTHROPIC_DEFAULT_HAIKU_MODEL, so an endpoint serving one model answers every tier. An entry for the same variable in the table below still wins."
 "settings-agent-profile-effort" = "Effort"
@@ -488,6 +488,7 @@
 "agent-settings-model" = "Model"
 "agent-settings-execution-policy" = "Execution policy"
 "agent-settings-quality-cost" = "Quality and cost"
+"agent-settings-agent-preset" = "Agent"
 
 # Agent usage
 "agent-usage-accessibility" = "Agent usage remaining. Codex five hour: {codex_session}; Codex week: {codex_week}; Claude five hour: {claude_session}; Claude week: {claude_week}.{refreshing}"
@@ -688,6 +689,7 @@
 "agent-effort-faster" = "Faster"
 "agent-effort-smarter" = "Smarter"
 "agent-setting-approval" = "approval"
+"agent-setting-agent-preset" = "composition"
 "agent-setting-sandbox" = "sandbox"
 "agent-setting-approval-reviewer" = "approval reviewer"
 "agent-setting-tier" = "tier"

@@ -184,6 +184,34 @@ impl AgentPane {
                 cx,
             ));
 
+        // A deployment that composes no presets has one composition for every
+        // conversation, so the control would offer a choice that does not exist.
+        if !self.agent_presets.is_empty() {
+            let composition_options: Vec<(String, String)> = self
+                .agent_presets
+                .iter()
+                .map(|preset| (preset.value.clone(), preset.label.clone()))
+                .collect();
+
+            let composition = Self::setting_picker(
+                cx,
+                "agent-composition",
+                i18n("agent-setting-agent-preset"),
+                IconName::Bot,
+                self.agent_preset.clone(),
+                composition_options,
+                false,
+                |this, value, cx| this.apply_agent_preset(value, cx),
+            )
+            .into_any_element();
+
+            row = row.child(Self::settings_group(
+                i18n("agent-settings-agent-preset"),
+                vec![composition],
+                cx,
+            ));
+        }
+
         if !self.approval_presets.is_empty() {
             let preset_options: Vec<(String, String)> = self
                 .approval_presets

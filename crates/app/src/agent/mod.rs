@@ -53,11 +53,12 @@ use nmt_agent_utils::background_task::{
     BackgroundTaskKey, BackgroundTaskProvider, BackgroundTaskSnapshot, BackgroundTaskTranscript,
 };
 use nmt_agent_utils::chat::{
-    ApprovalPreset, Compaction, CompactionTrigger, ContextComposition, ContextWindowUsage,
-    Event as SessionEvent, GoalStatus, Item as SessionItem, ModelInfo, Question, QuestionOption,
-    QueuedPrompt, ReplayTurn, SendOutcome, SessionScope, SessionStats, SessionSummary,
-    SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments, SlashCommandInfo,
-    SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings, TurnActivity,
+    AgentPreset, ApprovalPreset, Compaction, CompactionTrigger, ContextComposition,
+    ContextWindowUsage, Event as SessionEvent, GoalStatus, Item as SessionItem, ModelInfo,
+    Question, QuestionOption, QueuedPrompt, ReplayTurn, SendOutcome, SessionScope, SessionStats,
+    SessionSummary, SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments,
+    SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
+    ThreadSettings, TurnActivity,
 };
 use nmt_agent_utils::claude_code::workflows::{
     RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult,
@@ -618,6 +619,11 @@ pub(crate) struct AgentPane {
     /// Execution-permission presets, for a harness whose preset table belongs
     /// to its deployment. Empty for one whose presets this UI can name itself.
     approval_presets: Vec<ApprovalPreset>,
+    /// Agent compositions this deployment offers, and the one this conversation
+    /// was built from. Empty where the deployment composes none, which is a
+    /// picker with nothing to choose between rather than an unsupported one.
+    agent_presets: Vec<AgentPreset>,
+    agent_preset: Option<String>,
     /// Monotonic turn counter; entries are tagged with the turn they arrived
     /// in so a settled turn can fold as one unit.
     turn_seq: u64,
