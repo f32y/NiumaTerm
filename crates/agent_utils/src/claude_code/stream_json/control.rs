@@ -6,11 +6,15 @@ use tracing::debug;
 
 use crate::chat::{ContextComposition, ContextSegment, Event, Question, QuestionOption};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum PendingControlOperation {
     FileRewind,
     ContextComposition,
     SessionTitle,
+    /// An effort change, carrying the level the session stays on when the CLI
+    /// refuses it: ultracode the deployment does not offer, an environment
+    /// variable that pins the level, or a level beyond what the model reaches.
+    EffortChange(Option<String>),
 }
 
 /// A `can_use_tool` control request awaiting the user's decision. The original
@@ -136,6 +140,15 @@ pub(super) fn resolve_pending_control_operation(
         // Neither is worth showing the user: the conversation keeps the name
         // it already had. Both are worth a line in the log, because nothing
         // else distinguishes them from a request that was never made.
+        // A level that was applied needs no announcement: the control already
+        // shows it. A refusal has to reach the user, because the control shows
+        // a level the session is not on until it does.
+        PendingControlOperation::EffortChange(previous) => {
+            error.map(|message| Event::EffortRejected {
+                message,
+                effort: previous,
+            })
+        }
         PendingControlOperation::SessionTitle => {
             let title = error
                 .is_none()
@@ -208,6 +221,14 @@ pub(super) fn fail_pending_control_operations(
             // A conversation that lost its naming request keeps the name it
             // already had, which is what an unnamed one shows anyway.
             PendingControlOperation::SessionTitle => None,
+            // The process this level was meant for is gone. Its replacement
+            // launches on the level the profile pins, so the control goes back
+            // to what the lost session was on rather than keeping a pick that
+            // no process ever accepted.
+            PendingControlOperation::EffortChange(previous) => Some(Event::EffortRejected {
+                message: message.to_string(),
+                effort: previous,
+            }),
         })
         .collect()
 }

@@ -38,7 +38,7 @@ use crate::codex::app_server::compaction::{
     CompactionState, compaction_completed, compaction_started, is_legacy_compaction_notification,
 };
 pub use crate::codex::app_server::options::{
-    APPROVAL_OPTIONS, APPROVAL_REVIEWER_OPTIONS, EFFORT_OPTIONS, SANDBOX_OPTIONS,
+    APPROVAL_OPTIONS, APPROVAL_REVIEWER_OPTIONS, SANDBOX_OPTIONS,
 };
 #[cfg(test)]
 use crate::codex::app_server::protocol::thread_start_params;

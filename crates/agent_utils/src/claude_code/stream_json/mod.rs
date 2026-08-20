@@ -64,6 +64,13 @@ mod control;
 mod launch;
 mod parse;
 
+/// Effort level standing for Claude Code's ultracode mode. The CLI does not
+/// take it as a level: it is xhigh effort plus standing dynamic-workflow
+/// orchestration, carried by a separate session flag. Passing the word as a
+/// level would be aliased back to plain xhigh with the orchestration off, so
+/// the adapter splits it into the two settings the CLI expects.
+pub const ULTRACODE_EFFORT: &str = "ultracode";
+
 /// Serialized values for `--permission-mode` / the `set_permission_mode` control
 /// request. `auto` is the CLI's dynamic mode (verified accepted by
 /// `set_permission_mode` on 2.1.222).
@@ -121,11 +128,13 @@ pub struct Session {
     turn_reported: bool,
     pending_approval: Option<PendingApproval>,
     pending_questions: Option<PendingQuestions>,
-    /// Last model/permission actually applied by the backend, so settings picked
-    /// in the UI turn into `set_model` / `set_permission_mode` control
-    /// requests exactly when they change.
+    /// Last model/permission/effort actually applied by the backend, so
+    /// settings picked in the UI turn into `set_model`,
+    /// `set_permission_mode` and `apply_flag_settings` control requests
+    /// exactly when they change.
     applied_model: Option<String>,
     applied_permission: Option<String>,
+    applied_effort: Option<String>,
     /// Streamed content blocks of the in-flight assistant message, keyed by
     /// their stream index, so text/thinking deltas route to transcript items.
     open_blocks: HashMap<u64, String>,
@@ -275,6 +284,8 @@ impl Session {
             pending_questions: None,
             applied_model: initial_model,
             applied_permission: None,
+            // The launch flag below already put the process on this level.
+            applied_effort: launch.effort.clone(),
             open_blocks: HashMap::new(),
             open_texts: VecDeque::new(),
             open_thinkings: VecDeque::new(),
@@ -381,8 +392,8 @@ impl Session {
     }
 
     /// Write the user message, applying changed settings first via control
-    /// requests (model and permission mode are session state on the CLI, so
-    /// they are set once per change instead of per turn).
+    /// requests (model, permission mode and effort are session state on the
+    /// CLI, so they are set once per change instead of per turn).
     /// Send a user message carrying `images`, which the CLI takes inline as
     /// content blocks beside the text; it has no path input.
     pub fn send_user_message(
@@ -406,6 +417,25 @@ impl Session {
 
             self.send_control(json!({"subtype": "set_permission_mode", "mode": mode}));
             self.applied_permission = settings.approval.clone();
+        }
+        if settings.effort.is_some() && settings.effort != self.applied_effort {
+            let effort = settings.effort.clone().unwrap_or_default();
+            let ultracode = effort == ULTRACODE_EFFORT;
+            let level = if ultracode { "xhigh" } else { effort.as_str() };
+
+            // Correlated, unlike the model and permission requests: this one
+            // can be refused for reasons the user has to be told about, and
+            // the answer carries which.
+            let request_id = self.send_control(json!({
+                "subtype": "apply_flag_settings",
+                "settings": {"effortLevel": level, "ultracode": ultracode},
+            }));
+
+            self.pending_control_operations.insert(
+                request_id,
+                PendingControlOperation::EffortChange(self.applied_effort.clone()),
+            );
+            self.applied_effort = settings.effort.clone();
         }
 
         let mut content = vec![json!({"type": "text", "text": text})];
@@ -1237,6 +1267,13 @@ impl Session {
         if let Some(event) =
             resolve_pending_control_operation(&mut self.pending_control_operations, response)
         {
+            // A refused change left the session on the level it had, so the
+            // next change is measured against that one rather than against the
+            // pick that never took.
+            if let Event::EffortRejected { effort, .. } = &event {
+                self.applied_effort = effort.clone();
+            }
+
             // Before any assistant message reports usage there is nothing else
             // describing how full the window is, so the breakdown's own totals
             // stand in. Live accounting is richer, so it is never replaced.

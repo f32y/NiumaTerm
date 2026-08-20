@@ -10,7 +10,3 @@ pub const SANDBOX_OPTIONS: [(&str, &str); 3] = [
     ("workspaceWrite", "workspace-write"),
     ("dangerFullAccess", "full-access"),
 ];
-/// Serialized values for reasoning effort (`ReasoningEffort` serializes lowercase).
-pub const EFFORT_OPTIONS: [&str; 8] = [
-    "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
-];

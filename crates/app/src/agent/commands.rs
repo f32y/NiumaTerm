@@ -111,6 +111,7 @@ pub(super) fn setting_value_label(value: &str) -> String {
         "xhigh" => "agent-setting-value-xhigh",
         "max" => "agent-setting-value-max",
         "ultra" => "agent-setting-value-ultra",
+        "ultracode" => "agent-setting-value-ultracode",
         "normal" => "agent-setting-value-normal",
         _ => return value.to_string(),
     };

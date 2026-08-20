@@ -225,6 +225,7 @@ impl AgentPane {
             session_epoch: 0,
             status: Status::Starting,
             history_ui: SessionHistoryUi::default(),
+            effort_drag: None,
             pending_approval: None,
             pending_questions: None,
             settings: ThreadSettings::default(),

@@ -8,6 +8,20 @@ use crate::ui::settings::*;
 /// existed carries, so both mean "leave the effort to the agent".
 const PROFILE_EFFORT_OPTIONS: [&str; 6] = ["default", "low", "medium", "high", "xhigh", "max"];
 
+/// Codex takes one level above the shared list. It is the only harness whose
+/// top mode a profile can pin: Claude Code reaches its own through a slash
+/// command mid-conversation rather than through a launch setting.
+const CODEX_EFFORT_OPTION: &str = "ultra";
+
+/// The levels a profile of this kind can pin, in order.
+fn profile_effort_options(kind: AgentProfileKind) -> Vec<&'static str> {
+    PROFILE_EFFORT_OPTIONS
+        .iter()
+        .copied()
+        .chain((kind == AgentProfileKind::Codex).then_some(CODEX_EFFORT_OPTION))
+        .collect()
+}
+
 fn effort_label(option: &str) -> &'static str {
     match option {
         "low" => i18n("settings-agent-profile-effort-low"),
@@ -15,6 +29,7 @@ fn effort_label(option: &str) -> &'static str {
         "high" => i18n("settings-agent-profile-effort-high"),
         "xhigh" => i18n("settings-agent-profile-effort-xhigh"),
         "max" => i18n("settings-agent-profile-effort-max"),
+        "ultra" => i18n("settings-agent-profile-effort-ultra"),
         _ => i18n("settings-agent-profile-effort-default"),
     }
 }
@@ -463,25 +478,25 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
         .dropdown_menu(move |menu, _, _| {
             let selected = selected_effort.clone();
 
-            PROFILE_EFFORT_OPTIONS.iter().fold(menu, |menu, option| {
-                let option = *option;
-
-                menu.item(
-                    PopupMenuItem::new(effort_label(option))
-                        .checked(option == selected)
-                        .on_click(move |_, _, cx: &mut App| {
-                            // `default` is the absence of a choice, so it is
-                            // stored empty rather than as a level the agent
-                            // would be asked to honor.
-                            cx.global_mut::<AgentProfileDraft>().profile.effort =
-                                if option == PROFILE_EFFORT_OPTIONS[0] {
-                                    String::new()
-                                } else {
-                                    option.to_string()
-                                };
-                        }),
-                )
-            })
+            profile_effort_options(profile.kind)
+                .into_iter()
+                .fold(menu, |menu, option| {
+                    menu.item(
+                        PopupMenuItem::new(effort_label(option))
+                            .checked(option == selected)
+                            .on_click(move |_, _, cx: &mut App| {
+                                // `default` is the absence of a choice, so it
+                                // is stored empty rather than as a level the
+                                // agent would be asked to honor.
+                                cx.global_mut::<AgentProfileDraft>().profile.effort =
+                                    if option == PROFILE_EFFORT_OPTIONS[0] {
+                                        String::new()
+                                    } else {
+                                        option.to_string()
+                                    };
+                            }),
+                    )
+                })
         });
 
     // DeepSeek Harness is published to npm, so a profile can run it straight

@@ -39,6 +39,7 @@ use gpui_component::input::{
     Enter, Escape, IndentInline, Input, InputEvent, InputState, MoveDown, MoveUp,
 };
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
+use gpui_component::popover::Popover;
 use gpui_component::radio::Radio;
 use gpui_component::scroll::Scrollbar;
 use gpui_component::skeleton::Skeleton;
@@ -586,6 +587,9 @@ pub(crate) struct AgentPane {
     session_epoch: u64,
     status: Status,
     history_ui: SessionHistoryUi,
+    /// Stop the effort slider's thumb is being dragged to while the button is
+    /// down. The level itself is applied on release.
+    effort_drag: Option<usize>,
     /// Description of the approval request blocking the turn, shown as the
     /// card above the input; the request id lives in the session.
     pending_approval: Option<String>,

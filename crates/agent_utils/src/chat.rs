@@ -594,6 +594,14 @@ pub enum Event {
     /// can seed its pickers with real values.
     Ready(ThreadSettings),
     Models(Vec<ModelInfo>),
+    /// The backend refused an effort change, carrying the level the session
+    /// stays on. A refused setting is not something the conversation said, so
+    /// it is reported beside the control that asked for it rather than as a
+    /// transcript entry.
+    EffortRejected {
+        message: String,
+        effort: Option<String>,
+    },
     /// Replacement snapshot of the execution-permission presets this thread can
     /// switch between, and the one it is on. Reported only by a backend whose
     /// preset table belongs to its deployment rather than to this UI.

@@ -13,14 +13,35 @@ impl AgentPane {
         }
     }
 
+    /// The effort ladder the composer offers, cheapest first. It is this
+    /// application's rather than the harness's: Codex reports no per-model
+    /// levels at all, so reading them from the session spread its whole
+    /// serialization range across the control, including values no model
+    /// answers to.
+    const EFFORT_LEVELS: [&'static str; 5] = ["low", "medium", "high", "xhigh", "max"];
+
+    /// The shared ladder plus the one level a harness puts above it. Each of
+    /// these is a single harness's own top mode, so neither belongs in the
+    /// ladder the others share.
+    fn effort_levels(kind: AgentKind) -> Vec<(String, String)> {
+        let top = match kind {
+            AgentKind::Claude => Some(stream_json::ULTRACODE_EFFORT),
+            AgentKind::Codex => Some("ultra"),
+            AgentKind::DeepSeek => None,
+        };
+
+        Self::EFFORT_LEVELS
+            .iter()
+            .copied()
+            .chain(top)
+            .map(|value| (value.to_string(), setting_value_label(value)))
+            .collect()
+    }
+
     /// Claude settings: model, permission mode, and reasoning effort. The
-    /// model catalog comes from the initialize handshake; model and
-    /// permission changes apply via control requests before the next message.
-    /// Effort has no control request — it's applied by sending the `/effort`
-    /// slash command as a user message, which the CLI handles locally
-    /// (instant, no model call), so the picker sends it immediately as its
-    /// own mini-turn. The effort levels are per model; models without effort
-    /// support (e.g. Haiku) get no picker.
+    /// model catalog comes from the initialize handshake, and all three apply
+    /// via control requests before the next message. Models without effort
+    /// support (e.g. Haiku) get no effort control.
     fn render_claude_settings_row(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let model_options: Vec<(String, String)> = self
             .models
@@ -31,12 +52,15 @@ impl AgentPane {
             .iter()
             .map(|v| (v.to_string(), setting_value_label(v)))
             .collect();
-        let effort_options: Vec<(String, String)> = self
+        // Which levels exist is this application's call, but whether the
+        // model has the setting at all stays the harness's: a model that
+        // advertises none (Haiku) gets no control rather than one whose every
+        // value it would reject.
+        let supports_effort = self
             .models
             .iter()
             .find(|m| Some(&m.model) == self.settings.model.as_ref())
-            .map(|m| m.efforts.iter().map(|v| (v.clone(), v.clone())).collect())
-            .unwrap_or_default();
+            .is_some_and(|m| !m.efforts.is_empty());
 
         let model = Self::setting_picker(
             cx,
@@ -83,12 +107,9 @@ impl AgentPane {
                 cx,
             ));
 
-        if !effort_options.is_empty() {
-            let effort = Self::setting_picker(
+        if supports_effort {
+            let effort = Self::effort_panel(
                 cx,
-                "agent-effort",
-                i18n("agent-setting-effort"),
-                IconName::Gauge,
                 // The protocol never reports the session's current effort;
                 // until the user picks one, the honest label is the CLI's
                 // own per-model default rather than an empty dash.
@@ -96,12 +117,10 @@ impl AgentPane {
                     .effort
                     .clone()
                     .or_else(|| Some("default".to_string())),
-                effort_options,
-                false,
+                Self::effort_levels(self.kind),
                 |this, value, cx| {
-                    this.settings.effort = Some(value.clone());
+                    this.settings.effort = Some(value);
                     this.remember_thread_defaults(cx);
-                    this.send_text(format!("/effort {value}"), cx);
                 },
             )
             .into_any_element();
@@ -129,19 +148,14 @@ impl AgentPane {
             .iter()
             .map(|m| (m.model.clone(), m.display.clone()))
             .collect();
-        // The levels belong to the exact model route, so a model that
-        // advertises none simply has no effort control.
-        let effort_options: Vec<(String, String)> = self
+        // The setting belongs to the exact model route, so a model that
+        // advertises no levels simply has no effort control; the levels it
+        // then offers are the shared ladder.
+        let supports_effort = self
             .models
             .iter()
             .find(|m| Some(&m.model) == self.settings.model.as_ref())
-            .map(|m| {
-                m.efforts
-                    .iter()
-                    .map(|v| (v.clone(), setting_value_label(v)))
-                    .collect()
-            })
-            .unwrap_or_default();
+            .is_some_and(|m| !m.efforts.is_empty());
 
         let model = Self::setting_picker(
             cx,
@@ -201,15 +215,11 @@ impl AgentPane {
             ));
         }
 
-        if !effort_options.is_empty() {
-            let effort = Self::setting_picker(
+        if supports_effort {
+            let effort = Self::effort_panel(
                 cx,
-                "agent-effort",
-                i18n("agent-setting-effort"),
-                IconName::Gauge,
                 self.settings.effort.clone(),
-                effort_options,
-                false,
+                Self::effort_levels(self.kind),
                 |this, value, cx| {
                     this.settings.effort = Some(value);
                     this.remember_thread_defaults(cx);
@@ -263,11 +273,6 @@ impl AgentPane {
             .iter()
             .map(|(v, label)| (v.to_string(), setting_value_label(label)))
             .collect();
-        let effort_options: Vec<(String, String)> = app_server::EFFORT_OPTIONS
-            .iter()
-            .map(|v| (v.to_string(), setting_value_label(v)))
-            .collect();
-
         let model = Self::setting_picker(
             cx,
             "agent-model",
@@ -335,14 +340,10 @@ impl AgentPane {
             },
         )
         .into_any_element();
-        let effort = Self::setting_picker(
+        let effort = Self::effort_panel(
             cx,
-            "agent-effort",
-            i18n("agent-setting-effort"),
-            IconName::Gauge,
             self.settings.effort.clone(),
-            effort_options,
-            false,
+            Self::effort_levels(self.kind),
             |this, value, cx| {
                 this.settings.effort = Some(value);
                 this.remember_thread_defaults(cx);
@@ -401,6 +402,217 @@ impl AgentPane {
             .border_color(cx.theme().border.opacity(0.65))
             .bg(cx.theme().muted.opacity(0.2))
             .children(controls)
+    }
+
+    /// Height of the effort track, and the inset its thumb keeps from the
+    /// track's edge.
+    const EFFORT_TRACK_HEIGHT: Pixels = px(26.0);
+    const EFFORT_THUMB_INSET: Pixels = px(3.0);
+
+    /// Effort as a small panel instead of a menu: the levels are one ordered
+    /// axis from cheapest to most thorough, which a list of names does not
+    /// show. The track carries a stop per level and names both ends, so which
+    /// way is "more" needs no explaining.
+    ///
+    /// A press starts a drag the thumb follows, and the release commits the
+    /// stop it ends on. Committing on release rather than on every stop the
+    /// pointer crosses is what keeps one drag across the track from applying
+    /// every level between, which for Claude would send an `/effort` command
+    /// per stop.
+    fn effort_panel(
+        cx: &mut Context<Self>,
+        current: Option<String>,
+        options: Vec<(String, String)>,
+        set: fn(&mut Self, String, &mut Context<Self>),
+    ) -> impl IntoElement + use<> {
+        let pane = cx.entity();
+        let name = i18n("agent-setting-effort");
+        let current_label = current
+            .as_ref()
+            .map(|value| {
+                options
+                    .iter()
+                    .find(|(option_value, _)| option_value == value)
+                    .map(|(_, label)| label.clone())
+                    .unwrap_or_else(|| setting_value_label(value))
+            })
+            .unwrap_or_else(|| "-".to_string());
+        // Claude never reports the level its session is on, so the label can
+        // name a level that is not one of the stops. The track then carries no
+        // thumb rather than pointing at a stop the session may not be on.
+        let selected = current
+            .as_ref()
+            .and_then(|value| options.iter().position(|(option, _)| option == value));
+
+        let trigger = Button::new("agent-effort")
+            .ghost()
+            .small()
+            .tooltip(name)
+            .aria_label(format!("{name}: {current_label}"))
+            .child(
+                h_flex()
+                    .gap_1p5()
+                    .items_center()
+                    .child(
+                        Icon::new(IconName::Gauge)
+                            .size_4()
+                            .text_color(cx.theme().muted_foreground.opacity(0.8)),
+                    )
+                    .child(div().text_sm().child(current_label.clone()))
+                    .child(
+                        Icon::new(IconName::ChevronDown)
+                            .size_3()
+                            .text_color(cx.theme().muted_foreground.opacity(0.7)),
+                    ),
+            );
+
+        Popover::new("agent-effort-panel")
+            // The row sits at the bottom edge of the pane, so the panel opens
+            // upward from it.
+            .anchor(gpui::Anchor::BottomLeft)
+            .trigger(trigger)
+            .content(move |_, _, cx| {
+                let stops = options.len().max(1);
+                let width = relative(1.0 / stops as f32);
+                // While a drag is in flight the thumb sits where the pointer
+                // is rather than where the session is.
+                let thumb = pane.read(cx).effort_drag.or(selected);
+
+                v_flex()
+                    .w(px(260.))
+                    .gap_2()
+                    .child(
+                        h_flex()
+                            .gap_1p5()
+                            .items_baseline()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(i18n("agent-effort-panel-title")),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(current_label.clone()),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .justify_between()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(i18n("agent-effort-faster"))
+                            .child(i18n("agent-effort-smarter")),
+                    )
+                    .child(
+                        div()
+                            .relative()
+                            .w_full()
+                            .h(Self::EFFORT_TRACK_HEIGHT)
+                            .rounded_full()
+                            .bg(cx.theme().muted)
+                            // A release away from the stops ends the drag
+                            // without choosing, rather than parking the thumb
+                            // on a level the session is not on.
+                            .on_mouse_up_out(MouseButton::Left, {
+                                let pane = pane.clone();
+                                move |_, _, cx| {
+                                    pane.update(cx, |this, cx| {
+                                        if this.effort_drag.take().is_some() {
+                                            cx.notify();
+                                        }
+                                    });
+                                }
+                            })
+                            // The thumb is painted before the stops so they
+                            // stay on top of it and keep taking the clicks.
+                            .children(thumb.map(|index| {
+                                div()
+                                    .absolute()
+                                    .top(Self::EFFORT_THUMB_INSET)
+                                    .bottom(Self::EFFORT_THUMB_INSET)
+                                    .left(relative(index as f32 / stops as f32))
+                                    .w(width)
+                                    .rounded_full()
+                                    .bg(cx.theme().background)
+                                    .shadow_sm()
+                            }))
+                            .child(h_flex().absolute().inset_0().children(
+                                options.iter().enumerate().map(|(index, (value, label))| {
+                                    let value = value.clone();
+                                    let pane = pane.clone();
+
+                                    div()
+                                        .id(("agent-effort-stop", index))
+                                        .flex_1()
+                                        .h_full()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .cursor_pointer()
+                                        .aria_label(label.clone())
+                                        // The stop under the thumb is the
+                                        // one already chosen; marking it
+                                        // again would only show through it.
+                                        .when(Some(index) != thumb, |this| {
+                                            this.child(
+                                                div()
+                                                    .size(px(4.))
+                                                    .rounded_full()
+                                                    .bg(cx.theme().muted_foreground.opacity(0.45)),
+                                            )
+                                        })
+                                        .on_mouse_down(MouseButton::Left, {
+                                            let pane = pane.clone();
+                                            move |_, _, cx| {
+                                                pane.update(cx, |this, cx| {
+                                                    this.effort_drag = Some(index);
+                                                    cx.notify();
+                                                });
+                                            }
+                                        })
+                                        .on_mouse_move({
+                                            let pane = pane.clone();
+                                            move |event, _, cx| {
+                                                if !event.dragging() {
+                                                    return;
+                                                }
+                                                pane.update(cx, |this, cx| {
+                                                    // Moving within the stop
+                                                    // the drag already holds
+                                                    // is not a change, and a
+                                                    // move with no drag in
+                                                    // flight started outside
+                                                    // the track.
+                                                    if this.effort_drag.is_none()
+                                                        || this.effort_drag == Some(index)
+                                                    {
+                                                        return;
+                                                    }
+                                                    this.effort_drag = Some(index);
+                                                    cx.notify();
+                                                });
+                                            }
+                                        })
+                                        // The panel stays open on release: a
+                                        // level is worth comparing against
+                                        // its neighbours, and closing on the
+                                        // first pick would make trying two of
+                                        // them two round trips.
+                                        .on_mouse_up(MouseButton::Left, move |_, _, cx| {
+                                            pane.update(cx, |this, cx| {
+                                                this.effort_drag = None;
+                                                set(this, value.clone(), cx);
+                                                cx.notify();
+                                            });
+                                        })
+                                }),
+                            )),
+                    )
+            })
     }
 
     /// One dropdown showing `icon · current value · chevron`. Every picker uses
