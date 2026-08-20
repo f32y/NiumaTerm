@@ -238,6 +238,14 @@ fn default_agent_font_size() -> f64 {
     default_terminal_font_size()
 }
 
+fn default_agent_transcript_font_family() -> String {
+    default_terminal_font_family()
+}
+
+fn default_agent_transcript_font_size() -> f64 {
+    13.0
+}
+
 fn default_background_opacity() -> f64 {
     1.0
 }
@@ -319,7 +327,7 @@ pub struct AppearanceConfig {
     /// Font size in pixels used by agent (chat) tabs.
     #[serde(default = "default_agent_font_size", rename = "agent-font-size")]
     pub agent_font_size: f64,
-    /// Whether terminal font pickers only show monospace fonts.
+    /// Whether terminal and agent transcript font pickers only show monospace fonts.
     #[serde(default = "default_monospace_only", rename = "monospace-only")]
     pub monospace_only: bool,
     /// Window backdrop material. Acrylic is the default so existing opacity
@@ -367,6 +375,18 @@ pub struct AppearanceConfig {
         deserialize_with = "deserialize_language"
     )]
     pub language: Language,
+    /// Font family used by code-oriented agent transcript content.
+    #[serde(
+        default = "default_agent_transcript_font_family",
+        rename = "agent-transcript-font-family"
+    )]
+    pub agent_transcript_font_family: String,
+    /// Font size in pixels used by code-oriented agent transcript content.
+    #[serde(
+        default = "default_agent_transcript_font_size",
+        rename = "agent-transcript-font-size"
+    )]
+    pub agent_transcript_font_size: f64,
 }
 
 fn default_command_blocks() -> bool {
@@ -404,6 +424,8 @@ impl Default for AppearanceConfig {
             background_image: None,
             background_image_opacity: default_background_image_opacity(),
             language: Language::default(),
+            agent_transcript_font_family: default_agent_transcript_font_family(),
+            agent_transcript_font_size: default_agent_transcript_font_size(),
         }
     }
 }

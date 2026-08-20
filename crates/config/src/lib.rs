@@ -502,6 +502,9 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) -> 
     }
     doc["appearance"]["background-image-opacity"] = value(appearance.background_image_opacity);
     doc["appearance"]["language"] = value(appearance.language.as_str());
+    doc["appearance"]["agent-transcript-font-family"] =
+        value(&appearance.agent_transcript_font_family);
+    doc["appearance"]["agent-transcript-font-size"] = value(appearance.agent_transcript_font_size);
 
     ensure_explicit_table(doc, "cursor");
     doc["cursor"]["shape"] = value(cursor_shape.as_str());
@@ -563,6 +566,8 @@ mod tests {
             background_image: Some(r"C:\Wallpapers\background.png".to_string()),
             background_image_opacity: 0.4,
             language: appearance::Language::ZhCn,
+            agent_transcript_font_family: "JetBrains Mono".to_string(),
+            agent_transcript_font_size: 12.5,
         }
     }
 
@@ -645,6 +650,8 @@ mod tests {
         assert!(out.contains("# my terminal config"));
         assert!(out.contains("width = 960"));
         assert!(out.contains("smooth-scrolling = \"off\""));
+        assert!(out.contains("agent-transcript-font-family = \"JetBrains Mono\""));
+        assert!(out.contains("agent-transcript-font-size = 12.5"));
 
         let config: Config = parse_toml(&out).unwrap();
         assert_eq!(config.appearance, sample_appearance());

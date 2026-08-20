@@ -53,6 +53,7 @@ pub enum FontTarget {
     Terminal,
     Ui,
     Agent,
+    AgentTranscript,
 }
 
 struct FontPicker {
@@ -69,6 +70,7 @@ struct FontPickerGlobal {
     terminal: Option<FontPicker>,
     ui: Option<FontPicker>,
     agent: Option<FontPicker>,
+    agent_transcript: Option<FontPicker>,
 }
 
 impl Global for FontPickerGlobal {}
@@ -80,11 +82,13 @@ fn current_family(target: FontTarget, cx: &App) -> SharedString {
         FontTarget::Terminal => settings.terminal_font_family.clone(),
         FontTarget::Ui => settings.ui_font_family.clone(),
         FontTarget::Agent => settings.agent_font_family.clone(),
+        FontTarget::AgentTranscript => settings.agent_transcript_font_family.clone(),
     }
 }
 
 fn monospace_filter(target: FontTarget, cx: &App) -> bool {
-    matches!(target, FontTarget::Terminal) && cx.global::<AppSettings>().monospace_only
+    matches!(target, FontTarget::Terminal | FontTarget::AgentTranscript)
+        && cx.global::<AppSettings>().monospace_only
 }
 
 fn slot(target: FontTarget, cx: &App) -> &Option<FontPicker> {
@@ -94,6 +98,7 @@ fn slot(target: FontTarget, cx: &App) -> &Option<FontPicker> {
         FontTarget::Terminal => &global.terminal,
         FontTarget::Ui => &global.ui,
         FontTarget::Agent => &global.agent,
+        FontTarget::AgentTranscript => &global.agent_transcript,
     }
 }
 
@@ -104,6 +109,7 @@ fn slot_mut(target: FontTarget, cx: &mut App) -> &mut Option<FontPicker> {
         FontTarget::Terminal => &mut global.terminal,
         FontTarget::Ui => &mut global.ui,
         FontTarget::Agent => &mut global.agent,
+        FontTarget::AgentTranscript => &mut global.agent_transcript,
     }
 }
 
@@ -143,6 +149,9 @@ fn ensure_picker(target: FontTarget, window: &mut Window, cx: &mut App) -> Entit
                     FontTarget::Terminal => settings.terminal_font_family = name.clone(),
                     FontTarget::Ui => settings.ui_font_family = name.clone(),
                     FontTarget::Agent => settings.agent_font_family = name.clone(),
+                    FontTarget::AgentTranscript => {
+                        settings.agent_transcript_font_family = name.clone()
+                    }
                 }
             }
         });

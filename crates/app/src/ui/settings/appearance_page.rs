@@ -185,6 +185,26 @@ pub(super) fn appearance_page(
                             cx.global_mut::<AppSettings>().monospace_only = value;
                         },
                     ),
+                ))
+                .item(SettingItem::new(
+                    i18n("settings-appearance-agent-transcript-font"),
+                    ui::font_picker::font_family_field(
+                        ui::font_picker::FontTarget::AgentTranscript,
+                    ),
+                ))
+                .item(SettingItem::new(
+                    i18n("settings-appearance-agent-transcript-font-size"),
+                    SettingField::number_input(
+                        NumberFieldOptions {
+                            min: 6.0,
+                            max: 72.0,
+                            step: 0.1,
+                        },
+                        |cx| cx.global::<AppSettings>().agent_transcript_font_size,
+                        |value, cx| {
+                            cx.global_mut::<AppSettings>().agent_transcript_font_size = value;
+                        },
+                    ),
                 )),
         )
         .group(

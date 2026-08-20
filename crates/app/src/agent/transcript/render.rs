@@ -14,6 +14,7 @@ use crate::agent::transcript::{
     should_virtualize_transcript, strip_read_gutter, truncated_user_prompt, working_label,
 };
 use crate::agent::*;
+use crate::ui::font_with_default_fallback;
 
 /// Edge of a transcript thumbnail, matching the composer strip so an image
 /// does not change size when the message it belongs to is sent.
@@ -301,21 +302,42 @@ impl TranscriptView {
     /// same width: a code block or table left full-width would run its
     /// background past the text above it, so the tint would mark a column the
     /// reader is not reading along.
-    fn agent_text_style() -> TextViewStyle {
+    pub(super) fn transcript_code_block_style(
+        family: SharedString,
+        font_size: f64,
+    ) -> StyleRefinement {
+        StyleRefinement::default()
+            .font(font_with_default_fallback(family))
+            .text_size(px(font_size as f32))
+    }
+
+    fn configured_transcript_code_block_style(cx: &App) -> StyleRefinement {
+        let settings = cx.global::<AppSettings>();
+
+        Self::transcript_code_block_style(
+            settings.agent_transcript_font_family.clone(),
+            settings.agent_transcript_font_size,
+        )
+    }
+
+    fn agent_text_style(cx: &App) -> TextViewStyle {
         let measure = rems(AGENT_TEXT_MEASURE_REMS);
         // Only the ceiling is set: these blocks keep their own width behaviour
         // below it, so a short snippet still fills the measure rather than
         // shrinking to a box the width of its longest line.
-        let bounded = || {
-            let mut style = StyleRefinement::default();
-            style.max_size.width = Some(measure.into());
-            style
-        };
+        let mut code_block = Self::configured_transcript_code_block_style(cx);
+        code_block.max_size.width = Some(measure.into());
+        let mut table = StyleRefinement::default();
+        table.max_size.width = Some(measure.into());
 
         TextViewStyle::default()
             .prose_max_width(measure)
-            .code_block(bounded())
-            .table(bounded())
+            .code_block(code_block)
+            .table(table)
+    }
+
+    fn work_detail_text_style(cx: &App) -> TextViewStyle {
+        TextViewStyle::default().code_block(Self::configured_transcript_code_block_style(cx))
     }
 
     fn markdown_view(
@@ -352,7 +374,7 @@ impl TranscriptView {
                     .px_1()
                     .child(
                         Self::markdown_view(("agent-md", index), text, self.cwd.clone())
-                            .style(Self::agent_text_style())
+                            .style(Self::agent_text_style(cx))
                             .selectable(true),
                     ),
             )
@@ -545,7 +567,11 @@ impl TranscriptView {
                         )
                     };
                     let segment_count = segments.len();
-                    let line_height = px(f32::from(cx.theme().mono_font_size) * 1.5);
+                    let settings = cx.global::<AppSettings>();
+                    let transcript_font =
+                        font_with_default_fallback(settings.agent_transcript_font_family.clone());
+                    let transcript_font_size = px(settings.agent_transcript_font_size as f32);
+                    let line_height = transcript_font_size * 1.5;
                     let text_color = cx.theme().muted_foreground;
                     let list_source = source.clone();
                     let list_segments = segments.clone();
@@ -558,8 +584,8 @@ impl TranscriptView {
                         .overflow_hidden()
                         .rounded(UI_RADIUS)
                         .bg(cx.theme().tokens.muted)
-                        .font_family(cx.theme().mono_font_family.clone())
-                        .text_size(cx.theme().mono_font_size)
+                        .font(transcript_font)
+                        .text_size(transcript_font_size)
                         // The outer transcript list is behind this viewport in
                         // hit-test order. Occlusion prevents wheel input at the
                         // virtual list's limits from moving the conversation.
@@ -664,6 +690,7 @@ impl TranscriptView {
                                 .text_color(cx.theme().muted_foreground)
                                 .child(
                                     Self::markdown_view(("wl-md", index), markdown, cwd.clone())
+                                        .style(Self::work_detail_text_style(cx))
                                         .selectable(true),
                                 ),
                         )

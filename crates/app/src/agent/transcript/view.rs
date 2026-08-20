@@ -20,9 +20,9 @@ pub(crate) struct TranscriptView {
     /// specs against it and splices/remeasures just the changed range.
     pub(in crate::agent) transcript_list: ListState,
     pub(in crate::agent) row_specs: Vec<RowSpec>,
-    /// Row heights depend on the agent font, which the specs can't see; the
-    /// last-seen font triggers a full remeasure when it changes.
-    transcript_font: (SharedString, f64),
+    /// Row heights depend on the prose and technical-content fonts, which the
+    /// specs can't see; the last-seen values trigger a full remeasure on change.
+    transcript_font: (SharedString, f64, SharedString, f64),
     /// Virtual rows cache measured heights; a width change can rewrap prose
     /// without changing row fingerprints, so the viewport width is tracked too.
     transcript_width: Option<Pixels>,
@@ -398,8 +398,10 @@ impl Render for TranscriptView {
         self.sync_transcript_list(specs);
 
         let font = (
-            cx.global::<AppSettings>().agent_font_family.clone(),
-            cx.global::<AppSettings>().agent_font_size,
+            settings.agent_font_family.clone(),
+            settings.agent_font_size,
+            settings.agent_transcript_font_family.clone(),
+            settings.agent_transcript_font_size,
         );
         if self.transcript_font != font {
             self.transcript_font = font;
