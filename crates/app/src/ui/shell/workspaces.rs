@@ -252,15 +252,18 @@ impl Shell {
                 .footer(
                     DialogFooter::new()
                         .child(
-                            DialogClose::new().child(
-                                Button::new("cancel-ws").label(i18n("shell-workspace-cancel")),
+                            DialogAction::new().child(
+                                Button::new("create-ws")
+                                    .min_w(DIALOG_BUTTON_MIN_WIDTH)
+                                    .label(i18n("shell-workspace-create"))
+                                    .primary(),
                             ),
                         )
                         .child(
-                            DialogAction::new().child(
-                                Button::new("create-ws")
-                                    .label(i18n("shell-workspace-create"))
-                                    .primary(),
+                            DialogClose::new().child(
+                                Button::new("cancel-ws")
+                                    .min_w(DIALOG_BUTTON_MIN_WIDTH)
+                                    .label(i18n("shell-workspace-cancel")),
                             ),
                         ),
                 )

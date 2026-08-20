@@ -23,7 +23,9 @@ use gpui::{
     WindowId, div, img, px,
 };
 use gpui_component::button::{Button, ButtonVariants, Toggle, ToggleVariants};
-use gpui_component::dialog::{DialogAction, DialogButtonProps, DialogClose, DialogFooter};
+use gpui_component::dialog::{
+    DIALOG_BUTTON_MIN_WIDTH, DialogAction, DialogButtonProps, DialogClose, DialogFooter,
+};
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::notification::{Notification, NotificationType};
 use gpui_component::progress::Progress;
