@@ -9,6 +9,7 @@ use gpui::{
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::list::{List, ListDelegate, ListItem, ListState};
+use gpui_component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, IndexPath, Sizable as _, WindowExt as _, h_flex,
 };
@@ -90,6 +91,22 @@ fn delete_profile(ix: usize, window: &mut Window, cx: &mut App) {
                 true
             })
     });
+}
+
+/// Insert a copy of the profile at `ix` directly below it. A duplicate is the
+/// starting point for a variant of what it was copied from, and the order of
+/// this list is the user's own, so the copy belongs next to its original
+/// rather than at the end.
+fn duplicate_profile(ix: usize, cx: &mut App) {
+    let settings = cx.global_mut::<AppSettings>();
+    let Some(mut profile) = settings.agent_profiles.get(ix).cloned() else {
+        return;
+    };
+
+    // Names key the default-profile selector, tab persistence, and the
+    // per-profile thread defaults, so the copy has to take a free one.
+    profile.name = settings.unique_agent_profile_name(&profile.name, profile.kind, None);
+    settings.agent_profiles.insert(ix + 1, profile);
 }
 
 /// Drag payload for reordering rows: the position the drag started from.
@@ -237,6 +254,31 @@ impl ListDelegate for AgentProfileList {
                                 cx.global::<AppSettings>().agent_profiles.clone();
                             cx.notify();
                         }))
+                        // The same operations as the row's own controls, plus
+                        // duplication, which has no button: it is reached
+                        // rarely enough that a third icon would cost the name
+                        // column more width than it is worth.
+                        .context_menu(move |menu, _, _| {
+                            menu.item(PopupMenuItem::new(i18n("settings-common-edit")).on_click(
+                                move |_, window, cx: &mut App| {
+                                    open_agent_profile_dialog(Some(row), window, cx);
+                                },
+                            ))
+                            .item(
+                                PopupMenuItem::new(i18n("settings-common-duplicate")).on_click(
+                                    move |_, _, cx: &mut App| {
+                                        duplicate_profile(row, cx);
+                                    },
+                                ),
+                            )
+                            .item(
+                                PopupMenuItem::new(i18n("settings-common-delete")).on_click(
+                                    move |_, window, cx: &mut App| {
+                                        delete_profile(row, window, cx);
+                                    },
+                                ),
+                            )
+                        })
                         .when(ruled, |this| {
                             this.child(row_line(RowEdge::Bottom, px(1.0), cx.theme().border))
                         })
