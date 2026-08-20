@@ -652,7 +652,6 @@
 "agent-transcript-scroll-bottom" = "滚动到底部"
 
 # 智能体上下文用量
-"agent-context-deferred" = "{label}（延后）"
 "agent-context-used-left" = "已用 {tokens} · 剩余 {percent}%"
 "agent-context-used" = "已用 {tokens}"
 "agent-context-percent-left" = "剩余 {percent}%"

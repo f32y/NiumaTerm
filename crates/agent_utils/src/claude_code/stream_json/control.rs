@@ -168,6 +168,14 @@ pub(super) fn resolve_pending_control_operation(
     }
 }
 
+/// Categories the CLI lists beside its usage breakdown rather than as part of
+/// it: the window still empty, and the reserve compaction keeps for itself.
+/// Both are the window's free room, so listing them among the parts filling it
+/// puts "Free space" at the top of what is supposedly full. The CLI's own
+/// markdown export drops the same names. This version reports no field saying
+/// which rows these are, so the names are the only handle on them.
+const NON_USAGE_CATEGORIES: [&str; 3] = ["Free space", "Autocompact buffer", "Compact buffer"];
+
 /// Read the CLI's context breakdown. Every field beyond the segments is
 /// optional because a payload that drops one still describes the split
 /// usefully, and the alternative is showing nothing.
@@ -177,8 +185,14 @@ fn parse_context_composition(payload: &Value) -> Option<ContextComposition> {
         .iter()
         .filter_map(|category| {
             let tokens = category["tokens"].as_u64()?;
+            let name = category["name"].as_str()?;
+
+            if NON_USAGE_CATEGORIES.contains(&name) {
+                return None;
+            }
+
             Some(ContextSegment {
-                label: category["name"].as_str()?.to_owned(),
+                label: name.to_owned(),
                 tokens,
                 color: category["color"].as_str().map(str::to_owned),
                 deferred: category["isDeferred"].as_bool().unwrap_or(false),

@@ -653,7 +653,6 @@
 "agent-transcript-scroll-bottom" = "Scroll to Bottom"
 
 # Agent context usage
-"agent-context-deferred" = "{label} (deferred)"
 "agent-context-used-left" = "{tokens} used · {percent}% left"
 "agent-context-used" = "{tokens} used"
 "agent-context-percent-left" = "{percent}% left"
