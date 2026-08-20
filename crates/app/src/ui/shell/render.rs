@@ -90,7 +90,30 @@ impl Shell {
                         cx.global::<AppSettings>()
                             .show_daily_token_usage
                             .then(|| div().occlude().child(self.token_usage.clone())),
-                    ),
+                    )
+                    // Stays out of the chrome while every background tab is
+                    // caught up; there is nowhere for it to jump to then.
+                    .children(self.next_ready_tab(cx).is_some().then(|| {
+                        div().occlude().child(
+                            Button::new("next-ready-tab")
+                                .ghost()
+                                .icon(IconName::Bell)
+                                .tooltip(i18n("shell-next-ready-tab"))
+                                // The target is picked on the click rather
+                                // than captured here, so a tab that went ready
+                                // (or was closed) since this frame is still
+                                // reached by the very next click.
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    let Some((workspace_index, tab_index)) =
+                                        this.next_ready_tab(cx)
+                                    else {
+                                        return;
+                                    };
+
+                                    this.jump_to_tab(workspace_index, tab_index, window, cx);
+                                })),
+                        )
+                    })),
             )
             // The container keeps the title-bar drag area. Tabs and the
             // new-tab button block only their own bounds.

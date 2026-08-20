@@ -219,6 +219,62 @@ impl Shell {
         cx.notify();
     }
 
+    /// Position of the next tab holding something the user has not looked at:
+    /// a background command that finished, or an unread agent reply. The search
+    /// starts after the active tab and wraps, in workspace-then-tab order, so
+    /// repeated jumps walk every ready tab in turn.
+    ///
+    /// Each jump shrinks the set rather than advancing a cursor of its own,
+    /// because focusing a tab is what clears both marks.
+    pub(super) fn next_ready_tab(&self, cx: &App) -> Option<(usize, usize)> {
+        let (positions, ready): (Vec<(usize, usize)>, Vec<bool>) = self
+            .workspaces
+            .all_tabs()
+            .enumerate()
+            .flat_map(|(workspace_index, tabs)| {
+                tabs.tabs()
+                    .iter()
+                    .enumerate()
+                    .map(move |(tab_index, tab)| (workspace_index, tab_index, tab))
+            })
+            .map(|(workspace_index, tab_index, tab)| {
+                let routes = Self::agent_routes_in_surface(tab.surface(), cx);
+                let ready = tab.last_outcome().is_some()
+                    || self.agent_monitor.project(&routes).unread_count > 0;
+
+                ((workspace_index, tab_index), ready)
+            })
+            .unzip();
+
+        let active = (
+            self.workspaces.active_index(),
+            self.workspaces.active_tabs().active_index(),
+        );
+        let active_position = positions
+            .iter()
+            .position(|&position| position == active)
+            .unwrap_or(0);
+
+        next_ready_position(&ready, active_position).map(|index| positions[index])
+    }
+
+    pub(super) fn jump_to_tab(
+        &mut self,
+        workspace_index: usize,
+        tab_index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.workspaces.activate(workspace_index);
+        self.workspaces.active_tabs_mut().activate(tab_index);
+
+        self.focus_active(window, cx);
+
+        self.sync_session_memory(cx);
+
+        cx.notify();
+    }
+
     /// Open the new-workspace dialog with the shared default name and a working
     /// directory. Confirming creates the workspace; cancel creates nothing.
     pub(crate) fn on_new_workspace(
@@ -443,4 +499,13 @@ impl Shell {
 
         cx.notify();
     }
+}
+
+/// Walk from just after `active` and wrap around, returning the first ready
+/// slot. `active` itself is visited last, so a tab that goes ready while it is
+/// the one on screen stays reachable instead of being skipped forever.
+pub(super) fn next_ready_position(ready: &[bool], active: usize) -> Option<usize> {
+    (1..=ready.len())
+        .map(|offset| (active + offset) % ready.len())
+        .find(|&index| ready[index])
 }
