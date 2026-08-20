@@ -1,0 +1,20 @@
+name: Release build
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to build, for example v1.1.0
+        required: true
+
+jobs:
+  package:
+    uses: ./.github/workflows/windows-package.yml
+    with:
+      # A tag push leaves github.ref_name as the tag itself; a manual run has to
+      # name one, so the build always resolves to a tagged revision.
+      ref: ${{ inputs.tag || github.ref_name }}
+      version: ${{ inputs.tag || github.ref_name }}

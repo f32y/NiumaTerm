@@ -1,10 +1,16 @@
 name: Windows package
 
 on:
-  workflow_dispatch:
-
-permissions:
-  contents: write
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit, branch or tag to build
+        type: string
+        required: true
+      version:
+        description: Version label used in the package and artifact name
+        type: string
+        required: true
 
 jobs:
   package:
@@ -12,6 +18,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
 
       - uses: mlugg/setup-zig@v2
         with:
@@ -37,7 +45,7 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          $packageName = "NiumaTerm-windows-x86_64-$(Get-Date -Format yyyyMMdd)"
+          $packageName = "NiumaTerm-windows-x86_64-${{ inputs.version }}"
           "PACKAGE_NAME=$packageName" >> $env:GITHUB_ENV
           $package = "dist/$packageName"
 
@@ -55,12 +63,7 @@ jobs:
             -Path "$package/*" `
             -DestinationPath "$package.zip"
 
-      - name: Publish release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh release create "build-${{ github.run_number }}"
-          "dist/${{ env.PACKAGE_NAME }}.zip"
-          --title "${{ env.PACKAGE_NAME }}"
-          --target "${{ github.sha }}"
-          --generate-notes
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PACKAGE_NAME }}
+          path: dist/${{ env.PACKAGE_NAME }}.zip

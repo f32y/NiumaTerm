@@ -1,0 +1,38 @@
+name: Nightly build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  name:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.date.outputs.tag }}
+    steps:
+      - id: date
+        run: echo "tag=nightly-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+
+  package:
+    needs: name
+    uses: ./.github/workflows/windows-package.yml
+    with:
+      ref: ${{ github.sha }}
+      version: ${{ needs.name.outputs.tag }}
+
+  # Tagging runs after the build so a nightly tag only ever marks a revision
+  # that actually produced a package.
+  tag:
+    needs: [name, package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      # The tag name only carries a date, so a second run on the same day
+      # would collide; moving the tag keeps that run from failing and leaves
+      # the tag pointing at the newest nightly package.
+      - run: |
+          git tag -f "$TAG" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$TAG"
+        env:
+          TAG: ${{ needs.name.outputs.tag }}
