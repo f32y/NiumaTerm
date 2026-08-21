@@ -9,6 +9,8 @@ pub use nmt_config::profile::{AgentProfile, AgentProfileKind, EnvVar, Profile};
 use nmt_config::remote_session::RemoteSessionConfig;
 use nmt_config::system::{NewlineShortcut, SystemConfig, WarnBeforeTerminatingShell};
 use nmt_config::theme::Theme;
+pub use nmt_config::update::UpdateChannel;
+use nmt_config::update::UpdateConfig;
 use nmt_config::{CursorShape, SettingsPatch, get, save_settings};
 use nmt_i18n::i18n;
 use tracing::warn;
@@ -110,6 +112,11 @@ pub struct AppSettings {
     /// List Codex skills in the `/` command palette and rewrite a chosen one
     /// to its `$name` form.
     pub codex_skill_command_compat: bool,
+    /// Ask GitHub in the background whether the selected channel published
+    /// something newer than this build.
+    pub check_updates: bool,
+    /// Which published channel counts as an update.
+    pub update_channel: UpdateChannel,
     /// Restore the last saved workspace/tab session on startup.
     pub restore_last_session_when_opening: bool,
     /// Manage each tab's shell with a Windows Job Object: closing the tab
@@ -184,6 +191,8 @@ impl Default for AppSettings {
             collapse_tool_calls: CollapseRows::WorkAndToolCalls,
             check_agent_updates: true,
             codex_skill_command_compat: true,
+            check_updates: true,
+            update_channel: UpdateChannel::default(),
             restore_last_session_when_opening: true,
             manage_subprocess_job: false,
             warn_before_terminating_shell: WarnBeforeTerminatingShell::default(),
@@ -464,6 +473,8 @@ impl AppSettings {
             collapse_tool_calls: config.agent.collapse_tool_calls,
             check_agent_updates: config.agent.check_agent_updates,
             codex_skill_command_compat: config.agent.codex_skill_command_compat,
+            check_updates: config.update.check_updates,
+            update_channel: config.update.channel,
             restore_last_session_when_opening: config.system.restore_last_session_when_opening,
             manage_subprocess_job: config.system.manage_subprocess_job,
             warn_before_terminating_shell: config.system.warn_before_terminating_shell,
@@ -704,6 +715,11 @@ impl AppSettings {
             access_token: self.remote_access_token.to_string(),
         };
 
+        let update = UpdateConfig {
+            check_updates: self.check_updates,
+            channel: self.update_channel,
+        };
+
         let profiles = self.profiles.clone();
 
         if let Err(err) = save_settings(&SettingsPatch {
@@ -713,6 +729,7 @@ impl AppSettings {
             agent: &agent,
             system: &system,
             remote_session: &remote_session,
+            update: &update,
             profiles: &profiles,
             default_profile: &self.default_profile,
             agent_profiles: &self.agent_profiles,

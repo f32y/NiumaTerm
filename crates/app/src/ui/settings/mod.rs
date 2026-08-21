@@ -90,7 +90,7 @@ use crate::ui::settings::remote_session_page::remote_session_page;
 pub(crate) use crate::ui::settings::state::builtin_agent_profile;
 pub use crate::ui::settings::state::{
     AgentProfile, AgentProfileKind, AppSettings, CollapseRows, EnvVar, InputStyle, Language,
-    Profile, TabBarStyle, WindowBackdrop,
+    Profile, TabBarStyle, UpdateChannel, WindowBackdrop,
 };
 #[cfg(test)]
 use crate::ui::settings::state::{

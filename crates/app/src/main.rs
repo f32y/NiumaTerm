@@ -32,6 +32,7 @@ mod remote;
 mod tabs;
 mod terminal;
 mod ui;
+mod update;
 mod utils;
 mod window;
 mod workspace;
@@ -228,6 +229,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
             let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
             agent::updates::initialize(testing, &agent_profiles, cx);
             agent::input_history::initialize(testing, cx);
+            update::initialize(testing, cx);
 
             // Bring up the remote host service if it was left enabled. Runs on
             // its own runtime thread; failures only log.
@@ -442,6 +444,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
                 AppWindow::open(cx, initial);
             }
             agent::updates::schedule_automatic_checks(cx);
+            update::schedule_automatic_checks(cx);
 
             // Apply CLI actions (argv + forwarded over the IPC pipe) on the
             // foreground; windows above exist before the first poll.

@@ -18,6 +18,7 @@ nmt_config.workspace = true
 nmt_i18n.workspace = true
 nmt_terminal.workspace = true
 nmt_platform.workspace = true
+nmt_version.workspace = true
 
 dirs.workspace = true
 parking_lot.workspace = true
@@ -53,6 +54,11 @@ nmt_input.workspace = true
 image_rs.workspace = true
 
 windows-sys.workspace = true
+reqwest = { workspace = true, features = [
+    "blocking",
+    "rustls-tls-native-roots",
+    "system-proxy",
+] }
 percent-encoding.workspace = true
 raw-window-handle.workspace = true
 
