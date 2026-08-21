@@ -889,6 +889,10 @@ impl AgentPane {
         self.turn_seq = 0;
         self.turn_submitted_at = None;
         self.first_output_latency = None;
+        // The reading answers "how long has this conversation been waiting on
+        // me"; the replaced conversation's last answer says nothing about the
+        // fresh one, which has never been answered at all.
+        self.last_response_at = None;
         self.unanswered_prompt = None;
         // The new conversation restarts turn ids from zero, so a stop request
         // left over from the old one could match an unrelated future turn.
