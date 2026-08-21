@@ -22,7 +22,7 @@ use notify::{
 use toml::{Table as TomlTable, Value as TomlValue};
 use tracing::warn;
 
-use crate::ui::settings::opacity::surface_background_opacity;
+use crate::ui::settings::opacity::{main_view_background_opacity, surface_background_opacity};
 use crate::ui::settings::state::AppSettings;
 use crate::ui::{UI_BORDER_OPACITY, UI_RADIUS};
 
@@ -323,6 +323,11 @@ pub(super) fn tab_background_opacity(opacity: f32) -> f32 {
 /// effective window opacity. Reset first so repeated calls do not compound alpha.
 pub(crate) fn apply_window_translucency(cx: &mut App) {
     let opacity = surface_background_opacity(cx);
+    // The sidebar color surfaces the agent pane and the right-hand panel, both
+    // of which live inside a tab, so it follows the content-area switch instead
+    // of the chrome opacity. Otherwise turning the switch off would still leave
+    // those panels see-through.
+    let content_opacity = main_view_background_opacity(cx);
     let theme = ComponentTheme::global_mut(cx);
 
     let palette = if theme.mode.is_dark() {
@@ -334,9 +339,11 @@ pub(crate) fn apply_window_translucency(cx: &mut App) {
     theme.apply_config(&palette);
     apply_ui_constants(theme);
 
-    if opacity < 1.0 {
-        theme.colors.sidebar = theme.colors.sidebar.opacity(opacity);
+    if content_opacity < 1.0 {
+        theme.colors.sidebar = theme.colors.sidebar.opacity(content_opacity);
+    }
 
+    if opacity < 1.0 {
         // The shell paints this across the whole window as the chrome base
         // layer; it must dim with the rest of the chrome or translucency would
         // be defeated by an opaque backdrop.

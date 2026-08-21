@@ -74,6 +74,15 @@ fn window_backdrop_defaults_and_accepts_modes_and_legacy_values() {
         assert_eq!(config.appearance.window_backdrop, expected);
     }
 
+    // An unknown material must not fail the whole file; it degrades to opaque.
+    let unknown: Config = from_str(
+        "[appearance]
+enable-window-transparency = \"mica-alt\"
+",
+    )
+    .unwrap();
+    assert_eq!(unknown.appearance.window_backdrop, WindowBackdrop::Off);
+
     // Legacy boolean values: on preserved the acrylic behavior, off was opaque.
     let legacy_on: Config = from_str("[appearance]\nenable-window-transparency = true\n").unwrap();
     assert_eq!(
