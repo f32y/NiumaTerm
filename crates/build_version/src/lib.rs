@@ -15,6 +15,9 @@
 //! The nightly date comes from the commit rather than the wall clock, so
 //! rebuilding a revision yields the same label the packaging workflow published
 //! it under and a locally built binary is not mistaken for an outdated one.
+//!
+//! [`crate_revision`] answers a different question, for a binary an update
+//! leaves in place unless it changed.
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -57,6 +60,31 @@ pub fn emit() -> String {
     println!("cargo:rustc-env=NIUMATERM_VERSION={version}");
 
     version
+}
+
+/// The revision that last changed the calling crate, for a binary an update
+/// replaces only when it moved forward rather than on every release.
+///
+/// Explorer keeps a registered shell extension mapped in its own process, so
+/// replacing that file costs a stale context menu until Explorer unloads it.
+/// The release name cannot decide whether that cost is worth paying, because it
+/// advances on every build while the same extension stays correct across
+/// releases that did not touch it.
+///
+/// This reads committed history, so an uncommitted edit is invisible to it.
+/// That suits a value only published packages are compared by, and it means a
+/// shallow checkout with no history fails the build instead of quietly naming
+/// the wrong revision.
+pub fn crate_revision() -> String {
+    // A build script runs in its own package root, which is the directory this
+    // asks about; naming it instead would be a repository-relative path the
+    // caller has no other reason to know.
+    run_git(&["log", "-1", "--format=%h", "--abbrev=7", "--", "."]).unwrap_or_else(|| {
+        panic!(
+            "no committed revision for this crate; the build needs a checkout \
+             with history, not a shallow one"
+        )
+    })
 }
 
 fn derive_from_git() -> String {

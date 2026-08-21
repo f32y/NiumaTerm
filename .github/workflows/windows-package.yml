@@ -17,9 +17,12 @@ jobs:
     runs-on: windows-latest
 
     steps:
+      # The shell extension is versioned by the revision that last changed it,
+      # which a shallow checkout cannot report.
       - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.ref }}
+          fetch-depth: 0
 
       - uses: mlugg/setup-zig@v2
         with:
