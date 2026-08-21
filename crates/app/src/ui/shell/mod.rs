@@ -255,6 +255,11 @@ impl Shell {
             if this.window_active {
                 cx.global_mut::<LastActiveWindow>().0 = Some(this.window_id);
                 this.acknowledge_visible(window, true, cx);
+            } else {
+                // A context menu drawn in its own window never takes activation,
+                // so it has none of its own to lose. This window losing it is
+                // what says the user has moved on from the menu.
+                ui::dismiss_modern_menu(cx);
             }
             this.process_native_notifications(cx);
             cx.notify();

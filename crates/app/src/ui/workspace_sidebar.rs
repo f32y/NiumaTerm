@@ -6,7 +6,8 @@ use gpui::{
 };
 use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants};
 use gpui_component::input::{Input, InputState};
-use gpui_component::menu::{ContextMenuExt, DropdownMenu as _, PopupMenuItem};
+use gpui_component::menu::DropdownMenu as _;
+use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::progress::ProgressCircle;
 use gpui_component::scroll::Scrollbar;
 use gpui_component::{ActiveTheme, Icon, IconName, IconNamed, Selectable, Sizable, h_flex, v_flex};
@@ -651,62 +652,58 @@ impl Sidebar {
 
                 this.reorder_workspaces(drag.from, idx, window, cx);
             }))
-            .context_menu(move |menu, _, _| {
+            .modern_context_menu(move |menu, _, _| {
                 let rename_shell = shell.clone();
                 let close_shell = shell.clone();
                 let pin_shell = shell.clone();
                 let activate_shell = shell.clone();
                 let cwd = cwd.clone();
 
-                // Renaming, pinning, and copying a path all describe a
-                // workspace the user owns; the settings entry is dismissible
-                // and nothing else.
-                let menu = if settings_entry {
-                    menu
-                } else {
-                    menu.item(
-                        PopupMenuItem::new(i18n("sidebar-workspace-menu-rename")).on_click(
-                            move |_, window, cx| {
-                                rename_shell.update(cx, |this, cx| {
-                                    this.start_workspace_rename(ws_id, window, cx)
-                                });
-                            },
-                        ),
-                    )
-                    .item(PopupMenuItem::new(pin_label).on_click(move |_, _, cx| {
-                        pin_shell
-                            .update(cx, |this, cx| this.set_workspace_pinned(ws_id, !pinned, cx));
-                    }))
-                    .item(
-                        PopupMenuItem::new(i18n("sidebar-workspace-menu-copy-path")).on_click(
-                            move |_, _, cx| {
-                                cx.write_to_clipboard(ClipboardItem::new_string(cwd.clone()));
-                            },
-                        ),
-                    )
-                    // Only a temporary workspace has anything to adopt.
-                    .when(temporary, |menu| {
-                        menu.item(
-                            PopupMenuItem::new(i18n("sidebar-workspace-menu-activate")).on_click(
-                                move |_, _, cx| {
-                                    activate_shell.update(cx, |this, cx| {
-                                        this.activate_as_workspace(ws_id, cx)
-                                    });
-                                },
-                            ),
-                        )
+                // Pinning and closing are the two a user reaches for without
+                // reading, so they lead as a row of buttons rather than taking a
+                // line each. The settings entry is dismissible and nothing else.
+                menu.commands(|row| {
+                    row.when(!settings_entry, |row| {
+                        row.item(pin_label, move |_, cx| {
+                            pin_shell.update(cx, |this, cx| {
+                                this.set_workspace_pinned(ws_id, !pinned, cx)
+                            });
+                        })
+                        .icon(PinIcon)
                     })
-                };
-
-                menu.item(
-                    PopupMenuItem::new(i18n("sidebar-workspace-menu-close"))
-                        .disabled(!closeable)
-                        .on_click(move |_, window, cx| {
+                    .item_disabled(
+                        i18n("sidebar-workspace-menu-close"),
+                        !closeable,
+                        move |window, cx| {
                             close_shell.update(cx, |this, cx| {
                                 this.request_close_workspace(ws_id, window, cx)
                             });
-                        }),
-                )
+                        },
+                    )
+                    .icon(IconName::Close)
+                })
+                // Renaming and copying a path both describe a workspace the user
+                // owns, which the settings entry is not.
+                .when(!settings_entry, |menu| {
+                    menu.item(i18n("sidebar-workspace-menu-rename"), move |window, cx| {
+                        rename_shell.update(cx, |this, cx| {
+                            this.start_workspace_rename(ws_id, window, cx)
+                        });
+                    })
+                    .icon(IconName::PenLine)
+                    .item(i18n("sidebar-workspace-menu-copy-path"), move |_, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(cwd.clone()));
+                    })
+                    .icon(IconName::Copy)
+                    // Only a temporary workspace has anything to adopt.
+                    .when(temporary, |menu| {
+                        menu.item(i18n("sidebar-workspace-menu-activate"), move |_, cx| {
+                            activate_shell
+                                .update(cx, |this, cx| this.activate_as_workspace(ws_id, cx));
+                        })
+                        .icon(IconName::CircleCheck)
+                    })
+                })
             })
             .child(item)
             .children(progress)
@@ -959,24 +956,18 @@ impl Sidebar {
 
                 cx.notify();
             }))
-            .context_menu(move |menu, _, _| {
+            .modern_context_menu(move |menu, _, _| {
                 let rename_shell = menu_shell.clone();
                 let close_shell = menu_shell.clone();
 
-                menu.item(PopupMenuItem::new(i18n("tabbar-menu-rename")).on_click(
-                    move |_, window, cx| {
-                        rename_shell
-                            .update(cx, |this, cx| this.start_tab_rename(tab_id, window, cx));
-                    },
-                ))
-                .item(
-                    PopupMenuItem::new(i18n("tabbar-menu-close"))
-                        .disabled(!closeable)
-                        .on_click(move |_, window, cx| {
-                            close_shell
-                                .update(cx, |this, cx| this.request_close_tab(tab_id, window, cx));
-                        }),
-                )
+                menu.item(i18n("tabbar-menu-rename"), move |window, cx| {
+                    rename_shell.update(cx, |this, cx| this.start_tab_rename(tab_id, window, cx));
+                })
+                .icon(IconName::PenLine)
+                .item_disabled(i18n("tabbar-menu-close"), !closeable, move |window, cx| {
+                    close_shell.update(cx, |this, cx| this.request_close_tab(tab_id, window, cx));
+                })
+                .icon(IconName::Close)
             })
             .child(row)
             .into_any_element()

@@ -7,7 +7,8 @@ use gpui::{
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputState};
-use gpui_component::menu::{ContextMenuExt, DropdownMenu as _, PopupMenu, PopupMenuItem};
+use gpui_component::menu::{DropdownMenu as _, PopupMenu, PopupMenuItem};
+use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::progress::ProgressCircle;
 use gpui_component::tab::{Tab, TabBar, TabVariant};
 use gpui_component::{ActiveTheme, ElementExt as _, Icon, IconName, Sizable};
@@ -554,26 +555,26 @@ impl TabStrip {
                         .items_center()
                         .justify_center()
                         .overflow_hidden()
-                        .context_menu(move |menu, _, _| {
+                        .modern_context_menu(move |menu, _, _| {
                             let rename_shell = menu_shell.clone();
                             let close_shell = menu_shell.clone();
 
-                            menu.item(PopupMenuItem::new(i18n("tabbar-menu-rename")).on_click(
-                                move |_, window, cx| {
-                                    rename_shell.update(cx, |this, cx| {
-                                        this.start_tab_rename(TabId(id), window, cx)
+                            menu.item(i18n("tabbar-menu-rename"), move |window, cx| {
+                                rename_shell.update(cx, |this, cx| {
+                                    this.start_tab_rename(TabId(id), window, cx)
+                                });
+                            })
+                            .icon(IconName::PenLine)
+                            .item_disabled(
+                                i18n("tabbar-menu-close"),
+                                !closeable,
+                                move |window, cx| {
+                                    close_shell.update(cx, |this, cx| {
+                                        this.request_close_tab(TabId(id), window, cx)
                                     });
                                 },
-                            ))
-                            .item(
-                                PopupMenuItem::new(i18n("tabbar-menu-close"))
-                                    .disabled(!closeable)
-                                    .on_click(move |_, window, cx| {
-                                        close_shell.update(cx, |this, cx| {
-                                            this.request_close_tab(TabId(id), window, cx)
-                                        });
-                                    }),
                             )
+                            .icon(IconName::Close)
                         })
                         .gap_1()
                         // Restored-but-not-yet-spawned tabs render

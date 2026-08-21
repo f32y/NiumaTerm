@@ -38,7 +38,7 @@ use gpui_component::checkbox::Checkbox;
 use gpui_component::input::{
     Enter, Escape, IndentInline, Input, InputEvent, InputState, MoveDown, MoveUp,
 };
-use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
+use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_component::popover::Popover;
 use gpui_component::radio::Radio;
 use gpui_component::scroll::Scrollbar;

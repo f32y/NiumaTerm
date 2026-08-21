@@ -9,7 +9,7 @@ use gpui::{
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::list::{List, ListDelegate, ListItem, ListState};
-use gpui_component::menu::{ContextMenuExt as _, PopupMenuItem};
+use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, IndexPath, Sizable as _, WindowExt as _, h_flex,
 };
@@ -258,26 +258,19 @@ impl ListDelegate for AgentProfileList {
                         // duplication, which has no button: it is reached
                         // rarely enough that a third icon would cost the name
                         // column more width than it is worth.
-                        .context_menu(move |menu, _, _| {
-                            menu.item(PopupMenuItem::new(i18n("settings-common-edit")).on_click(
-                                move |_, window, cx: &mut App| {
-                                    open_agent_profile_dialog(Some(row), window, cx);
-                                },
-                            ))
-                            .item(
-                                PopupMenuItem::new(i18n("settings-common-duplicate")).on_click(
-                                    move |_, _, cx: &mut App| {
-                                        duplicate_profile(row, cx);
-                                    },
-                                ),
-                            )
-                            .item(
-                                PopupMenuItem::new(i18n("settings-common-delete")).on_click(
-                                    move |_, window, cx: &mut App| {
-                                        delete_profile(row, window, cx);
-                                    },
-                                ),
-                            )
+                        .modern_context_menu(move |menu, _, _| {
+                            menu.item(i18n("settings-common-edit"), move |window, cx| {
+                                open_agent_profile_dialog(Some(row), window, cx);
+                            })
+                            .icon(IconName::PenLine)
+                            .item(i18n("settings-common-duplicate"), move |_, cx| {
+                                duplicate_profile(row, cx);
+                            })
+                            .icon(IconName::Copy)
+                            .item(i18n("settings-common-delete"), move |window, cx| {
+                                delete_profile(row, window, cx);
+                            })
+                            .icon(IconName::Delete)
                         })
                         .when(ruled, |this| {
                             this.child(row_line(RowEdge::Bottom, px(1.0), cx.theme().border))
