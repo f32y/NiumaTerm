@@ -66,8 +66,12 @@ pub(crate) struct DirectXRenderer {
     globals: DirectXGlobalElements,
     pipelines: DirectXRenderPipelines,
     target_alpha_enabled: bool,
+    /// Remembered so a composition rebuilt after device loss matches the
+    /// material the window is configured for.
+    background_appearance: WindowBackgroundAppearance,
     force_full_present: bool,
-    direct_composition: Option<DirectComposition>,
+    /// `None` when Direct Composition is disabled for this window.
+    composition: Option<WindowComposition>,
     font_info: &'static FontInfo,
 
     width: u32,
@@ -134,10 +138,23 @@ struct DirectXGlobalElements {
     sampler: Option<ID3D11SamplerState>,
 }
 
-struct DirectComposition {
+pub(crate) struct DirectComposition {
     comp_device: IDCompositionDevice,
     comp_target: IDCompositionTarget,
     comp_visual: IDCompositionVisual,
+}
+
+/// How the window's swap chain reaches the screen.
+///
+/// [`Self::Direct`] is plain DirectComposition, a single visual holding the swap
+/// chain, and is what every window uses. [`Self::HostBackdrop`] additionally
+/// carries a blurred backdrop beneath the swap chain, for windows that need the
+/// material while they are not active (see [`crate::HostBackdropComposition`]).
+pub(crate) enum WindowComposition {
+    // Both payloads exist to own the composition: dropping one tears down the
+    // window's tree, so they are held rather than read.
+    Direct(#[expect(dead_code)] DirectComposition),
+    HostBackdrop(#[expect(dead_code)] HostBackdropComposition),
 }
 
 impl DirectXRendererDevices {
@@ -189,15 +206,19 @@ impl DirectXRenderer {
         let pipelines = DirectXRenderPipelines::new(&devices.device, target_alpha_enabled)
             .context("Creating DirectX render pipelines")?;
 
-        let direct_composition = if disable_direct_composition {
+        // The window's appearance arrives later through
+        // `set_background_appearance`, which swaps the composition if it asks
+        // for a material this one cannot draw.
+        let background_appearance = WindowBackgroundAppearance::Opaque;
+        let composition = if disable_direct_composition {
             None
         } else {
-            let composition = DirectComposition::new(devices.dxgi_device.as_ref().unwrap(), hwnd)
-                .context("Creating DirectComposition")?;
-            composition
-                .set_swap_chain(&resources.swap_chain)
-                .context("Setting swap chain for DirectComposition")?;
-            Some(composition)
+            Some(WindowComposition::new(
+                devices.dxgi_device.as_ref().unwrap(),
+                hwnd,
+                background_appearance,
+                &resources.swap_chain,
+            )?)
         };
 
         Ok(DirectXRenderer {
@@ -208,8 +229,9 @@ impl DirectXRenderer {
             globals,
             pipelines,
             target_alpha_enabled,
+            background_appearance,
             force_full_present: false,
-            direct_composition,
+            composition,
             font_info: Self::get_font_info(),
             width: 1,
             height: 1,
@@ -313,7 +335,7 @@ impl DirectXRenderer {
     }
 
     fn handle_device_lost_impl(&mut self, directx_devices: &DirectXDevices) -> Result<()> {
-        let disable_direct_composition = self.direct_composition.is_none();
+        let disable_direct_composition = self.composition.is_none();
 
         unsafe {
             #[cfg(debug_assertions)]
@@ -334,7 +356,7 @@ impl DirectXRenderer {
                     .log_err();
             }
 
-            self.direct_composition.take();
+            self.composition.take();
             self.devices.take();
         }
 
@@ -353,13 +375,15 @@ impl DirectXRenderer {
         let pipelines = DirectXRenderPipelines::new(&devices.device, self.target_alpha_enabled)
             .context("Creating DirectXRenderPipelines")?;
 
-        let direct_composition = if disable_direct_composition {
+        let composition = if disable_direct_composition {
             None
         } else {
-            let composition =
-                DirectComposition::new(devices.dxgi_device.as_ref().unwrap(), self.hwnd)?;
-            composition.set_swap_chain(&resources.swap_chain)?;
-            Some(composition)
+            Some(WindowComposition::new(
+                devices.dxgi_device.as_ref().unwrap(),
+                self.hwnd,
+                self.background_appearance,
+                &resources.swap_chain,
+            )?)
         };
 
         self.atlas
@@ -374,7 +398,7 @@ impl DirectXRenderer {
         self.resources = Some(resources);
         self.globals = globals;
         self.pipelines = pipelines;
-        self.direct_composition = direct_composition;
+        self.composition = composition;
         self.skip_draws = true;
         Ok(())
     }
@@ -383,6 +407,9 @@ impl DirectXRenderer {
         &mut self,
         background_appearance: WindowBackgroundAppearance,
     ) -> Result<()> {
+        self.background_appearance = background_appearance;
+        self.rebuild_composition(background_appearance)?;
+
         let target_alpha_enabled = target_alpha_enabled_for(background_appearance);
         if target_alpha_enabled == self.target_alpha_enabled {
             return Ok(());
@@ -395,6 +422,48 @@ impl DirectXRenderer {
             .context("Recreating DirectX render pipelines for window transparency")?;
         self.target_alpha_enabled = target_alpha_enabled;
         self.force_full_present = true;
+        Ok(())
+    }
+
+    /// Swap the composition when the appearance crosses between a DWM-drawn
+    /// backdrop and one composed in the window's own tree. Both build a
+    /// composition target for the same `HWND` and only one can own it, so the old
+    /// tree is dropped before the new one is built.
+    fn rebuild_composition(
+        &mut self,
+        background_appearance: WindowBackgroundAppearance,
+    ) -> Result<()> {
+        let Some(composition) = self.composition.as_ref() else {
+            return Ok(());
+        };
+        if composition.is_host_backdrop() == host_backdrop_wanted(background_appearance) {
+            return Ok(());
+        }
+
+        // Cloned so the borrow of `self` ends before the composition is replaced;
+        // both are reference-counted interfaces, not copies of any resource.
+        let devices = self.devices.as_ref().context("DirectX devices missing")?;
+        let dxgi_device = devices
+            .dxgi_device
+            .as_ref()
+            .context("DXGI device missing")?
+            .clone();
+        let swap_chain = self
+            .resources
+            .as_ref()
+            .context("DirectX resources missing")?
+            .swap_chain
+            .clone();
+
+        self.composition = None;
+        self.composition = Some(WindowComposition::new(
+            &dxgi_device,
+            self.hwnd,
+            background_appearance,
+            &swap_chain,
+        )?);
+        self.force_full_present = true;
+
         Ok(())
     }
 
@@ -1259,6 +1328,48 @@ impl DirectXRenderPipelines {
             backdrop_composite_pipeline,
         })
     }
+}
+
+impl WindowComposition {
+    /// Build the composition `background_appearance` calls for and point it at
+    /// `swap_chain`.
+    pub fn new(
+        dxgi_device: &IDXGIDevice,
+        hwnd: HWND,
+        background_appearance: WindowBackgroundAppearance,
+        swap_chain: &IDXGISwapChain1,
+    ) -> Result<Self> {
+        let composition = if host_backdrop_wanted(background_appearance) {
+            let composition =
+                HostBackdropComposition::new(hwnd).context("Creating HostBackdropComposition")?;
+            composition
+                .set_swap_chain(swap_chain)
+                .context("Setting swap chain for HostBackdropComposition")?;
+            Self::HostBackdrop(composition)
+        } else {
+            let composition =
+                DirectComposition::new(dxgi_device, hwnd).context("Creating DirectComposition")?;
+            composition
+                .set_swap_chain(swap_chain)
+                .context("Setting swap chain for DirectComposition")?;
+            Self::Direct(composition)
+        };
+
+        Ok(composition)
+    }
+
+    fn is_host_backdrop(&self) -> bool {
+        matches!(self, Self::HostBackdrop(_))
+    }
+}
+
+/// Whether `background_appearance` needs its material composed in the window's
+/// own tree instead of asked of DWM.
+fn host_backdrop_wanted(background_appearance: WindowBackgroundAppearance) -> bool {
+    matches!(
+        background_appearance,
+        WindowBackgroundAppearance::CompositedBlur
+    )
 }
 
 impl DirectComposition {

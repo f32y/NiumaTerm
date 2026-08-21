@@ -900,6 +900,88 @@ impl PlatformWindow for WindowsWindow {
         unsafe { ShowWindowAsync(self.0.hwnd, SW_HIDE).ok().log_err() };
     }
 
+    fn attach_as_flyout(&self, owner: &dyn PlatformWindow) {
+        let hwnd = self.0.hwnd;
+        let Ok(owner) = rwh::HasWindowHandle::window_handle(owner) else {
+            return;
+        };
+        let rwh::RawWindowHandle::Win32(owner) = owner.as_raw() else {
+            return;
+        };
+
+        unsafe {
+            // An unowned popup does not keep activation once it is given any:
+            // Windows hands it straight back to the window that had it, which
+            // the flyout would read as the user having clicked away. Ownership
+            // also keeps it above its owner and takes it down with the owner.
+            SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, owner.hwnd.get());
+            // Refusing activation outright is what keeps the owner rendering as
+            // the focused window for as long as the flyout is up.
+            let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | WS_EX_NOACTIVATE.0 as isize);
+        }
+
+        // DWMWCP_ROUND: the corner Windows 11 gives its own menus and popovers.
+        // DWM clips the window, backdrop included, to the frame it rounds, so the
+        // window does not have to mask itself.
+        let preference = DWMWCP_ROUND;
+        unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_WINDOW_CORNER_PREFERENCE,
+                (&raw const preference).cast(),
+                std::mem::size_of_val(&preference) as u32,
+            )
+        }
+        .log_err();
+    }
+
+    fn hide_flyout(&self) {
+        let hwnd = self.0.hwnd;
+        // Queued on the executor `show_flyout` uses, so a dismissal followed by
+        // another menu in the same event stays in that order. `ShowWindowAsync`
+        // posts to the window's message queue, which is not sequenced against
+        // that executor at all, and the two can land either way round.
+        self.0
+            .executor
+            .spawn(async move {
+                unsafe { ShowWindow(hwnd, SW_HIDE).ok().log_err() };
+            })
+            .detach();
+    }
+
+    fn show_flyout(&self, bounds: Bounds<Pixels>) {
+        let hwnd = self.0.hwnd;
+        // The flyout's own scale factor, which is the monitor it was created on.
+        // A flyout placed onto a monitor scaled differently from that one lands
+        // in the wrong pixels; resolving the target monitor from `bounds` first
+        // is what that would take.
+        let scale = self.scale_factor();
+        let bounds = bounds.to_device_pixels(scale);
+
+        // Deferred like `resize`: `SetWindowPos` dispatches this window's
+        // messages synchronously, and a caller inside an event handler still has
+        // the application borrowed, so those messages would be dropped.
+        self.0
+            .executor
+            .spawn(async move {
+                unsafe {
+                    SetWindowPos(
+                        hwnd,
+                        Some(HWND_TOP),
+                        bounds.origin.x.0,
+                        bounds.origin.y.0,
+                        bounds.size.width.0,
+                        bounds.size.height.0,
+                        SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                    )
+                    .context("unable to show the flyout")
+                    .log_err();
+                }
+            })
+            .detach();
+    }
+
     fn zoom(&self) {
         unsafe {
             if IsWindowVisible(self.0.hwnd).as_bool() {
@@ -1607,6 +1689,12 @@ fn apply_background_appearance(hwnd: HWND, background_appearance: WindowBackgrou
             if !dwm_set_window_composition_attribute(hwnd, 3) {
                 set_window_composition_attribute(hwnd, Some((0, 0, 0, 0)), 4);
             }
+        }
+        WindowBackgroundAppearance::CompositedBlur => {
+            // The renderer composes this material inside the window's own tree;
+            // a system backdrop on top of it would be the very thing that goes
+            // flat as soon as the window is not active.
+            dwm_set_window_composition_attribute(hwnd, 1);
         }
         WindowBackgroundAppearance::MicaBackdrop => {
             dwm_set_window_composition_attribute(hwnd, 2);
