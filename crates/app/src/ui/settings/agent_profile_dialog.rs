@@ -34,6 +34,20 @@ fn effort_label(option: &str) -> &'static str {
     }
 }
 
+/// Idle spans a profile can warn at before the next message rebuilds the
+/// provider's prompt cache, in minutes. `0` is off, which is also what a
+/// profile written before this field existed carries.
+const CACHE_WARN_OPTIONS: [u32; 4] = [0, 5, 30, 60];
+
+fn cache_warn_label(minutes: u32) -> &'static str {
+    match minutes {
+        5 => i18n("settings-agent-profile-cache-warn-5min"),
+        30 => i18n("settings-agent-profile-cache-warn-30min"),
+        60 => i18n("settings-agent-profile-cache-warn-1hour"),
+        _ => i18n("settings-agent-profile-cache-warn-off"),
+    }
+}
+
 /// Which half of an environment-variable row is open for editing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum EnvField {
@@ -499,6 +513,26 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
                 })
         });
 
+    let cache_warn_minutes = profile.cache_warn_minutes;
+    let cache_warn_control = Button::new("agent-profile-dialog-cache-warn")
+        .outline()
+        .w_64()
+        .label(cache_warn_label(cache_warn_minutes))
+        .dropdown_caret(true)
+        .dropdown_menu(move |menu, _, _| {
+            CACHE_WARN_OPTIONS.into_iter().fold(menu, |menu, minutes| {
+                menu.item(
+                    PopupMenuItem::new(cache_warn_label(minutes))
+                        .checked(minutes == cache_warn_minutes)
+                        .on_click(move |_, _, cx: &mut App| {
+                            cx.global_mut::<AgentProfileDraft>()
+                                .profile
+                                .cache_warn_minutes = minutes;
+                        }),
+                )
+            })
+        });
+
     // DeepSeek Harness is published to npm, so a profile can run it straight
     // from its package; every other harness is launched from a binary the user
     // installed and has nothing to pick between.
@@ -668,6 +702,12 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
                 }
             },
             Input::new(&key_input).disabled(!endpoint_on).w_64(),
+            cx,
+        ))
+        .child(card_row(
+            i18n("settings-agent-profile-cache-warn"),
+            i18n("settings-agent-profile-cache-warn-description"),
+            cache_warn_control,
             cx,
         ))
         .child(env_section)

@@ -18,9 +18,12 @@ use std::fs;
 use std::path::Path;
 
 use gpui::{ClipboardEntry, Image, ImageFormat};
+use gpui_component::WindowExt;
+use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, DialogClose, DialogFooter};
 use nmt_i18n::i18n;
 
 use crate::agent::composer::attachments::{AttachError, MAX_ATTACHMENTS};
+use crate::agent::transcript::last_response_label;
 use crate::agent::*;
 
 #[derive(Clone)]
@@ -106,7 +109,88 @@ pub(super) fn restored_input_after_interruption(submitted: &str, current: &str) 
 }
 
 impl AgentPane {
+    /// Send what the composer holds, warning first when the conversation has
+    /// been idle long enough for the provider's prompt cache to have expired.
     pub(super) fn send_user_message(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Slash lines steer the session (`/new`, `/model`, `/status`) rather
+        // than continue the conversation, so a warning about what the next
+        // answer costs would fire in front of commands that ask for none.
+        let text = self.input.read(cx).text().to_string();
+        if !text.trim().is_empty()
+            && parse_slash_command(&text).is_none()
+            && self.prompt_cache_may_have_expired(cx)
+        {
+            self.confirm_send_after_cache_expiry(window, cx);
+            return;
+        }
+
+        self.send_user_message_now(window, cx);
+    }
+
+    /// Whether the idle span since the agent last answered has passed the
+    /// profile's warning threshold. A running turn is still writing into the
+    /// live cache, so a mid-turn steer never counts as a cold start.
+    fn prompt_cache_may_have_expired(&self, cx: &Context<Self>) -> bool {
+        let minutes = self.profile.cache_warn_minutes;
+        minutes > 0
+            && !self.transcript.read(cx).is_working()
+            && self
+                .last_response_at
+                .is_some_and(|at| at.elapsed() >= Duration::from_secs(u64::from(minutes) * 60))
+    }
+
+    /// Ask before paying for a cold prompt cache. Cancelling leaves the text
+    /// in the composer, so the decision costs nothing to reverse.
+    fn confirm_send_after_cache_expiry(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let idle = self
+            .last_response_at
+            .map(|at| last_response_label(at.elapsed().as_secs()))
+            .unwrap_or_default();
+        let pane = cx.entity();
+
+        window.open_dialog(cx, move |dialog, _, _| {
+            let pane = pane.clone();
+            let idle = idle.clone();
+
+            dialog
+                .title(i18n("agent-cache-warning-title"))
+                .overlay_closable(false)
+                .content(move |content, _, cx| {
+                    content.child(
+                        v_flex()
+                            .gap_1()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(idle.clone())
+                            .child(i18n("agent-cache-warning-message")),
+                    )
+                })
+                .footer(
+                    DialogFooter::new()
+                        .child(
+                            Button::new("agent-cache-warning-send")
+                                .min_w(DIALOG_BUTTON_MIN_WIDTH)
+                                .primary()
+                                .label(i18n("agent-cache-warning-send"))
+                                .on_click(move |_, window, cx| {
+                                    window.close_dialog(cx);
+                                    pane.update(cx, |pane, cx| {
+                                        pane.send_user_message_now(window, cx)
+                                    });
+                                }),
+                        )
+                        .child(
+                            DialogClose::new().child(
+                                Button::new("agent-cache-warning-cancel")
+                                    .min_w(DIALOG_BUTTON_MIN_WIDTH)
+                                    .label(i18n("agent-cache-warning-cancel")),
+                            ),
+                        ),
+                )
+        });
+    }
+
+    fn send_user_message_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if rewind_blocks_submission(self.rewind.state.as_ref()) {
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
