@@ -652,6 +652,29 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     /// default does nothing, so a platform that has not implemented it simply
     /// keeps the window up until it is dropped.
     fn hide(&self) {}
+    /// Turn this window into a flyout of `owner`: owned by it, drawn above it,
+    /// and shaped the way the platform shapes its own menus and popovers.
+    ///
+    /// A flyout must never take activation. Its owner keeps that, which is what
+    /// lets the owner keep the appearance of the focused window while the flyout
+    /// is up, and on Windows also what lets its backdrop material keep rendering.
+    ///
+    /// The default does nothing, leaving the window an ordinary one.
+    fn attach_as_flyout(&self, _owner: &dyn PlatformWindow) {}
+    /// Place a flyout at `bounds` and show it without giving it focus.
+    ///
+    /// Pairs with [`Self::attach_as_flyout`]. Called instead of the usual show
+    /// path because that one activates the window.
+    fn show_flyout(&self, _bounds: Bounds<Pixels>) {}
+    /// Take a flyout back off the screen, in order with [`Self::show_flyout`].
+    ///
+    /// Separate from [`Self::hide`] because the two have to be sequenced against
+    /// each other. Dismissing one menu and opening another happens within a
+    /// single event — it is what a right click on top of an open menu is — and if
+    /// the hide arrives after the show, the new menu appears and vanishes again.
+    fn hide_flyout(&self) {
+        self.hide();
+    }
     fn zoom(&self);
     fn toggle_fullscreen(&self);
     fn is_fullscreen(&self) -> bool;
@@ -1761,6 +1784,18 @@ pub enum WindowBackgroundAppearance {
     ///
     /// Not always supported.
     Blurred,
+    /// Transparency with the contents behind the window blurred, composed inside
+    /// the window's own composition tree rather than as a window-level system
+    /// backdrop.
+    ///
+    /// The material survives the window not being active, which the system
+    /// backdrop does not: DWM drops that one to a flat color for inactive
+    /// windows. Use it for a window that deliberately never takes activation, so
+    /// that its owner keeps its focused appearance, and which still has to look
+    /// like a native flyout.
+    ///
+    /// Carries no tint of its own; paint one with alpha over it.
+    CompositedBlur,
     /// The Mica backdrop material, supported on Windows 11.
     MicaBackdrop,
     /// The Mica Alt backdrop material, supported on Windows 11.
