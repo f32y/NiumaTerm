@@ -17,16 +17,20 @@ fn main() {
     println!("cargo:rerun-if-changed={}", def.display());
     println!("cargo:rustc-link-arg-cdylib=/DEF:{}", def.display());
 
+    let revision = nmt_build_version::crate_revision();
+
     WindowsResource::new()
         .set("FileDescription", "NiumaTerm Shell Extension")
         .set("ProductName", "NiumaTerm")
         .set("InternalName", "NiumaTerm Shell Extension")
         .set("OriginalFilename", "shell_extension.dll")
-        // Explorer keeps a registered extension loaded across an update, so the
-        // label here is what tells a stale copy on disk from the one the app
-        // shipped with.
         .set("FileVersion", &version)
         .set("ProductVersion", &version)
+        // Explorer keeps a registered extension loaded, so an update replaces
+        // this file only when the extension itself moved forward. The release
+        // name above cannot express that: it advances on every build, while the
+        // same DLL stays correct across releases that did not touch it.
+        .set("InternalVersion", &revision)
         .compile()
         .unwrap();
 }
