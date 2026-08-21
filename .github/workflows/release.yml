@@ -35,7 +35,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag || github.ref_name }}
         run: >-
-          gh release create "$TAG" dist/*.zip
+          gh release create "$TAG" dist/*
           --repo "$GITHUB_REPOSITORY"
           --title "$TAG"
           --generate-notes

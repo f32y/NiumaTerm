@@ -62,7 +62,7 @@ jobs:
           TAG: ${{ needs.name.outputs.tag }}
         run: |
           gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes || true
-          gh release create "$TAG" dist/*.zip \
+          gh release create "$TAG" dist/* \
             --repo "$GITHUB_REPOSITORY" \
             --title "$TAG" \
             --prerelease \

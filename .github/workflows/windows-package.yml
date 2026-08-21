@@ -65,7 +65,22 @@ jobs:
             -Path "$package/*" `
             -DestinationPath "$package.zip"
 
+          # A downloader has no other way to tell a truncated or tampered
+          # package from a complete one before it starts replacing installed
+          # files. The sha256sum layout, lowercase digest and two spaces before
+          # the name, is what `sha256sum -c` reads; the line terminator is
+          # written explicitly because the CRLF this Windows runner would
+          # otherwise append becomes part of the name that tool looks up.
+          $digest = (Get-FileHash "$package.zip" -Algorithm SHA256).Hash.ToLower()
+          Set-Content `
+            -Path "$package.zip.sha256" `
+            -Value "$digest  $packageName.zip`n" `
+            -Encoding ascii `
+            -NoNewline
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ env.PACKAGE_NAME }}
-          path: dist/${{ env.PACKAGE_NAME }}.zip
+          path: |
+            dist/${{ env.PACKAGE_NAME }}.zip
+            dist/${{ env.PACKAGE_NAME }}.zip.sha256
