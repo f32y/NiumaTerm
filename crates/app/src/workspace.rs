@@ -411,6 +411,17 @@ impl WorkspaceManager {
         self.workspaces.find(id).is_some_and(|ws| ws.pinned)
     }
 
+    /// Id of the workspace that holds `tab_id`. The sidebar lists the tabs of
+    /// every workspace, so a tab command can name a tab the user is not
+    /// looking at.
+    pub fn workspace_of_tab(&self, tab_id: TabId) -> Option<WorkspaceId> {
+        self.workspaces
+            .items()
+            .iter()
+            .find(|ws| ws.tabs.find(tab_id).is_some())
+            .map(|ws| ws.id)
+    }
+
     /// The tab set that contains `tab_id`, searched across all workspaces (a
     /// background workspace's surface still polls host events).
     pub fn tab_manager_for(&self, tab_id: TabId) -> Option<&TabManager<TabSurface>> {
