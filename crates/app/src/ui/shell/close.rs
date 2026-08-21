@@ -210,43 +210,50 @@ impl Shell {
             .sum()
     }
 
-    /// Close the tab in the active workspace, with a confirm dialog first
-    /// when the shell has running child processes. Closing the last tab
-    /// closes its workspace too (confirmed first); on the last workspace
-    /// that routes into the quit/replace/cancel dialog.
+    /// Close a tab, with a confirm dialog first when the shell has running
+    /// child processes. Closing the last tab closes its workspace too
+    /// (confirmed first); on the last workspace that routes into the
+    /// quit/replace/cancel dialog.
+    ///
+    /// The tab need not be in the active workspace: the sidebar lists every
+    /// workspace's tabs, and closing one there leaves the user where they
+    /// are. Every lookup is therefore keyed on the workspace that holds the
+    /// tab rather than on the active one.
     pub(crate) fn request_close_tab(
         &mut self,
         id: TabId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let Some(ws_id) = self.workspaces.workspace_of_tab(id) else {
+            return;
+        };
+        let Some(tab) = self
+            .workspaces
+            .tabs_of(ws_id)
+            .and_then(|tabs| tabs.find(id))
+        else {
+            return;
+        };
+
+        let surface = tab.surface();
+        let is_settings = surface.is_settings();
+        let is_agent = surface.is_agent();
+        let count = self.close_process_count(surface, cx);
+        let last_tab = self
+            .workspaces
+            .tabs_of(ws_id)
+            .is_some_and(|tabs| tabs.len() == 1);
+
         // The settings entry holds one tab that terminates nothing, so its
         // close control is the same gesture as dismissing the entry.
-        if self
-            .workspaces
-            .active_tabs()
-            .find(id)
-            .is_some_and(|tab| tab.surface().is_settings())
-        {
-            let ws_id = self.workspaces.active_id();
-
+        if is_settings {
             self.close_workspace_now(ws_id, window, cx);
 
             return;
         }
 
-        let (count, is_agent) = self
-            .workspaces
-            .active_tabs()
-            .find(id)
-            .map_or((0, false), |tab| {
-                let surface = tab.surface();
-                (self.close_process_count(surface, cx), surface.is_agent())
-            });
-
-        if self.workspaces.active_tabs().len() == 1 {
-            let ws_id = self.workspaces.active_id();
-
+        if last_tab {
             if self.workspaces.real_len() == 1 {
                 self.confirm_close_last_workspace(ws_id, window, cx);
                 return;
@@ -301,20 +308,27 @@ impl Shell {
     }
 
     fn close_tab_now(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {
-        // `close` refuses the last tab and returns the removed pane entity;
-        // dropping it drops the pane's surface and PTY.
-        if let Some(tree) = self.workspaces.active_tabs_mut().close(id) {
-            for route in Self::agent_routes_in_surface(&tree, cx) {
-                self.remove_agent_route(&route, cx);
-            }
+        // `close` refuses the last tab of its workspace and returns the removed
+        // pane entity; dropping it drops the pane's surface and PTY.
+        let removed = self
+            .workspaces
+            .tab_manager_for_mut(id)
+            .and_then(|tabs| tabs.close(id));
 
-            drop(tree);
+        let Some(tree) = removed else {
+            return;
+        };
 
-            self.focus_active(window, cx);
-            self.sync_session_memory(cx);
-
-            cx.notify();
+        for route in Self::agent_routes_in_surface(&tree, cx) {
+            self.remove_agent_route(&route, cx);
         }
+
+        drop(tree);
+
+        self.focus_active(window, cx);
+        self.sync_session_memory(cx);
+
+        cx.notify();
     }
 
     /// Close the workspace, with a confirm dialog first when the

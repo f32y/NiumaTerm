@@ -1100,9 +1100,13 @@ impl Sidebar {
                             .children(summaries.iter().enumerate().flat_map(|(idx, ws)| {
                                 let mut rows = vec![self.render_item(idx, ws, rename, cx)];
                                 let ws_tabs = tabs.get(idx).map(Vec::as_slice).unwrap_or_default();
-                                // A workspace refuses to close its last tab, so the
-                                // row withholds the control the manager would ignore.
-                                let closeable = ws_tabs.len() > 1;
+                                // Closing a workspace's last tab falls through to
+                                // closing the workspace, so the row keeps its
+                                // control as long as one of the two would take
+                                // effect. A pinned or sole workspace refuses both,
+                                // and the row withholds a control that would do
+                                // nothing.
+                                let closeable = ws_tabs.len() > 1 || ws.closeable;
 
                                 rows.extend(ws_tabs.iter().enumerate().map(|(tab_idx, tab)| {
                                     self.render_tab_row(
