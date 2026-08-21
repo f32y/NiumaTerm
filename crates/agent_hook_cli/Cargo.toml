@@ -17,3 +17,7 @@ nmt_agent_utils.workspace = true
 nmt_platform.workspace = true
 
 serde_json.workspace = true
+
+[build-dependencies]
+nmt_build_version.workspace = true
+winres.workspace = true
