@@ -18,3 +18,24 @@ jobs:
       # name one, so the build always resolves to a tagged revision.
       ref: ${{ inputs.tag || github.ref_name }}
       version: ${{ inputs.tag || github.ref_name }}
+
+  release:
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: NiumaTerm-windows-x86_64-${{ inputs.tag || github.ref_name }}
+          path: dist
+      # The tag already exists on the remote, so the release just attaches to
+      # it; --repo stands in for a checkout this job has no other use for.
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: >-
+          gh release create "$TAG" dist/*.zip
+          --repo "$GITHUB_REPOSITORY"
+          --title "$TAG"
+          --generate-notes

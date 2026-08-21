@@ -36,3 +36,27 @@ jobs:
           git push -f origin "refs/tags/$TAG"
         env:
           TAG: ${{ needs.name.outputs.tag }}
+
+  release:
+    needs: [name, tag]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: NiumaTerm-windows-x86_64-${{ needs.name.outputs.tag }}
+          path: dist
+      # A second run on the same day reuses the tag, and gh refuses to create a
+      # release for a tag that already has one; dropping the old release
+      # republishes against the tag the previous step just moved.
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.name.outputs.tag }}
+        run: |
+          gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes || true
+          gh release create "$TAG" dist/*.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$TAG" \
+            --prerelease \
+            --notes "Automated nightly build of $GITHUB_SHA."
