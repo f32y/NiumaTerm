@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use winres::WindowsResource;
 
 fn main() {
-    let version = nmt_build_version::emit();
+    let version = nmt_version::emit();
 
     if env::var_os("CARGO_CFG_WINDOWS").is_some() {
         let icon = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/windows/app.ico");
