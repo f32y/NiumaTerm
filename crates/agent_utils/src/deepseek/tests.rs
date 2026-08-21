@@ -1002,6 +1002,9 @@ fn usage_projections_combine_into_one_window_snapshot() {
     assert_eq!(cumulative.scope, ContextUsageScope::Thread);
     assert_eq!(cumulative.breakdown.total_tokens, 10_000);
     assert_eq!(cumulative.breakdown.cache_read_input_tokens, Some(8000));
+    // Cache traffic belongs inside the input figure, so a reader dividing the
+    // read count by it gets a share at or below 100%.
+    assert_eq!(cumulative.breakdown.input_tokens, Some(9700));
 
     // Another tab's projection is not this tab's accounting.
     assert_eq!(
