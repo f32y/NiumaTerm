@@ -1,3 +1,5 @@
+use gpui::KeyDownEvent;
+use gpui_component::modern_menu::dispatch_modern_menu_key;
 use nmt_i18n::i18n;
 
 use crate::agent::RecoveryIdentity;
@@ -301,6 +303,8 @@ impl Render for Shell {
 
         self.process_native_notifications(cx);
 
+        ui::sync_modern_menu(cx);
+
         // Any workspace/tab switch re-renders the shell, so this render-time
         // compare-and-set catches every switch path.
         self.sync_git_target(cx);
@@ -415,6 +419,20 @@ impl Render for Shell {
             .size_full()
             .relative()
             .overflow_hidden()
+            // A context menu drawn in its own window never takes activation, so
+            // that this window keeps its focused backdrop material — which also
+            // means it never receives the press or the key that should dismiss
+            // it. This window does. Capture phase, because the input still
+            // belongs to whatever it was aimed at.
+            .capture_any_mouse_down(|_, _, cx| ui::dismiss_modern_menu(cx))
+            .capture_key_down(|event: &KeyDownEvent, _, cx| {
+                // Capture phase, and propagation stops on anything the menu
+                // used: while a menu is up its keys outrank the bindings of
+                // whatever still holds focus underneath it.
+                if dispatch_modern_menu_key(event, cx) {
+                    cx.stop_propagation();
+                }
+            })
             // The window surface itself is never painted (gpui leaves it
             // white/transparent), and the chrome now has see-through regions —
             // the tab strip and the gutters around the terminal cards — so the

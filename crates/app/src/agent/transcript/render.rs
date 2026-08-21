@@ -1,4 +1,5 @@
 use gpui::{ObjectFit, img};
+use gpui_component::modern_menu::{ModernMenu, ModernMenuExt as _};
 use nmt_i18n::i18n;
 
 use crate::agent::composer::attachments::MAX_ATTACHMENTS;
@@ -165,7 +166,7 @@ impl TranscriptView {
     pub(in crate::agent) fn copy_menu(
         pane: gpui::WeakEntity<Self>,
         index: usize,
-    ) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
+    ) -> impl Fn(ModernMenu, &mut Window, &mut App) -> ModernMenu + 'static {
         move |menu, _, cx| {
             // Full transcript payloads can be very large. Resolve and clone the
             // text only after a right click opens the menu, keeping ordinary
@@ -180,11 +181,11 @@ impl TranscriptView {
                 .flatten();
 
             match copy_text {
-                Some(copy_text) => menu.item(
-                    PopupMenuItem::new(i18n("agent-transcript-copy")).on_click(move |_, _, cx| {
+                Some(copy_text) => menu
+                    .item(i18n("agent-transcript-copy"), move |_, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
-                    }),
-                ),
+                    })
+                    .icon(IconName::Copy),
                 None => menu,
             }
         }
@@ -235,7 +236,7 @@ impl TranscriptView {
             .justify_end()
             .items_end()
             .gap_2()
-            .context_menu(Self::copy_menu(cx.entity().downgrade(), index))
+            .modern_context_menu(Self::copy_menu(cx.entity().downgrade(), index))
             .child(self.hover_stamp(index, cx))
             .child(
                 div()
@@ -362,7 +363,7 @@ impl TranscriptView {
             .w_full()
             .items_end()
             .gap_2()
-            .context_menu(Self::copy_menu(cx.entity().downgrade(), index))
+            .modern_context_menu(Self::copy_menu(cx.entity().downgrade(), index))
             .child(
                 // The body stops at the reading measure plus its own padding,
                 // so the timestamp that follows it sits beside the text rather
@@ -391,7 +392,7 @@ impl TranscriptView {
         h_flex()
             .id(("entry", index))
             .w_full()
-            .context_menu(Self::copy_menu(cx.entity().downgrade(), index))
+            .modern_context_menu(Self::copy_menu(cx.entity().downgrade(), index))
             .child(
                 div()
                     .max_w(relative(0.9))
@@ -545,7 +546,7 @@ impl TranscriptView {
         v_flex()
             .id(("entry", index))
             .w_full()
-            .context_menu(Self::copy_menu(cx.entity().downgrade(), index))
+            .modern_context_menu(Self::copy_menu(cx.entity().downgrade(), index))
             .child(header)
             .children(detail.as_deref().filter(|_| expanded).map(|detail| {
                 let code_format = code_transcript_format(&self.items[index].item, detail);
@@ -590,7 +591,7 @@ impl TranscriptView {
                         // hit-test order. Occlusion prevents wheel input at the
                         // virtual list's limits from moving the conversation.
                         .occlude()
-                        .context_menu(Self::copy_menu(cx.entity().downgrade(), index))
+                        .modern_context_menu(Self::copy_menu(cx.entity().downgrade(), index))
                         .child(
                             uniform_list(
                                 SharedString::from(format!("wl-virtual-{index}")),
@@ -685,7 +686,10 @@ impl TranscriptView {
                                 // earlier hitbox makes this viewport the only scroll
                                 // target under the pointer, even at either limit.
                                 .occlude()
-                                .context_menu(Self::copy_menu(cx.entity().downgrade(), index))
+                                .modern_context_menu(Self::copy_menu(
+                                    cx.entity().downgrade(),
+                                    index,
+                                ))
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
                                 .child(
@@ -774,7 +778,7 @@ impl TranscriptView {
             .id(("entry", index))
             .w_full()
             .gap_1()
-            .context_menu(Self::copy_menu(cx.entity().downgrade(), index))
+            .modern_context_menu(Self::copy_menu(cx.entity().downgrade(), index))
             // The rule sits above the heading: it closes off the conversation
             // that the summary below replaced.
             .child(div().w_full().h(px(1.)).bg(accent.opacity(0.35)))
@@ -870,7 +874,7 @@ impl TranscriptView {
                             // hitbox makes this the only scroll target under the
                             // pointer, even at either limit.
                             .occlude()
-                            .context_menu(Self::copy_menu(cx.entity().downgrade(), index))
+                            .modern_context_menu(Self::copy_menu(cx.entity().downgrade(), index))
                             .px_3()
                             .py_2()
                             .rounded(UI_RADIUS)

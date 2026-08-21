@@ -1,6 +1,8 @@
 use std::sync::LazyLock;
 
-use gpui::{Font, FontFallbacks, Pixels, SharedString, font, px};
+use gpui::{App, Font, FontFallbacks, Pixels, SharedString, font, px};
+pub(crate) use gpui_component::modern_menu::dismiss_modern_menu;
+use gpui_component::modern_menu::{prewarm_modern_menu, set_default_font};
 
 pub(crate) const UI_RADIUS: Pixels = px(8.0);
 pub(crate) const UI_BORDER_OPACITY: f32 = 0.5;
@@ -16,6 +18,20 @@ pub(crate) fn font_with_default_fallback(family: impl Into<SharedString>) -> Fon
 
     font.fallbacks = Some(DEFAULT_FONT_FALLBACKS.clone());
     font
+}
+
+/// Keep the context menu window built and carrying the chrome font.
+///
+/// The menu is drawn in a window of its own, so it inherits no text style from
+/// the window it opens over and would otherwise miss the CJK preference the rest
+/// of the chrome carries. Both halves are cheap once they have taken effect, so
+/// this is called from the shell's render and follows a font setting that
+/// changes underneath it.
+pub(crate) fn sync_modern_menu(cx: &mut App) {
+    let font = font_with_default_fallback(cx.global::<AppSettings>().ui_font_family.clone());
+
+    set_default_font(cx, font);
+    prewarm_modern_menu(cx);
 }
 
 pub(crate) fn default_font_fallbacks() -> FontFallbacks {
