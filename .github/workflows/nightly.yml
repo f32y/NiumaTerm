@@ -7,10 +7,17 @@ jobs:
   name:
     runs-on: ubuntu-latest
     outputs:
-      tag: ${{ steps.date.outputs.tag }}
+      tag: ${{ steps.name.outputs.tag }}
     steps:
-      - id: date
-        run: echo "tag=nightly-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v5
+      # The date comes from the commit rather than the run, so rebuilding a
+      # revision reproduces the name it was published under, and so a locally
+      # built binary of the same revision carries the same version string.
+      - id: name
+        run: |
+          date=$(git show -s --format=%cd --date=format:%Y%m%d "$GITHUB_SHA")
+          commit=$(git rev-parse --short=7 "$GITHUB_SHA")
+          echo "tag=nightly-$date-$commit" >> "$GITHUB_OUTPUT"
 
   package:
     needs: name
@@ -28,9 +35,9 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v5
-      # The tag name only carries a date, so a second run on the same day
-      # would collide; moving the tag keeps that run from failing and leaves
-      # the tag pointing at the newest nightly package.
+      # The tag names the revision, so it collides only when the same revision
+      # is built twice; forcing keeps that run from failing and leaves the tag
+      # on the revision it already marked.
       - run: |
           git tag -f "$TAG" "$GITHUB_SHA"
           git push -f origin "refs/tags/$TAG"
@@ -47,9 +54,9 @@ jobs:
         with:
           name: NiumaTerm-windows-x86_64-${{ needs.name.outputs.tag }}
           path: dist
-      # A second run on the same day reuses the tag, and gh refuses to create a
-      # release for a tag that already has one; dropping the old release
-      # republishes against the tag the previous step just moved.
+      # A second run on the same revision reuses the tag, and gh refuses to
+      # create a release for a tag that already has one; dropping the old
+      # release republishes the newer package against that tag.
       - env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.name.outputs.tag }}

@@ -4,6 +4,8 @@ use std::path::PathBuf;
 use winres::WindowsResource;
 
 fn main() {
+    let version = nmt_build_version::emit();
+
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
     if target_os != "windows" || target_env != "msvc" {
@@ -20,6 +22,11 @@ fn main() {
         .set("ProductName", "NiumaTerm")
         .set("InternalName", "NiumaTerm Shell Extension")
         .set("OriginalFilename", "shell_extension.dll")
+        // Explorer keeps a registered extension loaded across an update, so the
+        // label here is what tells a stale copy on disk from the one the app
+        // shipped with.
+        .set("FileVersion", &version)
+        .set("ProductVersion", &version)
         .compile()
         .unwrap();
 }

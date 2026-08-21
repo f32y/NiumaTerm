@@ -300,6 +300,7 @@ dependencies = [
  "image",
  "lsp-types",
  "nmt_agent_utils",
+ "nmt_build_version",
  "nmt_config",
  "nmt_i18n",
  "nmt_input",
@@ -4168,8 +4169,10 @@ name = "nmt_agent_hook_cli"
 version = "1.2.0"
 dependencies = [
  "nmt_agent_utils",
+ "nmt_build_version",
  "nmt_platform",
  "serde_json",
+ "winres",
 ]
 
 [[package]]
@@ -4192,6 +4195,10 @@ dependencies = [
  "which",
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "nmt_build_version"
+version = "1.2.0"
 
 [[package]]
 name = "nmt_config"
@@ -4283,6 +4290,7 @@ dependencies = [
 name = "nmt_shell_extension"
 version = "1.2.0"
 dependencies = [
+ "nmt_build_version",
  "percent-encoding",
  "windows 0.62.2",
  "windows-core 0.62.2",

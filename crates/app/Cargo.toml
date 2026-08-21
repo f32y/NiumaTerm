@@ -26,6 +26,7 @@ tracing-subscriber.workspace = true
 tracing-appender.workspace = true
 
 [build-dependencies]
+nmt_build_version.workspace = true
 winres.workspace = true
 
 [target.'cfg(windows)'.dependencies]
