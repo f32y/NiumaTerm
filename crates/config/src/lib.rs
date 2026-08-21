@@ -611,6 +611,7 @@ mod tests {
             effort: "high".to_string(),
             replace_sub_models: true,
             use_custom_endpoint: true,
+            cache_warn_minutes: 30,
             api_base_url: "https://proxy.example.com".to_string(),
             api_key: "sk-test".to_string(),
             env: vec![profile::EnvVar {

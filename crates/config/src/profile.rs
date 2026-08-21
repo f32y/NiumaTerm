@@ -119,6 +119,13 @@ pub struct AgentProfile {
     pub replace_sub_models: bool,
     #[serde(default, rename = "use-custom-endpoint")]
     pub use_custom_endpoint: bool,
+    /// Idle minutes after the agent's last answer beyond which the next
+    /// message is warned about: a provider prompt cache expires on its own
+    /// clock, so the message that follows a long pause is billed as a full
+    /// cache write. `0` disables the warning, which is what a profile written
+    /// before this field existed carries.
+    #[serde(default, rename = "cache-warn-minutes")]
+    pub cache_warn_minutes: u32,
     #[serde(default, rename = "api-base-url")]
     pub api_base_url: String,
     #[serde(default, rename = "api-key")]
@@ -148,6 +155,8 @@ struct PersistedAgentProfile {
     replace_sub_models: bool,
     #[serde(default, rename = "use-custom-endpoint")]
     use_custom_endpoint: bool,
+    #[serde(default, rename = "cache-warn-minutes")]
+    cache_warn_minutes: u32,
     #[serde(default, rename = "api-credentials")]
     api_credentials: Option<String>,
     #[serde(default, rename = "api-base-url")]
@@ -185,6 +194,7 @@ impl TryFrom<PersistedAgentProfile> for AgentProfile {
             effort: persisted.effort,
             replace_sub_models: persisted.replace_sub_models,
             use_custom_endpoint: persisted.use_custom_endpoint,
+            cache_warn_minutes: persisted.cache_warn_minutes,
             api_base_url,
             api_key,
             env: persisted.env,
@@ -238,6 +248,7 @@ pub(crate) fn patch_agent_document(
         table["effort"] = value(&profile.effort);
         table["replace-sub-models"] = value(profile.replace_sub_models);
         table["use-custom-endpoint"] = value(profile.use_custom_endpoint);
+        table["cache-warn-minutes"] = value(i64::from(profile.cache_warn_minutes));
         if !profile.api_base_url.is_empty() || !profile.api_key.is_empty() {
             let stored =
                 credentials::encrypt(&profile.api_base_url, &profile.api_key).map_err(|err| {

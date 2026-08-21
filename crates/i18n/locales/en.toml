@@ -224,6 +224,12 @@
 "settings-agent-profile-effort-xhigh" = "xhigh"
 "settings-agent-profile-effort-max" = "max"
 "settings-agent-profile-effort-ultra" = "ultra"
+"settings-agent-profile-cache-warn" = "Warn when cache timing out"
+"settings-agent-profile-cache-warn-description" = "Warn before sending a message when the agent has been idle this long. A provider prompt cache expires on its own clock, so the message after a long pause is billed as a full cache write."
+"settings-agent-profile-cache-warn-off" = "off"
+"settings-agent-profile-cache-warn-5min" = "5 min"
+"settings-agent-profile-cache-warn-30min" = "30 min"
+"settings-agent-profile-cache-warn-1hour" = "1 hour"
 "settings-agent-profile-custom-endpoint" = "Use Custom API Endpoint"
 "settings-agent-profile-custom-endpoint-description" = "Route this agent through your own API endpoint."
 "settings-agent-profile-api-url" = "API URL"
@@ -719,6 +725,12 @@
 "agent-setting-value-normal" = "normal"
 "agent-update-version-unknown" = "unknown"
 "agent-update-interruption-timeout" = "affected tabs did not reach a recoverable interruption boundary"
+
+# Agent prompt-cache warning
+"agent-cache-warning-title" = "Prompt cache may have expired"
+"agent-cache-warning-message" = "The provider's prompt cache expires on its own clock, so continuing this conversation now is likely to rewrite the whole context as cache-create tokens."
+"agent-cache-warning-send" = "Send Anyway"
+"agent-cache-warning-cancel" = "Cancel"
 
 # Agent composer
 "agent-composer-choose-command" = "Choose a slash command from the list."

@@ -223,6 +223,12 @@
 "settings-agent-profile-effort-xhigh" = "超高"
 "settings-agent-profile-effort-max" = "最高"
 "settings-agent-profile-effort-ultra" = "极高"
+"settings-agent-profile-cache-warn" = "缓存超时提醒"
+"settings-agent-profile-cache-warn-description" = "智能体空闲超过该时长后，发送消息前给出提醒。提供方的提示缓存按自身时钟过期，长时间停顿后的下一条消息会按完整缓存写入计费。"
+"settings-agent-profile-cache-warn-off" = "关闭"
+"settings-agent-profile-cache-warn-5min" = "5 分钟"
+"settings-agent-profile-cache-warn-30min" = "30 分钟"
+"settings-agent-profile-cache-warn-1hour" = "1 小时"
 "settings-agent-profile-custom-endpoint" = "使用自定义 API 端点"
 "settings-agent-profile-custom-endpoint-description" = "让此智能体通过你自己的 API 端点运行。"
 "settings-agent-profile-api-url" = "API URL"
@@ -718,6 +724,12 @@
 "agent-setting-value-normal" = "标准"
 "agent-update-version-unknown" = "未知"
 "agent-update-interruption-timeout" = "受影响的标签页未达到可恢复的中断状态"
+
+# 智能体提示缓存提醒
+"agent-cache-warning-title" = "缓存可能已过期"
+"agent-cache-warning-message" = "提供方的缓存按自身时钟过期，此时继续该对话很可能把整个上下文重新按缓存写入计费。"
+"agent-cache-warning-send" = "仍然发送"
+"agent-cache-warning-cancel" = "取消"
 
 # 智能体编辑器
 "agent-composer-choose-command" = "请从列表中选择斜杠命令。"
