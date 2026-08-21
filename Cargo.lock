@@ -311,6 +311,7 @@ dependencies = [
  "parking_lot",
  "percent-encoding",
  "raw-window-handle",
+ "reqwest",
  "rust-embed",
  "semver",
  "serde",

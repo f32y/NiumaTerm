@@ -1,6 +1,7 @@
 use nmt_i18n::i18n;
 
 use crate::ui::settings::*;
+use crate::update::{self, CheckError, Status};
 
 pub(super) fn about_page() -> SettingPage {
     SettingPage::new(i18n("settings-about-title"))
@@ -22,4 +23,85 @@ pub(super) fn about_page() -> SettingPage {
                     }),
                 )),
         )
+        .group(
+            SettingGroup::new()
+                .title(i18n("settings-about-updates"))
+                .item(
+                    SettingItem::new(
+                        i18n("settings-about-check-updates"),
+                        SettingField::switch(
+                            |cx| cx.global::<AppSettings>().check_updates,
+                            |value, cx| {
+                                cx.global_mut::<AppSettings>().check_updates = value;
+                            },
+                        ),
+                    )
+                    .description(i18n("settings-about-check-updates-description")),
+                )
+                .item(SettingItem::new(
+                    i18n("settings-about-channel"),
+                    SettingField::dropdown(
+                        vec![
+                            (
+                                "stable".into(),
+                                i18n("settings-about-channel-stable").into(),
+                            ),
+                            (
+                                "nightly".into(),
+                                i18n("settings-about-channel-nightly").into(),
+                            ),
+                        ],
+                        |cx| cx.global::<AppSettings>().update_channel.as_str().into(),
+                        |value, cx| {
+                            cx.global_mut::<AppSettings>().update_channel =
+                                UpdateChannel::from_value(&value);
+                        },
+                    )
+                    .default_value(SharedString::from("stable")),
+                ))
+                .item(update_check_item()),
+        )
+}
+
+fn update_check_item() -> SettingItem {
+    SettingItem::render(move |options, _window, cx| {
+        let status = update::status(cx);
+        let checking = status == Status::Checking;
+
+        let check = Button::new("app-update-check")
+            .outline()
+            .label(if checking {
+                i18n("settings-about-checking")
+            } else {
+                i18n("settings-about-check-button")
+            })
+            .disabled(options.disabled || checking)
+            .on_click(|_, _, cx: &mut App| update::check_now(cx));
+
+        card_row(
+            i18n("settings-about-check-for-updates"),
+            status_text(&status),
+            check,
+            cx,
+        )
+        .into_any_element()
+    })
+}
+
+fn status_text(status: &Status) -> String {
+    match status {
+        Status::Unknown => i18n("settings-about-not-checked").to_string(),
+        Status::Checking => i18n("settings-about-checking").to_string(),
+        Status::NothingPublished => i18n("settings-about-nothing-published").to_string(),
+        Status::UpToDate => i18n("settings-about-up-to-date").replace("{version}", APP_VERSION),
+        Status::Available(release) => {
+            i18n("settings-about-update-available").replace("{version}", &release.label)
+        }
+        Status::Failed(CheckError::Unreachable) => {
+            i18n("settings-about-check-unreachable").to_string()
+        }
+        Status::Failed(CheckError::Unreadable) => {
+            i18n("settings-about-check-unreadable").to_string()
+        }
+    }
 }

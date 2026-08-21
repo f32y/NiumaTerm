@@ -10,6 +10,7 @@ pub mod remote_session;
 pub mod render_types;
 pub mod system;
 pub mod theme;
+pub mod update;
 
 use std::default::Default;
 use std::path::{Path, PathBuf};
@@ -77,6 +78,9 @@ pub struct Config {
     /// Remote-session connection settings (settings dialog, Remote Session page).
     #[serde(default, rename = "remote-session")]
     pub remote_session: remote_session::RemoteSessionConfig,
+    /// Update checking settings (settings dialog, About page).
+    #[serde(default = "update::UpdateConfig::default")]
+    pub update: update::UpdateConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -313,6 +317,7 @@ impl Default for Config {
             agent: agent::AgentConfig::default(),
             system: system::SystemConfig::default(),
             remote_session: remote_session::RemoteSessionConfig::default(),
+            update: update::UpdateConfig::default(),
         }
     }
 }
@@ -411,6 +416,7 @@ pub struct SettingsPatch<'a> {
     pub agent: &'a AgentConfig,
     pub system: &'a SystemConfig,
     pub remote_session: &'a remote_session::RemoteSessionConfig,
+    pub update: &'a update::UpdateConfig,
     pub profiles: &'a [Profile],
     pub default_profile: &'a str,
     pub agent_profiles: &'a [profile::AgentProfile],
@@ -460,6 +466,7 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) -> 
         system,
         profiles,
         remote_session,
+        update,
         default_profile,
         agent_profiles,
         default_agent_profile,
@@ -517,6 +524,9 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) -> 
 
     ensure_explicit_table(doc, "remote-session");
     remote_session::patch_document(doc, remote_session);
+
+    ensure_explicit_table(doc, "update");
+    update::patch_document(doc, update);
 
     profile::patch_document(doc, profiles, default_profile);
     profile::patch_agent_document(doc, agent_profiles, default_agent_profile)
@@ -631,6 +641,7 @@ mod tests {
                 agent: &sample_agent(),
                 system: &sample_system(),
                 remote_session: &remote_session::RemoteSessionConfig::default(),
+                update: &update::UpdateConfig::default(),
                 profiles: &sample_profiles(),
                 default_profile: "PowerShell",
                 agent_profiles: &sample_agent_profiles(),
@@ -696,6 +707,7 @@ mod tests {
                     agent: &sample_agent(),
                     system: &sample_system(),
                     remote_session: &remote_session::RemoteSessionConfig::default(),
+                    update: &update::UpdateConfig::default(),
                     profiles: &sample_profiles(),
                     default_profile: "PowerShell",
                     agent_profiles: &sample_agent_profiles(),
