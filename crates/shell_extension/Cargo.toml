@@ -25,5 +25,5 @@ windows = { workspace = true, features = [
 windows-core = { workspace = true }
 
 [build-dependencies]
-nmt_build_version.workspace = true
+nmt_version.workspace = true
 winres.workspace = true
