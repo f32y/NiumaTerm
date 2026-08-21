@@ -9,7 +9,7 @@ use gpui::{
 
 use crate::button::{Button, ButtonVariants as _};
 use crate::input::clear_button;
-use crate::native_menu::NativeMenu;
+use crate::modern_menu::ModernMenu;
 use crate::spinner::Spinner;
 use crate::{ActiveTheme, Colorize, v_flex};
 use crate::{IconName, Size};
@@ -55,7 +55,7 @@ pub struct Input {
     /// An optional context menu builder to allow a custom context menu on the input.
     ///
     /// If set, this overrides the built-in context menu.
-    context_menu_builder: Option<Rc<dyn Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu>>,
+    context_menu_builder: Option<Rc<dyn Fn(ModernMenu, &mut Window, &mut App) -> ModernMenu>>,
 }
 
 impl Sizable for Input {
@@ -186,7 +186,7 @@ impl Input {
     /// If set, this overrides the built-in right-click context menu.
     pub fn context_menu(
         mut self,
-        f: impl Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu + 'static,
+        f: impl Fn(ModernMenu, &mut Window, &mut App) -> ModernMenu + 'static,
     ) -> Self {
         self.context_menu_builder = Some(Rc::new(f));
         self

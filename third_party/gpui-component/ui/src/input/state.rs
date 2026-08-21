@@ -31,6 +31,7 @@ use super::{
     number_input,
     number_input::{NumberStep, StepAction},
 };
+use crate::IconName;
 use crate::Size;
 use crate::actions::{SelectDown, SelectLeft, SelectRight, SelectUp};
 use crate::highlighter::DiagnosticSet;
@@ -45,7 +46,7 @@ use crate::input::{
     popovers::{ContextMenu, DiagnosticPopover, HoverPopover},
     search::SearchPanel,
 };
-use crate::native_menu::NativeMenu;
+use crate::modern_menu::ModernMenu;
 use crate::scroll::AutoScroll;
 use crate::{Root, history::History};
 
@@ -416,7 +417,7 @@ pub struct InputState {
     ///
     /// If set, this overrides the built-in context menu (and ignores [`Self::enable_context_menu`]).
     pub(super) context_menu_builder:
-        Option<Rc<dyn Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu>>,
+        Option<Rc<dyn Fn(ModernMenu, &mut Window, &mut App) -> ModernMenu>>,
 
     /// Whether the context menu that shows on right-click is enabled.
     ///
@@ -1714,7 +1715,7 @@ impl InputState {
 
         // A custom builder fully replaces the built-in context menu.
         let menu = if let Some(builder) = self.context_menu_builder.clone() {
-            builder(NativeMenu::new(), window, cx)
+            builder(ModernMenu::new(), window, cx)
         } else {
             let is_code_editor = self.mode.is_code_editor();
             if is_code_editor {
@@ -1727,45 +1728,56 @@ impl InputState {
             let is_selected = !self.selected_range.is_empty();
             let has_paste = is_enable && cx.read_from_clipboard().is_some();
 
-            let mut menu = NativeMenu::new();
+            let mut menu = ModernMenu::new();
             if is_code_editor {
                 menu = menu
-                    .menu_with_disabled(
+                    .action_disabled(
                         rust_i18n::t!("Input.Go to Definition"),
                         !has_goto_definition,
                         Box::new(crate::input::GoToDefinition),
                     )
-                    .menu_with_disabled(
+                    .icon(IconName::ArrowRightToLine)
+                    .action_disabled(
                         rust_i18n::t!("Input.Show Code Actions"),
                         !has_code_action,
                         Box::new(crate::input::ToggleCodeActions),
                     )
+                    .icon(IconName::Lightbulb)
                     .separator();
             }
 
-            menu.menu_with_disabled(
-                rust_i18n::t!("Input.Cut"),
-                !(is_enable && is_selected),
-                Box::new(crate::input::Cut),
-            )
-            .menu_with_disabled(
-                rust_i18n::t!("Input.Copy"),
-                !is_selected,
-                Box::new(crate::input::Copy),
-            )
-            .menu_with_disabled(
-                rust_i18n::t!("Input.Paste"),
-                !has_paste,
-                Box::new(crate::input::Paste),
-            )
-            .separator()
-            .menu(
+            // The three that are worth reaching without reading share a row, the
+            // way a system context menu opens with them.
+            menu.commands(|row| {
+                row.action_disabled(
+                    rust_i18n::t!("Input.Cut"),
+                    !(is_enable && is_selected),
+                    Box::new(crate::input::Cut),
+                )
+                .icon(IconName::Scissors)
+                .action_disabled(
+                    rust_i18n::t!("Input.Copy"),
+                    !is_selected,
+                    Box::new(crate::input::Copy),
+                )
+                .icon(IconName::Copy)
+                .action_disabled(
+                    rust_i18n::t!("Input.Paste"),
+                    !has_paste,
+                    Box::new(crate::input::Paste),
+                )
+                .icon(IconName::ClipboardPaste)
+            })
+            .action(
                 rust_i18n::t!("Input.Select All"),
                 Box::new(crate::input::SelectAll),
             )
+            .icon(IconName::TextSelect)
         };
 
-        menu.show(event.position, window, cx);
+        // The menu never takes focus, so the input keeps it and the actions
+        // above reach the handlers registered on this element.
+        menu.show_at(event.position, window, cx);
     }
 
     pub(super) fn on_mouse_down(
