@@ -199,8 +199,13 @@ fn goal_status(value: &Value) -> Option<GoalStatus> {
     })
 }
 
-/// The four buckets are disjoint — reasoning tokens are already inside the
-/// output count — so the total is their plain sum.
+/// The four reported buckets are disjoint — reasoning tokens are already inside
+/// the output count — so the total is their plain sum.
+///
+/// `input_tokens` is the whole prompt side, cache traffic included, because
+/// readers treat the cache counts as parts of it: the breakdown rows nest them
+/// under the input row, and the cache-hit share divides by it. Reporting the
+/// uncached remainder there instead made that share exceed 100%.
 fn cumulative_usage(value: &Value) -> TokenUsageBreakdown {
     let uncached_input = value["uncachedInputTokens"].as_u64().unwrap_or_default();
     let output = value["outputTokens"].as_u64().unwrap_or_default();
@@ -209,7 +214,7 @@ fn cumulative_usage(value: &Value) -> TokenUsageBreakdown {
 
     TokenUsageBreakdown {
         total_tokens: uncached_input + output + cache_read + cache_write,
-        input_tokens: Some(uncached_input),
+        input_tokens: Some(uncached_input + cache_read + cache_write),
         cache_read_input_tokens: Some(cache_read),
         cache_write_input_tokens: Some(cache_write),
         output_tokens: Some(output),
