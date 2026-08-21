@@ -115,8 +115,8 @@ impl TabBarStyle {
     }
 }
 
-/// The window backdrop material. The opacity slider applies in every mode;
-/// the mode only selects what shows through translucent content.
+/// The window backdrop material. Acrylic honors the opacity slider; Mica hands
+/// the chrome entirely to DWM, and Off keeps the window opaque.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum WindowBackdrop {
@@ -138,11 +138,14 @@ impl WindowBackdrop {
         }
     }
 
+    /// An unrecognized name falls back to Off. It most likely comes from a
+    /// newer build that knows a material this one does not, and an opaque
+    /// window is guaranteed to render; guessing at a translucent mode is not.
     pub fn from_value(value: &str) -> Self {
         match value {
             "mica" => Self::Mica,
-            "off" => Self::Off,
-            _ => Self::Acrylic,
+            "acrylic" => Self::Acrylic,
+            _ => Self::Off,
         }
     }
 }
@@ -150,7 +153,9 @@ impl WindowBackdrop {
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum WindowBackdropValue {
-    Mode(WindowBackdrop),
+    // Parsed as a plain string rather than as the enum so that an unknown
+    // material degrades to a usable window instead of failing the whole file.
+    Mode(String),
     Legacy(bool),
 }
 
@@ -159,7 +164,7 @@ where
     D: Deserializer<'de>,
 {
     Ok(match WindowBackdropValue::deserialize(deserializer)? {
-        WindowBackdropValue::Mode(mode) => mode,
+        WindowBackdropValue::Mode(mode) => WindowBackdrop::from_value(&mode),
         // Legacy `enable-window-transparency` boolean: on kept the acrylic
         // + opacity behavior, off was fully opaque.
         WindowBackdropValue::Legacy(true) => WindowBackdrop::Acrylic,

@@ -67,7 +67,7 @@ pub(super) fn appearance_page(
                     .default_value(SharedString::from("acrylic")),
                 ))
                 .item(SettingItem::new(
-                    i18n("settings-appearance-transparent-main-view"),
+                    i18n("settings-appearance-effect-on-content-area"),
                     SettingField::switch(
                         |cx| cx.global::<AppSettings>().transparent_main_view,
                         |value, cx| {
@@ -80,7 +80,12 @@ pub(super) fn appearance_page(
                         i18n("settings-appearance-background-opacity"),
                         background_opacity_field(),
                     )
-                    .disabled(backdrop == WindowBackdrop::Off),
+                    // Mica replaces the background with the DWM material, so a
+                    // custom opacity has nothing left to act on.
+                    .disabled(matches!(
+                        backdrop,
+                        WindowBackdrop::Off | WindowBackdrop::Mica
+                    )),
                 )
                 .item(SettingItem::new(
                     i18n("settings-appearance-background-image"),
