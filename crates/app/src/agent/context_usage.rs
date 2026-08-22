@@ -377,6 +377,9 @@ impl RenderOnce for ContextUsageIndicator {
                         this.child(
                             v_flex()
                                 .gap_1()
+                                .pt_2()
+                                .border_t_1()
+                                .border_color(cx.theme().border.opacity(0.6))
                                 .child(
                                     div()
                                         .text_xs()
@@ -391,6 +394,9 @@ impl RenderOnce for ContextUsageIndicator {
                         this.child(
                             v_flex()
                                 .gap_1()
+                                .pt_2()
+                                .border_t_1()
+                                .border_color(cx.theme().border.opacity(0.6))
                                 .child(
                                     div()
                                         .text_xs()
