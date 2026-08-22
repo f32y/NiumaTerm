@@ -86,7 +86,11 @@ pub(in crate::agent) fn turn_summary(
 /// instead of hashing full text: O(1) per row per frame, and every real
 /// mutation (streamed append, status transition, exit code, expansion) moves
 /// at least one component.
-pub(in crate::agent) fn entry_fingerprint(item: &SessionItem, detail_expanded: bool) -> u64 {
+pub(in crate::agent) fn entry_fingerprint(
+    item: &SessionItem,
+    detail_expanded: bool,
+    annotations_expanded: bool,
+) -> u64 {
     let (content_len, status_len, extra) = match item {
         SessionItem::UserMessage { text }
         | SessionItem::AgentMessage { text, .. }
@@ -139,6 +143,7 @@ pub(in crate::agent) fn entry_fingerprint(item: &SessionItem, detail_expanded: b
     (content_len as u64)
         ^ ((status_len as u64) << 48)
         ^ (extra << 24)
+        ^ ((annotations_expanded as u64) << 62)
         ^ ((detail_expanded as u64) << 63)
 }
 
@@ -200,6 +205,7 @@ impl TranscriptView {
             fingerprint: entry_fingerprint(
                 &self.items[index].item,
                 self.expanded_rows.contains(&index),
+                self.expanded_annotations.contains(&index),
             ),
         }
     }
@@ -210,6 +216,7 @@ impl TranscriptView {
             fingerprint: entry_fingerprint(
                 &self.items[index].item,
                 self.expanded_rows.contains(&index),
+                false,
             ),
         }
     }

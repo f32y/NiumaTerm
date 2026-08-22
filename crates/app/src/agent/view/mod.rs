@@ -8,7 +8,10 @@ mod settings_row;
 #[cfg(test)]
 mod tests;
 
+use gpui::WeakEntity;
+use gpui_component::WindowExt as _;
 use gpui_component::input::Paste;
+use gpui_component::modern_menu::ModernMenu;
 use nmt_i18n::i18n;
 
 use crate::agent::composer::{
@@ -203,6 +206,11 @@ impl Render for AgentPane {
                         MouseButton::Left,
                         cx.listener(|this, _, window, cx| {
                             this.focus(window, cx);
+                            let pane = cx.entity().downgrade();
+                            window.on_next_frame(move |window, cx| {
+                                Self::show_selected_text_menu(pane, window, cx);
+                            });
+                            cx.notify();
                         }),
                     )
                     .relative()
@@ -434,7 +442,28 @@ impl Render for AgentPane {
 }
 
 impl AgentPane {
-    // A pending approval transforms the composer: the panel slots into
-    // the shell's top (the shell's rounded frame clips it), and the
-    // decision buttons escalate left to right.
+    fn show_selected_text_menu(pane: WeakEntity<Self>, window: &mut Window, cx: &mut App) {
+        let selected_text = window.selected_text(cx).trim().to_string();
+        let Some(bounds) = window.selected_text_bounds(cx) else {
+            return;
+        };
+        if selected_text.is_empty() {
+            return;
+        }
+
+        let copy_text = selected_text.clone();
+        ModernMenu::new()
+            .item(i18n("agent-transcript-copy"), move |_, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
+            })
+            .icon(IconName::Copy)
+            .item(i18n("agent-transcript-quote-and-ask"), move |window, cx| {
+                let selected_text = selected_text.clone();
+                let _ = pane.update(cx, |pane, cx| {
+                    pane.add_response_annotation(selected_text, window, cx);
+                });
+            })
+            .icon(IconName::TextSelect)
+            .show_at(bounds.bottom_left(), window, cx);
+    }
 }

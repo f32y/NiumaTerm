@@ -1,10 +1,15 @@
 pub(in crate::agent) mod attachments;
 mod palette;
+mod response_annotations;
 mod rewind;
 
 #[allow(unused_imports)]
 pub(super) use crate::agent::composer::palette::{
     PaletteAction, PaletteControl, PaletteModel, PaletteRow,
+};
+pub(in crate::agent) use crate::agent::composer::response_annotations::{
+    annotation_count_label, parse_annotated_prompt, prompt_with_response_annotations,
+    visible_prompt,
 };
 #[allow(unused_imports)]
 pub(super) use crate::agent::composer::rewind::{

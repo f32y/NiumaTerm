@@ -4,6 +4,7 @@ use gpui_component::input::Enter;
 use nmt_agent_utils::chat::QueuedPrompt;
 use nmt_config::system::NewlineShortcut;
 
+use crate::agent::composer::prompt_with_response_annotations;
 use crate::agent::view::banners::composer_stats_label;
 use crate::agent::view::history::queued_message_label;
 use crate::agent::view::{ComposerEnterBehavior, composer_enter_behavior};
@@ -13,6 +14,17 @@ fn queued_message_label_flattens_a_multi_line_prompt() {
     let prompt = QueuedPrompt::local("first\nline".to_string());
 
     assert_eq!(queued_message_label(&prompt), "Queued message: first line");
+}
+
+#[test]
+fn queued_message_label_omits_response_annotation_context() {
+    let submitted = prompt_with_response_annotations("Explain this", &["selected text".into()]);
+    let prompt = QueuedPrompt::local(submitted);
+
+    assert_eq!(
+        queued_message_label(&prompt),
+        "Queued message: Explain this"
+    );
 }
 
 #[test]

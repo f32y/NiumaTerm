@@ -12,8 +12,8 @@ use gpui::Image;
 use nmt_i18n::i18n;
 
 use crate::agent::composer::{
-    CommandFeedbackKind, PaletteControl, restored_input_after_interruption,
-    rewind_blocks_submission,
+    CommandFeedbackKind, PaletteControl, prompt_with_response_annotations,
+    restored_input_after_interruption, rewind_blocks_submission,
 };
 use crate::agent::profile::{ANTHROPIC_MODEL_ENV, launch_env_value};
 pub(super) use crate::agent::session::backend::Backend;
@@ -217,6 +217,7 @@ impl AgentPane {
             input_history_scope,
             input_history_navigation: InputHistoryNavigation::default(),
             attachments: PendingAttachments::default(),
+            response_annotations: Vec::new(),
             last_response_at: None,
             conversation_named: false,
             transcript,
@@ -746,7 +747,7 @@ impl AgentPane {
     /// also used for UI-generated messages such as the `/effort` command.
     /// Returns false when the session isn't ready yet.
     pub(super) fn send_text(&mut self, text: String, cx: &mut Context<Self>) -> bool {
-        self.send_text_inner(text, None, false, cx)
+        self.send_text_inner(text, None, None, cx)
     }
 
     pub(super) fn send_text_with_skill(
@@ -755,7 +756,9 @@ impl AgentPane {
         skill: Option<&SkillReference>,
         cx: &mut Context<Self>,
     ) -> bool {
-        self.send_text_inner(text, skill, true, cx)
+        let response_annotations = self.response_annotations.clone();
+        let submitted = prompt_with_response_annotations(&text, &response_annotations);
+        self.send_text_inner(submitted, skill, Some((text, response_annotations)), cx)
     }
 
     /// Ask the backend what to call this conversation. Claude's CLI names it
@@ -786,7 +789,7 @@ impl AgentPane {
         &mut self,
         text: String,
         skill: Option<&SkillReference>,
-        restore_on_interrupt: bool,
+        restore_on_interrupt: Option<(String, Vec<String>)>,
         cx: &mut Context<Self>,
     ) -> bool {
         if rewind_blocks_submission(self.rewind.state.as_ref()) {
@@ -838,6 +841,9 @@ impl AgentPane {
             .map(|attachment| attachment.image())
             .collect();
         self.attachments.clear();
+        if restore_on_interrupt.is_some() {
+            self.response_annotations.clear();
+        }
 
         // The first message commits this tab to its conversation; the
         // history list is no longer offered.
@@ -847,20 +853,25 @@ impl AgentPane {
         // stating a subject, and the settings controls send some of them on
         // the user's behalf — so a conversation that opens with one waits for
         // the message that follows.
+        let title_text = restore_on_interrupt
+            .as_ref()
+            .map_or(text.as_str(), |(prompt, _)| prompt.as_str());
         if !self.conversation_named
-            && let Some(opening_line) = tab_title_from_prompt(&text)
+            && let Some(opening_line) = tab_title_from_prompt(title_text)
         {
-            self.request_conversation_title(&text, opening_line, cx);
+            self.request_conversation_title(title_text, opening_line, cx);
         }
 
         match outcome {
             SendOutcome::StartedTurn => {
                 self.turn_seq += 1;
-                let unanswered_prompt = restore_on_interrupt.then(|| UnansweredPrompt {
-                    turn: self.turn_seq,
-                    text: text.clone(),
-                    skill: skill.cloned(),
-                });
+                let unanswered_prompt =
+                    restore_on_interrupt.map(|(text, response_annotations)| UnansweredPrompt {
+                        turn: self.turn_seq,
+                        text,
+                        response_annotations,
+                        skill: skill.cloned(),
+                    });
                 self.push_item_with_images(
                     SessionItem::UserMessage { text: Some(text) },
                     sent_images,
@@ -1205,6 +1216,10 @@ impl AgentPane {
                 input.set_selected_range(cursor..cursor, cx);
             });
             self.palette.skill_binding = prompt.skill;
+            let mut response_annotations = prompt.response_annotations;
+            response_annotations.append(&mut self.response_annotations);
+            self.response_annotations = response_annotations;
+            cx.notify();
         }
 
         self.interrupt(cx);

@@ -3,6 +3,7 @@ use gpui_component::modern_menu::{ModernMenu, ModernMenuExt as _};
 use nmt_i18n::i18n;
 
 use crate::agent::composer::attachments::MAX_ATTACHMENTS;
+use crate::agent::composer::{annotation_count_label, parse_annotated_prompt};
 use crate::agent::transcript::disclosure_row::{
     AGENT_DISCLOSURE_DETAIL_INSET, AGENT_TEXT_MEASURE_REMS, AgentDisclosureRow,
     USER_TEXT_MEASURE_REMS,
@@ -203,6 +204,8 @@ impl TranscriptView {
         text: &str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let parsed = parse_annotated_prompt(text);
+        let text = parsed.as_ref().map_or(text, |parsed| parsed.prompt);
         let head_len = truncated_user_prompt(text).map(str::len);
         let expanded = head_len.is_some() && self.expanded_rows.contains(&index);
         let shown = match (head_len, expanded) {
@@ -229,6 +232,105 @@ impl TranscriptView {
                 }))
         });
 
+        let annotations_expanded = self.expanded_annotations.contains(&index);
+        let annotations = parsed.as_ref().and_then(|parsed| {
+            (!parsed.annotations.is_empty()).then(|| {
+                let action_label = if annotations_expanded {
+                    i18n("agent-transcript-annotations-collapse")
+                } else {
+                    i18n("agent-transcript-annotations-expand")
+                };
+                let content = annotations_expanded.then(|| {
+                    v_flex()
+                        .w_full()
+                        .gap_2()
+                        .border_t_1()
+                        .border_color(cx.theme().border)
+                        .px_2()
+                        .py_2()
+                        .children(parsed.annotations.iter().enumerate().map(
+                            |(position, annotation)| {
+                                h_flex()
+                                    .w_full()
+                                    .items_start()
+                                    .gap_2()
+                                    .child(
+                                        div()
+                                            .flex_none()
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(format!("{}.", position + 1)),
+                                    )
+                                    .child(
+                                        div().flex_1().min_w_0().child(
+                                            text::TextView::plain(
+                                                format!(
+                                                    "entry-response-annotation-{index}-{position}"
+                                                ),
+                                                annotation.text.clone(),
+                                            )
+                                            .selectable(true),
+                                        ),
+                                    )
+                            },
+                        ))
+                });
+
+                v_flex()
+                    .w(px(320.))
+                    .max_w_full()
+                    .overflow_hidden()
+                    .rounded(UI_RADIUS)
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .bg(cx.theme().muted)
+                    .child(
+                        Button::new(("entry-response-annotations", index))
+                            .ghost()
+                            .xsmall()
+                            .w_full()
+                            .icon(IconName::TextSelect)
+                            .label(annotation_count_label(parsed.annotations.len()))
+                            .child(
+                                Icon::new(if annotations_expanded {
+                                    IconName::ChevronUp
+                                } else {
+                                    IconName::ChevronDown
+                                })
+                                .xsmall(),
+                            )
+                            .aria_label(action_label)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if !this.expanded_annotations.insert(index) {
+                                    this.expanded_annotations.remove(&index);
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .children(content)
+            })
+        });
+        let message = div()
+            // The bubble tracks its text rather than the pane, so a
+            // long prompt wraps at the prompt measure instead of
+            // stretching a tinted block across the transcript.
+            .max_w(rems(USER_TEXT_MEASURE_REMS))
+            // The measure is a cap, not a floor: a container narrower
+            // than it — the side panels showing a child or workflow
+            // agent conversation — must still wrap the bubble. Without
+            // this the item keeps its content width and, being
+            // right-aligned, overflows past the container's left edge.
+            .min_w_0()
+            .px_3()
+            .py_2()
+            .rounded(UI_RADIUS)
+            .bg(cx.theme().muted)
+            // Plain, not markdown: the prompt is user-authored text and
+            // must render verbatim, but stays drag-selectable.
+            .child(text::TextView::plain(("user-text", index), shown).selectable(true))
+            .children(toggle)
+            .children(self.render_entry_images(index, cx));
+
         h_flex()
             .id(("entry", index))
             .group("entry")
@@ -239,26 +341,11 @@ impl TranscriptView {
             .modern_context_menu(Self::copy_menu(cx.entity().downgrade(), index))
             .child(self.hover_stamp(index, cx))
             .child(
-                div()
-                    // The bubble tracks its text rather than the pane, so a
-                    // long prompt wraps at the prompt measure instead of
-                    // stretching a tinted block across the transcript.
-                    .max_w(rems(USER_TEXT_MEASURE_REMS))
-                    // The measure is a cap, not a floor: a container narrower
-                    // than it — the side panels showing a child or workflow
-                    // agent conversation — must still wrap the bubble. Without
-                    // this the item keeps its content width and, being
-                    // right-aligned, overflows past the container's left edge.
-                    .min_w_0()
-                    .px_3()
-                    .py_2()
-                    .rounded(UI_RADIUS)
-                    .bg(cx.theme().muted)
-                    // Plain, not markdown: the prompt is user-authored text and
-                    // must render verbatim, but stays drag-selectable.
-                    .child(text::TextView::plain(("user-text", index), shown).selectable(true))
-                    .children(toggle)
-                    .children(self.render_entry_images(index, cx)),
+                v_flex()
+                    .items_end()
+                    .gap_1()
+                    .children(annotations)
+                    .child(message),
             )
             .into_any_element()
     }

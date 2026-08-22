@@ -39,6 +39,8 @@ pub(crate) struct TranscriptView {
     /// Work-log rows whose detail (command output, reasoning text) is
     /// expanded, keyed by transcript index.
     pub(in crate::agent) expanded_rows: HashSet<usize>,
+    /// User-message annotation cards expanded to show their complete text.
+    pub(in crate::agent) expanded_annotations: HashSet<usize>,
     /// Long expanded code transcripts retain their segmented source and
     /// independent uniform-list position while visible. Collapsing a row drops
     /// the duplicate source so large outputs do not stay resident twice.
@@ -100,6 +102,7 @@ impl TranscriptView {
             toggled_turns: HashSet::new(),
             collapse_mode: CollapseRows::default(),
             expanded_rows: HashSet::new(),
+            expanded_annotations: HashSet::new(),
             virtual_transcripts: HashMap::new(),
             settled_turns: HashSet::new(),
             completed_turn_seconds: HashMap::new(),
@@ -158,6 +161,7 @@ impl TranscriptView {
         self.expanded_groups.clear();
         self.toggled_turns.clear();
         self.expanded_rows.clear();
+        self.expanded_annotations.clear();
         self.settled_turns.clear();
         self.completed_turn_seconds.clear();
         self.completed_turn_output_tokens.clear();
