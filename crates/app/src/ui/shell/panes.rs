@@ -1,3 +1,4 @@
+use crate::ui::main_view_background_opacity;
 use crate::ui::shell::*;
 
 const PANE_RESIZE_STEP: Pixels = px(30.0);
@@ -215,6 +216,14 @@ impl Shell {
             return div()
                 .size_full()
                 .overflow_hidden()
+                // The Settings widget paints no fill of its own, so without
+                // this the translucent surface card shows the window backdrop
+                // through the page area while the sidebar, which carries an
+                // explicit fill, stays opaque.
+                .bg(cx
+                    .theme()
+                    .background
+                    .alpha(main_view_background_opacity(cx)))
                 .child(settings)
                 .into_any_element();
         }
