@@ -78,10 +78,26 @@ fn update_check_item() -> SettingItem {
             .disabled(options.disabled || checking)
             .on_click(|_, _, cx: &mut App| update::check_now(cx));
 
+        // The channel resolved a specific release, so the link goes to that
+        // one rather than to the list the user would have to find it in.
+        let open = match &status {
+            Status::Available(release) => {
+                let page_url = release.page_url.clone();
+                Some(
+                    Button::new("app-update-open")
+                        .primary()
+                        .label(i18n("settings-about-open-release"))
+                        .disabled(options.disabled)
+                        .on_click(move |_, _, cx: &mut App| cx.open_url(&page_url)),
+                )
+            }
+            _ => None,
+        };
+
         card_row(
             i18n("settings-about-check-for-updates"),
             status_text(&status),
-            check,
+            h_flex().gap_2().children(open).child(check),
             cx,
         )
         .into_any_element()

@@ -259,6 +259,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
             cx.observe_global::<AppSettings>(|cx| {
                 let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
                 agent::updates::reconcile_profiles(&agent_profiles, cx);
+                update::settings_changed(cx);
                 set_job_management(cx.global::<AppSettings>().manage_subprocess_job);
 
                 let smooth_panels = cx.global::<AppSettings>().smooth_scrolling.panels_enabled();

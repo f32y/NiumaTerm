@@ -1,6 +1,7 @@
 //! Asking GitHub what the selected channel has published, and deciding whether
 //! it supersedes what is running.
 
+use std::slice::from_ref;
 use std::time::Duration;
 
 use nmt_config::update::UpdateChannel;
@@ -10,9 +11,16 @@ use serde::Deserialize;
 
 use crate::update::APP_VERSION;
 
-/// One request answers both channels: the list is newest first, and each entry
-/// says whether it is a prerelease. Thirty entries reach well past the newest
-/// of either channel even when one of them is publishing daily.
+/// GitHub's own notion of "latest" is the newest release that is neither a
+/// draft nor a prerelease, which is exactly the stable channel. Asking for it
+/// directly keeps a stable release findable however many nightlies were
+/// published after it; a page of the full list cannot promise that, since
+/// nightlies published daily push a months-old release off it.
+const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/f32y/NiumaTerm/releases/latest";
+
+/// The nightly channel has no such endpoint, so it scans the list, which
+/// arrives newest first. Thirty entries reach past the newest nightly unless
+/// the stable channel out-publishes it by that many in a row.
 const RELEASES_URL: &str = "https://api.github.com/repos/f32y/NiumaTerm/releases?per_page=30";
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -52,10 +60,17 @@ pub(crate) fn latest(channel: UpdateChannel) -> Result<Option<Release>, CheckErr
         .build()
         .map_err(|_| CheckError::Unreachable)?;
 
+    match channel {
+        UpdateChannel::Stable => select_latest(&get(&client, LATEST_RELEASE_URL)?),
+        UpdateChannel::Nightly => select(&get(&client, RELEASES_URL)?, channel),
+    }
+}
+
+fn get(client: &Client, url: &str) -> Result<String, CheckError> {
     // GitHub answers an unauthenticated request without a user agent with 403,
     // so the header is required rather than merely polite.
     let response = client
-        .get(RELEASES_URL)
+        .get(url)
         .header("User-Agent", user_agent())
         .header("Accept", "application/vnd.github+json")
         .header("X-GitHub-Api-Version", "2022-11-28")
@@ -69,9 +84,7 @@ pub(crate) fn latest(channel: UpdateChannel) -> Result<Option<Release>, CheckErr
         return Err(CheckError::Unreadable);
     }
 
-    let body = response.text().map_err(|_| CheckError::Unreadable)?;
-
-    select(&body, channel)
+    response.text().map_err(|_| CheckError::Unreadable)
 }
 
 /// Split from the request so the selection can be exercised against a recorded
@@ -81,6 +94,15 @@ pub(crate) fn select(body: &str, channel: UpdateChannel) -> Result<Option<Releas
         serde_json::from_str::<Vec<ReleaseEntry>>(body).map_err(|_| CheckError::Unreadable)?;
 
     Ok(newest_in_channel(&entries, channel))
+}
+
+/// The single entry `/releases/latest` answers with. It is still checked
+/// against the stable channel: the endpoint promises the newest published
+/// non-prerelease, not that its tag is one this build can be compared against.
+pub(crate) fn select_latest(body: &str) -> Result<Option<Release>, CheckError> {
+    let entry = serde_json::from_str::<ReleaseEntry>(body).map_err(|_| CheckError::Unreadable)?;
+
+    Ok(newest_in_channel(from_ref(&entry), UpdateChannel::Stable))
 }
 
 fn user_agent() -> String {
