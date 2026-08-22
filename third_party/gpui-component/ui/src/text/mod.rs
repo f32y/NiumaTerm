@@ -10,6 +10,8 @@ mod style;
 mod text_view;
 mod utils;
 mod window_selection;
+#[cfg(test)]
+mod window_selection_bounds_tests;
 
 use gpui::{App, ElementId, IntoElement, RenderOnce, SharedString, Window};
 pub use markdown_ext::*;
