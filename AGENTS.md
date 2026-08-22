@@ -160,6 +160,8 @@ validated, such as by manually exercising the affected behavior, running an
 automated functional or regression test that directly covers it, or collecting
 concrete before-and-after performance data. If no such validation was performed,
 omit the section instead of substituting routine tool output as boilerplate.
+The commit-msg hook rejects a `Verification` section that mentions `cargo
+check`, `cargo fmt`, `cargo clippy`, `cargo build`, rustfmt, or compiling.
 
 When an AI coding agent materially contributes to the change, end the
 commit message with a `Co-Authored-By` trailer naming the model that

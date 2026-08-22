@@ -58,6 +58,38 @@ EOF
     exit 1
 fi
 
+# A Verification section claims the change itself was exercised, so routine
+# build, format, and lint runs do not belong in it: they are mandatory for
+# any edit and say nothing about whether the new behavior works. Only the
+# section body is scanned, so a subject or body line about a clippy fix is
+# still fine.
+routine_verification=$(
+    printf '%s\n' "$body" | awk '
+        /^[Vv]erification/ { in_section = 1 }
+        !in_section { next }
+        tolower($0) ~ /cargo (\+[a-z0-9._-]+ )?(check|fmt|clippy|build)/ ||
+        tolower($0) ~ /rustfmt|cargo-fmt|clippy::/ ||
+        tolower($0) ~ /compil(e|es|ed|ation)/ {
+            printf "%d: %s\n", NR, $0
+        }
+    '
+)
+if [ -n "$routine_verification" ]; then
+    cat >&2 <<EOF
+commit-msg: Verification must not cite routine build or lint commands
+
+cargo check, cargo fmt, cargo clippy, cargo build and compiling are
+required for every change and do not verify the changed behavior. Describe
+how the behavior itself was exercised - a manual run, a functional or
+regression test covering it, or before-and-after measurements - or drop the
+Verification section entirely.
+
+Offending lines:
+$routine_verification
+EOF
+    exit 1
+fi
+
 subject=$(sed -n '/^#/!{/./{p;q;}}' "$msg_file")
 
 # 60/80 rule: keep the subject under 60 chars and wrap body lines at 80.
