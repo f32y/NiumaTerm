@@ -2,7 +2,9 @@ use std::ffi::{self, OsString};
 use std::io::{Error, Result};
 use std::os::windows::ffi::OsStrExt as _;
 use std::os::windows::io::IntoRawHandle;
-use std::{env, mem, ptr};
+use std::sync::mpsc;
+use std::time::Duration;
+use std::{env, mem, ptr, thread};
 
 use libc::c_ushort;
 use miow::pipe::anonymous;
@@ -135,13 +137,39 @@ pub struct Conpty {
     job: Option<HANDLE>,
 }
 
+/// How long the pseudoconsole close is given before the shell tree is ended
+/// out from under it. A console whose client leaves closes in milliseconds, so
+/// this only bounds the wait described on [`Conpty::drop`].
+const CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
+
 impl Drop for Conpty {
     fn drop(&mut self) {
-        // XXX: This will block until the conout pipe is drained. Will cause a deadlock if the
-        // conout pipe has already been dropped by this point.
+        // ClosePseudoConsole returns once the console host has finished, which
+        // needs the client to detach and the conout pipe to drain. This thread
+        // is the one that was draining conout, so a shell that does not leave
+        // on the console's close event blocks the call with nothing left to
+        // release it: the job whose closure ends that shell is only reached
+        // after the call returns, so the wait outlives its own remedy.
         //
-        // See PR #3084 and https://docs.microsoft.com/en-us/windows/console/closepseudoconsole.
-        unsafe { (self.api.close)(self.handle) }
+        // See https://docs.microsoft.com/en-us/windows/console/closepseudoconsole.
+        //
+        // The close therefore runs on a scratch thread and the job is closed
+        // whether or not it came back. Ending the tree is what frees a close
+        // still waiting on it, and going in this order still lets a shell that
+        // does leave on its own finish first.
+        let (closed_tx, closed) = mpsc::channel();
+        let handle = self.handle;
+        let close = self.api.close;
+
+        thread::spawn(move || {
+            unsafe { close(handle) };
+
+            let _ = closed_tx.send(());
+        });
+
+        if closed.recv_timeout(CLOSE_TIMEOUT).is_err() {
+            warn!("conpty: the pseudoconsole is still closing; ending the shell tree");
+        }
 
         // After the console teardown, closing the job reaps whatever is left
         // of the tree (detached/GUI descendants included).
