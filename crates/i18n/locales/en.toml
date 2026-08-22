@@ -42,6 +42,15 @@
 "settings-about-update-available" = "{version} is available"
 "settings-about-check-unreachable" = "Could not reach GitHub"
 "settings-about-check-unreadable" = "GitHub returned something unreadable"
+"settings-about-install-button" = "Update and Restart"
+"settings-about-installing" = "Installing {version}..."
+"settings-about-install-no-package" = "This release has no package to install"
+"settings-about-install-unreachable" = "Could not download the update"
+"settings-about-install-checksum" = "The downloaded package does not match its published checksum"
+"settings-about-install-unpack" = "The downloaded package could not be unpacked"
+"settings-about-install-not-writable" = "The installation directory cannot be written to"
+"settings-about-install-replace" = "Could not replace the installed files"
+"settings-about-install-relaunch" = "Updated, but NiumaTerm could not be restarted"
 
 # Appearance settings
 "settings-appearance-title" = "Appearance"

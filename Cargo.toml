@@ -591,6 +591,7 @@ xkbcommon-dl = "0.4.2"
 yazi = "0.2.1"
 yeslogic-fontconfig-sys = "6.0.1"
 zbus = { version = "5.16.0", features = ["blocking"] }
+zip = { version = "6.0.0", default-features = false, features = ["deflate"] }
 zeno = "0.3.3"
 
 [profile.release]
