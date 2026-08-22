@@ -6,9 +6,12 @@ use crate::update::{self, CheckError, InstallError, Status};
 pub(super) fn about_page() -> SettingPage {
     SettingPage::new(i18n("settings-about-title"))
         .default_open(true)
+        // One untitled group. A page holding a single group drops its
+        // subcategory entries from the sidebar and stops appending a group
+        // name to the page header, so what the build is and how it updates
+        // read as one page instead of two the user switches between.
         .group(
             SettingGroup::new()
-                .title(i18n("settings-about-product"))
                 .item(SettingItem::new(
                     i18n("settings-about-version"),
                     SettingField::render(|_, _, _| Label::new(APP_VERSION).text_sm()),
@@ -21,11 +24,7 @@ pub(super) fn about_page() -> SettingPage {
                             .label(i18n("settings-about-release-page"))
                             .on_click(|_, _, cx: &mut App| cx.open_url(RELEASE_PAGE_URL))
                     }),
-                )),
-        )
-        .group(
-            SettingGroup::new()
-                .title(i18n("settings-about-updates"))
+                ))
                 .item(
                     SettingItem::new(
                         i18n("settings-about-check-updates"),

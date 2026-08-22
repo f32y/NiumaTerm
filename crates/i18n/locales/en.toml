@@ -22,11 +22,9 @@
 
 # About settings
 "settings-about-title" = "About"
-"settings-about-product" = "NiumaTerm"
 "settings-about-version" = "Version"
 "settings-about-releases" = "Releases"
 "settings-about-release-page" = "Go to Release Page"
-"settings-about-updates" = "Updates"
 "settings-about-check-updates" = "Check for Updates"
 "settings-about-check-updates-description" = "Ask GitHub once at startup and every six hours whether the selected channel has published a newer build. The Check button below stays available while this is off."
 "settings-about-channel" = "Update Channel"
