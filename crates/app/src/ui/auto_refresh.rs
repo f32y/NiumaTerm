@@ -7,7 +7,8 @@
 //! the toggle is on (the timer loop exits when the entity is dropped), and
 //! one initial refresh when the toggle starts on. `refresh` runs a single
 //! fetch on the background executor, dropping requests while one is already
-//! in flight; errors keep the previous data.
+//! in flight; errors keep the previous data. `refresh_from_user` is the same
+//! fetch, marked so the widget can show progress for it.
 
 use std::time::Duration;
 
@@ -18,6 +19,10 @@ use crate::ui::AppSettings;
 #[derive(Default)]
 pub(crate) struct RefreshState {
     pub refreshing: bool,
+    /// Whether the in-flight fetch was started by the user. A widget shows a
+    /// spinner only for those: one appearing on its own every interval draws
+    /// the eye to a background task nobody asked about.
+    pub user_requested: bool,
     /// Mirror of the widget's settings toggle; see the module docs.
     pub enabled: bool,
 }
@@ -66,6 +71,12 @@ pub(crate) fn start<V: AutoRefresh>(view: &mut V, cx: &mut Context<V>) {
     }
 }
 
+/// Refresh in response to a click, so the widget can show it is working.
+pub(crate) fn refresh_from_user<V: AutoRefresh>(view: &mut V, cx: &mut Context<V>) {
+    view.state().user_requested = true;
+    refresh(view, cx);
+}
+
 pub(crate) fn refresh<V: AutoRefresh>(view: &mut V, cx: &mut Context<V>) {
     if view.state().refreshing {
         return;
@@ -81,6 +92,7 @@ pub(crate) fn refresh<V: AutoRefresh>(view: &mut V, cx: &mut Context<V>) {
         let output = fetch.await;
         this.update(cx, |this, cx| {
             this.state().refreshing = false;
+            this.state().user_requested = false;
             this.apply(output);
             cx.notify();
         })
