@@ -9,6 +9,7 @@ mod tests;
 use std::time::Duration;
 
 use gpui::{App, Global};
+use nmt_config::update::UpdateChannel;
 use nmt_version::Version;
 
 use crate::ui::AppSettings;
@@ -42,14 +43,22 @@ pub(crate) enum Status {
 pub(crate) struct AppUpdate {
     status: Status,
     testing: bool,
+    /// The settings the current status was produced under. Settings changes
+    /// arrive as one undifferentiated notification, so the values are mirrored
+    /// here to tell an update setting moving from a change to anything else.
+    channel: UpdateChannel,
+    checking_enabled: bool,
 }
 
 impl Global for AppUpdate {}
 
 pub(crate) fn initialize(testing: bool, cx: &mut App) {
+    let settings = cx.global::<AppSettings>();
     cx.set_global(AppUpdate {
         status: Status::Unknown,
         testing,
+        channel: settings.update_channel,
+        checking_enabled: settings.check_updates,
     });
 }
 
@@ -61,6 +70,33 @@ pub(crate) fn status(cx: &App) -> Status {
 /// The About page's Check button. It runs whether or not automatic checking is
 /// on, which is the point of having it.
 pub(crate) fn check_now(cx: &mut App) {
+    check(cx);
+}
+
+/// React to an update setting changing.
+///
+/// A status describes the channel it was fetched for, so keeping it across a
+/// switch asserts something about the new channel that was never asked; it is
+/// cleared instead. The check that replaces it still answers to the automatic
+/// checking switch, which is the user saying not to reach the network unasked.
+pub(crate) fn settings_changed(cx: &mut App) {
+    let settings = cx.global::<AppSettings>();
+    let channel = settings.update_channel;
+    let checking_enabled = settings.check_updates;
+
+    let update = cx.global_mut::<AppUpdate>();
+    let switched = update.channel != channel;
+    let turned_on = checking_enabled && !update.checking_enabled;
+    update.channel = channel;
+    update.checking_enabled = checking_enabled;
+    if switched {
+        update.status = Status::Unknown;
+    }
+
+    if update.testing || !checking_enabled || !(switched || turned_on) {
+        return;
+    }
+
     check(cx);
 }
 
@@ -97,6 +133,12 @@ fn check(cx: &mut App) {
             .spawn(async move { releases::latest(channel) })
             .await;
         let _ = cx.update(|cx| {
+            // The channel can move while the request is out. A result for the
+            // channel the user left says nothing about the one they chose, and
+            // the switch has already started the check that does.
+            if cx.global::<AppSettings>().update_channel != channel {
+                return;
+            }
             set_status(outcome(found), cx);
             cx.refresh_windows();
         });

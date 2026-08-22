@@ -1,7 +1,7 @@
 use nmt_config::update::UpdateChannel;
 use nmt_version::Version;
 
-use crate::update::releases::{CheckError, select, supersedes};
+use crate::update::releases::{CheckError, select, select_latest, supersedes};
 
 fn version(label: &str) -> Version {
     Version::parse(label).expect("test labels are well formed")
@@ -127,6 +127,29 @@ fn a_response_that_is_not_the_releases_list_is_rejected() {
             r#"{"message":"API rate limit exceeded"}"#,
             UpdateChannel::Stable
         ),
+        Err(CheckError::Unreadable)
+    );
+}
+
+#[test]
+fn the_latest_endpoint_answers_the_stable_channel() {
+    let published = r#"{ "tag_name": "v1.3.0", "html_url": "https://example.invalid/r3",
+        "draft": false, "prerelease": false }"#;
+
+    let release = select_latest(published).unwrap().unwrap();
+    assert_eq!(release.label, "v1.3.0");
+    assert_eq!(release.page_url, "https://example.invalid/r3");
+
+    // The endpoint promises the newest published non-prerelease, not that its
+    // tag is one this build can be placed against.
+    let predates_the_naming = r#"{ "tag_name": "build-4", "html_url": "https://example.invalid/b4",
+        "draft": false, "prerelease": false }"#;
+    assert_eq!(select_latest(predates_the_naming).unwrap(), None);
+
+    // GitHub answers 404 for a repository with no full release yet, which
+    // reaches this as a body that is not a release.
+    assert_eq!(
+        select_latest(r#"{"message":"Not Found"}"#),
         Err(CheckError::Unreadable)
     );
 }
