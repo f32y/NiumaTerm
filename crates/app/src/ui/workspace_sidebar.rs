@@ -1089,7 +1089,23 @@ impl Sidebar {
                                 cx.notify();
                             }))
                             .children(summaries.iter().enumerate().flat_map(|(idx, ws)| {
-                                let mut rows = vec![self.render_item(idx, ws, rename, cx)];
+                                // Each workspace row is followed by that
+                                // workspace's own tab rows, so the rule goes
+                                // above the row rather than below it: drawn
+                                // below, it would separate a workspace from
+                                // its first tab instead of from the next
+                                // workspace.
+                                let mut rows = Vec::new();
+                                if idx > 0 {
+                                    rows.push(
+                                        div()
+                                            .h(px(1.))
+                                            .flex_shrink_0()
+                                            .bg(cx.theme().border.opacity(0.6))
+                                            .into_any_element(),
+                                    );
+                                }
+                                rows.push(self.render_item(idx, ws, rename, cx));
                                 let ws_tabs = tabs.get(idx).map(Vec::as_slice).unwrap_or_default();
                                 // Closing a workspace's last tab falls through to
                                 // closing the workspace, so the row keeps its
