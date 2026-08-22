@@ -1,6 +1,6 @@
 use nmt_i18n::i18n;
 
-use crate::agent::composer::{CommandFeedbackKind, RewindAction, RewindState};
+use crate::agent::composer::{CommandFeedbackKind, ForkState, RewindAction, RewindState};
 use crate::agent::input_history::InputHistoryDirection;
 use crate::agent::*;
 
@@ -11,6 +11,8 @@ pub(in crate::agent) enum PaletteAction {
     Skill(SkillInfo),
     RewindCheckpoint(sessions::ClaudeCheckpoint),
     RewindAction(RewindAction),
+    ForkCheckpoint(ForkCheckpoint),
+    ForkCancel,
 }
 
 #[derive(Clone)]
@@ -107,6 +109,9 @@ impl AgentPane {
     pub(in crate::agent) fn palette_model(&self, cx: &Context<Self>) -> Option<PaletteModel> {
         if let Some(state) = self.rewind.state.as_ref() {
             return self.rewind_palette_model(state);
+        }
+        if let Some(state) = self.fork.state.as_ref() {
+            return self.fork_palette_model(state);
         }
         if self.palette.dismissed {
             return None;
@@ -338,6 +343,8 @@ impl AgentPane {
             .is_some_and(RewindState::is_picker)
         {
             self.cancel_rewind_picker(cx);
+        } else if self.fork.state.as_ref().is_some_and(ForkState::is_picker) {
+            self.cancel_fork_picker(cx);
         } else {
             self.palette.dismissed = true;
             cx.notify();
@@ -484,6 +491,14 @@ impl AgentPane {
             }
             PaletteAction::RewindAction(action) => {
                 self.activate_rewind_action(action, window, cx);
+                return;
+            }
+            PaletteAction::ForkCheckpoint(checkpoint) => {
+                self.start_conversation_branch(checkpoint, cx);
+                return;
+            }
+            PaletteAction::ForkCancel => {
+                self.cancel_fork_picker(cx);
                 return;
             }
         };

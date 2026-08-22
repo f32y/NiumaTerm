@@ -192,6 +192,56 @@ impl TranscriptView {
         }
     }
 
+    /// The copy item plus the actions a prompt offers over the conversation
+    /// it opened: branching in front of it, or returning to it.
+    ///
+    /// Which of the two appears follows the backend. Where a branch is a
+    /// request the harness answers, the prompt names a cut and nothing else;
+    /// where the conversation is a transcript file this side rewrites, the
+    /// same cut also decides what happens to the files that turn touched, so
+    /// the rewind actions are what the prompt leads to.
+    fn user_row_menu(
+        &self,
+        index: usize,
+        cx: &Context<Self>,
+    ) -> impl Fn(ModernMenu, &mut Window, &mut App) -> ModernMenu + 'static {
+        let copy = Self::copy_menu(cx.entity().downgrade(), index);
+        let caps = self.kind.caps();
+        // Resolved now rather than when the menu opens: a prompt's place among
+        // the turns is a property of the transcript as it stands, and the rows
+        // can move under a menu that is already up.
+        let target = self
+            .owner()
+            .filter(|_| caps.session_fork || caps.file_rewind)
+            .zip(self.prompt_target(index))
+            .map(|(owner, target)| (owner.clone(), target));
+
+        move |menu, window, cx| {
+            let menu = copy(menu, window, cx);
+            let Some((pane, target)) = target.clone() else {
+                return menu;
+            };
+
+            if caps.session_fork {
+                menu.separator()
+                    .item(i18n("agent-transcript-fork-from-here"), move |_, cx| {
+                        let target = target.clone();
+                        pane.update(cx, |pane, cx| pane.fork_from_prompt(target, cx))
+                            .ok();
+                    })
+                    .icon(IconName::GitBranch)
+            } else {
+                menu.separator()
+                    .item(i18n("agent-transcript-rewind-to-here"), move |_, cx| {
+                        let target = target.clone();
+                        pane.update(cx, |pane, cx| pane.rewind_to_prompt(target, cx))
+                            .ok();
+                    })
+                    .icon(IconName::Undo)
+            }
+        }
+    }
+
     /// User prompt: right-aligned quiet bubble (muted surface, no border).
     ///
     /// Oversized prompts (huge pastes) collapse to their head by default:
@@ -338,7 +388,7 @@ impl TranscriptView {
             .justify_end()
             .items_end()
             .gap_2()
-            .modern_context_menu(Self::copy_menu(cx.entity().downgrade(), index))
+            .modern_context_menu(self.user_row_menu(index, cx))
             .child(self.hover_stamp(index, cx))
             .child(
                 v_flex()

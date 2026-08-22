@@ -398,6 +398,9 @@ impl AgentPane {
                 if self.history_ui.mode == RecentSessionsMode::Loading {
                     self.history_ui.mode = RecentSessionsMode::Open;
                     self.history_ui.pending_resume_replay = None;
+                    // A branch that never arrives would otherwise hold the
+                    // composer behind a conversation that is not being cut.
+                    self.abandon_conversation_branch();
                     if !fatal {
                         self.status = Status::Idle;
                     }
@@ -538,6 +541,10 @@ impl AgentPane {
                     self.palette.feedback = None;
                 }
                 self.apply_replay(items, cx);
+                // A branch is finished once the copy's own history has replaced
+                // the transcript, which is the moment it is a conversation the
+                // user can type into rather than one still being cut.
+                self.finish_conversation_branch(cx);
             }
             // The working row carries it: a turn waiting out a provider retry
             // is indistinguishable from one thinking slowly, and the elapsed
@@ -556,6 +563,9 @@ impl AgentPane {
                 self.transcript.update(cx, |transcript, cx| {
                     transcript.set_working_detail(detail, cx)
                 });
+            }
+            SessionEvent::ForkCheckpoints(checkpoints) => {
+                self.show_fork_checkpoints(checkpoints, cx)
             }
         }
     }

@@ -13,7 +13,7 @@ use nmt_i18n::i18n;
 
 use crate::agent::composer::{
     CommandFeedbackKind, PaletteControl, prompt_with_response_annotations,
-    restored_input_after_interruption, rewind_blocks_submission,
+    restored_input_after_interruption,
 };
 use crate::agent::profile::{ANTHROPIC_MODEL_ENV, launch_env_value};
 pub(super) use crate::agent::session::backend::Backend;
@@ -206,7 +206,15 @@ impl AgentPane {
         })
         .detach();
 
-        let transcript = cx.new(|_| TranscriptView::new(kind, cwd.clone()));
+        // The rows that branch or rewind the conversation address the pane, so
+        // the pane's own transcript is told which pane it belongs to; a view
+        // mirroring somebody else's conversation is left without one.
+        let owner = cx.entity().downgrade();
+        let transcript = cx.new(|_| {
+            let mut transcript = TranscriptView::new(kind, cwd.clone());
+            transcript.set_owner(owner);
+            transcript
+        });
 
         let mut this = Self {
             focus: cx.focus_handle(),
@@ -248,6 +256,7 @@ impl AgentPane {
             },
             queued_user_messages: VecDeque::new(),
             rewind: RewindFlow::default(),
+            fork: ForkFlow::default(),
             git_branch_poll: GitBranchPoll::default(),
             context_window_usage: None,
             context_composition: None,
@@ -792,7 +801,7 @@ impl AgentPane {
         restore_on_interrupt: Option<(String, Vec<String>)>,
         cx: &mut Context<Self>,
     ) -> bool {
-        if rewind_blocks_submission(self.rewind.state.as_ref()) {
+        if self.branch_flow_holds_composer() {
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-session-rewind-blocks-send").to_string(),
@@ -916,6 +925,7 @@ impl AgentPane {
         self.queued_user_messages.clear();
         self.rewind.state = None;
         self.rewind.file_completion = None;
+        self.fork.state = None;
         self.history_ui.pending_resume_replay = None;
         // An approval belongs to the tool call that asked for it. The backend
         // that asked is the one being replaced, so leaving the card up offers a

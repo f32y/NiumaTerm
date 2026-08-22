@@ -1,5 +1,6 @@
 use nmt_i18n::i18n;
 
+use crate::agent::composer::fork::{PromptTarget, checkpoint_at_depth};
 use crate::agent::composer::{CommandFeedbackKind, PaletteAction, PaletteModel, PaletteRow};
 use crate::agent::*;
 
@@ -110,7 +111,31 @@ pub(in crate::agent) fn rewind_timestamp(timestamp: Option<&str>) -> Option<Stri
 }
 
 impl AgentPane {
+    /// Rewind to one prompt the user pointed at in the transcript.
+    ///
+    /// The checkpoints still have to be read — only the transcript file
+    /// records what a rewind can be anchored on — so this is the same load the
+    /// picker does, carrying which of its answers to act on. What is skipped is
+    /// only choosing the prompt: the choice between restoring files, the
+    /// conversation, or both is what "rewind" leaves open, and it is still
+    /// offered.
+    pub(in crate::agent) fn rewind_to_prompt(
+        &mut self,
+        target: PromptTarget,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.load_rewind_checkpoints(Some(target), cx)
+    }
+
     pub(in crate::agent) fn open_rewind(&mut self, cx: &mut Context<Self>) -> bool {
+        self.load_rewind_checkpoints(None, cx)
+    }
+
+    fn load_rewind_checkpoints(
+        &mut self,
+        target: Option<PromptTarget>,
+        cx: &mut Context<Self>,
+    ) -> bool {
         if self.status != Status::Idle || self.is_command_busy() {
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
@@ -173,11 +198,35 @@ impl AgentPane {
                         );
                     }
                     Ok(checkpoints) => {
-                        this.rewind.state = Some(RewindState::SelectingCheckpoint {
-                            operation_id,
-                            checkpoints,
+                        // A pointed-at prompt skips ahead to the actions for
+                        // it; one the checkpoints do not confirm falls back to
+                        // the list, where the user can see why.
+                        let pointed_at = target.as_ref().and_then(|target| {
+                            checkpoint_at_depth(&checkpoints, target, |checkpoint| {
+                                checkpoint.prompt.as_str()
+                            })
+                            .cloned()
                         });
-                        this.palette.feedback = None;
+                        let unresolved = target.is_some() && pointed_at.is_none();
+                        this.rewind.state = Some(match pointed_at {
+                            Some(checkpoint) => RewindState::SelectingAction {
+                                operation_id,
+                                checkpoint,
+                            },
+                            None => RewindState::SelectingCheckpoint {
+                                operation_id,
+                                checkpoints,
+                            },
+                        });
+                        if unresolved {
+                            this.set_command_feedback(
+                                CommandFeedbackKind::Error,
+                                i18n("agent-rewind-prompt-not-a-checkpoint").to_string(),
+                                cx,
+                            );
+                        } else {
+                            this.palette.feedback = None;
+                        }
                         this.palette.selected = 0;
                         cx.notify();
                     }

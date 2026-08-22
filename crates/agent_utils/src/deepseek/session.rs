@@ -16,8 +16,9 @@ use crate::background_task::{
     BackgroundTaskKey, BackgroundTaskRefs, BackgroundTaskTranscriptUpdate,
 };
 use crate::chat::{
-    Event, MessageImage, QueuedPrompt, SendOutcome, SlashCommandArguments, SlashCommandInfo,
-    SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
+    Event, ForkAnchor, MessageImage, QueuedPrompt, SendOutcome, SlashCommandArguments,
+    SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
+    ThreadSettings,
 };
 use crate::deepseek::api::{ApiClient, CallError};
 use crate::deepseek::events::Downlinks;
@@ -98,11 +99,17 @@ const SUBAGENT_TRANSCRIPT_FRAME: &str = "nmt/subagent-transcript";
 const SKILLS_FRAME: &str = "nmt/skills";
 const PRESETS_FRAME: &str = "nmt/agent-presets";
 const WORKFLOW_TRANSCRIPT_FRAME: &str = "nmt/workflow-transcript";
+const FORK_CHECKPOINTS_FRAME: &str = "nmt/fork-checkpoints";
 
 /// How much of a resumed conversation is rebuilt. The harness pages history at
 /// whole-message boundaries, so this is a count of messages rather than of
 /// events; one page is what the pane shows, and older turns stay in the log.
 const REPLAY_MESSAGES: u64 = 200;
+
+/// How far back the branch-point picker looks. Larger than the replay window
+/// because a row costs one line here rather than a rebuilt turn, and a cut is
+/// worth offering at prompts that scrolled out of the rebuilt transcript.
+const FORK_CHECKPOINT_MESSAGES: u64 = 1000;
 
 /// A conversation this tab has just opened or reattached to.
 struct OpenedConversation {
@@ -396,6 +403,34 @@ fn load_replay(client: ApiClient, session_id: String, deliver: Arc<dyn Fn(Value)
     });
 }
 
+/// Read the prompts this conversation can be branched in front of.
+///
+/// The log answers it rather than the transcript this tab happens to be
+/// showing, so the offer covers turns from before the tab attached and stays
+/// right after a compaction rewrites what the transcript displays. It is read
+/// per request for the same reason: a list assembled as events went by would
+/// describe the conversation as it was when the tab last looked.
+fn load_fork_checkpoints(
+    client: ApiClient,
+    session_id: String,
+    deliver: Arc<dyn Fn(Value) + Send + Sync>,
+) {
+    thread::spawn(move || {
+        let payload = json!({ "sessionId": session_id, "maxMessages": FORK_CHECKPOINT_MESSAGES });
+        // A failure is delivered rather than only logged: the picker waits on
+        // this page, so a read that reported nothing would hold it open on a
+        // list never arriving.
+        let payload = match client.call("session.history", payload) {
+            Ok(page) => json!({ "type": FORK_CHECKPOINTS_FRAME, "page": page }),
+            Err(error) => json!({
+                "type": FORK_CHECKPOINTS_FRAME,
+                "error": error.message(),
+            }),
+        };
+        deliver(json!({ "payload": payload }));
+    });
+}
+
 /// Read the session's model directory and reconcile it with the profile's pick,
 /// then deliver the result.
 ///
@@ -486,12 +521,13 @@ impl Session {
             },
             SlashCommandInfo {
                 name: "fork".to_string(),
-                description: "Branch this conversation and continue in the copy".to_string(),
+                description: "Branch this conversation in front of an earlier prompt".to_string(),
                 argument_hint: None,
                 source: SlashCommandSource::Adapter,
                 arguments: SlashCommandArguments::None,
-                // The branch is cut at the last completed turn, so a fork
-                // requested mid-turn would silently drop the turn in progress.
+                // The harness cuts a branch on whole turns and refuses one
+                // anchored inside a turn still running, so a branch asked for
+                // mid-turn has no cut to offer.
                 run_policy: SlashCommandRunPolicy::IdleOnly,
             },
             SlashCommandInfo {
@@ -836,6 +872,15 @@ impl Session {
 
             events.push(Event::Replay(history::replay(page)));
             return events;
+        }
+
+        if frame["payload"]["type"] == FORK_CHECKPOINTS_FRAME {
+            return vec![Event::ForkCheckpoints(
+                match frame["payload"]["error"].as_str() {
+                    Some(message) => Err(message.to_string()),
+                    None => Ok(history::fork_checkpoints(&frame["payload"]["page"])),
+                },
+            )];
         }
 
         if frame["payload"]["type"] == MODELS_FRAME {
@@ -1209,18 +1254,38 @@ impl Session {
             .to_string())
     }
 
-    /// Branch this conversation at its last completed turn and continue in the
-    /// copy.
+    /// Ask which prompts this conversation can be branched in front of.
+    pub fn request_fork_checkpoints(&mut self) {
+        load_fork_checkpoints(
+            self.client.clone(),
+            self.session_id.clone(),
+            Arc::clone(&self.deliver),
+        );
+    }
+
+    /// Branch this conversation at `anchor` and continue in the copy.
     ///
-    /// The cut is left to the harness: naming a position would mean choosing
-    /// one from the transcript, and the harness anchors a fork on whole turns
-    /// rather than on the messages a transcript is addressed by. The tab then
-    /// moves to the child the same way it moves to any other conversation, so
-    /// the parent is left exactly as it was.
-    pub fn fork(&mut self) -> Result<(), String> {
+    /// The harness cuts on whole turns: it takes the anchoring seq to mean the
+    /// turn that seq falls in and keeps that turn entire, which is why the
+    /// anchor names the prompt ahead of the one the branch stops at. Omitting
+    /// it falls back to the last completed turn. The tab then moves to the
+    /// child the same way it moves to any other conversation, so the parent is
+    /// left exactly as it was.
+    pub fn fork(&mut self, anchor: Option<&ForkAnchor>) -> Result<(), String> {
+        let at_seq = match anchor {
+            Some(ForkAnchor::DeepSeekThrough(seq)) => Some(*seq),
+            Some(_) => return Err("that branch point belongs to another agent".to_string()),
+            None => None,
+        };
+
+        let mut payload = json!({ "sessionId": self.session_id });
+        if let Some(at_seq) = at_seq {
+            payload["atSeq"] = json!(at_seq);
+        }
+
         let forked = self
             .client
-            .call("session.fork", json!({ "sessionId": self.session_id }))
+            .call("session.fork", payload)
             .map_err(|error| error.message().to_string())?;
 
         let child = forked["sessionId"]

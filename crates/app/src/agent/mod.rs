@@ -54,11 +54,11 @@ use nmt_agent_utils::background_task::{
 };
 use nmt_agent_utils::chat::{
     AgentPreset, ApprovalPreset, Compaction, CompactionTrigger, ContextComposition,
-    ContextWindowUsage, Event as SessionEvent, GoalStatus, Item as SessionItem, ModelInfo,
-    Question, QuestionOption, QueuedPrompt, ReplayTurn, SendOutcome, SessionScope, SessionStats,
-    SessionSummary, SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments,
-    SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
-    ThreadSettings, TurnActivity,
+    ContextWindowUsage, Event as SessionEvent, ForkAnchor, ForkCheckpoint, GoalStatus,
+    Item as SessionItem, ModelInfo, Question, QuestionOption, QueuedPrompt, ReplayTurn,
+    SendOutcome, SessionScope, SessionStats, SessionSummary, SkillCatalog, SkillInfo,
+    SkillReference, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
+    SlashCommandRunPolicy, SlashCommandSource, ThreadSettings, TurnActivity,
 };
 use nmt_agent_utils::claude_code::workflows::{
     RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult,
@@ -87,7 +87,7 @@ use crate::agent::commands::{
     setting_value_label, validate_skill_binding,
 };
 use crate::agent::composer::attachments::{PendingAttachments, scratch_dir};
-use crate::agent::composer::{CommandFeedback, PendingSlashCommand, RewindState};
+use crate::agent::composer::{CommandFeedback, ForkFlow, PendingSlashCommand, RewindState};
 use crate::agent::input_history::{InputHistoryNavigation, InputHistoryScope};
 pub(crate) use crate::agent::profile::{AgentKind, AgentThreadDefaults, agent_launch};
 use crate::agent::session::{Backend, Status, UpdateSuspension};
@@ -653,6 +653,7 @@ pub(crate) struct AgentPane {
     /// the identities a removal needs.
     queued_user_messages: VecDeque<QueuedPrompt>,
     rewind: RewindFlow,
+    fork: ForkFlow,
     git_branch_poll: GitBranchPoll,
     context_window_usage: Option<ContextWindowUsage>,
     /// How that window is currently filled, when the provider measures it.

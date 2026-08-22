@@ -18,10 +18,11 @@ pub use crate::background_task::{
     BackgroundTaskKey, BackgroundTaskTranscriptState, BackgroundTaskTranscriptUpdate,
 };
 pub use crate::chat::{
-    Compaction, CompactionTrigger, ContextUsageScope, ContextWindowUsage, Event, Item, ModelInfo,
-    ScopedTokenUsage, SendOutcome, SessionScope, SessionSummary, SkillCatalog, SkillInfo,
-    SkillReference, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
-    SlashCommandRunPolicy, SlashCommandSource, ThreadSettings, TokenUsageBreakdown,
+    Compaction, CompactionTrigger, ContextUsageScope, ContextWindowUsage, Event, ForkAnchor,
+    ForkCheckpoint, Item, ModelInfo, ScopedTokenUsage, SendOutcome, SessionScope, SessionSummary,
+    SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments, SlashCommandInfo,
+    SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
+    TokenUsageBreakdown,
 };
 use crate::launcher::AgentCli;
 use crate::subprocess::JsonLineProcess;
@@ -44,8 +45,8 @@ pub use crate::codex::app_server::options::{
 use crate::codex::app_server::protocol::thread_start_params;
 use crate::codex::app_server::protocol::{
     codex_command_request, codex_command_response, codex_user_input, delta_event,
-    file_change_paths, initial_thread_request, parse_context_window_usage, parse_item,
-    parse_models, parse_replay, parse_thread_settings, parse_thread_summaries,
+    file_change_paths, initial_thread_request, parse_context_window_usage, parse_fork_checkpoints,
+    parse_item, parse_models, parse_replay, parse_thread_settings, parse_thread_summaries,
     resumed_thread_events, skills_list_request, stringify_command, thread_list_params,
     thread_resume_params, turn_start_params,
 };
@@ -60,6 +61,8 @@ const THREAD_START_RPC_ID: u64 = 2;
 const MODEL_LIST_RPC_ID: u64 = 3;
 const THREAD_LIST_RPC_ID: u64 = 4;
 const THREAD_RESUME_RPC_ID: u64 = 5;
+const THREAD_READ_RPC_ID: u64 = 6;
+const THREAD_FORK_RPC_ID: u64 = 7;
 const FIRST_TURN_RPC_ID: u64 = 100;
 const PROVIDER_API_FIELD: &str = concat!("wi", "re_api");
 
@@ -192,6 +195,16 @@ impl Session {
                 source: SlashCommandSource::Adapter,
                 arguments: SlashCommandArguments::Skills,
                 run_policy: SlashCommandRunPolicy::Immediate,
+            },
+            SlashCommandInfo {
+                name: "fork".to_string(),
+                description: "Branch this conversation in front of an earlier prompt".to_string(),
+                argument_hint: None,
+                source: SlashCommandSource::Adapter,
+                arguments: SlashCommandArguments::None,
+                // A branch is anchored on a turn the server has finished, so
+                // one asked for mid-turn could not name the turn in progress.
+                run_policy: SlashCommandRunPolicy::IdleOnly,
             },
         ]
     }
@@ -431,6 +444,52 @@ impl Session {
             "method": "thread/resume",
             "params": params,
         }));
+    }
+
+    /// Ask which prompts this conversation can be branched in front of.
+    ///
+    /// The thread's own history answers it, so the list covers turns from
+    /// before this session resumed the thread as well as the ones it watched
+    /// run. Reading it per request rather than accumulating it as turns go by
+    /// also keeps the offer honest after a compaction rewrites the thread.
+    pub fn request_fork_checkpoints(&mut self) -> bool {
+        let Some(thread_id) = self.thread_id.clone() else {
+            return false;
+        };
+
+        self.send(json!({
+            "jsonrpc": "2.0",
+            "id": THREAD_READ_RPC_ID,
+            "method": "thread/read",
+            "params": {"threadId": thread_id, "includeTurns": true},
+        }));
+        true
+    }
+
+    /// Branch the thread at `anchor` and move this session onto the copy.
+    ///
+    /// The reply carries the same reconstructed history and persisted settings
+    /// `thread/resume` answers with, so it is read by the same handler and the
+    /// tab lands in the branch exactly as it lands in a resumed conversation.
+    /// The source thread is left untouched.
+    pub fn fork_thread(&mut self, anchor: &ForkAnchor) -> Result<(), String> {
+        let ForkAnchor::CodexThrough(last_turn_id) = anchor else {
+            return Err("that branch point belongs to another agent".to_string());
+        };
+        let Some(thread_id) = self.thread_id.clone() else {
+            return Err("this conversation has no thread to branch".to_string());
+        };
+
+        self.compaction.reset_thread();
+        let mut params = thread_resume_params(&thread_id, &self.thread_profile);
+        params["lastTurnId"] = json!(last_turn_id);
+        self.send(json!({
+            "jsonrpc": "2.0",
+            "id": THREAD_FORK_RPC_ID,
+            "method": "thread/fork",
+            "params": params,
+        }));
+        Ok(())
     }
 
     /// Name this thread. The server has no naming of its own — it stores what
@@ -701,15 +760,24 @@ impl Session {
                 }];
             }
 
+            // A branch-point list nobody could read leaves the picker with
+            // nothing to show, which is the picker's own failure to report
+            // rather than something that happened to the conversation.
+            if rpc_id == THREAD_READ_RPC_ID {
+                return vec![Event::ForkCheckpoints(Err(error.to_string()))];
+            }
+
             // A failed resume (deleted/corrupt thread) is not fatal: the
             // session still has the thread it started with, so the composer
             // keeps working for a fresh conversation.
             let initial_resume_failed =
                 rpc_id == THREAD_RESUME_RPC_ID && self.initial_resume.is_some();
-            let message = if rpc_id == THREAD_RESUME_RPC_ID {
-                format!("Could not resume session: {error}")
-            } else {
-                error.to_string()
+            let message = match rpc_id {
+                THREAD_RESUME_RPC_ID => format!("Could not resume session: {error}"),
+                // A refused branch leaves the session on the thread it was
+                // already holding, so the conversation stays usable.
+                THREAD_FORK_RPC_ID => format!("Could not branch this conversation: {error}"),
+                _ => error.to_string(),
             };
 
             return vec![Event::Error {
@@ -772,7 +840,13 @@ impl Session {
                     self.thread_id.as_deref(),
                 ))]
             }
-            THREAD_RESUME_RPC_ID => {
+            THREAD_READ_RPC_ID => vec![Event::ForkCheckpoints(Ok(parse_fork_checkpoints(
+                &message["result"]["thread"]["turns"],
+            )))],
+            // A branch answers with the same payload a resume answers with,
+            // down to the settings block, so both switch this session onto the
+            // thread the reply names.
+            THREAD_RESUME_RPC_ID | THREAD_FORK_RPC_ID => {
                 let result = &message["result"];
 
                 self.thread_id = result["thread"]["id"].as_str().map(str::to_owned);

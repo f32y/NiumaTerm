@@ -67,8 +67,10 @@ pub(crate) struct Capabilities {
     /// applying one anyway would show a message as sent while it is still
     /// waiting.
     pub(crate) reports_pending_queue: bool,
-    /// The conversation can be branched at its last completed turn, which is
-    /// what the `/fork` command offers.
+    /// The conversation can be branched in front of a chosen prompt over the
+    /// backend's own connection, which is what the `/fork` picker offers.
+    /// Where the conversation is instead a file this side rewrites, `/fork`
+    /// reaches the rewind picker that already cuts the same branch.
     pub(crate) session_fork: bool,
     /// A title can be pinned on the conversation, which is what `/rename`
     /// offers. Where titles are derived from the transcript and regenerated,
@@ -100,7 +102,7 @@ const CODEX: Capabilities = Capabilities {
     session_scoped_approval: true,
     slash_skills_are_prompts: false,
     reports_pending_queue: false,
-    session_fork: false,
+    session_fork: true,
     session_rename: false,
     session_search: false,
     model_selection_is_a_request: false,

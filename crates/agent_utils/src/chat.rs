@@ -749,6 +749,11 @@ pub enum Event {
     /// clears it. The words belong to the view: an adapter reports the facts it
     /// was given and does not know the reader's language.
     StatusDetail(Option<TurnActivity>),
+    /// The prompts this conversation can be branched in front of, newest
+    /// first, answering one request for them. Backends that keep their history
+    /// behind the connection report it here; where the history is a file this
+    /// side can read, the list is read directly instead of asked for.
+    ForkCheckpoints(Result<Vec<ForkCheckpoint>, String>),
     Error {
         message: String,
         /// The handshake itself failed; the session will not become usable.
@@ -780,6 +785,39 @@ pub struct ReplayTurn {
 pub struct ReplayItem {
     pub item: Item,
     pub at: Option<i64>,
+}
+
+/// Where a branch is cut, named the way the backend that owns the conversation
+/// names positions in it.
+///
+/// The three coordinates are not interchangeable: one addresses a transcript
+/// record, one a turn, one an event, and only their own backend can resolve
+/// them. Carrying the backend's own name for the position keeps this side from
+/// maintaining a parallel numbering it would have to hold in step with a
+/// history it does not own.
+///
+/// Every variant names the same cut — the conversation stops before one human
+/// prompt — but the backends anchor it from opposite sides, so the variants
+/// spell out which side they mean.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ForkAnchor {
+    /// The Claude transcript record the copied prefix stops before.
+    ClaudeBefore(String),
+    /// The last Codex turn the copy keeps, inclusive.
+    CodexThrough(String),
+    /// A DeepSeek event seq lying inside the last turn the copy keeps.
+    DeepSeekThrough(u64),
+}
+
+/// One human prompt a branch can be cut in front of.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ForkCheckpoint {
+    /// The prompt the branch stops in front of, shown as the row's label and
+    /// handed back to the composer so the branch starts where it was cut.
+    pub prompt: String,
+    /// RFC 3339 as the provider recorded it; the UI owns the viewer's zone.
+    pub timestamp: Option<String>,
+    pub anchor: ForkAnchor,
 }
 
 impl ReplayTurn {

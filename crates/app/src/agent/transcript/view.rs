@@ -80,6 +80,12 @@ pub(crate) struct TranscriptView {
     /// Revision of the conversation this view was last filled from, for a view
     /// that mirrors content someone else owns rather than accumulating its own.
     source_revision: Option<u64>,
+    /// The pane whose conversation this is, for the row actions that address
+    /// the conversation rather than the row: branching in front of a prompt,
+    /// rewinding to one. Absent on a view that mirrors somebody else's
+    /// conversation — a child agent's or a workflow member's — where those
+    /// actions have no conversation of this pane's to act on.
+    owner: Option<gpui::WeakEntity<AgentPane>>,
 }
 
 impl TranscriptView {
@@ -115,7 +121,18 @@ impl TranscriptView {
             cwd,
             kind,
             source_revision: None,
+            owner: None,
         }
+    }
+
+    /// Claim this view as one pane's own conversation, which is what makes its
+    /// rows offer the actions that address the conversation.
+    pub(in crate::agent) fn set_owner(&mut self, owner: gpui::WeakEntity<AgentPane>) {
+        self.owner = Some(owner);
+    }
+
+    pub(in crate::agent) fn owner(&self) -> Option<&gpui::WeakEntity<AgentPane>> {
+        self.owner.as_ref()
     }
 
     pub(crate) fn is_empty(&self) -> bool {

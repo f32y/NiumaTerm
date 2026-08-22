@@ -5,9 +5,9 @@ use serde_json::{Value, json};
 
 use crate::CodexProviderConfig;
 use crate::chat::{
-    Compaction, ContextUsageScope, ContextWindowUsage, Event, Item, ModelInfo, ReplayItem,
-    ReplayTurn, ScopedTokenUsage, SessionScope, SessionSummary, SkillReference,
-    SlashCommandOutcome, ThreadSettings, TokenUsageBreakdown,
+    Compaction, ContextUsageScope, ContextWindowUsage, Event, ForkAnchor, ForkCheckpoint, Item,
+    ModelInfo, ReplayItem, ReplayTurn, ScopedTokenUsage, SessionScope, SessionSummary,
+    SkillReference, SlashCommandOutcome, ThreadSettings, TokenUsageBreakdown,
 };
 use crate::codex::app_server::{
     PROVIDER_API_FIELD, THREAD_LIST_LIMIT, THREAD_RESUME_RPC_ID, THREAD_START_RPC_ID, ThreadProfile,
@@ -383,6 +383,60 @@ pub(super) fn parse_thread_summaries(
 /// the same typed item parser as live notifications. Keeping one parser is the
 /// invariant that prevents restored tool cards from losing output or status as
 /// the app-server schema evolves.
+/// The prompts a branch of this thread can be cut in front of, newest first.
+///
+/// Cutting in front of a prompt keeps every turn before the one that prompt
+/// opened, and Codex names such a cut by the last turn it keeps, so each
+/// prompt is paired with the id of the turn ahead of it. The oldest prompt has
+/// no turn ahead of it, and branching in front of it would produce an empty
+/// conversation, which starting a new one already is; it is left out rather
+/// than offered as a row that does nothing this composer cannot already do.
+pub(super) fn parse_fork_checkpoints(turns: &Value) -> Vec<ForkCheckpoint> {
+    let turns: &[Value] = turns.as_array().map_or(&[], Vec::as_slice);
+    let mut checkpoints: Vec<ForkCheckpoint> = turns
+        .windows(2)
+        .filter_map(|pair| {
+            let [kept, opened] = pair else {
+                return None;
+            };
+            // An unfinished turn cannot anchor a cut, and a turn whose prompt
+            // is gone has no row to show, so both drop out of the list rather
+            // than reaching the server as a request it would refuse.
+            if kept["status"].as_str() != Some("completed") {
+                return None;
+            }
+
+            Some(ForkCheckpoint {
+                prompt: turn_prompt(opened)?,
+                timestamp: opened["startedAt"].as_i64().map(unix_seconds_to_rfc3339),
+                anchor: ForkAnchor::CodexThrough(kept["id"].as_str()?.to_string()),
+            })
+        })
+        .collect();
+
+    checkpoints.reverse();
+    checkpoints
+}
+
+/// The human prompt that opened a turn, which is the first user message in it.
+fn turn_prompt(turn: &Value) -> Option<String> {
+    turn["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|item| item["type"].as_str() == Some("userMessage"))
+        .map(|item| user_input_text(&item["content"]))
+        .filter(|text| !text.trim().is_empty())
+}
+
+/// Codex dates turns in Unix seconds while the picker renders RFC 3339, which
+/// is what the backends reading their history off disk already record.
+fn unix_seconds_to_rfc3339(seconds: i64) -> String {
+    chrono::DateTime::from_timestamp(seconds, 0)
+        .unwrap_or_default()
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
 pub(super) fn parse_replay(turns: &Value) -> Vec<ReplayTurn> {
     let mut replay = Vec::new();
 
