@@ -9,7 +9,7 @@ pub(super) fn effective_background_opacity(backdrop: WindowBackdrop, opacity: f6
         // painted on top only dilutes it and leaves the window looking unlike
         // every other Mica window on the desktop. The material replaces the
         // background outright, which is why the slider is inert in this mode.
-        WindowBackdrop::Mica => 0.0,
+        WindowBackdrop::MicaAlt | WindowBackdrop::Mica => 0.0,
         WindowBackdrop::Off => 1.0,
     }
 }
@@ -81,11 +81,12 @@ pub(super) fn window_background_appearance_for(
 ) -> WindowBackgroundAppearance {
     match backdrop {
         WindowBackdrop::Acrylic => WindowBackgroundAppearance::Blurred,
-        // DWMSBT_TABBEDWINDOW rather than DWMSBT_MAINWINDOW: it carries a
-        // stronger wallpaper tint and is what tabbed shells such as Chromium
-        // use, so a window next to them reads as the same material. Plain
-        // DWMSBT_MAINWINDOW washes out to near-flat gray by comparison.
-        WindowBackdrop::Mica => WindowBackgroundAppearance::MicaAltBackdrop,
+        // DWMSBT_TABBEDWINDOW: a stronger wallpaper tint, the material tabbed
+        // shells such as Chromium use.
+        WindowBackdrop::MicaAlt => WindowBackgroundAppearance::MicaAltBackdrop,
+        // DWMSBT_MAINWINDOW: the plain document-window material, much closer to
+        // flat gray than Mica Alt.
+        WindowBackdrop::Mica => WindowBackgroundAppearance::MicaBackdrop,
         WindowBackdrop::Off => WindowBackgroundAppearance::Opaque,
     }
 }

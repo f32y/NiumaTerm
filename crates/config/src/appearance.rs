@@ -115,11 +115,14 @@ impl TabBarStyle {
     }
 }
 
-/// The window backdrop material. Acrylic honors the opacity slider; Mica hands
-/// the chrome entirely to DWM, and Off keeps the window opaque.
+/// The window backdrop material. Acrylic honors the opacity slider; the Mica
+/// variants hand the chrome entirely to DWM, and Off keeps the window opaque.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum WindowBackdrop {
+    /// Windows 11 Mica Alt material: the same wallpaper tint as Mica, drawn
+    /// stronger for tabbed shells.
+    MicaAlt,
     /// Windows 11 Mica material: a static tint, no blur of the content behind.
     Mica,
     /// Blur the content behind the window (Acrylic).
@@ -132,6 +135,7 @@ pub enum WindowBackdrop {
 impl WindowBackdrop {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::MicaAlt => "mica-alt",
             Self::Mica => "mica",
             Self::Acrylic => "acrylic",
             Self::Off => "off",
@@ -143,6 +147,7 @@ impl WindowBackdrop {
     /// window is guaranteed to render; guessing at a translucent mode is not.
     pub fn from_value(value: &str) -> Self {
         match value {
+            "mica-alt" => Self::MicaAlt,
             "mica" => Self::Mica,
             "acrylic" => Self::Acrylic,
             _ => Self::Off,

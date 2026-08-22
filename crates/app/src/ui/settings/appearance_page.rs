@@ -49,6 +49,10 @@ pub(super) fn appearance_page(
                     SettingField::dropdown(
                         vec![
                             (
+                                "mica-alt".into(),
+                                i18n("settings-appearance-window-backdrop-mica-alt").into(),
+                            ),
+                            (
                                 "mica".into(),
                                 i18n("settings-appearance-window-backdrop-mica").into(),
                             ),
@@ -80,11 +84,11 @@ pub(super) fn appearance_page(
                         i18n("settings-appearance-background-opacity"),
                         background_opacity_field(),
                     )
-                    // Mica replaces the background with the DWM material, so a
-                    // custom opacity has nothing left to act on.
+                    // The Mica materials replace the background with what DWM
+                    // draws, so a custom opacity has nothing left to act on.
                     .disabled(matches!(
                         backdrop,
-                        WindowBackdrop::Off | WindowBackdrop::Mica
+                        WindowBackdrop::Off | WindowBackdrop::MicaAlt | WindowBackdrop::Mica
                     )),
                 )
                 .item(SettingItem::new(

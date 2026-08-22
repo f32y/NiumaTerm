@@ -89,7 +89,12 @@ fn window_transparency_controls_opacity_and_blur() {
     assert_eq!(clamp_background_opacity(f64::NAN), 1.0);
     // Off keeps the window fully opaque regardless of the slider value.
     assert_eq!(effective_background_opacity(WindowBackdrop::Off, 0.65), 1.0);
-    // Mica hands the background to DWM, so a configured opacity is ignored.
+    // The Mica materials hand the background to DWM, so a configured opacity is
+    // ignored.
+    assert_eq!(
+        effective_background_opacity(WindowBackdrop::MicaAlt, 0.65),
+        0.0
+    );
     assert_eq!(
         effective_background_opacity(WindowBackdrop::Mica, 0.65),
         0.0
@@ -118,8 +123,12 @@ fn window_transparency_controls_opacity_and_blur() {
         WindowBackgroundAppearance::Blurred
     );
     assert_eq!(
-        window_background_appearance_for(WindowBackdrop::Mica),
+        window_background_appearance_for(WindowBackdrop::MicaAlt),
         WindowBackgroundAppearance::MicaAltBackdrop
+    );
+    assert_eq!(
+        window_background_appearance_for(WindowBackdrop::Mica),
+        WindowBackgroundAppearance::MicaBackdrop
     );
     assert_eq!(
         window_background_appearance_for(WindowBackdrop::Off),
@@ -130,6 +139,7 @@ fn window_transparency_controls_opacity_and_blur() {
 #[test]
 fn window_backdrop_value_roundtrip() {
     for backdrop in [
+        WindowBackdrop::MicaAlt,
         WindowBackdrop::Mica,
         WindowBackdrop::Acrylic,
         WindowBackdrop::Off,
