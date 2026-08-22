@@ -1,6 +1,3 @@
-use std::time::Duration;
-use std::{process, thread};
-
 use gpui_component::StyledExt;
 use nmt_i18n::i18n;
 
@@ -528,7 +525,7 @@ impl Shell {
             i18n("shell-close-window-title"),
             description,
             note,
-            |_, window, cx| begin_window_teardown(window, cx),
+            |_, window, _| window.remove_window(),
         );
         false
     }
@@ -568,41 +565,4 @@ impl Shell {
             cx.notify();
         }
     }
-}
-
-/// How long the process may spend releasing a hidden window before it is cut
-/// short. The window is already off the screen by then, so a teardown that
-/// stalls leaves no way to tell the application is still running: an
-/// unbounded wait is an invisible process the user can only reach through the
-/// task manager.
-const TEARDOWN_DEADLINE: Duration = Duration::from_secs(5);
-
-/// Take the window off the screen and start the clock on releasing it.
-///
-/// Closing tears the window down synchronously once the update returns, and
-/// that teardown kills whole process trees: every shell's job object, every
-/// agent's CLI. Hiding first is what makes the click feel like a close, and
-/// the release then runs with nothing on screen.
-pub(super) fn begin_window_teardown(window: &mut Window, cx: &mut App) {
-    // The deadline ends the process, so it belongs only to the window whose
-    // closing ends it. Closing one of several leaves the application running,
-    // and its teardown is bounded by the windows that outlive it.
-    let last_window = cx.windows().len() <= 1;
-
-    window.hide_window();
-    window.remove_window();
-
-    if !last_window {
-        return;
-    }
-
-    // A plain OS thread, because the executor this would otherwise run on is
-    // part of what is being torn down. Exiting zero: whatever has not finished
-    // by now is release work, and the state files are written by the quit hook
-    // that runs well before this deadline.
-    thread::spawn(|| {
-        thread::sleep(TEARDOWN_DEADLINE);
-        warn!("window teardown exceeded {TEARDOWN_DEADLINE:?}; exiting");
-        process::exit(0);
-    });
 }
