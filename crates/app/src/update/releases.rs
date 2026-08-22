@@ -23,6 +23,12 @@ const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/f32y/NiumaTerm/re
 /// the stable channel out-publishes it by that many in a row.
 const RELEASES_URL: &str = "https://api.github.com/repos/f32y/NiumaTerm/releases?per_page=30";
 
+/// Where this repository's own release downloads live. An asset URL arrives in
+/// an API response, so following one unchecked would let that response point the
+/// download at a host and repository nobody chose; only the prefix is pinned,
+/// because GitHub redirects the download itself to its object storage.
+pub(crate) const DOWNLOAD_URL_PREFIX: &str = "https://github.com/f32y/NiumaTerm/releases/download/";
+
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// GitHub serves a few kilobytes per release. The cap is generous enough that
@@ -42,6 +48,15 @@ pub(crate) enum CheckError {
 pub(crate) struct Release {
     pub(crate) label: String,
     pub(crate) page_url: String,
+    pub(crate) assets: Vec<Asset>,
+}
+
+/// One file published with a release.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub(crate) struct Asset {
+    pub(crate) name: String,
+    #[serde(rename = "browser_download_url")]
+    pub(crate) url: String,
 }
 
 #[derive(Deserialize)]
@@ -52,6 +67,10 @@ struct ReleaseEntry {
     draft: bool,
     #[serde(default)]
     prerelease: bool,
+    /// Absent from the recorded responses the selection is tested against, and
+    /// from a release published before anything was attached to it.
+    #[serde(default)]
+    assets: Vec<Asset>,
 }
 
 pub(crate) fn latest(channel: UpdateChannel) -> Result<Option<Release>, CheckError> {
@@ -105,7 +124,7 @@ pub(crate) fn select_latest(body: &str) -> Result<Option<Release>, CheckError> {
     Ok(newest_in_channel(from_ref(&entry), UpdateChannel::Stable))
 }
 
-fn user_agent() -> String {
+pub(crate) fn user_agent() -> String {
     format!("NiumaTerm/{APP_VERSION}")
 }
 
@@ -128,6 +147,7 @@ fn newest_in_channel(entries: &[ReleaseEntry], channel: UpdateChannel) -> Option
         .map(|entry| Release {
             label: entry.tag_name.clone(),
             page_url: entry.html_url.clone(),
+            assets: entry.assets.clone(),
         })
 }
 

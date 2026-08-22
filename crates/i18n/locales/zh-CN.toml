@@ -41,6 +41,15 @@
 "settings-about-update-available" = "可更新到 {version}"
 "settings-about-check-unreachable" = "无法连接 GitHub"
 "settings-about-check-unreadable" = "GitHub 返回了无法解析的内容"
+"settings-about-install-button" = "更新并重启"
+"settings-about-installing" = "正在安装 {version}..."
+"settings-about-install-no-package" = "该发行版本没有可安装的安装包"
+"settings-about-install-unreachable" = "无法下载更新"
+"settings-about-install-checksum" = "下载的安装包与发布的校验和不符"
+"settings-about-install-unpack" = "无法解压下载的安装包"
+"settings-about-install-not-writable" = "安装目录不可写入"
+"settings-about-install-relaunch" = "已更新，但无法重启 NiumaTerm"
+"settings-about-install-replace" = "无法替换已安装的文件"
 
 # 外观设置
 "settings-appearance-title" = "外观"

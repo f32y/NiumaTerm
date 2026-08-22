@@ -2,18 +2,21 @@ pub use conpty::{job_has_other_processes, job_other_process_count};
 pub(crate) use notifier::{
     identity_registered, register_identity, remove, show, unregister_identity,
 };
+pub use process_exit::wait_for_exit;
 pub use readiness::SoftReady;
 pub use shell_integration::{
     is_shell_integration_registered, register_shell_integration, set_system_notification_enabled,
     shell_integration_dll_mismatched, system_notification_enabled, unregister_shell_integration,
 };
 
+pub mod file_version;
 pub mod ipc;
 
 mod child;
 mod conpty;
 mod notifier;
 mod pipes;
+mod process_exit;
 mod readiness;
 mod shell_integration;
 mod spsc;

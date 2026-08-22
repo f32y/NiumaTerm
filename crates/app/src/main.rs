@@ -56,6 +56,9 @@ struct StartupArgs {
     url: Option<String>,
     testing: bool,
     profiling: bool,
+    /// The instance an update replaced, which this one must outlive before it
+    /// may claim the single-instance mutex that instance still holds.
+    await_exit: Option<u32>,
 }
 
 struct StartupFiles {
@@ -73,7 +76,13 @@ fn main() {
         url,
         testing,
         profiling,
+        await_exit,
     } = parse_startup_args();
+
+    if let Some(pid) = await_exit {
+        update::await_predecessor(pid);
+    }
+
     run_app(url, testing, profiling);
 }
 
@@ -101,6 +110,13 @@ where
                 .action(ArgAction::SetTrue),
         )
         .arg(
+            Arg::new("await-exit")
+                .long(update::AWAIT_EXIT_FLAG.trim_start_matches('-'))
+                .value_name("PID")
+                .value_parser(clap::value_parser!(u32))
+                .hide(true),
+        )
+        .arg(
             Arg::new("new-tab")
                 .long("new-tab")
                 .value_name("PATH")
@@ -126,6 +142,7 @@ where
     StartupArgs {
         testing: matches.get_flag("testing"),
         profiling: matches.get_flag("enable-profiling"),
+        await_exit: matches.get_one::<u32>("await-exit").copied(),
         url: matches
             .get_one::<String>("url")
             .cloned()
@@ -230,6 +247,10 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
             agent::updates::initialize(testing, &agent_profiles, cx);
             agent::input_history::initialize(testing, cx);
             update::initialize(testing, cx);
+            // The files a previous update renamed aside are only removable once
+            // whoever had them mapped has exited, which for the instance that
+            // performed it is this startup.
+            update::discard_replaced_files();
 
             // Bring up the remote host service if it was left enabled. Runs on
             // its own runtime thread; failures only log.

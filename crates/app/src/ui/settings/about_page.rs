@@ -1,7 +1,7 @@
 use nmt_i18n::i18n;
 
 use crate::ui::settings::*;
-use crate::update::{self, CheckError, Status};
+use crate::update::{self, CheckError, InstallError, Status};
 
 pub(super) fn about_page() -> SettingPage {
     SettingPage::new(i18n("settings-about-title"))
@@ -66,26 +66,28 @@ pub(super) fn about_page() -> SettingPage {
 fn update_check_item() -> SettingItem {
     SettingItem::render(move |options, _window, cx| {
         let status = update::status(cx);
-        let checking = status == Status::Checking;
+        let busy = matches!(status, Status::Checking | Status::Installing(_));
 
         let check = Button::new("app-update-check")
             .outline()
-            .label(if checking {
+            .label(if status == Status::Checking {
                 i18n("settings-about-checking")
             } else {
                 i18n("settings-about-check-button")
             })
-            .disabled(options.disabled || checking)
+            .disabled(options.disabled || busy)
             .on_click(|_, _, cx: &mut App| update::check_now(cx));
 
         // The channel resolved a specific release, so the link goes to that
-        // one rather than to the list the user would have to find it in.
+        // one rather than to the list the user would have to find it in. It
+        // stays available beside the install button: a package that cannot be
+        // installed here can still be downloaded by hand.
         let open = match &status {
-            Status::Available(release) => {
+            Status::Available(release) | Status::Installing(release) => {
                 let page_url = release.page_url.clone();
                 Some(
                     Button::new("app-update-open")
-                        .primary()
+                        .outline()
                         .label(i18n("settings-about-open-release"))
                         .disabled(options.disabled)
                         .on_click(move |_, _, cx: &mut App| cx.open_url(&page_url)),
@@ -94,10 +96,22 @@ fn update_check_item() -> SettingItem {
             _ => None,
         };
 
+        let install = matches!(status, Status::Available(_)).then(|| {
+            Button::new("app-update-install")
+                .primary()
+                .label(i18n("settings-about-install-button"))
+                .disabled(options.disabled)
+                .on_click(|_, _, cx: &mut App| update::install_now(cx))
+        });
+
         card_row(
             i18n("settings-about-check-for-updates"),
             status_text(&status),
-            h_flex().gap_2().children(open).child(check),
+            h_flex()
+                .gap_2()
+                .children(open)
+                .children(install)
+                .child(check),
             cx,
         )
         .into_any_element()
@@ -113,6 +127,10 @@ fn status_text(status: &Status) -> String {
         Status::Available(release) => {
             i18n("settings-about-update-available").replace("{version}", &release.label)
         }
+        Status::Installing(release) => {
+            i18n("settings-about-installing").replace("{version}", &release.label)
+        }
+        Status::InstallFailed(error) => install_error_text(error),
         Status::Failed(CheckError::Unreachable) => {
             i18n("settings-about-check-unreachable").to_string()
         }
@@ -120,4 +138,17 @@ fn status_text(status: &Status) -> String {
             i18n("settings-about-check-unreadable").to_string()
         }
     }
+}
+
+fn install_error_text(error: &InstallError) -> String {
+    match error {
+        InstallError::NoPackage => i18n("settings-about-install-no-package"),
+        InstallError::Unreachable => i18n("settings-about-install-unreachable"),
+        InstallError::Checksum => i18n("settings-about-install-checksum"),
+        InstallError::Unpack => i18n("settings-about-install-unpack"),
+        InstallError::NotWritable => i18n("settings-about-install-not-writable"),
+        InstallError::Replace => i18n("settings-about-install-replace"),
+        InstallError::Relaunch => i18n("settings-about-install-relaunch"),
+    }
+    .to_string()
 }
