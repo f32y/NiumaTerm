@@ -73,49 +73,6 @@ impl AgentPane {
         }
     }
 
-    /// Branch this conversation and continue in the copy.
-    ///
-    /// The tab moves into the branch the same way it moves into a resumed
-    /// conversation, so the presentation waits on the branch's own replay: the
-    /// visible transcript is the parent's until the copy's history arrives to
-    /// replace it, and a failed branch leaves the tab exactly where it was.
-    pub(in crate::agent) fn fork_conversation(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.history_ui.mode == RecentSessionsMode::Loading {
-            return false;
-        }
-
-        let previous_status = self.status;
-        self.history_ui.mode = RecentSessionsMode::Loading;
-        self.history_ui.pending_resume_replay = None;
-        self.status = Status::Starting;
-        self.set_command_feedback(
-            CommandFeedbackKind::Notice,
-            i18n("agent-session-forking").to_string(),
-            cx,
-        );
-
-        let outcome = match self.session.as_mut() {
-            Some(session) => session.fork_conversation(),
-            None => {
-                Err(i18n("agent-session-still-starting").replace("{name}", self.kind.display()))
-            }
-        };
-
-        if let Err(error) = outcome {
-            self.history_ui.mode = RecentSessionsMode::Hidden;
-            self.status = previous_status;
-            self.set_command_feedback(CommandFeedbackKind::Error, error, cx);
-            return false;
-        }
-
-        // The branch inherits the parent's controls, so nothing is seeded over
-        // what its own history is about to replay.
-        self.seed_thread_defaults = false;
-        self.seed_approval_reviewer = false;
-        cx.notify();
-        true
-    }
-
     /// Ask the backend which earlier conversations mention a phrase.
     ///
     /// The answer replaces the recent list, so the list is opened here and the

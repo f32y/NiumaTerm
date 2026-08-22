@@ -682,3 +682,165 @@ mod resumed_collapse_tests {
         });
     }
 }
+
+/// A prompt right-clicked in the transcript has to name the same branch point
+/// the backend would, and the two lists are only counted from the newest end.
+mod branch_point_targeting_tests {
+    use gpui::{AppContext as _, TestAppContext};
+    use nmt_agent_utils::chat::{Item as SessionItem, ReplayItem, ReplayTurn};
+
+    use crate::agent::composer::{PromptTarget, checkpoint_at_depth};
+    use crate::agent::transcript::{AgentKind, TranscriptView};
+
+    fn user(text: &str) -> ReplayItem {
+        ReplayItem {
+            item: SessionItem::UserMessage {
+                text: Some(text.to_string()),
+            },
+            at: None,
+        }
+    }
+
+    fn agent(text: &str) -> ReplayItem {
+        ReplayItem {
+            item: SessionItem::AgentMessage {
+                id: text.to_string(),
+                text: Some(text.to_string()),
+            },
+            at: None,
+        }
+    }
+
+    /// A conversation of three turns, the middle one steered mid-flight, with
+    /// its turn grouping intact. Transcript indices of "first", "second",
+    /// "steered" and "third" are 0, 2, 3 and 5.
+    fn transcript(cx: &mut gpui::App) -> gpui::Entity<TranscriptView> {
+        let view = cx.new(|_| TranscriptView::new(AgentKind::Codex, None));
+        view.update(cx, |view, cx| {
+            for (turn, items) in [
+                (1, vec![user("first"), agent("a")]),
+                // "steered" shares turn 2 with the prompt that opened it, so
+                // it names no cut of its own.
+                (2, vec![user("second"), user("steered"), agent("b")]),
+                (3, vec![user("third"), agent("c")]),
+            ] {
+                view.append_replay(
+                    turn,
+                    ReplayTurn {
+                        items,
+                        ..ReplayTurn::default()
+                    },
+                    cx,
+                );
+            }
+        });
+        view
+    }
+
+    #[gpui::test]
+    fn a_prompt_is_located_by_how_many_turns_follow_it(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript(cx);
+            let index = [0, 2, 3, 5];
+
+            view.read_with(cx, |view, _| {
+                assert_eq!(
+                    view.prompt_target(index[3]),
+                    Some(PromptTarget {
+                        prompt: "third".into(),
+                        depth: 0,
+                    })
+                );
+                assert_eq!(
+                    view.prompt_target(index[1]),
+                    Some(PromptTarget {
+                        prompt: "second".into(),
+                        depth: 1,
+                    })
+                );
+                assert_eq!(
+                    view.prompt_target(index[0]),
+                    Some(PromptTarget {
+                        prompt: "first".into(),
+                        depth: 2,
+                    })
+                );
+                // A message steered into a running turn shares that turn with
+                // the prompt ahead of it and anchors nothing.
+                assert_eq!(view.prompt_target(index[2]), None);
+            })
+        });
+    }
+
+    #[gpui::test]
+    fn an_agent_message_names_no_branch_point(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript(cx);
+
+            view.read_with(cx, |view, _| assert_eq!(view.prompt_target(1), None));
+        });
+    }
+
+    #[test]
+    fn the_depth_indexes_the_backend_list_and_the_text_confirms_it() {
+        // The branch points a backend would report for the same conversation,
+        // newest first, and excluding the first prompt.
+        let checkpoints = ["third".to_string(), "second".to_string()];
+        let text = String::as_str;
+
+        assert_eq!(
+            checkpoint_at_depth(
+                &checkpoints,
+                &PromptTarget {
+                    prompt: "third".into(),
+                    depth: 0
+                },
+                text
+            ),
+            Some(&"third".to_string())
+        );
+        assert_eq!(
+            checkpoint_at_depth(
+                &checkpoints,
+                &PromptTarget {
+                    prompt: "second".into(),
+                    depth: 1
+                },
+                text
+            ),
+            Some(&"second".to_string())
+        );
+        // The oldest prompt is past the end of a list that does not offer it.
+        assert_eq!(
+            checkpoint_at_depth(
+                &checkpoints,
+                &PromptTarget {
+                    prompt: "first".into(),
+                    depth: 2
+                },
+                text
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn a_count_landing_on_another_prompt_names_nothing() {
+        // The backend left a branch point out — a cut it cannot make — so the
+        // depths no longer line up. The text comparison catches it rather than
+        // letting the cut land a turn away from where the user pointed.
+        let checkpoints = ["third".to_string(), "first".to_string()];
+
+        assert_eq!(
+            checkpoint_at_depth(
+                &checkpoints,
+                &PromptTarget {
+                    prompt: "second".into(),
+                    depth: 1
+                },
+                String::as_str
+            ),
+            None
+        );
+    }
+}

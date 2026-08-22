@@ -1675,3 +1675,66 @@ fn a_broken_preset_is_listed_by_the_harness_but_not_offered_for_selection() {
     );
     assert_eq!(presets[3].description.as_deref(), Some("Locally authored"));
 }
+
+#[test]
+fn branch_points_pair_each_prompt_with_the_seq_of_the_one_ahead_of_it() {
+    use crate::chat::{ForkAnchor, ForkCheckpoint};
+    use crate::deepseek::history;
+
+    let entry = |event: Value| json!({ "event": event });
+    let prompt = |seq: u64, time: u64, text: &str| {
+        entry(json!({
+            "type": "user/message",
+            "seq": seq,
+            "time": time,
+            "data": {
+                "content": [{ "type": "text", "text": text }],
+                "source": { "kind": "user" },
+            },
+        }))
+    };
+    let page = json!({
+        "hasMore": false,
+        "events": [
+            entry(json!({ "type": "turn/start", "seq": 0, "data": { "turn": 1 } })),
+            prompt(1, 1_770_000_000_000u64, "first"),
+            entry(json!({ "type": "turn/end", "seq": 2, "data": { "turn": 1 } })),
+            entry(json!({ "type": "turn/start", "seq": 3, "data": { "turn": 2 } })),
+            prompt(4, 1_770_000_100_000u64, "second"),
+            // A message the harness logged on the session's behalf is not
+            // something the person asked, so it is not a branch point.
+            entry(json!({
+                "type": "user/message",
+                "seq": 5,
+                "time": 1_770_000_101_000u64,
+                "data": {
+                    "content": [{ "type": "text", "text": "injected" }],
+                    "source": { "kind": "system" },
+                },
+            })),
+            entry(json!({ "type": "turn/end", "seq": 6, "data": { "turn": 2 } })),
+            entry(json!({ "type": "turn/start", "seq": 7, "data": { "turn": 3 } })),
+            prompt(8, 1_770_000_200_000u64, "third"),
+            entry(json!({ "type": "turn/end", "seq": 9, "data": { "turn": 3 } })),
+        ],
+    });
+
+    // Newest first. Each anchor lies inside the turn ahead of the prompt it is
+    // paired with, which is the turn the harness extends the cut through. The
+    // oldest prompt has none ahead of it and is left out.
+    assert_eq!(
+        history::fork_checkpoints(&page),
+        vec![
+            ForkCheckpoint {
+                prompt: "third".into(),
+                timestamp: Some("2026-02-02T02:43:20Z".into()),
+                anchor: ForkAnchor::DeepSeekThrough(4),
+            },
+            ForkCheckpoint {
+                prompt: "second".into(),
+                timestamp: Some("2026-02-02T02:41:40Z".into()),
+                anchor: ForkAnchor::DeepSeekThrough(1),
+            },
+        ]
+    );
+}

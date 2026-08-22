@@ -11,7 +11,9 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use serde_json::Value;
 
-use crate::chat::{Event, Item, ReplayItem, ReplayTurn, SessionSummary};
+use crate::chat::{
+    Event, ForkAnchor, ForkCheckpoint, Item, ReplayItem, ReplayTurn, SessionSummary,
+};
 use crate::deepseek::mapping::{ToolTracker, map_session_event};
 
 /// Read a `session.list` result into the resumable conversations of one
@@ -168,6 +170,65 @@ pub(crate) fn replay(value: &Value) -> Vec<ReplayTurn> {
     }
 
     turns
+}
+
+/// Read the prompts a branch of this conversation can be cut in front of out
+/// of a history page, newest first.
+///
+/// Cutting in front of a prompt keeps every turn before the one that prompt
+/// opened. The harness anchors such a cut on an event seq and extends it to
+/// the end of the turn that seq falls in, so each prompt is paired with the
+/// seq of the prompt ahead of it. The oldest prompt on the page has no prompt
+/// ahead of it: on a page that reaches the start of the log, branching in
+/// front of it is an empty conversation, which starting a new one already is,
+/// and on a page that does not, its predecessor is simply not loaded.
+pub(crate) fn fork_checkpoints(page: &Value) -> Vec<ForkCheckpoint> {
+    let prompts: Vec<(u64, String, Option<u64>)> = page["events"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|entry| &entry["event"])
+        .filter(|event| event["type"].as_str() == Some("user/message"))
+        .filter_map(|event| {
+            // The log records more than typed prompts under this type, and a
+            // branch is offered in front of what the person actually asked.
+            // The live mapping decides what counts as a typed prompt, so the
+            // rule stays in one place: the log records more than the person's
+            // own messages under this type. A prompt maps to exactly one item,
+            // and anything else the mapper produced is not one.
+            let mut mapped = map_session_event(event, &Value::Null, &mut ToolTracker::default());
+            let Some(Event::ItemStarted(Item::UserMessage { text: Some(text) })) = mapped.pop()
+            else {
+                return None;
+            };
+            Some((event["seq"].as_u64()?, text, event["time"].as_u64()))
+        })
+        .collect();
+
+    let mut checkpoints: Vec<ForkCheckpoint> = prompts
+        .windows(2)
+        .filter_map(|pair| {
+            let [(kept, _, _), (_, prompt, at)] = pair else {
+                return None;
+            };
+            Some(ForkCheckpoint {
+                prompt: prompt.clone(),
+                timestamp: at.map(|millis| unix_millis_to_rfc3339(millis)),
+                anchor: ForkAnchor::DeepSeekThrough(*kept),
+            })
+        })
+        .collect();
+
+    checkpoints.reverse();
+    checkpoints
+}
+
+/// The harness dates its events in Unix milliseconds while the picker renders
+/// RFC 3339, which is what a backend reading its history off disk records.
+fn unix_millis_to_rfc3339(millis: u64) -> String {
+    chrono::DateTime::from_timestamp_millis(millis as i64)
+        .unwrap_or_default()
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
 /// Flatten a rebuilt page into one stream of items.

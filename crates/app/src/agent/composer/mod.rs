@@ -1,8 +1,13 @@
 pub(in crate::agent) mod attachments;
+mod fork;
 mod palette;
 mod response_annotations;
 mod rewind;
 
+#[allow(unused_imports)]
+pub(super) use crate::agent::composer::fork::{
+    ForkFlow, ForkState, PromptTarget, checkpoint_at_depth,
+};
 #[allow(unused_imports)]
 pub(super) use crate::agent::composer::palette::{
     PaletteAction, PaletteControl, PaletteModel, PaletteRow,
@@ -196,7 +201,7 @@ impl AgentPane {
     }
 
     fn send_user_message_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if rewind_blocks_submission(self.rewind.state.as_ref()) {
+        if self.branch_flow_holds_composer() {
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-session-rewind-blocks-send").to_string(),
@@ -398,21 +403,13 @@ impl AgentPane {
             "rename" if self.kind.caps().session_rename => {
                 self.rename_conversation(&parsed.arguments, cx)
             }
-            // The branch is cut at the last completed turn, and the backend
-            // falls back to that cut rather than refusing, so a fork requested
-            // mid-turn would quietly leave the running turn out of the copy.
-            "fork" if self.kind.caps().session_fork => {
-                if self.is_command_busy() {
-                    self.set_command_feedback(
-                        CommandFeedbackKind::Error,
-                        i18n("agent-composer-command-idle-only").replace("{name}", &command.name),
-                        cx,
-                    );
-                    false
-                } else {
-                    self.fork_conversation(cx)
-                }
-            }
+            "fork" if self.kind.caps().session_fork => self.open_fork(cx),
+            // Where the conversation is a file this side rewrites, the rewind
+            // picker cuts the same branch and offers restoring the files that
+            // turn touched alongside it. Opening a second picker for the
+            // smaller half of what one command already does would only hide
+            // the choice behind the name it was reached by.
+            "fork" if self.kind.caps().file_rewind => self.open_rewind(cx),
             "find" if self.kind.caps().session_search => {
                 self.search_conversations(&parsed.arguments, cx)
             }
@@ -622,7 +619,7 @@ impl AgentPane {
         self.status == Status::Running
             || self.palette.awaiting_command_turn
             || self.history_ui.mode == RecentSessionsMode::Loading
-            || rewind_blocks_submission(self.rewind.state.as_ref())
+            || self.branch_flow_holds_composer()
     }
 
     pub(super) fn skill_disabled_reason(&self, skill: &SkillInfo) -> Option<String> {

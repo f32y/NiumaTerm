@@ -189,13 +189,34 @@ impl Backend {
         }
     }
 
-    /// Branch the conversation and move this session into the copy.
-    pub(in crate::agent) fn fork_conversation(&mut self) -> Result<(), String> {
+    /// Ask which prompts this conversation can be branched in front of. The
+    /// answer arrives as [`Event::ForkCheckpoints`], so there is nothing to
+    /// return here beyond whether the question could be put at all.
+    pub(in crate::agent) fn request_fork_checkpoints(&mut self) -> bool {
         match self {
-            Backend::DeepSeek(session) => session.fork(),
-            Backend::Codex(_) | Backend::Claude(_) => {
-                Err(i18n("agent-session-fork-unsupported").to_string())
+            Backend::Codex(session) => session.request_fork_checkpoints(),
+            Backend::DeepSeek(session) => {
+                session.request_fork_checkpoints();
+                true
             }
+            // Claude's history is a file this side reads directly, and its own
+            // rewind picker is what reads it.
+            Backend::Claude(_) => false,
+            #[cfg(test)]
+            Backend::Test(_) => false,
+        }
+    }
+
+    /// Branch the conversation in front of `anchor` and move this session into
+    /// the copy, leaving the conversation it branched from as it was.
+    pub(in crate::agent) fn fork_conversation(
+        &mut self,
+        anchor: &ForkAnchor,
+    ) -> Result<(), String> {
+        match self {
+            Backend::Codex(session) => session.fork_thread(anchor),
+            Backend::DeepSeek(session) => session.fork(Some(anchor)),
+            Backend::Claude(_) => Err(i18n("agent-session-fork-unsupported").to_string()),
             #[cfg(test)]
             Backend::Test(_) => Err(i18n("agent-session-fork-unsupported").to_string()),
         }

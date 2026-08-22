@@ -102,12 +102,12 @@ impl Render for AgentPane {
         let update_suspended = self.update_suspension.is_some();
         let update_banner = self.render_update_banner(cx);
         let update_overlay = self.render_update_overlay(cx);
-        let rewind_active = self.rewind.state.is_some();
-        let rewind_processing = self
-            .rewind
-            .state
-            .as_ref()
-            .is_some_and(|state| !state.is_picker());
+        // A branch settled from the backend's answer has no window to reach
+        // the composer through, so the prompt it cut in front of is put back
+        // here, in the frame that answer asked for.
+        self.fill_branch_prompt(window, cx);
+        let branch_flow_active = self.branch_flow_holds_composer();
+        let branch_flow_working = self.branch_flow_is_working();
         let session_loading = self.history_ui.mode == RecentSessionsMode::Loading;
         let background = if cx
             .global::<AppSettings>()
@@ -169,13 +169,9 @@ impl Render for AgentPane {
             // the pane below. A pending approval is cancelled (deny +
             // interrupt), while a running turn is interrupted directly.
             .on_action(cx.listener(|this, _: &Escape, window, cx| {
-                if this
-                    .rewind
-                    .state
-                    .as_ref()
-                    .is_some_and(RewindState::is_picker)
-                {
-                    this.cancel_rewind_picker(cx);
+                // A branch or rewind picker owns Escape ahead of anything
+                // under it, and closing one changes nothing else.
+                if this.cancel_branch_picker(cx) {
                 } else if this.pending_approval.is_some() {
                     this.respond_approval("cancel", cx);
                 } else if this.pending_questions.is_some() {
@@ -371,7 +367,7 @@ impl Render for AgentPane {
                                             as f32
                                             + 2.0))
                                         .child(Input::new(&self.input).appearance(false).disabled(
-                                            rewind_processing
+                                            branch_flow_working
                                                 || session_loading
                                                 || update_suspended,
                                         )),
@@ -409,7 +405,7 @@ impl Render for AgentPane {
                                             Button::new("agent-send")
                                                 .primary()
                                                 .disabled(
-                                                    rewind_active
+                                                    branch_flow_active
                                                         || session_loading
                                                         || update_suspended,
                                                 )

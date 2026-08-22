@@ -851,3 +851,83 @@ fn replay_keeps_each_turns_accounting_and_failure() {
         })
     );
 }
+
+#[test]
+fn branch_points_pair_each_prompt_with_the_turn_ahead_of_it() {
+    let turns = serde_json::json!([
+        {"id": "turn1", "status": "completed", "startedAt": 1_786_516_127i64, "items": [
+            {"id": "i1", "type": "userMessage",
+             "content": [{"type": "text", "text": "first"}]}
+        ]},
+        {"id": "turn2", "status": "completed", "startedAt": 1_786_516_227i64, "items": [
+            {"id": "i2", "type": "userMessage",
+             "content": [{"type": "text", "text": "second"}]}
+        ]},
+        {"id": "turn3", "status": "completed", "startedAt": 1_786_516_327i64, "items": [
+            {"id": "i3", "type": "userMessage",
+             "content": [{"type": "text", "text": "third"}]}
+        ]}
+    ]);
+
+    let checkpoints = parse_fork_checkpoints(&turns);
+
+    // Newest first, and the first prompt is absent: there is no turn ahead of
+    // it to keep, so branching in front of it is a new conversation.
+    assert_eq!(
+        checkpoints,
+        vec![
+            ForkCheckpoint {
+                prompt: "third".into(),
+                timestamp: Some("2026-08-12T06:32:07Z".into()),
+                anchor: ForkAnchor::CodexThrough("turn2".into()),
+            },
+            ForkCheckpoint {
+                prompt: "second".into(),
+                timestamp: Some("2026-08-12T06:30:27Z".into()),
+                anchor: ForkAnchor::CodexThrough("turn1".into()),
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_branch_is_never_anchored_on_a_turn_that_did_not_finish() {
+    let turns = serde_json::json!([
+        {"id": "turn1", "status": "completed", "items": [
+            {"id": "i1", "type": "userMessage",
+             "content": [{"type": "text", "text": "first"}]}
+        ]},
+        {"id": "turn2", "status": "interrupted", "items": [
+            {"id": "i2", "type": "userMessage",
+             "content": [{"type": "text", "text": "second"}]}
+        ]},
+        {"id": "turn3", "status": "completed", "items": [
+            {"id": "i3", "type": "userMessage",
+             "content": [{"type": "text", "text": "third"}]}
+        ]}
+    ]);
+
+    // The server refuses a cut through an unfinished turn, so "third" — whose
+    // only anchor is the interrupted turn2 — is not offered at all.
+    assert_eq!(
+        parse_fork_checkpoints(&turns),
+        vec![ForkCheckpoint {
+            prompt: "second".into(),
+            timestamp: None,
+            anchor: ForkAnchor::CodexThrough("turn1".into()),
+        }]
+    );
+}
+
+#[test]
+fn a_thread_with_one_turn_offers_no_branch_point() {
+    let turns = serde_json::json!([
+        {"id": "turn1", "status": "completed", "items": [
+            {"id": "i1", "type": "userMessage",
+             "content": [{"type": "text", "text": "only"}]}
+        ]}
+    ]);
+
+    assert!(parse_fork_checkpoints(&turns).is_empty());
+    assert!(parse_fork_checkpoints(&serde_json::Value::Null).is_empty());
+}

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use gpui::Image;
 
+use crate::agent::composer::PromptTarget;
 use crate::agent::transcript::view::TranscriptView;
 use crate::agent::transcript::{
     compaction_accounting, hidden, is_work_row, should_show_jump_to_latest,
@@ -474,5 +475,41 @@ impl TranscriptView {
         }
 
         self.row_specs = new;
+    }
+}
+
+/// Transcript indices of the prompts that opened a turn, oldest first.
+///
+/// A branch is cut in front of a whole turn, so only the message that opened
+/// one names a cut; a message steered into a turn already running shares that
+/// turn with the prompt ahead of it and names nothing of its own.
+fn turn_opening_prompts(items: &[Entry]) -> Vec<usize> {
+    let mut opened = HashSet::new();
+
+    items
+        .iter()
+        .enumerate()
+        .filter(|(_, entry)| matches!(entry.item, SessionItem::UserMessage { .. }))
+        .filter(|(_, entry)| opened.insert(entry.turn))
+        .map(|(index, _)| index)
+        .collect()
+}
+
+impl TranscriptView {
+    /// Name the branch point one transcript row points at, for the row's own
+    /// menu. `None` where the row is not a prompt that opened a turn, which is
+    /// a row no cut can be anchored on.
+    pub(in crate::agent) fn prompt_target(&self, index: usize) -> Option<PromptTarget> {
+        let SessionItem::UserMessage { text: Some(prompt) } = &self.items.get(index)?.item else {
+            return None;
+        };
+
+        let openings = turn_opening_prompts(&self.items);
+        let position = openings.iter().position(|opening| *opening == index)?;
+
+        Some(PromptTarget {
+            prompt: prompt.clone(),
+            depth: openings.len() - 1 - position,
+        })
     }
 }

@@ -1,5 +1,6 @@
 use nmt_i18n::i18n;
 
+use crate::agent::composer::ForkState;
 use crate::agent::session::{Backend, RecoveryIdentity, Status};
 use crate::agent::*;
 
@@ -64,6 +65,7 @@ impl AgentPane {
             || !self.palette.command_queue.is_empty()
             || !self.queued_user_messages.is_empty()
             || self.rewind.state.is_some()
+            || self.fork.state.is_some()
             || self.transcript.read(cx).is_compacting()
             || self
                 .session
@@ -125,6 +127,9 @@ impl AgentPane {
             .is_some_and(RewindState::is_picker)
         {
             self.rewind.state = None;
+        }
+        if self.fork.state.as_ref().is_some_and(ForkState::is_picker) {
+            self.fork.state = None;
         }
         self.transcript
             .update(cx, |transcript, cx| transcript.set_compacting(false, cx));
