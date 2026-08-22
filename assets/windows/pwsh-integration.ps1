@@ -12,6 +12,45 @@
 # a shell without PSReadLine emits no marks (region stays None, nothing withheld)
 # rather than `;A/;B` without `;C` (which would strand output in the hidden region).
 
+# The host writes PowerShell's own "a new release is available" notice from its
+# banner path, and it turns that path off for any session started with
+# -EncodedCommand -- which is how this integration is evaluated, so the notice
+# is lost. The background check behind it is unaffected and still records its
+# result on disk, so the notice is rebuilt from that record here. The work runs
+# in a child scope so none of its variables reach the interactive session.
+#
+# The record is a file named update<n>_v<version>_<yyyy-MM-dd> in the cache
+# directory of the running build, where <n> is the notification channel
+# (1 stable, 2 LTS). Its presence already means the version it names supersedes
+# what is running, and the directory is keyed by the running build, so neither a
+# version comparison nor an age check is needed here. Windows PowerShell has no
+# such directory and so prints nothing.
+& {
+    if ($env:POWERSHELL_UPDATECHECK -eq 'Off') { return }
+    $cacheDir = Join-Path $env:LOCALAPPDATA "Microsoft\PowerShell\$($PSVersionTable.GitCommitId)"
+    $marker = Get-ChildItem -LiteralPath $cacheDir -Filter 'update*' -File -ErrorAction Ignore |
+        Select-Object -First 1
+    if (-not ($marker -and $marker.Name -match '^update(\d+)_(v[^_]+)_')) { return }
+
+    $channel = if ($matches[1] -eq '2') { 'LTS' } else { 'stable' }
+    $tag = $matches[2]
+    $notice = @(
+        "A new PowerShell $channel release is available: $tag"
+        'Upgrade now, or check out the release page at:'
+        "  https://aka.ms/PowerShell-Release?tag=$tag"
+    )
+    # Reverse video with the lines padded to one width, matching how the host
+    # draws it: the notice reads as one block instead of as command output, and
+    # it borrows the user's own colours rather than naming a foreground that may
+    # be invisible against their background.
+    $width = ($notice | Measure-Object -Property Length -Maximum).Maximum
+    $e = [char]27
+    foreach ($line in $notice) {
+        [Console]::WriteLine("$e[7m$($line.PadRight($width))$e[0m")
+    }
+    [Console]::WriteLine()
+}
+
 if (Get-Module PSReadLine) {
     $Global:__YtOriginalPrompt = $function:prompt
     $Global:__YtReadLineCompleted = $false
