@@ -49,6 +49,10 @@ pub(crate) struct Release {
     pub(crate) label: String,
     pub(crate) page_url: String,
     pub(crate) assets: Vec<Asset>,
+    /// When the channel published it, as `yyyymmdd`, which is the only thing a
+    /// release tag and a nightly label can be ordered by across channels. Left
+    /// unset for a response that carried no timestamp this could read.
+    pub(crate) published: Option<u32>,
 }
 
 /// One file published with a release.
@@ -71,6 +75,10 @@ struct ReleaseEntry {
     /// from a release published before anything was attached to it.
     #[serde(default)]
     assets: Vec<Asset>,
+    /// `2026-08-14T09:12:33Z`. Null for a draft, which never reaches a
+    /// comparison, and absent from the recorded responses.
+    #[serde(default)]
+    published_at: Option<String>,
 }
 
 pub(crate) fn latest(channel: UpdateChannel) -> Result<Option<Release>, CheckError> {
@@ -148,7 +156,22 @@ fn newest_in_channel(entries: &[ReleaseEntry], channel: UpdateChannel) -> Option
             label: entry.tag_name.clone(),
             page_url: entry.html_url.clone(),
             assets: entry.assets.clone(),
+            published: entry.published_at.as_deref().and_then(publish_date),
         })
+}
+
+/// `2026-08-14T09:12:33Z` reduced to `20260814`, the form a nightly label
+/// already carries its date in, so the two order against each other as numbers.
+/// Anything else yields nothing rather than a date built from whatever happened
+/// to sit at those offsets.
+fn publish_date(timestamp: &str) -> Option<u32> {
+    let date = timestamp.get(..10)?;
+    let digits = format!("{}{}{}", date.get(..4)?, date.get(5..7)?, date.get(8..10)?);
+
+    digits
+        .bytes()
+        .all(|byte| byte.is_ascii_digit())
+        .then(|| digits.parse().ok())?
 }
 
 fn channel_of(version: &Version) -> UpdateChannel {
@@ -159,8 +182,15 @@ fn channel_of(version: &Version) -> UpdateChannel {
 }
 
 /// Whether `candidate` is worth offering over `current`.
-pub(crate) fn supersedes(current: &Version, candidate: &Version) -> bool {
-    match (current, candidate) {
+pub(crate) fn supersedes(current: &Version, candidate: &Release) -> bool {
+    // A tag this build cannot read is offered rather than hidden: the channel
+    // published it, and a name nothing here understands is no evidence that it
+    // is behind.
+    let Some(published) = Version::parse(&candidate.label) else {
+        return true;
+    };
+
+    match (current, &published) {
         (
             Version::Release {
                 major: current_major,
@@ -186,8 +216,24 @@ pub(crate) fn supersedes(current: &Version, candidate: &Version) -> bool {
             // at all means it is the newest the channel has.
             date > current_date || (date == current_date && commit != current_commit)
         }
-        // The channels moved. Whatever the chosen one publishes is what the
-        // user asked to run, even when its version reads as older.
-        _ => true,
+        // A nightly is cut from the tip of the development line, so a release
+        // published before that build existed is behind it however its number
+        // reads, and installing it would move the installation backwards. One
+        // published on a later day carries work the nightly cannot, which is
+        // what lets a months-old nightly move to the stable channel.
+        //
+        // A nightly label dates a build to the day, and a release is routinely
+        // cut from the same day's tree, so a same-day release is exactly the
+        // ambiguous case and is left alone: a release already published when
+        // that day's build was made is the downgrade being avoided, and the
+        // next release lands on a later day. For the same reason a release with
+        // no publishing date read from the response is treated as behind.
+        (Version::Nightly { date, .. }, Version::Release { .. }) => candidate
+            .published
+            .is_some_and(|published| published > *date),
+        // The other direction needs no such evidence: the nightly channel is
+        // only ever cut from the tip, so what it publishes is never behind a
+        // release.
+        (Version::Release { .. }, Version::Nightly { .. }) => true,
     }
 }

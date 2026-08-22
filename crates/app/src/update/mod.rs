@@ -283,11 +283,8 @@ fn outcome(found: Result<Option<Release>, CheckError>) -> Status {
     // A build whose own label does not parse cannot be compared against
     // anything, so it is offered the release rather than told it is current.
     match Version::parse(APP_VERSION) {
-        Some(current) => match Version::parse(&published.label) {
-            Some(candidate) if !supersedes(&current, &candidate) => Status::UpToDate,
-            _ => Status::Available(published),
-        },
-        None => Status::Available(published),
+        Some(current) if !supersedes(&current, &published) => Status::UpToDate,
+        _ => Status::Available(published),
     }
 }
 
