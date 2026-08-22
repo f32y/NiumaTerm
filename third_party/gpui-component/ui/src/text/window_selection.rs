@@ -1,7 +1,7 @@
 use gpui::{
     App, Bounds, Context, Element, ElementId, Entity, EntityId, GlobalElementId, Hitbox,
     InspectorElementId, IntoElement, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, Point, ScrollWheelEvent, Style, WeakEntity, Window,
+    MouseUpEvent, Pixels, Point, ScrollWheelEvent, Style, WeakEntity, Window, point,
 };
 
 use crate::{Root, global_state::GlobalState, scroll::AutoScroll, text::TextViewState};
@@ -341,6 +341,57 @@ impl Root {
             .map(|(_, text)| text)
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    /// Bounds of the visible selected text in window coordinates.
+    ///
+    /// Text line bounds are clipped to the current content mask during paint,
+    /// so the result stays anchored to visible text even when a selection
+    /// crosses virtualized rows or scrolls beyond the viewport.
+    pub(crate) fn window_selected_text_bounds(&self, cx: &App) -> Option<Bounds<Pixels>> {
+        let resolved = self.text_selection.resolved_points(cx);
+        let single_view = self.text_selection.single_view();
+        let anchor_scope = self.active_selection_scope();
+        let mut selected_bounds: Option<Bounds<Pixels>> = None;
+
+        for (id, (view, _, scope)) in &self.selectable_text_views {
+            let Some(view) = view.upgrade() else { continue };
+            let state = view.read(cx);
+            let in_window_selection = resolved.is_some()
+                && state.is_selectable()
+                && *scope == anchor_scope
+                && single_view.map_or(true, |view_id| view_id == *id);
+            if !state.has_view_selection() && !in_window_selection {
+                continue;
+            }
+
+            let Some(lines) = self.selectable_text_inlines.get(id) else {
+                continue;
+            };
+            if in_window_selection {
+                let Some((start, end)) = resolved else {
+                    continue;
+                };
+                for line in lines {
+                    if let Some(bounds) = selected_line_bounds(*line, start, end) {
+                        selected_bounds =
+                            Some(selected_bounds.map_or(bounds, |current| current.union(&bounds)));
+                    }
+                }
+            } else if let Some(selection) = state.multi_click_selection() {
+                if let Some(bounds) = lines.iter().find(|bounds| bounds.contains(&selection.pos)) {
+                    selected_bounds =
+                        Some(selected_bounds.map_or(*bounds, |current| current.union(bounds)));
+                }
+            } else {
+                for bounds in lines {
+                    selected_bounds =
+                        Some(selected_bounds.map_or(*bounds, |current| current.union(bounds)));
+                }
+            }
+        }
+
+        selected_bounds
     }
 
     /// Clear the window selection and all view-local selections.
@@ -712,6 +763,36 @@ impl Root {
             true
         });
     }
+}
+
+pub(in crate::text) fn selected_line_bounds(
+    line: Bounds<Pixels>,
+    start: Point<Pixels>,
+    end: Point<Pixels>,
+) -> Option<Bounds<Pixels>> {
+    let on_line = |position: Point<Pixels>| position.y >= line.top() && position.y < line.bottom();
+    let (top, bottom) = if start.y <= end.y {
+        (start, end)
+    } else {
+        (end, start)
+    };
+
+    let (left, right) = if on_line(start) && on_line(end) {
+        (start.x.min(end.x), start.x.max(end.x))
+    } else if on_line(top) {
+        (top.x, line.right())
+    } else if on_line(bottom) {
+        (line.left(), bottom.x)
+    } else if line.bottom() > top.y && line.top() <= bottom.y {
+        (line.left(), line.right())
+    } else {
+        return None;
+    };
+
+    let left = left.max(line.left());
+    let right = right.min(line.right());
+    (right > left)
+        .then(|| Bounds::from_corners(point(left, line.top()), point(right, line.bottom())))
 }
 
 /// A zero-size element that drives window-level text selection.

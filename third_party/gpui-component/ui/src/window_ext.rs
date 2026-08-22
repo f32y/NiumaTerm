@@ -5,7 +5,7 @@ use crate::{
     notification::Notification,
     sheet::Sheet,
 };
-use gpui::{App, ElementId, Entity, Window};
+use gpui::{App, Bounds, ElementId, Entity, Pixels, Window};
 use std::rc::Rc;
 
 /// Extension trait for [`Window`] to add dialog, sheet .. functionality.
@@ -87,6 +87,9 @@ pub trait WindowExt: Sized {
     ///
     /// Returns an empty string if the window root is not a [`Root`].
     fn selected_text(&mut self, cx: &mut App) -> String;
+
+    /// Returns the visible selected text bounds in window coordinates.
+    fn selected_text_bounds(&mut self, cx: &mut App) -> Option<Bounds<Pixels>>;
 
     /// Returns true if there is an active text selection in this window
     /// (either a window-level drag selection or a view-local selection such
@@ -225,6 +228,12 @@ impl WindowExt for Window {
             return String::new();
         };
         root.read(cx).window_selected_text(cx)
+    }
+
+    #[inline]
+    fn selected_text_bounds(&mut self, cx: &mut App) -> Option<Bounds<Pixels>> {
+        let root = self.root::<Root>().flatten()?;
+        root.read(cx).window_selected_text_bounds(cx)
     }
 
     #[inline]
