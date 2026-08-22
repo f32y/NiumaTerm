@@ -1,5 +1,6 @@
 use nmt_i18n::i18n;
 
+use crate::agent::composer::visible_prompt;
 use crate::agent::session::{directories_match, directory_label};
 use crate::agent::transcript::relative_time;
 use crate::agent::*;
@@ -7,7 +8,10 @@ use crate::agent::*;
 /// One queued prompt on one line. A prompt spanning several lines is folded
 /// into one so every waiting row costs the composer the same height.
 pub(in crate::agent::view) fn queued_message_label(prompt: &QueuedPrompt) -> String {
-    let text = prompt.text.lines().collect::<Vec<_>>().join(" ");
+    let text = visible_prompt(&prompt.text)
+        .lines()
+        .collect::<Vec<_>>()
+        .join(" ");
 
     i18n("agent-history-queued-message").replace("{text}", &text)
 }

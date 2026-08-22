@@ -1,5 +1,6 @@
 use nmt_i18n::i18n;
 
+use crate::agent::composer::visible_prompt;
 use crate::agent::*;
 
 /// Where the last-response reading stops counting and becomes "more than an
@@ -265,9 +266,14 @@ pub(in crate::agent) fn command_execution_detail(
 /// independent of any partial selection or truncated preview.
 pub(in crate::agent) fn entry_copy_text(item: &SessionItem) -> String {
     match item {
-        SessionItem::UserMessage { text }
-        | SessionItem::AgentMessage { text, .. }
-        | SessionItem::Reasoning { summary: text, .. } => text.clone().unwrap_or_default(),
+        SessionItem::UserMessage { text } => text
+            .as_deref()
+            .map(visible_prompt)
+            .unwrap_or_default()
+            .to_string(),
+        SessionItem::AgentMessage { text, .. } | SessionItem::Reasoning { summary: text, .. } => {
+            text.clone().unwrap_or_default()
+        }
         SessionItem::Error { text } => text.clone(),
         SessionItem::CommandExecution {
             command,

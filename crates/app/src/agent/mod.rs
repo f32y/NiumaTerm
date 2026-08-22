@@ -173,6 +173,7 @@ struct GitBranchPoll {
 struct UnansweredPrompt {
     turn: u64,
     text: String,
+    response_annotations: Vec<String>,
     skill: Option<SkillReference>,
 }
 
@@ -567,6 +568,8 @@ pub(crate) struct AgentPane {
     /// Images the pending message carries, anchored to the composer text by
     /// their `[Image #N]` placeholders.
     attachments: PendingAttachments,
+    /// Earlier agent response text attached to the pending message.
+    response_annotations: Vec<String>,
     /// When the agent last finished answering, for the composer's idle
     /// reading of how long the conversation has been waiting on the user.
     /// `None` until the first turn settles.

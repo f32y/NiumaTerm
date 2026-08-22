@@ -2,7 +2,9 @@ mod prompt_truncation_tests {
     use gpui::px;
     use nmt_agent_utils::chat::{Compaction, CompactionTrigger, Item as SessionItem};
 
-    use crate::agent::composer::{ComposerAction, composer_action};
+    use crate::agent::composer::{
+        ComposerAction, composer_action, prompt_with_response_annotations,
+    };
     use crate::agent::transcript::{
         AGENT_DISCLOSURE_DETAIL_INSET, AGENT_DISCLOSURE_GAP, AGENT_DISCLOSURE_PADDING,
         AGENT_DISCLOSURE_SLOT, AGENT_TEXT_MEASURE_REMS, AgentKind, Status, TranscriptView,
@@ -56,6 +58,17 @@ mod prompt_truncation_tests {
         for status in [Status::Starting, Status::Idle, Status::Exited] {
             assert_eq!(composer_action(status), ComposerAction::Send);
         }
+    }
+
+    #[test]
+    fn copying_an_annotated_user_message_omits_hidden_context() {
+        let submitted =
+            prompt_with_response_annotations("Explain this", &["selected response text".into()]);
+        let item = SessionItem::UserMessage {
+            text: Some(submitted),
+        };
+
+        assert_eq!(entry_copy_text(&item), "Explain this");
     }
 
     #[test]
@@ -386,6 +399,7 @@ mod separate_view_state_tests {
             parent.update(cx, |transcript, cx| {
                 transcript.push(1, message("a", "parent reply"), Vec::new(), cx);
                 transcript.expanded_rows.insert(0);
+                transcript.expanded_annotations.insert(0);
                 transcript.toggled_turns.insert(1);
                 transcript.expanded_groups.insert(0);
                 transcript.mark_interrupted(1);
@@ -397,6 +411,7 @@ mod separate_view_state_tests {
                     transcript.expanded_rows.is_empty(),
                     "row expansion belongs to one conversation"
                 );
+                assert!(transcript.expanded_annotations.is_empty());
                 assert!(transcript.toggled_turns.is_empty());
                 assert!(transcript.expanded_groups.is_empty());
                 assert!(
@@ -408,6 +423,7 @@ mod separate_view_state_tests {
             // The parent keeps everything it had after the child was touched.
             parent.update(cx, |transcript, _| {
                 assert!(transcript.expanded_rows.contains(&0));
+                assert!(transcript.expanded_annotations.contains(&0));
                 assert!(transcript.was_interrupted(1));
                 assert!(!transcript.is_empty());
             });
