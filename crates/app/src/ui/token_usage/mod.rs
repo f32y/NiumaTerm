@@ -156,6 +156,7 @@ impl TokenUsageView {
             usage: None,
             state: RefreshState {
                 refreshing: false,
+                user_requested: false,
                 enabled: Self::enabled(cx.global::<AppSettings>()),
             },
         };
@@ -201,8 +202,8 @@ impl Render for TokenUsageView {
             .icon(TokenIcon)
             .label(label)
             .aria_label(self.accessibility_label())
-            .loading(self.state.refreshing)
-            .on_click(cx.listener(|this, _, _, cx| auto_refresh::refresh(this, cx)));
+            .loading(self.state.user_requested)
+            .on_click(cx.listener(|this, _, _, cx| auto_refresh::refresh_from_user(this, cx)));
 
         HoverCard::new("token-usage-details")
             .anchor(gpui::Anchor::BottomLeft)
