@@ -21,11 +21,9 @@
 
 # 关于设置
 "settings-about-title" = "关于"
-"settings-about-product" = "NiumaTerm"
 "settings-about-version" = "版本"
 "settings-about-releases" = "发行版本"
 "settings-about-release-page" = "前往发行页面"
-"settings-about-updates" = "更新"
 "settings-about-check-updates" = "检查更新"
 "settings-about-check-updates-description" = "在启动时和每隔六小时向 GitHub 询问所选通道是否发布了更新的版本。即使关闭此项，下方的检查按钮仍可使用。"
 "settings-about-channel" = "更新通道"
