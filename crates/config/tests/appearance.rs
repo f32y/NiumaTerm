@@ -63,6 +63,7 @@ fn window_backdrop_defaults_and_accepts_modes_and_legacy_values() {
     assert_eq!(missing.appearance.window_backdrop, WindowBackdrop::Acrylic);
 
     for (value, expected) in [
+        ("mica-alt", WindowBackdrop::MicaAlt),
         ("mica", WindowBackdrop::Mica),
         ("acrylic", WindowBackdrop::Acrylic),
         ("off", WindowBackdrop::Off),
@@ -77,7 +78,7 @@ fn window_backdrop_defaults_and_accepts_modes_and_legacy_values() {
     // An unknown material must not fail the whole file; it degrades to opaque.
     let unknown: Config = from_str(
         "[appearance]
-enable-window-transparency = \"mica-alt\"
+enable-window-transparency = \"tabbed\"
 ",
     )
     .unwrap();
