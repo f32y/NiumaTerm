@@ -419,7 +419,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
             // A closed window is discarded — except the last one: GPUI's
             // LastWindowClosed quit follows, and the quit hook saves it.
             cx.on_window_closed(|cx, window_id| {
-                if !cx.windows().is_empty() {
+                if cx.any_window_keeps_app_alive() {
                     cx.global_mut::<WindowRegistry>().remove(window_id);
                 }
                 cx.global_mut::<ShellRegistry>().remove(window_id);
