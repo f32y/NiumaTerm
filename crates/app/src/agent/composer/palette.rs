@@ -4,6 +4,11 @@ use crate::agent::composer::{CommandFeedbackKind, ForkState, RewindAction, Rewin
 use crate::agent::input_history::InputHistoryDirection;
 use crate::agent::*;
 
+/// Tallest the palette grows before its own rows scroll: nine rows and the
+/// note under them. The transcript reads this as the height the picker covers
+/// when it floats over the bottom of the pane.
+pub(in crate::agent) const PALETTE_MAX_HEIGHT: Pixels = px(9. * 48. + 36.);
+
 #[derive(Clone)]
 pub(in crate::agent) enum PaletteAction {
     Command(SlashCommandInfo),
@@ -316,6 +321,7 @@ impl AgentPane {
                 {
                     self.palette.selected = selected;
                     self.palette.scroll.scroll_to_item(self.palette.selected);
+                    self.follow_branch_selection(cx);
                     cx.notify();
                 }
             }
@@ -405,6 +411,23 @@ impl AgentPane {
         }
 
         true
+    }
+
+    /// Move the highlight to the row under the pointer without acting on it.
+    ///
+    /// Only a picker of branch points does this: there the highlight is what
+    /// the transcript follows, so pointing at a prompt has to reach it the
+    /// same way the arrow keys do. In the command palette the pointer often
+    /// rests over the list while the user types, and moving the highlight
+    /// there would change what Enter runs.
+    fn hover_palette_index(&mut self, index: usize, cx: &mut Context<Self>) {
+        if self.palette.selected == index {
+            return;
+        }
+
+        self.palette.selected = index;
+        self.follow_branch_selection(cx);
+        cx.notify();
     }
 
     pub(in crate::agent) fn activate_palette_index(
@@ -525,6 +548,7 @@ impl AgentPane {
             .palette
             .selected
             .min(model.rows.len().saturating_sub(1));
+        let hover_selects = self.branch_picker_is_open();
         let rows = model
             .rows
             .into_iter()
@@ -545,6 +569,13 @@ impl AgentPane {
                     .when(disabled, |this| this.opacity(0.5))
                     .when(!disabled, |this| {
                         this.hover(|style| style.bg(cx.theme().muted.opacity(0.45)))
+                    })
+                    .when(hover_selects && !disabled, |this| {
+                        this.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                            if *hovered {
+                                this.hover_palette_index(index, cx);
+                            }
+                        }))
                     })
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.activate_palette_index(index, true, window, cx)
@@ -593,7 +624,7 @@ impl AgentPane {
                 .id("agent-slash-command-palette")
                 .on_mouse_down_out(cx.listener(|this, _, _, cx| this.dismiss_command_palette(cx)))
                 .w_full()
-                .max_h(px(9. * 48. + 36.))
+                .max_h(PALETTE_MAX_HEIGHT)
                 .overflow_y_scroll()
                 .track_scroll(&self.palette.scroll)
                 .p_1()

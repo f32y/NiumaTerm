@@ -66,6 +66,15 @@ pub(in crate::agent) enum RowSpec {
     },
 }
 
+/// Where the reader was before something else began moving the transcript for
+/// them. The live end is recorded as such rather than as the offset it stands
+/// at, because the end moves as the conversation grows.
+#[derive(Clone, Copy, Debug)]
+pub(in crate::agent) enum ReadingPosition {
+    Tail,
+    At(ListOffset),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::agent) enum TurnSummary {
     Worked(u64),
@@ -511,5 +520,94 @@ impl TranscriptView {
             prompt: prompt.clone(),
             depth: openings.len() - 1 - position,
         })
+    }
+
+    /// The transcript row a branch point names, found the way `prompt_target`
+    /// names one: counted back from the newest turn-opening prompt, with the
+    /// text confirming the count landed on the same message. `None` where the
+    /// two disagree, which is a row the transcript should not be moved to.
+    pub(in crate::agent) fn prompt_row(&self, target: &PromptTarget) -> Option<usize> {
+        let openings = turn_opening_prompts(&self.items);
+        let index = *openings.get(openings.len().checked_sub(target.depth + 1)?)?;
+        let SessionItem::UserMessage { text: Some(prompt) } = &self.items[index].item else {
+            return None;
+        };
+        if *prompt != target.prompt {
+            return None;
+        }
+
+        self.row_specs
+            .iter()
+            .position(|spec| matches!(spec, RowSpec::Entry { index: row, .. } if *row == index))
+    }
+
+    /// Put the prompt a branch point names at the top of the transcript, so
+    /// the conversation follows the row a picker is highlighting.
+    ///
+    /// Top rather than merely visible: a picker floats over the bottom of the
+    /// transcript, so a prompt revealed at the lower edge would be hidden
+    /// behind the list naming it — and the turns the cut would discard are
+    /// what the user is deciding about, which is what sits below it.
+    pub(in crate::agent) fn scroll_to_prompt(
+        &self,
+        target: &PromptTarget,
+        smooth: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(row) = self.prompt_row(target) else {
+            return;
+        };
+
+        let offset = ListOffset {
+            item_ix: row,
+            offset_in_item: px(0.),
+        };
+        if smooth {
+            self.transcript_list.scroll_to_smooth(offset);
+        } else {
+            self.transcript_list.scroll_to(offset);
+        }
+        cx.notify();
+    }
+
+    /// Hand the transcript to a picker that will scroll it to whichever prompt
+    /// it highlights.
+    ///
+    /// Two things have to happen before it does. The reading position is
+    /// remembered, so closing the picker can give it back; and it is pinned,
+    /// because the empty space opened below the conversation would otherwise
+    /// carry a view that was sitting at the live end down into it.
+    ///
+    /// The newer hold replaces any older one: a picker that closed by cutting
+    /// the conversation rather than by being cancelled leaves its own behind,
+    /// and that position describes a conversation the user has since left.
+    pub(in crate::agent) fn hold_for_picker(&mut self) {
+        self.stashed_position = Some(if self.transcript_list.is_following_tail() {
+            ReadingPosition::Tail
+        } else {
+            ReadingPosition::At(self.transcript_list.logical_scroll_top())
+        });
+        self.transcript_list.freeze_scroll_position();
+        self.reserve_below = true;
+    }
+
+    /// Take it back, for a picker that closed without changing anything: the
+    /// reserved space goes away and the conversation returns to where the
+    /// reader left it.
+    ///
+    /// The return is a jump rather than an eased scroll. Dropping the reserve
+    /// shortens what the list can travel in the same frame, so a view sitting
+    /// on a prompt near the end is already outside the range an animation
+    /// could start from; easing from where it lands after that would read as a
+    /// jump followed by a slide.
+    pub(in crate::agent) fn release_from_picker(&mut self, cx: &mut Context<Self>) {
+        self.reserve_below = false;
+
+        match self.stashed_position.take() {
+            Some(ReadingPosition::Tail) => self.scroll_to_bottom(),
+            Some(ReadingPosition::At(offset)) => self.transcript_list.scroll_to(offset),
+            None => {}
+        }
+        cx.notify();
     }
 }

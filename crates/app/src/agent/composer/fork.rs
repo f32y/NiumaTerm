@@ -46,6 +46,25 @@ pub(in crate::agent) fn checkpoint_at_depth<'a, T>(
         .filter(|checkpoint| prompt_of(checkpoint) == target.prompt)
 }
 
+/// Name the prompt one picker row stands for.
+///
+/// Both pickers list their branch points newest first and append their cancel
+/// row last, which is the same order `depth` counts in, so a row's own index
+/// is the depth of the prompt it offers. The text travels with it, so the
+/// transcript can refuse to move if the two lists have drifted apart.
+pub(in crate::agent) fn row_prompt_target(
+    row: usize,
+    action: &PaletteAction,
+) -> Option<PromptTarget> {
+    let prompt = match action {
+        PaletteAction::RewindCheckpoint(checkpoint) => checkpoint.prompt.clone(),
+        PaletteAction::ForkCheckpoint(checkpoint) => checkpoint.prompt.clone(),
+        _ => return None,
+    };
+
+    Some(PromptTarget { prompt, depth: row })
+}
+
 /// A branch is a local multi-step operation rather than a model turn, so its
 /// progress is tracked apart from the turn state; timers, transcript rows, and
 /// the slash queue must not read cutting a branch as provider output.
@@ -103,6 +122,49 @@ impl AgentPane {
                 .state
                 .as_ref()
                 .is_some_and(|state| !state.is_picker())
+    }
+
+    /// Whether a list of branch points is on screen, which is what makes the
+    /// palette's highlight something the transcript follows.
+    pub(in crate::agent) fn branch_picker_is_open(&self) -> bool {
+        self.rewind
+            .state
+            .as_ref()
+            .is_some_and(RewindState::is_picker)
+            || self.fork.state.as_ref().is_some_and(ForkState::is_picker)
+    }
+
+    /// Hand the transcript to a picker that is about to scroll it to the
+    /// prompt it highlights.
+    pub(in crate::agent) fn hold_transcript_for_picker(&self, cx: &mut Context<Self>) {
+        self.transcript
+            .update(cx, |transcript, _| transcript.hold_for_picker());
+    }
+
+    /// Give it back, for a picker closing without having cut anything.
+    pub(in crate::agent) fn release_transcript_from_picker(&self, cx: &mut Context<Self>) {
+        self.transcript
+            .update(cx, |transcript, cx| transcript.release_from_picker(cx));
+    }
+
+    /// Move the transcript to the prompt the highlighted picker row names, so
+    /// the conversation shows what the cut would keep and what it would drop.
+    /// Following the smooth-scrolling setting keeps the jump between two
+    /// distant prompts readable where the user asked for animated scrolling.
+    pub(in crate::agent) fn follow_branch_selection(&self, cx: &mut Context<Self>) {
+        let selected = self.palette.selected;
+        let Some(target) = self
+            .palette_model(cx)
+            .and_then(|model| model.rows.get(selected).cloned())
+            .and_then(|row| row_prompt_target(selected, &row.action))
+        else {
+            return;
+        };
+
+        let smooth = cx.global::<AppSettings>().smooth_scrolling.agent_enabled();
+        self.transcript.update(cx, |transcript, cx| {
+            transcript.scroll_to_prompt(&target, smooth, cx)
+        });
     }
 
     /// Close whichever picker is open, answering whether there was one. Escape
@@ -227,6 +289,11 @@ impl AgentPane {
                                 cx,
                             );
                         }
+                        self.hold_transcript_for_picker(cx);
+                        // The newest prompt is highlighted, and it usually
+                        // sits under the picker that just opened over the
+                        // bottom of the transcript.
+                        self.follow_branch_selection(cx);
                         cx.notify();
                     }
                 }
@@ -241,6 +308,7 @@ impl AgentPane {
         if self.fork.state.as_ref().is_some_and(ForkState::is_picker) {
             self.fork.state = None;
             self.palette.selected = 0;
+            self.release_transcript_from_picker(cx);
             // Cancelling is the user's own no-op, and dropping the message
             // retires the non-transient "Reading branch points…" status that
             // would otherwise outlive the picker it described.
