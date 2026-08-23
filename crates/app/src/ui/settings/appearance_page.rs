@@ -12,6 +12,26 @@ pub(super) fn appearance_page(
         .default_open(true)
         .group(
             SettingGroup::new()
+                .title(i18n("settings-appearance-language"))
+                .item(SettingItem::new(
+                    i18n("settings-appearance-language"),
+                    SettingField::dropdown(
+                        vec![
+                            // Language names are proper nouns shown in their
+                            // own language, so they stay out of the catalogs.
+                            ("en".into(), "English".into()),
+                            ("zh-CN".into(), "简体中文".into()),
+                        ],
+                        |cx| cx.global::<AppSettings>().language.as_str().into(),
+                        |value, cx| {
+                            cx.global_mut::<AppSettings>().language = Language::from_value(&value);
+                        },
+                    )
+                    .default_value(SharedString::from("en")),
+                )),
+        )
+        .group(
+            SettingGroup::new()
                 .title(i18n("settings-appearance-theme"))
                 .item(SettingItem::new(
                     i18n("settings-appearance-agent-pane-terminal-background"),
@@ -336,25 +356,5 @@ pub(super) fn appearance_page(
                     // the entry is locked instead of reporting a dead value.
                     .disabled(!show_git_status),
                 ),
-        )
-        .group(
-            SettingGroup::new()
-                .title(i18n("settings-appearance-language"))
-                .item(SettingItem::new(
-                    i18n("settings-appearance-language"),
-                    SettingField::dropdown(
-                        vec![
-                            // Language names are proper nouns shown in their
-                            // own language, so they stay out of the catalogs.
-                            ("en".into(), "English".into()),
-                            ("zh-CN".into(), "简体中文".into()),
-                        ],
-                        |cx| cx.global::<AppSettings>().language.as_str().into(),
-                        |value, cx| {
-                            cx.global_mut::<AppSettings>().language = Language::from_value(&value);
-                        },
-                    )
-                    .default_value(SharedString::from("en")),
-                )),
         )
 }
