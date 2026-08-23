@@ -82,6 +82,10 @@ struct StateInner {
     follow_state: FollowState,
     smooth_wheel_enabled: bool,
     smooth_wheel_motion: Option<SmoothWheelMotion>,
+    /// An offset asked for with the wheel's own easing rather than a jump.
+    /// Held until the next layout, because turning it into a distance needs
+    /// the viewport height, which only a laid-out list knows.
+    pending_smooth_scroll: Option<ListOffset>,
 }
 
 /// Deferred scroll adjustment applied after the scroll-top item has been remeasured.
@@ -336,6 +340,7 @@ impl ListState {
             follow_state: FollowState::default(),
             smooth_wheel_enabled: false,
             smooth_wheel_motion: None,
+            pending_smooth_scroll: None,
         })));
         this.splice(0..0, item_count);
         this
@@ -670,6 +675,46 @@ impl ListState {
         state.logical_scroll_top = Some(scroll_top);
     }
 
+    /// Scroll the list to the given offset, easing there over a few frames
+    /// the way a wheel detent does instead of jumping.
+    ///
+    /// The motion begins on the next layout: the distance it has to travel is
+    /// measured against the viewport, whose height is only known once the list
+    /// has been laid out. Callers reaching this from outside a frame — a key
+    /// handler, a timer — must notify their view, because a demand-driven
+    /// frame pump does not wake for a request parked here.
+    pub fn scroll_to_smooth(&self, scroll_top: ListOffset) {
+        self.0.borrow_mut().pending_smooth_scroll = Some(scroll_top);
+    }
+
+    /// Name the position the list is currently showing, so a change to the
+    /// content or to the padding around it cannot move it.
+    ///
+    /// A bottom-aligned list represents its end as no position at all, and
+    /// that sentinel means "wherever the end now is": space added below the
+    /// content would carry the view down into it. Naming the position keeps
+    /// the reading position where the reader left it.
+    pub fn freeze_scroll_position(&self) {
+        let state = &mut *self.0.borrow_mut();
+        state.follow_state.stop_following();
+
+        let height = state
+            .last_layout_bounds
+            .map_or(px(0.), |bounds| bounds.size.height);
+        let scroll_top = state.pixel_scroll_top(height);
+        let (start, ..) =
+            state
+                .items
+                .find::<ListItemSummary, _>((), &Height(scroll_top), Bias::Right);
+        let scroll_top = ListOffset {
+            item_ix: start.count,
+            offset_in_item: scroll_top - start.height,
+        };
+
+        state.rebase_pending_scroll(scroll_top);
+        state.logical_scroll_top = Some(scroll_top);
+    }
+
     /// Scroll the list to the given item, such that the item is fully visible.
     pub fn scroll_to_reveal_item(&self, ix: usize) {
         let state = &mut *self.0.borrow_mut();
@@ -845,6 +890,11 @@ impl ListState {
 impl StateInner {
     fn cancel_smooth_wheel(&mut self) {
         self.smooth_wheel_motion = None;
+        // Every direct positioning call cancels the motion in flight, and a
+        // request still waiting for a layout is the same motion one frame
+        // earlier: left behind, it would drag the content off the position
+        // that cancelled it.
+        self.pending_smooth_scroll = None;
     }
 
     /// Re-anchor a pending scroll adjustment from a remeasure onto a newly set
@@ -1053,6 +1103,44 @@ impl StateInner {
             window.on_next_frame(move |_, cx| cx.notify(current_view));
         }
         step.velocity
+    }
+
+    /// Aim the wheel's easing at a requested offset, so a position chosen by
+    /// the application arrives the same way a scrolled one does.
+    fn start_smooth_scroll(
+        &mut self,
+        scroll_top: ListOffset,
+        now: Instant,
+        height: Pixels,
+        current_view: EntityId,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let mut cursor = self.items.cursor::<ListItemSummary>(());
+        cursor.seek(&Count(scroll_top.item_ix), Bias::Right);
+        let destination = cursor.start().height + scroll_top.offset_in_item;
+        drop(cursor);
+
+        // Anywhere short of the end is a position the list has to hold, so
+        // tail following stops the same way it does for a direct scroll —
+        // otherwise the next layout snaps back past the motion.
+        if scroll_top.item_ix < self.items.summary().count {
+            self.follow_state.stop_following();
+        }
+
+        let position = self.pixel_scroll_top(height).0;
+        let scroll_max = self.scroll_max_for_height(height).0;
+        match SmoothWheelMotion::start(now, position, destination.0, 0., scroll_max) {
+            SmoothWheel::Motion(motion) => {
+                self.smooth_wheel_motion = Some(motion);
+                window.on_next_frame(move |_, cx| cx.notify(current_view));
+            }
+            SmoothWheel::Jump(destination) => {
+                self.smooth_wheel_motion = None;
+                self.set_pixel_scroll_top(px(destination), height, current_view, window, cx);
+            }
+            SmoothWheel::Settled => self.smooth_wheel_motion = None,
+        }
     }
 
     fn start_smooth_wheel(
@@ -1682,6 +1770,32 @@ impl Element for List {
         let state = &mut *self.state.0.borrow_mut();
         state.reset = false;
 
+        let mut style = Style::default();
+        style.refine(&self.style);
+
+        let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
+
+        let padding = style
+            .padding
+            .to_pixels(bounds.size.into(), window.rem_size());
+        // How far the content can travel is measured against this frame's
+        // padding, before anything moves it: a caller that reserved room below
+        // the content did so in the frame it also asked to scroll, and the
+        // previous layout's padding would clamp the destination back to where
+        // the content used to end.
+        state.last_padding = Some(padding);
+
+        if let Some(scroll_top) = state.pending_smooth_scroll.take() {
+            state.start_smooth_scroll(
+                scroll_top,
+                cx.background_executor().now(),
+                bounds.size.height,
+                window.current_view(),
+                window,
+                cx,
+            );
+        }
+
         if state.smooth_wheel_motion.is_some() {
             state.advance_smooth_wheel(
                 cx.background_executor().now(),
@@ -1691,11 +1805,6 @@ impl Element for List {
                 cx,
             );
         }
-
-        let mut style = Style::default();
-        style.refine(&self.style);
-
-        let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
 
         // If the width of the list has changed, invalidate all cached item heights
         if state
@@ -1714,9 +1823,6 @@ impl Element for List {
             state.measuring_behavior.reset();
         }
 
-        let padding = style
-            .padding
-            .to_pixels(bounds.size.into(), window.rem_size());
         let layout =
             match state.prepaint_items(bounds, padding, true, &mut self.render_item, window, cx) {
                 Ok(layout) => layout,
@@ -1730,7 +1836,6 @@ impl Element for List {
             };
 
         state.last_layout_bounds = Some(bounds);
-        state.last_padding = Some(padding);
         ListPrepaintState { hitbox, layout }
     }
 
@@ -2041,6 +2146,34 @@ mod test {
         }
     }
 
+    struct PaddedListView(ListState, crate::Pixels);
+    impl Render for PaddedListView {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            list(self.0.clone(), |_, _, _| {
+                div().h(px(20.)).w_full().into_any()
+            })
+            .w_full()
+            .h_full()
+            .pb(self.1)
+        }
+    }
+
+    fn draw_padded_list(
+        cx: &mut crate::VisualTestContext,
+        state: &ListState,
+        height: f32,
+        padding_bottom: crate::Pixels,
+    ) {
+        cx.draw(
+            point(px(0.), px(0.)),
+            size(px(100.), px(height)),
+            |_, cx| {
+                cx.new(|_| PaddedListView(state.clone(), padding_bottom))
+                    .into_any_element()
+            },
+        );
+    }
+
     fn draw_test_list(cx: &mut crate::VisualTestContext, state: &ListState, height: f32) {
         cx.draw(
             point(px(0.), px(0.)),
@@ -2191,6 +2324,87 @@ mod test {
         test_wheel(cx, ScrollDelta::Lines(point(0., 1.)));
         state.reset(30);
         assert!(state.0.borrow().smooth_wheel_motion.is_none());
+    }
+
+    #[gpui::test]
+    fn test_scroll_to_smooth_eases_to_the_requested_item(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let state = ListState::new(30, crate::ListAlignment::Top, px(10.)).measure_all();
+        draw_test_list(cx, &state, 100.);
+
+        // Item 10 of 20px rows sits 200px down, and the request is only
+        // parked until a layout can measure the distance to it.
+        state.scroll_to_smooth(crate::ListOffset {
+            item_ix: 10,
+            offset_in_item: px(0.),
+        });
+        assert_eq!(test_scroll_position(&state, 100.), 0.);
+
+        draw_test_list(cx, &state, 100.);
+        assert!(test_scroll_position(&state, 100.) < 200.);
+        assert_eq!(test_smooth_destination(&state), 200.);
+
+        cx.executor().advance_clock(Duration::from_millis(500));
+        draw_test_list(cx, &state, 100.);
+        assert!((test_scroll_position(&state, 100.) - 200.).abs() < 0.1);
+        assert!(state.0.borrow().smooth_wheel_motion.is_none());
+    }
+
+    #[gpui::test]
+    fn scratch_probe_bottom_tail(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let state = ListState::new(30, crate::ListAlignment::Bottom, px(10.)).measure_all();
+        state.set_follow_mode(crate::FollowMode::Tail);
+        draw_test_list(cx, &state, 100.);
+        println!("start position={}", test_scroll_position(&state, 100.));
+
+        state.scroll_to_smooth(crate::ListOffset {
+            item_ix: 10,
+            offset_in_item: px(0.),
+        });
+        draw_test_list(cx, &state, 100.);
+        println!(
+            "after first draw position={} motion={:?}",
+            test_scroll_position(&state, 100.),
+            state.0.borrow().smooth_wheel_motion.is_some()
+        );
+
+        for step in 0..5 {
+            cx.executor().advance_clock(Duration::from_millis(50));
+            draw_test_list(cx, &state, 100.);
+            println!(
+                "step {step} position={} following={}",
+                test_scroll_position(&state, 100.),
+                state.is_following_tail()
+            );
+        }
+    }
+
+    /// Room opened below the content in the same frame as the request has to
+    /// count towards how far the list may travel; measuring against the
+    /// previous layout would clamp the motion back to the old end.
+    #[gpui::test]
+    fn test_scroll_to_smooth_measures_this_frames_padding(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        // 30 rows of 20px in a 100px viewport: without room below, the last
+        // rows cannot reach the top.
+        let state = ListState::new(30, crate::ListAlignment::Bottom, px(10.)).measure_all();
+        draw_test_list(cx, &state, 100.);
+        state.scroll_to(crate::ListOffset::default());
+        draw_test_list(cx, &state, 100.);
+
+        // Reaching the last row's top needs the 80px opened below it: without
+        // that room the motion would stop 80px short, at the old end.
+        state.scroll_to_smooth(crate::ListOffset {
+            item_ix: 29,
+            offset_in_item: px(0.),
+        });
+        draw_padded_list(cx, &state, 100., px(80.));
+        assert_eq!(test_smooth_destination(&state), 580.);
+
+        cx.executor().advance_clock(Duration::from_millis(500));
+        draw_padded_list(cx, &state, 100., px(80.));
+        assert!((test_scroll_position(&state, 100.) - 580.).abs() < 0.1);
     }
 
     #[gpui::test]
