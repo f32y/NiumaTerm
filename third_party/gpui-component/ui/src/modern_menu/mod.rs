@@ -517,6 +517,10 @@ fn menu_window(
             is_movable: false,
             is_resizable: false,
             is_minimizable: false,
+            // Built once and reused by every menu, so it stays open for the
+            // life of the process. Counting it as an open window would leave
+            // an app that quits on its last window closed running forever.
+            keeps_app_alive: false,
             ..Default::default()
         },
         |_, cx| cx.new(|_| MenuView::new()),
