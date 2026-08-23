@@ -27,13 +27,13 @@ fn process_routes_are_unique_and_environment_is_exact() {
     );
     assert_eq!(environment[2], (AGENT_HOOK_VERSION_ENV.into(), "1".into()));
 
-    process.set_hook_executable("C:\\NiumaTerm\\NiumaTermHook.exe".into());
+    process.set_hook_executable("C:\\NiumaTerm\\NmtAgentHook.exe".into());
     process.set_hook_executable("C:\\ignored\\second\\call.exe".into());
     assert_eq!(
         process.environment_for(&first)[3],
         (
             AGENT_HOOK_EXE_ENV.into(),
-            "C:\\NiumaTerm\\NiumaTermHook.exe".into()
+            "C:\\NiumaTerm\\NmtAgentHook.exe".into()
         )
     );
 
@@ -48,12 +48,12 @@ fn process_routes_are_unique_and_environment_is_exact() {
 fn windows_hook_command_uses_bare_safe_path() {
     assert_eq!(
         build_windows_hook_command_for(
-            r"C:\Soft\NiumaTerm\NiumaTermHook.exe",
+            r"C:\Soft\NiumaTerm\NmtAgentHook.exe",
             "codex",
             r"C:\Windows",
         )
         .unwrap(),
-        r"C:\Soft\NiumaTerm\NiumaTermHook.exe codex"
+        r"C:\Soft\NiumaTerm\NmtAgentHook.exe codex"
     );
     assert!(
         build_windows_hook_command_for(r"C:\Hook.exe", "codex & whoami", r"C:\Windows").is_err()
@@ -62,14 +62,14 @@ fn windows_hook_command_uses_bare_safe_path() {
 
 #[test]
 fn windows_hook_command_encodes_unsafe_path() {
-    let executable = r"C:\Program Files\Niuma'Term\%HOOK%^\NiumaTermHook.exe";
+    let executable = r"C:\Program Files\Niuma'Term\%HOOK%^\NmtAgentHook.exe";
     let command = build_windows_hook_command_for(executable, "codex", r"D:\Windows").unwrap();
     assert!(command.starts_with(
         "D:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile \
          -ExecutionPolicy Bypass -EncodedCommand "
     ));
     assert!(!command.contains(executable));
-    assert!(hook_command_contains(&command, "NiumaTermHook.exe"));
+    assert!(hook_command_contains(&command, "NmtAgentHook.exe"));
 
     let encoded = command.rsplit_once(' ').unwrap().1;
     let bytes = STANDARD.decode(encoded).unwrap();
@@ -79,7 +79,7 @@ fn windows_hook_command_encodes_unsafe_path() {
         .collect::<Vec<_>>();
     assert_eq!(
         String::from_utf16(&units).unwrap(),
-        r"& 'C:\Program Files\Niuma''Term\%HOOK%^\NiumaTermHook.exe' codex; exit $LASTEXITCODE"
+        r"& 'C:\Program Files\Niuma''Term\%HOOK%^\NmtAgentHook.exe' codex; exit $LASTEXITCODE"
     );
 
     #[cfg(windows)]

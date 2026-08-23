@@ -14,8 +14,10 @@ use serde_json::{Value, from_str, json, to_string_pretty};
 use crate::{AGENT_HOOK_EXE_ENV, HookInstallStatus, hook_command_contains};
 
 /// Markers that identify hook entries owned by NiumaTerm: the current
-/// env-var command and legacy installs that baked in an absolute path.
-const HOOK_MARKERS: [&str; 2] = [AGENT_HOOK_EXE_ENV, "NiumaTermHook.exe"];
+/// env-var command and legacy installs that baked in an absolute path. The
+/// former executable name stays listed so an entry written before the rename
+/// is still recognized as ours and gets replaced rather than duplicated.
+const HOOK_MARKERS: [&str; 3] = [AGENT_HOOK_EXE_ENV, "NmtAgentHook.exe", "NiumaTermHook.exe"];
 
 /// The user's home directory — `USERPROFILE` on Windows with a `HOME`
 /// fallback so the same code works in POSIX-flavored shells. Shared root for

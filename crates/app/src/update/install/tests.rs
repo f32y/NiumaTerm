@@ -34,7 +34,7 @@ fn only_files_whose_version_moved_are_replaced() {
         ("NiumaTerm.exe", Some("v1.3.0"), Some("v1.2.0")),
         // The release advanced, but this file's own revision did not, which is
         // the whole point of giving it a different key to be compared by.
-        ("shell_extension.dll", Some("a0e2c9f"), Some("a0e2c9f")),
+        ("NmtShellExtension.dll", Some("a0e2c9f"), Some("a0e2c9f")),
         ("conpty.dll", Some("1.24.0"), Some("1.24.0")),
     ]);
 
@@ -48,13 +48,13 @@ fn a_version_that_cannot_be_read_counts_as_a_difference() {
     // be read. None of them may be assumed to be current.
     let versions = versions([
         ("NiumaTerm.exe", Some("v1.3.0"), None),
-        ("NiumaTermHook.exe", None, None),
+        ("NmtAgentHook.exe", None, None),
         ("conpty.dll", None, Some("1.24.0")),
     ]);
 
     assert_eq!(
         differing(&versions),
-        ["NiumaTerm.exe", "NiumaTermHook.exe", "conpty.dll"]
+        ["NiumaTerm.exe", "NmtAgentHook.exe", "conpty.dll"]
     );
 }
 

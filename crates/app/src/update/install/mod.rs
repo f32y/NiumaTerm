@@ -42,8 +42,8 @@ const INCOMING_SUFFIX: &str = ".nmt-incoming";
 ///   resource, which moves only when the vendored copy is replaced.
 const PAYLOAD: [(&str, &str); 5] = [
     (APP_EXE, "FileVersion"),
-    ("NiumaTermHook.exe", "FileVersion"),
-    ("shell_extension.dll", "InternalVersion"),
+    ("NmtAgentHook.exe", "FileVersion"),
+    ("NmtShellExtension.dll", "InternalVersion"),
     ("conpty.dll", "FileVersion"),
     ("OpenConsole.exe", "FileVersion"),
 ];

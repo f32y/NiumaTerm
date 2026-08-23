@@ -9,7 +9,7 @@ authors.workspace = true
 workspace = true
 
 [lib]
-name = "shell_extension"
+name = "NmtShellExtension"
 crate-type = ["cdylib"]
 
 [dependencies]

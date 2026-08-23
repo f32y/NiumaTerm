@@ -137,7 +137,7 @@ pub(crate) fn register_shell_integration_paths(exe_path: &Path, dll_path: &Path)
 }
 
 fn shell_extension_path(exe_path: &Path) -> PathBuf {
-    exe_path.with_file_name("shell_extension.dll")
+    exe_path.with_file_name("NmtShellExtension.dll")
 }
 
 fn dll_path_matches(actual: &str, expected: &Path) -> bool {
@@ -215,15 +215,15 @@ mod tests {
         );
         assert_eq!(
             shell_extension_path(Path::new(r"C:\Program Files\NiumaTerm\NiumaTerm.exe")),
-            Path::new(r"C:\Program Files\NiumaTerm\shell_extension.dll")
+            Path::new(r"C:\Program Files\NiumaTerm\NmtShellExtension.dll")
         );
         assert!(dll_path_matches(
             r"c:\program files\niumaterm\SHELL_EXTENSION.DLL",
-            Path::new(r"C:\Program Files\NiumaTerm\shell_extension.dll")
+            Path::new(r"C:\Program Files\NiumaTerm\NmtShellExtension.dll")
         ));
         assert!(!dll_path_matches(
-            r"C:\Old\shell_extension.dll",
-            Path::new(r"C:\Program Files\NiumaTerm\shell_extension.dll")
+            r"C:\Old\NmtShellExtension.dll",
+            Path::new(r"C:\Program Files\NiumaTerm\NmtShellExtension.dll")
         ));
     }
 

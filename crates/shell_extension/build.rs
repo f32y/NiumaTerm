@@ -23,7 +23,7 @@ fn main() {
         .set("FileDescription", "NiumaTerm Shell Extension")
         .set("ProductName", "NiumaTerm")
         .set("InternalName", "NiumaTerm Shell Extension")
-        .set("OriginalFilename", "shell_extension.dll")
+        .set("OriginalFilename", "NmtShellExtension.dll")
         .set("FileVersion", &version)
         .set("ProductVersion", &version)
         // Explorer keeps a registered extension loaded, so an update replaces

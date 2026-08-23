@@ -20,7 +20,7 @@ $ErrorActionPreference = 'Stop'
 
 # Build scripts are reported as executables too, under their own
 # target/<profile>/build/<pkg>-<hash>/ directory, so they must be excluded before
-# the profile root can be identified. A cdylib such as shell_extension.dll
+# the profile root can be identified. A cdylib such as NmtShellExtension.dll
 # reports a null `executable`, so fall back to `filenames`. Cargo uplifts every
 # linkable artifact into the profile root and leaves intermediate rlibs in deps/,
 # which is the remaining directory to ignore.

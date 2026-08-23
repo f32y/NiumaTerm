@@ -239,7 +239,7 @@ mod tests {
         assert!(!event.body.contains('\0'));
     }
 
-    const CURRENT_COMMAND: &str = r"C:\Soft\NiumaTerm\NiumaTermHook.exe codex";
+    const CURRENT_COMMAND: &str = r"C:\Soft\NiumaTerm\NmtAgentHook.exe codex";
     const LEGACY_COMMAND: &str = r#""C:\Program Files\NiumaTerm\NiumaTermHook.exe" codex"#;
 
     fn user_hooks() -> Value {
