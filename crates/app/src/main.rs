@@ -178,7 +178,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
     }
 
     // Hold the appender guard for the whole app lifetime; `main` blocks until exit.
-    let _log_guard = logging::init_logging().expect("init logging");
+    let _log_guard = logging::init_logging(testing).expect("init logging");
 
     let startup_files = load_startup_files_or_exit();
 
