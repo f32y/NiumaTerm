@@ -382,6 +382,7 @@
 "shell-workspace-dir-description" = "此工作区中的 Shell 从该目录启动。"
 "shell-tab-exited-title" = "{title} [已退出]"
 "shell-next-ready-tab" = "跳转到下一个就绪标签页"
+"shell-next-busy-tab" = "跳转到下一个忙碌标签页"
 "shell-remote-no-hosts" = "没有已配对的远程主机。请在“设置 → 远程会话”中配对。"
 "shell-remote-tab-title" = "远程"
 "shell-remote-session-failed" = "远程会话失败：{error}"

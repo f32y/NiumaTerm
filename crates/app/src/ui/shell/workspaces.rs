@@ -219,15 +219,11 @@ impl Shell {
         cx.notify();
     }
 
-    /// Position of the next tab holding something the user has not looked at:
-    /// a background command that finished, or an unread agent reply. The search
-    /// starts after the active tab and wraps, in workspace-then-tab order, so
-    /// repeated jumps walk every ready tab in turn.
-    ///
-    /// Each jump shrinks the set rather than advancing a cursor of its own,
-    /// because focusing a tab is what clears both marks.
-    pub(super) fn next_ready_tab(&self, cx: &App) -> Option<(usize, usize)> {
-        let (positions, ready): (Vec<(usize, usize)>, Vec<bool>) = self
+    /// Position of the next tab `marked` accepts, searching after the active
+    /// tab and wrapping in workspace-then-tab order so repeated jumps walk the
+    /// whole marked set in turn.
+    fn next_marked_tab(&self, marked: impl Fn(&Tab<TabSurface>) -> bool) -> Option<(usize, usize)> {
+        let (positions, marks): (Vec<(usize, usize)>, Vec<bool>) = self
             .workspaces
             .all_tabs()
             .enumerate()
@@ -235,15 +231,9 @@ impl Shell {
                 tabs.tabs()
                     .iter()
                     .enumerate()
-                    .map(move |(tab_index, tab)| (workspace_index, tab_index, tab))
+                    .map(move |(tab_index, tab)| ((workspace_index, tab_index), tab))
             })
-            .map(|(workspace_index, tab_index, tab)| {
-                let routes = Self::agent_routes_in_surface(tab.surface(), cx);
-                let ready = tab.last_outcome().is_some()
-                    || self.agent_monitor.project(&routes).unread_count > 0;
-
-                ((workspace_index, tab_index), ready)
-            })
+            .map(|(position, tab)| (position, marked(tab)))
             .unzip();
 
         let active = (
@@ -255,7 +245,39 @@ impl Shell {
             .position(|&position| position == active)
             .unwrap_or(0);
 
-        next_ready_position(&ready, active_position).map(|index| positions[index])
+        next_marked_position(&marks, active_position).map(|index| positions[index])
+    }
+
+    /// The next tab holding something the user has not looked at: a background
+    /// command that finished, or an unread agent reply.
+    ///
+    /// Each jump shrinks the set rather than advancing a cursor of its own,
+    /// because focusing a tab is what clears both marks.
+    pub(super) fn next_ready_tab(&self, cx: &App) -> Option<(usize, usize)> {
+        self.next_marked_tab(|tab| {
+            let routes = Self::agent_routes_in_surface(tab.surface(), cx);
+
+            tab.last_outcome().is_some() || self.agent_monitor.project(&routes).unread_count > 0
+        })
+    }
+
+    /// The next tab with work still in flight: a terminal running a command, or
+    /// an agent still producing its answer.
+    ///
+    /// Unlike the ready set this one does not shrink when the tab is focused —
+    /// watching a tab does not finish its work — so the jump keeps cycling
+    /// while the same tabs stay busy, which is what following several parallel
+    /// runs needs.
+    pub(super) fn next_busy_tab(&self, cx: &App) -> Option<(usize, usize)> {
+        self.next_marked_tab(|tab| {
+            if Self::tab_terminal_activity(tab, cx) == TerminalActivity::Running {
+                return true;
+            }
+
+            let routes = Self::agent_routes_in_surface(tab.surface(), cx);
+
+            self.agent_monitor.project(&routes).status == AgentRuntimeStatus::Running
+        })
     }
 
     pub(super) fn jump_to_tab(
@@ -501,11 +523,11 @@ impl Shell {
     }
 }
 
-/// Walk from just after `active` and wrap around, returning the first ready
-/// slot. `active` itself is visited last, so a tab that goes ready while it is
+/// Walk from just after `active` and wrap around, returning the first marked
+/// slot. `active` itself is visited last, so a tab that gets marked while it is
 /// the one on screen stays reachable instead of being skipped forever.
-pub(super) fn next_ready_position(ready: &[bool], active: usize) -> Option<usize> {
-    (1..=ready.len())
-        .map(|offset| (active + offset) % ready.len())
-        .find(|&index| ready[index])
+pub(super) fn next_marked_position(marks: &[bool], active: usize) -> Option<usize> {
+    (1..=marks.len())
+        .map(|offset| (active + offset) % marks.len())
+        .find(|&index| marks[index])
 }

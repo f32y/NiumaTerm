@@ -383,6 +383,7 @@
 "shell-workspace-dir-description" = "Shells in this workspace start in this directory."
 "shell-tab-exited-title" = "{title} [exited]"
 "shell-next-ready-tab" = "Go to the next ready tab"
+"shell-next-busy-tab" = "Go to the next busy tab"
 "shell-remote-no-hosts" = "No paired remote hosts. Pair one in Settings → Remote Session."
 "shell-remote-tab-title" = "Remote"
 "shell-remote-session-failed" = "Remote session failed: {error}"
