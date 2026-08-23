@@ -26,7 +26,7 @@ use crate::agent::transcript::format::{
 };
 #[allow(unused_imports)]
 pub(super) use crate::agent::transcript::rows::{
-    Entry, RowSpec, TurnSummary, entry_fingerprint, turn_summary,
+    Entry, ReadingPosition, RowSpec, TurnSummary, entry_fingerprint, turn_summary,
 };
 pub(crate) use crate::agent::transcript::view::TranscriptView;
 #[cfg(test)]

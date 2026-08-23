@@ -228,6 +228,11 @@ impl AgentPane {
                             this.palette.feedback = None;
                         }
                         this.palette.selected = 0;
+                        this.hold_transcript_for_picker(cx);
+                        // The newest prompt is highlighted, and it usually
+                        // sits under the picker that just opened over the
+                        // bottom of the transcript.
+                        this.follow_branch_selection(cx);
                         cx.notify();
                     }
                     Err(message) => {
@@ -251,6 +256,7 @@ impl AgentPane {
         {
             self.rewind.state = None;
             self.palette.selected = 0;
+            self.release_transcript_from_picker(cx);
             // Cancelling is the user's own no-op, so an acknowledgement tells
             // them nothing they do not already know. Dropping the message also
             // retires the non-transient "Loading checkpoints…" status, which

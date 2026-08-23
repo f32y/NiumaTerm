@@ -26,6 +26,19 @@ pub(crate) struct TranscriptView {
     /// Virtual rows cache measured heights; a width change can rewrap prose
     /// without changing row fingerprints, so the viewport width is tracked too.
     transcript_width: Option<Pixels>,
+    /// Last measured viewport height, which is how much empty space below the
+    /// conversation lets its final row reach the top of the screen.
+    transcript_height: Option<Pixels>,
+    /// Reading position from before a picker started scrolling the transcript
+    /// to the prompt it highlights, so cancelling that picker returns the
+    /// conversation to where the user was reading it.
+    pub(in crate::agent::transcript) stashed_position: Option<ReadingPosition>,
+    /// A picker is following the transcript, so empty space is left below the
+    /// conversation. Without that room a prompt near the end cannot be lifted
+    /// clear of the picker: the list stops scrolling once its last row is on
+    /// screen, which leaves exactly those prompts behind the list naming
+    /// them.
+    pub(in crate::agent::transcript) reserve_below: bool,
     /// Collapsed work-log runs the user has expanded, keyed by the index of
     /// the run's first transcript entry (stable — the list only appends).
     pub(in crate::agent) expanded_groups: HashSet<usize>,
@@ -102,8 +115,11 @@ impl TranscriptView {
                 state
             },
             row_specs: Vec::new(),
+            stashed_position: None,
+            reserve_below: false,
             transcript_font: Default::default(),
             transcript_width: None,
+            transcript_height: None,
             expanded_groups: HashSet::new(),
             toggled_turns: HashSet::new(),
             collapse_mode: CollapseRows::default(),
@@ -174,6 +190,8 @@ impl TranscriptView {
     /// conversation's expansion and scroll position cannot leak into another's.
     pub(crate) fn clear(&mut self) {
         self.items.clear();
+        self.stashed_position = None;
+        self.reserve_below = false;
         self.scroll_to_bottom();
         self.expanded_groups.clear();
         self.toggled_turns.clear();
@@ -392,6 +410,18 @@ impl TranscriptView {
     }
 }
 
+/// Empty space left below the conversation while a picker follows it.
+///
+/// What has to be cleared is the picker itself, which floats over the bottom
+/// of the pane, so the room it can cover is the room to leave. A viewport too
+/// short for that keeps a screenful of conversation instead: a list padded to
+/// its own height has no space left to paint rows in, and would go blank.
+fn picker_reserve(viewport: Pixels) -> Pixels {
+    const KEEP_VISIBLE: Pixels = px(120.);
+
+    PALETTE_MAX_HEIGHT.min((viewport - KEEP_VISIBLE).max(px(0.)))
+}
+
 impl Render for TranscriptView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let settings = cx.global::<AppSettings>();
@@ -429,6 +459,13 @@ impl Render for TranscriptView {
             self.transcript_list.remeasure();
         }
 
+        // The reserve is measured from the previous layout, which is the
+        // viewport the next one will use unless the window is being resized.
+        let reserve_below = self
+            .reserve_below
+            .then_some(self.transcript_height)
+            .flatten()
+            .map(picker_reserve);
         let has_hidden_content_below = self.transcript_has_hidden_content_below();
         let scrolled_from_top = self.transcript_has_hidden_content_above();
 
@@ -447,6 +484,7 @@ impl Render for TranscriptView {
                         let view = cx.entity().downgrade();
                         move |bounds, _, cx| {
                             view.update(cx, |this, cx| {
+                                this.transcript_height = Some(bounds.size.height);
                                 let width = bounds.size.width;
                                 if this.transcript_width != Some(width) {
                                     this.transcript_width = Some(width);
@@ -469,7 +507,8 @@ impl Render for TranscriptView {
                             }
                         })
                         .size_full()
-                        .pt(px(16.)),
+                        .pt(px(16.))
+                        .when_some(reserve_below, |this, reserve| this.pb(reserve)),
                     ),
             )
             .children(scrolled_from_top.then(|| {

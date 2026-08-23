@@ -686,11 +686,12 @@ mod resumed_collapse_tests {
 /// A prompt right-clicked in the transcript has to name the same branch point
 /// the backend would, and the two lists are only counted from the newest end.
 mod branch_point_targeting_tests {
-    use gpui::{AppContext as _, TestAppContext};
+    use gpui::{AppContext as _, ListOffset, TestAppContext, px};
     use nmt_agent_utils::chat::{Item as SessionItem, ReplayItem, ReplayTurn};
 
     use crate::agent::composer::{PromptTarget, checkpoint_at_depth};
     use crate::agent::transcript::{AgentKind, TranscriptView};
+    use crate::ui::CollapseRows;
 
     fn user(text: &str) -> ReplayItem {
         ReplayItem {
@@ -735,6 +736,42 @@ mod branch_point_targeting_tests {
             }
         });
         view
+    }
+
+    /// Two turns where the first one ran a command, so its work folds behind
+    /// a disclosure row and the prompts no longer sit at their entry indices.
+    fn transcript_with_work(cx: &mut gpui::App) -> gpui::Entity<TranscriptView> {
+        let view = cx.new(|_| TranscriptView::new(AgentKind::Codex, None));
+        view.update(cx, |view, cx| {
+            for (turn, items) in [
+                (1, vec![user("first"), command("ls"), agent("a")]),
+                (2, vec![user("second"), agent("b")]),
+            ] {
+                view.append_replay(
+                    turn,
+                    ReplayTurn {
+                        items,
+                        ..ReplayTurn::default()
+                    },
+                    cx,
+                );
+            }
+        });
+        view
+    }
+
+    fn command(command: &str) -> ReplayItem {
+        ReplayItem {
+            item: SessionItem::CommandExecution {
+                id: command.to_string(),
+                command: command.to_string(),
+                purpose: None,
+                aggregated_output: None,
+                status: None,
+                exit_code: Some(0),
+            },
+            at: None,
+        }
     }
 
     #[gpui::test]
@@ -822,6 +859,98 @@ mod branch_point_targeting_tests {
             ),
             None
         );
+    }
+
+    /// The picker highlights a branch point; the transcript has to find the
+    /// row showing it, which is not the entry's own index once folded work
+    /// and disclosures sit between the prompts.
+    #[gpui::test]
+    fn a_branch_point_finds_the_row_showing_its_prompt(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_work(cx);
+
+            view.update(cx, |view, _| {
+                let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
+                view.sync_transcript_list(specs);
+
+                // Rows: prompt, work disclosure, reply, prompt, reply.
+                assert_eq!(
+                    view.prompt_row(&PromptTarget {
+                        prompt: "first".into(),
+                        depth: 1,
+                    }),
+                    Some(0)
+                );
+                assert_eq!(
+                    view.prompt_row(&PromptTarget {
+                        prompt: "second".into(),
+                        depth: 0,
+                    }),
+                    Some(3)
+                );
+                // A depth landing on a different prompt names a list the
+                // transcript disagrees with, and moving to it would put the
+                // user in front of a turn they did not point at.
+                assert_eq!(
+                    view.prompt_row(&PromptTarget {
+                        prompt: "second".into(),
+                        depth: 1,
+                    }),
+                    None
+                );
+            })
+        });
+    }
+
+    /// Following the picker's highlight moves the transcript for the user;
+    /// cancelling it has to give that position back.
+    #[gpui::test]
+    fn a_cancelled_picker_returns_the_reader_to_where_they_were(cx: &mut TestAppContext) {
+        let first = PromptTarget {
+            prompt: "first".into(),
+            depth: 1,
+        };
+
+        cx.update(|cx| {
+            let view = transcript_with_work(cx);
+
+            view.update(cx, |view, cx| {
+                let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
+                view.sync_transcript_list(specs);
+
+                // Reading the live end: what is restored is the tail itself,
+                // not the offset the tail happened to stand at.
+                view.hold_for_picker();
+                assert!(
+                    view.reserve_below,
+                    "a held transcript can scroll past its last row"
+                );
+                assert!(
+                    !view.transcript_list.is_following_tail(),
+                    "the hold pins the view before the reserve opens below it"
+                );
+                view.scroll_to_prompt(&first, false, cx);
+                view.release_from_picker(cx);
+                assert!(view.transcript_list.is_following_tail());
+                assert!(!view.reserve_below);
+
+                // Reading an earlier turn: that offset comes back.
+                view.transcript_list.scroll_to(ListOffset {
+                    item_ix: 3,
+                    offset_in_item: px(0.),
+                });
+                view.hold_for_picker();
+                view.scroll_to_prompt(&first, false, cx);
+                assert_eq!(view.transcript_list.logical_scroll_top().item_ix, 0);
+                view.release_from_picker(cx);
+                assert_eq!(view.transcript_list.logical_scroll_top().item_ix, 3);
+
+                // Nothing left stashed, so a later cancel cannot drag the
+                // conversation back to a position from this one.
+                view.release_from_picker(cx);
+                assert_eq!(view.transcript_list.logical_scroll_top().item_ix, 3);
+            })
+        });
     }
 
     #[test]

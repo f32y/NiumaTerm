@@ -28,10 +28,10 @@ use futures::channel::{mpsc, oneshot};
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, ClipboardItem, Context, Div, ElementId, Entity, FocusHandle, FollowMode,
-    FontWeight, Hsla, ListAlignment, ListHorizontalSizingBehavior, ListSizingBehavior, ListState,
-    MouseButton, Pixels, ScrollHandle, ScrollStrategy, SharedString, Stateful, StyleRefinement,
-    Task, UniformListScrollHandle, Window, div, linear_color_stop, linear_gradient, list, px,
-    relative, rems, size, uniform_list,
+    FontWeight, Hsla, ListAlignment, ListHorizontalSizingBehavior, ListOffset, ListSizingBehavior,
+    ListState, MouseButton, Pixels, ScrollHandle, ScrollStrategy, SharedString, Stateful,
+    StyleRefinement, Task, UniformListScrollHandle, Window, div, linear_color_stop,
+    linear_gradient, list, px, relative, rems, size, uniform_list,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::checkbox::Checkbox;
@@ -87,14 +87,18 @@ use crate::agent::commands::{
     setting_value_label, validate_skill_binding,
 };
 use crate::agent::composer::attachments::{PendingAttachments, scratch_dir};
-use crate::agent::composer::{CommandFeedback, ForkFlow, PendingSlashCommand, RewindState};
+use crate::agent::composer::{
+    CommandFeedback, ForkFlow, PALETTE_MAX_HEIGHT, PendingSlashCommand, RewindState,
+};
 use crate::agent::input_history::{InputHistoryNavigation, InputHistoryScope};
 pub(crate) use crate::agent::profile::{AgentKind, AgentThreadDefaults, agent_launch};
 use crate::agent::session::{Backend, Status, UpdateSuspension};
 pub(crate) use crate::agent::session::{
     RecoveryIdentity, RecoveryReadiness, RecoverySnapshot, RestorationReadiness,
 };
-use crate::agent::transcript::{Entry, RowSpec, TranscriptView, VirtualTranscriptState};
+use crate::agent::transcript::{
+    Entry, ReadingPosition, RowSpec, TranscriptView, VirtualTranscriptState,
+};
 use crate::agent::workflows::WorkflowUi;
 use crate::ui::{AppSettings, CollapseRows, UI_RADIUS, WorkingIndicator, current_branch};
 
