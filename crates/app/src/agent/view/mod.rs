@@ -8,7 +8,7 @@ mod settings_row;
 #[cfg(test)]
 mod tests;
 
-use gpui::WeakEntity;
+use gpui::{MouseUpEvent, Pixels, Point, WeakEntity};
 use gpui_component::WindowExt as _;
 use gpui_component::input::Paste;
 use gpui_component::modern_menu::ModernMenu;
@@ -200,11 +200,16 @@ impl Render for AgentPane {
                     // reaches the pane-level interrupt handler through the input.
                     .on_mouse_up(
                         MouseButton::Left,
-                        cx.listener(|this, _, window, cx| {
+                        cx.listener(|this, event: &MouseUpEvent, window, cx| {
                             this.focus(window, cx);
                             let pane = cx.entity().downgrade();
+                            // The release point, not the selection rect: a
+                            // selection spanning several lines has a bounding
+                            // box whose corners can sit far from where the drag
+                            // ended, and the menu belongs under the pointer.
+                            let released_at = event.position;
                             window.on_next_frame(move |window, cx| {
-                                Self::show_selected_text_menu(pane, window, cx);
+                                Self::show_selected_text_menu(pane, released_at, window, cx);
                             });
                             cx.notify();
                         }),
@@ -438,11 +443,13 @@ impl Render for AgentPane {
 }
 
 impl AgentPane {
-    fn show_selected_text_menu(pane: WeakEntity<Self>, window: &mut Window, cx: &mut App) {
+    fn show_selected_text_menu(
+        pane: WeakEntity<Self>,
+        released_at: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
         let selected_text = window.selected_text(cx).trim().to_string();
-        let Some(bounds) = window.selected_text_bounds(cx) else {
-            return;
-        };
         if selected_text.is_empty() {
             return;
         }
@@ -460,6 +467,6 @@ impl AgentPane {
                 });
             })
             .icon(IconName::TextSelect)
-            .show_at(bounds.bottom_left(), window, cx);
+            .show_at(released_at, window, cx);
     }
 }
