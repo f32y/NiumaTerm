@@ -27,7 +27,7 @@ $ErrorActionPreference = 'Stop'
 # Only artifacts this workspace links. The output directory also collects files
 # that a build script merely copied in, such as the prebuilt OpenConsole.exe,
 # whose timestamps say nothing about the revision being built.
-$names = @('NiumaTerm.exe', 'NiumaTermHook.exe', 'shell_extension.dll')
+$names = @('NiumaTerm.exe', 'NmtAgentHook.exe', 'NmtShellExtension.dll')
 
 $repo = git rev-parse --show-toplevel
 if ($LASTEXITCODE -ne 0) { throw 'not a git repository' }

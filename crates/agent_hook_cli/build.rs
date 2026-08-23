@@ -15,7 +15,7 @@ fn main() {
         .set("FileDescription", "NiumaTerm Agent Hook")
         .set("ProductName", "NiumaTerm")
         .set("InternalName", "NiumaTerm Agent Hook")
-        .set("OriginalFilename", "NiumaTermHook.exe")
+        .set("OriginalFilename", "NmtAgentHook.exe")
         // Agent configurations point at this executable by absolute path, so a
         // copy can outlive the installation that wrote it; the label identifies
         // which one a stray copy came from.

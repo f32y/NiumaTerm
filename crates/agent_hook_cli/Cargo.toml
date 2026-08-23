@@ -9,7 +9,7 @@ authors.workspace = true
 workspace = true
 
 [[bin]]
-name = "NiumaTermHook"
+name = "NmtAgentHook"
 path = "src/main.rs"
 
 [dependencies]

@@ -168,7 +168,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
     agent_process().set_testing(testing);
     agent_process().set_hook_executable(
         utils::get_exe_dir()
-            .join("NiumaTermHook.exe")
+            .join("NmtAgentHook.exe")
             .display()
             .to_string(),
     );
