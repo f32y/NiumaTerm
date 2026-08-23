@@ -196,22 +196,23 @@ fn title_bar_controls_stay_inside_a_narrow_window(cx: &mut TestAppContext) {
     }
 }
 
-/// Each click walks to the next ready tab and wraps, so a set of them is
-/// cleared in order rather than the same one being reopened.
+/// Shared by the ready-tab and busy-tab jumps: each click walks to the next
+/// marked tab and wraps, so a set of them is visited in order rather than the
+/// same one being reopened.
 #[test]
-fn ready_tab_search_wraps_past_the_active_tab() {
-    use crate::ui::shell::workspaces::next_ready_position;
+fn marked_tab_search_wraps_past_the_active_tab() {
+    use crate::ui::shell::workspaces::next_marked_position;
 
-    let ready = [true, false, true, false];
+    let marks = [true, false, true, false];
 
-    assert_eq!(next_ready_position(&ready, 0), Some(2));
-    assert_eq!(next_ready_position(&ready, 2), Some(0));
-    assert_eq!(next_ready_position(&ready, 3), Some(0));
+    assert_eq!(next_marked_position(&marks, 0), Some(2));
+    assert_eq!(next_marked_position(&marks, 2), Some(0));
+    assert_eq!(next_marked_position(&marks, 3), Some(0));
 
     // The active tab is the last slot visited, so its own mark still counts
     // when nothing else carries one.
-    assert_eq!(next_ready_position(&[true], 0), Some(0));
+    assert_eq!(next_marked_position(&[true], 0), Some(0));
 
-    assert_eq!(next_ready_position(&[false, false], 0), None);
-    assert_eq!(next_ready_position(&[], 0), None);
+    assert_eq!(next_marked_position(&[false, false], 0), None);
+    assert_eq!(next_marked_position(&[], 0), None);
 }

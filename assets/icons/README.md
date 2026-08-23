@@ -3,6 +3,7 @@
 ## Lucide
 
 - https://github.com/lucide-icons/lucide/blob/main/icons/coins.svg
+- https://github.com/lucide-icons/lucide/blob/main/icons/circle-arrow-right.svg
 - https://github.com/lucide-icons/lucide/blob/main/icons/trash-2.svg
 
 Lucide Icons is Copyright © 2026 Lucide Icons and Contributors and distributed

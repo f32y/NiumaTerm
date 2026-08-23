@@ -114,6 +114,24 @@ impl Shell {
                                     this.jump_to_tab(workspace_index, tab_index, window, cx);
                                 })),
                         )
+                    }))
+                    // Same bargain for work still in flight: nothing to jump
+                    // to while every tab is idle.
+                    .children(self.next_busy_tab(cx).is_some().then(|| {
+                        div().occlude().child(
+                            Button::new("next-busy-tab")
+                                .ghost()
+                                .icon(NextBusyTabIcon)
+                                .tooltip(i18n("shell-next-busy-tab"))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    let Some((workspace_index, tab_index)) = this.next_busy_tab(cx)
+                                    else {
+                                        return;
+                                    };
+
+                                    this.jump_to_tab(workspace_index, tab_index, window, cx);
+                                })),
+                        )
                     })),
             )
             // The container keeps the title-bar drag area. Tabs and the
@@ -266,6 +284,18 @@ struct GitIcon;
 impl IconNamed for GitIcon {
     fn path(self) -> SharedString {
         "icons/git.svg".into()
+    }
+}
+
+/// Titlebar busy-tab jump icon, backed by the project's `assets/icons/
+/// circle-arrow-right.svg`. The arrow is what separates it from the busy
+/// spinner drawn on the tabs themselves: this control navigates to that work
+/// rather than reporting it.
+struct NextBusyTabIcon;
+
+impl IconNamed for NextBusyTabIcon {
+    fn path(self) -> SharedString {
+        "icons/circle-arrow-right.svg".into()
     }
 }
 
