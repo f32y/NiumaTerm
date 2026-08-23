@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::{fs, io};
 
 use tracing_appender::non_blocking;
@@ -8,12 +9,21 @@ use tracing_subscriber::{EnvFilter, fmt, registry};
 
 use crate::utils::get_data_dir;
 
-fn rotate_logs() -> io::Result<()> {
+/// Testing instances keep their own log directory so a test run cannot rotate
+/// away or interleave with the logs of a normally launched terminal.
+fn log_dir(testing: bool) -> PathBuf {
+    let base = get_data_dir();
+    if testing {
+        base.join("Test").join("logs")
+    } else {
+        base.join("logs")
+    }
+}
+
+fn rotate_logs(log_path: &Path) -> io::Result<()> {
     const LOG_PREFIX: &str = "app";
 
-    let log_path = get_data_dir().join("logs");
-
-    fs::create_dir_all(&log_path)?;
+    fs::create_dir_all(log_path)?;
 
     let current = log_path.join(format!("{LOG_PREFIX}.log"));
 
@@ -41,10 +51,11 @@ fn rotate_logs() -> io::Result<()> {
     Ok(())
 }
 
-pub fn init_logging() -> io::Result<WorkerGuard> {
-    rotate_logs()?;
+pub fn init_logging(testing: bool) -> io::Result<WorkerGuard> {
+    let log_path = log_dir(testing);
+    rotate_logs(&log_path)?;
 
-    let log_file = get_data_dir().join("logs").join("app.log");
+    let log_file = log_path.join("app.log");
 
     let file = fs::OpenOptions::new()
         .create(true)
