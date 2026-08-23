@@ -1576,6 +1576,16 @@ pub struct WindowOptions {
 
     /// Tab group name, allows opening the window as a native tab on macOS 10.12+. Windows with the same tabbing identifier will be grouped together.
     pub tabbing_identifier: Option<String>,
+
+    /// Whether this window keeps the application running while it is open.
+    ///
+    /// A window the application opens for itself rather than because the user
+    /// asked for one — a prewarmed menu host, an offscreen surface kept alive
+    /// so it does not have to be rebuilt — should set this to `false`. Such a
+    /// window is never closed, so under [`crate::QuitMode::LastWindowClosed`] it would
+    /// otherwise keep the process running with nothing left on screen once the
+    /// user closes the last window they opened.
+    pub keeps_app_alive: bool,
 }
 
 /// The variables that can be configured when creating a new window
@@ -1696,6 +1706,7 @@ impl Default for WindowOptions {
             window_min_size: None,
             window_decorations: None,
             tabbing_identifier: None,
+            keeps_app_alive: true,
         }
     }
 }

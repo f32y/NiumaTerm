@@ -629,6 +629,10 @@ pub struct App {
     pub(crate) new_entity_observers: SubscriberSet<TypeId, NewEntityListener>,
     pub(crate) windows: SlotMap<WindowId, Option<Box<Window>>>,
     pub(crate) window_handles: FxHashMap<WindowId, AnyWindowHandle>,
+    /// The windows opened with [`WindowOptions::keeps_app_alive`], tracked
+    /// separately from `windows` because a window checked out for an update
+    /// leaves a `None` behind and the flag still has to be readable then.
+    pub(crate) windows_keeping_app_alive: FxHashSet<WindowId>,
     pub(crate) focus_handles: Arc<FocusMap>,
     pub(crate) keymap: Rc<RefCell<Keymap>>,
     pub(crate) keyboard_layout: Box<dyn PlatformKeyboardLayout>,
@@ -746,6 +750,7 @@ impl App {
                 windows: SlotMap::with_key(),
                 window_update_stack: Vec::new(),
                 window_handles: FxHashMap::default(),
+                windows_keeping_app_alive: FxHashSet::default(),
                 focus_handles: Arc::new(RwLock::new(SlotMap::with_key())),
                 keymap: Rc::new(RefCell::new(Keymap::default())),
                 keyboard_layout,
@@ -875,6 +880,7 @@ impl App {
 
         self.windows.clear();
         self.window_handles.clear();
+        self.windows_keeping_app_alive.clear();
         self.flush_effects();
         self.quitting = true;
 
@@ -1119,6 +1125,18 @@ impl App {
             .collect()
     }
 
+    /// Whether any open window keeps the application running.
+    ///
+    /// Windows opened with [`WindowOptions::keeps_app_alive`] set to `false` do
+    /// not count: the user never opened them and has no way to close them, so
+    /// they must not decide whether the application is still in use. This is
+    /// the condition [`QuitMode::LastWindowClosed`] quits on, and the one an
+    /// application should test when it wants to act on its own last window
+    /// going away.
+    pub fn any_window_keeps_app_alive(&self) -> bool {
+        !self.windows_keeping_app_alive.is_empty()
+    }
+
     /// Returns the window handles ordered by their appearance on screen, front to back.
     ///
     /// The first window in the returned list is the active/topmost window of the application.
@@ -1142,6 +1160,7 @@ impl App {
         build_root_view: impl FnOnce(&mut Window, &mut App) -> Entity<V>,
     ) -> anyhow::Result<WindowHandle<V>> {
         self.update(|cx| {
+            let keeps_app_alive = options.keeps_app_alive;
             let id = cx.windows.insert(None);
             let handle = WindowHandle::new(id);
             match Window::new(handle.into(), options, cx) {
@@ -1160,6 +1179,9 @@ impl App {
                     clear.clear();
 
                     cx.window_handles.insert(id, window.handle);
+                    if keeps_app_alive {
+                        cx.windows_keeping_app_alive.insert(id);
+                    }
                     cx.windows.get_mut(id).unwrap().replace(Box::new(window));
                     Ok(handle)
                 }
@@ -1653,6 +1675,7 @@ impl App {
 
                 if window.removed {
                     cx.window_handles.remove(&id);
+                    cx.windows_keeping_app_alive.remove(&id);
                     cx.windows.remove(id);
                     if let Some(tracked) = cx.tracked_entities.remove(&id) {
                         for entity_id in tracked {
@@ -1678,7 +1701,7 @@ impl App {
                         QuitMode::Default => cfg!(not(target_os = "macos")),
                     };
 
-                    if quit_on_empty && cx.windows.is_empty() {
+                    if quit_on_empty && !cx.any_window_keeps_app_alive() {
                         cx.quit();
                     }
                 } else {
@@ -2771,7 +2794,7 @@ impl<'a, T> Drop for GpuiBorrow<'a, T> {
 mod test {
     use std::{cell::RefCell, rc::Rc};
 
-    use crate::{AppContext, TestAppContext};
+    use crate::{AppContext, Empty, QuitMode, TestAppContext, WindowOptions};
 
     #[test]
     fn test_gpui_borrow() {
@@ -2802,5 +2825,37 @@ mod test {
         });
 
         assert_eq!(*observation_count.borrow(), 2);
+    }
+
+    #[test]
+    fn test_window_kept_alive_by_the_app_does_not_block_quit() {
+        let cx = TestAppContext::single();
+
+        let main = cx.update(|cx| {
+            cx.set_quit_mode(QuitMode::LastWindowClosed);
+
+            // A surface the app opened for itself, never closed by the user.
+            cx.open_window(
+                WindowOptions {
+                    keeps_app_alive: false,
+                    ..Default::default()
+                },
+                |_, cx| cx.new(|_| Empty),
+            )
+            .unwrap();
+
+            cx.open_window(WindowOptions::default(), |_, cx| cx.new(|_| Empty))
+                .unwrap()
+        });
+
+        cx.update(|cx| assert!(cx.any_window_keeps_app_alive()));
+        assert!(!cx.did_request_quit());
+
+        cx.update(|cx| {
+            main.update(cx, |_, window, _| window.remove_window())
+                .unwrap()
+        });
+
+        assert!(cx.did_request_quit());
     }
 }
