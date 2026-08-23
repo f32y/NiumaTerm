@@ -167,6 +167,12 @@ impl TestAppContext {
         self.test_platform.did_prompt_for_new_path()
     }
 
+    /// Whether the app asked the platform to quit. The test platform records
+    /// the request instead of acting on it, so a test can assert on it.
+    pub fn did_request_quit(&self) -> bool {
+        self.test_platform.quit_requested.get()
+    }
+
     /// returns a new `TestAppContext` re-using the same executors to interleave tasks.
     pub fn new_app(&self) -> TestAppContext {
         Self::build(self.dispatcher.clone(), self.fn_name)

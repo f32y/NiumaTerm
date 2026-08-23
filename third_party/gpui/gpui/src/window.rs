@@ -1336,6 +1336,11 @@ impl Window {
             icon,
             #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
             tabbing_identifier,
+            // Read by `App::open_window`, which records it against the window
+            // id: the app has to answer "is any window still keeping us alive?"
+            // while a window is checked out of `App::windows` for an update,
+            // and at that point the `Window` itself is unreachable.
+            keeps_app_alive: _,
         } = options;
 
         let initial_window_title = titlebar
