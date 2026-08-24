@@ -62,6 +62,7 @@ reqwest = { workspace = true, features = [
 percent-encoding.workspace = true
 raw-window-handle.workspace = true
 sha2.workspace = true
+which.workspace = true
 zip.workspace = true
 
 [target.'cfg(windows)'.dev-dependencies]

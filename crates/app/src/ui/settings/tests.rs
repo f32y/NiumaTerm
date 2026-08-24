@@ -1,4 +1,5 @@
 use std::time::Duration;
+use std::{env, fs};
 
 use gpui::{
     Context, Entity, IntoElement, ListAlignment, ListOffset, ListState, ScrollDelta,
@@ -359,7 +360,10 @@ fn defaults_have_one_powershell_profile() {
     assert!(settings.scroll_to_bottom_when_typing);
     assert_eq!(settings.window_backdrop, WindowBackdrop::Acrylic);
     assert_eq!(settings.profiles.len(), 1);
-    assert_eq!(settings.profiles[0].shell, DEFAULT_SHELL);
+    assert!(
+        settings.profiles[0].shell == DEFAULT_SHELL
+            || settings.profiles[0].shell.ends_with(r"\pwsh.exe")
+    );
     assert_eq!(settings.profiles[0].args, "");
     assert!(settings.restore_last_session_when_opening);
     assert_eq!(settings.smooth_scrolling, SmoothScrollingMode::All);
@@ -472,4 +476,30 @@ fn every_registered_harness_can_be_named_seeded_and_launched() {
         assert_eq!(AgentKind::from_profile(kind.profile_kind()), kind);
         assert_eq!(AgentKind::from_id(kind.id()), Some(kind));
     }
+}
+
+#[test]
+fn newest_pwsh_picks_the_highest_major_at_least_seven() {
+    let root = env::temp_dir().join("nmt-newest-pwsh-test");
+    let _ = fs::remove_dir_all(&root);
+    for major in ["6", "7", "9"] {
+        fs::create_dir_all(root.join(major)).unwrap();
+    }
+    // PowerShell 6 is end-of-life, and 9 is a directory without the binary.
+    for major in ["6", "7"] {
+        fs::write(root.join(major).join("pwsh.exe"), "").unwrap();
+    }
+
+    assert_eq!(
+        newest_pwsh(&root),
+        Some(
+            root.join("7")
+                .join("pwsh.exe")
+                .to_string_lossy()
+                .into_owned()
+        )
+    );
+
+    fs::remove_dir_all(&root).unwrap();
+    assert_eq!(newest_pwsh(&root), None);
 }
