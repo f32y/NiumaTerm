@@ -322,6 +322,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "which",
  "windows-sys 0.61.2",
  "winres",
  "zip",
