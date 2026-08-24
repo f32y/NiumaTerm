@@ -38,6 +38,13 @@ pub(super) const RESIZE_HANDLE: &str = "workspace-sidebar-resize";
 pub(super) const MIN_WIDTH: f32 = 140.0;
 pub(crate) const MAX_WIDTH: f32 = 480.0;
 
+/// Side of the vertical tab-bar new-tab control on a workspace row, and the
+/// size the `+` glyph inside it is drawn at. The control is hover-only, so it
+/// is sized as a comfortable pointer target rather than to match the `×` it
+/// replaces.
+const NEW_TAB_BUTTON: f32 = 32.0;
+const NEW_TAB_GLYPH: f32 = 18.0;
+
 /// Diameter of a status dot in the sidebar column. Smaller than the agent
 /// spinner's `size_3`, so a stacked pair reads as a spinner with a mark under
 /// it rather than as two equal glyphs.
@@ -419,7 +426,39 @@ impl Sidebar {
             .filter(|(id, _)| *id == ws_id)
             .map(|(_, input)| input.clone());
 
-        let controls: AnyElement = if ws.pinned {
+        let controls: AnyElement = if vertical_tabs && !settings_entry {
+            // This row heads the workspace's own tab list here, so its control
+            // adds a tab to that list; closing moves to the context menu. The
+            // press activates the workspace before the menu opens, so the
+            // profile the user picks lands in the workspace they clicked
+            // (a tab always opens in the active workspace). Popover stops the
+            // press from reaching the row behind it, so the activation has to
+            // run on the capture side of the mouse-down.
+            let menu_shell = cx.entity();
+            div()
+                .id(("workspace-new-tab", idx))
+                .capture_any_mouse_down(cx.listener(move |this, _, window, cx| {
+                    this.workspaces.activate(idx);
+                    this.focus_active(window, cx);
+                    this.sync_session_memory(cx);
+                    cx.notify();
+                }))
+                .invisible()
+                .group_hover("ws-item", |this| this.visible())
+                .child(
+                    Button::new(("workspace-new-tab-button", idx))
+                        // A pixel size leaves the box to the styles below:
+                        // Button only derives its padding and glyph size from
+                        // it, while the named sizes would pin the height too.
+                        .with_size(px(NEW_TAB_GLYPH))
+                        .ghost()
+                        .aria_label(i18n("sidebar-tab-new"))
+                        .size(px(NEW_TAB_BUTTON))
+                        .child("+")
+                        .dropdown_menu(move |menu, _, cx| new_tab_menu(menu, &menu_shell, cx)),
+                )
+                .into_any_element()
+        } else if ws.pinned {
             div()
                 .id(("workspace-pin", idx))
                 .px_1()
@@ -973,34 +1012,6 @@ impl Sidebar {
             .into_any_element()
     }
 
-    /// The new-tab row that closes out the active workspace's tab list. Only
-    /// the active workspace gets one: the title bar's `+` is gone in this
-    /// style, and a new tab always opens where the user is looking. Clicking it
-    /// opens the same profile menu the horizontal strip's `+` does, so the two
-    /// styles offer the same choices; Ctrl+Shift+T still opens the default
-    /// profile directly.
-    fn render_new_tab_row(&self, cx: &mut Context<Shell>) -> AnyElement {
-        let menu_shell = cx.entity();
-
-        Button::new("sidebar-tab-new")
-            .ghost()
-            .aria_label(i18n("sidebar-tab-new"))
-            .w_full()
-            .h(px(TAB_ROW_HEIGHT))
-            .px_0()
-            .child(
-                h_flex()
-                    .w_full()
-                    .items_center()
-                    .justify_center()
-                    .text_xs()
-                    .text_color(cx.theme().sidebar_foreground.opacity(0.6))
-                    .child("+"),
-            )
-            .dropdown_menu(move |menu, _, cx| new_tab_menu(menu, &menu_shell, cx))
-            .into_any_element()
-    }
-
     /// The workspace sidebar: one themed button per workspace (active = selected),
     /// plus a new-workspace button and bottom status bar. Toggled by
     /// `ToggleSidebar` (Ctrl+Shift+B).
@@ -1120,10 +1131,6 @@ impl Sidebar {
                                         idx, tab_idx, tab, closeable, tab_rename, cx,
                                     )
                                 }));
-
-                                if ws.active && !ws_tabs.is_empty() {
-                                    rows.push(self.render_new_tab_row(cx));
-                                }
 
                                 rows
                             })),
