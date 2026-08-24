@@ -13,7 +13,9 @@ use gpui::{
     px,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::{ActiveTheme as _, IconName, IconNamed, Sizable as _, h_flex, v_flex};
+use gpui_component::{
+    ActiveTheme as _, IconName, IconNamed, Sizable as _, StyledExt as _, h_flex, v_flex,
+};
 use nmt_agent_utils::background_task::{
     BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskState,
     BackgroundTaskSummary, BackgroundTaskTranscriptState,
@@ -23,6 +25,7 @@ use nmt_i18n::i18n;
 use crate::agent::AgentPane;
 use crate::agent::transcript::TranscriptView;
 use crate::ui::AppSettings;
+use crate::ui::composition::panel_header;
 
 /// Rows shown before the section control offers the rest. Running work is the
 /// part a user watches, so the finished list stays shorter per row of interest.
@@ -651,11 +654,7 @@ impl Render for BackgroundTasksView {
             .text_size(font_size)
             .children(matches!(self.mode, PanelMode::List).then(|| {
                 h_flex()
-                    .px_2()
-                    .py_1()
-                    .items_center()
-                    .border_b_1()
-                    .border_color(cx.theme().sidebar_border)
+                    .refine_style(&panel_header(cx))
                     .child(div().text_sm().child(i18n("tasks-background-title")))
             }))
             .child(self.render_body(cx))

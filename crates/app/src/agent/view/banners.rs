@@ -1,7 +1,36 @@
 use nmt_i18n::i18n;
 
 use crate::agent::context_usage::{ContextUsageIndicator, cache_hit_percent};
+use crate::agent::view::blocking_overlay::BlockingOverlay;
 use crate::agent::*;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::agent::view) enum UpdateOverlayPhase {
+    Stopping,
+    Updating,
+    Reconnecting,
+}
+
+impl UpdateOverlayPhase {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Stopping => i18n("agent-update-stopping-label"),
+            Self::Updating => i18n("agent-update-updating-label"),
+            Self::Reconnecting => i18n("agent-update-reconnecting-label"),
+        }
+    }
+}
+
+pub(in crate::agent::view) fn update_overlay_phase(
+    state: &UpdateSuspension,
+) -> Option<UpdateOverlayPhase> {
+    match state {
+        UpdateSuspension::Stopping => Some(UpdateOverlayPhase::Stopping),
+        UpdateSuspension::Updating => Some(UpdateOverlayPhase::Updating),
+        UpdateSuspension::Reconnecting => Some(UpdateOverlayPhase::Reconnecting),
+        UpdateSuspension::Waiting | UpdateSuspension::Failed(_) => None,
+    }
+}
 
 /// Sub-second latencies are the interesting ones, and a reading like `0.8s`
 /// hides how much of a second it was; past a second the tenth is enough.
@@ -360,44 +389,26 @@ impl AgentPane {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let label = match self.update_suspension.as_ref()? {
-            UpdateSuspension::Stopping => i18n("agent-update-stopping-label"),
-            UpdateSuspension::Updating => i18n("agent-update-updating-label"),
-            UpdateSuspension::Reconnecting => i18n("agent-update-reconnecting-label"),
-            UpdateSuspension::Waiting | UpdateSuspension::Failed(_) => return None,
-        };
+        let label = update_overlay_phase(self.update_suspension.as_ref()?)?.label();
 
-        Some(
-            v_flex()
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                // Swallows clicks and keys aimed at the suspended transcript
-                // and composer underneath.
-                .occlude()
-                .items_center()
-                .justify_center()
-                .gap_3()
-                // Frosted glass: the transcript stays legible as shape and color
-                // while reading as unavailable, which a flat scrim cannot do.
-                .backdrop_blur(px(24.))
-                .bg(cx.theme().background.opacity(0.45))
-                .child(
-                    Spinner::new()
-                        .icon(IconName::LoaderCircle)
-                        .with_size(px(22.))
-                        .color(cx.theme().primary),
-                )
-                .child(
-                    div()
-                        .text_sm()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(cx.theme().foreground)
-                        .child(label),
-                )
-                .into_any_element(),
-        )
+        let body = v_flex()
+            .items_center()
+            .gap_3()
+            .child(
+                Spinner::new()
+                    .icon(IconName::LoaderCircle)
+                    .with_size(px(22.))
+                    .color(cx.theme().primary),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(cx.theme().foreground)
+                    .child(label),
+            );
+
+        Some(BlockingOverlay::new(body).into_any_element())
     }
 
     /// The harness's start, over the tab it is starting in.
@@ -474,25 +485,7 @@ impl AgentPane {
                 ),
         };
 
-        Some(
-            v_flex()
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                // Swallows clicks and keys aimed at the composer underneath,
-                // which has no backend to send them to.
-                .occlude()
-                .items_center()
-                .justify_center()
-                .p_6()
-                // Frosted glass rather than a flat scrim: the tab stays
-                // readable as shape and colour while reading as unavailable.
-                .backdrop_blur(px(24.))
-                .bg(cx.theme().background.opacity(0.45))
-                .child(body)
-                .into_any_element(),
-        )
+        Some(BlockingOverlay::new(body).padded().into_any_element())
     }
 
     pub(in crate::agent::view) fn render_composer_status(

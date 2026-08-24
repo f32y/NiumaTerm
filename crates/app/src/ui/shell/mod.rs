@@ -1,9 +1,11 @@
 mod actions;
 mod agent_notifications;
 mod close;
+mod inline_rename;
 mod panes;
 mod pump;
 mod render;
+mod tab_presentation;
 mod tab_surface;
 mod tabs_open;
 mod updates_layer;
@@ -42,8 +44,6 @@ use nmt_agent_utils::{
     AgentRuntimeStatus, agent_process, request_native_delivery,
 };
 use nmt_config::get;
-#[cfg(test)]
-use nmt_config::local_state::TabState;
 use nmt_config::local_state::WindowState;
 use nmt_config::system::WarnBeforeTerminatingShell;
 use nmt_i18n::i18n;
@@ -77,6 +77,8 @@ pub(crate) use crate::ui::shell::actions::{
 };
 #[cfg(test)]
 use crate::ui::shell::close::{should_confirm_close, should_confirm_tab_close};
+pub(in crate::ui) use crate::ui::shell::inline_rename::{InlineRename, InlineRenameStyle};
+pub(in crate::ui) use crate::ui::shell::tab_presentation::pending_tab_icon;
 pub(crate) use crate::ui::shell::tab_surface::TabSurface;
 use crate::ui::tab_bar::TabStrip;
 use crate::ui::token_usage::TokenUsageView;

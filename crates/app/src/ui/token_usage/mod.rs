@@ -15,15 +15,18 @@ use gpui::{
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::hover_card::HoverCard;
 use gpui_component::list::{List, ListDelegate, ListItem, ListState};
-use gpui_component::{ActiveTheme as _, IconNamed, IndexPath, Sizable as _, h_flex, v_flex};
+use gpui_component::{
+    ActiveTheme as _, IconNamed, IndexPath, Sizable as _, StyledExt as _, h_flex, v_flex,
+};
 use nmt_i18n::i18n;
 use nmt_platform::windows::process::hidden_cmd_command;
 use serde::Deserialize;
 use serde_json::from_slice;
 use tracing::warn;
 
+use crate::ui::AppSettings;
 use crate::ui::auto_refresh::{self, AutoRefresh, RefreshState};
-use crate::ui::{AppSettings, UI_RADIUS};
+use crate::ui::composition::{framed_region, table_header as table_header_style};
 
 /// Shown before the first successful fetch and retained after fetch errors.
 const PLACEHOLDER: &str = "-";
@@ -369,16 +372,9 @@ fn usage_header_cell(label: &'static str, width: Pixels) -> gpui::Div {
 
 fn model_usage_header(cx: &App) -> gpui::Div {
     h_flex()
-        .w_full()
+        .refine_style(&table_header_style(cx))
         .h(px(MODEL_HEADER_HEIGHT))
-        .px_3()
-        .gap_2()
-        .items_center()
-        .border_b_1()
-        .border_color(cx.theme().border)
-        .bg(cx.theme().muted.opacity(0.4))
         .text_size(px(14.0))
-        .text_color(cx.theme().muted_foreground)
         .child(
             div()
                 .flex_1()
@@ -433,11 +429,7 @@ fn render_model_usage_list(
     let height = MODEL_HEADER_HEIGHT + MODEL_ROW_HEIGHT * row_count.clamp(1.0, MAX_VISIBLE_ROWS);
 
     div()
-        .w_full()
-        .border_1()
-        .border_color(cx.theme().border)
-        .rounded(UI_RADIUS)
-        .overflow_hidden()
+        .refine_style(&framed_region(cx))
         .child(
             List::new(&state)
                 .h(px(height))

@@ -29,7 +29,7 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, ClipboardItem, Div, FileDialogFilter, Global, InteractiveElement as _,
     IntoElement as _, ParentElement as _, PathPromptOptions, SharedString,
-    StatefulInteractiveElement as _, StyleRefinement, Styled as _, Window, div, px, relative,
+    StatefulInteractiveElement as _, Styled as _, Window, div, px, relative,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, DialogClose, DialogFooter};
@@ -62,6 +62,7 @@ use tracing::warn;
 
 use crate::agent::updates as agent_updates;
 use crate::ui::UI_RADIUS;
+use crate::ui::composition::sidebar_surface;
 use crate::ui::settings::about_page::about_page;
 use crate::ui::settings::agent_page::agent_page;
 #[cfg(test)]
@@ -132,14 +133,7 @@ pub fn settings_view(cx: &App) -> Settings {
     let background_image_enabled = cx.global::<AppSettings>().background_image.is_some();
     let shell_integration_mismatched = shell_integration_dll_mismatched();
 
-    let sidebar_style = StyleRefinement::default()
-        .bg(cx.theme().sidebar)
-        .border_t_1()
-        .border_b_1()
-        .border_l_1()
-        .border_color(cx.theme().sidebar_border)
-        .rounded(UI_RADIUS)
-        .overflow_hidden();
+    let sidebar_style = sidebar_surface(cx).border_r_0();
 
     Settings::new("app-settings")
         .sidebar_width(px(240.0))

@@ -2,65 +2,35 @@ use std::{cell, collections, rc};
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Context, DragMoveEvent, Entity, Hsla, IsZero as _, KeyDownEvent, MouseButton,
-    Pixels, Render, ScrollHandle, SharedString, Window, div, px, relative,
+    AnyElement, App, Context, DragMoveEvent, Entity, Hsla, IsZero as _, Pixels, ScrollHandle,
+    SharedString, div, px, relative,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::input::{Input, InputState};
-use gpui_component::menu::{DropdownMenu as _, PopupMenu, PopupMenuItem};
+use gpui_component::input::InputState;
+use gpui_component::menu::DropdownMenu as _;
 use gpui_component::modern_menu::ModernMenuExt as _;
-use gpui_component::progress::ProgressCircle;
 use gpui_component::tab::{Tab, TabBar, TabVariant};
-use gpui_component::{ActiveTheme, ElementExt as _, Icon, IconName, Sizable};
+use gpui_component::{ActiveTheme, ElementExt as _, IconName, Sizable};
 use nmt_i18n::i18n;
 use nmt_terminal::event::{ProgressReport, ProgressState};
 
-use super::Shell;
-use super::shell::TabSurface;
 use crate::agent::AgentKind;
 use crate::tabs::{TabId, TabManager};
+use crate::ui::composition::{
+    HoverActionLayout, HoverActionVisibility, StatusMark, StatusMarkTone, hover_action,
+};
+use crate::ui::shell::{InlineRename, InlineRenameStyle, TabSurface, pending_tab_icon};
 use crate::ui::terminal_status::{terminal_dot, terminal_presentation};
-use crate::ui::{AppSettings, UI_RADIUS};
+use crate::ui::{AppSettings, Shell, UI_RADIUS};
 use crate::workspace::TerminalActivity;
 
-struct TabDrag {
-    from: usize,
-}
+mod drag;
+mod menu;
+#[cfg(test)]
+mod tests;
 
-/// The floating preview shown under the cursor while dragging a tab: a
-/// full-size replica of the active tab pill. The pill's alpha fill is
-/// composited onto the chrome background here, because the ghost floats over
-/// arbitrary content where a bare alpha fill would wash out.
-struct TabDragPreview {
-    label: SharedString,
-    width: f32,
-}
-
-impl Render for TabDragPreview {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // The chrome background carries the window translucency, and the Mica
-        // materials drive it to zero, so the composite base has to be taken at
-        // full alpha or the ghost is back to a bare alpha fill.
-        div()
-            .rounded(UI_RADIUS)
-            .bg(cx.theme().background.alpha(1.0))
-            .child(
-                div()
-                    .w(px(self.width))
-                    .h(px(30.0))
-                    .px_2()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .overflow_hidden()
-                    .rounded(UI_RADIUS)
-                    .bg(cx.theme().tab_active)
-                    .text_sm()
-                    .text_color(cx.theme().tab_active_foreground)
-                    .child(div().truncate().child(self.label.clone())),
-            )
-    }
-}
+use crate::ui::tab_bar::drag::{TabDrag, TabDragPreview};
+pub(in crate::ui) use crate::ui::tab_bar::menu::{new_tab_menu, tab_icon};
 
 pub(super) struct TabStrip {
     /// Scroll position of the tab strip (tabs overflow horizontally once their
@@ -198,33 +168,6 @@ fn agent_tab_indicator(busy: bool, unread: bool) -> Option<AgentTabIndicator> {
     }
 }
 
-/// The glyph a tab leads with: the agent's own mark on an agent tab, a gear on
-/// the settings tab, a terminal mark otherwise.
-pub(super) fn tab_icon(agent_kind: Option<AgentKind>, settings: bool) -> Icon {
-    match agent_kind {
-        Some(kind) => kind.icon(),
-        None if settings => Icon::new(IconName::Settings),
-        None => Icon::new(IconName::SquareTerminal),
-    }
-    .xsmall()
-}
-
-/// The glyph a restored-but-not-yet-spawned tab leads with instead of its own
-/// mark. A moon is the sleeping cue browsers use for discarded tabs, and it
-/// occupies the icon slot every tab already reserves, so the fixed tab width
-/// keeps all of its remaining room for the title. It renders unfaded on purpose:
-/// the faded title says "asleep" only once you have another tab to compare it
-/// against, while the glyph says it on its own.
-fn pending_icon(id: u64) -> AnyElement {
-    div()
-        .id(("tab-pending-icon", id as usize))
-        .aria_label(i18n("tabbar-tooltip-pending"))
-        .flex()
-        .items_center()
-        .child(Icon::new(IconName::Moon).xsmall())
-        .into_any_element()
-}
-
 fn progress_bar_width(tab_width: Pixels) -> Pixels {
     (tab_width - UI_RADIUS * 2.0).max(Pixels::ZERO)
 }
@@ -267,68 +210,6 @@ fn progress_bar(report: ProgressReport, tab_width: f32, cx: &App) -> AnyElement 
                 .bg(color),
         )
         .into_any_element()
-}
-
-/// The new-tab menu: one entry per configured terminal profile, then one per
-/// agent profile. Shared by the title-bar strip's `+` and the sidebar's, so a
-/// tab opens the same way in either tab-bar style.
-pub(super) fn new_tab_menu(
-    mut menu: PopupMenu,
-    shell: &Entity<Shell>,
-    cx: &mut Context<PopupMenu>,
-) -> PopupMenu {
-    for profile in cx.global::<AppSettings>().profiles.clone() {
-        let shell_cmd = profile.shell.trim().to_string();
-
-        // A profile without a command cannot spawn; offering it would silently
-        // fall back to the built-in shell.
-        if shell_cmd.is_empty() {
-            continue;
-        }
-
-        let args: Vec<String> = profile
-            .args
-            .split_whitespace()
-            .map(str::to_string)
-            .collect();
-        let item_shell = shell.clone();
-
-        menu = menu.item(
-            PopupMenuItem::new(profile.name.clone())
-                .icon(tab_icon(None, false))
-                .on_click(move |_, window, cx| {
-                    let launch = (Some(shell_cmd.clone()), args.clone());
-                    item_shell.update(cx, |this, cx| this.open_profile_tab(launch, window, cx));
-                }),
-        );
-    }
-
-    let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
-
-    // No separator over an empty agent section (every agent profile deleted).
-    if !agent_profiles.is_empty() {
-        menu = menu.separator();
-    }
-
-    for (ix, profile) in agent_profiles.into_iter().enumerate() {
-        let label = if profile.name.trim().is_empty() {
-            i18n("tabbar-menu-agent-profile").replace("{index}", &(ix + 1).to_string())
-        } else {
-            profile.name.clone()
-        };
-        let item_shell = shell.clone();
-
-        menu = menu.item(
-            PopupMenuItem::new(label)
-                .icon(tab_icon(Some(AgentKind::from_profile(profile.kind)), false))
-                .on_click(move |_, window, cx| {
-                    let profile = profile.clone();
-                    item_shell.update(cx, |this, cx| this.open_agent_tab(profile, window, cx));
-                }),
-        );
-    }
-
-    menu
 }
 
 impl TabStrip {
@@ -481,29 +362,26 @@ impl TabStrip {
                 // hover state it would otherwise wait for is already the one
                 // the tab is in.
                 let close_pinned = icon_only && index == active_idx;
-                let close = div()
-                    .id(("tab-close", id as usize))
-                    .when(!icon_only, |this| this.px_1())
-                    // In the glyph slot the control *is* the slot: covering it
-                    // keeps the click target as large as the icon it hides,
-                    // instead of shrinking to the width of the `×` itself.
-                    .when(icon_only, |this| {
-                        this.absolute()
-                            .inset_0()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                    })
-                    .when(!close_pinned, |this| {
-                        this.invisible()
-                            .group_hover("shell-tab", |this| this.visible())
-                    })
-                    .child("×")
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        cx.stop_propagation();
-                        this.request_close_tab(TabId(id), window, cx);
-                    }))
-                    .into_any_element();
+                let close_layout = match icon_only {
+                    true => HoverActionLayout::Fill,
+                    false => HoverActionLayout::Inline,
+                };
+                let close_visibility = match close_pinned {
+                    true => HoverActionVisibility::Always,
+                    false => HoverActionVisibility::OnGroupHover("shell-tab".into()),
+                };
+                let close = hover_action(
+                    ("tab-close", id as usize),
+                    i18n("tabbar-menu-close"),
+                    close_layout,
+                    close_visibility,
+                    "×",
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    cx.stop_propagation();
+                    this.request_close_tab(TabId(id), window, cx);
+                }))
+                .into_any_element();
 
                 // A tab down to one glyph hands that slot to the close control
                 // on hover; wider tabs keep it at the trailing edge.
@@ -529,23 +407,18 @@ impl TabStrip {
                     .map(|(_, input)| input.clone());
 
                 let content: AnyElement = if let Some(input) = renaming {
-                    div()
-                        .flex_1()
-                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .capture_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| {
-                            if e.keystroke.key == "escape" {
-                                cx.stop_propagation();
-                                this.finish_tab_rename(false, window, cx);
-                            }
-                        }))
-                        .child(
-                            Input::new(&input)
-                                .small()
-                                .p_0()
-                                .text_center()
-                                .appearance(false),
-                        )
-                        .into_any_element()
+                    let rename_shell = cx.entity();
+                    InlineRename::new(
+                        ("tab-rename", id as usize),
+                        label.clone(),
+                        input,
+                        InlineRenameStyle::HorizontalTab,
+                        move |window, cx| {
+                            rename_shell
+                                .update(cx, |this, cx| this.finish_tab_rename(false, window, cx));
+                        },
+                    )
+                    .into_any_element()
                 } else {
                     // Right-click menu; Close reuses the confirm-gated path of
                     // the hover `×` and is disabled for the last tab, which
@@ -620,7 +493,11 @@ impl TabStrip {
                                                     })
                                                 })
                                                 .child(if pending {
-                                                    pending_icon(id)
+                                                    pending_tab_icon((
+                                                        "tab-pending-icon",
+                                                        id as usize,
+                                                    ))
+                                                    .into_any_element()
                                                 } else {
                                                     tab_icon(agent_kind, is_settings)
                                                         .into_any_element()
@@ -641,21 +518,24 @@ impl TabStrip {
                             // circle instead of a text bullet, so it stays
                             // visible against the muted inactive-tab text.
                             .children((unread && agent_kind.is_none()).then(|| {
-                                div()
-                                    .flex_none()
-                                    .size(px(6.0))
-                                    .rounded_full()
-                                    .bg(cx.theme().primary)
+                                StatusMark::new(
+                                    ("tab-unread", id as usize),
+                                    StatusMarkTone::Primary,
+                                    px(TAB_DOT),
+                                )
+                                .label(
+                                    i18n("sidebar-workspace-unread-label").replace("{count}", "1"),
+                                )
                             }))
                             // Bell dot, in the warning color so it reads
                             // apart from the unread dot when a tab has
                             // both.
                             .children(bell.then(|| {
-                                div()
-                                    .flex_none()
-                                    .size(px(6.0))
-                                    .rounded_full()
-                                    .bg(cx.theme().warning)
+                                StatusMark::new(
+                                    ("tab-bell", id as usize),
+                                    StatusMarkTone::Warning,
+                                    px(TAB_DOT),
+                                )
                             }))
                         })
                         .into_any_element()
@@ -703,7 +583,8 @@ impl TabStrip {
                                 .items_center()
                                 .gap_1()
                                 .child(if pending {
-                                    pending_icon(id)
+                                    pending_tab_icon(("tab-pending-icon", id as usize))
+                                        .into_any_element()
                                 } else {
                                     tab_icon(None, is_settings).into_any_element()
                                 })
@@ -736,7 +617,8 @@ impl TabStrip {
                                 .items_center()
                                 .gap_1()
                                 .child(if pending {
-                                    pending_icon(id)
+                                    pending_tab_icon(("tab-pending-icon", id as usize))
+                                        .into_any_element()
                                 } else {
                                     tab_icon(Some(agent_kind), false).into_any_element()
                                 })
@@ -758,19 +640,18 @@ impl TabStrip {
                                             .items_center()
                                             .justify_center()
                                             .child(match indicator {
-                                                AgentTabIndicator::Busy => ProgressCircle::new((
+                                                AgentTabIndicator::Busy => StatusMark::busy((
                                                     "tab-agent-busy-spinner",
                                                     id as usize,
                                                 ))
-                                                .small()
-                                                .loading(true)
-                                                .color(cx.theme().warning)
                                                 .into_any_element(),
-                                                AgentTabIndicator::Ready => div()
-                                                    .size(px(6.0))
-                                                    .rounded_full()
-                                                    .bg(cx.theme().primary)
-                                                    .into_any_element(),
+                                                AgentTabIndicator::Ready => StatusMark::new(
+                                                    ("tab-agent-ready", id as usize),
+                                                    StatusMarkTone::Primary,
+                                                    px(TAB_DOT),
+                                                )
+                                                .label(i18n("tabbar-tooltip-agent-ready"))
+                                                .into_any_element(),
                                             }),
                                     )
                                 }),
@@ -860,86 +741,5 @@ impl TabStrip {
             }))
             .child(bar)
             .into_any_element()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn progress_bar_stops_at_rounded_tab_edges() {
-        let tab_width = px(150.0);
-        let bar_width = progress_bar_width(tab_width);
-
-        assert_eq!(bar_width, px(134.0));
-        assert_eq!(tab_width - UI_RADIUS - bar_width, UI_RADIUS);
-    }
-
-    /// Auto Size holds the configured width while the row has room, shares the
-    /// row once it does not, and stops at the width that still shows the
-    /// leading icon. It also has to survive a strip that has not been measured
-    /// yet, which is every tab strip on its first frame.
-    #[test]
-    fn auto_size_shares_the_strip_between_tabs() {
-        let configured = 120.0;
-        let width = |strip: f32, count: usize| auto_tab_width(strip, count, configured);
-
-        // Room to spare: no reason to shrink below what the user asked for.
-        assert_eq!(width(1200.0, 2), configured);
-
-        // Crowded: the tabs split what is left after the new-tab button, the
-        // bar padding, and one gap each.
-        let crowded = width(800.0, 8);
-        assert!(
-            crowded < configured,
-            "{crowded} should be under {configured}"
-        );
-        assert!(crowded > MIN_AUTO_TAB_WIDTH);
-        assert!(
-            (crowded * 8.0 + TAB_GAP * 8.0 + TAB_BAR_PADDING + NEW_TAB_BUTTON_WIDTH - 800.0).abs()
-                < 0.001,
-            "the tabs and their gaps should consume the strip exactly",
-        );
-
-        // Past the floor the row overflows instead, and the strip scrolls.
-        assert_eq!(width(800.0, 40), MIN_AUTO_TAB_WIDTH);
-
-        // Before the first layout, and with nothing to lay out.
-        assert_eq!(width(0.0, 8), configured);
-        assert_eq!(width(1200.0, 0), configured);
-
-        // A configured width under the floor is still an upper bound; Auto Size
-        // never widens a tab past the setting.
-        assert_eq!(auto_tab_width(800.0, 40, 30.0), 30.0);
-    }
-
-    /// The close control is the one thing a tab must never lose: the title
-    /// goes first, then the leading icon gives up its slot on hover.
-    #[test]
-    fn a_shrinking_tab_gives_up_the_title_first() {
-        assert_eq!(tab_density(120.0), TabDensity::Full);
-        assert_eq!(tab_density(FULL_TAB_WIDTH), TabDensity::Full);
-        assert_eq!(tab_density(FULL_TAB_WIDTH - 1.0), TabDensity::Compact);
-        assert_eq!(tab_density(COMPACT_TAB_WIDTH), TabDensity::Compact);
-        assert_eq!(tab_density(COMPACT_TAB_WIDTH - 1.0), TabDensity::IconOnly);
-
-        // Every width Auto Size can produce still has a glyph slot for the
-        // close control to take over.
-        assert!(MIN_AUTO_TAB_WIDTH < COMPACT_TAB_WIDTH);
-        assert_eq!(tab_density(MIN_AUTO_TAB_WIDTH), TabDensity::IconOnly);
-    }
-
-    #[test]
-    fn busy_indicator_takes_precedence_over_ready() {
-        assert_eq!(
-            agent_tab_indicator(true, true),
-            Some(AgentTabIndicator::Busy)
-        );
-        assert_eq!(
-            agent_tab_indicator(false, true),
-            Some(AgentTabIndicator::Ready)
-        );
-        assert_eq!(agent_tab_indicator(false, false), None);
     }
 }

@@ -5,10 +5,10 @@
 
 use gpui::prelude::*;
 use gpui::{AnyElement, Context, DragMoveEvent, Entity, Pixels, Window, div, px};
-use gpui_component::{ActiveTheme as _, v_flex};
+use gpui_component::{StyledExt as _, v_flex};
 
-use crate::ui::UI_RADIUS;
 use crate::ui::background_tasks::BackgroundTasksView;
+use crate::ui::composition::sidebar_surface;
 use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::sidebar_resize::{self, ResizeDrag};
 use crate::ui::workflows::WorkflowsView;
@@ -146,12 +146,8 @@ impl Render for RightPanel {
         // and the terminal column's own gutter provides the left gap — so the
         // resize handle keeps riding the card's left edge.
         let card = v_flex()
+            .refine_style(&sidebar_surface(cx))
             .size_full()
-            .bg(cx.theme().sidebar)
-            .border_1()
-            .border_color(cx.theme().sidebar_border)
-            .rounded(UI_RADIUS)
-            .overflow_hidden()
             .child(body);
 
         let content = div()
