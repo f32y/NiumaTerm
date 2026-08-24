@@ -327,20 +327,39 @@ impl TranscriptView {
                 });
 
                 v_flex()
-                    .w(px(320.))
-                    .max_w_full()
+                    // The bubble fills the column it shares with the prompt,
+                    // which the column itself holds to the prompt measure.
+                    .w_full()
                     .overflow_hidden()
                     .rounded(UI_RADIUS)
                     .border_1()
                     .border_color(cx.theme().border)
                     .bg(cx.theme().muted)
                     .child(
-                        Button::new(("entry-response-annotations", index))
-                            .ghost()
-                            .xsmall()
+                        // The header is the whole bubble while it is collapsed,
+                        // so it is built from the prompt bubble's own padding
+                        // and inherited text size rather than a button size:
+                        // the transcript's text size is a setting, and a
+                        // control with a fixed height would stop matching the
+                        // bubble below it as soon as that setting moves.
+                        h_flex()
+                            .id(("entry-response-annotations", index))
+                            .role(gpui::Role::Button)
+                            .aria_label(action_label)
                             .w_full()
-                            .icon(IconName::TextSelect)
-                            .label(annotation_count_label(parsed.annotations.len()))
+                            .px_3()
+                            .py_2()
+                            .gap_2()
+                            .items_center()
+                            .cursor_pointer()
+                            .hover(|style| style.bg(cx.theme().accent))
+                            .child(Icon::new(IconName::TextSelect).xsmall())
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(annotation_count_label(parsed.annotations.len())),
+                            )
                             .child(
                                 Icon::new(if annotations_expanded {
                                     IconName::ChevronUp
@@ -349,7 +368,6 @@ impl TranscriptView {
                                 })
                                 .xsmall(),
                             )
-                            .aria_label(action_label)
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 if !this.expanded_annotations.insert(index) {
                                     this.expanded_annotations.remove(&index);
@@ -392,6 +410,11 @@ impl TranscriptView {
             .child(self.hover_stamp(index, cx))
             .child(
                 v_flex()
+                    // The annotation bubble is as wide as the prompt bubble
+                    // because both fill this column, so the cap that keeps the
+                    // prompt at its measure lives here rather than on either.
+                    .max_w(rems(USER_TEXT_MEASURE_REMS))
+                    .min_w_0()
                     .items_end()
                     .gap_1()
                     .children(annotations)
