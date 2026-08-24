@@ -4,7 +4,7 @@ use crate::agent::composer::{
     CommandFeedbackKind, FileRestoreNext, RewindState, app_server, feedback_is_current,
     feedback_is_transient, file_restore_next, parse_annotated_prompt,
     prompt_with_response_annotations, restored_input_after_interruption, rewind_blocks_submission,
-    sessions, stream_json,
+    sessions, spaced_placeholder, stream_json,
 };
 
 fn checkpoint() -> sessions::ClaudeCheckpoint {
@@ -181,4 +181,17 @@ fn requested_information_and_progress_hold() {
         CommandFeedbackKind::Status,
         /*queue_is_empty*/ true
     ));
+}
+
+#[test]
+fn an_image_placeholder_is_separated_from_the_prompt_it_is_written_into() {
+    // The marker has to read as its own word: written straight against the
+    // preceding text it would be part of it, both for the reader and for the
+    // agent that receives the prompt.
+    assert_eq!(spaced_placeholder(Some('t'), "[Image #1]"), " [Image #1] ");
+    // Nothing to separate it from, so a leading space would only open the
+    // prompt with an empty column.
+    assert_eq!(spaced_placeholder(None, "[Image #1]"), "[Image #1] ");
+    assert_eq!(spaced_placeholder(Some(' '), "[Image #2]"), "[Image #2] ");
+    assert_eq!(spaced_placeholder(Some('\n'), "[Image #2]"), "[Image #2] ");
 }
