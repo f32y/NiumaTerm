@@ -47,7 +47,7 @@ use crate::terminal::layout::{
 };
 use crate::terminal::links::LinkHit;
 use crate::terminal::scrollbar::{
-    SCROLLBAR_LINGER, scrollbar_element, scrollbar_offset_for_thumb, scrollbar_opacity,
+    scrollbar_element, scrollbar_offset_for_thumb, scrollbar_opacity,
 };
 use crate::terminal::session::{HostEvent, InFlightBlock};
 use crate::terminal::surface::{
@@ -105,8 +105,9 @@ pub(crate) struct TerminalPane {
     /// True while the scrollbar thumb is being dragged (mouse-move then scrolls
     /// to the pointer instead of selecting text).
     pub(super) scrollbar_dragging: bool,
-    /// Last user scroll action; the scrollbar shows only while dragging or
-    /// within [`SCROLLBAR_LINGER`] of this instant, then auto-hides.
+    /// Last user scroll action; the scrollbar stays opaque within
+    /// [`gpui_component::scroll::SCROLLBAR_AUTO_HIDE_DELAY`], then fades out
+    /// unless it is being dragged.
     pub(super) last_scroll_activity: Option<time::Instant>,
     /// Bumped per scroll action so only the newest hide-timer repaints.
     scroll_activity_gen: u64,
