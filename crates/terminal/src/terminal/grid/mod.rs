@@ -5,20 +5,11 @@
 // The `Grid<T>`/`Storage`/resize engine and iterators were deleted with the
 // `Crosswords` VT engine (the Ghostty engine + RenderBuffer own grid state now).
 // What remains is the cell-geometry surface the live code still uses: the
-// `Dimensions` trait, the `GridSquare` trait (`Row<T>`'s bound), `Row` (in
-// `row`), and `Indexed` (selection).
+// `Dimensions` trait and `Row` (in `row`).
 
 pub mod row;
 
-use std::ops::Deref;
-
-use crate::terminal::pos::Pos;
 use crate::terminal::{Column, Line};
-
-pub trait GridSquare: Sized {
-    fn is_empty(&self) -> bool;
-    fn reset(&mut self, template: &Self);
-}
 
 pub trait Dimensions {
     /// Total number of lines in the buffer, this includes scrollback and visible lines.
@@ -53,18 +44,6 @@ pub trait Dimensions {
     fn history_size(&self) -> usize {
         self.total_lines().saturating_sub(self.screen_lines())
     }
-
-    /// square height in pixels.
-    #[inline]
-    fn square_height(&self) -> f32 {
-        0.0
-    }
-
-    /// square width in pixels.
-    #[inline]
-    fn square_width(&self) -> f32 {
-        0.0
-    }
 }
 
 #[cfg(test)]
@@ -79,28 +58,5 @@ impl Dimensions for (usize, usize) {
 
     fn columns(&self) -> usize {
         self.1
-    }
-
-    fn square_width(&self) -> f32 {
-        0.
-    }
-
-    fn square_height(&self) -> f32 {
-        0.
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct Indexed<T> {
-    pub pos: Pos,
-    pub square: T,
-}
-
-impl<T> Deref for Indexed<T> {
-    type Target = T;
-
-    #[inline]
-    fn deref(&self) -> &T {
-        &self.square
     }
 }

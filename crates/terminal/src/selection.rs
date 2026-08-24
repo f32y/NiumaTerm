@@ -45,7 +45,6 @@ pub struct SelectionRange {
 }
 
 impl SelectionRange {
-    #[allow(unused)]
     pub fn new(start: Pos, end: Pos, is_block: bool) -> Self {
         assert!(start <= end);
         Self {
@@ -61,8 +60,7 @@ impl SelectionRange {
     /// viewport, or `None` when the selection is fully outside it.
     /// Mirrors the retired `TermDamageState::damage_selection` at
     /// `display_offset == 0` — the render buffer is always the displayed viewport
-    /// without scanning unrelated rows. The hint-hover clear path uses it to mark the old
-    /// highlight's `visible_rows[y].dirty` so `RowsToRebuild::Dirty` clears it.
+    /// without scanning unrelated rows.
     /// `start <= end` is guaranteed by `SelectionRange::new`.
     pub fn visible_rows_clamped(&self, rows: usize) -> Option<ops::RangeInclusive<usize>> {
         if rows == 0 {
@@ -77,15 +75,6 @@ impl SelectionRange {
         let start = start_row.max(0) as usize;
         let end = end_row.clamp(0, last) as usize;
         Some(start..=end)
-    }
-
-    /// Check if a point lies within the selection.
-    #[allow(unused)]
-    pub fn contains(&self, point: Pos) -> bool {
-        self.start.row <= point.row
-            && self.end.row >= point.row
-            && (self.start.col <= point.col || (self.start.row != point.row && !self.is_block))
-            && (self.end.col >= point.col || (self.end.row != point.row && !self.is_block))
     }
 }
 

@@ -100,7 +100,6 @@ pub enum Msg {
     /// Data that should be written to the PTY.
     Input(Cow<'static, [u8]>),
 
-    #[allow(dead_code)]
     Shutdown,
 
     Resize(WinsizeBuilder),

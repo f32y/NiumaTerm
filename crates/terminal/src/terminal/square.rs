@@ -14,9 +14,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use bitflags::bitflags;
 
-use crate::terminal::grid::GridSquare;
-use crate::terminal::style::{DEFAULT_STYLE_ID, StyleId};
-use crate::terminal::{Column, Row};
+use crate::terminal::style::StyleId;
 
 // ---------------------------------------------------------------------------
 // Bit layout for Square(u64)
@@ -397,14 +395,6 @@ impl Square {
         *self = Square(0);
     }
 
-    /// Reset the cell using a template. Preserves the template's style id;
-    /// drops any extras the cell currently has (caller must free the slot).
-    #[inline]
-    pub fn reset(&mut self, template: Square) {
-        let new = Square(0).with_style_id(template.style_id());
-        *self = new;
-    }
-
     /// Builder helper for tests.
     #[inline]
     pub fn with_style_id(mut self, id: StyleId) -> Self {
@@ -452,80 +442,11 @@ impl Square {
     }
 }
 
-impl GridSquare for Square {
-    #[inline]
-    fn is_empty(&self) -> bool {
-        if self.0 == 0 {
-            return true;
-        }
-        // A cell with an inline bg is NOT empty even if everything else
-        // looks default.
-        if self.is_bg_only() {
-            return false;
-        }
-        (self.c() == '\0' || self.c() == '\t')
-            && self.style_id() == DEFAULT_STYLE_ID
-            && self.extras_id().is_none()
-            && !self.contains_cell_flag(CellFlags::WRAPLINE)
-            && matches!(self.wide(), Wide::Narrow)
-    }
-
-    #[inline]
-    fn reset(&mut self, template: &Self) {
-        let style_id = template.style_id();
-        *self = Square(0).with_style_id(style_id);
-    }
-}
-
-pub trait LineLength {
-    /// Calculate the occupied line length.
-    fn line_length(&self) -> Column;
-}
-
-impl LineLength for Row<Square> {
-    fn line_length(&self) -> Column {
-        let mut length = Column(0);
-
-        if self[Column(self.len() - 1)].wrapline() {
-            return Column(self.len());
-        }
-
-        for (index, cell) in self[..].iter().rev().enumerate() {
-            if cell.c() != '\0' || cell.has_extras() {
-                length = Column(self.len() - index);
-                break;
-            }
-        }
-
-        length
-    }
-}
-
-pub trait ResetDiscriminant<T> {
-    /// Value based on which equality for the reset will be determined.
-    fn discriminant(&self) -> T;
-}
-
-impl<T: Copy> ResetDiscriminant<T> for T {
-    fn discriminant(&self) -> T {
-        *self
-    }
-}
-
-impl ResetDiscriminant<StyleId> for Square {
-    fn discriminant(&self) -> StyleId {
-        self.style_id()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::mem;
 
     use super::*;
-    use crate::terminal;
-    use crate::terminal::grid::row::Row;
-    use crate::terminal::pos::Column;
 
     #[test]
     fn square_is_eight_bytes() {
@@ -639,26 +560,5 @@ mod tests {
         s.set_bg_rgb(1, 2, 3);
         assert!(s.wrapline());
         assert_eq!(s.bg_rgb(), (1, 2, 3));
-    }
-
-    #[test]
-    fn bg_only_cells_are_not_empty() {
-        let mut s = Square(0);
-        s.set_bg_palette(7);
-        assert!(!<Square as terminal::grid::GridSquare>::is_empty(&s));
-    }
-
-    #[test]
-    fn line_length_works() {
-        let mut row = Row::<Square>::new(10);
-        row[Column(5)].set_c('a');
-        assert_eq!(row.line_length(), Column(6));
-    }
-
-    #[test]
-    fn line_length_works_with_wrapline() {
-        let mut row = Row::<Square>::new(10);
-        row[Column(9)].set_wrapline(true);
-        assert_eq!(row.line_length(), Column(10));
     }
 }
