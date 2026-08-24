@@ -27,7 +27,7 @@ use crate::deepseek::mapping::{self, ApprovalRequest, QuestionRequest, ToolTrack
 use crate::deepseek::models::ModelDirectory;
 use crate::deepseek::projections::ProjectionTracker;
 use crate::deepseek::workflows::WorkflowTracker;
-use crate::deepseek::{commands, history, presets, subagents};
+use crate::deepseek::{commands, history, presets, settings, subagents};
 
 pub struct Session {
     client: ApiClient,
@@ -50,6 +50,10 @@ pub struct Session {
     /// continues later: the directory belongs to the session, not to the tab.
     model: Option<String>,
     effort: Option<String>,
+    /// Whether that model is declared image-capable in the provider's
+    /// configured catalog when a conversation starts. Kept for the same reason
+    /// the model is: a resumed conversation reads its directory afresh.
+    declares_image_input: bool,
     /// The turn state this side knows about, so a stop is only offered while a
     /// turn is actually running.
     running: bool,
@@ -443,20 +447,21 @@ fn load_models(
     session_id: String,
     wanted_model: Option<String>,
     wanted_effort: Option<String>,
+    declares_image_input: bool,
     deliver: Arc<dyn Fn(Value) + Send + Sync>,
 ) {
     thread::spawn(move || {
-        let mut catalog =
-            match client.call("session.models", json!({ "sessionId": session_id.clone() })) {
-                Ok(catalog) => catalog,
-                Err(error) => {
-                    tracing::warn!(
-                        "deepseek model directory could not be read: {}",
-                        error.message()
-                    );
-                    return;
-                }
-            };
+        let read_catalog = || client.call("session.models", json!({ "sessionId": &session_id }));
+        let mut catalog = match read_catalog() {
+            Ok(catalog) => catalog,
+            Err(error) => {
+                tracing::warn!(
+                    "deepseek model directory could not be read: {}",
+                    error.message()
+                );
+                return;
+            }
+        };
 
         // Why the harness kept its own selection, when it did. The levels a
         // route serves are the adapter's, so a profile can name one this
@@ -465,7 +470,32 @@ fn load_models(
         let mut refusal = None;
 
         if let Some(model) = wanted_model {
-            let directory = ModelDirectory::parse(&catalog);
+            let mut directory = ModelDirectory::parse(&catalog);
+
+            if declares_image_input {
+                let (provider, id) = directory.route(&model);
+                let (provider, id) = (provider.to_string(), id.to_string());
+
+                match settings::declare_image_input(&client, &provider, &id) {
+                    // A catalog that gained an entry is a different catalog:
+                    // the model now has a name and a reasoning-effort list
+                    // instead of the bare id a selection alone would show.
+                    Ok(true) => {
+                        if let Ok(refreshed) = read_catalog() {
+                            catalog = refreshed;
+                            directory = ModelDirectory::parse(&catalog);
+                        }
+                    }
+                    Ok(false) => {}
+                    // Nothing waits on this, and the consequence announces
+                    // itself: the harness refuses the first message carrying an
+                    // image and names the model it refused for.
+                    Err(message) => tracing::warn!(
+                        "deepseek could not declare {id} as image-capable: {message}"
+                    ),
+                }
+            }
+
             let already = directory.selected() == Some(model.as_str())
                 && (wanted_effort.is_none() || directory.effort() == wanted_effort.as_deref());
 
@@ -573,6 +603,7 @@ impl Session {
             session_id.clone(),
             launch.model.clone(),
             launch.effort.clone(),
+            launch.declares_image_input,
             Arc::clone(&deliver),
         );
         // The list is read now rather than when the picker opens, because the
@@ -599,6 +630,7 @@ impl Session {
             deliver,
             model: launch.model.clone(),
             effort: launch.effort.clone(),
+            declares_image_input: launch.declares_image_input,
             running: false,
             pending_approval: None,
             pending_questions: None,
@@ -641,6 +673,7 @@ impl Session {
                     self.session_id.clone(),
                     self.model.clone(),
                     self.effort.clone(),
+                    self.declares_image_input,
                     Arc::clone(&self.deliver),
                 );
                 load_replay(

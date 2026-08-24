@@ -951,6 +951,35 @@ fn a_selection_outside_the_catalog_still_shows_in_the_picker() {
     assert_eq!(directory.effort(), None);
 }
 
+#[test]
+fn declaring_image_input_rewrites_the_catalog_the_harness_already_serves() {
+    use crate::deepseek::settings::models_with_image;
+
+    // A settings write replaces the value at its path, so every model the
+    // harness already serves has to travel with the one being declared.
+    let catalog = json!([
+        { "id": "deepseek-v4-flash", "name": "DeepSeek-V4-Flash", "contextWindow": 128_000 },
+        { "id": "custom-vision", "name": "Custom", "inputModalities": ["text"] },
+    ]);
+
+    let written = models_with_image(&catalog, "custom-vision").expect("a text-only model changes");
+    assert_eq!(written[0], catalog[0]);
+    assert_eq!(written[1]["inputModalities"], json!(["text", "image"]));
+    // The entry keeps what the harness knew about it; only its modalities move.
+    assert_eq!(written[1]["name"], json!("Custom"));
+
+    // A model the catalog never listed carries only what is being declared.
+    let appended = models_with_image(&catalog, "proxy-model").expect("an unlisted model changes");
+    assert_eq!(
+        appended[2],
+        json!({ "id": "proxy-model", "inputModalities": ["text", "image"] })
+    );
+
+    // Nothing to write is reported as nothing to write, so a tab that opens
+    // twice does not churn the user's configuration file.
+    assert!(models_with_image(&written, "custom-vision").is_none());
+}
+
 /// One projection unit's whole current value.
 fn projection_frame(key: &str, value: Value) -> Value {
     json!({

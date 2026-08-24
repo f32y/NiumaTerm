@@ -60,6 +60,11 @@ pub struct LaunchConfig {
     pub effort: Option<String>,
     pub provider: Option<CodexProviderConfig>,
     pub env: Vec<(String, String)>,
+    /// Declare [`Self::model`] as an image-capable model in the harness's own
+    /// provider catalog when a conversation starts. Only DeepSeek Harness has
+    /// such a catalog: it refuses an image unless the selected model is listed
+    /// there as taking one, and a model named by hand is never listed.
+    pub declares_image_input: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

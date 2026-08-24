@@ -82,6 +82,7 @@ fn sample_agent_profiles() -> Vec<profile::AgentProfile> {
             name: "FOO".to_string(),
             value: "bar".to_string(),
         }],
+        vision_model: false,
     }]
 }
 
