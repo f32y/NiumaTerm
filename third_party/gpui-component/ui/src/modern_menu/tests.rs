@@ -6,7 +6,7 @@ use crate::modern_menu::{Activation, Entry, Item, normalize_separators};
 
 use crate::modern_menu::metrics::{
     COMMAND_BUTTON_WIDTH, COMMAND_ROW_HEIGHT, Content, ICON_GAP, ICON_SIZE, ITEM_HEIGHT,
-    ITEM_PADDING_X, MENU_PADDING, SEPARATOR_HEIGHT, STROKE_WIDTH, menu_size, place,
+    ITEM_PADDING_X, MENU_PADDING, SEPARATOR_HEIGHT, menu_size, place,
 };
 
 fn rows(items: usize, separators: usize) -> Content {
@@ -47,7 +47,7 @@ fn a_label_gets_exactly_the_room_it_was_measured_for() {
     // Everything a row is inset by: the outline, the menu's own padding, the
     // item's, and the icon column every row keeps. Miss one and the widest label
     // is clipped by the window edge.
-    let inset = (STROKE_WIDTH + MENU_PADDING + ITEM_PADDING_X) * 2.0 + ICON_SIZE + ICON_GAP;
+    let inset = (MENU_PADDING + ITEM_PADDING_X) * 2.0 + ICON_SIZE + ICON_GAP;
 
     assert_eq!(menu_size(px(200.0), rows(1, 0)).width - px(200.0), inset);
 }
@@ -86,7 +86,7 @@ fn a_command_row_wider_than_the_labels_sets_the_width() {
         widest_command_row: 6,
         ..Default::default()
     };
-    let expected = COMMAND_BUTTON_WIDTH * 6.0 + (MENU_PADDING + STROKE_WIDTH) * 2.0;
+    let expected = COMMAND_BUTTON_WIDTH * 6.0 + MENU_PADDING * 2.0;
 
     assert_eq!(menu_size(px(96.0), content).width, expected);
 }

@@ -36,16 +36,11 @@ pub(super) const COMMAND_LABEL_SIZE: Pixels = px(11.0);
 /// Space between a command button's icon and its label.
 pub(super) const COMMAND_LABEL_GAP: Pixels = px(6.0);
 
-/// Width of the menu's outline. Part of what insets the rows, so `menu_size`
-/// counts it; a label measured without it is wider than the room it gets and
-/// loses its last glyph to the window edge.
-pub(super) const STROKE_WIDTH: Pixels = px(1.0);
-
 /// Height a separator occupies: a one pixel rule with room either side of it.
 /// Measured off a system context menu, whose rule sits six device pixels clear of
 /// the rows above and below it at 150% scale.
 pub(super) const SEPARATOR_HEIGHT: Pixels = px(9.0);
-/// Thickness of the rule itself, drawn in the same color as the menu's outline.
+/// Thickness of the rule itself.
 pub(super) const SEPARATOR_THICKNESS: Pixels = px(1.0);
 
 /// Radius of an item's hover fill.
@@ -53,9 +48,9 @@ pub(super) const ITEM_RADIUS: Pixels = px(4.0);
 /// Label size.
 pub(super) const FONT_SIZE: Pixels = px(14.0);
 
-/// Radius of the menu's outline, matching the frame DWM rounds the window to.
-/// A different value here would show as a hairline that drifts away from the
-/// corner it is supposed to trace.
+/// Radius of the menu surface, matching the frame DWM rounds the window to.
+/// A larger value would show as a tinted corner poking past the rounded frame,
+/// a smaller one as a gap between the surface and that frame.
 pub(super) const CORNER_RADIUS: Pixels = px(8.0);
 
 /// How much of the menu surface is the theme's own popover color rather than the
@@ -70,18 +65,12 @@ pub(super) const CORNER_RADIUS: Pixels = px(8.0);
 /// labels wash out over bright content.
 pub(super) const TINT_ALPHA: f32 = 0.35;
 
-/// Alpha of that hairline, which is always black.
+/// Alpha of the separator rule, which is always black.
 ///
-/// A flyout reads as lifted through two things: the shadow DWM draws around the
-/// window, and a darkened hairline along its edge that separates the surface from
-/// whatever it covers. Darkening rather than lightening is what the system
-/// flyouts do in both themes; a light edge on a dark surface reads as a drawn
-/// border instead of a gap.
-///
-/// The light value is measured off a system context menu: its edge sits 12 levels
-/// under the 252 surface behind it, on both the top and the left. The dark value
-/// is heavier because the same separation has to survive against a dark surface.
-pub(super) fn stroke_alpha(dark: bool) -> f32 {
+/// Measured off a system context menu, whose rule sits 12 levels under the 252
+/// surface behind it. The dark value is heavier because the same separation has
+/// to survive against a dark surface.
+pub(super) fn separator_alpha(dark: bool) -> f32 {
     if dark { 0.2 } else { 0.048 }
 }
 
@@ -115,7 +104,7 @@ pub(super) fn menu_size(widest_label: Pixels, content: Content) -> Size<Pixels> 
     let commands = COMMAND_BUTTON_WIDTH * content.widest_command_row as f32;
 
     size(
-        rows.max(commands) + (MENU_PADDING + STROKE_WIDTH) * 2.0,
+        rows.max(commands) + MENU_PADDING * 2.0,
         ITEM_HEIGHT * content.items as f32
             + SEPARATOR_HEIGHT * content.separators as f32
             + COMMAND_ROW_HEIGHT * content.command_rows as f32

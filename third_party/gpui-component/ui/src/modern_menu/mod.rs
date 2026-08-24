@@ -700,7 +700,7 @@ impl Render for MenuView {
         let enabled_color = theme.popover_foreground;
         let disabled_color = theme.muted_foreground;
         let hover_color = theme.accent;
-        let stroke_color = gpui::black().opacity(metrics::stroke_alpha(theme.is_dark()));
+        let separator_color = gpui::black().opacity(metrics::separator_alpha(theme.is_dark()));
         let tint_color = theme.tokens.popover.opacity(metrics::TINT_ALPHA);
 
         let selected = self.selected;
@@ -730,14 +730,12 @@ impl Render for MenuView {
         div()
             .size_full()
             // The material itself comes from underneath this window; what is
-            // painted here is the tint over it and the hairline that traces the
-            // rounded frame. That hairline, with the shadow the platform puts
-            // around the window, is what lifts the menu off its background.
+            // painted here is only the tint over it. The shadow the platform
+            // draws around the window is what lifts the menu off its background,
+            // so no edge stroke is needed to separate the two.
             .bg(tint_color)
             .p(metrics::MENU_PADDING)
             .rounded(metrics::CORNER_RADIUS)
-            .border(metrics::STROKE_WIDTH)
-            .border_color(stroke_color)
             .font(
                 self.font
                     .clone()
@@ -757,7 +755,7 @@ impl Render for MenuView {
                                 div()
                                     .h(metrics::SEPARATOR_THICKNESS)
                                     .w_full()
-                                    .bg(stroke_color),
+                                    .bg(separator_color),
                             )
                             .into_any_element();
                     }
