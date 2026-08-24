@@ -1,3 +1,5 @@
+use gpui_component::scroll::SCROLLBAR_AUTO_HIDE_DELAY;
+
 use crate::terminal::view::*;
 
 pub(in crate::terminal) fn scroll_block_list_to_latest(block_list: &mut BlockListState) -> bool {
@@ -19,7 +21,8 @@ pub(in crate::terminal) fn viewport_is_scrolled(offset: u64, total: u64, len: u6
 
 impl TerminalPane {
     /// Record a user scroll action and schedule the repaint that starts fading
-    /// the scrollbar once [`SCROLLBAR_LINGER`] passes without further activity.
+    /// the scrollbar once [`SCROLLBAR_AUTO_HIDE_DELAY`] passes without further
+    /// activity.
     pub(in crate::terminal) fn mark_scroll_activity(&mut self, cx: &mut Context<Self>) {
         self.last_scroll_activity = Some(time::Instant::now());
         self.scroll_activity_gen += 1;
@@ -27,7 +30,9 @@ impl TerminalPane {
         let generation = self.scroll_activity_gen;
 
         cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(SCROLLBAR_LINGER).await;
+            cx.background_executor()
+                .timer(SCROLLBAR_AUTO_HIDE_DELAY)
+                .await;
 
             let _ = this.update(cx, |this, cx| {
                 // Stale timers from earlier scroll ticks no-op; only the newest

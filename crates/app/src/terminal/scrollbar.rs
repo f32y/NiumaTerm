@@ -5,6 +5,7 @@ use gpui::{
     Context, Div, DragMoveEvent, Empty, MouseButton, MouseDownEvent, Stateful, div, px, relative,
 };
 use gpui_component::ActiveTheme;
+use gpui_component::scroll::{SCROLLBAR_AUTO_HIDE_DELAY, SCROLLBAR_FADE_OUT_DURATION};
 use nmt_terminal::ghostty::ScrollbarInfo;
 
 use super::view::TerminalPane;
@@ -92,11 +93,6 @@ pub(super) fn scrollbar_element(
     )
 }
 
-/// How long the scrollbar stays visible after the last scroll action.
-pub(super) const SCROLLBAR_LINGER: time::Duration = time::Duration::from_millis(900);
-/// How long the scrollbar takes to fade out after lingering.
-pub(super) const SCROLLBAR_FADE: time::Duration = time::Duration::from_millis(180);
-
 pub(super) fn scrollbar_opacity(
     dragging: bool,
     elapsed_since_scroll: Option<time::Duration>,
@@ -107,17 +103,17 @@ pub(super) fn scrollbar_opacity(
 
     let elapsed = elapsed_since_scroll?;
 
-    if elapsed < SCROLLBAR_LINGER {
+    if elapsed < SCROLLBAR_AUTO_HIDE_DELAY {
         return Some(1.0);
     }
 
-    if elapsed >= SCROLLBAR_LINGER + SCROLLBAR_FADE {
+    if elapsed >= SCROLLBAR_AUTO_HIDE_DELAY + SCROLLBAR_FADE_OUT_DURATION {
         return None;
     }
 
-    let fade_elapsed = elapsed - SCROLLBAR_LINGER;
+    let fade_elapsed = elapsed - SCROLLBAR_AUTO_HIDE_DELAY;
 
-    Some(1.0 - fade_elapsed.as_secs_f32() / SCROLLBAR_FADE.as_secs_f32())
+    Some(1.0 - fade_elapsed.as_secs_f32() / SCROLLBAR_FADE_OUT_DURATION.as_secs_f32())
 }
 
 #[cfg(test)]
@@ -126,17 +122,29 @@ mod tests {
 
     #[test]
     fn scrollbar_opacity_fades_after_linger() {
+        assert_eq!(SCROLLBAR_AUTO_HIDE_DELAY, time::Duration::from_millis(500));
+        assert_eq!(
+            SCROLLBAR_FADE_OUT_DURATION,
+            time::Duration::from_millis(200)
+        );
         assert_eq!(scrollbar_opacity(true, None), Some(1.0));
         assert_eq!(
-            scrollbar_opacity(false, Some(SCROLLBAR_LINGER / 2)),
+            scrollbar_opacity(false, Some(SCROLLBAR_AUTO_HIDE_DELAY / 2)),
             Some(1.0)
         );
 
-        let fading = scrollbar_opacity(false, Some(SCROLLBAR_LINGER + SCROLLBAR_FADE / 2)).unwrap();
+        let fading = scrollbar_opacity(
+            false,
+            Some(SCROLLBAR_AUTO_HIDE_DELAY + SCROLLBAR_FADE_OUT_DURATION / 2),
+        )
+        .unwrap();
         assert!(fading > 0.0 && fading < 1.0);
 
         assert_eq!(
-            scrollbar_opacity(false, Some(SCROLLBAR_LINGER + SCROLLBAR_FADE)),
+            scrollbar_opacity(
+                false,
+                Some(SCROLLBAR_AUTO_HIDE_DELAY + SCROLLBAR_FADE_OUT_DURATION),
+            ),
             None
         );
     }
