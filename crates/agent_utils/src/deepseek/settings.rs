@@ -11,11 +11,11 @@ use serde_json::{Value, json};
 
 use crate::deepseek::api::ApiClient;
 
-/// The one provider-configuration shape this understands. Each adapter owns
-/// its own model-entry schema — the OpenAI-compatible one spells the same
-/// field `input` — so a route configured by another adapter is reported back
-/// rather than written with entries its owner would reject.
-const DEEPSEEK_NAMESPACE: &str = "llm-deepseek";
+/// How each adapter spells a catalog entry's input modalities. The field name
+/// is the whole difference between them, and an adapter missing from this list
+/// is left alone rather than written with entries its own schema would drop.
+const MODALITY_FIELDS: [(&str, &str); 2] =
+    [("llm-deepseek", "inputModalities"), ("llm-pi-ai", "input")];
 
 /// Declare `model` image-capable on `provider`'s configured catalog, and
 /// report whether that changed anything.
@@ -38,14 +38,18 @@ pub(super) fn declare_image_input(
         .ok_or_else(|| format!("the harness does not configure the {provider} route"))?;
 
     let namespace = route["settingsNs"].as_str().unwrap_or_default();
-    if namespace != DEEPSEEK_NAMESPACE {
+    let Some((_, field)) = MODALITY_FIELDS
+        .iter()
+        .find(|(known, _)| *known == namespace)
+    else {
         return Err(format!(
             "{provider} is configured by {namespace}, whose model catalog has a shape this cannot write"
         ));
-    }
+    };
     // Where the provider's own settings live inside its section. Empty for a
     // section that is the provider profile itself, which is what the DeepSeek
-    // route declares.
+    // route declares; the OpenAI-compatible adapter keeps one profile per
+    // route instead.
     let section: Vec<&str> = route["settingsPath"]
         .as_array()
         .into_iter()
@@ -66,15 +70,11 @@ pub(super) fn declare_image_input(
         .find(|view| view["ns"].as_str() == Some(namespace))
         .ok_or_else(|| format!("the harness reports no {namespace} settings"))?;
 
-    let mut profile = &view["value"];
-    for step in &section {
-        profile = &profile[step];
-    }
-    let Some(models) = models_with_image(&profile["models"], model) else {
+    let Some(models) = models_with_image(catalog(view, &section), model, field) else {
         return Ok(false);
     };
 
-    let mut path: Vec<&str> = section;
+    let mut path: Vec<&str> = section.clone();
     path.push("models");
     let mut payload = json!({
         "ns": namespace,
@@ -86,10 +86,42 @@ pub(super) fn declare_image_input(
         payload["expectedRevision"] = json!(revision);
     }
 
-    client
+    let written = client
         .call("settings.mutate", payload)
         .map_err(|error| error.message().to_string())?;
+
+    // The answer is the namespace as the harness now reads it, which is the
+    // only place a silently dropped declaration shows. An adapter build whose
+    // catalog schema has no modality field accepts the write, stores it, and
+    // resolves the entry without it — so the write has to be read back rather
+    // than assumed, or every conversation would rewrite a setting that never
+    // takes and the first image would still be refused with no explanation.
+    if !declares_image(catalog(&written, &section), model, field) {
+        return Err(format!(
+            "the {namespace} adapter in this harness kept {model} without image input, so this build serves it as text only"
+        ));
+    }
     Ok(true)
+}
+
+/// The model catalog inside one namespace view.
+fn catalog<'a>(view: &'a Value, section: &[&str]) -> &'a Value {
+    let mut profile = &view["value"];
+    for step in section {
+        profile = &profile[*step];
+    }
+    &profile["models"]
+}
+
+/// Whether `models` offers `model` to image input.
+fn declares_image(models: &Value, model: &str, field: &str) -> bool {
+    models
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|entry| entry["id"].as_str() == Some(model))
+        .and_then(|entry| entry[field].as_array())
+        .is_some_and(|declared| declared.iter().any(|modality| modality == "image"))
 }
 
 /// The catalog that declares `model` image-capable, or `None` when the one
@@ -100,7 +132,11 @@ pub(super) fn declare_image_input(
 /// already held. That does pin the adapter's built-in catalog into the user's
 /// own settings, which is the same thing editing the array in the harness's
 /// configuration form does.
-pub(super) fn models_with_image(models: &Value, model: &str) -> Option<Value> {
+pub(super) fn models_with_image(models: &Value, model: &str, field: &str) -> Option<Value> {
+    if declares_image(models, model, field) {
+        return None;
+    }
+
     let mut catalog: Vec<Value> = models.as_array().cloned().unwrap_or_default();
     let modalities = json!(["text", "image"]);
 
@@ -108,19 +144,11 @@ pub(super) fn models_with_image(models: &Value, model: &str) -> Option<Value> {
         .iter_mut()
         .find(|entry| entry["id"].as_str() == Some(model))
     {
-        Some(entry) => {
-            if entry["inputModalities"]
-                .as_array()
-                .is_some_and(|declared| declared.iter().any(|modality| modality == "image"))
-            {
-                return None;
-            }
-            entry["inputModalities"] = modalities;
-        }
+        Some(entry) => entry[field] = modalities,
         // A model the catalog never listed carries nothing else: the adapter
         // fills a context window and an image budget of its own for an entry
         // that names only its modalities.
-        None => catalog.push(json!({ "id": model, "inputModalities": modalities })),
+        None => catalog.push(json!({ "id": model, field: modalities })),
     }
 
     Some(Value::Array(catalog))

@@ -487,12 +487,16 @@ fn load_models(
                         }
                     }
                     Ok(false) => {}
-                    // Nothing waits on this, and the consequence announces
-                    // itself: the harness refuses the first message carrying an
-                    // image and names the model it refused for.
-                    Err(message) => tracing::warn!(
-                        "deepseek could not declare {id} as image-capable: {message}"
-                    ),
+                    // Reported beside the picker rather than only logged: the
+                    // alternative is a switch that looks applied while the
+                    // first message carrying an image is refused for a reason
+                    // the pane never mentions.
+                    Err(message) => {
+                        tracing::warn!(
+                            "deepseek could not declare {id} as image-capable: {message}"
+                        );
+                        refusal = Some(message);
+                    }
                 }
             }
 

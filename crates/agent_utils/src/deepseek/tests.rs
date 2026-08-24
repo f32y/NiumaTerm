@@ -962,14 +962,16 @@ fn declaring_image_input_rewrites_the_catalog_the_harness_already_serves() {
         { "id": "custom-vision", "name": "Custom", "inputModalities": ["text"] },
     ]);
 
-    let written = models_with_image(&catalog, "custom-vision").expect("a text-only model changes");
+    let written = models_with_image(&catalog, "custom-vision", "inputModalities")
+        .expect("a text-only model changes");
     assert_eq!(written[0], catalog[0]);
     assert_eq!(written[1]["inputModalities"], json!(["text", "image"]));
     // The entry keeps what the harness knew about it; only its modalities move.
     assert_eq!(written[1]["name"], json!("Custom"));
 
     // A model the catalog never listed carries only what is being declared.
-    let appended = models_with_image(&catalog, "proxy-model").expect("an unlisted model changes");
+    let appended = models_with_image(&catalog, "proxy-model", "inputModalities")
+        .expect("an unlisted model changes");
     assert_eq!(
         appended[2],
         json!({ "id": "proxy-model", "inputModalities": ["text", "image"] })
@@ -977,7 +979,16 @@ fn declaring_image_input_rewrites_the_catalog_the_harness_already_serves() {
 
     // Nothing to write is reported as nothing to write, so a tab that opens
     // twice does not churn the user's configuration file.
-    assert!(models_with_image(&written, "custom-vision").is_none());
+    assert!(models_with_image(&written, "custom-vision", "inputModalities").is_none());
+
+    // The OpenAI-compatible adapter spells the same declaration `input`, and
+    // reading the wrong field would rewrite a catalog that is already right.
+    let pi_ai = json!([{ "id": "custom-vision", "input": ["text", "image"] }]);
+    assert!(models_with_image(&pi_ai, "custom-vision", "input").is_none());
+    assert_eq!(
+        models_with_image(&pi_ai, "other", "input").expect("an unlisted model changes")[1],
+        json!({ "id": "other", "input": ["text", "image"] })
+    );
 }
 
 /// One projection unit's whole current value.
