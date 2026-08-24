@@ -128,7 +128,10 @@ impl Render for ProfileDragPreview {
             .rounded(cx.theme().radius)
             .border_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().background)
+            // The preview floats over the list under the cursor, so it needs an
+            // opaque fill; the theme's background carries the window
+            // translucency, which the Mica materials drive to zero.
+            .bg(cx.theme().background.alpha(1.0))
             .text_sm()
             .child(self.label.clone())
     }
