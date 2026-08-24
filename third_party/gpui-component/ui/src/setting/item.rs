@@ -5,7 +5,7 @@ use gpui::{
 use std::{any::TypeId, ops::Deref, rc::Rc};
 
 use crate::{
-    ActiveTheme as _, AxisExt, StyledExt as _,
+    ActiveTheme as _, AxisExt, Icon, IconName, StyledExt as _, h_flex,
     label::Label,
     setting::{
         AnySettingField, ElementField, RenderOptions,
@@ -14,7 +14,7 @@ use crate::{
         },
     },
     text::Text,
-    v_flex,
+    tooltip::{ManagedTooltipExt as _, Tooltip},
 };
 
 /// Setting item.
@@ -282,7 +282,7 @@ impl SettingItem {
                         })
                         .gap_3()
                         .child(
-                            v_flex()
+                            h_flex()
                                 .map(|this| {
                                     if layout.is_horizontal() {
                                         this.flex_1().max_w_3_5()
@@ -291,14 +291,22 @@ impl SettingItem {
                                     }
                                 })
                                 .gap_1()
+                                .items_center()
                                 .child(Label::new(title).text_sm())
                                 .when_some(description, |this, description| {
+                                    // Keeping the description behind a hover
+                                    // hint holds every row to one line, so a
+                                    // page of settings stays scannable and the
+                                    // field column keeps a stable baseline.
                                     this.child(
                                         div()
-                                            .size_full()
-                                            .text_sm()
+                                            .id("description")
+                                            .flex_shrink_0()
                                             .text_color(cx.theme().muted_foreground)
-                                            .child(description),
+                                            .child(Icon::new(IconName::CircleHelp).size_3())
+                                            .managed_tooltip(move |window, cx| {
+                                                Tooltip::new(description.clone()).build(window, cx)
+                                            }),
                                     )
                                 }),
                         )

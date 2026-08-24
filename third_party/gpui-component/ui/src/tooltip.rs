@@ -1,10 +1,10 @@
-use std::{cell::Cell, rc::Rc, time::Duration};
+use std::{rc::Rc, time::Duration};
 
 use gpui::{
     Action, AnyElement, AnyView, App, AppContext, Bounds, Context, Display, Element, ElementId,
-    GlobalElementId, Half, InspectorElementId, IntoElement, LayoutId, MouseButton, ParentElement,
-    Pixels, Point, Position, Render, SharedString, Size, StatefulInteractiveElement, Style,
-    StyleRefinement, Styled, Task, Window, deferred, div, point, prelude::FluentBuilder, px,
+    GlobalElementId, InspectorElementId, IntoElement, LayoutId, MouseButton, ParentElement, Pixels,
+    Point, Position, Render, SharedString, Size, StatefulInteractiveElement, Style,
+    StyleRefinement, Styled, Task, Window, deferred, div, point, prelude::FluentBuilder, px, size,
 };
 
 use crate::{
@@ -123,7 +123,9 @@ impl Render for Tooltip {
                 .refine_style(&self.style)
                 .map(|this| {
                     this.child(div().map(|this| match self.content {
-                        TooltipContext::Text(ref text) => this.child(text.clone()),
+                        TooltipContext::Text(ref text) => {
+                            this.max_w(TOOLTIP_MAX_TEXT_WIDTH).child(text.clone())
+                        }
                         TooltipContext::Element(ref builder) => this.child(builder(window, cx)),
                     }))
                 })
@@ -151,6 +153,10 @@ const ENTER_DURATION: Duration = Duration::from_millis(150);
 /// Duration of the position-slide animation when switching tooltips.
 const SLIDE_DURATION: Duration = Duration::from_millis(200);
 const TOOLTIP_WINDOW_MARGIN: Pixels = px(4.);
+/// Wrap width for text tooltips: roughly 60 Latin characters at the tooltip's
+/// `text_sm` size, whose average advance is about half the 14px font size. A
+/// long description would otherwise stretch across the whole window in one line.
+const TOOLTIP_MAX_TEXT_WIDTH: Pixels = px(420.);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum TooltipPlacement {
@@ -170,12 +176,14 @@ fn tooltip_overlay_position(
     viewport_size: Size<Pixels>,
     margin: Pixels,
 ) -> TooltipOverlayPosition {
-    let centered_x = trigger_bounds.center().x - tooltip_size.width.half();
+    // The trigger box is the mouse cursor, so the tooltip reads as belonging to
+    // the pointer when its left edge starts there rather than straddling it.
+    let anchor_x = trigger_bounds.left();
     let above_bounds = Bounds::new(
-        point(centered_x, trigger_bounds.top() - tooltip_size.height),
+        point(anchor_x, trigger_bounds.top() - tooltip_size.height),
         tooltip_size,
     );
-    let below_bounds = Bounds::new(point(centered_x, trigger_bounds.bottom()), tooltip_size);
+    let below_bounds = Bounds::new(point(anchor_x, trigger_bounds.bottom()), tooltip_size);
 
     let bottom_limit = (viewport_size.height - margin).max(margin);
     let available_above = (trigger_bounds.top() - margin).max(px(0.));
@@ -604,6 +612,14 @@ impl ComponentTooltip {
 
 // ── Internal managed tooltip trait ──────────────────────────────────────────
 
+/// Approximate height of the mouse cursor glyph, which hangs below its hotspot.
+/// Anchoring to a box this tall keeps a below-placed tooltip clear of the arrow.
+const CURSOR_HEIGHT: Pixels = px(18.);
+
+fn cursor_bounds(position: Point<Pixels>) -> Bounds<Pixels> {
+    Bounds::new(position, size(px(0.), CURSOR_HEIGHT))
+}
+
 pub(crate) trait ManagedTooltipExt:
     StatefulInteractiveElement + crate::ElementExt + Sized
 {
@@ -612,19 +628,13 @@ pub(crate) trait ManagedTooltipExt:
         build_tooltip: impl Fn(&mut Window, &mut App) -> AnyView + 'static,
     ) -> Self {
         let build_tooltip = Rc::new(build_tooltip);
-        let trigger_bounds_cell: Rc<Cell<Bounds<Pixels>>> = Rc::new(Cell::new(Bounds::default()));
-        let bounds_writer = trigger_bounds_cell.clone();
 
-        self.on_prepaint(move |bounds, _, _| {
-            bounds_writer.set(bounds);
-        })
-        .on_hover({
-            let trigger_bounds_cell = trigger_bounds_cell.clone();
+        self.on_hover({
             let build_tooltip = build_tooltip.clone();
             move |hovered, window, cx| {
                 if let Some(overlay) = Root::tooltip_overlay(window, cx) {
                     if *hovered {
-                        let bounds = trigger_bounds_cell.get();
+                        let bounds = cursor_bounds(window.mouse_position());
                         overlay.update(cx, |o: &mut TooltipOverlay, cx| {
                             o.request_show(
                                 TooltipContent {
@@ -705,7 +715,7 @@ mod tests {
         );
 
         assert_eq!(position.placement, TooltipPlacement::Above);
-        assert_eq!(position.bounds.origin.x, px(80.));
+        assert_eq!(position.bounds.origin.x, trigger_bounds.left());
         assert_eq!(position.bounds.origin.y, px(50.));
         assert_eq!(position.bounds.bottom(), trigger_bounds.top());
     }
@@ -751,6 +761,6 @@ mod tests {
 
         assert_eq!(position.placement, TooltipPlacement::Below);
         assert_eq!(position.bounds.top(), TOOLTIP_WINDOW_MARGIN);
-        assert_eq!(position.bounds.left(), px(60.));
+        assert_eq!(position.bounds.left(), trigger_bounds.left());
     }
 }
