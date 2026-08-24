@@ -17,6 +17,7 @@ use crate::agent::composer::{
 };
 use crate::agent::profile::{ANTHROPIC_MODEL_ENV, launch_env_value};
 pub(super) use crate::agent::session::backend::Backend;
+use crate::agent::session::backend::ConversationTitleRequest;
 pub(crate) use crate::agent::session::backend::RecoveryIdentity;
 #[cfg(test)]
 pub(in crate::agent) use crate::agent::session::backend::TestBackend;
@@ -770,30 +771,6 @@ impl AgentPane {
         self.send_text_inner(submitted, skill, Some((text, response_annotations)), cx)
     }
 
-    /// Ask the backend what to call this conversation. Claude's CLI names it
-    /// with a model call on the whole prompt; Codex stores names but writes
-    /// none of its own, so it is told `opening_line`.
-    ///
-    /// Asked again for every message until a name arrives, because a request
-    /// can come back empty: Claude's CLI refuses to name a conversation from
-    /// under ten characters, which a short opening question can be. The
-    /// adapter drops a request made while one is outstanding, so the repeat
-    /// costs nothing once one is on its way.
-    fn request_conversation_title(
-        &mut self,
-        text: &str,
-        opening_line: String,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(session) = self.session.as_mut() else {
-            return;
-        };
-
-        for event in session.request_title(text, opening_line) {
-            self.apply_event(event, cx);
-        }
-    }
-
     fn send_text_inner(
         &mut self,
         text: String,
@@ -818,9 +795,29 @@ impl AgentPane {
             return false;
         }
 
+        let title_text = restore_on_interrupt
+            .as_ref()
+            .map_or(text.as_str(), |(prompt, _)| prompt.as_str());
+        let title_request = if self.conversation_named {
+            None
+        } else {
+            tab_title_from_prompt(title_text).map(|opening_line| ConversationTitleRequest {
+                description: title_text.to_string(),
+                opening_line,
+            })
+        };
         let settings = self.settings.clone();
         let scratch = scratch_dir(self.agent_route.as_str());
         let outcome = match self.session.as_mut() {
+            Some(session) if let Some(title) = title_request.as_ref() => session
+                .send_user_message_with_title(
+                    &text,
+                    &settings,
+                    skill,
+                    &self.attachments,
+                    &scratch,
+                    title,
+                ),
             Some(session) => {
                 session.send_user_message(&text, &settings, skill, &self.attachments, &scratch)
             }
@@ -857,19 +854,6 @@ impl AgentPane {
         // The first message commits this tab to its conversation; the
         // history list is no longer offered.
         self.history_ui.mode = RecentSessionsMode::Hidden;
-
-        // A slash command names nothing — it instructs the CLI rather than
-        // stating a subject, and the settings controls send some of them on
-        // the user's behalf — so a conversation that opens with one waits for
-        // the message that follows.
-        let title_text = restore_on_interrupt
-            .as_ref()
-            .map_or(text.as_str(), |(prompt, _)| prompt.as_str());
-        if !self.conversation_named
-            && let Some(opening_line) = tab_title_from_prompt(title_text)
-        {
-            self.request_conversation_title(title_text, opening_line, cx);
-        }
 
         match outcome {
             SendOutcome::StartedTurn => {

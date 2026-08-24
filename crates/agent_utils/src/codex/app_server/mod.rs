@@ -144,6 +144,11 @@ impl TurnOutputUsage {
     }
 }
 
+struct PendingThreadName {
+    thread_id: String,
+    name: String,
+}
+
 pub struct Session {
     process: JsonLineProcess,
     next_rpc_id: u64,
@@ -156,6 +161,9 @@ pub struct Session {
     /// Command RPC responses are independent of turn ids. Tracking their
     /// request ids keeps command failures non-fatal to the live thread.
     pending_commands: HashMap<u64, String>,
+    /// Name responses arrive independently of turn events. Retaining the
+    /// requested value lets the UI publish only a name the server accepted.
+    pending_thread_names: HashMap<u64, PendingThreadName>,
     history_scope: SessionScope,
     skill_refresh: SkillRefreshState,
     compaction: CompactionState,
@@ -278,6 +286,7 @@ impl Session {
             pending_approval: None,
             history_cursor: None,
             pending_commands: HashMap::new(),
+            pending_thread_names: HashMap::new(),
             history_scope: SessionScope::default(),
             skill_refresh: SkillRefreshState::default(),
             compaction: CompactionState::default(),
@@ -377,6 +386,21 @@ impl Session {
         }));
 
         SendOutcome::StartedTurn
+    }
+
+    /// Store the first conversation name before submitting its first turn.
+    /// Codex serializes both requests per thread, while accepting `turn/start`
+    /// does not wait for the rollout's initial metadata to reach disk.
+    pub fn send_user_message_with_thread_name(
+        &mut self,
+        text: &str,
+        settings: &ThreadSettings,
+        skill: Option<&SkillReference>,
+        images: &[PathBuf],
+        thread_name: &str,
+    ) -> SendOutcome {
+        self.set_thread_name(thread_name);
+        self.send_user_message_with_skill(text, settings, skill, images)
     }
 
     /// Execute Codex operations that map directly to dedicated app-server
@@ -500,8 +524,22 @@ impl Session {
         let Some(thread_id) = self.thread_id.clone() else {
             return;
         };
+        if self
+            .pending_thread_names
+            .values()
+            .any(|pending| pending.thread_id == thread_id)
+        {
+            return;
+        }
 
         let rpc_id = self.alloc_rpc_id();
+        self.pending_thread_names.insert(
+            rpc_id,
+            PendingThreadName {
+                thread_id: thread_id.clone(),
+                name: name.to_string(),
+            },
+        );
 
         self.send(json!({
             "jsonrpc": "2.0",
@@ -677,6 +715,19 @@ impl Session {
     }
 
     fn process_response(&mut self, rpc_id: u64, message: &Value) -> Vec<Event> {
+        if let Some(pending) = self.pending_thread_names.remove(&rpc_id) {
+            if self.thread_id.as_deref() != Some(pending.thread_id.as_str()) {
+                return Vec::new();
+            }
+            if let Some(error) = message["error"]["message"].as_str() {
+                return vec![Event::Error {
+                    message: error.to_string(),
+                    fatal: false,
+                }];
+            }
+            return vec![Event::TitleUpdated(pending.name)];
+        }
+
         if self.skill_refresh.in_flight == Some(rpc_id) {
             let catalog = skill_catalog_from_response(message);
             let force_reload_again = self.skill_refresh.finish(rpc_id).unwrap_or(false);
