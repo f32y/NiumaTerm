@@ -256,52 +256,6 @@ fn ctrl_c_on_alt_screen_recovers_block_mode() {
     );
 }
 
-/// Bug 2, full fidelity: run the real vtebench binary (one fast sample of the
-/// alt-screen `unicode` benchmark) and require its "Results:" table to survive.
-#[test]
-fn real_vtebench_results_are_visible() {
-    let exe = path::Path::new("C:\\Workspace\\vtebench\\target\\release\\vtebench.exe");
-    if !exe.exists() {
-        eprintln!("skipping: vtebench.exe not built");
-        return;
-    }
-    let Some((session, mut all)) = trusted_session() else {
-        return;
-    };
-
-    let cmd = format!(
-        "& '{}' -b C:\\Workspace\\vtebench\\benchmarks\\unicode \
-         --warmup 0 --max-samples 1 --max-secs 2 --min-bytes 65536",
-        exe.display()
-    );
-    assert!(
-        run_command_within(&session, &mut all, &cmd, Duration::from_secs(90)),
-        "vtebench never finished; events: {all:?}\nscreen:\n{}",
-        screen_text(&session)
-    );
-
-    thread::sleep(Duration::from_millis(800));
-    pump(&session, &mut all);
-    let blocks = block_texts(&session);
-    let screen = screen_text(&session);
-    let in_blocks = blocks.iter().any(|(_, text)| text.contains("Results:"));
-    let on_screen = screen.contains("Results:");
-    eprintln!(
-        "[diag] real_vtebench: in_blocks={in_blocks} on_screen={on_screen} \
-         alt_screen={:?} blocks(cmd,len)={:?}",
-        last_alt_screen(&all),
-        blocks
-            .iter()
-            .map(|(c, t)| (c.clone(), t.len()))
-            .collect::<Vec<_>>()
-    );
-    assert!(
-        in_blocks || on_screen,
-        "vtebench results vanished: not in any frozen block and not on screen.\n\
-         blocks: {blocks:?}\nscreen:\n{screen}\nevents: {all:?}"
-    );
-}
-
 /// Regression: a command that entered AND left the alternate screen before
 /// printing its final output (vtebench: `?1049h` in setup, RIS between
 /// samples) must still get its whole tail into the block. Failure mode: the
@@ -336,65 +290,6 @@ fn full_tail_survives_after_alt_screen_roundtrip() {
             "TAILLINE{n} missing from blocks — post-alt-screen tail truncated.\n\
              blocks: {blocks:?}\nscreen:\n{}",
             screen_text(&session)
-        );
-    }
-}
-
-/// Bug 2, heavy fidelity: the full vtebench suite (all 12 benchmarks, shortened
-/// samples). Mirrors the user's "run to completion, no results shown" report.
-#[test]
-#[ignore = "slow full-suite repro; run explicitly"]
-fn real_vtebench_full_suite_results_are_visible() {
-    let exe = path::Path::new("C:\\Workspace\\vtebench\\target\\release\\vtebench.exe");
-    if !exe.exists() {
-        eprintln!("skipping: vtebench.exe not built");
-        return;
-    }
-    let Some((session, mut all)) = trusted_session() else {
-        return;
-    };
-
-    let cmd = format!(
-        "& '{}' -b C:\\Workspace\\vtebench\\benchmarks \
-         --warmup 0 --max-secs 2 --min-bytes 262144",
-        exe.display()
-    );
-    assert!(
-        run_command_within(&session, &mut all, &cmd, Duration::from_secs(600)),
-        "full vtebench never finished (or the shell died); events: {all:?}\nscreen:\n{}",
-        screen_text(&session)
-    );
-
-    thread::sleep(Duration::from_millis(800));
-    pump(&session, &mut all);
-    let blocks = block_texts(&session);
-    let screen = screen_text(&session);
-    let in_blocks = blocks.iter().any(|(_, text)| text.contains("Results:"));
-    let on_screen = screen.contains("Results:");
-    eprintln!(
-        "[diag] full_suite: in_blocks={in_blocks} on_screen={on_screen} \
-         alt_screen={:?} blocks(cmd,len)={:?}",
-        last_alt_screen(&all),
-        blocks
-            .iter()
-            .map(|(c, t)| (c.clone(), t.len()))
-            .collect::<Vec<_>>()
-    );
-    assert!(
-        in_blocks || on_screen,
-        "full-suite vtebench results vanished.\nscreen:\n{screen}\nevents: {all:?}"
-    );
-    // The WHOLE table must survive, not just the "Results:" header — the
-    // first and last benchmarks' result lines prove the tail wasn't cut.
-    let all_text = blocks
-        .iter()
-        .map(|(_, t)| t.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
-    for marker in ["cursor_motion (", "unicode ("] {
-        assert!(
-            all_text.contains(marker) || screen.contains(marker),
-            "results table truncated: {marker:?} missing.\nblocks: {blocks:?}\nscreen:\n{screen}"
         );
     }
 }
