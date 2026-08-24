@@ -4,8 +4,11 @@ use gpui::{
     Context, Entity, IntoElement, ListAlignment, ListOffset, ListState, ScrollDelta,
     ScrollWheelEvent, TestAppContext, list, point, size,
 };
+use nmt_config::builtin_themes::{THEMES as BUILTIN_THEMES, get as builtin_theme_source};
+use nmt_config::theme::Theme as ConfigTheme;
 
 use crate::agent::AgentKind;
+use crate::ui::settings::theme::ui_theme_config;
 use crate::ui::settings::*;
 
 #[test]
@@ -475,4 +478,28 @@ fn every_registered_harness_can_be_named_seeded_and_launched() {
         assert_eq!(AgentKind::from_profile(kind.profile_kind()), kind);
         assert_eq!(AgentKind::from_id(kind.id()), Some(kind));
     }
+}
+
+#[test]
+fn built_in_ui_themes_parse_into_component_config() {
+    for builtin in BUILTIN_THEMES {
+        let theme: ConfigTheme = toml::from_str(builtin.source).unwrap();
+        let ui = theme
+            .ui_theme()
+            .unwrap_or_else(|| panic!("{} has no [colors.ui] section", builtin.name));
+        let config = ui_theme_config(&ui)
+            .unwrap_or_else(|| panic!("{} has an unparsable [colors.ui] section", builtin.name));
+
+        assert_eq!(config.name, ui.name);
+        assert!(config.colors.background.is_some());
+    }
+}
+
+#[test]
+fn fluent_themes_carry_their_own_corner_radii() {
+    let theme: ConfigTheme = toml::from_str(builtin_theme_source("fluent_dark").unwrap()).unwrap();
+    let config = ui_theme_config(&theme.ui_theme().unwrap()).unwrap();
+
+    assert_eq!(config.radius, Some(4));
+    assert_eq!(config.radius_lg, Some(8));
 }
