@@ -25,8 +25,10 @@ const THUMB_ACTIVE_WIDTH: Pixels = px(8.);
 const THUMB_ACTIVE_RADIUS: Pixels = px(8. / 2.);
 const THUMB_ACTIVE_INSET: Pixels = px(4.);
 
-const FADE_OUT_DURATION: f32 = 3.0;
-const FADE_OUT_DELAY: f32 = 2.0;
+/// Time a scrolling-mode scrollbar stays fully opaque after activity.
+pub const SCROLLBAR_AUTO_HIDE_DELAY: Duration = Duration::from_millis(500);
+/// Time a scrolling-mode scrollbar takes to fade from opaque to hidden.
+pub const SCROLLBAR_FADE_OUT_DURATION: Duration = Duration::from_millis(200);
 
 /// Scrollbar show mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash, Default, JsonSchema)]
@@ -231,8 +233,8 @@ impl ScrollbarStateInner {
         }
 
         if let Some(last_time) = self.last_scroll_time {
-            let elapsed = Instant::now().duration_since(last_time).as_secs_f32();
-            elapsed < FADE_OUT_DURATION
+            let elapsed = Instant::now().duration_since(last_time);
+            elapsed < SCROLLBAR_AUTO_HIDE_DELAY + SCROLLBAR_FADE_OUT_DURATION
         } else {
             false
         }
@@ -626,9 +628,10 @@ impl Element for Scrollbar {
                     }
                 } else {
                     let mut idle_state = self.style_for_idle(cx);
-                    // Delay 2s to fade out the scrollbar thumb (in 1s)
+                    // Keep the thumb opaque during the idle delay, then fade it
+                    // linearly over the shared duration.
                     if let Some(last_time) = state.get().last_scroll_time {
-                        let elapsed = Instant::now().duration_since(last_time).as_secs_f32();
+                        let elapsed = Instant::now().duration_since(last_time);
                         if is_hovered_on_bar {
                             state.set(state.get().with_last_scroll_time(Some(Instant::now())));
                             idle_state = if is_hovered_on_thumb {
@@ -636,14 +639,14 @@ impl Element for Scrollbar {
                             } else {
                                 Self::style_for_hovered_bar(cx)
                             };
-                        } else if elapsed < FADE_OUT_DELAY {
+                        } else if elapsed < SCROLLBAR_AUTO_HIDE_DELAY {
                             idle_state.0 = cx.theme().tokens.scrollbar_thumb.into();
 
                             if !state.get().idle_timer_scheduled {
                                 let state = state.clone();
                                 state.set(state.get().with_idle_timer_scheduled(true));
                                 let current_view = window.current_view();
-                                let next_delay = Duration::from_secs_f32(FADE_OUT_DELAY - elapsed);
+                                let next_delay = SCROLLBAR_AUTO_HIDE_DELAY - elapsed;
                                 window
                                     .spawn(cx, async move |cx| {
                                         cx.background_executor().timer(next_delay).await;
@@ -652,8 +655,11 @@ impl Element for Scrollbar {
                                     })
                                     .detach();
                             }
-                        } else if elapsed < FADE_OUT_DURATION {
-                            let opacity = 1.0 - (elapsed - FADE_OUT_DELAY).powi(10);
+                        } else if elapsed < SCROLLBAR_AUTO_HIDE_DELAY + SCROLLBAR_FADE_OUT_DURATION
+                        {
+                            let fade_progress = (elapsed - SCROLLBAR_AUTO_HIDE_DELAY).as_secs_f32()
+                                / SCROLLBAR_FADE_OUT_DURATION.as_secs_f32();
+                            let opacity = 1.0 - fade_progress;
                             idle_state.0 = cx
                                 .theme()
                                 .tokens
