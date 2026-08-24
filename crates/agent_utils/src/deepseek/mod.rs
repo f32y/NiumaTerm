@@ -21,6 +21,7 @@ mod models;
 mod presets;
 mod projections;
 mod session;
+mod settings;
 mod subagents;
 mod version;
 mod workflows;

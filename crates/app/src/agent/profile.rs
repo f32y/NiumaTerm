@@ -220,6 +220,11 @@ pub(crate) fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
         model,
         effort: profile_effort(profile),
         provider: codex_provider,
+        // Only the harness keeps a provider catalog to declare a model in, and
+        // only a model this profile names can be declared in it.
+        declares_image_input: profile.kind == AgentProfileKind::DeepSeek
+            && profile.vision_model
+            && !profile.model.trim().is_empty(),
     }
 }
 

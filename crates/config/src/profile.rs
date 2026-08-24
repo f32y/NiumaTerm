@@ -132,6 +132,12 @@ pub struct AgentProfile {
     pub api_key: String,
     #[serde(default)]
     pub env: Vec<EnvVar>,
+    /// Declare [`Self::model`] as an image-capable model in DeepSeek Harness's
+    /// own provider catalog. The harness refuses an image unless the selected
+    /// model is listed there as taking one, and a model named by hand never
+    /// is, so this is the only way a custom model name reaches image input.
+    #[serde(default, rename = "vision-model")]
+    pub vision_model: bool,
 }
 
 /// On-disk shape of one `[[agent-profiles.list]]` entry. Credentials arrive
@@ -165,6 +171,8 @@ struct PersistedAgentProfile {
     api_key: String,
     #[serde(default)]
     env: Vec<EnvVar>,
+    #[serde(default, rename = "vision-model")]
+    vision_model: bool,
 }
 
 impl TryFrom<PersistedAgentProfile> for AgentProfile {
@@ -198,6 +206,7 @@ impl TryFrom<PersistedAgentProfile> for AgentProfile {
             api_base_url,
             api_key,
             env: persisted.env,
+            vision_model: persisted.vision_model,
         })
     }
 }
@@ -268,6 +277,7 @@ pub(crate) fn patch_agent_document(
             env.push(entry);
         }
         table["env"] = value(env);
+        table["vision-model"] = value(profile.vision_model);
 
         tables.push(table);
     }

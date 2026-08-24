@@ -571,6 +571,12 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
                 .replace_sub_models = *checked;
         });
 
+    let vision_switch = Switch::new("agent-profile-dialog-vision-model")
+        .checked(profile.vision_model)
+        .on_click(|checked: &bool, _, cx: &mut App| {
+            cx.global_mut::<AgentProfileDraft>().profile.vision_model = *checked;
+        });
+
     let endpoint_switch = Switch::new("agent-profile-dialog-endpoint")
         .checked(endpoint_on)
         .on_click(|checked: &bool, _, cx: &mut App| {
@@ -658,6 +664,17 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
                 i18n("settings-agent-profile-replace-sub-models"),
                 i18n("settings-agent-profile-replace-sub-models-description"),
                 sub_models_switch,
+                cx,
+            ))
+        })
+        // The harness is the only kind that gates image input on a model
+        // catalog of its own, and writing into that catalog is a change to the
+        // user's harness configuration rather than to this profile alone.
+        .when(profile.kind == AgentProfileKind::DeepSeek, |this| {
+            this.child(card_row(
+                i18n("settings-agent-profile-vision-model"),
+                i18n("settings-agent-profile-vision-model-description"),
+                vision_switch,
                 cx,
             ))
         })

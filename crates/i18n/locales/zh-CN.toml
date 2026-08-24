@@ -239,6 +239,8 @@
 "settings-agent-profile-model-deepseek-description" = "初始模型；在智能体上报模型目录后应用到会话。当两个提供方提供同一模型 id 时，请写 `provider/id`。"
 "settings-agent-profile-replace-sub-models" = "用主模型替换所有子模型配置"
 "settings-agent-profile-replace-sub-models-description" = "同时将上方模型设置为 ANTHROPIC_DEFAULT_OPUS_MODEL、ANTHROPIC_DEFAULT_SONNET_MODEL 和 ANTHROPIC_DEFAULT_HAIKU_MODEL，让仅提供一个模型的端点处理所有层级。下方表格中的同名变量仍然优先。"
+"settings-agent-profile-vision-model" = "模型支持图片输入"
+"settings-agent-profile-vision-model-description" = "在 DeepSeek Harness 自己的提供方目录中把上方模型声明为支持图片；它在接收带图片的消息前会检查该目录。此项写入的是该智能体的共享配置，影响它的所有客户端，而不只是当前配置。"
 "settings-agent-profile-effort" = "推理强度"
 "settings-agent-profile-effort-description" = "强制此配置启动的每个对话使用指定推理强度。`default` 表示由智能体及上次记忆的选择决定。"
 "settings-agent-profile-effort-default" = "默认"

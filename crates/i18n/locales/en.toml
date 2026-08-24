@@ -240,6 +240,8 @@
 "settings-agent-profile-model-deepseek-description" = "Initial model; applied to the session once the harness reports its catalog. Write `provider/id` when two providers serve the same model id."
 "settings-agent-profile-replace-sub-models" = "Replace all sub-model config with primary"
 "settings-agent-profile-replace-sub-models-description" = "Also send the model above as ANTHROPIC_DEFAULT_OPUS_MODEL, ANTHROPIC_DEFAULT_SONNET_MODEL, and ANTHROPIC_DEFAULT_HAIKU_MODEL, so an endpoint serving one model answers every tier. An entry for the same variable in the table below still wins."
+"settings-agent-profile-vision-model" = "Model accepts images"
+"settings-agent-profile-vision-model-description" = "Declare the model above as image-capable in DeepSeek Harness's own provider catalog, which it checks before admitting a message that carries an image. This writes to the harness configuration shared by every client of it, not to this profile alone."
 "settings-agent-profile-effort" = "Effort"
 "settings-agent-profile-effort-description" = "Reasoning effort forced on every conversation this profile starts. `default` leaves it to the agent and the last remembered pick."
 "settings-agent-profile-effort-default" = "default"
