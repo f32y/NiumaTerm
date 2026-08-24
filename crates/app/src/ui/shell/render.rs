@@ -71,7 +71,11 @@ impl Shell {
                         div().occlude().child(
                             Button::new("toggle-sidebar")
                                 .ghost()
-                                .icon(SideBarIcon)
+                                .icon(if self.sidebar.collapsed {
+                                    SideBarIcon::Expand
+                                } else {
+                                    SideBarIcon::Collapse
+                                })
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.on_toggle_sidebar(&ToggleSidebar, window, cx)
                                 })),
@@ -269,13 +273,19 @@ impl Focusable for Shell {
     }
 }
 
-/// Titlebar sidebar-toggle icon, backed by the project's `assets/icons/
-/// side-bar.svg` (served by `crate::assets::AppAssets`).
-struct SideBarIcon;
+/// Titlebar sidebar-toggle icons served by `crate::assets::AppAssets`.
+enum SideBarIcon {
+    Collapse,
+    Expand,
+}
 
 impl IconNamed for SideBarIcon {
     fn path(self) -> SharedString {
-        "icons/side-bar.svg".into()
+        match self {
+            Self::Collapse => "icons/side-bar-collapse.svg",
+            Self::Expand => "icons/side-bar-expand.svg",
+        }
+        .into()
     }
 }
 
