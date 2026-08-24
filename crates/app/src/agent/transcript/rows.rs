@@ -166,15 +166,6 @@ impl TranscriptView {
         )
     }
 
-    pub(in crate::agent) fn transcript_has_hidden_content_above(&self) -> bool {
-        let logical = self.transcript_list.logical_scroll_top();
-        let has_logical_offset = logical.item_ix > 0 || logical.offset_in_item > px(0.);
-        // A short bottom-aligned list uses an end anchor even though no content
-        // is clipped. The pixel offset distinguishes that alignment sentinel
-        // from a genuine logical offset into earlier rows.
-        has_logical_offset && self.transcript_list.scroll_px_offset_for_scrollbar().y < px(0.)
-    }
-
     /// Re-engaging tail mode also scrolls to the very end (past the last
     /// item), which stays correct while the last row is still growing.
     pub(crate) fn scroll_to_bottom(&self) {
