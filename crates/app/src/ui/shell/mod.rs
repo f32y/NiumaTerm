@@ -78,8 +78,7 @@ pub(crate) use crate::ui::shell::actions::{
 };
 #[cfg(test)]
 use crate::ui::shell::close::{should_confirm_close, should_confirm_tab_close};
-#[allow(unused_imports)]
-pub(crate) use crate::ui::shell::tab_surface::{TabSurface, TerminalPaneTree};
+pub(crate) use crate::ui::shell::tab_surface::TabSurface;
 use crate::ui::tab_bar::TabStrip;
 use crate::ui::token_usage::TokenUsageView;
 use crate::ui::workflows::WorkflowsView;
