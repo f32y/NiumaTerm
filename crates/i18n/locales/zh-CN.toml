@@ -903,6 +903,7 @@
 "agent-composer-context-label" = "消息上下文"
 "agent-composer-annotation-count-one" = "{count} 条标注"
 "agent-composer-annotation-count-other" = "{count} 条标注"
-"agent-composer-annotations-remove" = "移除标注"
+"agent-composer-annotation-item" = "标注 {index}"
+"agent-composer-annotations-remove" = "移除此标注"
 "agent-transcript-annotations-expand" = "展开标注"
 "agent-transcript-annotations-collapse" = "收起标注"

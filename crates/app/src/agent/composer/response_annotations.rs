@@ -89,9 +89,16 @@ impl AgentPane {
         cx.notify();
     }
 
-    pub(in crate::agent) fn clear_response_annotations(&mut self, cx: &mut Context<Self>) {
-        if !self.response_annotations.is_empty() {
-            self.response_annotations.clear();
+    /// Take one annotation back off the pending message. The rest keep their
+    /// order, so the numbers the remaining chips carry stay the numbers the
+    /// prompt will send them under.
+    pub(in crate::agent) fn remove_response_annotation(
+        &mut self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        if index < self.response_annotations.len() {
+            self.response_annotations.remove(index);
             cx.notify();
         }
     }
