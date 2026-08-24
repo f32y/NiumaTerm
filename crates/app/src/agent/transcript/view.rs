@@ -467,7 +467,6 @@ impl Render for TranscriptView {
             .flatten()
             .map(picker_reserve);
         let has_hidden_content_below = self.transcript_has_hidden_content_below();
-        let scrolled_from_top = self.transcript_has_hidden_content_above();
 
         // The scrollbar must sit OUTSIDE the scrolling element (a child would
         // scroll away with the content), so a relative wrapper hosts the
@@ -511,21 +510,6 @@ impl Render for TranscriptView {
                         .when_some(reserve_below, |this, reserve| this.pb(reserve)),
                     ),
             )
-            .children(scrolled_from_top.then(|| {
-                // This decorative overlay has no handlers, so text selection
-                // and wheel input continue to reach the list.
-                div()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right(px(16.))
-                    .h(px(24.))
-                    .bg(linear_gradient(
-                        180.,
-                        linear_color_stop(cx.theme().sidebar, 0.),
-                        linear_color_stop(cx.theme().sidebar.opacity(0.), 1.),
-                    ))
-            }))
             // The bare Scrollbar element carries no inset of its own, so it
             // lands at its static flow position (below the full-height
             // sibling); the pinned strip gives it a deterministic containing

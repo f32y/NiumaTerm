@@ -30,8 +30,8 @@ use gpui::{
     AnyElement, App, ClipboardItem, Context, Div, ElementId, Entity, FocusHandle, FollowMode,
     FontWeight, Hsla, ListAlignment, ListHorizontalSizingBehavior, ListOffset, ListSizingBehavior,
     ListState, MouseButton, Pixels, ScrollHandle, ScrollStrategy, SharedString, Stateful,
-    StyleRefinement, Task, UniformListScrollHandle, Window, div, linear_color_stop,
-    linear_gradient, list, px, relative, rems, size, uniform_list,
+    StyleRefinement, Task, UniformListScrollHandle, Window, div, list, px, relative, rems, size,
+    uniform_list,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::checkbox::Checkbox;
