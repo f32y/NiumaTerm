@@ -4,11 +4,9 @@ mod palette;
 mod response_annotations;
 mod rewind;
 
-#[allow(unused_imports)]
-pub(super) use crate::agent::composer::fork::{
-    ForkFlow, ForkState, PromptTarget, checkpoint_at_depth,
-};
-#[allow(unused_imports)]
+#[cfg(test)]
+pub(super) use crate::agent::composer::fork::checkpoint_at_depth;
+pub(super) use crate::agent::composer::fork::{ForkFlow, ForkState, PromptTarget};
 pub(super) use crate::agent::composer::palette::{
     PALETTE_MAX_HEIGHT, PaletteAction, PaletteControl, PaletteModel, PaletteRow,
 };
@@ -16,11 +14,11 @@ pub(in crate::agent) use crate::agent::composer::response_annotations::{
     annotation_count_label, parse_annotated_prompt, prompt_with_response_annotations,
     visible_prompt,
 };
-#[allow(unused_imports)]
-pub(super) use crate::agent::composer::rewind::{
-    FileRestoreNext, RewindAction, RewindState, file_restore_next, rewind_blocks_submission,
-    rewind_prompt_label, rewind_timestamp,
+#[cfg(test)]
+use crate::agent::composer::rewind::{
+    FileRestoreNext, file_restore_next, rewind_blocks_submission,
 };
+pub(super) use crate::agent::composer::rewind::{RewindAction, RewindState};
 #[cfg(test)]
 mod tests;
 

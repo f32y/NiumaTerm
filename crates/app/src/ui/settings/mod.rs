@@ -73,10 +73,8 @@ use crate::ui::settings::card::{card_row, card_text_input};
 use crate::ui::settings::fields::{
     background_image_field, background_image_opacity_field, background_opacity_field,
 };
-#[allow(unused_imports)]
 pub(crate) use crate::ui::settings::opacity::{
-    background_image_layer_opacity, main_view_background_opacity, surface_background_opacity,
-    window_background_appearance,
+    background_image_layer_opacity, main_view_background_opacity, window_background_appearance,
 };
 #[cfg(test)]
 use crate::ui::settings::opacity::{
@@ -89,8 +87,8 @@ pub(crate) use crate::ui::settings::remote_session_page::reconcile_remote_host;
 use crate::ui::settings::remote_session_page::remote_session_page;
 pub(crate) use crate::ui::settings::state::builtin_agent_profile;
 pub use crate::ui::settings::state::{
-    AgentProfile, AgentProfileKind, AppSettings, CollapseRows, EnvVar, InputStyle, Language,
-    Profile, TabBarStyle, UpdateChannel, WindowBackdrop,
+    AgentProfile, AgentProfileKind, AppSettings, CollapseRows, DEFAULT_TAB_WIDTH, EnvVar,
+    InputStyle, Language, Profile, TabBarStyle, UpdateChannel, WindowBackdrop,
 };
 #[cfg(test)]
 use crate::ui::settings::state::{
@@ -99,10 +97,9 @@ use crate::ui::settings::state::{
     clamp_terminal_font_size, clamp_terminal_line_height, newest_pwsh, terminal_font_or_default,
     ui_font_or_default,
 };
-#[allow(unused_imports)]
-pub use crate::ui::settings::state::{
-    DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, DEFAULT_SHELL, DEFAULT_TAB_WIDTH,
-    DEFAULT_UI_FONT,
+#[cfg(test)]
+use crate::ui::settings::state::{
+    DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, DEFAULT_SHELL, DEFAULT_UI_FONT,
 };
 use crate::ui::settings::state::{
     agent_kind_display_label, clamp_git_interval, clamp_tab_width, cursor_shape_from_value,

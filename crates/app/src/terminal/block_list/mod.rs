@@ -31,33 +31,29 @@ use nmt_terminal::terminal::square::Wide;
 use crate::terminal;
 #[cfg(test)]
 use crate::terminal::block_list::chrome::item_header;
-#[allow(unused_imports)]
 pub(crate) use crate::terminal::block_list::chrome::{
-    FrozenItemChrome, block_list_live_chrome, format_duration, live_chrome, offset_frozen_chrome,
+    FrozenItemChrome, block_list_live_chrome, live_chrome, offset_frozen_chrome,
     paint_frozen_chrome, paint_frozen_separators,
 };
-#[allow(unused_imports)]
+#[cfg(test)]
+use crate::terminal::block_list::geometry::item_rows;
 pub(crate) use crate::terminal::block_list::geometry::{
     ITEM_PAD_ROWS, block_list_active_top_px, block_list_alignment, block_pad_rows, item_px,
-    item_rows, live_item_px, nav_item_top, visible_rows,
+    live_item_px, nav_item_top, visible_rows,
 };
-#[allow(unused_imports)]
 pub(crate) use crate::terminal::block_list::images::{FrozenImage, frozen_block_images};
-#[allow(unused_imports)]
 pub(crate) use crate::terminal::block_list::paint::{paint_frozen, shape_frozen_rows};
-#[allow(unused_imports)]
 pub(crate) use crate::terminal::block_list::reconcile::{
-    BlockListMeasureKey, BlockListRenderMetrics, BlockListState, ListReconcile, RemeasureScope,
-    block_list_render_metrics, plan_list_reconcile, plan_remeasure,
-    shift_selected_item_for_eviction,
+    BlockListMeasureKey, BlockListState, ListReconcile, RemeasureScope, block_list_render_metrics,
+    plan_list_reconcile, plan_remeasure, shift_selected_item_for_eviction,
 };
-#[allow(unused_imports)]
+#[cfg(test)]
+use crate::terminal::block_list::rows::HandleItemInfo;
 pub(crate) use crate::terminal::block_list::rows::{
-    EngineRowBuilder, HandleItemInfo, frozen_block_view, handle_item_info, live_history_view,
+    EngineRowBuilder, frozen_block_view, handle_item_info, live_history_view,
 };
-#[allow(unused_imports)]
 pub(crate) use crate::terminal::block_list::selection::{
-    BlockListPoint, FrozenHitInfo, FrozenPoint, FrozenSelectionPiece, frozen_selection_pieces,
+    BlockListPoint, FrozenHitInfo, FrozenPoint, frozen_selection_pieces,
 };
 use crate::terminal::frame::{
     LineBuilder, StyleRun, TerminalCell, TerminalColor, TerminalLine, theme_default_foreground,

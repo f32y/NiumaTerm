@@ -23,9 +23,7 @@ use crate::terminal::metrics;
 use crate::terminal::paint_text::{paint_glyph_rows, paint_line_backgrounds_at, shape_lines};
 use crate::terminal::session::InFlightBlock;
 pub(crate) use crate::terminal::terminal_view::item::BlockListItem;
-#[allow(unused_imports)]
-pub(crate) use crate::terminal::terminal_view::item::BlockListItemPrepaint;
-#[allow(unused_imports)]
+#[cfg(test)]
 pub(crate) use crate::terminal::terminal_view::paint::cursor_bounds;
 use crate::terminal::terminal_view::paint::{paint_frame, shape_frame};
 use crate::terminal::view::TerminalPane;
