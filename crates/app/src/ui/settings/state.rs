@@ -5,7 +5,9 @@ pub use nmt_config::agent::CollapseRows;
 use nmt_config::appearance::{AppearanceConfig, SmoothScrollingMode};
 pub use nmt_config::appearance::{InputStyle, Language, TabBarStyle, WindowBackdrop};
 use nmt_config::defaults::default_theme;
-pub use nmt_config::profile::{AgentProfile, AgentProfileKind, EnvVar, Profile};
+pub use nmt_config::profile::{
+    AgentProfile, AgentProfileKind, AgentProfileLauncher, EnvVar, Profile,
+};
 use nmt_config::remote_session::RemoteSessionConfig;
 use nmt_config::system::{NewlineShortcut, SystemConfig, WarnBeforeTerminatingShell};
 use nmt_config::theme::Theme;
@@ -290,7 +292,11 @@ pub(crate) fn builtin_agent_profile(kind: AgentProfileKind) -> AgentProfile {
         // own, so a fresh profile runs it through npx and needs nothing
         // installed first. The executable stays filled in as what the profile
         // falls back to once it is pointed at a binary instead.
-        via_npx: kind == AgentProfileKind::DeepSeek,
+        launcher: if kind == AgentProfileKind::DeepSeek {
+            AgentProfileLauncher::Npx
+        } else {
+            AgentProfileLauncher::Custom
+        },
         ..AgentProfile::default()
     }
 }

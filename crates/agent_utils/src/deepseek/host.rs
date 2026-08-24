@@ -21,9 +21,14 @@ use crate::launcher::AgentCli;
 const ADDRESS_MARKER: &str = "http://";
 
 /// Node startup plus profile initialization measured at about 1.1 s on a warm
-/// machine. The wait is generous because expiring is reported as a failed
-/// start, and a slow first run is not a failure.
+/// machine. Package launchers that may need a cold download can select a longer
+/// wait below without making every failed custom launch take longer to report.
 const START_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// A first `pnpm dlx` run installs several hundred harness packages before it
+/// can print the listening address. Later runs use pnpm's cache and finish well
+/// inside this limit.
+const PNPM_DLX_START_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// How many stderr lines are kept to explain a failed start. The host writes
 /// its own diagnostics there, and a bounded tail keeps a runaway log from
@@ -131,6 +136,7 @@ impl Host {
     /// one; the cost is that the address can only be learned from the host, so
     /// the wait below is also the start-failure detector.
     pub fn start(launch: &crate::LaunchConfig) -> Result<Self, HostError> {
+        let start_timeout = start_timeout(launch);
         let cli = AgentCli::from_launch(launch, DEFAULT_EXECUTABLE);
         // A bare name that PATH cannot resolve comes back as the configured
         // spelling, which is not a file; that is the missing-installation case
@@ -188,7 +194,7 @@ impl Host {
             }
         });
 
-        let base = match address_rx.recv_timeout(START_TIMEOUT) {
+        let base = match address_rx.recv_timeout(start_timeout) {
             Ok(address) => address,
             Err(reason) => {
                 let _ = child.kill();
@@ -242,6 +248,27 @@ pub const DEFAULT_EXECUTABLE: &str = "dsh";
 /// 0.1.1-rc.1 onward.
 pub const NPX_EXECUTABLE: &str = "npx";
 pub const NPX_ARGUMENTS: [&str; 2] = ["-y", "@deepseek-ai/dsh@latest"];
+
+/// pnpm's one-shot package launcher. Unlike npm's dependency resolver, pnpm
+/// can resolve the harness's mutually referring peer dependencies without
+/// spending unbounded CPU and memory in the installation phase.
+pub const PNPM_DLX_EXECUTABLE: &str = "pnpm";
+pub const PNPM_DLX_ARGUMENTS: [&str; 2] = ["dlx", "@deepseek-ai/dsh@latest"];
+
+fn start_timeout(launch: &crate::LaunchConfig) -> Duration {
+    let uses_pnpm_dlx = launch.executable.trim() == PNPM_DLX_EXECUTABLE
+        && launch
+            .executable_args
+            .iter()
+            .map(String::as_str)
+            .eq(PNPM_DLX_ARGUMENTS);
+
+    if uses_pnpm_dlx {
+        PNPM_DLX_START_TIMEOUT
+    } else {
+        START_TIMEOUT
+    }
+}
 
 fn address_in(line: &str) -> Option<String> {
     let start = line.find(ADDRESS_MARKER)?;

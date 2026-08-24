@@ -478,6 +478,11 @@ fn every_registered_harness_can_be_named_seeded_and_launched() {
         assert_eq!(AgentKind::from_profile(kind.profile_kind()), kind);
         assert_eq!(AgentKind::from_id(kind.id()), Some(kind));
     }
+
+    assert_eq!(
+        builtin_agent_profile(AgentProfileKind::DeepSeek).launcher,
+        AgentProfileLauncher::Npx
+    );
 }
 
 #[test]

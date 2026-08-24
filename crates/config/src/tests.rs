@@ -70,7 +70,7 @@ fn sample_agent_profiles() -> Vec<profile::AgentProfile> {
         name: "Claude Code".to_string(),
         kind: profile::AgentProfileKind::ClaudeCode,
         executable: "claude".to_string(),
-        via_npx: false,
+        launcher: profile::AgentProfileLauncher::Custom,
         model: "claude-opus-4-8".to_string(),
         effort: "high".to_string(),
         replace_sub_models: true,
@@ -243,6 +243,52 @@ fn empty_agent_credentials_are_omitted() {
     assert!(!out.contains("api-credentials"));
     assert!(!out.contains("api-base-url"));
     assert!(!out.contains("api-key"));
+}
+
+#[test]
+fn legacy_npx_launcher_loads_and_migrates_to_the_launcher_enum() {
+    let legacy = r#"
+[[agent-profiles.list]]
+name = "DeepSeek Harness"
+kind = "deepseek"
+executable = "dsh"
+via-npx = true
+"#;
+    let config: Config = parse_toml(legacy).unwrap();
+    let loaded = &config.agent_profiles.list[0];
+
+    assert_eq!(loaded.launcher, profile::AgentProfileLauncher::Npx);
+
+    let mut doc = legacy.parse::<DocumentMut>().unwrap();
+    profile::patch_agent_document(&mut doc, &config.agent_profiles.list, "DeepSeek Harness")
+        .unwrap();
+    let saved = doc.to_string();
+
+    assert!(saved.contains("launcher = \"npx\""));
+    assert!(!saved.contains("via-npx"));
+}
+
+#[test]
+fn pnpm_dlx_launcher_round_trips() {
+    let source = r#"
+[[agent-profiles.list]]
+name = "DeepSeek Harness"
+kind = "deepseek"
+executable = "dsh"
+launcher = "pnpm-dlx"
+"#;
+    let config: Config = parse_toml(source).unwrap();
+    assert_eq!(
+        config.agent_profiles.list[0].launcher,
+        profile::AgentProfileLauncher::PnpmDlx
+    );
+
+    let mut doc = DocumentMut::new();
+    profile::patch_agent_document(&mut doc, &config.agent_profiles.list, "DeepSeek Harness")
+        .unwrap();
+    let restored: Config = parse_toml(&doc.to_string()).unwrap();
+
+    assert_eq!(restored.agent_profiles.list, config.agent_profiles.list);
 }
 
 const LEGACY_PROFILE_TOML: &str = r#"
