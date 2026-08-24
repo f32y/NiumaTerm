@@ -179,12 +179,14 @@ impl TerminalPane {
         let (wake, wake_rx) = wake::wake_channel();
         let agent_route = agent_process().allocate_route();
         let environment = agent_process().environment_for(&agent_route);
-        let (fixed_bottom_requested, cursor_shape) = cx.read_global(|settings: &AppSettings, _| {
-            (
-                settings.input_style.is_fixed_bottom(),
-                settings.cursor_shape,
-            )
-        });
+        let (fixed_bottom_requested, cursor_shape, manage_process_tree) =
+            cx.read_global(|settings: &AppSettings, _| {
+                (
+                    settings.input_style.is_fixed_bottom(),
+                    settings.cursor_shape,
+                    settings.manage_subprocess_job,
+                )
+            });
 
         let surface = terminal_surface_for_tab(
             &wake,
@@ -193,6 +195,7 @@ impl TerminalPane {
             &profile_name,
             cursor_shape,
             environment,
+            manage_process_tree,
         )?;
 
         Ok(cx.new(|cx| {

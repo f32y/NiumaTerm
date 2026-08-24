@@ -4,16 +4,14 @@ use std::cmp::Reverse;
 use std::collections::VecDeque;
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
-use std::os::windows::process::CommandExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 use std::{env, fmt, io, thread};
 
-use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
+use nmt_platform::windows::process::{KillOnCloseJob, hidden_cmd_command};
 
 use crate::LaunchConfig;
-use crate::subprocess::KillOnCloseJob;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
 
@@ -112,13 +110,11 @@ impl AgentCli {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        let mut command = Command::new("cmd.exe");
+        let mut command = hidden_cmd_command(&self.executable);
         command
-            .args(["/D", "/C", self.executable.as_str()])
             .args(&self.arguments)
             .args(arguments)
-            .envs(self.environment.iter().map(|(name, value)| (name, value)))
-            .creation_flags(CREATE_NO_WINDOW);
+            .envs(self.environment.iter().map(|(name, value)| (name, value)));
         command
     }
 
@@ -300,7 +296,8 @@ where
             launcher.executable()
         ))
     })?;
-    let job = KillOnCloseJob::attach_or_kill(&mut child).map_err(ProcessError::Containment)?;
+    let job = KillOnCloseJob::attach_or_kill(&mut child)
+        .map_err(|error| ProcessError::Containment(error.to_string()))?;
 
     let stdout = child.stdout.take().expect("piped stdout");
     let stderr = child.stderr.take().expect("piped stderr");
@@ -445,59 +442,4 @@ fn redact_common_credentials(text: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn cmd_launcher() -> AgentCli {
-        AgentCli::new("cmd.exe", [])
-    }
-
-    #[test]
-    fn bounded_runner_retains_suffix_and_redacts_environment_values() {
-        let secret = "secret-value-for-test";
-        let launcher = AgentCli::new(
-            "cmd.exe",
-            [("NMT_TEST_SECRET".to_string(), secret.to_string())],
-        );
-        let output = run_bounded(
-            &launcher,
-            ["/D", "/C", "echo 1234567890%NMT_TEST_SECRET%"],
-            ProcessLimits::new(Duration::from_secs(3), 20),
-        )
-        .unwrap();
-        assert!(output.success());
-        assert!(output.stdout_truncated);
-        assert!(!output.stdout.contains(secret));
-        assert!(output.stdout.contains("<redacted>"));
-    }
-
-    #[test]
-    fn structured_probe_parsing_precedes_diagnostic_redaction() {
-        let launcher = AgentCli::new(
-            "cmd.exe",
-            [("NMT_TEST_VALUE".to_string(), "codex".to_string())],
-        );
-        let output = run_bounded(
-            &launcher,
-            ["/D", "/C", "echo {\"codexVersion\":\"1.2.3\"}"],
-            ProcessLimits::new(Duration::from_secs(3), 256),
-        )
-        .unwrap();
-
-        assert!(output.stdout.contains("<redacted>Version"));
-        assert!(output.stdout_for_parsing().contains("codexVersion"));
-        assert!(!format!("{output:?}").contains("codexVersion"));
-    }
-
-    #[test]
-    fn bounded_runner_times_out_and_reports_bounded_diagnostics() {
-        let error = run_bounded(
-            &cmd_launcher(),
-            ["/D", "/C", "echo before-timeout & ping -n 6 127.0.0.1 >nul"],
-            ProcessLimits::new(Duration::from_millis(100), 64),
-        )
-        .unwrap_err();
-        assert!(matches!(error, ProcessError::TimedOut { .. }));
-        assert!(error.to_string().len() < 4_200);
-    }
-}
+mod tests;

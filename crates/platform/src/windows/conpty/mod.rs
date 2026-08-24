@@ -9,14 +9,8 @@ use std::{env, mem, ptr, thread};
 use libc::c_ushort;
 use miow::pipe::anonymous;
 use tracing::*;
-use windows_sys::Win32::Foundation::{CloseHandle, ERROR_MORE_DATA, GetLastError, HANDLE, S_OK};
+use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, S_OK};
 use windows_sys::Win32::System::Console::{COORD, HPCON};
-use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-    JobObjectBasicProcessIdList, JobObjectExtendedLimitInformation, QueryInformationJobObject,
-    SetInformationJobObject,
-};
 use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows_sys::Win32::System::Threading::{
     CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, EXTENDED_STARTUPINFO_PRESENT,
@@ -29,6 +23,7 @@ use windows_sys::{s, w};
 use crate::Winsize;
 use crate::windows::child::ChildExitWatcher;
 use crate::windows::pipes::{EventedAnonRead, EventedAnonWrite};
+use crate::windows::process::{KillOnCloseJob, ProcessTree};
 use crate::windows::{Pty, cmdline, win32_string};
 
 /// Load the pseudoconsole API from conpty.dll if possible, otherwise use the
@@ -134,7 +129,7 @@ pub struct Conpty {
     /// Job object holding the shell's process tree (`KILL_ON_JOB_CLOSE`),
     /// present when job management is enabled. Closing the handle on drop
     /// kills every process still in the job.
-    job: Option<HANDLE>,
+    job: Option<KillOnCloseJob>,
 }
 
 /// How long the pseudoconsole close is given before the shell tree is ended
@@ -173,9 +168,7 @@ impl Drop for Conpty {
 
         // After the console teardown, closing the job reaps whatever is left
         // of the tree (detached/GUI descendants included).
-        if let Some(job) = self.job.take() {
-            unsafe { CloseHandle(job) };
-        }
+        drop(self.job.take());
     }
 }
 
@@ -339,7 +332,9 @@ pub fn new(
     }
 
     let job = if manage_process_tree {
-        let job = unsafe { create_kill_on_close_job(proc_info.hProcess) };
+        let job = unsafe { KillOnCloseJob::attach_handle(proc_info.hProcess) }
+            .map_err(|error| warn!("failed to create process-tree job: {error}"))
+            .ok();
 
         // The shell was created suspended; resume it whether or not the job
         // setup succeeded (failure degrades to unmanaged, it must not hang).
@@ -423,88 +418,9 @@ fn build_environment_block(overrides: &[(String, String)]) -> Vec<u16> {
     block
 }
 
-/// True when the job contains more than one process — i.e. the shell has
-/// live descendants and closing the job would kill more than the shell
-/// itself. `job` is a raw Job Object handle (`Pty::job_handle`).
-pub fn job_has_other_processes(job: isize) -> bool {
-    job_other_process_count(job) > 0
-}
-
-/// Number of processes in the job beyond the shell itself. `job` is a raw
-/// Job Object handle (`Pty::job_handle`). 0 on query failure.
-pub fn job_other_process_count(job: isize) -> usize {
-    // Room for a few pids; on ERROR_MORE_DATA the header's
-    // NumberOfAssignedProcesses still holds the full count.
-    #[repr(C)]
-    struct PidListBuf {
-        list: JOBOBJECT_BASIC_PROCESS_ID_LIST,
-        _extra: [usize; 7],
-    }
-
-    let mut buf: PidListBuf = unsafe { mem::zeroed() };
-
-    let ok = unsafe {
-        QueryInformationJobObject(
-            job as HANDLE,
-            JobObjectBasicProcessIdList,
-            &mut buf as *mut _ as *mut ffi::c_void,
-            mem::size_of::<PidListBuf>() as u32,
-            ptr::null_mut(),
-        )
-    };
-
-    if ok != 0 || unsafe { GetLastError() } == ERROR_MORE_DATA {
-        (buf.list.NumberOfAssignedProcesses as usize).saturating_sub(1)
-    } else {
-        0
-    }
-}
-
-/// Create a Job Object with `KILL_ON_JOB_CLOSE` and put `process` in it, so
-/// the process tree dies with the job handle. Returns `None` (with a warning)
-/// on failure — the shell then runs unmanaged, like with the setting off.
-unsafe fn create_kill_on_close_job(process: HANDLE) -> Option<HANDLE> {
-    unsafe {
-        let job = CreateJobObjectW(ptr::null(), ptr::null());
-
-        if job.is_null() {
-            warn!("CreateJobObjectW failed: {}", Error::last_os_error());
-            return None;
-        }
-
-        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = mem::zeroed();
-
-        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-
-        let ok = SetInformationJobObject(
-            job,
-            JobObjectExtendedLimitInformation,
-            &info as *const _ as *const ffi::c_void,
-            mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-        ) > 0;
-
-        if !ok {
-            warn!("SetInformationJobObject failed: {}", Error::last_os_error());
-            CloseHandle(job);
-            return None;
-        }
-
-        if AssignProcessToJobObject(job, process) == 0 {
-            warn!(
-                "AssignProcessToJobObject failed: {}",
-                Error::last_os_error()
-            );
-            CloseHandle(job);
-            return None;
-        }
-
-        Some(job)
-    }
-}
-
 impl Conpty {
-    pub(crate) fn job(&self) -> Option<HANDLE> {
-        self.job
+    pub(crate) fn process_tree(&self) -> Option<ProcessTree> {
+        self.job.as_ref().map(KillOnCloseJob::process_tree)
     }
 
     pub fn on_resize(&mut self, window_size: Winsize) {
@@ -531,142 +447,4 @@ impl From<Winsize> for COORD {
 }
 
 #[cfg(test)]
-mod environment_tests {
-    use std::{env, fs, io, mem, process, ptr};
-
-    use windows_sys::Win32::Foundation::CloseHandle;
-    use windows_sys::Win32::System::Threading::{
-        CREATE_UNICODE_ENVIRONMENT, CreateProcessW, INFINITE, PROCESS_INFORMATION, STARTUPINFOW,
-        WaitForSingleObject,
-    };
-
-    use super::build_environment_block;
-
-    fn entries(block: &[u16]) -> Vec<String> {
-        block[..block.len() - 1]
-            .split(|unit| *unit == 0)
-            .filter(|entry| !entry.is_empty())
-            .map(String::from_utf16_lossy)
-            .collect()
-    }
-
-    #[test]
-    fn overrides_replace_names_case_insensitively_without_mutating_parent() {
-        let key = "NMT_PTY_ENV_REPLACEMENT_TEST";
-        unsafe { env::set_var(key, "parent") };
-        let block = build_environment_block(&[(key.to_lowercase(), "child".into())]);
-        let matching: Vec<_> = entries(&block)
-            .into_iter()
-            .filter(|entry| entry.to_lowercase().starts_with(&key.to_lowercase()))
-            .collect();
-        assert_eq!(matching, [format!("{}=child", key.to_lowercase())]);
-        assert_eq!(env::var(key).as_deref(), Ok("parent"));
-        unsafe { env::remove_var(key) };
-    }
-
-    #[test]
-    fn block_preserves_unrelated_values_and_unicode() {
-        let inherited = "NMT_PTY_ENV_PRESERVE_TEST";
-        unsafe { env::set_var(inherited, "kept") };
-        let block = build_environment_block(&[("NMT_UNICODE".into(), "牛马终端🦀".into())]);
-        let entries = entries(&block);
-        assert!(
-            entries
-                .iter()
-                .any(|entry| entry == &format!("{inherited}=kept"))
-        );
-        assert!(
-            entries
-                .iter()
-                .any(|entry| entry == "NMT_UNICODE=牛马终端🦀")
-        );
-        unsafe { env::remove_var(inherited) };
-    }
-
-    #[test]
-    fn block_advertises_truecolor_by_default() {
-        let block = build_environment_block(&[]);
-        assert!(
-            entries(&block)
-                .iter()
-                .any(|entry| entry.eq_ignore_ascii_case("COLORTERM=truecolor"))
-        );
-    }
-
-    #[test]
-    fn block_advertises_terminal_progress_by_default() {
-        let block = build_environment_block(&[]);
-        assert!(entries(&block).iter().any(|entry| {
-            entry.split_once('=').is_some_and(|(key, value)| {
-                key.eq_ignore_ascii_case("TERM_FEATURES") && value.contains('P')
-            })
-        }));
-    }
-
-    #[test]
-    fn block_is_sorted_case_insensitively_and_double_nul_terminated() {
-        let block = build_environment_block(&[
-            ("zz_nmt".into(), "z".into()),
-            ("AA_NMT".into(), "a".into()),
-        ]);
-        assert!(block.len() >= 2);
-        assert_eq!(&block[block.len() - 2..], &[0, 0]);
-        let entries = entries(&block);
-        let folded: Vec<_> = entries
-            .iter()
-            .map(|entry| {
-                entry
-                    .split_once('=')
-                    .map_or(entry.as_str(), |(key, _)| key)
-                    .to_lowercase()
-            })
-            .collect();
-        assert!(folded.windows(2).all(|pair| pair[0] <= pair[1]));
-    }
-
-    #[test]
-    fn create_process_receives_exact_agent_overrides() {
-        let output = env::temp_dir().join(format!("nmt-pty-env-{}.txt", process::id()));
-        let _ = fs::remove_file(&output);
-        let overrides = [
-            ("NMT_AGENT_ROUTE".into(), "route-exact".into()),
-            ("NMT_AGENT_HOOK_TOKEN".into(), "token-exact".into()),
-            ("NMT_AGENT_HOOK_VERSION".into(), "1".into()),
-        ];
-        let mut environment = build_environment_block(&overrides);
-        let command = format!(
-            "cmd.exe /d /c (echo %NMT_AGENT_ROUTE%&echo %NMT_AGENT_HOOK_TOKEN%&echo %NMT_AGENT_HOOK_VERSION%)>\"{}\"",
-            output.display()
-        );
-        let mut command: Vec<u16> = command.encode_utf16().chain([0]).collect();
-        let mut startup: STARTUPINFOW = unsafe { mem::zeroed() };
-        startup.cb = mem::size_of::<STARTUPINFOW>() as u32;
-        let mut process: PROCESS_INFORMATION = unsafe { mem::zeroed() };
-        let created = unsafe {
-            CreateProcessW(
-                ptr::null(),
-                command.as_mut_ptr(),
-                ptr::null_mut(),
-                ptr::null_mut(),
-                0,
-                CREATE_UNICODE_ENVIRONMENT,
-                environment.as_mut_ptr().cast(),
-                ptr::null(),
-                &startup,
-                &mut process,
-            )
-        };
-        assert_ne!(created, 0, "{}", io::Error::last_os_error());
-        unsafe {
-            WaitForSingleObject(process.hProcess, INFINITE);
-            CloseHandle(process.hThread);
-            CloseHandle(process.hProcess);
-        }
-        let values = fs::read_to_string(&output).unwrap();
-        let _ = fs::remove_file(output);
-        assert_eq!(
-            values.lines().collect::<Vec<_>>(),
-            ["route-exact", "token-exact", "1"]
-        );
-    }
-}
+mod tests;

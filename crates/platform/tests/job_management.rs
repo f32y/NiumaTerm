@@ -3,33 +3,12 @@
 
 #![cfg(windows)]
 
-use nmt_platform::{
-    create_managed_pty_with_env, create_pty, job_other_process_count, set_job_management,
-};
-use windows_sys::Win32::System::JobObjects::IsProcessInJob;
+use nmt_platform::{create_managed_pty_with_env, create_pty};
 
-// One test fn: the toggle is process-global, so parallel test threads would
-// race on it.
 #[test]
-fn job_management_toggle_and_managed_pty_control_shell_job() {
-    // Off (default): no job.
+fn managed_pty_controls_shell_process_tree() {
     let pty = create_pty("cmd.exe", Vec::new(), &None, 80, 24).expect("failed to create ConPTY");
-    assert!(pty.job_handle().is_none());
-    drop(pty);
-
-    // On: the shell is inside the PTY's job.
-    set_job_management(true);
-    let pty = create_pty("cmd.exe", Vec::new(), &None, 80, 24).expect("failed to create ConPTY");
-    set_job_management(false);
-
-    let job = pty.job_handle().expect("job handle present when enabled");
-    let mut in_job = 0;
-    let ok = unsafe { IsProcessInJob(pty.child_watcher().raw_handle(), job, &mut in_job) };
-    assert_ne!(ok, 0, "IsProcessInJob failed");
-    assert_ne!(in_job, 0, "shell process is not in the PTY's job");
-    // A fresh shell has no descendants: the job holds exactly one process.
-    assert_eq!(job_other_process_count(job as isize), 0);
-    // Dropping the Pty closes the job (KILL_ON_JOB_CLOSE reaps the tree).
+    assert!(pty.process_tree().is_none());
     drop(pty);
 
     let pty = create_managed_pty_with_env(
@@ -43,7 +22,10 @@ fn job_management_toggle_and_managed_pty_control_shell_job() {
     )
     .expect("failed to create managed ConPTY");
     assert!(
-        pty.job_handle().is_some(),
-        "managed PTY must own its process tree when the global setting is off"
+        pty.process_tree().is_some(),
+        "managed PTY must own its process tree"
     );
+    let process_tree = pty.process_tree().expect("managed process tree");
+    assert_eq!(process_tree.process_count(), 1);
+    assert_eq!(process_tree.other_process_count(), 0);
 }

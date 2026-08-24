@@ -2,89 +2,13 @@
 //! Job Object containment and the newline-delimited-JSON process shape used
 //! by the chat sessions.
 
-use std::ffi::c_void;
 use std::io::{BufRead as _, BufReader, Write as _};
-use std::os::windows::io::AsRawHandle as _;
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::thread;
 use std::time::{Duration, Instant};
-use std::{io, mem, ptr, thread};
 
+use nmt_platform::windows::process::KillOnCloseJob;
 use serde_json::Value;
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
-use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-    SetInformationJobObject,
-};
-
-/// A Windows Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`: every
-/// process assigned to it (and each of their descendants) is terminated when
-/// the last handle closes, i.e. when this value drops. This is the containment
-/// that makes killing npm `.cmd` shims safe — killing only the shim would
-/// strand the Node descendant that actually holds the inherited pipes.
-pub(crate) struct KillOnCloseJob(HANDLE);
-
-// A Job Object handle has no thread affinity. Ownership remains unique and
-// Drop closes it exactly once, so moving the owner to a shutdown worker is
-// equivalent to moving any other owned Windows kernel handle.
-unsafe impl Send for KillOnCloseJob {}
-
-// Sharing a reference exposes no operation at all: the handle is private and
-// the only thing done with it, closing, happens in Drop and therefore requires
-// ownership. A job shared behind an `Arc` is what lets several agent tabs hold
-// one contained host process.
-unsafe impl Sync for KillOnCloseJob {}
-
-impl KillOnCloseJob {
-    pub(crate) fn attach(child: &Child) -> Result<Self, String> {
-        unsafe {
-            let job = CreateJobObjectW(ptr::null(), ptr::null());
-            if job.is_null() {
-                return Err(format!(
-                    "failed to create process containment job: {}",
-                    io::Error::last_os_error()
-                ));
-            }
-
-            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = mem::zeroed();
-            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            if SetInformationJobObject(
-                job,
-                JobObjectExtendedLimitInformation,
-                &raw const info as *const c_void,
-                mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            ) == 0
-            {
-                let error = io::Error::last_os_error();
-                CloseHandle(job);
-                return Err(format!("failed to configure process containment: {error}"));
-            }
-            if AssignProcessToJobObject(job, child.as_raw_handle() as HANDLE) == 0 {
-                let error = io::Error::last_os_error();
-                CloseHandle(job);
-                return Err(format!("failed to contain child process tree: {error}"));
-            }
-            Ok(Self(job))
-        }
-    }
-
-    /// Attach with rollback: a child that cannot be contained is killed and
-    /// reaped before the error propagates, because a running-but-uncontained
-    /// process would escape every later job-based cleanup path.
-    pub(crate) fn attach_or_kill(child: &mut Child) -> Result<Self, String> {
-        Self::attach(child).map_err(|error| {
-            let _ = child.kill();
-            let _ = child.wait();
-            error
-        })
-    }
-}
-
-impl Drop for KillOnCloseJob {
-    fn drop(&mut self) {
-        unsafe { CloseHandle(self.0) };
-    }
-}
 
 /// A spawned agent CLI with piped stdio, kill-on-close containment, and
 /// newline-delimited JSON output. Stdout lines that parse as JSON are handed
@@ -120,7 +44,7 @@ impl JsonLineProcess {
         let mut child = command
             .spawn()
             .map_err(|err| format!("could not run `{display_command}`: {err}"))?;
-        let job = KillOnCloseJob::attach_or_kill(&mut child)?;
+        let job = KillOnCloseJob::attach_or_kill(&mut child).map_err(|error| error.to_string())?;
 
         let stdin = child
             .stdin

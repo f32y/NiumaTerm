@@ -7,6 +7,7 @@ pub(super) fn terminal_surface_for_tab(
     profile_name: &str,
     cursor_shape: CursorShape,
     environment_overrides: Vec<(String, String)>,
+    manage_process_tree: bool,
 ) -> Result<TerminalSurface, String> {
     match TerminalSurface::for_gpui(
         wake.clone(),
@@ -17,6 +18,7 @@ pub(super) fn terminal_surface_for_tab(
         profile_name.to_string(),
         cursor_shape,
         environment_overrides.clone(),
+        manage_process_tree,
     ) {
         Ok(surface) => Ok(surface),
 
@@ -32,6 +34,7 @@ pub(super) fn terminal_surface_for_tab(
                 profile_name.to_string(),
                 cursor_shape,
                 environment_overrides,
+                manage_process_tree,
             )
         }
         Err(error) => Err(error),

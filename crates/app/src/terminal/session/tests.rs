@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::{collections, env, fs, process, sync, thread, time};
 
 use base64::engine::general_purpose::STANDARD;
+use nmt_platform::windows::powershell::INTEGRATION_SCRIPT;
 use nmt_terminal::block_store::BlockStore;
 use nmt_terminal::event::{BlockEvent, TerminalEvent};
 use parking_lot::Mutex;
@@ -14,7 +15,6 @@ use crate::terminal::session::{
     TerminalSessionConfig,
 };
 use crate::terminal::wake::Wake;
-use crate::utils::POWERSHELL_INTEGRATION;
 
 /// End-to-end proof that a remote session renders through `NetPty`: start a
 /// host, pair, attach, type a command, and confirm its output reaches the
@@ -158,7 +158,7 @@ fn powershell_bootstrap_is_passed_as_utf16_encoded_command() {
     assert_eq!(config.args[1], "-EncodedCommand");
     assert_eq!(
         String::from_utf16(utf16.as_slice()).unwrap(),
-        POWERSHELL_INTEGRATION
+        INTEGRATION_SCRIPT
     );
 }
 

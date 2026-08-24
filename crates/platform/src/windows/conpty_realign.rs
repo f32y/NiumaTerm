@@ -1,6 +1,6 @@
 use std::str;
 
-pub(super) fn is_conpty_resize_echo_input(bytes: &[u8]) -> bool {
+pub fn is_conpty_resize_echo_input(bytes: &[u8]) -> bool {
     !bytes.is_empty()
         && bytes.len() <= 32
         && bytes.iter().all(|b| *b >= 0x20 && *b != 0x7f && *b != 0x1b)
@@ -46,7 +46,7 @@ fn is_cup(fin: u8) -> bool {
     fin == b'H' || fin == b'f'
 }
 
-pub(super) fn rewrite_conpty_resize_echo_cup_rows(
+pub fn rewrite_conpty_resize_echo_cup_rows(
     bytes: &[u8],
     target_row_1based: u16,
 ) -> Option<Vec<u8>> {
@@ -131,7 +131,7 @@ fn last_cup_row(bytes: &[u8]) -> Option<u16> {
 /// The maximum row and column (both 1-based) addressed by any CUP in `bytes`. Used to
 /// sanity-check that a ConPTY repaint fits the latched resize size before SU
 /// realignment. `(0, 0)` if there is no CUP.
-pub(super) fn max_cup_row_col(bytes: &[u8]) -> (u16, u16) {
+pub fn max_cup_row_col(bytes: &[u8]) -> (u16, u16) {
     let (mut max_row, mut max_col) = (0u16, 0u16);
 
     for_each_csi(bytes, |start, fin| {
@@ -152,7 +152,7 @@ pub(super) fn max_cup_row_col(bytes: &[u8]) -> (u16, u16) {
 ///
 /// `r_ghostty` is the latched `active_cursor_row()` (0-based); `R_conpty` is the
 /// repaint's last CUP row (0-based) — both the cursor row, kept anchor-matched.
-pub(super) fn su_realign_count(
+pub fn su_realign_count(
     repaint: &[u8],
     r_ghostty: u16,
     latched_cols: u16,
@@ -198,7 +198,7 @@ fn contains_csi_erase_display(bytes: &[u8]) -> bool {
     found
 }
 
-pub(super) fn is_conpty_resize_repaint(bytes: &[u8], target_row_1based: u16) -> bool {
+pub fn is_conpty_resize_repaint(bytes: &[u8], target_row_1based: u16) -> bool {
     if target_row_1based == 0 || bytes.is_empty() || bytes.len() > 512 {
         return false;
     }

@@ -4,8 +4,6 @@
 //! compact total while the hover card shows exact totals and per-model input,
 //! output, cache creation, cache-read counts, and prices.
 
-use std::os::windows::process::CommandExt as _;
-use std::process;
 use std::time::Duration;
 
 use chrono::Local;
@@ -19,10 +17,10 @@ use gpui_component::hover_card::HoverCard;
 use gpui_component::list::{List, ListDelegate, ListItem, ListState};
 use gpui_component::{ActiveTheme as _, IconNamed, IndexPath, Sizable as _, h_flex, v_flex};
 use nmt_i18n::i18n;
+use nmt_platform::windows::process::hidden_cmd_command;
 use serde::Deserialize;
 use serde_json::from_slice;
 use tracing::warn;
-use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use crate::ui::auto_refresh::{self, AutoRefresh, RefreshState};
 use crate::ui::{AppSettings, UI_RADIUS};
@@ -487,15 +485,8 @@ fn render_usage_panel(
 
 /// Run ccusage for `since` (yyyymmdd) and parse the requested day.
 fn fetch_usage(since: &str, date: &str) -> Result<DailyTokenUsage, String> {
-    // `npx` is a `.cmd` shim on Windows, so cmd.exe resolves it. The hidden
-    // process flag prevents a console window from flashing on each refresh.
-    let output = process::Command::new("cmd")
-        .args([
-            "/D",
-            "/C",
-            &format!("npx ccusage@latest -j --since {since}"),
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
+    let output = hidden_cmd_command("npx")
+        .args(["ccusage@latest", "-j", "--since", since])
         .output()
         .map_err(|err| format!("failed to run ccusage: {err}"))?;
 

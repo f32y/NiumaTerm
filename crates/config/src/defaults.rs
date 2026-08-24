@@ -1,3 +1,8 @@
+#[cfg(target_os = "windows")]
+use nmt_platform::windows::environment::DEFAULT_EDITOR;
+#[cfg(target_os = "windows")]
+use nmt_platform::windows::powershell::DEFAULT_CONFIG_SHELL;
+
 use crate::{CursorShape, Shell};
 
 #[inline]
@@ -23,7 +28,7 @@ pub fn default_shell() -> Shell {
     #[cfg(target_os = "windows")]
     {
         Shell {
-            program: String::from("powershell"),
+            program: String::from(DEFAULT_CONFIG_SHELL),
             args: vec![],
         }
     }
@@ -57,7 +62,7 @@ pub fn default_editor() -> Shell {
     #[cfg(target_os = "windows")]
     {
         Shell {
-            program: String::from("notepad"),
+            program: String::from(DEFAULT_EDITOR),
             args: vec![],
         }
     }

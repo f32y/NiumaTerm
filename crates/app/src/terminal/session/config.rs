@@ -1,29 +1,20 @@
 use std::sync::LazyLock;
 
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD;
 use nmt_config::CursorShape;
 use nmt_config::local_state::TabState;
-
-use crate::utils::POWERSHELL_INTEGRATION;
+use nmt_platform::windows::powershell;
 
 static ENCODED_POWERSHELL_INTEGRATION: LazyLock<String> =
-    LazyLock::new(|| encode_powershell_command(POWERSHELL_INTEGRATION));
+    LazyLock::new(|| powershell::encode_command(powershell::INTEGRATION_SCRIPT));
 
 pub(crate) fn default_shell() -> String {
-    "powershell.exe".to_string()
+    powershell::DEFAULT_SHELL.to_string()
 }
 
 /// Whether a configured shell is PowerShell (the only shell we have an OSC 133
 /// integration script for). `None` resolves to the PowerShell default.
 pub(crate) fn shell_is_powershell(shell: Option<&str>) -> bool {
-    match shell {
-        Some(s) => {
-            let lower = s.to_ascii_lowercase();
-            lower.contains("powershell") || lower.contains("pwsh")
-        }
-        None => true,
-    }
+    powershell::is_shell(shell)
 }
 
 /// Local terminal session configuration. `None` and empty fields fall back to
@@ -49,6 +40,7 @@ pub struct TerminalSessionConfig {
     /// Child-only values merged into the shell's inherited Windows environment.
     /// Runtime metadata is deliberately excluded from persisted tab state.
     pub environment_overrides: Vec<(String, String)>,
+    pub manage_process_tree: bool,
 }
 
 impl TerminalSessionConfig {
@@ -87,12 +79,6 @@ impl TerminalSessionConfig {
     }
 }
 
-fn encode_powershell_command(script: &str) -> String {
-    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
-
-    STANDARD.encode(bytes)
-}
-
 impl Default for TerminalSessionConfig {
     fn default() -> Self {
         TerminalSessionConfig {
@@ -106,6 +92,7 @@ impl Default for TerminalSessionConfig {
             scrollback_lines: 10_000,
             engine_blocks: true,
             environment_overrides: Vec::new(),
+            manage_process_tree: false,
         }
     }
 }

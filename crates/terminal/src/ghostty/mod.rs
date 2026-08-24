@@ -193,10 +193,11 @@ impl GhosttyTerminal {
         // width (2 cols), so the cursor misaligns on any line with such a cluster —
         // independent of resize. Real ptys (macOS/Linux) let the app drive 2027, so
         // this default is Windows-only.
-        #[cfg(windows)]
-        unsafe {
-            let seq = b"\x1b[?2027h";
-            ghostty_terminal_vt_write(terminal, seq.as_ptr(), seq.len());
+        if nmt_platform::USES_CONPTY {
+            unsafe {
+                let seq = b"\x1b[?2027h";
+                ghostty_terminal_vt_write(terminal, seq.as_ptr(), seq.len());
+            }
         }
 
         Ok(Self {

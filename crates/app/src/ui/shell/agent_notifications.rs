@@ -1,3 +1,5 @@
+use nmt_platform::windows::window::is_foreground_and_not_minimized;
+
 use crate::ui::shell::*;
 
 struct AgentRouteLocation {
@@ -58,7 +60,6 @@ impl Shell {
 
     pub(super) fn exact_window_active(window: &Window) -> bool {
         use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-        use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, IsIconic};
 
         let Ok(handle) = HasWindowHandle::window_handle(window) else {
             return false;
@@ -68,13 +69,7 @@ impl Shell {
             return false;
         };
 
-        let hwnd = handle.hwnd.get() as HWND;
-        let foreground = unsafe { GetForegroundWindow() };
-        let gpui_active = window.is_window_active();
-        let foreground_matches = foreground == hwnd;
-        let minimized = unsafe { IsIconic(hwnd) } != 0;
-
-        exact_window_is_active(gpui_active, foreground_matches, minimized)
+        window.is_window_active() && is_foreground_and_not_minimized(handle.hwnd)
     }
 
     pub(super) fn acknowledge_notification(

@@ -3,14 +3,16 @@ use std::sync::atomic::AtomicU32;
 use std::{io, sync, time};
 
 use nmt_config::colors::Colors;
+use nmt_platform::windows::conpty_realign::{
+    max_cup_row_col, rewrite_conpty_resize_echo_cup_rows, su_realign_count,
+};
 use nmt_platform::{ChildEvent, EventedPty, ProcessReadWrite, WinsizeBuilder};
 use parking_lot::{FairMutex, Mutex};
 
 use crate::event::{self, VoidListener};
 use crate::pty_pipe::{
-    Interest, Poll, PtyPipe, PtyState, READ_BUFFER_SIZE, SYNC_OUTPUT_TIMEOUT, Token, Waker,
-    max_cup_row_col, mode, publish_render_buffer, rewrite_conpty_resize_echo_cup_rows,
-    su_realign_count,
+    Interest, Poll, PtyPipe, PtyState, READ_BUFFER_SIZE, SYNC_OUTPUT_TIMEOUT, Token, Waker, mode,
+    publish_render_buffer,
 };
 use crate::render_buffer::RenderBuffer;
 use crate::{ansi, ghostty};

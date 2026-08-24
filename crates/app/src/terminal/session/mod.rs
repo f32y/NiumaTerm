@@ -8,7 +8,8 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::time;
 
 use nmt_config::{CursorShape, active_colors};
-use nmt_platform::{WinsizeBuilder, create_pty_with_env, job_other_process_count};
+use nmt_platform::windows::process::ProcessTree;
+use nmt_platform::{WinsizeBuilder, create_managed_pty_with_env, create_pty_with_env};
 use nmt_terminal::block_store::BlockStore;
 use nmt_terminal::event::{Msg, MsgSender, ProgressReport};
 use nmt_terminal::ghostty::GhosttyTerminal;
@@ -25,9 +26,8 @@ use crate::terminal::wake::WakeSender;
 mod config;
 mod proxy;
 
-use config::default_shell;
-
 pub use crate::terminal::session::config::TerminalSessionConfig;
+use crate::terminal::session::config::default_shell;
 pub use crate::terminal::session::proxy::TerminalEventProxy;
 
 pub(crate) type SessionGraphics = Arc<Mutex<GenerationStore>>;
@@ -103,9 +103,7 @@ pub struct TerminalSession {
     /// lives beside the (gpui-free) block store because the values are gpui
     /// images. Pruned by the proxy on the same batches that feed the store.
     frozen_images: terminal::graphics::FrozenImageCache,
-    /// Raw Job Object handle managing the shell tree (when job management was
-    /// on at spawn). Owned by the PTY; only queried while the session lives.
-    job_handle: Option<isize>,
+    process_tree: Option<ProcessTree>,
     /// Engine-blocks mode is active: frozen history lives in
     /// finished engine blocks, rendered through `BlockRef` handles. Mirrors the
     /// flag the PTY pipe runs with.
@@ -193,7 +191,7 @@ impl TerminalSession {
             in_flight,
             open_prompt,
             frozen_images,
-            job_handle: None,
+            process_tree: None,
             engine_blocks,
         })
     }
@@ -228,15 +226,27 @@ impl TerminalSession {
             wake,
         );
 
-        let pty = create_pty_with_env(
-            &shell,
-            config.args.clone(),
-            &config.working_dir,
-            cols,
-            rows,
-            &config.environment_overrides,
-            config.starting_title.as_deref(),
-        )
+        let pty = if config.manage_process_tree {
+            create_managed_pty_with_env(
+                &shell,
+                config.args.clone(),
+                &config.working_dir,
+                cols,
+                rows,
+                &config.environment_overrides,
+                config.starting_title.as_deref(),
+            )
+        } else {
+            create_pty_with_env(
+                &shell,
+                config.args.clone(),
+                &config.working_dir,
+                cols,
+                rows,
+                &config.environment_overrides,
+                config.starting_title.as_deref(),
+            )
+        }
         .map_err(|error| {
             error!("session create_pty failed: {error:?}");
             EngineError::new(
@@ -245,7 +255,7 @@ impl TerminalSession {
             )
         })?;
 
-        let job_handle = pty.job_handle().map(|handle| handle as isize);
+        let process_tree = pty.process_tree();
 
         let handles = start_session(
             pty,
@@ -276,7 +286,7 @@ impl TerminalSession {
             in_flight,
             open_prompt,
             frozen_images,
-            job_handle,
+            process_tree,
             engine_blocks,
         })
     }
@@ -310,7 +320,9 @@ impl TerminalSession {
     /// Number of processes beyond the shell itself in the shell's Job
     /// Object (requires job management; 0 otherwise).
     pub fn child_process_count(&self) -> usize {
-        self.job_handle.map_or(0, job_other_process_count)
+        self.process_tree
+            .as_ref()
+            .map_or(0, ProcessTree::other_process_count)
     }
 
     /// Write input bytes (already terminal-encoded) to the session's PTY.

@@ -94,7 +94,7 @@ pub use crate::ui::settings::state::{
 use crate::ui::settings::state::{
     DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE, DEFAULT_BACKGROUND_IMAGE_OPACITY,
     clamp_agent_transcript_font_size, clamp_background_image_opacity, clamp_background_opacity,
-    clamp_terminal_font_size, clamp_terminal_line_height, newest_pwsh, terminal_font_or_default,
+    clamp_terminal_font_size, clamp_terminal_line_height, terminal_font_or_default,
     ui_font_or_default,
 };
 #[cfg(test)]

@@ -322,8 +322,6 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
- "which",
- "windows-sys 0.61.2",
  "winres",
  "zip",
 ]
@@ -4218,7 +4216,6 @@ dependencies = [
  "tungstenite",
  "uuid",
  "which",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4228,6 +4225,7 @@ dependencies = [
  "aes-gcm",
  "base64",
  "dirs",
+ "nmt_platform",
  "regex",
  "serde",
  "toml 1.1.3+spec-1.1.0",
@@ -4256,6 +4254,7 @@ name = "nmt_platform"
 version = "1.2.5"
 dependencies = [
  "anyhow",
+ "base64",
  "block2 0.6.2",
  "dirs",
  "iovec",
@@ -4267,9 +4266,12 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "objc2-user-notifications",
  "parking_lot",
+ "percent-encoding",
  "signal-hook",
  "tracing",
+ "which",
  "windows 0.62.2",
+ "windows-core 0.62.2",
  "windows-registry",
  "windows-sys 0.61.2",
  "zbus",
@@ -4281,6 +4283,7 @@ version = "1.2.5"
 dependencies = [
  "base32",
  "futures",
+ "nmt_platform",
  "nmt_remote_session_hub",
  "parking_lot",
  "postcard",
@@ -4293,7 +4296,6 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tracing",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4311,10 +4313,8 @@ dependencies = [
 name = "nmt_shell_extension"
 version = "1.2.5"
 dependencies = [
+ "nmt_platform",
  "nmt_version",
- "percent-encoding",
- "windows 0.62.2",
- "windows-core 0.62.2",
  "winres",
 ]
 
@@ -4347,7 +4347,6 @@ dependencies = [
  "tracing",
  "unicode-width-16",
  "url",
- "windows-sys 0.61.2",
 ]
 
 [[package]]

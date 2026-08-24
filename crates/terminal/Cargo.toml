@@ -44,6 +44,3 @@ toml.workspace = true
 tracing.workspace = true
 unicode-width.workspace = true
 url.workspace = true
-
-[target.'cfg(windows)'.dependencies]
-windows-sys.workspace = true

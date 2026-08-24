@@ -29,4 +29,3 @@ reqwest = { workspace = true, features = [
     "system-proxy",
 ] }
 tungstenite.workspace = true
-windows-sys.workspace = true

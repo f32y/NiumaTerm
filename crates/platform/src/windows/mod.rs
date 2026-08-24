@@ -1,4 +1,3 @@
-pub use conpty::{job_has_other_processes, job_other_process_count};
 pub(crate) use notifier::{remove, show};
 pub use process_exit::wait_for_exit;
 pub use readiness::SoftReady;
@@ -7,8 +6,17 @@ pub use shell_integration::{
     shell_integration_dll_mismatched, system_notification_enabled, unregister_shell_integration,
 };
 
+pub mod conpty_realign;
+pub mod data_protection;
+pub mod environment;
 pub mod file_version;
+pub mod filesystem;
 pub mod ipc;
+pub mod powershell;
+pub mod process;
+pub mod self_update;
+pub mod shell_extension;
+pub mod window;
 
 mod child;
 mod conpty;
@@ -28,12 +36,12 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc::TryRecvError;
 use std::sync::{self};
 
-use conpty::Conpty as Backend;
-use pipes::{EventedAnonRead as ReadPipe, EventedAnonWrite as WritePipe};
-use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::System::Threading::{CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW};
 
 use crate::windows::child::ChildExitWatcher;
+use crate::windows::conpty::Conpty as Backend;
+use crate::windows::pipes::{EventedAnonRead as ReadPipe, EventedAnonWrite as WritePipe};
+use crate::windows::process::ProcessTree;
 use crate::{
     ChildEvent, EventedPty, Interest, Poll, ProcessReadWrite, Token, Waker, Winsize, WinsizeBuilder,
 };
@@ -80,7 +88,7 @@ pub fn create_pty_with_env(
         rows,
         environment_overrides,
         starting_title,
-        crate::job_management(),
+        false,
     )
 }
 
@@ -106,7 +114,7 @@ pub fn create_managed_pty_with_env(
         starting_title,
         true,
     )?;
-    if pty.job_handle().is_none() {
+    if pty.process_tree().is_none() {
         return Err(io::Error::other(
             "managed ConPTY could not create its process-tree job",
         ));
@@ -154,14 +162,8 @@ impl Pty {
         }
     }
 
-    /// The Job Object managing the shell's process tree, present when job
-    /// management was enabled at spawn time (diagnostic/test accessor).
-    pub fn job_handle(&self) -> Option<HANDLE> {
-        self.backend.job()
-    }
-
-    pub fn child_watcher(&self) -> &ChildExitWatcher {
-        &self.child_watcher
+    pub fn process_tree(&self) -> Option<ProcessTree> {
+        self.backend.process_tree()
     }
 }
 
@@ -347,38 +349,4 @@ where
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{command_line, quote_command_arg};
-
-    #[test]
-    fn command_line_quotes_shell_path_and_args() {
-        let args = vec![
-            "-NoExit".to_string(),
-            "-Command".to_string(),
-            r". 'C:\Program Files\NiumaTerm\assets\pwsh-integration.ps1'".to_string(),
-        ];
-
-        assert_eq!(
-            command_line(r"C:\Program Files\PowerShell\7\pwsh.exe", &args),
-            r#""C:\Program Files\PowerShell\7\pwsh.exe" -NoExit -Command ". 'C:\Program Files\NiumaTerm\assets\pwsh-integration.ps1'""#
-        );
-    }
-
-    #[test]
-    fn command_line_keeps_legacy_raw_shell_when_args_are_empty() {
-        assert_eq!(
-            command_line("powershell -NoProfile -Command echo", &[]),
-            "powershell -NoProfile -Command echo"
-        );
-    }
-
-    #[test]
-    fn quote_command_arg_handles_windows_argv_rules() {
-        assert_eq!(quote_command_arg("pwsh.exe"), "pwsh.exe");
-        assert_eq!(quote_command_arg(""), r#""""#);
-        assert_eq!(
-            quote_command_arg(r#"a "quoted" arg\"#),
-            r#""a \"quoted\" arg\\""#
-        );
-    }
-}
+mod tests;

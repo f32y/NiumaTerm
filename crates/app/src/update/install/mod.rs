@@ -8,23 +8,19 @@
 //! keeps running from the renamed file until it exits.
 
 use std::path::Path;
+use std::process;
 use std::process::Command;
 use std::time::Duration;
-use std::{fs, io, process};
 
 use nmt_platform::file_version::version_string;
+use nmt_platform::windows::self_update::{
+    ReplaceFilesError, discard_previous as discard_previous_files, replace_files,
+};
 use tracing::warn;
 
 use crate::update::{AWAIT_EXIT_FLAG, InstallError};
 
 const APP_EXE: &str = "NiumaTerm.exe";
-
-/// Names the swap gives to the file it is about to replace and to the copy that
-/// will replace it. Both live in the installation directory, so the renames
-/// that follow a copy stay within one directory and cannot fail for lack of
-/// space or cross a volume boundary.
-const PREVIOUS_SUFFIX: &str = ".nmt-previous";
-const INCOMING_SUFFIX: &str = ".nmt-incoming";
 
 /// Every file a package installs, and the version-resource key that decides
 /// whether the staged copy is already the one on disk.
@@ -97,8 +93,13 @@ pub(crate) fn apply(staging: &Path, install: &Path) -> Result<Vec<&'static str>,
     let versions = versions(staging, install);
     let names = differing(&versions);
 
-    copy_in(staging, install, &names)?;
-    swap(install, &names)?;
+    replace_files(staging, install, &names).map_err(|error| {
+        warn!("update: {error}");
+        match error {
+            ReplaceFilesError::Copy { .. } => InstallError::NotWritable,
+            ReplaceFilesError::Replace { .. } => InstallError::Replace,
+        }
+    })?;
 
     // The file this process is running from is among the ones just renamed
     // aside, so at least one removal here is expected to fail. Startup sweeps
@@ -108,114 +109,11 @@ pub(crate) fn apply(staging: &Path, install: &Path) -> Result<Vec<&'static str>,
     Ok(names)
 }
 
-/// Copy each staged file next to the file it will replace.
-///
-/// This is the only step that can fail for an ordinary reason — no space, a
-/// read-only installation directory, a scanner holding a handle open — so it
-/// runs to completion before anything installed is touched, and undoes itself
-/// on failure. It is also what proves the directory is writable, rather than
-/// asking and acting on an answer that could change in between.
-fn copy_in(staging: &Path, install: &Path, names: &[&str]) -> Result<(), InstallError> {
-    for name in names {
-        let incoming = install.join(format!("{name}{INCOMING_SUFFIX}"));
-
-        if let Err(error) = fs::copy(staging.join(name), &incoming) {
-            warn!("update: staging {name} failed: {error}");
-            discard_incoming(install, names);
-
-            return Err(InstallError::NotWritable);
-        }
-    }
-
-    Ok(())
-}
-
-/// Give every copied file the name of the one it replaces.
-///
-/// Each step is a rename within one directory, so reaching this point means the
-/// remaining work is metadata only. A failure anyway leaves the installation as
-/// it was rather than partly updated.
-fn swap(install: &Path, names: &[&str]) -> Result<(), InstallError> {
-    let mut done: Vec<(&str, bool)> = Vec::new();
-
-    for name in names {
-        match replace(install, name) {
-            Ok(had_previous) => done.push((name, had_previous)),
-            Err(error) => {
-                warn!("update: replacing {name} failed: {error}");
-                undo(install, &done);
-                discard_incoming(install, names);
-
-                return Err(InstallError::Replace);
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Reports whether an installed file was moved aside, which is what an undo has
-/// to put back.
-fn replace(install: &Path, name: &str) -> io::Result<bool> {
-    let target = install.join(name);
-    let previous = install.join(format!("{name}{PREVIOUS_SUFFIX}"));
-    let incoming = install.join(format!("{name}{INCOMING_SUFFIX}"));
-
-    // A release that adds a file reaches an installation with nothing to move
-    // aside, and then claiming the free name is the whole operation.
-    let had_previous = target.exists();
-
-    if had_previous {
-        fs::rename(&target, &previous)?;
-    }
-
-    match fs::rename(&incoming, &target) {
-        Ok(()) => Ok(had_previous),
-        Err(error) => {
-            if had_previous {
-                let _ = fs::rename(&previous, &target);
-            }
-
-            Err(error)
-        }
-    }
-}
-
-fn undo(install: &Path, done: &[(&str, bool)]) {
-    for (name, had_previous) in done {
-        let target = install.join(name);
-
-        let _ = fs::rename(&target, install.join(format!("{name}{INCOMING_SUFFIX}")));
-
-        if *had_previous {
-            let _ = fs::rename(install.join(format!("{name}{PREVIOUS_SUFFIX}")), &target);
-        }
-    }
-}
-
-fn discard_incoming(install: &Path, names: &[&str]) {
-    for name in names {
-        let _ = fs::remove_file(install.join(format!("{name}{INCOMING_SUFFIX}")));
-    }
-}
-
 /// Remove the files a previous update renamed aside. The ones still mapped by a
 /// process that outlived the update — Explorer, most often — refuse to go and
 /// are left for a later run to collect.
 pub(crate) fn discard_previous(install: &Path) {
-    let Ok(entries) = fs::read_dir(install) else {
-        return;
-    };
-
-    for entry in entries.flatten() {
-        if entry
-            .file_name()
-            .to_string_lossy()
-            .ends_with(PREVIOUS_SUFFIX)
-        {
-            let _ = fs::remove_file(entry.path());
-        }
-    }
+    discard_previous_files(install);
 }
 
 /// Start the installed executable and let it take over.

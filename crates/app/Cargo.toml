@@ -53,7 +53,6 @@ nmt_input.workspace = true
 # crate/version GPUI links, so `image_rs::Frame` unifies with `gpui`'s `Frame`.
 image_rs.workspace = true
 
-windows-sys.workspace = true
 reqwest = { workspace = true, features = [
     "blocking",
     "rustls-tls-native-roots",
@@ -62,7 +61,6 @@ reqwest = { workspace = true, features = [
 percent-encoding.workspace = true
 raw-window-handle.workspace = true
 sha2.workspace = true
-which.workspace = true
 zip.workspace = true
 
 [target.'cfg(windows)'.dev-dependencies]

@@ -31,15 +31,13 @@ pub use crate::event::{
     AgentValidationError, RawAgentHookMessage, normalize_body, normalize_title,
 };
 use crate::event::{MAX_ROUTE_BYTES, validate_identity};
-#[cfg(test)]
-use crate::hook_command::build_windows_hook_command_for;
 pub use crate::hook_command::{
     HookInstallStatus, build_windows_hook_command, hook_command_contains,
 };
 pub use crate::monitor::{
     ACTIVE_STATE_STALE_AFTER, AgentActivityPolicy, AgentMonitor, AgentNotification, AgentPaneState,
     AgentProjection, COMPLETION_QUIET_WINDOW, MonitorMutation, PendingCompletion,
-    exact_window_is_active, request_native_delivery,
+    request_native_delivery,
 };
 pub use crate::process::{
     AGENT_HOOK_EXE_ENV, AGENT_HOOK_PROTOCOL_VERSION, AGENT_HOOK_TOKEN_ENV, AGENT_HOOK_VERSION_ENV,
