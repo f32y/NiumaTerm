@@ -47,6 +47,36 @@ pub fn emit() -> String {
     version
 }
 
+/// Emits `NIUMATERM_INTERNAL_VERSION` for `env!` in the calling crate: the
+/// branch and abbreviated revision the build came from. The release label
+/// cannot answer which branch a build was cut from, and a nightly label drops
+/// the branch as well, so a bug report from a side branch is otherwise
+/// indistinguishable from one built on `main`. Call from a build script only.
+pub fn emit_internal() {
+    if let Some(git_dir) = git_dir() {
+        // Committing on the current branch rewrites the branch ref rather than
+        // `HEAD`, which keeps naming the same branch; the reflog is the one
+        // file both a commit and a checkout always append to.
+        println!(
+            "cargo:rerun-if-changed={}",
+            git_dir.join("logs").join("HEAD").display()
+        );
+    }
+
+    let internal = match (
+        run_git(&["rev-parse", "--abbrev-ref", "HEAD"]),
+        run_git(&["rev-parse", "--short=7", "HEAD"]),
+    ) {
+        (Some(branch), Some(commit)) => format!("{branch}@{commit}"),
+        // A build from a published archive has no checkout to read, and the
+        // label is diagnostic rather than load-bearing, so it degrades instead
+        // of failing the build the way a missing version label does.
+        _ => "unknown".to_owned(),
+    };
+
+    println!("cargo:rustc-env=NIUMATERM_INTERNAL_VERSION={internal}");
+}
+
 /// The revision that last changed the calling crate, for a binary an update
 /// replaces only when it moved forward rather than on every release.
 ///

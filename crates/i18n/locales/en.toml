@@ -23,6 +23,7 @@
 # About settings
 "settings-about-title" = "About"
 "settings-about-version" = "Version"
+"settings-about-internal-version" = "Internal Version"
 "settings-about-releases" = "Releases"
 "settings-about-release-page" = "Go to Release Page"
 "settings-about-check-updates" = "Check for Updates"
