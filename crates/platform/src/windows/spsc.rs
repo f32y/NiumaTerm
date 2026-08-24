@@ -77,12 +77,6 @@ impl SpscBufferReader {
         self.buffer.is_empty()
     }
 
-    /// Check whether the buffer is currently empty
-    #[allow(unused)]
-    pub fn is_full(&self) -> bool {
-        self.buffer.is_full()
-    }
-
     /// Read data from the buffer. Returns number of bytes read.
     pub fn read_to_slice(&mut self, buf: &mut [u8]) -> usize {
         use std::cmp::min;
