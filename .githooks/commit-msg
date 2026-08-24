@@ -58,34 +58,32 @@ EOF
     exit 1
 fi
 
-# A Verification section claims the change itself was exercised, so routine
-# build, format, and lint runs do not belong in it: they are mandatory for
-# any edit and say nothing about whether the new behavior works. Only the
-# section body is scanned, so a subject or body line about a clippy fix is
-# still fine.
-routine_verification=$(
+# A Verification section names the specific changed behavior that was exercised
+# and its observed result. A command invocation does not carry that information.
+# Only the section body is scanned, so a subject or body line about one of these
+# commands is still fine.
+verification_commands=$(
     printf '%s\n' "$body" | awk '
         /^[Vv]erification/ { in_section = 1 }
         !in_section { next }
-        tolower($0) ~ /cargo (\+[a-z0-9._-]+ )?(check|fmt|clippy|build)/ ||
+        tolower($0) ~ /cargo (\+[a-z0-9._-]+ )?(check|test|fmt|clippy|build)/ ||
         tolower($0) ~ /rustfmt|cargo-fmt|clippy::/ ||
         tolower($0) ~ /compil(e|es|ed|ation)/ {
             printf "%d: %s\n", NR, $0
         }
     '
 )
-if [ -n "$routine_verification" ]; then
+if [ -n "$verification_commands" ]; then
     cat >&2 <<EOF
-commit-msg: Verification must not cite routine build or lint commands
+commit-msg: Verification must name the specific tested behavior
 
-cargo check, cargo fmt, cargo clippy, cargo build and compiling are
-required for every change and do not verify the changed behavior. Describe
-how the behavior itself was exercised - a manual run, a functional or
-regression test covering it, or before-and-after measurements - or drop the
-Verification section entirely.
+A command invocation does not show which changed behavior was exercised.
+Name the specific scenario and observed result instead of citing cargo check,
+cargo test, cargo fmt, cargo clippy, cargo build or compiling. Drop the
+Verification section when there is no behavior-specific result to report.
 
 Offending lines:
-$routine_verification
+$verification_commands
 EOF
     exit 1
 fi

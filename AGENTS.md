@@ -150,18 +150,21 @@ and the important implementation details. Bullet lists are common. Keep the
 subject focused on the user-visible or architectural effect, not just the files
 touched.
 
-Do not add a `Verification` section merely to list routine development checks
-such as `cargo check`, `cargo fmt`, `cargo clippy`, compilation, or analogous
-formatting and lint commands. These checks are mandatory parts of modifying the
-codebase; by themselves they do not verify that the changed behavior works.
+A `Verification` section must identify the specific changed behavior that was
+tested and the observed result. Passing `cargo test`, even for a selected
+package or module, is not sufficient by itself because it does not state which
+behavior the test exercises. Do not mention `cargo check`, `cargo test`, `cargo
+fmt`, `cargo clippy`, compilation, or analogous build and lint commands in that
+section.
 
 Include a `Verification` section only when the change itself was meaningfully
-validated, such as by manually exercising the affected behavior, running an
-automated functional or regression test that directly covers it, or collecting
-concrete before-and-after performance data. If no such validation was performed,
-omit the section instead of substituting routine tool output as boilerplate.
-The commit-msg hook rejects a `Verification` section that mentions `cargo
-check`, `cargo fmt`, `cargo clippy`, `cargo build`, rustfmt, or compiling.
+validated, such as by manually exercising the affected behavior, describing the
+scenario and outcome of an automated functional or regression test that directly
+covers it, or collecting concrete before-and-after performance data. If no such
+validation was performed, omit the section instead of substituting routine tool
+output as boilerplate. The commit-msg hook rejects a `Verification` section that
+mentions `cargo check`, `cargo test`, `cargo fmt`, `cargo clippy`, `cargo build`,
+rustfmt, or compiling.
 
 When an AI coding agent materially contributes to the change, end the
 commit message with a `Co-Authored-By` trailer naming the model that
