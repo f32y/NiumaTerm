@@ -37,6 +37,11 @@ pub(in crate::agent) enum Backend {
     Test(TestBackend),
 }
 
+pub(super) struct ConversationTitleRequest {
+    pub(super) description: String,
+    pub(super) opening_line: String,
+}
+
 #[cfg(test)]
 pub(in crate::agent) struct TestBackend {
     send_outcomes: VecDeque<SendOutcome>,
@@ -152,6 +157,47 @@ impl Backend {
         }
     }
 
+    /// Submit a message that gives an unnamed conversation its first title.
+    /// Each provider owns the ordering its persistence model needs.
+    pub(super) fn send_user_message_with_title(
+        &mut self,
+        text: &str,
+        settings: &ThreadSettings,
+        skill: Option<&SkillReference>,
+        attachments: &PendingAttachments,
+        scratch: &Path,
+        title: &ConversationTitleRequest,
+    ) -> SendOutcome {
+        match self {
+            Backend::Codex(session) => {
+                let paths = write_attachments(attachments, scratch);
+                session.send_user_message_with_thread_name(
+                    text,
+                    settings,
+                    skill,
+                    &paths,
+                    &title.opening_line,
+                )
+            }
+            Backend::Claude(session) => {
+                let outcome =
+                    session.send_user_message(text, settings, &inline_images(attachments));
+                if matches!(outcome, SendOutcome::StartedTurn | SendOutcome::Steered) {
+                    session.request_session_title(&title.description);
+                }
+                outcome
+            }
+            Backend::DeepSeek(session) => {
+                session.send_user_message(text, &inline_images(attachments))
+            }
+            #[cfg(test)]
+            Backend::Test(session) => session
+                .send_outcomes
+                .pop_front()
+                .unwrap_or(SendOutcome::NotReady),
+        }
+    }
+
     pub(in crate::agent) fn adapter_commands(&self) -> Vec<SlashCommandInfo> {
         match self {
             Backend::Codex(_) => app_server::Session::adapter_commands(),
@@ -245,31 +291,6 @@ impl Backend {
             Backend::DeepSeek(session) => session.execute_slash_command(name, arguments),
             #[cfg(test)]
             Backend::Test(session) => session.slash_outcome.clone(),
-        }
-    }
-
-    /// Ask for a name for this conversation. Claude's CLI summarizes
-    /// `description` with a model call and answers later through
-    /// `TitleUpdated`; Codex has no naming of its own, so `opening_line` is
-    /// stored on the thread and reported straight back. Returning the events
-    /// lets one call site serve both without knowing which it is talking to.
-    pub(in crate::agent) fn request_title(
-        &mut self,
-        description: &str,
-        opening_line: String,
-    ) -> Vec<SessionEvent> {
-        match self {
-            Backend::Claude(session) => {
-                session.request_session_title(description);
-                Vec::new()
-            }
-            Backend::Codex(session) => {
-                session.set_thread_name(&opening_line);
-                vec![SessionEvent::TitleUpdated(opening_line)]
-            }
-            Backend::DeepSeek(_) => Vec::new(),
-            #[cfg(test)]
-            Backend::Test(_) => Vec::new(),
         }
     }
 
