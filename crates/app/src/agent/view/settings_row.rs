@@ -565,7 +565,13 @@ impl AgentPane {
                                     .left(relative(index as f32 / stops as f32))
                                     .w(width)
                                     .rounded_full()
-                                    .bg(cx.theme().background)
+                                    // The theme's background carries the
+                                    // window translucency, which the Mica
+                                    // materials drive to zero; the thumb would
+                                    // then be nothing but its own shadow. It
+                                    // reads as a solid cap over the track, so
+                                    // it takes the base color at full alpha.
+                                    .bg(cx.theme().background.alpha(1.0))
                                     .shadow_sm()
                             }))
                             .child(h_flex().absolute().inset_0().children(

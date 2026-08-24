@@ -38,21 +38,27 @@ struct TabDragPreview {
 
 impl Render for TabDragPreview {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div().rounded(UI_RADIUS).bg(cx.theme().background).child(
-            div()
-                .w(px(self.width))
-                .h(px(30.0))
-                .px_2()
-                .flex()
-                .items_center()
-                .justify_center()
-                .overflow_hidden()
-                .rounded(UI_RADIUS)
-                .bg(cx.theme().tab_active)
-                .text_sm()
-                .text_color(cx.theme().tab_active_foreground)
-                .child(div().truncate().child(self.label.clone())),
-        )
+        // The chrome background carries the window translucency, and the Mica
+        // materials drive it to zero, so the composite base has to be taken at
+        // full alpha or the ghost is back to a bare alpha fill.
+        div()
+            .rounded(UI_RADIUS)
+            .bg(cx.theme().background.alpha(1.0))
+            .child(
+                div()
+                    .w(px(self.width))
+                    .h(px(30.0))
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .overflow_hidden()
+                    .rounded(UI_RADIUS)
+                    .bg(cx.theme().tab_active)
+                    .text_sm()
+                    .text_color(cx.theme().tab_active_foreground)
+                    .child(div().truncate().child(self.label.clone())),
+            )
     }
 }
 
