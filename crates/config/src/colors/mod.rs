@@ -470,16 +470,6 @@ pub struct ColorBuilder {
 }
 
 impl ColorBuilder {
-    #[allow(dead_code)]
-    fn new(red: f64, green: f64, blue: f64, alpha: f64) -> Self {
-        Self {
-            red,
-            green,
-            blue,
-            alpha,
-        }
-    }
-
     pub fn from_hex(mut hex: String, conversion_type: Format) -> Result<Self, String> {
         // Compiled once: this runs for every color of every theme, and regex
         // compilation dwarfs the match itself.
