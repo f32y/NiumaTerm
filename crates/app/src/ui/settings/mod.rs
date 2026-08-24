@@ -69,7 +69,7 @@ use crate::ui::settings::agent_page::{installation_update_title, installation_ve
 use crate::ui::settings::agent_profile_dialog::open_agent_profile_dialog;
 use crate::ui::settings::agent_profile_list::agent_profile_list;
 use crate::ui::settings::appearance_page::appearance_page;
-use crate::ui::settings::card::{card_row, card_text_input};
+use crate::ui::settings::card::{card_row, card_text_input, description_hint};
 use crate::ui::settings::fields::{
     background_image_field, background_image_opacity_field, background_opacity_field,
 };

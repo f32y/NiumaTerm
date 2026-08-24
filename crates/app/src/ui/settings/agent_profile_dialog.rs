@@ -588,12 +588,16 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
     let env_section = v_flex()
         .w_full()
         .gap_2()
-        .child(Label::new(i18n("settings-agent-profile-environment")).text_sm())
         .child(
-            div()
-                .text_sm()
-                .text_color(cx.theme().muted_foreground)
-                .child(i18n("settings-agent-profile-environment-description")),
+            h_flex()
+                .gap_1()
+                .items_center()
+                .child(Label::new(i18n("settings-agent-profile-environment")).text_sm())
+                .child(description_hint(
+                    "environment",
+                    i18n("settings-agent-profile-environment-description").into(),
+                    cx,
+                )),
         )
         .child(env_var_table(&profile.env, window, cx))
         .child(
