@@ -2,20 +2,23 @@
 set -eu
 
 collect_staged_code_files() {
-    for file in $staged_files; do
-        if printf '%s\n' "$file" | grep -Eq "$protected_paths"; then
-            continue
-        fi
+    printf '%s\n' "$staged_files" |
+        awk -v protected="$protected_paths" -v code_path="$code_file_pattern" '
+            $0 ~ protected { next }
+            $0 ~ code_path { print }
+        '
+}
 
-        case "$file" in
-            Cargo.toml|Cargo.lock|*/Cargo.toml|*/Cargo.lock|build.rs|*/build.rs|\
-            *.rs|*.zig|*.c|*.cc|*.cpp|*.cxx|*.h|*.hh|*.hpp|*.hxx|*.m|*.mm|*.swift|\
-            *.py|*.sh|*.bash|*.zsh|*.ps1|*.js|*.jsx|*.ts|*.tsx|*.css|*.scss|*.html|\
-            *.wgsl|*.hlsl|*.metal)
-                printf '%s\n' "$file"
-                ;;
-        esac
-    done
+collect_added_comment_lines() {
+    git diff --cached --diff-filter=ACMR -U0 |
+        awk -v protected="$protected_paths" -v code_path="$code_file_pattern" '
+            /^\+\+\+ b\// {
+                file = substr($0, 7)
+                code = file !~ protected && file ~ code_path
+                next
+            }
+            code && /^\+[[:space:]]*(\/\/[/!]?|#|\/\*|\*|<!--)/ { print file ": " $0 }
+        '
 }
 
 check_ai_docs_are_separate() {
@@ -105,13 +108,7 @@ check_comment_rationale() {
         return 0
     fi
 
-    comment_lines=$(
-        for file in $code_files; do
-            git diff --cached --diff-filter=ACMR -U0 -- "$file" |
-                grep -E '^\+[[:space:]]*(//[/!]?|#|/\*|\*|<!--)' |
-                sed "s|^|$file: |" || true
-        done
-    )
+    comment_lines=$(collect_added_comment_lines)
     if [ -z "$comment_lines" ]; then
         return 0
     fi
@@ -156,7 +153,7 @@ check_rustfmt_and_clippy() {
         exit 1
     }
 
-    changed_packages=$(
+    package_classes=$(
         printf '%s\n' "$workspace_metadata" |
             jq -r --arg changed_files "$rust_files" '
                 def normalize_path: gsub("\\\\"; "/");
@@ -177,7 +174,7 @@ check_rustfmt_and_clippy() {
                             | sub("/Cargo.toml$"; ""))
                       }
                   ] as $packages
-                | [
+                | ([
                     $files[] as $file
                     | [$packages[]
                         | select(.directory as $directory
@@ -186,60 +183,54 @@ check_rustfmt_and_clippy() {
                     | sort_by(.directory | length)
                     | last
                     | select(. != null)
-                    | .name
+                  ] | unique_by(.name)[]) as $package
+                | [
+                    (if ($package.directory | startswith($root + "/crates/"))
+                     then "first_party"
+                     else "other"
+                     end),
+                    $package.name
                   ]
-                | unique[]
+                | @tsv
             '
     ) || {
-        echo "pre-commit: failed to select changed workspace members" >&2
+        echo "pre-commit: failed to classify changed workspace members" >&2
         exit 1
     }
-    changed_packages=$(printf '%s\n' "$changed_packages" | tr -d '\r')
+    package_classes=$(printf '%s\n' "$package_classes" | tr -d '\r')
 
     rustfmt_files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.rs')
     if [ -n "$rustfmt_files" ]; then
         echo "pre-commit: checking rustfmt on staged Rust files"
+        set --
         while IFS= read -r file; do
-            rustfmt --edition 2024 --check --config skip_children=true "$file"
+            set -- "$@" "$file"
         done <<EOF
 $rustfmt_files
 EOF
+        rustfmt --edition 2024 --check --config skip_children=true "$@"
     fi
 
-    if [ -z "$changed_packages" ]; then
+    if [ -z "$package_classes" ]; then
         echo "pre-commit: staged Rust files are outside workspace members; skipping clippy"
         return 0
     fi
 
-    set --
-    for package in $changed_packages; do
-        set -- "$@" -p "$package"
-    done
+    first_party_packages=$(printf '%s\n' "$package_classes" |
+        awk -F '\t' '$1 == "first_party" { print $2 }')
+    other_packages=$(printf '%s\n' "$package_classes" |
+        awk -F '\t' '$1 == "other" { print $2 }')
 
-    echo "pre-commit: running clippy on changed workspace members"
-    cargo clippy --all-targets --quiet "$@"
+    if [ -n "$other_packages" ]; then
+        set --
+        for package in $other_packages; do
+            set -- "$@" -p "$package"
+        done
 
-    first_party_packages=$(
-        printf '%s\n' "$workspace_metadata" |
-            jq -r --arg changed_packages "$changed_packages" '
-                def normalize_path: gsub("\\\\"; "/");
+        echo "pre-commit: running clippy on changed non-first-party members"
+        cargo clippy --all-targets --no-deps --quiet "$@"
+    fi
 
-                . as $workspace
-                | ($workspace.workspace_root | normalize_path) as $root
-                | ($changed_packages | split("\n")) as $changed
-                | $workspace.packages[]
-                | select(.id as $id | $workspace.workspace_members | index($id))
-                | select(.name as $name | $changed | index($name))
-                | select(
-                    (.manifest_path | normalize_path)
-                    | startswith($root + "/crates/")
-                  )
-                | .name
-            '
-    ) || {
-        echo "pre-commit: failed to select changed first-party workspace members" >&2
-        exit 1
-    }
     first_party_packages=$(printf '%s\n' "$first_party_packages" | tr -d '\r')
     if [ -z "$first_party_packages" ]; then
         echo "pre-commit: no changed first-party workspace members; skipping clippy::absolute_paths"
@@ -256,7 +247,8 @@ EOF
 }
 
 branch=$(git symbolic-ref --quiet --short HEAD || true)
-protected_paths='^(\.agents|\.claude|\.codex|\.scratch|openspec|spec|docs/adr|docs/agents|docs/superpowers)(/|$)'
+protected_paths='^([.]agents|[.]claude|[.]codex|[.]scratch|openspec|spec|docs/adr|docs/agents|docs/superpowers)(/|$)'
+code_file_pattern='(^|/)(Cargo[.](toml|lock)|build[.]rs)$|[.](rs|zig|c|cc|cpp|cxx|h|hh|hpp|hxx|m|mm|swift|py|sh|bash|zsh|ps1|js|jsx|ts|tsx|css|scss|html|wgsl|hlsl|metal)$'
 staged_files=$(git diff --cached --name-only --diff-filter=ACMRD)
 protected_files=$(printf '%s\n' "$staged_files" | grep -E "$protected_paths" || true)
 code_files=$(collect_staged_code_files)
