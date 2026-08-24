@@ -154,6 +154,10 @@ pub(crate) struct Shell {
     /// user left; the element state the component keeps by default would be
     /// dropped the frame the surface stops rendering.
     settings_state: Option<Entity<SettingsState>>,
+    /// Whether the settings surface was the active tab at the last activation.
+    /// Comparing against it turns every activation into an edge detector, so
+    /// leaving the surface can flush the edits it left in the global.
+    settings_was_active: bool,
     focus: FocusHandle,
     /// This shell's window in the `WindowRegistry`; all state writes target
     /// this entry.
@@ -327,6 +331,7 @@ impl Shell {
             root_observed: false,
             theme_watcher: None,
             settings_state: None,
+            settings_was_active: false,
             focus: cx.focus_handle(),
             window_id,
             token_usage: cx.new(TokenUsageView::new),
@@ -556,10 +561,21 @@ impl Shell {
     pub(crate) fn focus_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.ensure_active_tab_live(window, cx);
 
+        let settings_active = self.workspaces.active_tabs().active().is_settings();
+
+        // Settings edits only live in the global until something writes them
+        // out. Switching to another workspace leaves the surface on screen
+        // for an unbounded time, so treat the departure as a commit point
+        // instead of holding the edits until the entry is closed.
+        if self.settings_was_active && !settings_active {
+            cx.global::<AppSettings>().save();
+        }
+        self.settings_was_active = settings_active;
+
         // The settings surface owns its inner focus (its search field and
         // controls), and it has no pane to hand the keyboard to, so focus
         // stops at the shell.
-        if self.workspaces.active_tabs().active().is_settings() {
+        if settings_active {
             window.focus(&self.focus, cx);
 
             return;
@@ -805,6 +821,9 @@ impl Shell {
         cx.global::<AppSettings>().save();
         // Pick up relay URL / token edits made while the entry was open.
         ui::settings::reconcile_remote_host(cx);
+
+        // The surface is gone, so the next activation has nothing to flush.
+        self.settings_was_active = false;
 
         self.theme_watcher = None;
         // Reopening starts on the first page, matching what the modal did.
