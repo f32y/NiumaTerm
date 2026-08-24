@@ -231,7 +231,7 @@
 "settings-agent-profile-launcher" = "Launcher"
 "settings-agent-profile-launcher-custom" = "Custom"
 "settings-agent-profile-launcher-description" = "Run DeepSeek Harness from its npm package, or from an executable you point at."
-"settings-agent-profile-launcher-npx" = "Via npx @deepseek-ai/dsh"
+"settings-agent-profile-launcher-npx" = "Via npx @deepseek-ai/dsh@latest"
 "settings-agent-profile-executable" = "Executable Path"
 "settings-agent-profile-executable-description" = "Executable name or full path; a bare name resolves via PATH."
 "settings-agent-profile-model" = "Model"
