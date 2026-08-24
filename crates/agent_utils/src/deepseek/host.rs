@@ -232,8 +232,16 @@ pub const DEFAULT_EXECUTABLE: &str = "dsh";
 /// rather than an installed binary. `-y` is not optional: the host is spawned
 /// with a null stdin, so npx's prompt before fetching a package it does not
 /// have cached could never be answered.
+///
+/// The `@latest` tag is what makes this launcher mean the published package.
+/// npx resolves a bare package name against what is already installed first,
+/// so a machine carrying an older global `dsh` would keep running that one and
+/// this profile would differ from the executable launcher in nothing but its
+/// spelling. Naming a tag also keeps the harness current on its own, which
+/// matters while it is pre-release: image input, for one, exists only from
+/// 0.1.1-rc.1 onward.
 pub const NPX_EXECUTABLE: &str = "npx";
-pub const NPX_ARGUMENTS: [&str; 2] = ["-y", "@deepseek-ai/dsh"];
+pub const NPX_ARGUMENTS: [&str; 2] = ["-y", "@deepseek-ai/dsh@latest"];
 
 fn address_in(line: &str) -> Option<String> {
     let start = line.find(ADDRESS_MARKER)?;
