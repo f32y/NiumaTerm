@@ -2,8 +2,6 @@
 /// on, re-exported so consumers drive the PTY event loop through
 /// `nmt_platform::{Poll, ...}` without taking their own (possibly mismatched)
 /// `mio` dependency.
-use std::sync;
-
 use libc::c_ushort;
 pub use mio::{Events, Interest, Poll, Token, Waker};
 
@@ -16,7 +14,7 @@ pub use crate::unix::*;
 
 #[cfg(windows)]
 pub mod windows;
-use std::io;
+use std::{io, sync};
 
 #[cfg(windows)]
 use crate::windows as platform;
@@ -24,25 +22,7 @@ use crate::windows as platform;
 pub use crate::windows::*;
 
 pub const APP_ID: &str = "NiumaTerm";
-
-/// Process-wide toggle: manage spawned shells with a Windows Job Object
-/// (`KILL_ON_JOB_CLOSE`), so closing a tab kills the shell's entire process
-/// tree. Read at spawn time — only affects PTYs created afterwards. No-op on
-/// non-Windows platforms.
-static JOB_MANAGEMENT: sync::atomic::AtomicBool = sync::atomic::AtomicBool::new(false);
-
-pub fn set_job_management(enabled: bool) {
-    JOB_MANAGEMENT.store(enabled, sync::atomic::Ordering::Relaxed);
-}
-
-pub fn job_management_enabled() -> bool {
-    JOB_MANAGEMENT.load(sync::atomic::Ordering::Relaxed)
-}
-
-#[cfg_attr(not(windows), allow(dead_code))]
-pub(crate) fn job_management() -> bool {
-    job_management_enabled()
-}
+pub const USES_CONPTY: bool = cfg!(windows);
 
 #[repr(C)]
 pub struct Winsize {

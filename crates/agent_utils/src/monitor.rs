@@ -524,13 +524,5 @@ pub fn request_native_delivery(
     exact_visible_route != Some(notification_route)
 }
 
-pub fn exact_window_is_active(
-    gpui_active: bool,
-    foreground_matches_window: bool,
-    foreground_minimized: bool,
-) -> bool {
-    gpui_active && foreground_matches_window && !foreground_minimized
-}
-
 pub const COMPLETION_QUIET_WINDOW: Duration = Duration::from_millis(1_500);
 pub const ACTIVE_STATE_STALE_AFTER: Duration = Duration::from_secs(30 * 60);

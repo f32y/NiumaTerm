@@ -1,17 +1,4 @@
-use std::path::PathBuf;
-use std::{env, fs, process};
-
-use crate::update::InstallError;
-use crate::update::install::{INCOMING_SUFFIX, PREVIOUS_SUFFIX, differing, swap};
-
-fn scratch(name: &str) -> PathBuf {
-    let directory = env::temp_dir().join(format!("nmt-update-{}-{name}", process::id()));
-
-    let _ = fs::remove_dir_all(&directory);
-    fs::create_dir_all(&directory).expect("create the scratch directory");
-
-    directory
-}
+use crate::update::install::differing;
 
 fn versions(
     entries: [(&'static str, Option<&str>, Option<&str>); 3],
@@ -56,51 +43,4 @@ fn a_version_that_cannot_be_read_counts_as_a_difference() {
         differing(&versions),
         ["NiumaTerm.exe", "NmtAgentHook.exe", "conpty.dll"]
     );
-}
-
-#[test]
-fn a_completed_swap_leaves_the_old_files_renamed_aside() {
-    let install = scratch("swap");
-    let names = ["one.txt", "two.txt"];
-
-    for name in names {
-        fs::write(install.join(name), "installed").unwrap();
-        fs::write(install.join(format!("{name}{INCOMING_SUFFIX}")), "staged").unwrap();
-    }
-
-    swap(&install, &names).expect("every incoming file is in place");
-
-    for name in names {
-        assert_eq!(fs::read_to_string(install.join(name)).unwrap(), "staged");
-        assert_eq!(
-            fs::read_to_string(install.join(format!("{name}{PREVIOUS_SUFFIX}"))).unwrap(),
-            "installed"
-        );
-        assert!(!install.join(format!("{name}{INCOMING_SUFFIX}")).exists());
-    }
-}
-
-#[test]
-fn a_swap_that_fails_part_way_puts_back_what_it_moved() {
-    let install = scratch("rollback");
-    let names = ["one.txt", "two.txt", "three.txt"];
-
-    for name in names {
-        fs::write(install.join(name), "installed").unwrap();
-        fs::write(install.join(format!("{name}{INCOMING_SUFFIX}")), "staged").unwrap();
-    }
-
-    // The third file has nothing to move into place, which is the failure the
-    // first two have to be undone for.
-    fs::remove_file(install.join(format!("three.txt{INCOMING_SUFFIX}"))).unwrap();
-
-    assert_eq!(swap(&install, &names), Err(InstallError::Replace));
-
-    for name in names {
-        assert_eq!(fs::read_to_string(install.join(name)).unwrap(), "installed");
-        assert!(!install.join(format!("{name}{PREVIOUS_SUFFIX}")).exists());
-        // An abandoned swap also takes its copies with it, so a later attempt
-        // never finds a half-fetched package waiting in the installation.
-        assert!(!install.join(format!("{name}{INCOMING_SUFFIX}")).exists());
-    }
 }

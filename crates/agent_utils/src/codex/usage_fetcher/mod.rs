@@ -1,16 +1,14 @@
 //! Fetches the active Codex account's remaining rate limits through the Codex CLI.
 
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
-use std::os::windows::process::CommandExt as _;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use nmt_platform::windows::process::{KillOnCloseJob, hidden_cmd_command};
 use serde_json::{Value, from_str};
-use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
-use crate::subprocess::KillOnCloseJob;
 use crate::usage::{
     FIVE_HOUR_WINDOW_MINUTES, UsageResetCredits, UsageSnapshot, UsageWindow, WEEKLY_WINDOW_MINUTES,
     parse_timestamp_millis,
@@ -21,11 +19,8 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 pub fn fetch() -> Result<UsageSnapshot, String> {
     // The app-server is the Codex-owned boundary for OAuth refresh, account
     // selection, and backend compatibility; NiumaTerm only reads its RPC result.
-    let mut child = Command::new("cmd.exe")
+    let mut child = hidden_cmd_command("codex")
         .args([
-            "/D",
-            "/C",
-            "codex",
             // Codex 0.149 dropped the `untrusted` approval policy; the `-c`
             // override also replaces a legacy `approval_policy` in config.toml
             // before the CLI validates it and refuses to start.
@@ -40,7 +35,6 @@ pub fn fetch() -> Result<UsageSnapshot, String> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .creation_flags(CREATE_NO_WINDOW)
         .spawn()
         .map_err(|err| format!("failed to start Codex app-server: {err}"))?;
 
@@ -48,7 +42,7 @@ pub fn fetch() -> Result<UsageSnapshot, String> {
     // containment guarantees the whole tree dies on timeout or error paths;
     // killing only cmd.exe would strand the descendant holding the output
     // pipes, and with it the reader threads.
-    let job = KillOnCloseJob::attach_or_kill(&mut child)?;
+    let job = KillOnCloseJob::attach_or_kill(&mut child).map_err(|error| error.to_string())?;
 
     let mut stdin = child.stdin.take().ok_or("Codex stdin unavailable")?;
     let stdout = child.stdout.take().ok_or("Codex stdout unavailable")?;
@@ -222,89 +216,4 @@ fn parse_reset_credits(value: &Value) -> Option<UsageResetCredits> {
 }
 
 #[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::*;
-
-    #[test]
-    fn formats_remaining_codex_windows() {
-        let response = json!({
-            "id": 2,
-            "result": {
-                "rateLimits": {
-                    "primary": { "usedPercent": 12.4, "windowDurationMins": 10080 },
-                    "secondary": { "usedPercent": 67.6, "windowDurationMins": 300 }
-                }
-            }
-        });
-        assert_eq!(
-            parse_rate_limits(&response).unwrap(),
-            UsageSnapshot {
-                five_hour: Some(UsageWindow::new(32, FIVE_HOUR_WINDOW_MINUTES)),
-                weekly: Some(UsageWindow::new(88, WEEKLY_WINDOW_MINUTES)),
-                ..UsageSnapshot::default()
-            }
-        );
-    }
-
-    #[test]
-    fn rejects_missing_windows() {
-        let response = json!({ "id": 2, "result": { "rateLimits": {} } });
-        assert!(parse_rate_limits(&response).is_err());
-    }
-
-    #[test]
-    fn keeps_the_available_window() {
-        let response = json!({
-            "id": 2,
-            "result": {
-                "rateLimits": {
-                    "primary": { "usedPercent": 12.4, "windowDurationMins": 10080 }
-                }
-            }
-        });
-        assert_eq!(
-            parse_rate_limits(&response).unwrap(),
-            UsageSnapshot {
-                weekly: Some(UsageWindow::new(88, WEEKLY_WINDOW_MINUTES)),
-                ..UsageSnapshot::default()
-            }
-        );
-    }
-
-    #[test]
-    fn keeps_reset_plan_and_reset_credit_metadata() {
-        let response = json!({
-            "id": 2,
-            "result": {
-                "rateLimits": {
-                    "planType": "plus",
-                    "primary": {
-                        "usedPercent": 25,
-                        "windowDurationMins": 300,
-                        "resetsAt": 1_770_000_000
-                    }
-                },
-                "rateLimitResetCredits": {
-                    "availableCount": 2,
-                    "credits": [
-                        { "status": "spent", "expiresAt": 1_770_000_010 },
-                        { "status": "available", "expiresAt": "2026-02-02T02:40:00Z" }
-                    ]
-                }
-            }
-        });
-
-        let usage = parse_rate_limits(&response).unwrap();
-        assert_eq!(usage.plan_type.as_deref(), Some("plus"));
-        assert_eq!(usage.five_hour.unwrap().resets_at, Some(1_770_000_000_000));
-        assert_eq!(
-            usage.reset_credits,
-            Some(UsageResetCredits {
-                available_count: 2,
-                next_expires_at: Some(1_770_000_000_000),
-            })
-        );
-    }
-}
+mod tests;

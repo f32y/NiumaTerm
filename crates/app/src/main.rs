@@ -3,7 +3,7 @@
 
 use std::ffi::OsString;
 use std::rc::Rc;
-use std::{env, path, process, ptr, time};
+use std::{env, path, process, time};
 
 use clap::{Arg, ArgAction, Command as ClapCommand};
 use futures::StreamExt as _;
@@ -16,10 +16,9 @@ use gpui_windows::WindowsPlatform;
 use nmt_agent_utils::{AgentEvent, AgentRoute, agent_process};
 use nmt_config::local_state::{self, LocalState};
 use nmt_config::{Config, enable_testing_mode, get, init};
-use nmt_platform::set_job_management;
 use nmt_platform::windows::ipc as platform_ipc;
+use nmt_platform::windows::window::show_error_dialog;
 use tracing::warn;
-use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 
 mod agent;
 mod cli;
@@ -259,8 +258,6 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
 
             ui::apply_window_translucency(cx);
 
-            set_job_management(cx.global::<AppSettings>().manage_subprocess_job);
-
             // Terminal and agent scrolling are their own elements carrying
             // their own switch; this one covers every container that scrolls
             // through a plain scroll handle, which is the rest of the app.
@@ -281,8 +278,6 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
                 let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
                 agent::updates::reconcile_profiles(&agent_profiles, cx);
                 update::settings_changed(cx);
-                set_job_management(cx.global::<AppSettings>().manage_subprocess_job);
-
                 let smooth_panels = cx.global::<AppSettings>().smooth_scrolling.panels_enabled();
                 cx.set_smooth_wheel_scrolling(smooth_panels);
 
@@ -507,72 +502,11 @@ fn startup_error_and_exit(file: &str, error: &str) -> ! {
 }
 
 pub(crate) fn show_startup_error_dialog(message: &str) {
-    let title: Vec<u16> = nmt_i18n::i18n("startup-configuration-error")
-        .encode_utf16()
-        .chain(Some(0))
-        .collect();
-    let message: Vec<u16> = message.encode_utf16().chain(Some(0)).collect();
-    unsafe {
-        MessageBoxW(
-            ptr::null_mut(),
-            message.as_ptr(),
-            title.as_ptr(),
-            MB_OK | MB_ICONERROR,
-        );
-    }
+    show_error_dialog(&nmt_i18n::i18n("startup-configuration-error"), message);
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn keeps_url_argument_for_normal_launch() {
-        let StartupArgs { url, .. } =
-            parse_startup_args_from(["NiumaTerm", "nmt://action/new_tab?path=C%3A%2FWorkspace"]);
-        assert_eq!(
-            url.as_deref(),
-            Some("nmt://action/new_tab?path=C%3A%2FWorkspace")
-        );
-    }
-
-    #[test]
-    fn parses_shell_extension_path_flags() {
-        let StartupArgs { url, .. } =
-            parse_startup_args_from(["NiumaTerm", "--new-tab", r"C:\A Dir"]);
-        assert_eq!(
-            url.as_deref(),
-            Some("nmt://action/new_tab?path=C%3A%5CA%20Dir")
-        );
-
-        let StartupArgs { url, .. } =
-            parse_startup_args_from(["NiumaTerm", "--new-window", r"C:\A&B"]);
-        assert_eq!(
-            url.as_deref(),
-            Some("nmt://action/new_window?path=C%3A%5CA%26B")
-        );
-    }
-
-    #[test]
-    fn parses_testing_mode() {
-        let StartupArgs { url, testing, .. } = parse_startup_args_from(["NiumaTerm", "--testing"]);
-        assert!(testing);
-        assert!(url.is_none());
-
-        let StartupArgs { testing, .. } = parse_startup_args_from(["NiumaTerm"]);
-        assert!(!testing);
-    }
-
-    #[test]
-    fn parses_profiling_flag() {
-        let StartupArgs { profiling, .. } =
-            parse_startup_args_from(["NiumaTerm", "--enable-profiling"]);
-        assert!(profiling);
-
-        let StartupArgs { profiling, .. } = parse_startup_args_from(["NiumaTerm"]);
-        assert!(!profiling);
-    }
-}
+mod tests;
 
 /// The most recently active window's shell, falling back to the newest open
 /// window when none was activated yet (or the active one just closed).

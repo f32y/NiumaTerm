@@ -39,7 +39,7 @@ use gpui_component::{
 use nmt_agent_utils::update::{ProviderKind, UpdatePhase};
 use nmt_agent_utils::{
     AgentActivityPolicy, AgentEvent, AgentMonitor, AgentNotification, AgentRoute,
-    AgentRuntimeStatus, agent_process, exact_window_is_active, request_native_delivery,
+    AgentRuntimeStatus, agent_process, request_native_delivery,
 };
 use nmt_config::get;
 #[cfg(test)]
@@ -51,7 +51,6 @@ use nmt_platform::{
     NativeNotification, remove_notification, show_notification, system_notification_enabled,
 };
 use tracing::warn;
-use windows_sys::Win32::Foundation::HWND;
 
 use crate::agent::updates::{
     self as agent_updates, AgentUpdates, FocusedVisibleLifetime, NotificationPrimaryAction,

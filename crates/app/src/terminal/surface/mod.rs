@@ -25,15 +25,15 @@ mod scroll;
 mod selection;
 
 #[cfg(test)]
-use input::paste_payload;
-pub(crate) use input::{TerminalKeyAction, TerminalKeyResult};
-pub(crate) use mouse::{
+use crate::terminal::surface::input::paste_payload;
+pub(crate) use crate::terminal::surface::input::{TerminalKeyAction, TerminalKeyResult};
+pub(crate) use crate::terminal::surface::mouse::{
     SurfaceCell, SurfaceCellSide, SurfaceMouseButton, SurfaceMouseEventKind, SurfaceScreenCell,
 };
 #[cfg(test)]
-use mouse::{mouse_button_code, mouse_motion_code, mouse_report_mods};
+use crate::terminal::surface::mouse::{mouse_button_code, mouse_motion_code, mouse_report_mods};
 #[cfg(test)]
-use selection::{block_selection_range, selection_screen_range};
+use crate::terminal::surface::selection::{block_selection_range, selection_screen_range};
 
 pub struct TerminalSurface {
     session: TerminalSession,
@@ -119,6 +119,7 @@ impl TerminalSurface {
         starting_title: String,
         cursor_shape: CursorShape,
         environment_overrides: Vec<(String, String)>,
+        manage_process_tree: bool,
     ) -> Result<Self, String> {
         let wake_sender = WakeSender::from_fn(move |kind: Wake| {
             wake.signal(kind);
@@ -133,6 +134,7 @@ impl TerminalSurface {
             rows: metrics::ROWS,
             cursor_shape,
             environment_overrides,
+            manage_process_tree,
             ..TerminalSessionConfig::default()
         };
 

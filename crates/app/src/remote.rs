@@ -7,11 +7,12 @@
 //! (the enable toggle, dialog close, startup), never per keystroke, and
 //! restarts the service only when the effective config actually changes.
 
+use std::fs;
 use std::path::PathBuf;
-use std::{env, fs};
 
 use nmt_config::remote_session::RemoteSessionConfig;
 use nmt_i18n::i18n;
+use nmt_platform::windows::environment::computer_name;
 use nmt_remote_net::{
     AttachTarget, HostConfig, HostHandle, PairingCode, ProtocolSessionOptions, RemoteSession,
     hex_decode, hex_encode, load_or_create_keypair, open_remote_session,
@@ -195,5 +196,5 @@ pub fn connect_new_session(host: &KnownHost) -> Result<RemoteSession, String> {
 }
 
 fn hostname() -> String {
-    env::var("COMPUTERNAME").unwrap_or_else(|_| i18n("remote-default-client-name").to_owned())
+    computer_name().unwrap_or_else(|| i18n("remote-default-client-name").to_owned())
 }

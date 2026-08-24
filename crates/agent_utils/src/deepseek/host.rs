@@ -9,11 +9,11 @@ use std::sync::{Arc, Weak};
 use std::thread;
 use std::time::Duration;
 
+use nmt_platform::windows::process::KillOnCloseJob;
 use parking_lot::Mutex;
 
 use crate::deepseek::api::ApiClient;
 use crate::launcher::AgentCli;
-use crate::subprocess::KillOnCloseJob;
 
 /// The host announces where it bound on stdout, which is the only way to learn
 /// the port when it is asked to pick one. Everything before this prefix on the
@@ -148,7 +148,8 @@ impl Host {
         let mut child = command
             .spawn()
             .map_err(|error| HostError::FailedToStart(error.to_string()))?;
-        let job = KillOnCloseJob::attach_or_kill(&mut child).map_err(HostError::FailedToStart)?;
+        let job = KillOnCloseJob::attach_or_kill(&mut child)
+            .map_err(|error| HostError::FailedToStart(error.to_string()))?;
 
         let stdout = child
             .stdout

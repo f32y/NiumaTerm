@@ -6,9 +6,9 @@ use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::{error, fmt, io, thread};
 
 use nmt_config::{CursorShape, active_colors};
-use nmt_platform::{
-    WinsizeBuilder, create_pty_with_env, job_other_process_count, set_job_management,
-};
+use nmt_platform::windows::powershell::DEFAULT_SHELL;
+use nmt_platform::windows::process::ProcessTree;
+use nmt_platform::{WinsizeBuilder, create_managed_pty_with_env, create_pty_with_env};
 use nmt_terminal::event::{EventListener, Msg, MsgSender, TerminalEvent, WindowId};
 use nmt_terminal::ghostty::GhosttyTerminal;
 use nmt_terminal::pty_pipe::{SessionOptions as PipeOptions, start_session};
@@ -41,7 +41,7 @@ pub struct SessionOptions {
 impl Default for SessionOptions {
     fn default() -> Self {
         Self {
-            shell: "powershell.exe".to_owned(),
+            shell: DEFAULT_SHELL.to_owned(),
             args: Vec::new(),
             working_directory: None,
             environment_overrides: Vec::new(),
@@ -253,7 +253,7 @@ struct RemoteSession {
     engine: Arc<FairMutex<GhosttyTerminal>>,
     stream: Arc<Mutex<StreamState>>,
     shutdown_sent: AtomicBool,
-    job_handle: Option<isize>,
+    process_tree: Option<ProcessTree>,
 }
 
 impl RemoteSession {
@@ -286,7 +286,6 @@ impl Drop for RemoteSession {
 pub struct RemoteSessionHub {
     next_session_id: AtomicU64,
     sessions: Mutex<HashMap<SessionId, Arc<RemoteSession>>>,
-    spawn_lock: Mutex<()>,
 }
 
 impl RemoteSessionHub {
@@ -300,13 +299,17 @@ impl RemoteSessionHub {
         let id = SessionId(self.next_session_id.fetch_add(1, Ordering::Relaxed) + 1);
         let stream = Arc::new(Mutex::new(StreamState::default()));
 
-        let pty = {
-            // The platform toggle is process-wide, so spawning is serialized to
-            // preserve each session's requested Job Object policy.
-            let _spawn = self.spawn_lock.lock();
-
-            set_job_management(options.manage_process_tree);
-
+        let pty = if options.manage_process_tree {
+            create_managed_pty_with_env(
+                &options.shell,
+                options.args.clone(),
+                &options.working_directory,
+                options.cols,
+                options.rows,
+                &options.environment_overrides,
+                options.starting_title.as_deref(),
+            )
+        } else {
             create_pty_with_env(
                 &options.shell,
                 options.args.clone(),
@@ -316,10 +319,10 @@ impl RemoteSessionHub {
                 &options.environment_overrides,
                 options.starting_title.as_deref(),
             )
-            .map_err(HubError::Spawn)?
-        };
+        }
+        .map_err(HubError::Spawn)?;
 
-        let job_handle = pty.job_handle().map(|handle| handle as isize);
+        let process_tree = pty.process_tree();
 
         let output_stream = Arc::clone(&stream);
 
@@ -356,7 +359,7 @@ impl RemoteSessionHub {
             engine: handles.engine,
             stream,
             shutdown_sent: AtomicBool::new(false),
-            job_handle,
+            process_tree,
         });
 
         self.sessions.lock().insert(id, session);
@@ -449,7 +452,11 @@ impl RemoteSessionHub {
     }
 
     pub fn child_process_count(&self, id: SessionId) -> Result<usize, HubError> {
-        Ok(self.get(id)?.job_handle.map_or(0, job_other_process_count))
+        Ok(self
+            .get(id)?
+            .process_tree
+            .as_ref()
+            .map_or(0, ProcessTree::other_process_count))
     }
 
     pub fn list_sessions(&self) -> Vec<SessionInfo> {

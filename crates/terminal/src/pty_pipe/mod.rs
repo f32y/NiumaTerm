@@ -17,17 +17,15 @@ use crate::prompt_sniffer::PromptSniffer;
 use crate::render_buffer::RenderBuffer;
 use crate::{terminal, vt_trace};
 
-mod conpty_realign;
 mod marks;
 mod session;
 mod write_queue;
 
-#[cfg(test)]
-use crate::pty_pipe::conpty_realign::max_cup_row_col;
-use crate::pty_pipe::conpty_realign::{
+use nmt_platform::windows::conpty_realign::{
     is_conpty_resize_echo_input, is_conpty_resize_repaint, rewrite_conpty_resize_echo_cup_rows,
     su_realign_count,
 };
+
 use crate::pty_pipe::marks::{apply_sniffer_mark, engine_blocks_live_list};
 pub use crate::pty_pipe::session::{OutputSink, SessionHandles, SessionOptions, start_session};
 pub use crate::pty_pipe::write_queue::PtyState;
@@ -408,7 +406,7 @@ where
 
         let mut engine = self.ghostty.lock();
 
-        let echo_pending_at_entry = cfg!(windows) && self.conpty_resize_echo_pending;
+        let echo_pending_at_entry = nmt_platform::USES_CONPTY && self.conpty_resize_echo_pending;
 
         let mut rewritten = None;
         let mut synthetic_prefix = None;
@@ -416,7 +414,8 @@ where
         // Some(R_conpty) means SU realignment ran during this read.
         let mut su_realigned_to: Option<u16> = None;
 
-        let repaint_window = cfg!(windows) && self.conpty_resize_repaint_reads_remaining > 0;
+        let repaint_window =
+            nmt_platform::USES_CONPTY && self.conpty_resize_repaint_reads_remaining > 0;
 
         if repaint_window {
             self.conpty_resize_repaint_reads_remaining =
@@ -429,7 +428,7 @@ where
         // CUP in the ORIGINAL repaint lands on the prompt (no 0005 rewrite). The
         // `su_realign_count` pre-check (latched size correspondence + N>0) and the
         // post-write assertion below guard against a mis-latched resize.
-        if cfg!(windows) && self.su_realign_armed && repaint_window {
+        if nmt_platform::USES_CONPTY && self.su_realign_armed && repaint_window {
             self.su_realign_armed = false;
 
             if !engine.mode(mode::ALT_SCREEN) {
@@ -454,7 +453,7 @@ where
             }
         }
 
-        if cfg!(windows)
+        if nmt_platform::USES_CONPTY
             && su_realigned_to.is_none()
             && (self.conpty_resize_echo_pending || repaint_window)
         {
@@ -771,7 +770,7 @@ where
                     // realigned and the input/prompt accumulates.
                     const RESIZE_ECHO_WINDOW: time::Duration = time::Duration::from_millis(150);
 
-                    if cfg!(windows)
+                    if nmt_platform::USES_CONPTY
                         && self.conpty_resize_echo_realign
                         && self
                             .conpty_resize_at
@@ -864,7 +863,7 @@ where
                     self.content_version
                         .fetch_add(1, sync::atomic::Ordering::Relaxed);
 
-                    if cfg!(windows) {
+                    if nmt_platform::USES_CONPTY {
                         self.conpty_resize_echo_realign = true;
                         self.conpty_resize_at = Some(time::Instant::now());
                         self.conpty_resize_repaint_reads_remaining = 8;

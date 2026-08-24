@@ -7,8 +7,9 @@
 //! is never rewritten.
 
 use std::path::{Path, PathBuf};
-use std::{env, fs, io};
+use std::{fs, io};
 
+use nmt_platform::windows::environment;
 use serde_json::{Value, from_str, json, to_string_pretty};
 
 use crate::{AGENT_HOOK_EXE_ENV, HookInstallStatus, hook_command_contains};
@@ -23,9 +24,7 @@ const HOOK_MARKERS: [&str; 3] = [AGENT_HOOK_EXE_ENV, "NmtAgentHook.exe", "NiumaT
 /// fallback so the same code works in POSIX-flavored shells. Shared root for
 /// every per-agent config path.
 pub(crate) fn home_dir() -> Option<PathBuf> {
-    env::var_os("USERPROFILE")
-        .or_else(|| env::var_os("HOME"))
-        .map(PathBuf::from)
+    environment::home_dir()
 }
 
 /// Re-registering is idempotent: prior NiumaTerm entries (including legacy

@@ -1,7 +1,3 @@
-use std::path::Path;
-use std::sync::OnceLock;
-use std::{env, fs};
-
 use gpui::{Global, SharedString};
 use nmt_agent_utils::deepseek;
 use nmt_config::agent::AgentConfig;
@@ -17,13 +13,15 @@ pub use nmt_config::update::UpdateChannel;
 use nmt_config::update::UpdateConfig;
 use nmt_config::{CursorShape, SettingsPatch, get, save_settings};
 use nmt_i18n::i18n;
+use nmt_platform::windows::powershell;
 use tracing::warn;
 
 use crate::agent::AgentKind;
 use crate::ui::settings::MAX_TAB_WIDTH;
 use crate::ui::settings::theme::load_theme_choices;
 
-pub const DEFAULT_SHELL: &str = r"C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe";
+#[cfg(test)]
+pub const DEFAULT_SHELL: &str = powershell::LEGACY_SHELL;
 pub const DEFAULT_FONT_FAMILY: &str = "Consolas";
 pub const DEFAULT_FONT_SIZE: f64 = 14.0;
 pub const DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE: f64 = 13.0;
@@ -244,41 +242,8 @@ pub(super) fn cursor_shape_from_value(value: &str) -> CursorShape {
     }
 }
 
-/// Path of the newest PowerShell 7+ install under `root`, the side-by-side
-/// layout the MSI creates (`%ProgramFiles%\PowerShell\<major>\pwsh.exe`).
-/// The directory name carries the major version, so no `pwsh -v` process has
-/// to run. Majors below 7 are ignored because PowerShell 6 is end-of-life.
-pub(super) fn newest_pwsh(root: &Path) -> Option<String> {
-    fs::read_dir(root)
-        .ok()?
-        .flatten()
-        .filter_map(|entry| {
-            let major: u32 = entry.file_name().to_str()?.parse().ok()?;
-            let exe = entry.path().join("pwsh.exe");
-            (major >= 7 && exe.is_file()).then_some((major, exe))
-        })
-        .max_by_key(|(major, _)| *major)
-        .map(|(_, exe)| exe.to_string_lossy().into_owned())
-}
-
-/// Shell for the seeded profile: PowerShell 7+ when installed, otherwise the
-/// Windows PowerShell 5.1 that ships with the OS. Cached because the lookup
-/// touches the disk and the answer cannot change while the app runs.
-///
-/// The MSI layout is preferred because its directory name states the major
-/// version. A Store, winget, scoop, or portable install lands elsewhere, so
-/// the fallback resolves `pwsh` through PATH and PATHEXT; that path carries no
-/// version, and taking it as 7+ is safe because 6 is the only other major that
-/// ever shipped a `pwsh` and it is end-of-life.
 fn default_shell() -> &'static str {
-    static SHELL: OnceLock<String> = OnceLock::new();
-
-    SHELL.get_or_init(|| {
-        let root = env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".into());
-        newest_pwsh(&Path::new(&root).join("PowerShell"))
-            .or_else(|| Some(which::which("pwsh").ok()?.to_string_lossy().into_owned()))
-            .unwrap_or_else(|| DEFAULT_SHELL.to_string())
-    })
+    powershell::preferred_shell()
 }
 
 /// The built-in profile seeded when the config file defines none.
