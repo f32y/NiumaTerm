@@ -29,39 +29,7 @@ use crate::ui::{UI_BORDER_OPACITY, UI_RADIUS};
 /// Apply the UI half of a terminal theme, falling back to the built-in dark
 /// palette when the theme does not define `[colors.ui]` or contains invalid UI data.
 pub(crate) fn apply_ui_theme(value: Option<&UiTheme>, cx: &mut App) {
-    let configured = value.and_then(|value| {
-        let mut config = TomlTable::new();
-
-        config.insert("name".to_string(), TomlValue::String(value.name.clone()));
-        config.insert(
-            "mode".to_string(),
-            TomlValue::String(
-                match value.mode {
-                    AppearanceTheme::Dark => "dark",
-                    AppearanceTheme::Light => "light",
-                }
-                .to_string(),
-            ),
-        );
-
-        let mut colors = value.colors.clone();
-
-        // Shadow lives at the top level of `ThemeConfig`, while the theme file
-        // format keeps it under `[colors.ui]`.
-        if let Some(colors) = colors.as_table_mut() {
-            if let Some(value) = colors.remove("shadow") {
-                config.insert("shadow".to_string(), value);
-            }
-        }
-
-        config.insert("colors".to_string(), colors);
-
-        TomlValue::Table(config)
-            .try_into::<ComponentThemeConfig>()
-            .map(Rc::new)
-            .map_err(|err| warn!("failed to load UI theme: {err}"))
-            .ok()
-    });
+    let configured = value.and_then(ui_theme_config);
 
     let theme = configured.unwrap_or_else(|| {
         ComponentThemeRegistry::global(cx)
@@ -74,12 +42,56 @@ pub(crate) fn apply_ui_theme(value: Option<&UiTheme>, cx: &mut App) {
     ComponentTheme::global_mut(cx).apply_config(&theme);
     ComponentTheme::change(mode, None, cx);
 
-    apply_ui_constants(ComponentTheme::global_mut(cx));
+    apply_ui_constants(&theme, ComponentTheme::global_mut(cx));
 }
 
-fn apply_ui_constants(theme: &mut ComponentTheme) {
-    theme.radius = UI_RADIUS;
-    theme.radius_lg = UI_RADIUS;
+/// Translate the `[colors.ui]` section of a theme file into the component
+/// library's theme configuration, dropping the theme when a key does not parse.
+pub(super) fn ui_theme_config(value: &UiTheme) -> Option<Rc<ComponentThemeConfig>> {
+    let mut config = TomlTable::new();
+
+    config.insert("name".to_string(), TomlValue::String(value.name.clone()));
+    config.insert(
+        "mode".to_string(),
+        TomlValue::String(
+            match value.mode {
+                AppearanceTheme::Dark => "dark",
+                AppearanceTheme::Light => "light",
+            }
+            .to_string(),
+        ),
+    );
+
+    let mut colors = value.colors.clone();
+
+    // Shadow and the corner radii live at the top level of `ThemeConfig`, while
+    // the theme file format keeps them under `[colors.ui]`.
+    if let Some(colors) = colors.as_table_mut() {
+        for key in ["shadow", "radius", "radius.lg"] {
+            if let Some(value) = colors.remove(key) {
+                config.insert(key.to_string(), value);
+            }
+        }
+    }
+
+    config.insert("colors".to_string(), colors);
+
+    TomlValue::Table(config)
+        .try_into::<ComponentThemeConfig>()
+        .map(Rc::new)
+        .map_err(|err| warn!("failed to load UI theme: {err}"))
+        .ok()
+}
+
+fn apply_ui_constants(config: &ComponentThemeConfig, theme: &mut ComponentTheme) {
+    // A theme that states its own corner radii owns them; the app radius is the
+    // fallback for the themes that leave the choice to the application.
+    if config.radius.is_none() {
+        theme.radius = UI_RADIUS;
+    }
+    if config.radius_lg.is_none() {
+        theme.radius_lg = UI_RADIUS;
+    }
     theme.colors.sidebar_border = theme.colors.sidebar_border.opacity(UI_BORDER_OPACITY);
 }
 
@@ -337,7 +349,7 @@ pub(crate) fn apply_window_translucency(cx: &mut App) {
     };
 
     theme.apply_config(&palette);
-    apply_ui_constants(theme);
+    apply_ui_constants(&palette, theme);
 
     if content_opacity < 1.0 {
         theme.colors.sidebar = theme.colors.sidebar.opacity(content_opacity);
