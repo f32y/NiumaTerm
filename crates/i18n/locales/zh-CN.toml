@@ -554,6 +554,11 @@
 "agent-usage-plan" = "{name} 方案"
 "agent-usage-no-limits" = "没有可用的订阅限制"
 
+# 智能体启动遮罩
+"agent-start-starting" = "正在启动智能体"
+"agent-start-retry" = "重试"
+"agent-start-close-tab" = "关闭标签页"
+
 # 智能体更新流程
 "agent-update-waiting-label" = "等待更新"
 "agent-update-waiting-detail" = "在此标签页进入可恢复的空闲状态前，新的提供方输入会暂停。"

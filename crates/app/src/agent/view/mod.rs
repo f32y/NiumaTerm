@@ -102,6 +102,7 @@ impl Render for AgentPane {
         let update_suspended = self.update_suspension.is_some();
         let update_banner = self.render_update_banner(cx);
         let update_overlay = self.render_update_overlay(cx);
+        let start_overlay = self.render_start_overlay(cx);
         // A branch settled from the backend's answer has no window to reach
         // the composer through, so the prompt it cut in front of is put back
         // here, in the frame that answer asked for.
@@ -439,6 +440,7 @@ impl Render for AgentPane {
             })
             // Painted last so it sits over the transcript and the composer.
             .children(update_overlay)
+            .children(start_overlay)
     }
 }
 

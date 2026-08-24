@@ -340,6 +340,10 @@ impl Render for Shell {
             );
         }
 
+        if let Some(tab) = self.pending_agent_close.take() {
+            self.request_close_tab(tab, window, cx);
+        }
+
         self.process_native_notifications(cx);
 
         ui::sync_modern_menu(cx);

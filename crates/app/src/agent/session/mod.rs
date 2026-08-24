@@ -37,6 +37,12 @@ impl Drop for AgentPane {
     }
 }
 
+/// How long a start is allowed to run before the tab is covered. Long enough
+/// that a reused host, which answers in a frame or two, never shows an overlay
+/// at all; short enough that a cold Node start is explained rather than looking
+/// like a dead tab.
+const START_OVERLAY_DELAY: Duration = Duration::from_millis(400);
+
 /// How long the composer's "last response" reading stays accurate, given how
 /// old it already is. Matches the coarsest unit the label shows, so the pane
 /// redraws exactly as often as the words change, and `None` once the label has
@@ -234,6 +240,8 @@ impl AgentPane {
             session: None,
             session_epoch: 0,
             status: Status::Starting,
+            start_failure: None,
+            start_overlay_visible: false,
             history_ui: SessionHistoryUi::default(),
             effort_drag: None,
             pending_approval: None,
@@ -473,6 +481,14 @@ impl AgentPane {
     /// the EOF signal (the sender is owned by the reader thread). Returns
     /// before the process exists; the pane sits in `Status::Starting` until it
     /// does. The calling stack sees no repaint — the arrival notifies.
+    /// Whether this pane covers its own start at all. Only the harness's host
+    /// is slow enough to be worth it: it is a Node process that may still be
+    /// fetching its package, while the CLI backends are running within a frame
+    /// or two, where an overlay would read as a flicker.
+    pub(in crate::agent) fn wears_start_overlay(&self) -> bool {
+        self.kind == AgentKind::DeepSeek
+    }
+
     pub(super) fn start_session(&mut self, resume: Option<String>, cx: &mut Context<Self>) {
         self.start_session_with_options(
             resume.map(|id| RecoveryIdentity::new(AgentKind::Claude, id)),
@@ -540,6 +556,9 @@ impl AgentPane {
         // Replacing a conversation must clear any running or unread state
         // associated with the previous backend before the new epoch can emit.
         cx.emit(AgentPaneEvent::Interrupted);
+        // The previous attempt's reason describes a backend nobody is waiting
+        // on any more, and this start is what the pane now reports.
+        self.start_failure = None;
         self.session_epoch = next_session_epoch(self.session_epoch);
         // A replacement conversation names the tab again from its own opening
         // message; the previous one's subject no longer describes the tab.
@@ -585,6 +604,23 @@ impl AgentPane {
         // as `Status::Starting` with no backend installed, so the spawn moves
         // to a background thread and the result arrives in a later update.
         self.status = Status::Starting;
+        // A host that is already running answers within a frame or two, so the
+        // overlay is held back rather than shown and pulled away as a flicker.
+        // Nothing repaints while the start runs, so the hold has to wake the
+        // pane itself instead of being read from a clock at render time.
+        self.start_overlay_visible = false;
+        if self.wears_start_overlay() {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(START_OVERLAY_DELAY).await;
+                let _ = this.update(cx, |this, cx| {
+                    if this.status == Status::Starting {
+                        this.start_overlay_visible = true;
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+        }
         let spawned = cx
             .background_executor()
             .spawn(async move { Backend::spawn(kind, &launch, cwd, recovery, deliver) });
@@ -700,6 +736,7 @@ impl AgentPane {
             return None;
         }
 
+        self.start_overlay_visible = false;
         Some(match spawned {
             Ok(session) => {
                 self.session = Some(session);
@@ -711,16 +748,13 @@ impl AgentPane {
                 self.palette.awaiting_command_turn = false;
                 self.palette.command_queue.clear();
                 self.queued_user_messages.clear();
+                let text = i18n("agent-session-start-failed")
+                    .replace("{name}", name)
+                    .replace("{error}", &err);
+                self.start_failure = Some(text.clone());
                 let turn = self.turn_seq;
                 self.transcript.update(cx, |transcript, _| {
-                    transcript.push_stamped(
-                        turn,
-                        SessionItem::Error {
-                            text: i18n("agent-session-start-failed")
-                                .replace("{name}", name)
-                                .replace("{error}", &err),
-                        },
-                    );
+                    transcript.push_stamped(turn, SessionItem::Error { text });
                 });
                 false
             }
