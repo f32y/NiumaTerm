@@ -469,13 +469,12 @@ fn load_models(
             let already = directory.selected() == Some(model.as_str())
                 && (wanted_effort.is_none() || directory.effort() == wanted_effort.as_deref());
 
-            // A profile naming a model this deployment does not serve leaves
-            // the harness on its own selection, which the catalog already
-            // describes; overriding it with a route that does not exist would
-            // only fail the next turn.
-            if let Some((provider, id)) = directory.route(&model)
-                && !already
-            {
+            // A model the catalog never listed is still applied: a provider
+            // resolves an unadvertised id as a text-only model on its own
+            // route, which is how a profile names a model behind a proxy or one
+            // the endpoint stopped advertising.
+            if !already {
+                let (provider, id) = directory.route(&model);
                 let mut payload = json!({
                     "sessionId": session_id,
                     "provider": provider,
@@ -1112,9 +1111,7 @@ impl Session {
     /// is what a model switch wants: the levels belong to the exact model, so
     /// carrying the previous one over could pin a level this route rejects.
     pub fn select_model(&mut self, model: &str, effort: Option<&str>) -> Result<(), String> {
-        let Some((provider, id)) = self.models.route(model) else {
-            return Err(format!("{model} is not one of this session's models"));
-        };
+        let (provider, id) = self.models.route(model);
 
         let mut payload = json!({
             "sessionId": self.session_id,

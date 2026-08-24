@@ -911,9 +911,19 @@ fn the_model_directory_addresses_a_pick_as_a_provider_and_model_pair() {
     assert_eq!(directory.effort(), Some("high"));
     assert_eq!(
         directory.route("openrouter/deepseek-chat"),
-        Some(("openrouter", "deepseek-chat"))
+        ("openrouter", "deepseek-chat")
     );
-    assert_eq!(directory.route("nothing-like-this"), None);
+    // A custom id the catalog never listed still routes, through the provider
+    // the session is already on.
+    assert_eq!(
+        directory.route("nothing-like-this"),
+        ("deepseek", "nothing-like-this")
+    );
+    // A slash inside a model id names no provider, so it survives the split.
+    assert_eq!(
+        directory.route("Qwen/Qwen3-32B"),
+        ("deepseek", "Qwen/Qwen3-32B")
+    );
 }
 
 #[test]
@@ -936,7 +946,7 @@ fn a_selection_outside_the_catalog_still_shows_in_the_picker() {
     assert_eq!(directory.selected(), Some("deepseek-retired"));
     assert_eq!(
         directory.route("deepseek-retired"),
-        Some(("deepseek", "deepseek-retired"))
+        ("deepseek", "deepseek-retired")
     );
     assert_eq!(directory.effort(), None);
 }

@@ -25,6 +25,9 @@ struct ModelRoute {
 #[derive(Default)]
 pub(crate) struct ModelDirectory {
     routes: Vec<ModelRoute>,
+    /// Route the session is currently on. An id the catalog never listed is
+    /// addressed to this provider, because a bare id names no route of its own.
+    current_provider: String,
     /// Key of the current selection, absent only before the first catalog.
     selected: Option<String>,
     effort: Option<String>,
@@ -105,6 +108,7 @@ impl ModelDirectory {
 
         Self {
             routes,
+            current_provider: provider.to_string(),
             selected,
             effort: current["reasoningEffort"].as_str().map(str::to_string),
         }
@@ -133,11 +137,29 @@ impl ModelDirectory {
     }
 
     /// The `(provider, model)` pair a picked key addresses.
-    pub(crate) fn route(&self, key: &str) -> Option<(&str, &str)> {
-        self.routes
-            .iter()
-            .find(|route| route.key == key)
-            .map(|route| (route.provider.as_str(), route.model.as_str()))
+    ///
+    /// Catalog membership is advisory on the way in as well as the way out: a
+    /// provider resolves an id it never advertised as a text-only model on its
+    /// own route, so an id absent from the directory is still addressable and
+    /// gets routed rather than refused.
+    ///
+    /// A prefix is read as a provider only when some route actually serves that
+    /// provider, because a model id may contain a slash of its own
+    /// (`Qwen/Qwen3-32B`) and splitting one would address a provider that does
+    /// not exist.
+    pub(crate) fn route<'a>(&'a self, key: &'a str) -> (&'a str, &'a str) {
+        if let Some(route) = self.routes.iter().find(|route| route.key == key) {
+            return (route.provider.as_str(), route.model.as_str());
+        }
+
+        match key.split_once('/') {
+            Some((provider, model))
+                if self.routes.iter().any(|route| route.provider == provider) =>
+            {
+                (provider, model)
+            }
+            _ => (self.current_provider.as_str(), key),
+        }
     }
 
     /// Record a selection the harness confirmed.
