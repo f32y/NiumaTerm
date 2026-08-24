@@ -689,11 +689,6 @@ impl Session {
         self.host.is_running()
     }
 
-    /// The host's own diagnostics, for explaining an exit nobody asked for.
-    pub fn host_diagnostics(&self) -> String {
-        self.host.stderr_tail()
-    }
-
     /// Map one delivered frame into transcript events. Frames for other
     /// sessions and types this build does not know produce nothing.
     pub fn process(&mut self, frame: Value) -> Vec<Event> {

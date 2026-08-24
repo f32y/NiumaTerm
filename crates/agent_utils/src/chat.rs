@@ -820,20 +820,6 @@ pub struct ForkCheckpoint {
     pub anchor: ForkAnchor,
 }
 
-impl ReplayTurn {
-    /// A turn carrying items but none of the accounting, for a provider that
-    /// persists no turn metadata.
-    pub fn from_items(items: impl IntoIterator<Item = Item>) -> Self {
-        Self {
-            items: items
-                .into_iter()
-                .map(|item| ReplayItem { item, at: None })
-                .collect(),
-            ..Self::default()
-        }
-    }
-}
-
 /// Outcome of a session's `send_user_message`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SendOutcome {

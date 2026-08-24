@@ -60,7 +60,6 @@ impl HostError {
 pub struct Host {
     client: ApiClient,
     base: String,
-    stderr: Arc<Mutex<Vec<String>>>,
     /// Held for its Drop: releasing the job terminates the host and every
     /// descendant it spawned.
     _job: KillOnCloseJob,
@@ -202,7 +201,6 @@ impl Host {
         Ok(Self {
             client,
             base,
-            stderr: retained,
             _job: job,
             child: Mutex::new(child),
         })
@@ -222,12 +220,6 @@ impl Host {
     /// their next call.
     pub fn is_running(&self) -> bool {
         matches!(self.child.lock().try_wait(), Ok(None))
-    }
-
-    /// The host's own diagnostics, for reporting an exit the user did not ask
-    /// for.
-    pub fn stderr_tail(&self) -> String {
-        self.stderr.lock().join("\n")
     }
 }
 
