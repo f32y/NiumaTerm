@@ -1,7 +1,7 @@
 use gpui::{ObjectFit, img};
 use gpui_component::button::{Button, ButtonVariants};
+use gpui_component::tooltip::Tooltip;
 
-use crate::agent::composer::annotation_count_label;
 use crate::agent::composer::attachments::Attachment;
 use crate::agent::*;
 
@@ -40,8 +40,10 @@ impl AgentPane {
                         .map(|(index, attachment)| self.render_attachment(index, attachment, cx)),
                 )
                 .children(
-                    (!self.response_annotations.is_empty())
-                        .then(|| self.render_response_annotations(cx)),
+                    self.response_annotations
+                        .iter()
+                        .enumerate()
+                        .map(|(index, text)| self.render_response_annotation(index, text, cx)),
                 )
                 .into_any_element(),
         )
@@ -94,18 +96,32 @@ impl AgentPane {
             .into_any_element()
     }
 
-    fn render_response_annotations(&self, cx: &mut Context<Self>) -> AnyElement {
-        let text = self.response_annotations.join(" · ");
+    /// One annotation, as its own chip. They stay separate rather than folding
+    /// into a single count because each one is a different quotation the user
+    /// chose, and one of them being wrong is a reason to drop that one.
+    ///
+    /// The chip shows as much as fits and carries the whole selection in its
+    /// tooltip: a quotation is often several lines, and a strip that grew to
+    /// hold them would take the composer's room.
+    fn render_response_annotation(
+        &self,
+        index: usize,
+        text: &str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let mut chars = text.chars();
         let mut preview: String = chars.by_ref().take(ANNOTATION_PREVIEW_CHARS).collect();
         if chars.next().is_some() {
             preview.push('…');
         }
-        let label = annotation_count_label(self.response_annotations.len());
+        let label =
+            i18n("agent-composer-annotation-item").replace("{index}", &(index + 1).to_string());
+        let group = SharedString::from(format!("agent-response-annotation-{index}"));
+        let full = SharedString::from(text.to_string());
 
         div()
-            .id("agent-response-annotations")
-            .group("agent-response-annotations")
+            .id(("agent-response-annotation", index))
+            .group(group.clone())
             .relative()
             .w(px(ANNOTATION_WIDTH))
             .max_w_full()
@@ -117,6 +133,7 @@ impl AgentPane {
             .border_color(cx.theme().border)
             .bg(cx.theme().muted)
             .aria_label(format!("{label}: {text}"))
+            .tooltip(move |window, cx| Tooltip::new(full.clone()).build(window, cx))
             .child(
                 v_flex()
                     .size_full()
@@ -140,15 +157,15 @@ impl AgentPane {
                     .top_0()
                     .right_0()
                     .invisible()
-                    .group_hover("agent-response-annotations", |this| this.visible())
+                    .group_hover(group, |this| this.visible())
                     .child(
-                        Button::new("agent-response-annotations-remove")
+                        Button::new(("agent-response-annotation-remove", index))
                             .ghost()
                             .xsmall()
                             .icon(IconName::Close)
                             .aria_label(i18n("agent-composer-annotations-remove"))
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                this.clear_response_annotations(cx)
+                                this.remove_response_annotation(index, cx)
                             })),
                     ),
             )

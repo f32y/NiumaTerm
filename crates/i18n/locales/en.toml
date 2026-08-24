@@ -904,6 +904,7 @@
 "agent-composer-context-label" = "Message context"
 "agent-composer-annotation-count-one" = "{count} Annotation"
 "agent-composer-annotation-count-other" = "{count} Annotations"
-"agent-composer-annotations-remove" = "Remove annotations"
+"agent-composer-annotation-item" = "Annotation {index}"
+"agent-composer-annotations-remove" = "Remove this annotation"
 "agent-transcript-annotations-expand" = "Expand annotations"
 "agent-transcript-annotations-collapse" = "Collapse annotations"
