@@ -22,6 +22,7 @@
 # 关于设置
 "settings-about-title" = "关于"
 "settings-about-version" = "版本"
+"settings-about-internal-version" = "内部版本"
 "settings-about-releases" = "发行版本"
 "settings-about-release-page" = "前往发行页面"
 "settings-about-check-updates" = "检查更新"

@@ -17,6 +17,10 @@ pub(super) fn about_page() -> SettingPage {
                     SettingField::render(|_, _, _| Label::new(APP_VERSION).text_sm()),
                 ))
                 .item(SettingItem::new(
+                    i18n("settings-about-internal-version"),
+                    SettingField::render(|_, _, _| Label::new(APP_INTERNAL_VERSION).text_sm()),
+                ))
+                .item(SettingItem::new(
                     i18n("settings-about-releases"),
                     SettingField::render(|_, _, _| {
                         Button::new("go-to-release-page")
