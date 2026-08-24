@@ -255,9 +255,7 @@ impl RenderBuffer {
         } else {
             for row in &mut self.grid {
                 row.inner.fill(Square::default());
-                row.has_extras = false;
                 row.kitty_virtual_placeholder = false;
-                row.dirty = true;
             }
         }
 
@@ -316,8 +314,6 @@ impl RenderBuffer {
             );
 
             sq.set_extras_id(Some(extras_id));
-
-            self.grid[y].has_extras = true;
         }
     }
 
