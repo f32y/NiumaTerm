@@ -1,7 +1,5 @@
 pub use conpty::{job_has_other_processes, job_other_process_count};
-pub(crate) use notifier::{
-    identity_registered, register_identity, remove, show, unregister_identity,
-};
+pub(crate) use notifier::{remove, show};
 pub use process_exit::wait_for_exit;
 pub use readiness::SoftReady;
 pub use shell_integration::{

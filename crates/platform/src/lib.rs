@@ -2,7 +2,6 @@
 /// on, re-exported so consumers drive the PTY event loop through
 /// `nmt_platform::{Poll, ...}` without taking their own (possibly mismatched)
 /// `mio` dependency.
-use std::path;
 use std::sync;
 
 use libc::c_ushort;
@@ -154,26 +153,4 @@ pub fn show_notification(notification: &NativeNotification) -> Result<(), String
 
 pub fn remove_notification(tag: &str, group: &str) -> Result<(), String> {
     platform::remove(tag, group)
-}
-
-/// Write the Start Menu shortcut that carries this process's AppUserModelID.
-///
-/// An unpackaged Windows app has no identity of its own, so
-/// `ToastNotificationManager` refuses to create a notifier for an AUMID that no
-/// installed shortcut claims. Setting the AUMID on the process alone (as
-/// `show_notification` does) is not enough on a machine where this has never
-/// run.
-///
-/// No caller invokes this yet, so a fresh install has no shortcut and native
-/// notifications can fail there with nothing but a `warn!` line to show for it.
-pub fn register_application_identity(exe_path: &path::Path) -> Result<(), String> {
-    platform::register_identity(exe_path)
-}
-
-pub fn unregister_application_identity() -> Result<(), String> {
-    platform::unregister_identity()
-}
-
-pub fn application_identity_registered() -> bool {
-    platform::identity_registered()
 }
