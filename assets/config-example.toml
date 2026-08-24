@@ -84,3 +84,7 @@ open-in-best-workspace = true
 host-enabled = false
 relay-url = ""
 access-token = ""
+
+[update]
+check-updates = true
+channel = "stable"
