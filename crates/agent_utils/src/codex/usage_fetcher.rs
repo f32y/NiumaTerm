@@ -26,10 +26,15 @@ pub fn fetch() -> Result<UsageSnapshot, String> {
             "/D",
             "/C",
             "codex",
+            // Codex 0.149 dropped the `untrusted` approval policy; the `-c`
+            // override also replaces a legacy `approval_policy` in config.toml
+            // before the CLI validates it and refuses to start.
+            "-c",
+            "approval_policy=never",
             "-s",
             "read-only",
             "-a",
-            "untrusted",
+            "never",
             "app-server",
         ])
         .stdin(Stdio::piped())
