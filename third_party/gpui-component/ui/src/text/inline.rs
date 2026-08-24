@@ -22,6 +22,58 @@ use crate::{
     text::selection::word_range_at,
 };
 
+/// Where the character at `offset` is actually painted, and how wide it is.
+fn char_cell(
+    text_layout: &TextLayout,
+    offset: usize,
+    c: char,
+    line_height: Pixels,
+) -> Option<(Point<Pixels>, Pixels)> {
+    let pos = text_layout.position_for_index(offset)?;
+    let next_pos = text_layout.position_for_index(offset + c.len_utf8());
+    Some(char_cell_at(
+        pos,
+        next_pos,
+        text_layout.bounds().left(),
+        c,
+        line_height,
+    ))
+}
+
+/// Resolve a character cell from the layout position of the character and of
+/// the one after it.
+///
+/// A soft-wrap boundary index is reported at the end of the row the text
+/// wrapped out of, so the first character of every wrapped row would otherwise
+/// be tested against the previous row's geometry: a selection confined to one
+/// row never reaches that phantom position and the leftmost character silently
+/// drops out. A following position on another row means this character starts a
+/// row, so anchor it to `left`, the row's left edge, where it is drawn. A hard
+/// line break keeps the reported end-of-row position; it is drawn nowhere and
+/// must not claim the next row's first cell.
+///
+/// The width falls back to half the line height when the following character
+/// has no position at all (this one is the last the layout knows about).
+fn char_cell_at(
+    pos: Point<Pixels>,
+    next_pos: Option<Point<Pixels>>,
+    left: Pixels,
+    c: char,
+    line_height: Pixels,
+) -> (Point<Pixels>, Pixels) {
+    let Some(next_pos) = next_pos else {
+        return (pos, line_height.half());
+    };
+    if next_pos.y == pos.y {
+        return (pos, next_pos.x - pos.x);
+    }
+    if c == '\n' || c == '\r' {
+        return (pos, line_height.half());
+    }
+
+    (point(left, next_pos.y), next_pos.x - left)
+}
+
 /// A inline element used to render a inline text and support selectable.
 ///
 /// All text in TextView (including the CodeBlock) used this for text rendering.
@@ -155,18 +207,11 @@ impl Inline {
         let mut offset = 0;
         let mut chars = self.text.chars().peekable();
         while let Some(c) = chars.next() {
-            let Some(pos) = text_layout.position_for_index(offset) else {
-                offset += c.len_utf8();
+            let next_offset = offset + c.len_utf8();
+            let Some((pos, char_width)) = char_cell(text_layout, offset, c, line_height) else {
+                offset = next_offset;
                 continue;
             };
-
-            let next_offset = offset + c.len_utf8();
-            let mut char_width = line_height.half();
-            if let Some(next_pos) = text_layout.position_for_index(next_offset) {
-                if next_pos.y == pos.y {
-                    char_width = next_pos.x - pos.x;
-                }
-            }
 
             let char_center = point(pos.x + char_width.half(), pos.y + line_height.half());
             if mask_bounds.contains(&char_center)
@@ -206,17 +251,10 @@ impl Inline {
 
         for c in self.text.chars() {
             let next_offset = offset + c.len_utf8();
-            let Some(pos) = text_layout.position_for_index(offset) else {
+            let Some((pos, char_width)) = char_cell(text_layout, offset, c, line_height) else {
                 offset = next_offset;
                 continue;
             };
-
-            let mut char_width = line_height.half();
-            if let Some(next_pos) = text_layout.position_for_index(next_offset) {
-                if next_pos.y == pos.y {
-                    char_width = next_pos.x - pos.x;
-                }
-            }
 
             let bounds = Bounds::from_corners(pos, point(pos.x + char_width, pos.y + line_height))
                 .intersect(&mask_bounds);
@@ -246,6 +284,7 @@ impl Inline {
 
     /// Paint the selection background.
     fn paint_selection(
+        &self,
         selection: &Selection,
         text_layout: &TextLayout,
         bounds: &Bounds<Pixels>,
@@ -257,14 +296,26 @@ impl Inline {
         if end < start {
             std::mem::swap(&mut start, &mut end);
         }
-        let Some(start_position) = text_layout.position_for_index(start) else {
+        let line_height = text_layout.line_height();
+        // The start index is inclusive, so a selection beginning on a wrapped
+        // row must be drawn from that row's left edge rather than from the
+        // phantom end-of-previous-row position the layout reports for it. The
+        // end index is exclusive, and its phantom position is the right place
+        // to stop: the selection ends where the previous row ends.
+        let start_position = self
+            .text
+            .get(start..)
+            .and_then(|rest| rest.chars().next())
+            .and_then(|c| char_cell(text_layout, start, c, line_height))
+            .map(|(pos, _)| pos)
+            .or_else(|| text_layout.position_for_index(start));
+        let Some(start_position) = start_position else {
             return;
         };
         let Some(end_position) = text_layout.position_for_index(end) else {
             return;
         };
 
-        let line_height = text_layout.line_height();
         if start_position.y == end_position.y {
             window.paint_quad(quad(
                 Bounds::from_corners(
@@ -422,7 +473,7 @@ impl Element for Inline {
         }
 
         if let Some(selection) = &state.selection {
-            Self::paint_selection(selection, &text_layout, &bounds, window, cx);
+            self.paint_selection(selection, &text_layout, &bounds, window, cx);
         }
 
         if is_selectable {
@@ -626,8 +677,40 @@ fn point_in_text_selection(
 
 #[cfg(test)]
 mod tests {
-    use super::point_in_text_selection;
+    use super::{char_cell_at, point_in_text_selection};
     use gpui::{point, px};
+
+    #[test]
+    fn test_char_cell_at() {
+        let line_height = px(20.);
+        let left = px(10.);
+        let pos = point(px(50.), px(0.));
+
+        // Mid-row character: the next position gives the advance width.
+        assert_eq!(
+            char_cell_at(pos, Some(point(px(58.), px(0.))), left, 'a', line_height),
+            (pos, px(8.))
+        );
+
+        // First character of a wrapped row: the layout reports the end of the
+        // row it wrapped out of, so the cell moves to the next row's left edge.
+        assert_eq!(
+            char_cell_at(pos, Some(point(px(18.), px(20.))), left, 'a', line_height),
+            (point(left, px(20.)), px(8.))
+        );
+
+        // A hard line break stays where the layout put it.
+        assert_eq!(
+            char_cell_at(pos, Some(point(px(10.), px(20.))), left, '\n', line_height),
+            (pos, px(10.))
+        );
+
+        // Last known character: fall back to half the line height.
+        assert_eq!(
+            char_cell_at(pos, None, left, 'a', line_height),
+            (pos, px(10.))
+        );
+    }
 
     #[test]
     fn test_point_in_text_selection() {
