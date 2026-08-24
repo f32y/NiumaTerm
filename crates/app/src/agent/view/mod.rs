@@ -1,5 +1,6 @@
 mod attachments;
 mod banners;
+mod blocking_overlay;
 mod history;
 mod last_response;
 mod session_state;

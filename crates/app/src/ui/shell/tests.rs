@@ -1,14 +1,40 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gpui::{Bounds, Pixels, TestAppContext};
+use gpui_component::input::InputState;
+use nmt_config::local_state::TabState;
+use nmt_config::system::WarnBeforeTerminatingShell;
 
-use super::{
-    AgentKind, TabState, TabSurface, WarnBeforeTerminatingShell, should_confirm_close,
-    should_confirm_tab_close,
-};
+use crate::agent::AgentKind;
 use crate::ui::shell::render::TAB_STRIP_MIN_WIDTH;
+use crate::ui::shell::{
+    InlineRename, InlineRenameStyle, TabSurface, should_confirm_close, should_confirm_tab_close,
+};
 use crate::window::MIN_WINDOW_WIDTH;
+
+struct InlineRenameProbe {
+    input: gpui::Entity<InputState>,
+    cancelled: Rc<Cell<bool>>,
+}
+
+impl gpui::Render for InlineRenameProbe {
+    fn render(
+        &mut self,
+        _: &mut gpui::Window,
+        _: &mut gpui::Context<Self>,
+    ) -> impl gpui::IntoElement {
+        let cancelled = self.cancelled.clone();
+
+        InlineRename::new(
+            "inline-rename-probe",
+            "Rename probe",
+            self.input.clone(),
+            InlineRenameStyle::HorizontalTab,
+            move |_, _| cancelled.set(true),
+        )
+    }
+}
 
 #[gpui::test]
 fn restored_agent_tab_keeps_kind_before_activation(cx: &mut TestAppContext) {
@@ -36,6 +62,34 @@ fn agent_tab_close_honors_confirmation_setting() {
     assert!(!should_confirm_tab_close(true, false, Disabled, 0));
     assert!(!should_confirm_tab_close(false, true, Disabled, 0));
     assert!(should_confirm_tab_close(false, false, Always, 0));
+}
+
+#[gpui::test]
+fn inline_rename_routes_escape_to_cancellation(cx: &mut TestAppContext) {
+    use gpui::{AppContext as _, VisualTestContext};
+
+    let cancelled = Rc::new(Cell::new(false));
+    let window = cx.update(|cx| {
+        cx.open_window(Default::default(), |window, cx| {
+            gpui_component::init(cx);
+            let input = cx.new(|cx| InputState::new(window, cx).default_value("old name"));
+            input.update(cx, |input, cx| input.focus(window, cx));
+            let probe = cx.new(|_| InlineRenameProbe {
+                input,
+                cancelled: cancelled.clone(),
+            });
+            cx.new(|cx| gpui_component::Root::new(probe, window, cx))
+        })
+        .expect("open inline rename test window")
+    });
+    let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+    cx.run_until_parked();
+    cx.refresh().expect("render inline rename probe");
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+
+    assert!(cancelled.get());
 }
 
 /// The right-side area holds one content at a time, so Git,

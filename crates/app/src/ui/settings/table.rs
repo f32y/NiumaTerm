@@ -5,9 +5,9 @@
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{App, Div, Pixels, SharedString, Styled as _, px};
-use gpui_component::{ActiveTheme as _, IconNamed, h_flex};
+use gpui_component::{ActiveTheme as _, IconNamed, StyledExt as _, h_flex};
 
-use crate::ui::UI_RADIUS;
+use crate::ui::composition::{framed_region, table_header as table_header_style};
 
 /// Content height of one row. A table whose rows are virtualized needs every
 /// row to agree on a height, so this is stated rather than measured.
@@ -42,28 +42,16 @@ impl IconNamed for TrashIcon {
 /// The bordered box a table sits in. It clips the header fill and the row
 /// rules to the rounded corners, so the table reads as one object.
 pub(super) fn table_frame(cx: &App) -> Div {
-    gpui::div()
-        .w_full()
-        .border_1()
-        .border_color(cx.theme().border)
-        .rounded(UI_RADIUS)
-        .overflow_hidden()
+    gpui::div().refine_style(&framed_region(cx))
 }
 
 /// The column-title strip. Callers add one cell per column, using the same
 /// widths their rows use.
 pub(super) fn table_header(cx: &App) -> Div {
     h_flex()
-        .w_full()
+        .refine_style(&table_header_style(cx))
         .h(px(TABLE_HEADER_HEIGHT))
-        .px_3()
-        .gap_2()
-        .items_center()
-        .border_b_1()
-        .border_color(cx.theme().border)
-        .bg(cx.theme().muted.opacity(0.4))
         .text_xs()
-        .text_color(cx.theme().muted_foreground)
 }
 
 /// One table row, padded to match the header. `ruled` draws the divider to

@@ -64,7 +64,9 @@ impl Shell {
                     // the alignment is worth less than keeping the window
                     // controls on screen, so this block gives up width before
                     // anything to its right does.
-                    .w(px(self.sidebar.width - floating_surface::SIDE_INSET))
+                    .w(px(
+                        self.sidebar.width - ui::composition::FLOATING_SURFACE_SIDE_INSET
+                    ))
                     .min_w_0()
                     .overflow_hidden()
                     .child(
@@ -512,9 +514,9 @@ impl Render for Shell {
                             .min_w_0()
                             .relative()
                             .overflow_hidden()
-                            .px(px(floating_surface::SIDE_INSET))
-                            .pt(px(floating_surface::TOP_INSET))
-                            .pb(px(floating_surface::BOTTOM_INSET))
+                            .px(px(ui::composition::FLOATING_SURFACE_SIDE_INSET))
+                            .pt(px(ui::composition::FLOATING_SURFACE_TOP_INSET))
+                            .pb(px(ui::composition::FLOATING_SURFACE_BOTTOM_INSET))
                             .child(
                                 floating_surface::card(cx)
                                     .id("main-floating-surface")

@@ -12,13 +12,14 @@ use gpui::{
     AnyElement, Context, Entity, Hsla, ScrollHandle, SharedString, WeakEntity, Window, div, px,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::{ActiveTheme as _, IconName, Sizable as _, h_flex, v_flex};
+use gpui_component::{ActiveTheme as _, IconName, Sizable as _, StyledExt as _, h_flex, v_flex};
 use nmt_agent_utils::workflow::{WorkflowAgent, WorkflowAgentState, WorkflowRun, WorkflowRunState};
 use nmt_i18n::i18n;
 
 use crate::agent::AgentPane;
 use crate::agent::transcript::TranscriptView;
 use crate::ui::AppSettings;
+use crate::ui::composition::panel_header;
 
 pub(crate) struct WorkflowsView {
     /// The Agent pane whose runs are shown. Weak because the tab can close
@@ -138,11 +139,7 @@ impl Render for WorkflowsView {
             // so the panel title stands down rather than stacking two bars.
             .children((!showing_conversation).then(|| {
                 h_flex()
-                    .px_2()
-                    .py_1()
-                    .items_center()
-                    .border_b_1()
-                    .border_color(cx.theme().sidebar_border)
+                    .refine_style(&panel_header(cx))
                     .child(div().text_sm().child(i18n("workflows-title")))
             }))
             .child(self.render_body(cx))

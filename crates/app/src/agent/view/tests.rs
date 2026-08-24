@@ -4,8 +4,9 @@ use gpui_component::input::Enter;
 use nmt_agent_utils::chat::QueuedPrompt;
 use nmt_config::system::NewlineShortcut;
 
+use crate::agent::UpdateSuspension;
 use crate::agent::composer::prompt_with_response_annotations;
-use crate::agent::view::banners::composer_stats_label;
+use crate::agent::view::banners::{UpdateOverlayPhase, composer_stats_label, update_overlay_phase};
 use crate::agent::view::history::queued_message_label;
 use crate::agent::view::{ComposerEnterBehavior, composer_enter_behavior};
 
@@ -44,6 +45,27 @@ fn composer_stats_report_only_what_the_conversation_knows() {
     assert_eq!(
         composer_stats_label(1, 1, Some(Duration::from_millis(1_240)), None).as_deref(),
         Some("1 turns · 1 steps · first 1.2s")
+    );
+}
+
+#[test]
+fn update_phases_choose_the_blocking_overlay() {
+    assert_eq!(
+        update_overlay_phase(&UpdateSuspension::Stopping),
+        Some(UpdateOverlayPhase::Stopping)
+    );
+    assert_eq!(
+        update_overlay_phase(&UpdateSuspension::Updating),
+        Some(UpdateOverlayPhase::Updating)
+    );
+    assert_eq!(
+        update_overlay_phase(&UpdateSuspension::Reconnecting),
+        Some(UpdateOverlayPhase::Reconnecting)
+    );
+    assert_eq!(update_overlay_phase(&UpdateSuspension::Waiting), None);
+    assert_eq!(
+        update_overlay_phase(&UpdateSuspension::Failed("failed".into())),
+        None
     );
 }
 
