@@ -126,6 +126,9 @@ pub(crate) enum AgentPaneEvent {
     /// pane no longer holds a conversation worth naming, which drops the tab
     /// back to the name its profile gives it.
     TitleSuggested(String),
+    /// The tab holding this pane should close. A pane owns no tab, so the
+    /// chrome that does is asked to close it.
+    CloseRequested,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -594,6 +597,14 @@ pub(crate) struct AgentPane {
     /// new one or report a bogus exit.
     session_epoch: u64,
     status: Status,
+    /// Why the backend never came up, while that is still the pane's whole
+    /// state. Held rather than derived from [`Status::Exited`], which a
+    /// conversation that ran and then ended also reaches.
+    start_failure: Option<String>,
+    /// Whether the start has taken long enough to be worth covering the tab
+    /// for. Set by a timer rather than compared against a clock at render
+    /// time, because a pane waiting on its backend repaints for nothing else.
+    start_overlay_visible: bool,
     history_ui: SessionHistoryUi,
     /// Stop the effort slider's thumb is being dragged to while the button is
     /// down. The level itself is applied on release.

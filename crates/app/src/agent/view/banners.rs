@@ -400,6 +400,101 @@ impl AgentPane {
         )
     }
 
+    /// The harness's start, over the tab it is starting in.
+    ///
+    /// Only the DeepSeek pane wears one: its host is a Node process that may
+    /// still be fetching its package, so the gap is long enough that an
+    /// unexplained dead tab is the alternative. The CLI backends are running
+    /// within a frame or two, where an overlay would only flash.
+    ///
+    /// A start that failed keeps the overlay and answers with the two things
+    /// left to do, because the pane behind it has no conversation to return
+    /// to: the transcript holds one error row and nothing else.
+    pub(in crate::agent::view) fn render_start_overlay(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !self.wears_start_overlay() {
+            return None;
+        }
+
+        let failure = self.start_failure.clone();
+        if failure.is_none() && !self.start_overlay_visible {
+            return None;
+        }
+
+        let body = match &failure {
+            Some(message) => v_flex()
+                .max_w(px(420.))
+                .items_center()
+                .gap_4()
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().danger)
+                        .child(message.clone()),
+                )
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            Button::new("agent-start-retry")
+                                .primary()
+                                .small()
+                                .label(i18n("agent-start-retry"))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.start_session(None, cx);
+                                })),
+                        )
+                        .child(
+                            Button::new("agent-start-close-tab")
+                                .outline()
+                                .small()
+                                .label(i18n("agent-start-close-tab"))
+                                .on_click(cx.listener(|_, _, _, cx| {
+                                    cx.emit(AgentPaneEvent::CloseRequested);
+                                })),
+                        ),
+                ),
+            None => v_flex()
+                .items_center()
+                .gap_3()
+                .child(
+                    Spinner::new()
+                        .icon(IconName::LoaderCircle)
+                        .with_size(px(22.))
+                        .color(cx.theme().primary),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(cx.theme().foreground)
+                        .child(i18n("agent-start-starting")),
+                ),
+        };
+
+        Some(
+            v_flex()
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                // Swallows clicks and keys aimed at the composer underneath,
+                // which has no backend to send them to.
+                .occlude()
+                .items_center()
+                .justify_center()
+                .p_6()
+                // Frosted glass rather than a flat scrim: the tab stays
+                // readable as shape and colour while reading as unavailable.
+                .backdrop_blur(px(24.))
+                .bg(cx.theme().background.opacity(0.45))
+                .child(body)
+                .into_any_element(),
+        )
+    }
+
     pub(in crate::agent::view) fn render_composer_status(
         &self,
         cx: &mut Context<Self>,

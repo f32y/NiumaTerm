@@ -135,6 +135,9 @@ pub(crate) struct Shell {
     /// in a tab rooted there. Event subscriptions carry no window, and opening
     /// a tab needs one.
     pending_agent_resume: Option<PendingAgentResume>,
+    /// A tab whose agent asked to be closed, waiting for a render to close it.
+    /// Closing a tab needs a window for the same reason opening one does.
+    pending_agent_close: Option<TabId>,
     /// Whether any tab has run a workflow. Sticky: the title-bar control
     /// appears the first time one runs and stays, so a finished run remains
     /// reachable after its rows have settled.
@@ -326,6 +329,7 @@ impl Shell {
             tab_rename: None,
             needs_focus: true,
             pending_agent_resume: None,
+            pending_agent_close: None,
             workflows_seen: false,
             background_tasks_seen: false,
             root_observed: false,

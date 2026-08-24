@@ -555,6 +555,11 @@
 "agent-usage-plan" = "{name} plan"
 "agent-usage-no-limits" = "No subscription limits available"
 
+# Agent start overlay
+"agent-start-starting" = "STARTING AGENT"
+"agent-start-retry" = "Retry"
+"agent-start-close-tab" = "Close Tab"
+
 # Agent update flow
 "agent-update-waiting-label" = "WAITING FOR UPDATE"
 "agent-update-waiting-detail" = "New provider input is paused until this tab becomes recoverably idle."

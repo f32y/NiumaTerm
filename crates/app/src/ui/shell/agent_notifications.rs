@@ -358,6 +358,13 @@ impl Shell {
                     }
                     return;
                 }
+                AgentPaneEvent::CloseRequested => {
+                    // Same reason as the resume above: closing a tab needs a
+                    // window, and the next render has one.
+                    this.pending_agent_close = this.tab_for_agent_pane(&pane);
+                    cx.notify();
+                    return;
+                }
                 AgentPaneEvent::Interrupted => {
                     this.agent_monitor.interrupt(&route, time::Instant::now())
                 }
