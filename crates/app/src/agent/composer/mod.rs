@@ -716,8 +716,10 @@ impl AgentPane {
 
         match self.attachments.attach(&image) {
             Ok(placeholder) => {
-                self.input
-                    .update(cx, |input, cx| input.insert(placeholder, window, cx));
+                self.input.update(cx, |input, cx| {
+                    let preceding = input.text().chars_at(input.cursor()).prev();
+                    input.insert(spaced_placeholder(preceding, &placeholder), window, cx);
+                });
                 cx.notify();
                 true
             }
@@ -782,6 +784,17 @@ impl AgentPane {
 /// A copied file read as an image, or `None` for anything that is not one.
 /// Only the extension is trusted to decide whether reading is worth it; the
 /// decode decides whether it was an image.
+/// The placeholder as it is written into the composer. A space on each side
+/// keeps it a word of its own, so the prompt around it does not run into the
+/// marker. The leading one is dropped where there is nothing to separate it
+/// from: the start of the text, or whitespace the caret already sits after.
+fn spaced_placeholder(preceding: Option<char>, placeholder: &str) -> String {
+    match preceding {
+        Some(character) if !character.is_whitespace() => format!(" {placeholder} "),
+        _ => format!("{placeholder} "),
+    }
+}
+
 fn image_file(path: &Path) -> Option<Image> {
     let format = match path
         .extension()
