@@ -1,11 +1,12 @@
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    App, AppContext as _, Div, Entity, ParentElement as _, SharedString, Styled as _, Subscription,
-    Window,
+    App, AppContext as _, Div, Entity, InteractiveElement as _, ParentElement as _, SharedString,
+    Stateful, StatefulInteractiveElement as _, Styled as _, Subscription, Window,
 };
 use gpui_component::input::{InputEvent, InputState};
 use gpui_component::label::Label;
-use gpui_component::{ActiveTheme as _, h_flex, v_flex};
+use gpui_component::tooltip::Tooltip;
+use gpui_component::{ActiveTheme as _, Icon, IconName, h_flex};
 
 /// Persistent input state for a text field inside a profile card, created
 /// via `window.use_keyed_state` so it survives the per-frame settings-view
@@ -62,35 +63,52 @@ pub(super) fn card_text_input(
     input
 }
 
-/// One labeled row inside a profile card: title and an optional muted
-/// description on the left, with the control on the right. An empty
-/// description omits the second line entirely.
+/// The hover hint that carries a label's description. `owner` names the label
+/// it belongs to: the hint carries hover state, so it needs an id of its own,
+/// and two hints sharing one would share that state.
+pub(super) fn description_hint(owner: &str, description: SharedString, cx: &App) -> Stateful<Div> {
+    gpui::div()
+        .id(SharedString::from(format!("card-hint-{owner}")))
+        .flex_shrink_0()
+        .text_color(cx.theme().muted_foreground)
+        .child(Icon::new(IconName::CircleHelp).size_3())
+        .tooltip(move |window, cx| Tooltip::new(description.clone()).build(window, cx))
+}
+
+/// One labeled row inside a profile card: title on the left with the control
+/// on the right, and an optional description behind a hover hint beside the
+/// title. An empty description omits the hint entirely.
+///
+/// The description hides behind the hint rather than sitting under the title
+/// so that every row is one line tall: the rows stay scannable, the control
+/// column keeps one baseline, and a row explaining itself at length costs the
+/// page no more height than one that needs no explanation. This is the shape
+/// the settings pages built from `SettingItem` already have, and a card is
+/// read as one of them.
 pub(super) fn card_row(
     title: impl Into<SharedString>,
     description: impl Into<SharedString>,
     control: impl gpui::IntoElement,
     cx: &App,
 ) -> Div {
+    let title = title.into();
+    let title_id = title.to_string();
     let description = description.into();
 
     h_flex()
         .w_full()
         .justify_between()
-        .items_start()
+        .items_center()
         .gap_3()
         .child(
-            v_flex()
+            h_flex()
                 .flex_1()
                 .max_w_3_5()
                 .gap_1()
-                .child(Label::new(title.into()).text_sm())
+                .items_center()
+                .child(Label::new(title).text_sm())
                 .when(!description.is_empty(), |this| {
-                    this.child(
-                        gpui::div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(description),
-                    )
+                    this.child(description_hint(&title_id, description, cx))
                 }),
         )
         .child(control.into_any_element())
