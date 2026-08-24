@@ -934,6 +934,22 @@ impl PlatformWindow for WindowsWindow {
             )
         }
         .log_err();
+
+        // Rounding a window also gets it the frame border DWM draws for a
+        // top-level window, which on a flyout reads as a grey ring around a
+        // surface that is supposed to be defined by its shadow alone. The
+        // sentinel below is what suppresses that border; an ordinary color
+        // would only repaint it.
+        let border_color: u32 = 0xFFFF_FFFE;
+        unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_BORDER_COLOR,
+                (&raw const border_color).cast(),
+                std::mem::size_of_val(&border_color) as u32,
+            )
+        }
+        .log_err();
     }
 
     fn hide_flyout(&self) {
