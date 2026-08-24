@@ -200,18 +200,21 @@ pub(crate) fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
             api_key_env,
         });
 
-    // A DeepSeek profile can run the harness from its npm package instead of
-    // an installed binary, which moves the package name into the launcher's
-    // own arguments and leaves the configured path unused.
-    let (executable, executable_args) =
-        if profile.kind == AgentProfileKind::DeepSeek && profile.via_npx {
-            (
-                deepseek::NPX_EXECUTABLE.to_string(),
-                deepseek::NPX_ARGUMENTS.map(str::to_string).to_vec(),
-            )
-        } else {
-            (profile.executable.trim().to_string(), Vec::new())
-        };
+    // Package launchers move the package name into their own arguments and
+    // leave the configured executable unused. Other agent kinds always launch
+    // their configured executable even if a hand-edited file names a package
+    // launcher that their adapter does not support.
+    let (executable, executable_args) = match (profile.kind, profile.launcher) {
+        (AgentProfileKind::DeepSeek, AgentProfileLauncher::Npx) => (
+            deepseek::NPX_EXECUTABLE.to_string(),
+            deepseek::NPX_ARGUMENTS.map(str::to_string).to_vec(),
+        ),
+        (AgentProfileKind::DeepSeek, AgentProfileLauncher::PnpmDlx) => (
+            deepseek::PNPM_DLX_EXECUTABLE.to_string(),
+            deepseek::PNPM_DLX_ARGUMENTS.map(str::to_string).to_vec(),
+        ),
+        _ => (profile.executable.trim().to_string(), Vec::new()),
+    };
 
     LaunchConfig {
         executable,
@@ -292,7 +295,7 @@ impl AgentThreadDefaults {
 
 #[cfg(test)]
 mod agent_profile_launch_tests {
-    use nmt_config::profile::{AgentProfile, AgentProfileKind, EnvVar};
+    use nmt_config::profile::{AgentProfile, AgentProfileKind, AgentProfileLauncher, EnvVar};
 
     use crate::agent::profile::{
         ANTHROPIC_MODEL_ENV, ANTHROPIC_SUB_MODEL_ENVS, DEEPSEEK_API_KEY_ENV, DEEPSEEK_BASE_URL_ENV,
@@ -500,6 +503,36 @@ mod agent_profile_launch_tests {
 
         assert_eq!(launch_env_value(&launch, DEEPSEEK_BASE_URL_ENV), None);
         assert_eq!(launch_env_value(&launch, DEEPSEEK_API_KEY_ENV), None);
+    }
+
+    #[test]
+    fn deepseek_package_launchers_build_their_native_commands() {
+        let cases = [
+            (
+                AgentProfileLauncher::Npx,
+                "npx",
+                vec!["-y", "@deepseek-ai/dsh@latest"],
+            ),
+            (
+                AgentProfileLauncher::PnpmDlx,
+                "pnpm",
+                vec!["dlx", "@deepseek-ai/dsh@latest"],
+            ),
+        ];
+
+        for (launcher, expected_executable, expected_args) in cases {
+            let profile = AgentProfile {
+                kind: AgentProfileKind::DeepSeek,
+                executable: "ignored-dsh".into(),
+                launcher,
+                ..AgentProfile::default()
+            };
+
+            let launch = agent_launch(&profile);
+
+            assert_eq!(launch.executable, expected_executable);
+            assert_eq!(launch.executable_args, expected_args);
+        }
     }
 
     #[test]

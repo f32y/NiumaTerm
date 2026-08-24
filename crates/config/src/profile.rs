@@ -71,6 +71,27 @@ impl AgentProfileKind {
     }
 }
 
+/// How a DeepSeek Harness profile obtains the `dsh` command it launches.
+/// Other agent kinds always use [`AgentProfileLauncher::Custom`].
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AgentProfileLauncher {
+    #[default]
+    Custom,
+    Npx,
+    PnpmDlx,
+}
+
+impl AgentProfileLauncher {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AgentProfileLauncher::Custom => "custom",
+            AgentProfileLauncher::Npx => "npx",
+            AgentProfileLauncher::PnpmDlx => "pnpm-dlx",
+        }
+    }
+}
+
 /// One environment variable applied to the agent process on launch.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct EnvVar {
@@ -93,15 +114,13 @@ pub struct AgentProfile {
     pub kind: AgentProfileKind,
     /// Executable name or path; a bare name resolves via PATH (and PATHEXT on
     /// Windows, so `claude` finds both `claude.exe` and the npm `claude.cmd`).
-    /// Ignored while [`Self::via_npx`] runs the harness from its package.
+    /// Ignored while [`Self::launcher`] runs the harness from its package.
     #[serde(default)]
     pub executable: String,
-    /// Run the harness through `npx` from its published package instead of an
-    /// installed executable. Only DeepSeek Harness offers this; a profile
-    /// written before the field existed reads as false, which keeps it on the
-    /// executable it was already launching.
-    #[serde(default, rename = "via-npx")]
-    pub via_npx: bool,
+    /// Only DeepSeek Harness offers package launchers; the other agent kinds
+    /// use their configured executable regardless of this value.
+    #[serde(default)]
+    pub launcher: AgentProfileLauncher,
     /// Model selected when a new agent conversation starts. Each adapter maps
     /// this to its native configuration surface.
     #[serde(default)]
@@ -151,6 +170,10 @@ struct PersistedAgentProfile {
     kind: AgentProfileKind,
     #[serde(default)]
     executable: String,
+    #[serde(default)]
+    launcher: Option<AgentProfileLauncher>,
+    /// Builds before package launchers became a three-way choice stored this
+    /// boolean. A new `launcher` value wins when both fields are present.
     #[serde(default, rename = "via-npx")]
     via_npx: bool,
     #[serde(default)]
@@ -193,11 +216,18 @@ impl TryFrom<PersistedAgentProfile> for AgentProfile {
             })?,
             None => (persisted.api_base_url, persisted.api_key),
         };
+        let launcher = persisted.launcher.unwrap_or_else(|| {
+            if persisted.via_npx {
+                AgentProfileLauncher::Npx
+            } else {
+                AgentProfileLauncher::Custom
+            }
+        });
         Ok(AgentProfile {
             name: persisted.name,
             kind: persisted.kind,
             executable: persisted.executable,
-            via_npx: persisted.via_npx,
+            launcher,
             model: persisted.model,
             effort: persisted.effort,
             replace_sub_models: persisted.replace_sub_models,
@@ -252,7 +282,7 @@ pub(crate) fn patch_agent_document(
         table["name"] = value(&profile.name);
         table["kind"] = value(profile.kind.as_str());
         table["executable"] = value(&profile.executable);
-        table["via-npx"] = value(profile.via_npx);
+        table["launcher"] = value(profile.launcher.as_str());
         table["model"] = value(&profile.model);
         table["effort"] = value(&profile.effort);
         table["replace-sub-models"] = value(profile.replace_sub_models);

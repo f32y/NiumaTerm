@@ -197,7 +197,7 @@ fn select_profile_kind(profile_kind: AgentProfileKind, cx: &mut App) {
         draft.profile.executable = builtin.executable;
         // How the harness is launched belongs to the harness, so the choice
         // follows the kind for as long as the executable does.
-        draft.profile.via_npx = builtin.via_npx;
+        draft.profile.launcher = builtin.launcher;
     }
     draft.profile.kind = profile_kind;
 }
@@ -533,32 +533,43 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
             })
         });
 
-    // DeepSeek Harness is published to npm, so a profile can run it straight
-    // from its package; every other harness is launched from a binary the user
+    // DeepSeek Harness is published as a package, so it can run through either
+    // package manager; every other harness is launched from a binary the user
     // installed and has nothing to pick between.
-    let via_npx = profile.kind == AgentProfileKind::DeepSeek && profile.via_npx;
+    let launcher = profile.launcher;
+    let launcher_label = match launcher {
+        AgentProfileLauncher::Custom => i18n("settings-agent-profile-launcher-custom"),
+        AgentProfileLauncher::Npx => i18n("settings-agent-profile-launcher-npx"),
+        AgentProfileLauncher::PnpmDlx => i18n("settings-agent-profile-launcher-pnpm-dlx"),
+    };
     let launcher_control = Button::new("agent-profile-dialog-launcher")
         .outline()
         .w_64()
-        .label(if via_npx {
-            i18n("settings-agent-profile-launcher-npx")
-        } else {
-            i18n("settings-agent-profile-launcher-custom")
-        })
+        .label(launcher_label)
         .dropdown_caret(true)
         .dropdown_menu(move |menu, _, _| {
             menu.item(
                 PopupMenuItem::new(i18n("settings-agent-profile-launcher-npx"))
-                    .checked(via_npx)
+                    .checked(launcher == AgentProfileLauncher::Npx)
                     .on_click(|_, _, cx: &mut App| {
-                        cx.global_mut::<AgentProfileDraft>().profile.via_npx = true;
+                        cx.global_mut::<AgentProfileDraft>().profile.launcher =
+                            AgentProfileLauncher::Npx;
                     }),
             )
             .item(
                 PopupMenuItem::new(i18n("settings-agent-profile-launcher-custom"))
-                    .checked(!via_npx)
+                    .checked(launcher == AgentProfileLauncher::Custom)
                     .on_click(|_, _, cx: &mut App| {
-                        cx.global_mut::<AgentProfileDraft>().profile.via_npx = false;
+                        cx.global_mut::<AgentProfileDraft>().profile.launcher =
+                            AgentProfileLauncher::Custom;
+                    }),
+            )
+            .item(
+                PopupMenuItem::new(i18n("settings-agent-profile-launcher-pnpm-dlx"))
+                    .checked(launcher == AgentProfileLauncher::PnpmDlx)
+                    .on_click(|_, _, cx: &mut App| {
+                        cx.global_mut::<AgentProfileDraft>().profile.launcher =
+                            AgentProfileLauncher::PnpmDlx;
                     }),
             )
         });
@@ -639,14 +650,17 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
         })
         // The path is what the profile launches, so it is only asked for when
         // the profile launches a path.
-        .when(!via_npx, |this| {
-            this.child(card_row(
-                i18n("settings-agent-profile-executable"),
-                i18n("settings-agent-profile-executable-description"),
-                Input::new(&exe_input).w_64(),
-                cx,
-            ))
-        })
+        .when(
+            profile.kind != AgentProfileKind::DeepSeek || launcher == AgentProfileLauncher::Custom,
+            |this| {
+                this.child(card_row(
+                    i18n("settings-agent-profile-executable"),
+                    i18n("settings-agent-profile-executable-description"),
+                    Input::new(&exe_input).w_64(),
+                    cx,
+                ))
+            },
+        )
         .child(card_row(
             i18n("settings-agent-profile-model"),
             match profile.kind {
