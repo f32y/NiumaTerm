@@ -11,7 +11,15 @@ use gpui::{
 };
 use smallvec::SmallVec;
 
+/// Height of the title bar strip. Windows' Fluent guidance offers a 32px
+/// standard bar and a 48px tall bar; a bar carrying interactive content wants
+/// the taller end of that range so its controls keep a usable hit target.
 pub const TITLE_BAR_HEIGHT: Pixels = px(40.);
+/// Width of a single minimize/maximize/close button. Windows draws its caption
+/// buttons 46px wide at every bar height, so this is deliberately independent
+/// of [`TITLE_BAR_HEIGHT`]: raising the bar makes the buttons taller, never
+/// wider.
+const WINDOW_CONTROL_WIDTH: Pixels = px(46.);
 #[cfg(target_os = "macos")]
 const TITLE_BAR_LEFT_PADDING: Pixels = px(80.);
 #[cfg(not(target_os = "macos"))]
@@ -164,7 +172,7 @@ impl RenderOnce for ControlIcon {
         div()
             .id(self.id())
             .flex()
-            .w(TITLE_BAR_HEIGHT)
+            .w(WINDOW_CONTROL_WIDTH)
             .h_full()
             .flex_shrink_0()
             .justify_center()
