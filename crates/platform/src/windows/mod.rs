@@ -14,6 +14,7 @@ pub mod filesystem;
 pub mod ipc;
 pub mod powershell;
 pub mod process;
+pub mod restart_manager;
 pub mod self_update;
 pub mod shell_extension;
 pub mod window;
