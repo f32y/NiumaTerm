@@ -107,17 +107,33 @@ fn update_check_item() -> SettingItem {
                 .on_click(|_, _, cx: &mut App| update::install_now(cx))
         });
 
-        card_row(
-            i18n("settings-about-check-for-updates"),
-            status_text(&status),
-            h_flex()
-                .gap_2()
-                .children(open)
-                .children(install)
-                .child(check),
-            cx,
-        )
-        .into_any_element()
+        // The status line reports the result of a check the user just ran and
+        // changes while it runs, so it sits under the label instead of behind
+        // the hover hint the static row descriptions use: watching a check
+        // progress should not require holding the pointer over an icon.
+        h_flex()
+            .w_full()
+            .justify_between()
+            .items_center()
+            .gap_3()
+            .child(
+                v_flex()
+                    .flex_1()
+                    .child(Label::new(i18n("settings-about-check-for-updates")).text_sm())
+                    .child(
+                        Label::new(status_text(&status))
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .children(open)
+                    .children(install)
+                    .child(check),
+            )
+            .into_any_element()
     })
 }
 
