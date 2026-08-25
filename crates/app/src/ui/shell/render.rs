@@ -514,9 +514,11 @@ impl Render for Shell {
                             .min_w_0()
                             .relative()
                             .overflow_hidden()
-                            .px(px(ui::composition::FLOATING_SURFACE_SIDE_INSET))
+                            // Gutters only on the two sides that face other
+                            // chrome; the surface runs flush into the window's
+                            // right and bottom edges.
+                            .pl(px(ui::composition::FLOATING_SURFACE_SIDE_INSET))
                             .pt(px(ui::composition::FLOATING_SURFACE_TOP_INSET))
-                            .pb(px(ui::composition::FLOATING_SURFACE_BOTTOM_INSET))
                             .child(
                                 floating_surface::card(cx)
                                     .id("main-floating-surface")

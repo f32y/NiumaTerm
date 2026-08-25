@@ -1,7 +1,7 @@
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, Context, DragMoveEvent, ElementId, Entity, ScrollHandle, SharedString, div, px,
-    relative,
+    AnyElement, App, Context, DragMoveEvent, ElementId, Entity, ScrollHandle, SharedString, div,
+    px, relative,
 };
 use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants};
 use gpui_component::input::InputState;
@@ -219,6 +219,38 @@ const TAB_ROW_HEIGHT: f32 = 30.0;
 /// Diameter of a tab row's status dot. Smaller than the workspace column's,
 /// which keeps the two tiers apart at a glance.
 const TAB_ROW_DOT: f32 = 6.0;
+
+/// Geometry of the selection bar on the leading edge of a selected row.
+/// Windows navigation panes draw this mark at a fixed 3x16 with a 2px radius
+/// whatever the row height is, so a two-line workspace row and a single-line
+/// tab row carry the same mark and line up as one column of selection cues.
+const SELECTION_BAR_WIDTH: f32 = 3.0;
+const SELECTION_BAR_HEIGHT: f32 = 16.0;
+const SELECTION_BAR_RADIUS: f32 = 2.0;
+/// Distance from the row box's leading edge. The row is a rounded rectangle,
+/// so a mark flush against that edge would sit outside the fill at the corners.
+const SELECTION_BAR_INSET: f32 = 2.0;
+
+/// The accent bar that marks the selected row. It is drawn out of the row's
+/// flow so it can sit in the gutter left of the row's own padding, and it
+/// carries the accent color on its own: the row fill stays a neutral subtle
+/// wash, which keeps a selected row legible against a translucent pane.
+fn selection_bar(cx: &App) -> impl IntoElement {
+    div()
+        .absolute()
+        .left(px(SELECTION_BAR_INSET))
+        .top_0()
+        .bottom_0()
+        .flex()
+        .items_center()
+        .child(
+            div()
+                .w(px(SELECTION_BAR_WIDTH))
+                .h(px(SELECTION_BAR_HEIGHT))
+                .rounded(px(SELECTION_BAR_RADIUS))
+                .bg(cx.theme().primary),
+        )
+}
 
 /// Workspace-sidebar view state: collapse/expand plus the persisted expanded
 /// width. Rendered against the workspace summaries the shell passes in.
