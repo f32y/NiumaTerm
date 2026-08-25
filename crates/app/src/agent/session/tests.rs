@@ -298,15 +298,14 @@ fn a_directory_reads_as_its_last_two_components() {
     assert_eq!(directory_label("C:/only"), "C:/only");
 }
 
-/// A prompt submitted while a turn is running belongs to the turn that
-/// answers it. Claude's CLI holds such a prompt until the running turn ends
-/// and then opens a turn of its own for it, so drawing it when the first turn
-/// completes puts it inside a finished turn — above the reply that turn had
-/// already written, because a settled turn renders its final answer last.
+/// Where a prompt appears between the moment it is submitted and the moment
+/// its turn answers it. Each harness hands one over differently, and the two
+/// ways of getting it wrong are drawing it in a turn that had already
+/// finished writing, and drawing it twice at once.
 mod queued_prompt_placement_tests {
     use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext, WindowHandle};
     use nmt_agent_utils::chat::{
-        Event as SessionEvent, Item as SessionItem, SendOutcome, SlashCommandOutcome,
+        Event as SessionEvent, Item as SessionItem, QueuedPrompt, SendOutcome, SlashCommandOutcome,
     };
     use nmt_config::profile::{AgentProfile, AgentProfileKind};
 
@@ -314,12 +313,13 @@ mod queued_prompt_placement_tests {
     use crate::agent::{AgentPane, AgentThreadDefaults};
     use crate::ui::AppSettings;
 
-    fn open_claude_pane(
+    fn open_pane(
         cx: &mut TestAppContext,
+        kind: AgentProfileKind,
     ) -> (Entity<AgentPane>, WindowHandle<gpui_component::Root>) {
         let profile = AgentProfile {
             name: "Queued Prompt Test".into(),
-            kind: AgentProfileKind::ClaudeCode,
+            kind,
             // Never spawned: every test below installs a backend by hand.
             executable: "missing-agent.exe".into(),
             ..AgentProfile::default()
@@ -356,7 +356,7 @@ mod queued_prompt_placement_tests {
 
     #[gpui::test]
     fn a_queued_prompt_heads_the_turn_opened_for_it(cx: &mut TestAppContext) {
-        let (pane, window) = open_claude_pane(cx);
+        let (pane, window) = open_pane(cx, AgentProfileKind::ClaudeCode);
         let mut cx = VisualTestContext::from_window(window.into(), cx);
 
         cx.update(|_, cx| {
@@ -402,6 +402,61 @@ mod queued_prompt_placement_tests {
                     ],
                     "the held prompt heads the turn that answers it"
                 );
+            });
+        });
+    }
+
+    /// The harness lists a prompt in its pending inbox from the moment it
+    /// accepts it until the turn claims it, and the send that started that
+    /// turn has already drawn the prompt's row. Listing it above the composer
+    /// as well would show the same message twice for that whole window.
+    #[gpui::test]
+    fn a_pending_inbox_omits_the_prompt_its_send_already_drew(cx: &mut TestAppContext) {
+        let (pane, window) = open_pane(cx, AgentProfileKind::DeepSeek);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.session = Some(Backend::Test(TestBackend::new(
+                    [SendOutcome::StartedTurn],
+                    SlashCommandOutcome::NotReady,
+                    Vec::new(),
+                )));
+                pane.status = Status::Idle;
+
+                let text = "Reply with exactly: ok".to_string();
+                assert!(pane.send_text(text.clone(), cx));
+
+                // What the harness reports, in the order it reports it: the
+                // prompt queued, the turn opened, the queue emptied, and the
+                // harness's own echo of the message it took.
+                pane.apply_event(
+                    SessionEvent::QueuedPrompts(vec![QueuedPrompt {
+                        id: Some("afd4d197".into()),
+                        text: text.clone(),
+                    }]),
+                    cx,
+                );
+                assert!(
+                    pane.queued_user_messages.is_empty(),
+                    "a prompt already in the transcript is not also waiting"
+                );
+
+                pane.apply_event(SessionEvent::TurnStarted, cx);
+                pane.apply_event(SessionEvent::QueuedPrompts(Vec::new()), cx);
+                pane.apply_event(
+                    SessionEvent::ItemStarted(SessionItem::UserMessage {
+                        text: Some(text.clone()),
+                    }),
+                    cx,
+                );
+
+                assert_eq!(
+                    user_rows(pane, cx),
+                    vec![(1, text)],
+                    "the message appears once, in the turn it opened"
+                );
+                assert!(pane.queued_user_messages.is_empty());
             });
         });
     }

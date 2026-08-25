@@ -534,12 +534,26 @@ impl AgentPane {
             // either can arrive first. Both read the same list and remove what
             // they publish, so whichever loses the race finds nothing left to
             // publish and the row appears exactly once.
-            SessionEvent::QueuedPrompts(prompts) => {
+            SessionEvent::QueuedPrompts(mut prompts) => {
+                // A prompt whose own send started the turn is already in the
+                // transcript, and the backend keeps listing it until the turn
+                // claims it. Repeating it above the composer would show the
+                // same message twice for that whole window, so it is dropped
+                // from the list here and the snapshot that stops naming it —
+                // the moment the turn took it — retires the record.
+                if let Some(drawn) = self.published_prompt.take() {
+                    let before = prompts.len();
+                    prompts.retain(|prompt| prompt.text != drawn);
+                    if prompts.len() != before {
+                        self.published_prompt = Some(drawn);
+                    }
+                }
+
                 let claimed = claimed_prompts(&self.queued_user_messages, &prompts);
 
                 self.queued_user_messages = prompts.into();
                 for text in claimed {
-                    self.publish_prompt_row(text, cx);
+                    self.push_item(SessionItem::UserMessage { text: Some(text) }, cx);
                 }
                 cx.notify();
             }
@@ -620,7 +634,7 @@ impl AgentPane {
             {
                 let text = text.clone();
                 self.queued_user_messages.pop_front();
-                self.publish_prompt_row(text, cx);
+                self.push_item(SessionItem::UserMessage { text: Some(text) }, cx);
             }
             return;
         }
@@ -642,19 +656,6 @@ impl AgentPane {
         }
 
         self.push_item(item, cx);
-    }
-
-    /// Put a prompt the backend has claimed into the transcript, unless the
-    /// send that started the turn already drew it. Both the pending-inbox
-    /// snapshot and the backend's own echo claim the same row and either can
-    /// arrive first, so the suppression is spent by whichever gets there.
-    fn publish_prompt_row(&mut self, text: String, cx: &mut Context<Self>) {
-        if self.published_prompt.as_deref() == Some(text.as_str()) {
-            self.published_prompt = None;
-            return;
-        }
-
-        self.push_item(SessionItem::UserMessage { text: Some(text) }, cx);
     }
 
     pub(in crate::agent::session) fn publish_queued_user_messages(
