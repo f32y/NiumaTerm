@@ -365,8 +365,15 @@ fn a_command_result_reports_what_the_registry_settled() {
     use crate::chat::SlashCommandOutcome;
     use crate::deepseek::commands;
 
+    // The gateway compares the whole argument set, so the image list the
+    // descriptor names has to be there even though no command run from here
+    // carries an attachment.
     assert_eq!(
         commands::execute_args(SESSION, "/compact keep the design"),
+        json!({ "args": { "agentId": SESSION, "line": "/compact keep the design", "images": [] } })
+    );
+    assert_eq!(
+        commands::execute_args_without_images(SESSION, "/compact keep the design"),
         json!({ "args": { "agentId": SESSION, "line": "/compact keep the design" } })
     );
 

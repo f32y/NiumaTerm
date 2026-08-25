@@ -32,8 +32,23 @@ pub(crate) fn agent_args(session_id: &str) -> Value {
     json!({ "args": { "agentId": session_id } })
 }
 
+/// How the gateway refuses an argument set carrying an image list on a release
+/// whose command descriptor has no image parameter. The check compares the
+/// whole field set, so an empty list is as unacceptable there as a full one,
+/// and the refusal is what tells this apart from a command that failed.
+pub(crate) const UNEXPECTED_IMAGES: &str = "unexpected \"images\"";
+
 /// Named arguments for one command line addressed to a session's agent.
+///
+/// From 0.1.1 a command can be given attachments, and the field is required
+/// whether or not the command reads them. The commands this adapter runs carry
+/// none, so the list is present and empty.
 pub(crate) fn execute_args(session_id: &str, line: &str) -> Value {
+    json!({ "args": { "agentId": session_id, "line": line, "images": [] } })
+}
+
+/// The same call for a release that predates the image parameter.
+pub(crate) fn execute_args_without_images(session_id: &str, line: &str) -> Value {
     json!({ "args": { "agentId": session_id, "line": line } })
 }
 
