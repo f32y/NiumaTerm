@@ -669,9 +669,9 @@ pub(crate) struct AgentPane {
     queued_user_messages: VecDeque<QueuedPrompt>,
     /// The prompt this side already put in the transcript because the backend
     /// admitted it as a new turn. A backend that publishes its pending inbox
-    /// also lists that prompt until the turn claims it, and the claim is what
-    /// normally places the row, so without this the same message would appear
-    /// twice.
+    /// keeps listing that prompt until the turn claims it, and every list it
+    /// appears in would show the message a second time beside the row that is
+    /// already there.
     published_prompt: Option<String>,
     rewind: RewindFlow,
     fork: ForkFlow,
