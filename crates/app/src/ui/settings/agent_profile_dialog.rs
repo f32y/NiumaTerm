@@ -557,19 +557,19 @@ fn agent_profile_dialog_content(window: &mut Window, cx: &mut App) -> Div {
                     }),
             )
             .item(
-                PopupMenuItem::new(i18n("settings-agent-profile-launcher-custom"))
-                    .checked(launcher == AgentProfileLauncher::Custom)
-                    .on_click(|_, _, cx: &mut App| {
-                        cx.global_mut::<AgentProfileDraft>().profile.launcher =
-                            AgentProfileLauncher::Custom;
-                    }),
-            )
-            .item(
                 PopupMenuItem::new(i18n("settings-agent-profile-launcher-pnpm-dlx"))
                     .checked(launcher == AgentProfileLauncher::PnpmDlx)
                     .on_click(|_, _, cx: &mut App| {
                         cx.global_mut::<AgentProfileDraft>().profile.launcher =
                             AgentProfileLauncher::PnpmDlx;
+                    }),
+            )
+            .item(
+                PopupMenuItem::new(i18n("settings-agent-profile-launcher-custom"))
+                    .checked(launcher == AgentProfileLauncher::Custom)
+                    .on_click(|_, _, cx: &mut App| {
+                        cx.global_mut::<AgentProfileDraft>().profile.launcher =
+                            AgentProfileLauncher::Custom;
                     }),
             )
         });
