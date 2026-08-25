@@ -22,6 +22,7 @@ use notify::{
 use toml::{Table as TomlTable, Value as TomlValue};
 use tracing::warn;
 
+use crate::ui::fluent::{BUTTON_PADDING_X, CONTROL_RADIUS};
 use crate::ui::settings::opacity::{main_view_background_opacity, surface_background_opacity};
 use crate::ui::settings::state::AppSettings;
 use crate::ui::{UI_BORDER_OPACITY, UI_RADIUS};
@@ -84,14 +85,20 @@ pub(super) fn ui_theme_config(value: &UiTheme) -> Option<Rc<ComponentThemeConfig
 }
 
 fn apply_ui_constants(config: &ComponentThemeConfig, theme: &mut ComponentTheme) {
-    // A theme that states its own corner radii owns them; the app radius is the
-    // fallback for the themes that leave the choice to the application.
+    // A theme that states its own corner radii owns them; these are the
+    // fallback for the themes that leave the choice to the application. The
+    // two radii part ways here: controls follow the system's smaller corner
+    // while dialogs, notifications, and the pane frame keep the app's own.
     if config.radius.is_none() {
-        theme.radius = UI_RADIUS;
+        theme.radius = CONTROL_RADIUS;
     }
     if config.radius_lg.is_none() {
         theme.radius_lg = UI_RADIUS;
     }
+    // No theme-file key backs this one, so it is not a fallback: button
+    // padding is a property of the application's design language rather than
+    // of the palette a theme chooses.
+    theme.button_padding_x = BUTTON_PADDING_X;
     theme.colors.sidebar_border = theme.colors.sidebar_border.opacity(UI_BORDER_OPACITY);
 }
 
