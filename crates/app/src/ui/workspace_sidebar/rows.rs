@@ -372,6 +372,9 @@ impl Sidebar {
                 })
             })
             .child(item)
+            // After the row itself, because the row's selected fill would
+            // otherwise paint over the bar's lane.
+            .children(highlight_active.then(|| selection_bar(cx)))
             .children(progress)
             .into_any_element()
     }
@@ -494,6 +497,7 @@ impl Sidebar {
             // A restored-but-not-yet-spawned tab renders faded, the same
             // "sleeping tab" cue the horizontal strip uses.
             .when(tab.pending, |this| this.opacity(0.6))
+            .children(active.then(|| selection_bar(cx)))
             .when(active, |this| {
                 this.bg(selection.active_background)
                     .text_color(selection.active_foreground)

@@ -6,7 +6,7 @@ pub(crate) use crate::ui::composition::metrics::{
 };
 pub(crate) use crate::ui::composition::status_mark::{StatusMark, StatusMarkTone};
 pub(crate) use crate::ui::composition::styles::{
-    framed_region, panel_header, sidebar_selection, sidebar_surface, surface_frame, table_header,
+    framed_region, panel_header, sidebar_selection, sidebar_surface, table_header,
 };
 
 mod hover_action;

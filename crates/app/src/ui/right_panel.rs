@@ -143,8 +143,8 @@ impl Render for RightPanel {
         // The panel surface is a floating card (own background, 1px border,
         // large radius) in a gutter cut from the fixed width: right inset
         // clears the window edge, the top inset lines up with the tab pills,
-        // and the terminal column's own gutter provides the left gap — so the
-        // resize handle keeps riding the card's left edge.
+        // and the left inset separates the card from the terminal column,
+        // which now runs flush up to this panel.
         let card = v_flex()
             .refine_style(&sidebar_surface(cx))
             .size_full()
@@ -155,6 +155,7 @@ impl Render for RightPanel {
             .h_full()
             .flex_none()
             .relative()
+            .pl(px(6.))
             .pr(px(6.))
             .pt(px(4.))
             .pb(px(6.))
