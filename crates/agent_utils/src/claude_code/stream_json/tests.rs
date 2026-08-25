@@ -1011,3 +1011,72 @@ fn unanswered_questions_are_omitted_rather_than_reported_as_empty() {
     assert!(!answers.contains_key("Which database?"));
     assert_eq!(answers["Which extras?"], json!("Tracing"));
 }
+
+/// The CLI queues a message written while a turn is running and then answers
+/// it in a turn of its own, which no send from this side opened. That turn
+/// announces itself only by producing model output, so without adopting it
+/// here nothing downstream ever learns a second turn started.
+#[cfg(windows)]
+#[test]
+fn model_output_after_a_finished_turn_opens_the_next_one() {
+    use std::env;
+    use std::path::Path;
+
+    use uuid::Uuid;
+
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude/fake-stream-json.cmd");
+    let log = env::temp_dir().join(format!("niumaterm-fake-queued-{}.jsonl", Uuid::new_v4()));
+    let launch = LaunchConfig {
+        executable: fixture.to_string_lossy().into_owned(),
+        env: vec![(
+            "NMT_FAKE_STREAM_LOG".to_string(),
+            log.to_string_lossy().into_owned(),
+        )],
+        ..LaunchConfig::default()
+    };
+    let mut session =
+        Session::spawn(&launch, None, None, |_| {}, |_| {}).expect("fake Claude process starts");
+    session.ready = true;
+
+    let assistant = json!({
+        "type": "assistant",
+        "message": {"id": "msg_1", "content": [{"type": "text", "text": "answer"}]},
+    });
+
+    assert_eq!(
+        session.send_user_message("first", &ThreadSettings::default(), &[]),
+        SendOutcome::StartedTurn
+    );
+    assert!(
+        session
+            .process(assistant.clone())
+            .iter()
+            .any(|event| matches!(event, Event::TurnStarted)),
+        "the turn the send opened reports its start"
+    );
+
+    // A message written while that turn runs is accepted by the CLI without
+    // joining it.
+    assert_eq!(
+        session.send_user_message("queued", &ThreadSettings::default(), &[]),
+        SendOutcome::Steered
+    );
+    assert!(
+        session
+            .process(json!({"type": "result", "subtype": "success"}))
+            .iter()
+            .any(|event| matches!(event, Event::TurnCompleted { .. }))
+    );
+
+    assert!(
+        session
+            .process(assistant)
+            .iter()
+            .any(|event| matches!(event, Event::TurnStarted)),
+        "the turn the CLI opens for the queued message reports its start too"
+    );
+
+    drop(session);
+    let _ = fs::remove_file(log);
+}
