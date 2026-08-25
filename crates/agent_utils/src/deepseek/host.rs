@@ -20,6 +20,12 @@ use crate::launcher::AgentCli;
 /// line is ignored so a future banner cannot break discovery.
 const ADDRESS_MARKER: &str = "http://";
 
+/// From 0.1.1 the host opens the served page in the default browser, which is
+/// the wrong surface here: the tab drives the same session over the local
+/// interface, so an extra browser window would be a second client nobody asked
+/// for.
+const NO_BROWSER_FLAG: &str = "--no-open";
+
 /// Node startup plus profile initialization measured at about 1.1 s on a warm
 /// machine. Package launchers that may need a cold download can select a longer
 /// wait below without making every failed custom launch take longer to report.
@@ -136,6 +142,19 @@ impl Host {
     /// one; the cost is that the address can only be learned from the host, so
     /// the wait below is also the start-failure detector.
     pub fn start(launch: &crate::LaunchConfig) -> Result<Self, HostError> {
+        match Self::start_with(launch, &["web", "--port", "0", NO_BROWSER_FLAG]) {
+            // Releases before 0.1.1 neither open a browser nor know the flag,
+            // and commander refuses an unknown option by exiting before it
+            // binds. Naming the flag in the refusal is what tells this apart
+            // from a real start failure, which must keep its own message.
+            Err(HostError::FailedToStart(detail)) if detail.contains(NO_BROWSER_FLAG) => {
+                Self::start_with(launch, &["web", "--port", "0"])
+            }
+            outcome => outcome,
+        }
+    }
+
+    fn start_with(launch: &crate::LaunchConfig, arguments: &[&str]) -> Result<Self, HostError> {
         let start_timeout = start_timeout(launch);
         let cli = AgentCli::from_launch(launch, DEFAULT_EXECUTABLE);
         // A bare name that PATH cannot resolve comes back as the configured
@@ -145,7 +164,7 @@ impl Host {
             return Err(HostError::NotInstalled(cli.executable().to_string()));
         }
 
-        let mut command = cli.command(["web", "--port", "0"]);
+        let mut command = cli.command(arguments);
         command
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
