@@ -518,7 +518,7 @@ impl AgentPane {
 
                 self.queued_user_messages = prompts.into();
                 for text in claimed {
-                    self.push_item(SessionItem::UserMessage { text: Some(text) }, cx);
+                    self.publish_prompt_row(text, cx);
                 }
                 cx.notify();
             }
@@ -597,8 +597,9 @@ impl AgentPane {
                     .front()
                     .is_some_and(|queued| &queued.text == text)
             {
+                let text = text.clone();
                 self.queued_user_messages.pop_front();
-                self.push_item(item, cx);
+                self.publish_prompt_row(text, cx);
             }
             return;
         }
@@ -618,6 +619,19 @@ impl AgentPane {
         }
 
         self.push_item(item, cx);
+    }
+
+    /// Put a prompt the backend has claimed into the transcript, unless the
+    /// send that started the turn already drew it. Both the pending-inbox
+    /// snapshot and the backend's own echo claim the same row and either can
+    /// arrive first, so the suppression is spent by whichever gets there.
+    fn publish_prompt_row(&mut self, text: String, cx: &mut Context<Self>) {
+        if self.published_prompt.as_deref() == Some(text.as_str()) {
+            self.published_prompt = None;
+            return;
+        }
+
+        self.push_item(SessionItem::UserMessage { text: Some(text) }, cx);
     }
 
     pub(in crate::agent::session) fn publish_queued_user_messages(

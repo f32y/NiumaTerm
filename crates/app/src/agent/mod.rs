@@ -667,6 +667,12 @@ pub(crate) struct AgentPane {
     /// pending queue republishes this whole list, which is what gives the rows
     /// the identities a removal needs.
     queued_user_messages: VecDeque<QueuedPrompt>,
+    /// The prompt this side already put in the transcript because the backend
+    /// admitted it as a new turn. A backend that publishes its pending inbox
+    /// also lists that prompt until the turn claims it, and the claim is what
+    /// normally places the row, so without this the same message would appear
+    /// twice.
+    published_prompt: Option<String>,
     rewind: RewindFlow,
     fork: ForkFlow,
     git_branch_poll: GitBranchPoll,

@@ -264,6 +264,7 @@ impl AgentPane {
                 ..SlashPalette::default()
             },
             queued_user_messages: VecDeque::new(),
+            published_prompt: None,
             rewind: RewindFlow::default(),
             fork: ForkFlow::default(),
             git_branch_poll: GitBranchPoll::default(),
@@ -892,6 +893,12 @@ impl AgentPane {
         match outcome {
             SendOutcome::StartedTurn => {
                 self.turn_seq += 1;
+                // A backend that publishes its pending inbox lists this prompt
+                // until the turn claims it; the row below is the claim's, so
+                // the claim has to know it was already drawn.
+                if self.kind.caps().reports_pending_queue {
+                    self.published_prompt = Some(text.clone());
+                }
                 let unanswered_prompt =
                     restore_on_interrupt.map(|(text, response_annotations)| UnansweredPrompt {
                         turn: self.turn_seq,
@@ -926,6 +933,7 @@ impl AgentPane {
             .update(cx, |transcript, _| transcript.clear());
         self.turn_seq = 0;
         self.turn_submitted_at = None;
+        self.published_prompt = None;
         self.first_output_latency = None;
         // The reading answers "how long has this conversation been waiting on
         // me"; the replaced conversation's last answer says nothing about the
