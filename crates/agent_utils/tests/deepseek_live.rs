@@ -13,7 +13,7 @@ use std::{env, fs};
 
 use nmt_agent_utils::LaunchConfig;
 use nmt_agent_utils::chat::{Event, Item, SendOutcome};
-use nmt_agent_utils::deepseek::Session;
+use nmt_agent_utils::deepseek::{Host, Session};
 
 /// A prompt into an idle conversation starts a turn of its own. Steering means
 /// this side thought a turn was running, and a refusal means the harness would
@@ -162,6 +162,17 @@ fn a_turn_streams_and_survives_being_stopped() {
             .any(|e| matches!(e, Event::ItemCompleted(Item::AgentMessage { .. }))),
         "a completed turn should produce a completed assistant message"
     );
+}
+
+/// `--no-open` keeps the host from opening the served page in a browser, and a
+/// release that predates the flag refuses to start when it is passed. The start
+/// path therefore has to reach a serving host on both, which is what this runs.
+#[test]
+#[ignore = "starts a real harness host"]
+fn the_host_serves_whether_or_not_it_knows_the_no_browser_flag() {
+    let host = Host::start(&launch()).expect("the installed harness should serve");
+
+    assert!(host.is_running());
 }
 
 #[test]
