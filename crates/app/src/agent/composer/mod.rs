@@ -178,7 +178,6 @@ impl AgentPane {
                         .child(
                             Button::new("agent-cache-warning-send")
                                 .min_w(DIALOG_BUTTON_MIN_WIDTH)
-                                .primary()
                                 .label(i18n("agent-cache-warning-send"))
                                 .on_click(move |_, window, cx| {
                                     window.close_dialog(cx);
@@ -191,6 +190,7 @@ impl AgentPane {
                             DialogClose::new().child(
                                 Button::new("agent-cache-warning-cancel")
                                     .min_w(DIALOG_BUTTON_MIN_WIDTH)
+                                    .primary()
                                     .label(i18n("agent-cache-warning-cancel")),
                             ),
                         ),
