@@ -1352,10 +1352,21 @@ impl Session {
             arguments => format!("/{name} {arguments}"),
         };
 
-        match self.client.call(
+        let mut answer = self.client.call(
             commands::EXECUTE_METHOD,
             commands::execute_args(&self.session_id, &line),
-        ) {
+        );
+        if answer
+            .as_ref()
+            .is_err_and(|error| error.message().contains(commands::UNEXPECTED_IMAGES))
+        {
+            answer = self.client.call(
+                commands::EXECUTE_METHOD,
+                commands::execute_args_without_images(&self.session_id, &line),
+            );
+        }
+
+        match answer {
             Ok(value) => commands::outcome(name, &value),
             Err(error) => SlashCommandOutcome::Rejected {
                 message: error.message().to_string(),
