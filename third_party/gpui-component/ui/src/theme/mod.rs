@@ -69,6 +69,10 @@ pub struct Theme {
     pub radius: Pixels,
     /// Radius for the large elements, e.g.: Dialog, Notification border radius.
     pub radius_lg: Pixels,
+    /// Horizontal padding of a medium or large [`crate::button::Button`] that
+    /// carries a label. Smaller sizes and icon-only buttons keep their own
+    /// measurements, which are driven by the glyph rather than by the label.
+    pub button_padding_x: Pixels,
     pub shadow: bool,
     pub transparent: Hsla,
     /// Show the scrollbar mode, default: Scrolling
@@ -223,6 +227,7 @@ impl From<&ThemeColor> for Theme {
             mono_font_size: px(13.),
             radius: px(6.),
             radius_lg: px(8.),
+            button_padding_x: px(16.),
             shadow: true,
             scrollbar_show: ScrollbarShow::default(),
             notification: NotificationSettings::default(),

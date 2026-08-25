@@ -460,6 +460,10 @@ impl RenderOnce for Button {
             .clone();
         let is_focused = focus_handle.is_focused(window);
 
+        // Read before the builder chain below, which cannot borrow the app
+        // while it is being consumed by the closures.
+        let padding_x = cx.theme().button_padding_x;
+
         let rounding = match self.rounded {
             ButtonRounded::Small => cx.theme().radius * 0.5,
             ButtonRounded::Medium => cx.theme().radius,
@@ -516,7 +520,7 @@ impl RenderOnce for Button {
                             .when(self.compact, |this| this.min_w_6().px_1p5()),
                         _ => this
                             .h_8()
-                            .px_4()
+                            .px(padding_x)
                             .when(self.compact, |this| this.min_w_8().px_2()),
                     }
                 }
