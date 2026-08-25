@@ -574,6 +574,7 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_UI_Shell",
     "Win32_UI_TextServices",
     "Win32_UI_WindowsAndMessaging",
+    "Win32_System_RestartManager",
 ] }
 winres = "0.1.12"
 wyhash = "0.6.0"

@@ -21,6 +21,7 @@ use tracing::warn;
 use crate::update::{AWAIT_EXIT_FLAG, InstallError};
 
 const APP_EXE: &str = "NiumaTerm.exe";
+pub(crate) const SHELL_EXTENSION_DLL: &str = "NmtShellExtension.dll";
 
 /// Every file a package installs, and the version-resource key that decides
 /// whether the staged copy is already the one on disk.
@@ -39,7 +40,7 @@ const APP_EXE: &str = "NiumaTerm.exe";
 const PAYLOAD: [(&str, &str); 5] = [
     (APP_EXE, "FileVersion"),
     ("NmtAgentHook.exe", "FileVersion"),
-    ("NmtShellExtension.dll", "InternalVersion"),
+    (SHELL_EXTENSION_DLL, "InternalVersion"),
     ("conpty.dll", "FileVersion"),
     ("OpenConsole.exe", "FileVersion"),
 ];
@@ -87,13 +88,39 @@ fn differing(versions: &[(&'static str, Option<String>, Option<String>)]) -> Vec
         .collect()
 }
 
-/// Replace the installed payload with the one in `staging`, and report which
-/// files were touched.
-pub(crate) fn apply(staging: &Path, install: &Path) -> Result<Vec<&'static str>, InstallError> {
-    let versions = versions(staging, install);
-    let names = differing(&versions);
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct InstallPlan {
+    names: Vec<&'static str>,
+}
 
-    replace_files(staging, install, &names).map_err(|error| {
+impl InstallPlan {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.names.is_empty()
+    }
+
+    pub(crate) fn contains(&self, name: &str) -> bool {
+        self.names.contains(&name)
+    }
+}
+
+/// Select the staged payload files that differ from the installed copies.
+///
+/// Capturing this before any file moves keeps later pre-install decisions tied
+/// to the exact set that the swap will consume.
+pub(crate) fn plan(staging: &Path, install: &Path) -> InstallPlan {
+    let versions = versions(staging, install);
+    InstallPlan {
+        names: differing(&versions),
+    }
+}
+
+/// Replace the installed payload selected by `plan` with the staged copies.
+pub(crate) fn apply(
+    staging: &Path,
+    install: &Path,
+    plan: &InstallPlan,
+) -> Result<(), InstallError> {
+    replace_files(staging, install, &plan.names).map_err(|error| {
         warn!("update: {error}");
         match error {
             ReplaceFilesError::Copy { .. } => InstallError::NotWritable,
@@ -106,7 +133,7 @@ pub(crate) fn apply(staging: &Path, install: &Path) -> Result<Vec<&'static str>,
     // whatever survives.
     discard_previous(install);
 
-    Ok(names)
+    Ok(())
 }
 
 /// Remove the files a previous update renamed aside. The ones still mapped by a

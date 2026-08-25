@@ -1,7 +1,90 @@
-use nmt_config::update::UpdateChannel;
-use nmt_version::Version;
+use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::{env, fs, process};
 
+use gpui::TestAppContext;
+use nmt_config::update::UpdateChannel;
+use nmt_platform::windows::restart_manager::{
+    AffectedApplication, ApplicationKind, ApplicationStatus, FileUsage, Operation, RebootReasons,
+    RestartManagerError,
+};
+use nmt_version::Version;
+use parking_lot::Mutex;
+
+use crate::update::file_users::display_names;
 use crate::update::releases::{CheckError, Release, select, select_latest, supersedes};
+use crate::update::{
+    AppUpdate, ClosePreparation, FileUsePromptReason, FileUserSession, FileUserSessionSource,
+    InstallError, PendingInstall, Status, cancel_install, classify_file_usage, continue_install,
+    install, prepare_close_with, recovery_application_names, status,
+};
+
+#[derive(Clone)]
+struct ScriptedSessionSource {
+    state: Arc<Mutex<CloseState>>,
+}
+
+struct ScriptedSession {
+    state: Arc<Mutex<CloseState>>,
+}
+
+struct CloseState {
+    usage: VecDeque<Result<FileUsage, u32>>,
+    shutdown_error: Option<u32>,
+    restart_error: Option<u32>,
+    events: Vec<&'static str>,
+}
+
+impl FileUserSessionSource for ScriptedSessionSource {
+    type Session = ScriptedSession;
+
+    fn open(&self, _path: &Path) -> Result<Self::Session, RestartManagerError> {
+        self.state.lock().events.push("open");
+        Ok(ScriptedSession {
+            state: self.state.clone(),
+        })
+    }
+}
+
+impl FileUserSession for ScriptedSession {
+    fn file_usage(&self) -> Result<FileUsage, RestartManagerError> {
+        let mut state = self.state.lock();
+        state.events.push("list");
+        state
+            .usage
+            .pop_front()
+            .unwrap()
+            .map_err(|code| RestartManagerError::Windows {
+                operation: Operation::ListApplications,
+                code,
+            })
+    }
+
+    fn shutdown(&self) -> Result<(), RestartManagerError> {
+        let mut state = self.state.lock();
+        state.events.push("shutdown");
+        match state.shutdown_error {
+            Some(code) => Err(RestartManagerError::Windows {
+                operation: Operation::ShutdownApplications,
+                code,
+            }),
+            None => Ok(()),
+        }
+    }
+
+    fn restart(&self) -> Result<(), RestartManagerError> {
+        let mut state = self.state.lock();
+        state.events.push("restart");
+        match state.restart_error {
+            Some(code) => Err(RestartManagerError::Windows {
+                operation: Operation::RestartApplications,
+                code,
+            }),
+            None => Ok(()),
+        }
+    }
+}
 
 fn version(label: &str) -> Version {
     Version::parse(label).expect("test labels are well formed")
@@ -23,6 +106,25 @@ fn published_on(label: &str, published: u32) -> Release {
         published: Some(published),
         ..undated(label)
     }
+}
+
+fn application(name: &str, process_id: u32, restartable: bool) -> AffectedApplication {
+    AffectedApplication {
+        name: name.to_owned(),
+        service_name: None,
+        process_id,
+        kind: ApplicationKind::Explorer,
+        status: ApplicationStatus::from_bits(0),
+        terminal_session_id: Some(1),
+        restartable,
+    }
+}
+
+fn scratch(name: &str) -> PathBuf {
+    let directory = env::temp_dir().join(format!("nmt-update-flow-{}-{name}", process::id()));
+    let _ = fs::remove_dir_all(&directory);
+    fs::create_dir_all(&directory).unwrap();
+    directory
 }
 
 #[test]
@@ -215,4 +317,214 @@ fn a_publishing_timestamp_is_reduced_to_a_comparable_date() {
     let null = r#"{ "tag_name": "v1.3.0", "html_url": "https://example.invalid/r3",
         "draft": false, "prerelease": false, "published_at": null }"#;
     assert_eq!(select_latest(null).unwrap().unwrap().published, None);
+}
+
+#[test]
+fn file_use_results_distinguish_clear_used_unknown_and_reboot_states() {
+    let clear = FileUsage {
+        applications: Vec::new(),
+        reboot_reasons: RebootReasons::default(),
+    };
+    assert_eq!(classify_file_usage(Ok(clear)).unwrap(), None);
+
+    let explorer = application("Windows Explorer", 101, true);
+    let used = FileUsage {
+        applications: vec![explorer.clone()],
+        reboot_reasons: RebootReasons::default(),
+    };
+    let prompt = classify_file_usage(Ok(used)).unwrap().unwrap();
+    assert_eq!(prompt.reason, FileUsePromptReason::InUse);
+    assert_eq!(prompt.applications, [explorer.clone()]);
+
+    let reboot = FileUsage {
+        applications: vec![explorer],
+        reboot_reasons: RebootReasons {
+            session_mismatch: true,
+            ..Default::default()
+        },
+    };
+    assert_eq!(
+        classify_file_usage(Ok(reboot)).unwrap().unwrap().reason,
+        FileUsePromptReason::RebootRequired
+    );
+
+    let error = RestartManagerError::Windows {
+        operation: Operation::ListApplications,
+        code: 5,
+    };
+    assert!(matches!(
+        classify_file_usage(Err(error)),
+        Err(RestartManagerError::Windows {
+            operation: Operation::ListApplications,
+            code: 5,
+        })
+    ));
+}
+
+#[test]
+fn recovery_names_only_applications_that_need_manual_work() {
+    let restartable = application("Explorer", 1, true);
+    let manual = application("Other host", 2, false);
+    let applications = [restartable, manual];
+
+    assert_eq!(
+        recovery_application_names(&Ok(()), &applications),
+        ["Other host"]
+    );
+    assert_eq!(
+        recovery_application_names(
+            &Err(RestartManagerError::Windows {
+                operation: Operation::RestartApplications,
+                code: 352,
+            }),
+            &applications,
+        ),
+        ["Explorer", "Other host"]
+    );
+}
+
+#[test]
+fn duplicate_application_names_include_process_identifiers() {
+    assert_eq!(
+        display_names(&[
+            application("Explorer", 11, true),
+            application("Explorer", 12, true),
+            application("Other", 13, true),
+        ]),
+        ["Explorer (PID 11)", "Explorer (PID 12)", "Other"]
+    );
+}
+
+#[test]
+fn close_preparation_uses_a_fresh_session_application_list() {
+    let current = application("Current host", 22, true);
+    let state = Arc::new(Mutex::new(CloseState {
+        usage: VecDeque::from([Ok(FileUsage {
+            applications: vec![current.clone()],
+            reboot_reasons: RebootReasons::default(),
+        })]),
+        shutdown_error: None,
+        restart_error: None,
+        events: Vec::new(),
+    }));
+    let source = ScriptedSessionSource {
+        state: state.clone(),
+    };
+
+    let result = prepare_close_with(&source, Path::new(r"C:\NiumaTerm\dll"));
+
+    match result {
+        ClosePreparation::Released { applications, .. } => {
+            assert_eq!(applications, [current]);
+        }
+        ClosePreparation::Clear | ClosePreparation::Prompt(_) => panic!("expected shutdown"),
+    }
+    assert_eq!(state.lock().events, ["open", "list", "shutdown"]);
+}
+
+#[test]
+fn failed_shutdown_restarts_before_remaining_users_are_reported() {
+    let current = application("Current host", 22, true);
+    let state = Arc::new(Mutex::new(CloseState {
+        usage: VecDeque::from([
+            Ok(FileUsage {
+                applications: vec![current.clone()],
+                reboot_reasons: RebootReasons::default(),
+            }),
+            Ok(FileUsage {
+                applications: vec![current.clone()],
+                reboot_reasons: RebootReasons::default(),
+            }),
+        ]),
+        shutdown_error: Some(351),
+        restart_error: None,
+        events: Vec::new(),
+    }));
+    let source = ScriptedSessionSource {
+        state: state.clone(),
+    };
+
+    let result = prepare_close_with(&source, Path::new(r"C:\NiumaTerm\dll"));
+
+    match result {
+        ClosePreparation::Prompt(prompt) => {
+            assert_eq!(prompt.reason, FileUsePromptReason::RemainingUsers);
+            assert_eq!(prompt.applications, [current]);
+        }
+        ClosePreparation::Clear | ClosePreparation::Released { .. } => {
+            panic!("expected remaining users")
+        }
+    }
+    assert_eq!(
+        state.lock().events,
+        ["open", "list", "shutdown", "restart", "list"]
+    );
+}
+
+#[gpui::test]
+fn cancelling_a_staged_update_replaces_nothing_and_restores_availability(cx: &mut TestAppContext) {
+    let staging = scratch("cancel-staging");
+    let install_root = scratch("cancel-install");
+    let plan = install::plan(&staging, &install_root);
+    let release = undated("v2.0.0");
+    let window = cx.add_empty_window();
+
+    window.update(|window, cx| {
+        cx.set_global(AppUpdate {
+            status: Status::AwaitingFileUse(release.clone()),
+            testing: true,
+            pending: Some(PendingInstall {
+                release: release.clone(),
+                staged: staging.clone(),
+                install: install_root.clone(),
+                plan,
+                window: window.window_handle(),
+                testing: true,
+            }),
+            channel: UpdateChannel::Stable,
+            checking_enabled: false,
+        });
+
+        cancel_install(cx);
+
+        assert_eq!(status(cx), Status::Available(release));
+        assert!(cx.global::<AppUpdate>().pending.is_none());
+        assert!(fs::read_dir(&install_root).unwrap().next().is_none());
+    });
+}
+
+#[gpui::test]
+fn continuing_applies_the_plan_before_reporting_relaunch_failure(cx: &mut TestAppContext) {
+    let staging = scratch("continue-staging");
+    let install_root = scratch("continue-install");
+    fs::write(staging.join(install::SHELL_EXTENSION_DLL), "new dll").unwrap();
+    let plan = install::plan(&staging, &install_root);
+    let release = undated("v2.0.0");
+    let window = cx.add_empty_window();
+
+    window.update(|window, cx| {
+        cx.set_global(AppUpdate {
+            status: Status::AwaitingFileUse(release),
+            testing: true,
+            pending: Some(PendingInstall {
+                release: undated("v2.0.0"),
+                staged: staging.clone(),
+                install: install_root.clone(),
+                plan,
+                window: window.window_handle(),
+                testing: true,
+            }),
+            channel: UpdateChannel::Stable,
+            checking_enabled: false,
+        });
+
+        continue_install(cx);
+
+        assert_eq!(status(cx), Status::InstallFailed(InstallError::Relaunch));
+        assert!(cx.global::<AppUpdate>().pending.is_none());
+        assert_eq!(
+            fs::read_to_string(install_root.join(install::SHELL_EXTENSION_DLL)).unwrap(),
+            "new dll"
+        );
+    });
 }

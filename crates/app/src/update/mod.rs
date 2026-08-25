@@ -2,6 +2,7 @@
 //! the running build, on a schedule and on demand.
 
 mod download;
+mod file_users;
 mod install;
 mod releases;
 
@@ -9,11 +10,16 @@ mod releases;
 mod tests;
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use gpui::{App, Global};
+use gpui::{AnyWindowHandle, App, Global, Window};
 use nmt_config::update::UpdateChannel;
+use nmt_i18n::i18n;
+use nmt_platform::windows::restart_manager::{
+    AffectedApplication, FileUsage, RestartManagerError, RestartManagerSession,
+};
+use nmt_platform::windows::window::show_error_dialog;
 use nmt_version::Version;
 use tracing::warn;
 
@@ -21,6 +27,7 @@ use crate::ui::AppSettings;
 pub(crate) use crate::update::releases::CheckError;
 use crate::update::releases::{Release, supersedes};
 use crate::utils::get_exe_dir;
+use crate::window::ShellRegistry;
 
 /// Hidden argument the instance started by an update is given, naming the
 /// process it replaces. Hidden because nothing but that restart has a reason to
@@ -51,11 +58,52 @@ pub(crate) enum Status {
     NothingPublished,
     UpToDate,
     Available(Release),
-    /// The package is being fetched and unpacked. It ends either in a restart
-    /// into the new build or in `InstallFailed`, so nothing observes success.
+    /// The package is being fetched and unpacked, or its captured plan is being
+    /// applied without needing a user decision.
     Installing(Release),
+    InspectingFileUse(Release),
+    AwaitingFileUse(Release),
+    ClosingFileUsers(Release),
+    RecoveryWarning {
+        release: Release,
+        applications: Vec<String>,
+    },
     Failed(CheckError),
     InstallFailed(InstallError),
+}
+
+impl Status {
+    pub(crate) fn busy(&self) -> bool {
+        matches!(self, Self::Checking) || self.installation_in_progress()
+    }
+
+    fn installation_in_progress(&self) -> bool {
+        matches!(
+            self,
+            Self::Installing(_)
+                | Self::InspectingFileUse(_)
+                | Self::AwaitingFileUse(_)
+                | Self::ClosingFileUsers(_)
+                | Self::RecoveryWarning { .. }
+        )
+    }
+
+    pub(crate) fn release(&self) -> Option<&Release> {
+        match self {
+            Self::Available(release)
+            | Self::Installing(release)
+            | Self::InspectingFileUse(release)
+            | Self::AwaitingFileUse(release)
+            | Self::ClosingFileUsers(release) => Some(release),
+            Self::RecoveryWarning { release, .. } => Some(release),
+            Self::Unknown
+            | Self::Checking
+            | Self::NothingPublished
+            | Self::UpToDate
+            | Self::Failed(_)
+            | Self::InstallFailed(_) => None,
+        }
+    }
 }
 
 /// Why an update that was found could not be put in place. Each variant names
@@ -80,11 +128,36 @@ pub(crate) enum InstallError {
 pub(crate) struct AppUpdate {
     status: Status,
     testing: bool,
+    pending: Option<PendingInstall>,
     /// The settings the current status was produced under. Settings changes
     /// arrive as one undifferentiated notification, so the values are mirrored
     /// here to tell an update setting moving from a change to anything else.
     channel: UpdateChannel,
     checking_enabled: bool,
+}
+
+#[derive(Clone)]
+struct PendingInstall {
+    release: Release,
+    staged: PathBuf,
+    install: PathBuf,
+    plan: install::InstallPlan,
+    window: AnyWindowHandle,
+    testing: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FileUsePromptReason {
+    InUse,
+    CheckFailed,
+    RebootRequired,
+    RemainingUsers,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FileUsePrompt {
+    pub(crate) reason: FileUsePromptReason,
+    pub(crate) applications: Vec<AffectedApplication>,
 }
 
 impl Global for AppUpdate {}
@@ -94,6 +167,7 @@ pub(crate) fn initialize(testing: bool, cx: &mut App) {
     cx.set_global(AppUpdate {
         status: Status::Unknown,
         testing,
+        pending: None,
         channel: settings.update_channel,
         checking_enabled: settings.check_updates,
     });
@@ -111,56 +185,431 @@ pub(crate) fn check_now(cx: &mut App) {
 }
 
 /// The About page's Update button: fetch the release the last check found,
-/// replace the files that differ from it, and restart into the result.
+/// capture the files that differ from it, and restart into the result after any
+/// required file-use decision.
 ///
 /// Downloading and unpacking happen off the main thread; replacing does not.
 /// The swap is a handful of renames within one directory, and it has to be the
 /// last thing this process does to its installation before it quits, so running
 /// it anywhere else would only add a window for something to happen in between.
-pub(crate) fn install_now(cx: &mut App) {
+pub(crate) fn install_now(window: &mut Window, cx: &mut App) {
     let Status::Available(release) = status(cx) else {
         return;
     };
 
     let testing = cx.global::<AppUpdate>().testing;
     let staging = nmt_config::config_dir_path().join(STAGING_DIRECTORY);
+    let initiating_window = window.window_handle();
+    let download_release = release.clone();
 
     set_status(Status::Installing(release.clone()), cx);
 
     cx.spawn(async move |cx| {
         let staged = cx
             .background_executor()
-            .spawn(async move { download::stage(&release, &staging) })
+            .spawn(async move { download::stage(&download_release, &staging) })
             .await;
 
-        let _ = cx.update(
-            |cx| match staged.and_then(|staged| finish(&staged, testing)) {
-                Ok(()) => cx.quit(),
-                Err(error) => {
-                    set_status(Status::InstallFailed(error), cx);
-                    cx.refresh_windows();
-                }
-            },
-        );
+        let _ = cx.update(|cx| match staged {
+            Ok(staged) => prepare_install(release, staged, initiating_window, testing, cx),
+            Err(error) => fail_install(error, cx),
+        });
     })
     .detach();
 }
 
-fn finish(staged: &Path, testing: bool) -> Result<(), InstallError> {
+fn prepare_install(
+    release: Release,
+    staged: PathBuf,
+    window: AnyWindowHandle,
+    testing: bool,
+    cx: &mut App,
+) {
     let install = get_exe_dir();
+    let plan = install::plan(&staged, &install);
 
     // A release the check offered should differ from what is installed in at
     // least its own label, so nothing to replace means the two disagree about
     // what is running. Restarting is still what was asked for.
-    if install::apply(staged, &install)?.is_empty() {
+    if plan.is_empty() {
         warn!("update: the published package matches what is installed");
     }
+
+    let inspect_shell_extension = plan.contains(install::SHELL_EXTENSION_DLL);
+    cx.global_mut::<AppUpdate>().pending = Some(PendingInstall {
+        release,
+        staged,
+        install,
+        plan,
+        window,
+        testing,
+    });
+
+    if inspect_shell_extension {
+        inspect_file_users(cx);
+    } else {
+        continue_install(cx);
+    }
+}
+
+fn inspect_file_users(cx: &mut App) {
+    let Some(pending) = cx.global::<AppUpdate>().pending.clone() else {
+        return;
+    };
+    let release = pending.release.clone();
+    let dll = pending.install.join(install::SHELL_EXTENSION_DLL);
+    set_status(Status::InspectingFileUse(release), cx);
+    cx.refresh_windows();
+
+    cx.spawn(async move |cx| {
+        let result = cx
+            .background_executor()
+            .spawn(async move { file_usage(&dll) })
+            .await;
+        let _ = cx.update(|cx| finish_file_use_inspection(result, cx));
+    })
+    .detach();
+}
+
+fn file_usage(path: &Path) -> Result<FileUsage, RestartManagerError> {
+    RestartManagerSession::for_files(&[path])?.file_usage()
+}
+
+fn finish_file_use_inspection(result: Result<FileUsage, RestartManagerError>, cx: &mut App) {
+    let prompt = match classify_file_usage(result) {
+        Ok(None) => {
+            continue_install(cx);
+            return;
+        }
+        Ok(Some(prompt)) => prompt,
+        Err(error) => {
+            warn!("update: checking shell-extension users failed: {error}");
+            FileUsePrompt {
+                reason: FileUsePromptReason::CheckFailed,
+                applications: Vec::new(),
+            }
+        }
+    };
+    show_file_use_prompt(prompt, cx);
+}
+
+fn classify_file_usage(
+    result: Result<FileUsage, RestartManagerError>,
+) -> Result<Option<FileUsePrompt>, RestartManagerError> {
+    let usage = result?;
+    if usage.applications.is_empty() && usage.reboot_reasons.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(FileUsePrompt {
+        reason: if usage.reboot_reasons.is_empty() {
+            FileUsePromptReason::InUse
+        } else {
+            FileUsePromptReason::RebootRequired
+        },
+        applications: usage.applications,
+    }))
+}
+
+fn show_file_use_prompt(prompt: FileUsePrompt, cx: &mut App) {
+    let Some(pending) = cx.global::<AppUpdate>().pending.clone() else {
+        return;
+    };
+    set_status(Status::AwaitingFileUse(pending.release.clone()), cx);
+
+    for handle in pending_windows(&pending, cx) {
+        if file_users::open_file_use_prompt(handle, prompt.clone(), cx) {
+            cx.refresh_windows();
+            return;
+        }
+    }
+
+    // Without a live window there is nowhere to obtain consent, so the staged
+    // package remains untouched and the release can be attempted again later.
+    cancel_install(cx);
+}
+
+fn pending_windows(pending: &PendingInstall, cx: &App) -> Vec<AnyWindowHandle> {
+    let mut handles = vec![pending.window];
+    if let Some(registry) = cx.try_global::<ShellRegistry>() {
+        handles.extend(registry.0.iter().map(|entry| entry.handle));
+    }
+    handles
+}
+
+pub(crate) fn retry_file_use(cx: &mut App) {
+    inspect_file_users(cx);
+}
+
+pub(crate) fn cancel_install(cx: &mut App) {
+    let Some(pending) = cx.global_mut::<AppUpdate>().pending.take() else {
+        return;
+    };
+    set_status(Status::Available(pending.release), cx);
+    cx.refresh_windows();
+}
+
+pub(crate) fn continue_install(cx: &mut App) {
+    let Some(release) = cx
+        .global::<AppUpdate>()
+        .pending
+        .as_ref()
+        .map(|pending| pending.release.clone())
+    else {
+        return;
+    };
+    set_status(Status::Installing(release), cx);
+
+    match apply_pending_files(cx) {
+        Ok(()) => complete_relaunch(cx),
+        Err(error) => fail_install(error, cx),
+    }
+}
+
+fn apply_pending_files(cx: &App) -> Result<(), InstallError> {
+    let pending = cx
+        .global::<AppUpdate>()
+        .pending
+        .as_ref()
+        .expect("an install action needs its staged plan");
+    install::apply(&pending.staged, &pending.install, &pending.plan)
+}
+
+pub(crate) fn complete_relaunch(cx: &mut App) {
+    let Some(pending) = cx.global_mut::<AppUpdate>().pending.take() else {
+        return;
+    };
 
     // Nothing may consult the running executable's own path from here on. The
     // file it names has just been renamed aside, so anything rebuilt from it —
     // the context-menu registration, the notification identity — would name the
     // copy left behind instead of the installed one.
-    install::relaunch(&install, testing)
+    match install::relaunch(&pending.install, pending.testing) {
+        Ok(()) => cx.quit(),
+        Err(error) => fail_install(error, cx),
+    }
+}
+
+fn fail_install(error: InstallError, cx: &mut App) {
+    cx.global_mut::<AppUpdate>().pending = None;
+    set_status(Status::InstallFailed(error), cx);
+    cx.refresh_windows();
+}
+
+trait FileUserSession {
+    fn file_usage(&self) -> Result<FileUsage, RestartManagerError>;
+    fn shutdown(&self) -> Result<(), RestartManagerError>;
+    fn restart(&self) -> Result<(), RestartManagerError>;
+}
+
+impl FileUserSession for RestartManagerSession {
+    fn file_usage(&self) -> Result<FileUsage, RestartManagerError> {
+        RestartManagerSession::file_usage(self)
+    }
+
+    fn shutdown(&self) -> Result<(), RestartManagerError> {
+        RestartManagerSession::shutdown(self)
+    }
+
+    fn restart(&self) -> Result<(), RestartManagerError> {
+        RestartManagerSession::restart(self)
+    }
+}
+
+trait FileUserSessionSource {
+    type Session: FileUserSession;
+
+    fn open(&self, path: &Path) -> Result<Self::Session, RestartManagerError>;
+}
+
+struct SystemSessionSource;
+
+impl FileUserSessionSource for SystemSessionSource {
+    type Session = RestartManagerSession;
+
+    fn open(&self, path: &Path) -> Result<Self::Session, RestartManagerError> {
+        RestartManagerSession::for_files(&[path])
+    }
+}
+
+enum ClosePreparation<S> {
+    Clear,
+    Released {
+        session: S,
+        applications: Vec<AffectedApplication>,
+    },
+    Prompt(FileUsePrompt),
+}
+
+pub(crate) fn close_file_users(cx: &mut App) {
+    let Some(pending) = cx.global::<AppUpdate>().pending.clone() else {
+        return;
+    };
+    let dll = pending.install.join(install::SHELL_EXTENSION_DLL);
+    set_status(Status::ClosingFileUsers(pending.release), cx);
+    cx.refresh_windows();
+
+    cx.spawn(async move |cx| {
+        let prepared = cx
+            .background_executor()
+            .spawn(async move { prepare_close(&dll) })
+            .await;
+
+        match prepared {
+            ClosePreparation::Clear => {
+                let _ = cx.update(continue_install);
+            }
+            ClosePreparation::Prompt(prompt) => {
+                let _ = cx.update(|cx| show_file_use_prompt(prompt, cx));
+            }
+            ClosePreparation::Released {
+                session,
+                applications,
+            } => {
+                cx.update(|cx| {
+                    let applied = apply_pending_files(cx);
+                    // Once the running executable has moved aside, no other UI
+                    // callback may run before application recovery and relaunch:
+                    // resolving current_exe during that gap would name the old
+                    // copy instead of the installed executable.
+                    let restarted = session.restart();
+                    match applied {
+                        Err(error) => fail_install(error, cx),
+                        Ok(()) => finish_recovery(restarted, applications, cx),
+                    }
+                });
+            }
+        }
+    })
+    .detach();
+}
+
+fn prepare_close(path: &Path) -> ClosePreparation<RestartManagerSession> {
+    prepare_close_with(&SystemSessionSource, path)
+}
+
+fn prepare_close_with<S>(source: &S, path: &Path) -> ClosePreparation<S::Session>
+where
+    S: FileUserSessionSource,
+{
+    let session = match source.open(path) {
+        Ok(session) => session,
+        Err(error) => {
+            warn!("update: starting shell-extension shutdown failed: {error}");
+            return check_failed_prompt();
+        }
+    };
+    let usage = match session.file_usage() {
+        Ok(usage) => usage,
+        Err(error) => {
+            warn!("update: refreshing shell-extension users failed: {error}");
+            return check_failed_prompt();
+        }
+    };
+    if !usage.reboot_reasons.is_empty() {
+        return ClosePreparation::Prompt(FileUsePrompt {
+            reason: FileUsePromptReason::RebootRequired,
+            applications: usage.applications,
+        });
+    }
+    if usage.applications.is_empty() {
+        return ClosePreparation::Clear;
+    }
+
+    let applications = usage.applications;
+    if let Err(error) = session.shutdown() {
+        warn!("update: closing shell-extension users failed: {error}");
+        if let Err(restart_error) = session.restart() {
+            warn!("update: restoring partially closed applications failed: {restart_error}");
+        }
+        return match session.file_usage() {
+            Ok(usage) => ClosePreparation::Prompt(FileUsePrompt {
+                reason: if usage.reboot_reasons.is_empty() {
+                    FileUsePromptReason::RemainingUsers
+                } else {
+                    FileUsePromptReason::RebootRequired
+                },
+                applications: usage.applications,
+            }),
+            Err(list_error) => {
+                warn!("update: listing applications after failed shutdown failed: {list_error}");
+                check_failed_prompt()
+            }
+        };
+    }
+
+    ClosePreparation::Released {
+        session,
+        applications,
+    }
+}
+
+fn check_failed_prompt<S>() -> ClosePreparation<S> {
+    ClosePreparation::Prompt(FileUsePrompt {
+        reason: FileUsePromptReason::CheckFailed,
+        applications: Vec::new(),
+    })
+}
+
+fn finish_recovery(
+    restarted: Result<(), RestartManagerError>,
+    applications: Vec<AffectedApplication>,
+    cx: &mut App,
+) {
+    if let Err(error) = &restarted {
+        warn!("update: restarting shell-extension users failed: {error}");
+    }
+    let manual = recovery_application_names(&restarted, &applications);
+
+    if manual.is_empty() {
+        complete_relaunch(cx);
+    } else {
+        show_recovery_warning(manual, cx);
+    }
+}
+
+fn recovery_application_names(
+    restarted: &Result<(), RestartManagerError>,
+    applications: &[AffectedApplication],
+) -> Vec<String> {
+    applications
+        .iter()
+        .filter(|application| restarted.is_err() || !application.restartable)
+        .cloned()
+        .map(application_name)
+        .collect()
+}
+
+fn application_name(application: AffectedApplication) -> String {
+    if application.name.is_empty() {
+        format!("PID {}", application.process_id)
+    } else {
+        application.name
+    }
+}
+
+fn show_recovery_warning(applications: Vec<String>, cx: &mut App) {
+    let Some(pending) = cx.global::<AppUpdate>().pending.clone() else {
+        return;
+    };
+    set_status(
+        Status::RecoveryWarning {
+            release: pending.release.clone(),
+            applications: applications.clone(),
+        },
+        cx,
+    );
+
+    for handle in pending_windows(&pending, cx) {
+        if file_users::open_recovery_warning(handle, applications.clone(), cx) {
+            cx.refresh_windows();
+            return;
+        }
+    }
+
+    let message = i18n("settings-about-recovery-warning-message")
+        .replace("{applications}", &applications.join(", "));
+    show_error_dialog(i18n("settings-about-recovery-warning-title"), &message);
+    complete_relaunch(cx);
 }
 
 /// Collect what a previous update renamed aside. The files are only removable
@@ -197,9 +646,9 @@ pub(crate) fn settings_changed(cx: &mut App) {
 
     let update = cx.global_mut::<AppUpdate>();
     // An install is already committed to a release. Clearing its status would
-    // report nothing in progress while the download continues, so the new
-    // settings are recorded and answered once it has finished.
-    if matches!(update.status, Status::Installing(_)) {
+    // report nothing in progress while the download or user decision remains,
+    // so the new settings are recorded and answered once it has finished.
+    if update.pending.is_some() || update.status.installation_in_progress() {
         update.channel = channel;
         update.checking_enabled = checking_enabled;
 
@@ -245,10 +694,7 @@ fn check(cx: &mut App) {
     // An install has already decided which release is being put in place, and a
     // check landing on top of it would replace that with an answer about a
     // release nothing is waiting for.
-    if matches!(
-        cx.global::<AppUpdate>().status,
-        Status::Checking | Status::Installing(_)
-    ) {
+    if cx.global::<AppUpdate>().status.busy() || cx.global::<AppUpdate>().pending.is_some() {
         return;
     }
     let channel = cx.global::<AppSettings>().update_channel;

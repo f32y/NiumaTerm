@@ -69,7 +69,7 @@ pub(super) fn about_page() -> SettingPage {
 fn update_check_item() -> SettingItem {
     SettingItem::render(move |options, _window, cx| {
         let status = update::status(cx);
-        let busy = matches!(status, Status::Checking | Status::Installing(_));
+        let busy = status.busy();
 
         let check = Button::new("app-update-check")
             .outline()
@@ -85,26 +85,21 @@ fn update_check_item() -> SettingItem {
         // one rather than to the list the user would have to find it in. It
         // stays available beside the install button: a package that cannot be
         // installed here can still be downloaded by hand.
-        let open = match &status {
-            Status::Available(release) | Status::Installing(release) => {
-                let page_url = release.page_url.clone();
-                Some(
-                    Button::new("app-update-open")
-                        .outline()
-                        .label(i18n("settings-about-open-release"))
-                        .disabled(options.disabled)
-                        .on_click(move |_, _, cx: &mut App| cx.open_url(&page_url)),
-                )
-            }
-            _ => None,
-        };
+        let open = status.release().map(|release| {
+            let page_url = release.page_url.clone();
+            Button::new("app-update-open")
+                .outline()
+                .label(i18n("settings-about-open-release"))
+                .disabled(options.disabled)
+                .on_click(move |_, _, cx: &mut App| cx.open_url(&page_url))
+        });
 
         let install = matches!(status, Status::Available(_)).then(|| {
             Button::new("app-update-install")
                 .primary()
                 .label(i18n("settings-about-install-button"))
                 .disabled(options.disabled)
-                .on_click(|_, _, cx: &mut App| update::install_now(cx))
+                .on_click(|_, window, cx: &mut App| update::install_now(window, cx))
         });
 
         // The status line reports the result of a check the user just ran and
@@ -148,6 +143,19 @@ fn status_text(status: &Status) -> String {
         }
         Status::Installing(release) => {
             i18n("settings-about-installing").replace("{version}", &release.label)
+        }
+        Status::InspectingFileUse(release) => {
+            i18n("settings-about-file-use-checking").replace("{version}", &release.label)
+        }
+        Status::AwaitingFileUse(release) => {
+            i18n("settings-about-file-use-waiting").replace("{version}", &release.label)
+        }
+        Status::ClosingFileUsers(release) => {
+            i18n("settings-about-file-use-closing").replace("{version}", &release.label)
+        }
+        Status::RecoveryWarning { applications, .. } => {
+            i18n("settings-about-recovery-warning-status")
+                .replace("{applications}", &applications.join(", "))
         }
         Status::InstallFailed(error) => install_error_text(error),
         Status::Failed(CheckError::Unreachable) => {
