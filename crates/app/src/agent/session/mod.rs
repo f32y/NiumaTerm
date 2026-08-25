@@ -11,6 +11,7 @@ use std::sync::Arc;
 use gpui::Image;
 use nmt_i18n::i18n;
 
+use crate::agent::capabilities::QueuedPromptDelivery;
 use crate::agent::composer::{
     CommandFeedbackKind, PaletteControl, prompt_with_response_annotations,
     restored_input_after_interruption,
@@ -896,7 +897,7 @@ impl AgentPane {
                 // A backend that publishes its pending inbox lists this prompt
                 // until the turn claims it; the row below is the claim's, so
                 // the claim has to know it was already drawn.
-                if self.kind.caps().reports_pending_queue {
+                if self.kind.caps().queued_prompt_delivery == QueuedPromptDelivery::PendingInbox {
                     self.published_prompt = Some(text.clone());
                 }
                 let unanswered_prompt =

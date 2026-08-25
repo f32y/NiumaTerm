@@ -338,6 +338,17 @@ impl Session {
         let tasks_changed = self.tasks.observe(&message);
         let workflows_changed = self.workflows.observe(&message);
 
+        // A message written while a turn was still running is queued by the
+        // CLI and then run as a turn of its own, opened with no send from this
+        // side. Model output is the only announcement that turn makes, so it
+        // has to be adopted here; otherwise it is never reported as started,
+        // and everything it produces is filed under the turn that preceded it.
+        if !self.turn_active && carries_model_output(&message) {
+            self.turn_active = true;
+            self.turn_reported = false;
+            self.turn_output_usage.reset();
+        }
+
         // First sign of life after a send: the turn is actually running.
         if self.turn_active && !self.turn_reported {
             self.turn_reported = true;
@@ -1373,6 +1384,13 @@ impl Session {
             self.context_window,
         )
     }
+}
+
+/// Whether a line is model output, which the CLI only emits inside a turn.
+/// The turn's `system`/`init` line arrives first but is also emitted on
+/// startup and on resume, where no turn has opened yet.
+fn carries_model_output(message: &Value) -> bool {
+    matches!(message["type"].as_str(), Some("assistant" | "stream_event"))
 }
 
 /// Whether a context breakdown should stand in for the window's own

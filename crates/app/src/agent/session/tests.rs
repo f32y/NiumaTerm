@@ -297,3 +297,112 @@ fn a_directory_reads_as_its_last_two_components() {
     assert_eq!(directory_label("/home/u/projects/app/"), "projects/app");
     assert_eq!(directory_label("C:/only"), "C:/only");
 }
+
+/// A prompt submitted while a turn is running belongs to the turn that
+/// answers it. Claude's CLI holds such a prompt until the running turn ends
+/// and then opens a turn of its own for it, so drawing it when the first turn
+/// completes puts it inside a finished turn — above the reply that turn had
+/// already written, because a settled turn renders its final answer last.
+mod queued_prompt_placement_tests {
+    use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext, WindowHandle};
+    use nmt_agent_utils::chat::{
+        Event as SessionEvent, Item as SessionItem, SendOutcome, SlashCommandOutcome,
+    };
+    use nmt_config::profile::{AgentProfile, AgentProfileKind};
+
+    use crate::agent::session::{Backend, Status, TestBackend};
+    use crate::agent::{AgentPane, AgentThreadDefaults};
+    use crate::ui::AppSettings;
+
+    fn open_claude_pane(
+        cx: &mut TestAppContext,
+    ) -> (Entity<AgentPane>, WindowHandle<gpui_component::Root>) {
+        let profile = AgentProfile {
+            name: "Queued Prompt Test".into(),
+            kind: AgentProfileKind::ClaudeCode,
+            // Never spawned: every test below installs a backend by hand.
+            executable: "missing-agent.exe".into(),
+            ..AgentProfile::default()
+        };
+        let mut pane = None;
+        let window = cx.update(|cx| {
+            gpui_component::init(cx);
+            cx.set_global(AppSettings::default());
+            cx.set_global(AgentThreadDefaults::default());
+            cx.open_window(Default::default(), |window, cx| {
+                let agent = cx.new(|cx| AgentPane::new(profile, None, window, cx));
+                pane = Some(agent.clone());
+                cx.new(|cx| gpui_component::Root::new(agent, window, cx))
+            })
+            .expect("open Agent test window")
+        });
+        (pane.expect("create Agent pane"), window)
+    }
+
+    /// Every user row as the turn it was filed under and the text it carries.
+    fn user_rows(pane: &AgentPane, cx: &gpui::App) -> Vec<(u64, String)> {
+        pane.transcript
+            .read(cx)
+            .items
+            .iter()
+            .filter_map(|entry| match &entry.item {
+                SessionItem::UserMessage { text } => {
+                    Some((entry.turn, text.clone().unwrap_or_default()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[gpui::test]
+    fn a_queued_prompt_heads_the_turn_opened_for_it(cx: &mut TestAppContext) {
+        let (pane, window) = open_claude_pane(cx);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.session = Some(Backend::Test(TestBackend::new(
+                    [SendOutcome::StartedTurn, SendOutcome::Steered],
+                    SlashCommandOutcome::NotReady,
+                    Vec::new(),
+                )));
+                pane.status = Status::Idle;
+
+                assert!(pane.send_text("open the turn".into(), cx));
+                pane.apply_event(SessionEvent::TurnStarted, cx);
+                let first_turn = pane.turn_seq;
+
+                assert!(pane.send_text("queued behind it".into(), cx));
+                pane.apply_event(
+                    SessionEvent::ItemStarted(SessionItem::AgentMessage {
+                        id: "msg-1".into(),
+                        text: Some("the first answer".into()),
+                    }),
+                    cx,
+                );
+                pane.apply_event(SessionEvent::TurnCompleted { error: None }, cx);
+
+                assert_eq!(
+                    user_rows(pane, cx),
+                    vec![(first_turn, "open the turn".to_string())],
+                    "the finished turn keeps only the prompt that opened it"
+                );
+
+                // The CLI answers the held prompt in a turn nothing here sent.
+                pane.apply_event(SessionEvent::TurnStarted, cx);
+
+                assert_eq!(pane.turn_seq, first_turn + 1, "that turn is numbered");
+                assert_eq!(pane.status, Status::Running);
+                assert!(pane.transcript.read(cx).is_working());
+                assert_eq!(
+                    user_rows(pane, cx),
+                    vec![
+                        (first_turn, "open the turn".to_string()),
+                        (first_turn + 1, "queued behind it".to_string()),
+                    ],
+                    "the held prompt heads the turn that answers it"
+                );
+            });
+        });
+    }
+}

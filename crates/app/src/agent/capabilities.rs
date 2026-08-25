@@ -1,5 +1,24 @@
 use crate::agent::*;
 
+/// What a backend does with a prompt submitted while a turn is running.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QueuedPromptDelivery {
+    /// The prompt joins the turn already in flight. The backend reports
+    /// nothing about it, so assistant output arriving after the submit is the
+    /// only sign it landed, and the turn's end is the last chance to say so.
+    RunningTurn,
+    /// The harness holds the prompt until the running turn ends and then opens
+    /// a turn of its own for it. The prompt therefore heads that next turn,
+    /// and drawing it into the finished one would put it above output written
+    /// before it was ever submitted.
+    FollowingTurn,
+    /// The backend republishes its own pending inbox, so a prompt waiting
+    /// behind the running turn is known rather than guessed at. Guessing
+    /// beside it would show a message as sent while the snapshot still lists
+    /// it as waiting.
+    PendingInbox,
+}
+
 /// What one harness can do. Behavior questions ask a named capability here
 /// instead of comparing against a kind, so a call site reads as the question
 /// it is actually asking and a new harness answers it once.
@@ -60,13 +79,9 @@ pub(crate) struct Capabilities {
     /// so a slash line naming a skill is a message rather than a command, and
     /// rejecting it as an unknown command would block the only way to use one.
     pub(crate) slash_skills_are_prompts: bool,
-    /// The backend republishes its own pending inbox, so a prompt waiting
-    /// behind the running turn is known rather than guessed at. Where it is
-    /// guessed at, the guess is that assistant output means the steered
-    /// message landed; a backend that says so itself needs no such rule, and
-    /// applying one anyway would show a message as sent while it is still
-    /// waiting.
-    pub(crate) reports_pending_queue: bool,
+    /// Where a prompt submitted while a turn is running ends up, which is
+    /// what decides when the transcript may draw it.
+    pub(crate) queued_prompt_delivery: QueuedPromptDelivery,
     /// The conversation can be branched in front of a chosen prompt over the
     /// backend's own connection, which is what the `/fork` picker offers.
     /// Where the conversation is instead a file this side rewrites, `/fork`
@@ -101,7 +116,7 @@ const CODEX: Capabilities = Capabilities {
     expandable_compaction_rows: false,
     session_scoped_approval: true,
     slash_skills_are_prompts: false,
-    reports_pending_queue: false,
+    queued_prompt_delivery: QueuedPromptDelivery::RunningTurn,
     session_fork: true,
     session_rename: false,
     session_search: false,
@@ -123,7 +138,7 @@ const CLAUDE: Capabilities = Capabilities {
     expandable_compaction_rows: true,
     session_scoped_approval: true,
     slash_skills_are_prompts: false,
-    reports_pending_queue: false,
+    queued_prompt_delivery: QueuedPromptDelivery::FollowingTurn,
     session_fork: false,
     session_rename: false,
     session_search: false,
@@ -149,7 +164,7 @@ const DEEPSEEK: Capabilities = Capabilities {
     expandable_compaction_rows: true,
     session_scoped_approval: false,
     slash_skills_are_prompts: true,
-    reports_pending_queue: true,
+    queued_prompt_delivery: QueuedPromptDelivery::PendingInbox,
     session_fork: true,
     session_rename: true,
     session_search: true,

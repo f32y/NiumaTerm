@@ -1,5 +1,6 @@
 use nmt_i18n::i18n;
 
+use crate::agent::capabilities::QueuedPromptDelivery;
 use crate::agent::composer::CommandFeedbackKind;
 use crate::agent::session::conversation::claimed_prompts;
 use crate::agent::session::{Status, UpdateSuspension};
@@ -205,9 +206,27 @@ impl AgentPane {
                 }
             },
             SessionEvent::TurnStarted => {
-                if claim_command_turn_start(&mut self.palette.awaiting_command_turn) {
+                // A turn a send opened numbered itself and started its timer
+                // at send time. A command's turn and a turn the harness opened
+                // on its own — running a prompt it held while the last turn
+                // finished — both arrive with neither done, and without them
+                // the whole turn would be filed under the previous one and
+                // leave the pane looking idle while it runs.
+                let command_turn =
+                    claim_command_turn_start(&mut self.palette.awaiting_command_turn);
+                let harness_opened = !command_turn && !self.transcript.read(cx).is_working();
+
+                if command_turn || harness_opened {
                     self.turn_seq += 1;
                     self.start_working(cx);
+                }
+                // The prompt the harness held is what this turn answers, so it
+                // heads this turn rather than trailing the finished one.
+                if harness_opened
+                    && self.kind.caps().queued_prompt_delivery
+                        == QueuedPromptDelivery::FollowingTurn
+                {
+                    self.publish_queued_user_messages(cx);
                 }
                 self.status = Status::Running;
                 self.emit_lifecycle(AgentEventKind::PromptSubmitted, "", "", cx);
@@ -238,10 +257,12 @@ impl AgentPane {
                 // would leave the indicator spinning with nothing behind it.
                 self.transcript
                     .update(cx, |transcript, cx| transcript.set_compacting(false, cx));
-                // A backend that keeps its pending inbox across a turn's end
-                // will run those prompts in the next one, so the end of this
-                // turn is not what makes them sent.
-                if !self.kind.caps().reports_pending_queue {
+                // A prompt steered into this turn is one the backend never
+                // acknowledges, so the turn's end is the last moment that can
+                // still say it went in. The other two deliveries run their
+                // queue in a turn of its own, which the end of this one does
+                // not make sent.
+                if self.kind.caps().queued_prompt_delivery == QueuedPromptDelivery::RunningTurn {
                     self.publish_queued_user_messages(cx);
                 }
                 self.finish_working(cx);
@@ -608,12 +629,14 @@ impl AgentPane {
             self.note_visible_agent_output();
         }
 
-        // Assistant output is the only sign most backends give that a steered
-        // message joined the running turn. A backend that publishes its own
-        // pending inbox says so exactly, and guessing beside it would show a
-        // message as sent while its snapshot still lists it as waiting.
+        // Where a prompt joins the turn already in flight, assistant output is
+        // the only sign the backend gives that it landed. The other two
+        // deliveries answer the question themselves — one by opening a turn
+        // for the prompt, one by listing it until a turn claims it — and
+        // guessing beside either would show a message as sent while it is
+        // still waiting.
         if matches!(item, SessionItem::AgentMessage { .. })
-            && !self.kind.caps().reports_pending_queue
+            && self.kind.caps().queued_prompt_delivery == QueuedPromptDelivery::RunningTurn
         {
             self.publish_queued_user_messages(cx);
         }
