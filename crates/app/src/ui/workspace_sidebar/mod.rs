@@ -326,7 +326,7 @@ impl Sidebar {
             .overflow_hidden()
             .flex()
             .flex_col()
-            .p_2()
+            .px_2()
             .gap_1()
             .child(
                 Button::new("new-workspace")
