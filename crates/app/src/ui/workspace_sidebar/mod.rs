@@ -22,6 +22,7 @@ use crate::ui::composition::{
     HoverActionLayout, HoverActionVisibility, StatusMark, StatusMarkTone, hover_action,
     sidebar_selection,
 };
+use crate::ui::fluent::{SELECTION_BAR_HEIGHT, SELECTION_BAR_RADIUS, SELECTION_BAR_WIDTH};
 use crate::ui::shell::{InlineRename, InlineRenameStyle, pending_tab_icon};
 use crate::ui::sidebar_resize::{self, ResizeDrag};
 use crate::ui::tab_bar::{new_tab_menu, progress_visual, tab_icon};
@@ -220,13 +221,6 @@ const TAB_ROW_HEIGHT: f32 = 30.0;
 /// which keeps the two tiers apart at a glance.
 const TAB_ROW_DOT: f32 = 6.0;
 
-/// Geometry of the selection bar on the leading edge of a selected row.
-/// Windows navigation panes draw this mark at a fixed 3x16 with a 2px radius
-/// whatever the row height is, so a two-line workspace row and a single-line
-/// tab row carry the same mark and line up as one column of selection cues.
-const SELECTION_BAR_WIDTH: f32 = 3.0;
-const SELECTION_BAR_HEIGHT: f32 = 16.0;
-const SELECTION_BAR_RADIUS: f32 = 2.0;
 /// Distance from the row box's leading edge. The row is a rounded rectangle,
 /// so a mark flush against that edge would sit outside the fill at the corners.
 const SELECTION_BAR_INSET: f32 = 2.0;

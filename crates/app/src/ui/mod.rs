@@ -59,6 +59,7 @@ mod auto_refresh;
 mod background_tasks;
 mod composition;
 mod floating_surface;
+mod fluent;
 mod font_picker;
 mod git_sidebar;
 mod git_status;
