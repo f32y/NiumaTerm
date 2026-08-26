@@ -89,6 +89,18 @@ impl ApiClient {
     }
 
     pub(crate) fn call(&self, method: &str, payload: Value) -> Result<Value, CallError> {
+        self.call_with_timeout(method, payload, CALL_TIMEOUT)
+    }
+
+    /// Send one call with a tighter deadline than ordinary foreground work.
+    /// Close cleanup uses this so an unresponsive shared host cannot retain a
+    /// detached worker for the full request timeout.
+    pub(crate) fn call_with_timeout(
+        &self,
+        method: &str,
+        payload: Value,
+        timeout: Duration,
+    ) -> Result<Value, CallError> {
         let rpc_id = uuid::Uuid::new_v4().to_string();
         let request = json!({
             "type": "client-request",
@@ -101,6 +113,7 @@ impl ApiClient {
             .post(format!("{}/api/{method}", self.base))
             .header("content-type", JSON_MEDIA_TYPE)
             .body(request.to_string())
+            .timeout(timeout)
             .send()
             .map_err(|error| {
                 CallError::Transport(format!("{method} could not be sent: {error}"))
