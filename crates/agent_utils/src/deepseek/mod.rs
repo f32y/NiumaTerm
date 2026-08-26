@@ -12,6 +12,7 @@
 //! why it is a fraction of the size of the two CLI adapters.
 
 mod api;
+mod close;
 mod commands;
 mod events;
 mod history;

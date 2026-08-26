@@ -21,6 +21,7 @@ use crate::chat::{
     ThreadSettings,
 };
 use crate::deepseek::api::{ApiClient, CallError};
+use crate::deepseek::close::{CloseAction, schedule_close_actions};
 use crate::deepseek::events::Downlinks;
 use crate::deepseek::host::{self, Host, HostError};
 use crate::deepseek::mapping::{self, ApprovalRequest, QuestionRequest, ToolTracker};
@@ -57,6 +58,9 @@ pub struct Session {
     /// The turn state this side knows about, so a stop is only offered while a
     /// turn is actually running.
     running: bool,
+    /// Pending prompt identities from the Harness's latest whole-inbox
+    /// snapshot. Closing removes them before cancelling the current turn.
+    queued_prompt_ids: Vec<String>,
     /// The approval the harness is currently blocked on. Held because the
     /// answer has to carry identities the transcript vocabulary does not.
     pending_approval: Option<ApprovalRequest>,
@@ -650,6 +654,7 @@ impl Session {
             effort: launch.effort.clone(),
             declares_image_input: launch.declares_image_input,
             running: false,
+            queued_prompt_ids: Vec::new(),
             pending_approval: None,
             pending_questions: None,
             tools: ToolTracker::default(),
@@ -675,6 +680,7 @@ impl Session {
                 // Everything below describes the conversation this tab just
                 // left; carrying it over would attribute it to the new one.
                 self.running = false;
+                self.queued_prompt_ids.clear();
                 self.pending_approval = None;
                 self.pending_questions = None;
                 self.tools = ToolTracker::default();
@@ -877,9 +883,12 @@ impl Session {
         if frame["payload"]["type"] == "session/queue"
             && frame["payload"]["sessionId"].as_str() == Some(&self.session_id)
         {
-            return vec![Event::QueuedPrompts(queued_prompts(
-                &frame["payload"]["items"],
-            ))];
+            let prompts = queued_prompts(&frame["payload"]["items"]);
+            self.queued_prompt_ids = prompts
+                .iter()
+                .filter_map(|prompt| prompt.id.clone())
+                .collect();
+            return vec![Event::QueuedPrompts(prompts)];
         }
 
         if frame["payload"]["type"] == REPLAY_FRAME {
@@ -1256,7 +1265,10 @@ impl Session {
         });
 
         match self.client.call("session.updateQueue", payload) {
-            Ok(_) => true,
+            Ok(_) => {
+                self.queued_prompt_ids.retain(|queued| queued != item_id);
+                true
+            }
             Err(error) => {
                 tracing::warn!(
                     "deepseek queued prompt could not be removed: {}",
@@ -1430,5 +1442,19 @@ impl Session {
 
     pub fn has_active_operation(&self) -> bool {
         self.running
+    }
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        let mut actions: Vec<CloseAction> = self
+            .queued_prompt_ids
+            .drain(..)
+            .map(CloseAction::RemoveQueued)
+            .collect();
+        if self.running {
+            actions.push(CloseAction::CancelTurn);
+        }
+        schedule_close_actions(self.client.clone(), self.session_id.clone(), actions);
     }
 }

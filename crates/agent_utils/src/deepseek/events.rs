@@ -8,6 +8,7 @@
 //! deliver protocol messages; introducing an async runtime for two long-lived
 //! sockets would buy nothing.
 
+use std::io::ErrorKind;
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak, mpsc};
@@ -30,6 +31,9 @@ const DOWNLINKS: [&str; 2] = ["/api/events.mux", "/api/events.host"];
 /// long-lived and a reconnect re-emits a baseline for every attached session,
 /// so the client can rebuild without the tab noticing.
 const RECONNECT_DELAY: Duration = Duration::from_millis(500);
+
+/// Maximum time an idle socket may delay observing that its tab was closed.
+const STOP_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 /// How long opening a session waits for its downlinks. Both are loopback
 /// upgrades against an already-serving host, so this only has to cover a busy
@@ -142,7 +146,37 @@ fn pump(
     deliver: &impl Fn(Value),
     stopped: &AtomicBool,
 ) {
+    pump_with_read_signal(&mut socket, deliver, stopped, None);
+}
+
+#[cfg(test)]
+pub(crate) fn pump_for_test(
+    mut socket: WebSocket<MaybeTlsStream<TcpStream>>,
+    deliver: &impl Fn(Value),
+    stopped: &AtomicBool,
+    read_started: &mpsc::Sender<()>,
+) {
+    pump_with_read_signal(&mut socket, deliver, stopped, Some(read_started));
+}
+
+fn pump_with_read_signal(
+    socket: &mut WebSocket<MaybeTlsStream<TcpStream>>,
+    deliver: &impl Fn(Value),
+    stopped: &AtomicBool,
+    read_started: Option<&mpsc::Sender<()>>,
+) {
+    if let MaybeTlsStream::Plain(stream) = socket.get_mut()
+        && let Err(error) = stream.set_read_timeout(Some(STOP_POLL_INTERVAL))
+    {
+        warn!("deepseek downlink could not set its close poll interval: {error}");
+    }
+
+    let mut announced_read = false;
     while !stopped.load(Ordering::Relaxed) {
+        if !announced_read && let Some(read_started) = read_started {
+            let _ = read_started.send(());
+            announced_read = true;
+        }
         match socket.read() {
             // Only text frames carry protocol messages. Ping and pong are
             // answered by the library's own write path, and a binary frame is
@@ -153,6 +187,8 @@ fn pump(
             },
             Ok(Message::Close(_)) => return,
             Ok(_) => {}
+            Err(tungstenite::Error::Io(error))
+                if matches!(error.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) => {}
             Err(error) => {
                 warn!("deepseek downlink ended: {error}");
                 return;
