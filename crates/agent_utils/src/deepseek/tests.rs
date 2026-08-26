@@ -1072,7 +1072,9 @@ fn usage_projections_combine_into_one_window_snapshot() {
 
 #[test]
 fn the_permission_presets_come_from_the_deployment_rather_than_from_here() {
+    use crate::deepseek::models::ModelDirectory;
     use crate::deepseek::projections::ProjectionTracker;
+    use crate::deepseek::session::ready_settings;
 
     let mut projections = ProjectionTracker::default();
     let events = projections
@@ -1101,6 +1103,19 @@ fn the_permission_presets_come_from_the_deployment_rather_than_from_here() {
     assert_eq!(presets[0].description.as_deref(), Some("No writes"));
     // The derived entry is offered only while it is what the session is on.
     assert_eq!(current.as_deref(), Some("custom"));
+
+    let models = ModelDirectory::parse(&json!({
+        "current": {
+            "provider": "deepseek-official",
+            "model": "deepseek-chat",
+            "reasoningEffort": "max",
+        },
+        "groups": [],
+    }));
+    let settings = ready_settings(&models, &projections);
+    assert_eq!(settings.model.as_deref(), Some("deepseek-chat"));
+    assert_eq!(settings.approval.as_deref(), Some("custom"));
+    assert_eq!(settings.effort.as_deref(), Some("max"));
 }
 
 #[test]
