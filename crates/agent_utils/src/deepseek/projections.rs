@@ -21,6 +21,8 @@ pub(crate) struct ProjectionTracker {
     used_tokens: Option<u64>,
     /// Capacity of the route that produced the newest sample.
     context_window: Option<u64>,
+    /// Execution-permission preset reported for this exact session.
+    permission: Option<String>,
 }
 
 impl ProjectionTracker {
@@ -81,7 +83,14 @@ impl ProjectionTracker {
                 .map(|title| Event::TitleUpdated(title.to_string()))
                 .into_iter()
                 .collect(),
-            "permissions" => permission_presets(value).into_iter().collect(),
+            "permissions" => {
+                let event = permission_presets(value);
+                self.permission = match &event {
+                    Some(Event::ApprovalPresets { current, .. }) => current.clone(),
+                    _ => None,
+                };
+                event.into_iter().collect()
+            }
             // A cleared goal is reported as a null value rather than by the
             // key disappearing, so the absent case is a value to publish and
             // not a frame to ignore.
@@ -153,6 +162,10 @@ impl ProjectionTracker {
             auto_compact_threshold: None,
             segments,
         }))
+    }
+
+    pub(crate) fn permission(&self) -> Option<&str> {
+        self.permission.as_deref()
     }
 }
 

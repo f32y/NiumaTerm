@@ -115,6 +115,20 @@ const REPLAY_MESSAGES: u64 = 200;
 /// worth offering at prompts that scrolled out of the rebuilt transcript.
 const FORK_CHECKPOINT_MESSAGES: u64 = 1000;
 
+/// Combine the independently loaded model directory and permission projection
+/// into the settings snapshot that marks the session ready.
+pub(crate) fn ready_settings(
+    models: &ModelDirectory,
+    projections: &ProjectionTracker,
+) -> ThreadSettings {
+    ThreadSettings {
+        model: models.selected().map(str::to_string),
+        approval: projections.permission().map(str::to_string),
+        effort: models.effort().map(str::to_string),
+        ..ThreadSettings::default()
+    }
+}
+
 /// A conversation this tab has just opened or reattached to.
 struct OpenedConversation {
     session_id: String,
@@ -920,11 +934,7 @@ impl Session {
             // gain their options and their current value in one repaint.
             let mut events = vec![
                 Event::Models(self.models.catalog()),
-                Event::Ready(ThreadSettings {
-                    model: self.models.selected().map(str::to_string),
-                    effort: self.models.effort().map(str::to_string),
-                    ..ThreadSettings::default()
-                }),
+                Event::Ready(ready_settings(&self.models, &self.usage)),
             ];
 
             // A refused selection travels with the catalog that outlived it, so
