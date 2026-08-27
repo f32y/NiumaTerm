@@ -42,7 +42,7 @@ impl TerminalPane {
     /// UI reaction to input reaching the PTY: optionally snap the view back
     /// to the latest output.
     fn react_to_pty_input(&mut self, cx: &mut Context<Self>) {
-        if cx.global::<AppSettings>().scroll_to_bottom_when_typing {
+        if cx.global::<TerminalSettings>().scroll_to_bottom_when_typing {
             self.scroll_to_latest(cx);
         }
     }
@@ -67,7 +67,7 @@ impl TerminalPane {
 
         let action = terminal_input::key_action(
             &event.keystroke,
-            cx.global::<AppSettings>().newline_shortcut,
+            cx.global::<TerminalSettings>().newline_shortcut,
         );
         let interrupts_agent = matches!(event.keystroke.key.as_str(), "escape" | "esc")
             && !event.keystroke.modifiers.modified();
@@ -101,7 +101,7 @@ impl TerminalPane {
     pub(crate) fn feed_terminal_key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) {
         match self.surface.apply_key_action(terminal_input::key_action(
             keystroke,
-            cx.global::<AppSettings>().newline_shortcut,
+            cx.global::<TerminalSettings>().newline_shortcut,
         )) {
             SurfaceKeyResult::Ignored => return,
             SurfaceKeyResult::Handled => self.react_to_pty_input(cx),

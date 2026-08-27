@@ -2,22 +2,22 @@ use std::slice;
 
 use gpui::{App, TextStyle, Window, px};
 
-use crate::ui::{AppSettings, default_font_fallbacks};
+use crate::terminal::settings::TerminalSettings;
 
 pub(crate) const COLS: u16 = 100;
 pub(crate) const ROWS: u16 = 30;
 pub(crate) const PADDING_PX: f32 = 10.0;
 
 pub(crate) fn font_family(cx: &App) -> String {
-    cx.global::<AppSettings>().terminal_font_family.to_string()
+    cx.global::<TerminalSettings>().font_family.to_string()
 }
 
 pub(crate) fn font_size_px(cx: &App) -> f32 {
-    cx.global::<AppSettings>().terminal_font_size as f32
+    cx.global::<TerminalSettings>().font_size
 }
 
 pub(crate) fn line_height_multiplier(cx: &App) -> f32 {
-    cx.global::<AppSettings>().terminal_line_height as f32
+    cx.global::<TerminalSettings>().line_height
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -43,7 +43,7 @@ pub(crate) fn terminal_text_style(window: &Window, cx: &App) -> TextStyle {
     let size = font_size_px(cx);
 
     style.font_family = font_family(cx).into();
-    style.font_fallbacks = Some(default_font_fallbacks());
+    style.font_fallbacks = Some(cx.global::<TerminalSettings>().font_fallbacks.clone());
     style.font_size = px(size).into();
     style.line_height = px(size * line_height_multiplier(cx)).into();
 

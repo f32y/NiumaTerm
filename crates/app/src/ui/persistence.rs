@@ -1,7 +1,7 @@
 use std::process;
 
 use dirs::home_dir;
-use gpui::{App, AppContext as _, Axis, Context, Entity, Window};
+use gpui::{App, AppContext, Axis, Context, Entity, Window};
 use gpui_component::resizable::ResizableState;
 use nmt_config::local_state::{
     PaneNodeState, PaneSplitAxis, SessionState, TabState, WorkspaceState,
@@ -38,6 +38,28 @@ fn legacy_generated_tab_title(title: &str) -> bool {
     title
         .strip_prefix("Tab ")
         .is_some_and(|number| number.parse::<usize>().is_ok())
+}
+
+/// Fill a launch's blank shell from the default profile and resolve the
+/// display name of the profile it runs. A `None` shell means "follow the
+/// default profile" (session persistence); resolving it here keeps the
+/// hardcoded built-in fallback in the session layer from swallowing the
+/// configured profile. The pane takes only the resolved values, so profile
+/// policy stays with the settings that define it.
+fn launch_with_profile(
+    tab_state: Option<TabState>,
+    default_profile: (Option<String>, Vec<String>),
+    cx: &mut impl AppContext,
+) -> (TabState, String) {
+    let mut tab_state = tab_state.unwrap_or_default();
+    if tab_state.shell.is_none() {
+        tab_state.shell = default_profile.0;
+        tab_state.args = default_profile.1;
+    }
+    let profile_name = cx.read_global(|settings: &AppSettings, _| {
+        settings.profile_name_for_command(tab_state.shell.as_deref(), &tab_state.args)
+    });
+    (tab_state, profile_name)
 }
 
 /// Resolve a saved launch command for restore: a `None` shell follows the current
@@ -303,18 +325,18 @@ impl Shell {
                 let surface_id = Self::alloc_id(next_id);
                 let default_profile = cx.global::<AppSettings>().default_profile_command();
 
-                let pane =
-                    match TerminalPane::spawn(cx, surface_id, Some(state), default_profile.clone())
-                    {
-                        Ok(pane) => {
-                            Self::watch_pane(&pane, cx);
-                            pane
-                        }
-                        Err(error) => {
-                            warn!("failed to restore tab {surface_id} lazily: {error}");
-                            Self::spawn_default_pane(cx, surface_id, default_profile, None)
-                        }
-                    };
+                let (launch, profile_name) =
+                    launch_with_profile(Some(state), default_profile.clone(), cx);
+                let pane = match TerminalPane::spawn(cx, surface_id, launch, profile_name) {
+                    Ok(pane) => {
+                        Self::watch_pane(&pane, cx);
+                        pane
+                    }
+                    Err(error) => {
+                        warn!("failed to restore tab {surface_id} lazily: {error}");
+                        Self::spawn_default_pane(cx, surface_id, default_profile, None)
+                    }
+                };
 
                 PaneTree::new_leaf(PaneId(surface_id), pane)
             });
@@ -428,7 +450,9 @@ impl Shell {
                 resolve_restored_launch(&mut launch, cx.global::<AppSettings>());
 
                 // Spawn retries without the saved cwd internally.
-                match TerminalPane::spawn(cx, surface_id, Some(launch), (None, Vec::new())) {
+                let (launch, profile_name) =
+                    launch_with_profile(Some(launch), (None, Vec::new()), cx);
+                match TerminalPane::spawn(cx, surface_id, launch, profile_name) {
                     Ok(pane) => {
                         Self::watch_pane(&pane, cx);
                         Some(PaneTree::restored_leaf(PaneId(surface_id), pane))
@@ -485,17 +509,19 @@ impl Shell {
             ..TabState::default()
         });
 
-        let spawned =
-            TerminalPane::spawn(cx, surface_id, launch, default_profile.clone()).or_else(|error| {
-                warn!("spawn with workspace cwd/profile failed, retrying default: {error}");
-                TerminalPane::spawn(cx, surface_id, None, default_profile.clone())
-            });
+        let (launch, profile_name) = launch_with_profile(launch, default_profile.clone(), cx);
+        let spawned = TerminalPane::spawn(cx, surface_id, launch, profile_name).or_else(|error| {
+            warn!("spawn with workspace cwd/profile failed, retrying default: {error}");
+            let (launch, profile_name) = launch_with_profile(None, default_profile, cx);
+            TerminalPane::spawn(cx, surface_id, launch, profile_name)
+        });
 
         let pane = match spawned {
             Ok(pane) => pane,
             Err(error) => {
                 warn!("default profile failed, retrying built-in shell: {error}");
-                match TerminalPane::spawn(cx, surface_id, None, (None, Vec::new())) {
+                let (launch, profile_name) = launch_with_profile(None, (None, Vec::new()), cx);
+                match TerminalPane::spawn(cx, surface_id, launch, profile_name) {
                     Ok(pane) => pane,
                     Err(error) => {
                         // Even the built-in shell cannot spawn (e.g. ConPTY

@@ -16,6 +16,7 @@ mod remote_session_page;
 mod state;
 mod system_page;
 mod table;
+mod terminal_bridge;
 mod terminal_page;
 mod theme;
 
@@ -111,6 +112,7 @@ use crate::ui::settings::system_page::system_page;
 use crate::ui::settings::table::{
     ENV_OPERATION_COLUMN, TABLE_OPERATION_BUTTON, TrashIcon, table_frame, table_header, table_row,
 };
+pub(crate) use crate::ui::settings::terminal_bridge::install_terminal_settings;
 use crate::ui::settings::terminal_page::terminal_page;
 #[cfg(test)]
 use crate::ui::settings::theme::tab_background_opacity;

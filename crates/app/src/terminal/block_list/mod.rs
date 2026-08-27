@@ -64,11 +64,11 @@ use crate::terminal::paint_text::{
     block_separator_bounds, paint_glyph_rows, paint_line_backgrounds_at, shape_lines,
 };
 use crate::terminal::session::InFlightBlock;
+use crate::terminal::settings::TerminalSettings;
 use crate::terminal::theme::{
     BLOCK_FAILURE_COLOR, BLOCK_GUTTER_GAP, BLOCK_GUTTER_WIDTH, BLOCK_INPUT_COLOR,
     BLOCK_RUNNING_COLOR, BLOCK_SELECTED_TINT, BLOCK_SUCCESS_COLOR, SEPARATOR_COLOR,
 };
-use crate::ui::AppSettings;
 
 /// One visible frozen row, positioned in element-local pixels.
 pub(crate) struct FrozenRow {

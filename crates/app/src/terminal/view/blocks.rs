@@ -10,7 +10,7 @@ impl TerminalPane {
     }
 
     pub(super) fn block_chrome_enabled(&self, cx: &App) -> bool {
-        self.block_list_mode(cx) && cx.global::<AppSettings>().command_blocks
+        self.block_list_mode(cx) && cx.global::<TerminalSettings>().command_blocks
     }
 
     /// Columns of the content area (block-split hit-testing).

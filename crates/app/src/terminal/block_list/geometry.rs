@@ -88,7 +88,7 @@ pub(crate) fn nav_item_top(
 /// contiguously like a classic grid. Every block-list geometry consumer must
 /// use this one value per frame so heights, hit-testing, and scroll math agree.
 pub(crate) fn block_pad_rows(cx: &App) -> f32 {
-    if cx.global::<AppSettings>().command_blocks {
+    if cx.global::<TerminalSettings>().command_blocks {
         terminal::block_list::ITEM_PAD_ROWS
     } else {
         0.0

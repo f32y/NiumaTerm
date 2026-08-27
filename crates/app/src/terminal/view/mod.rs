@@ -50,6 +50,7 @@ use crate::terminal::scrollbar::{
     scrollbar_element, scrollbar_offset_for_thumb, scrollbar_opacity,
 };
 use crate::terminal::session::{HostEvent, InFlightBlock};
+use crate::terminal::settings::TerminalSettings;
 use crate::terminal::surface::{
     SurfaceCell, SurfaceCellSide, SurfaceMouseButton, SurfaceMouseEventKind, SurfaceScreenCell,
     TerminalKeyAction as SurfaceKeyAction, TerminalKeyResult as SurfaceKeyResult, TerminalSurface,
@@ -65,7 +66,6 @@ use crate::terminal::view::mouse::{
     block_gutter_hit, selection_drag_started, selection_type_for_click_count, terminal_scroll_lines,
 };
 use crate::terminal::{metrics, wake};
-use crate::ui::{AppSettings, UI_RADIUS, font_with_default_fallback, main_view_background_opacity};
 
 actions!(
     terminal,
@@ -157,33 +157,22 @@ pub(crate) struct AgentInterrupted;
 impl EventEmitter<AgentInterrupted> for TerminalPane {}
 
 impl TerminalPane {
+    /// Launch policy is resolved by the caller: `tab_state` arrives with a
+    /// concrete shell (the settings layer fills a blank one from the default
+    /// profile) and `profile_name` names the profile it resolved to.
     pub(crate) fn spawn(
         cx: &mut impl AppContext,
         surface_id: u64,
-        tab_state: Option<TabState>,
-        default_profile: (Option<String>, Vec<String>),
+        tab_state: TabState,
+        profile_name: String,
     ) -> Result<Entity<Self>, String> {
-        // A `None` shell means "follow the default profile" (session-persistence);
-        // filling it here keeps the hardcoded built-in fallback in the session layer
-        // from swallowing the configured profile.
-        let mut tab_state = tab_state.unwrap_or_default();
-
-        if tab_state.shell.is_none() {
-            tab_state.shell = default_profile.0;
-            tab_state.args = default_profile.1;
-        }
-
-        let profile_name = cx.read_global(|settings: &AppSettings, _| {
-            settings.profile_name_for_command(tab_state.shell.as_deref(), &tab_state.args)
-        });
-
         let (wake, wake_rx) = wake::wake_channel();
         let agent_route = agent_process().allocate_route();
         let environment = agent_process().environment_for(&agent_route);
         let (fixed_bottom_requested, cursor_shape, manage_process_tree) =
-            cx.read_global(|settings: &AppSettings, _| {
+            cx.read_global(|settings: &TerminalSettings, _| {
                 (
-                    settings.input_style.is_fixed_bottom(),
+                    settings.fixed_bottom(),
                     settings.cursor_shape,
                     settings.manage_subprocess_job,
                 )
@@ -225,12 +214,10 @@ impl TerminalPane {
     ) -> Result<Entity<Self>, String> {
         let (wake, wake_rx) = wake::wake_channel();
         let agent_route = agent_process().allocate_route();
-        let (fixed_bottom_requested, cursor_shape) = cx.read_global(|settings: &AppSettings, _| {
-            (
-                settings.input_style.is_fixed_bottom(),
-                settings.cursor_shape,
-            )
-        });
+        let (fixed_bottom_requested, cursor_shape) =
+            cx.read_global(|settings: &TerminalSettings, _| {
+                (settings.fixed_bottom(), settings.cursor_shape)
+            });
 
         let surface = TerminalSurface::for_gpui_remote(wake.clone(), surface_id, remote)?;
 
@@ -263,9 +250,9 @@ impl TerminalPane {
     ) -> Self {
         // Apply terminal presentation settings to existing panes and invalidate
         // measurements that depend on font metrics.
-        cx.observe_global::<AppSettings>(|this, cx| {
-            let settings = cx.global::<AppSettings>();
-            let fixed_bottom = settings.input_style.is_fixed_bottom();
+        cx.observe_global::<TerminalSettings>(|this, cx| {
+            let settings = cx.global::<TerminalSettings>();
+            let fixed_bottom = settings.fixed_bottom();
             let cursor_shape = settings.cursor_shape;
 
             this.block_list
@@ -410,7 +397,7 @@ impl TerminalPane {
             return Vec::new();
         };
 
-        let fixed_bottom = cx.global::<AppSettings>().input_style.is_fixed_bottom();
+        let fixed_bottom = cx.global::<TerminalSettings>().fixed_bottom();
 
         bottom_anchor_offsets(&frame, cell.height_px, fixed_bottom)
     }
@@ -483,12 +470,12 @@ impl Render for TerminalPane {
             }
         }
 
-        let settings = cx.global::<AppSettings>();
-        let fixed_bottom = settings.input_style.is_fixed_bottom();
+        let settings = cx.global::<TerminalSettings>();
+        let fixed_bottom = settings.fixed_bottom();
         let show_block_chrome = settings.command_blocks;
         self.block_list
             .list
-            .set_smooth_wheel_enabled(settings.smooth_scrolling.terminal_enabled());
+            .set_smooth_wheel_enabled(settings.smooth_wheel);
 
         // Block-split list: native GPUI list owns visibility, clamp, resize
         // anchoring, and tail following.
@@ -531,14 +518,15 @@ impl Render for TerminalPane {
             .relative()
             // This is the terminal region's single full-bleed background;
             // cells with explicit background colors stay opaque on top.
-            .bg(rgb(theme_default_background().rgb_u32()).opacity(main_view_background_opacity(cx)))
+            .bg(rgb(theme_default_background().rgb_u32())
+                .opacity(cx.global::<TerminalSettings>().background_opacity))
             // The shell frames each pane as a 1px-bordered rounded card; the
             // fill is rounded to the card's inner radius so its corners don't
             // paint square over the frame. The cell padding below keeps glyphs
             // clear of the rounded corners.
-            .rounded(UI_RADIUS - px(1.))
+            .rounded(cx.global::<TerminalSettings>().corner_radius - px(1.))
             .text_color(rgb(theme_default_foreground().rgb_u32()))
-            .font(font_with_default_fallback(metrics::font_family(cx)))
+            .font(cx.global::<TerminalSettings>().font())
             .text_size(px(metrics::font_size_px(cx)))
             .line_height(px(cell.height_px))
             .p(px(metrics::PADDING_PX))
