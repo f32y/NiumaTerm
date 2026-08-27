@@ -5,13 +5,13 @@ use gpui_component::{ActiveTheme as _, v_flex};
 /// A modal layer over an Agent pane while its backend cannot accept input.
 /// Callers supply the state-specific body and keep ownership of all commands.
 #[derive(IntoElement)]
-pub(in crate::view) struct BlockingOverlay {
+pub(super) struct BlockingOverlay {
     body: AnyElement,
     padded: bool,
 }
 
 impl BlockingOverlay {
-    pub(in crate::view) fn new(body: impl IntoElement) -> Self {
+    pub(super) fn new(body: impl IntoElement) -> Self {
         Self {
             body: body.into_any_element(),
             padded: false,
@@ -20,7 +20,7 @@ impl BlockingOverlay {
 
     /// Failure content needs room from narrow pane edges; compact progress
     /// content does not, so padding is opt-in at the call site.
-    pub(in crate::view) fn padded(mut self) -> Self {
+    pub(super) fn padded(mut self) -> Self {
         self.padded = true;
         self
     }

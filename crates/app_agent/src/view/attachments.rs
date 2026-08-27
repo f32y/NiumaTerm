@@ -16,7 +16,7 @@ impl AgentPane {
     /// The images the pending message carries, above the composer text they
     /// are anchored in. Absent while nothing is attached, so an ordinary
     /// message keeps the composer where it has always been.
-    pub(in crate::view) fn render_attachments(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn render_attachments(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         if self.attachments.is_empty() && self.response_annotations.is_empty() {
             return None;
         }

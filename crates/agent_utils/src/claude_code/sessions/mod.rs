@@ -29,8 +29,8 @@ use index::{TranscriptIndex, is_transcript_entry};
 use paths::munge_cwd;
 /// The workflow reader resolves the same project directory and parses the same
 /// child transcript shape, so both are shared rather than reimplemented.
-pub(in crate::claude_code) use paths::project_dir;
-pub(in crate::claude_code) use replay::parse_child_replay;
+pub(super) use paths::project_dir;
+pub(super) use replay::parse_child_replay;
 #[cfg(test)]
 use replay::parse_replay;
 pub use replay::{load_checkpoints, load_replay};

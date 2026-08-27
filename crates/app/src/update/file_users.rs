@@ -183,7 +183,7 @@ fn prompt_message(reason: FileUsePromptReason) -> &'static str {
     }
 }
 
-pub(in crate::update) fn display_names(applications: &[AffectedApplication]) -> Vec<String> {
+pub(super) fn display_names(applications: &[AffectedApplication]) -> Vec<String> {
     let mut counts = HashMap::new();
     for application in applications {
         *counts.entry(application.name.as_str()).or_insert(0usize) += 1;

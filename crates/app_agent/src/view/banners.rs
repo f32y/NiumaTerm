@@ -5,7 +5,7 @@ use crate::view::blocking_overlay::BlockingOverlay;
 use crate::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::view) enum UpdateOverlayPhase {
+pub(super) enum UpdateOverlayPhase {
     Stopping,
     Updating,
     Reconnecting,
@@ -21,9 +21,7 @@ impl UpdateOverlayPhase {
     }
 }
 
-pub(in crate::view) fn update_overlay_phase(
-    state: &UpdateSuspension,
-) -> Option<UpdateOverlayPhase> {
+pub(super) fn update_overlay_phase(state: &UpdateSuspension) -> Option<UpdateOverlayPhase> {
     match state {
         UpdateSuspension::Stopping => Some(UpdateOverlayPhase::Stopping),
         UpdateSuspension::Updating => Some(UpdateOverlayPhase::Updating),
@@ -47,7 +45,7 @@ fn latency_readout(latency: Duration) -> String {
 /// its first output, and how much of the input the provider had cached. Each
 /// part is dropped rather than shown as a zero when nothing reports it, and a
 /// conversation that has not run a turn yet reports nothing at all.
-pub(in crate::view) fn composer_stats_label(
+pub(super) fn composer_stats_label(
     turns: u64,
     steps: usize,
     first_output: Option<Duration>,
@@ -75,10 +73,7 @@ pub(in crate::view) fn composer_stats_label(
 }
 
 impl AgentPane {
-    pub(in crate::view) fn render_approval_panel(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    pub(super) fn render_approval_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.pending_approval.as_ref().map(|approval| {
             v_flex()
                 .w_full()
@@ -163,10 +158,7 @@ impl AgentPane {
     /// The `AskUserQuestion` card. The provider caps a batch at four questions
     /// of two to four options, so every question renders expanded rather than
     /// paged: the user sees the whole ask before answering any of it.
-    pub(in crate::view) fn render_question_panel(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    pub(super) fn render_question_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let prompt = self.pending_questions.as_ref()?;
         let complete = prompt.is_complete();
 
@@ -308,10 +300,7 @@ impl AgentPane {
     /// use. It is not dismissible and appears before the first prompt, because
     /// a user who attached three directories would otherwise only discover the
     /// reduction from the agent failing to find a file.
-    pub(in crate::view) fn render_multi_root_notice(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    pub(super) fn render_multi_root_notice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let notice = multi_root_notice(self.kind, self.configured_workspace())?;
 
         Some(
@@ -335,10 +324,7 @@ impl AgentPane {
         )
     }
 
-    pub(in crate::view) fn render_update_banner(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    pub(super) fn render_update_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.runtime.update_suspension.as_ref().and_then(|state| {
             // The phases that tear the backend down and bring it back own the
             // whole surface through `render_update_overlay`, so the strip only
@@ -416,10 +402,7 @@ impl AgentPane {
     /// Covers the surface while the update transaction owns the backend: input
     /// would go nowhere, and the transcript underneath is a stale snapshot of a
     /// conversation that is about to be replayed.
-    pub(in crate::view) fn render_update_overlay(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    pub(super) fn render_update_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let label = update_overlay_phase(self.runtime.update_suspension.as_ref()?)?.label();
 
         let body = v_flex()
@@ -452,10 +435,7 @@ impl AgentPane {
     /// A start that failed keeps the overlay and answers with the two things
     /// left to do, because the pane behind it has no conversation to return
     /// to: the transcript holds one error row and nothing else.
-    pub(in crate::view) fn render_start_overlay(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    pub(super) fn render_start_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         if !self.wears_start_overlay() {
             return None;
         }
@@ -519,7 +499,7 @@ impl AgentPane {
         Some(BlockingOverlay::new(body).padded().into_any_element())
     }
 
-    pub(in crate::view) fn render_composer_status(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_composer_status(&self, cx: &mut Context<Self>) -> AnyElement {
         let (branch, branch_opacity) = self.git_branch_poll.presentation();
 
         let usage = self.context_window_usage.map(|usage| {
@@ -601,10 +581,7 @@ impl AgentPane {
 /// change can neither raise nor clear it: choosing a broader preset widens what
 /// the harness may do inside the one root it has, and does not give it
 /// selected-root isolation across the others.
-pub(in crate::view) fn multi_root_notice(
-    kind: AgentKind,
-    workspace: &AgentWorkspace,
-) -> Option<String> {
+pub(super) fn multi_root_notice(kind: AgentKind, workspace: &AgentWorkspace) -> Option<String> {
     if kind.caps().multi_root_access == MultiRootAccess::Full || !workspace.is_multi_root() {
         return None;
     }

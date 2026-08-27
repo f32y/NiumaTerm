@@ -20,24 +20,24 @@ use crate::ui::Shell;
 use crate::window::ShellRegistry;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::agent_updates) enum UpdateMode {
+pub(super) enum UpdateMode {
     WhenIdle,
     StopNow,
 }
 
 impl UpdateMode {
-    pub(in crate::agent_updates) fn interrupts_active_work(self) -> bool {
+    pub(super) fn interrupts_active_work(self) -> bool {
         self == Self::StopNow
     }
 }
 
-pub(in crate::agent_updates) enum PreflightResolution {
+pub(super) enum PreflightResolution {
     Ready(Vec<RecoverySnapshot>),
     Wait,
     Failed(String),
 }
 
-pub(in crate::agent_updates) fn resolve_preflight(
+pub(super) fn resolve_preflight(
     assessments: Vec<RecoveryReadiness>,
     mode: UpdateMode,
     stop_timeout_elapsed: bool,
@@ -68,7 +68,7 @@ pub(in crate::agent_updates) fn resolve_preflight(
     PreflightResolution::Wait
 }
 
-pub(in crate::agent_updates) fn combine_transaction_error(
+pub(super) fn combine_transaction_error(
     operation_error: Option<UpdateError>,
     restore_failures: usize,
 ) -> Option<UpdateError> {
@@ -191,7 +191,7 @@ fn matching_panes(key: &InstallationKey, cx: &mut App) -> Vec<Entity<AgentPane>>
 
 /// A tab whose harness has no vendor-managed installation carries no key, so it
 /// matches no target and is never suspended by another harness's update.
-pub(in crate::agent_updates) fn affected_installation_indices(
+pub(super) fn affected_installation_indices(
     target: &InstallationKey,
     installations: &[Option<InstallationKey>],
 ) -> Vec<usize> {

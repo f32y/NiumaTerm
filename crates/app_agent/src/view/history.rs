@@ -7,7 +7,7 @@ use crate::*;
 
 /// One queued prompt on one line. A prompt spanning several lines is folded
 /// into one so every waiting row costs the composer the same height.
-pub(in crate::view) fn queued_message_label(prompt: &QueuedPrompt) -> String {
+pub(super) fn queued_message_label(prompt: &QueuedPrompt) -> String {
     let text = visible_prompt(&prompt.text)
         .lines()
         .collect::<Vec<_>>()
@@ -21,7 +21,7 @@ impl AgentPane {
     /// composer. A row whose backend named it carries a control that drops it
     /// again; one this side is only remembering does not, because there is
     /// nothing on the backend such a control could address.
-    pub(in crate::view) fn render_queued_prompts(
+    pub(super) fn render_queued_prompts(
         &self,
         cx: &mut Context<Self>,
     ) -> Option<impl IntoElement + use<>> {
@@ -83,10 +83,7 @@ impl AgentPane {
     /// skeleton rows at the final height, so the composer doesn't jump when
     /// the real rows land; rows render through a virtual list, so hundreds
     /// of persisted sessions cost only the visible ten.
-    pub(in crate::view) fn render_history(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement + use<> {
+    pub(super) fn render_history(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let rows = self
             .history_ui
             .pending

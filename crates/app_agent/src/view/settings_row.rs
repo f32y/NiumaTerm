@@ -5,7 +5,7 @@ use crate::*;
 
 impl AgentPane {
     /// The dropdown row under the input, per agent kind.
-    pub(in crate::view) fn render_settings_row(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_settings_row(&self, cx: &mut Context<Self>) -> AnyElement {
         match self.kind {
             AgentKind::Codex => self.render_codex_settings_row(cx).into_any_element(),
             AgentKind::Claude => self.render_claude_settings_row(cx).into_any_element(),
