@@ -36,7 +36,12 @@ fn integration_config() -> TerminalSessionConfig {
             "Bypass".into(),
             "-NoExit".into(),
             "-Command".into(),
-            format!(". '{}'", script.display()),
+            // Synthetic commands run through PSReadLine, so keep them out of the
+            // user's shared ConsoleHost history while this test session is active.
+            format!(
+                "Set-PSReadLineOption -HistorySaveStyle SaveNothing; . '{}'",
+                script.display()
+            ),
         ],
         cols: 100,
         rows: 30,
