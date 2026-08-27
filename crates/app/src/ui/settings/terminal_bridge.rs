@@ -9,9 +9,9 @@
 //! of their reaction by construction.
 
 use gpui::App;
+use nmt_app_agent::settings::AgentSettings;
 use nmt_app_terminal::settings::TerminalSettings;
 
-use crate::agent::settings::AgentSettings;
 use crate::ui::settings::opacity::main_view_background_opacity;
 use crate::ui::settings::state::AppSettings;
 use crate::ui::{UI_RADIUS, default_font_fallbacks};

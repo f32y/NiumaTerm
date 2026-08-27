@@ -13,9 +13,9 @@ use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, IndexPath, Sizable as _, WindowExt as _, h_flex,
 };
+use nmt_app_agent::AgentKind;
 use nmt_i18n::i18n;
 
-use crate::agent::AgentKind;
 use crate::ui::settings::agent_profile_dialog::open_agent_profile_dialog;
 use crate::ui::settings::state::{AgentProfile, AppSettings};
 use crate::ui::settings::table::{

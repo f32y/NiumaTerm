@@ -1,6 +1,6 @@
+use nmt_app_agent::RecoveryIdentity;
 use nmt_i18n::i18n;
 
-use crate::agent::RecoveryIdentity;
 use crate::ui::shell::*;
 
 impl Shell {

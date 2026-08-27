@@ -1,6 +1,6 @@
+use nmt_app_agent::AgentKind;
 use nmt_i18n::i18n;
 
-use crate::agent::AgentKind;
 use crate::ui::settings::*;
 
 /// Reasoning-effort choices a profile can pin. `default` is stored as an

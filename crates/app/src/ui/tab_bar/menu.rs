@@ -1,10 +1,10 @@
 use gpui::{Context, Entity, Window};
 use gpui_component::menu::{PopupMenu, PopupMenuItem};
 use gpui_component::{Icon, IconName, Sizable as _};
+use nmt_app_agent::AgentKind;
 use nmt_config::profile::Profile;
 use nmt_i18n::i18n;
 
-use crate::agent::AgentKind;
 use crate::ui::{AppSettings, Shell};
 
 /// The glyph a tab leads with: the agent's own mark on an agent tab, a gear on

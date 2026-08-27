@@ -3,10 +3,10 @@ use std::rc::Rc;
 
 use gpui::{Bounds, Pixels, TestAppContext};
 use gpui_component::input::InputState;
+use nmt_app_agent::AgentKind;
 use nmt_config::local_state::TabState;
 use nmt_config::system::WarnBeforeTerminatingShell;
 
-use crate::agent::AgentKind;
 use crate::ui::shell::render::TAB_STRIP_MIN_WIDTH;
 use crate::ui::shell::{
     InlineRename, InlineRenameStyle, TabSurface, should_confirm_close, should_confirm_tab_close,
