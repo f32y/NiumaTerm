@@ -22,7 +22,7 @@ pub(crate) struct TranscriptView {
     pub(in crate::agent) row_specs: Vec<RowSpec>,
     /// Row heights depend on the prose and technical-content fonts, which the
     /// specs can't see; the last-seen values trigger a full remeasure on change.
-    transcript_font: (SharedString, f64, SharedString, f64),
+    transcript_font: (SharedString, f32, SharedString, f32),
     /// Virtual rows cache measured heights; a width change can rewrap prose
     /// without changing row fingerprints, so the viewport width is tracked too.
     transcript_width: Option<Pixels>,
@@ -424,8 +424,15 @@ fn picker_reserve(viewport: Pixels) -> Pixels {
 
 impl Render for TranscriptView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let settings = cx.global::<AppSettings>();
+        let settings = cx.global::<AgentSettings>();
         let collapse = settings.collapse_tool_calls;
+        let smooth_wheel = settings.smooth_wheel;
+        let font = (
+            settings.font_family.clone(),
+            settings.font_size,
+            settings.transcript_font_family.clone(),
+            settings.transcript_font_size,
+        );
 
         // Switching the setting is a directive about the whole transcript, so
         // it drops the folds and expansions the previous mode collected. They
@@ -438,8 +445,7 @@ impl Render for TranscriptView {
             self.toggled_turns.clear();
             self.expanded_groups.clear();
         }
-        self.transcript_list
-            .set_smooth_wheel_enabled(settings.smooth_scrolling.agent_enabled());
+        self.transcript_list.set_smooth_wheel_enabled(smooth_wheel);
 
         // Transcript rows, one folded/expanded section per turn (entries are
         // tagged with a monotonic turn id, so turns are contiguous slices).
@@ -448,12 +454,6 @@ impl Render for TranscriptView {
         let specs = self.build_row_specs(collapse);
         self.sync_transcript_list(specs);
 
-        let font = (
-            settings.agent_font_family.clone(),
-            settings.agent_font_size,
-            settings.agent_transcript_font_family.clone(),
-            settings.agent_transcript_font_size,
-        );
         if self.transcript_font != font {
             self.transcript_font = font;
             self.transcript_list.remeasure();

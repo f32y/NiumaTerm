@@ -7,6 +7,8 @@ pub mod codex;
 #[cfg(target_os = "windows")]
 pub mod deepseek;
 #[cfg(target_os = "windows")]
+pub mod git;
+#[cfg(target_os = "windows")]
 pub mod launcher;
 #[cfg(target_os = "windows")]
 pub mod update;

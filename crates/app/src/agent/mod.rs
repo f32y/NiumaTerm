@@ -10,9 +10,11 @@ mod links;
 mod pane_state;
 mod profile;
 mod session;
+pub(crate) mod settings;
 pub(crate) mod transcript;
 mod view;
 mod workflows;
+mod working_indicator;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
@@ -72,6 +74,7 @@ use nmt_agent_utils::{
     AgentEvent, AgentEventKind, AgentRoute, AgentWorkspace, CodexProviderConfig, LaunchConfig,
     MultiRootAccess, agent_process, deepseek, normalize_body, normalize_title,
 };
+use nmt_config::agent::CollapseRows;
 use nmt_config::local_state::{self, AgentDefaults as StoredAgentDefaults};
 use nmt_config::profile::{AgentProfile, AgentProfileKind, AgentProfileLauncher};
 use nmt_config::system::NewlineShortcut;
@@ -97,11 +100,12 @@ use crate::agent::session::{Backend, Status, UpdateSuspension};
 pub(crate) use crate::agent::session::{
     RecoveryIdentity, RecoveryReadiness, RecoverySnapshot, RestorationReadiness,
 };
+use crate::agent::settings::{AgentSettings, UI_RADIUS};
 use crate::agent::transcript::{
     Entry, ReadingPosition, RowSpec, TranscriptView, VirtualTranscriptState,
 };
 use crate::agent::workflows::WorkflowUi;
-use crate::ui::{AppSettings, CollapseRows, UI_RADIUS, WorkingIndicator, current_branch};
+use crate::agent::working_indicator::WorkingIndicator;
 
 #[derive(Clone)]
 pub(crate) enum AgentPaneEvent {

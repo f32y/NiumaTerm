@@ -1,5 +1,30 @@
-use crate::agent::usage::{ClaudeIcon, CodexIcon, DeepSeekIcon};
 use crate::agent::*;
+
+/// Provider icons, defined beside the kind they mark. The usage view and the
+/// settings chrome borrow them from here.
+pub(crate) struct CodexIcon;
+
+impl IconNamed for CodexIcon {
+    fn path(self) -> SharedString {
+        "icons/codex.svg".into()
+    }
+}
+
+pub(crate) struct ClaudeIcon;
+
+impl IconNamed for ClaudeIcon {
+    fn path(self) -> SharedString {
+        "icons/claude.svg".into()
+    }
+}
+
+pub(crate) struct DeepSeekIcon;
+
+impl IconNamed for DeepSeekIcon {
+    fn path(self) -> SharedString {
+        "icons/deepseek.svg".into()
+    }
+}
 
 /// Which agent backs this pane; the persisted tab snapshot stores the agent
 /// name so future kinds can slot in without a schema change.

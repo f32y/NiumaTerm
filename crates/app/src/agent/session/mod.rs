@@ -9,6 +9,7 @@ use std::fs;
 use std::sync::Arc;
 
 use gpui::Image;
+use nmt_agent_utils::git;
 use nmt_i18n::i18n;
 
 use crate::agent::capabilities::QueuedPromptDelivery;
@@ -80,6 +81,17 @@ pub(in crate::agent) fn directories_match(left: Option<&str>, right: Option<&str
 /// How a session's directory reads in a list: its last two components, which
 /// is enough to tell projects apart without spending the row's width on a
 /// path that is mostly shared prefix.
+/// The pane's branch label: a detached `HEAD` shows its short commit,
+/// matching the git footer's presentation of the same state.
+fn branch_label(cwd: &str) -> Option<String> {
+    Some(match git::current_branch(cwd)? {
+        git::CheckedOut::Branch(branch) => branch,
+        git::CheckedOut::Detached(commit) => {
+            i18n("git-status-detached").replace("{commit}", &commit)
+        }
+    })
+}
+
 pub(in crate::agent) fn directory_label(cwd: &str) -> String {
     let parts: Vec<&str> = cwd
         .trim_end_matches(['/', '\\'])
@@ -300,7 +312,7 @@ impl AgentPane {
         cx.spawn(async move |this, cx| {
             loop {
                 let Ok(interval) = this.update(cx, |_, cx| {
-                    cx.global::<AppSettings>().git_status_refresh_interval
+                    cx.global::<AgentSettings>().git_status_refresh_interval
                 }) else {
                     break;
                 };
@@ -480,7 +492,7 @@ impl AgentPane {
 
         let fetch = cx
             .background_executor()
-            .spawn(async move { current_branch(&cwd) });
+            .spawn(async move { branch_label(&cwd) });
 
         cx.spawn(async move |this, cx| {
             let branch = fetch.await;
@@ -558,8 +570,8 @@ impl AgentPane {
         // launches with the profile as currently configured. A renamed or
         // deleted profile keeps the snapshot so the tab still works.
         if let Some(fresh) = cx
-            .global::<AppSettings>()
-            .agent_profiles
+            .global::<AgentSettings>()
+            .profiles
             .iter()
             .find(|p| p.kind == self.profile.kind && p.name == self.profile.name)
         {

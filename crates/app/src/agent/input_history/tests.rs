@@ -17,6 +17,7 @@ use crate::agent::input_history::{
     InputHistoryNavigation, InputHistoryScope, replace_input_with_history,
 };
 use crate::agent::session::{Backend, Status, TestBackend};
+use crate::agent::settings::AgentSettings;
 use crate::agent::{AgentKind, AgentPane, AgentThreadDefaults, RecentSessionsMode, app_server};
 use crate::ui::AppSettings;
 
@@ -92,6 +93,7 @@ fn open_test_pane(
     let window = cx.update(|cx| {
         gpui_component::init(cx);
         cx.set_global(AppSettings::default());
+        cx.set_global(AgentSettings::default());
         cx.set_global(AgentThreadDefaults::default());
         cx.set_global(AgentInputHistory {
             store: HistoryStore::default(),

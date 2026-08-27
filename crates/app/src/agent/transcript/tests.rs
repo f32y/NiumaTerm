@@ -1,10 +1,11 @@
 mod prompt_truncation_tests {
-    use gpui::px;
+    use gpui::{FontFallbacks, px};
     use nmt_agent_utils::chat::{Compaction, CompactionTrigger, Item as SessionItem};
 
     use crate::agent::composer::{
         ComposerAction, composer_action, prompt_with_response_annotations,
     };
+    use crate::agent::settings::AgentSettings;
     use crate::agent::transcript::{
         AGENT_DISCLOSURE_DETAIL_INSET, AGENT_DISCLOSURE_GAP, AGENT_DISCLOSURE_PADDING,
         AGENT_DISCLOSURE_SLOT, AgentKind, Status, TranscriptView, TurnSummary,
@@ -17,7 +18,12 @@ mod prompt_truncation_tests {
 
     #[test]
     fn transcript_code_style_uses_configured_font_and_size() {
-        let style = TranscriptView::transcript_code_block_style("JetBrains Mono".into(), 12.5);
+        let settings = AgentSettings {
+            font_fallbacks: FontFallbacks::from_fonts(vec!["Microsoft YaHei".into()]),
+            ..AgentSettings::default()
+        };
+        let font = settings.font_with_fallbacks("JetBrains Mono".into());
+        let style = TranscriptView::transcript_code_block_style(font, 12.5);
         let fallbacks = style
             .text
             .font_fallbacks
@@ -363,9 +369,9 @@ mod fence_tests {
 mod separate_view_state_tests {
     use gpui::{AppContext as _, TestAppContext};
     use nmt_agent_utils::chat::Item as SessionItem;
+    use nmt_config::agent::CollapseRows;
 
     use crate::agent::transcript::{AgentKind, TranscriptView};
-    use crate::ui::CollapseRows;
 
     fn message(id: &str, text: &str) -> SessionItem {
         SessionItem::AgentMessage {
@@ -466,9 +472,9 @@ mod separate_view_state_tests {
 mod steered_prompt_rows_tests {
     use gpui::{AppContext as _, TestAppContext};
     use nmt_agent_utils::chat::Item as SessionItem;
+    use nmt_config::agent::CollapseRows;
 
     use crate::agent::transcript::{AgentKind, RowSpec, TranscriptView};
-    use crate::ui::CollapseRows;
 
     fn reply(id: &str) -> SessionItem {
         SessionItem::AgentMessage {
@@ -596,9 +602,9 @@ mod steered_prompt_rows_tests {
 mod resumed_collapse_tests {
     use gpui::{AppContext as _, TestAppContext};
     use nmt_agent_utils::chat::{Item as SessionItem, ReplayItem, ReplayTurn};
+    use nmt_config::agent::CollapseRows;
 
     use crate::agent::transcript::{AgentKind, RowSpec, TranscriptView};
-    use crate::ui::CollapseRows;
 
     fn replayed(items: Vec<SessionItem>) -> ReplayTurn {
         ReplayTurn {
@@ -672,10 +678,10 @@ mod resumed_collapse_tests {
 mod branch_point_targeting_tests {
     use gpui::{AppContext as _, ListOffset, TestAppContext, px};
     use nmt_agent_utils::chat::{Item as SessionItem, ReplayItem, ReplayTurn};
+    use nmt_config::agent::CollapseRows;
 
     use crate::agent::composer::{PromptTarget, checkpoint_at_depth};
     use crate::agent::transcript::{AgentKind, TranscriptView};
-    use crate::ui::CollapseRows;
 
     fn user(text: &str) -> ReplayItem {
         ReplayItem {

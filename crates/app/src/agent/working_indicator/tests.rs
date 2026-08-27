@@ -1,4 +1,4 @@
-use crate::ui::working_indicator::*;
+use crate::agent::working_indicator::*;
 
 #[test]
 fn pulse_visits_each_dot_in_order() {
