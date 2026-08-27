@@ -43,6 +43,8 @@ use nmt_agent_utils::{
     AgentActivityPolicy, AgentEvent, AgentMonitor, AgentNotification, AgentRoute,
     AgentRuntimeStatus, AgentWorkspace, agent_process, request_native_delivery,
 };
+use nmt_app_terminal::session::HostEvent;
+use nmt_app_terminal::view::{AgentInterrupted, TerminalPane};
 use nmt_config::get;
 use nmt_config::local_state::WindowState;
 use nmt_config::system::WarnBeforeTerminatingShell;
@@ -61,8 +63,6 @@ use crate::agent::{AgentKind, AgentPane, AgentPaneEvent};
 use crate::cli::CliAction;
 use crate::pane_tree::{PaneId, PaneNode, PaneTree, RemoveOutcome, SplitDirection, SplitOutcome};
 use crate::tabs::{CommandOutcome, Tab, TabId, TabManager};
-use crate::terminal::session::HostEvent;
-use crate::terminal::view::{AgentInterrupted, TerminalPane};
 use crate::ui::background_tasks::BackgroundTasksView;
 use crate::ui::floating_surface;
 use crate::ui::git_sidebar::GitSidebar;

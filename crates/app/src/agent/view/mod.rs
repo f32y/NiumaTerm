@@ -13,13 +13,13 @@ use gpui::{MouseUpEvent, Pixels, Point, WeakEntity};
 use gpui_component::WindowExt as _;
 use gpui_component::input::Paste;
 use gpui_component::modern_menu::ModernMenu;
+use nmt_app_terminal::frame::theme_default_background;
 use nmt_i18n::i18n;
 
 use crate::agent::composer::{
     CommandFeedbackKind, ComposerAction, PaletteControl, composer_action,
 };
 use crate::agent::*;
-use crate::terminal::frame::theme_default_background;
 use crate::ui::{font_with_default_fallback, main_view_background_opacity};
 
 struct StopResponseIcon;

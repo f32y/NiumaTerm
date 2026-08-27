@@ -300,6 +300,7 @@ dependencies = [
  "image",
  "lsp-types",
  "nmt_agent_utils",
+ "nmt_app_terminal",
  "nmt_config",
  "nmt_i18n",
  "nmt_input",
@@ -4216,6 +4217,28 @@ dependencies = [
  "tungstenite",
  "uuid",
  "which",
+]
+
+[[package]]
+name = "nmt_app_terminal"
+version = "1.2.6"
+dependencies = [
+ "base64",
+ "futures",
+ "gpui",
+ "gpui-component",
+ "gpui_windows",
+ "image",
+ "nmt_agent_utils",
+ "nmt_config",
+ "nmt_i18n",
+ "nmt_input",
+ "nmt_platform",
+ "nmt_remote_net",
+ "nmt_terminal",
+ "parking_lot",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

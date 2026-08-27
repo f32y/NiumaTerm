@@ -22,25 +22,24 @@ use tracing::warn;
 
 mod agent;
 mod cli;
-mod error;
 mod ipc;
 mod logging;
 mod pane_tree;
 #[cfg(windows)]
 mod remote;
 mod tabs;
-mod terminal;
 mod ui;
 mod update;
 mod utils;
 mod window;
 mod workspace;
 
-use crate::agent::AgentThreadDefaults;
-use crate::cli::CliAction;
-use crate::terminal::view::{
+use nmt_app_terminal::view::{
     CopyBlockCommand, CopyBlockOutput, NextBlock, PreviousBlock, RerunBlock, SendShiftTab, SendTab,
 };
+
+use crate::agent::AgentThreadDefaults;
+use crate::cli::CliAction;
 use crate::ui::{
     AppAssets, AppSettings, CloseTab, NewAgentTab, NewRemoteTab, NewTab, NewWindow, NewWorkspace,
     NextTab, NextWorkspace, PrevTab, PrevWorkspace, ResizePaneDown, ResizePaneLeft,
