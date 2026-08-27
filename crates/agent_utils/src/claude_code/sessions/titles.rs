@@ -1,6 +1,6 @@
-use std::fs;
 use std::io::{BufRead, BufReader, Read as _, Seek as _, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::{cmp, fs};
 
 use serde_json::Value;
 
@@ -86,7 +86,7 @@ pub fn list_all_sessions() -> Vec<SessionSummary> {
 }
 
 fn sorted_newest_first(mut sessions: Vec<SessionSummary>) -> Vec<SessionSummary> {
-    sessions.sort_by(|a, b| b.last_active.cmp(&a.last_active));
+    sessions.sort_by_key(|session| cmp::Reverse(session.last_active));
 
     sessions
 }
@@ -159,7 +159,7 @@ pub(super) fn renamed_title(path: &Path) -> Option<String> {
                 .filter(|title| !title.is_empty())
                 .map(str::to_owned)
         })
-        .last()
+        .next_back()
 }
 
 /// What the head of a transcript file says about its session.
@@ -331,10 +331,10 @@ pub(super) fn clean_prompt(text: &str) -> String {
         let open = format!("<{tag}>");
         let close = format!("</{tag}>");
 
-        if let (Some(start), Some(end)) = (text.find(&open), text.find(&close)) {
-            if start < end {
-                return text[start + open.len()..end].trim().to_string();
-            }
+        if let (Some(start), Some(end)) = (text.find(&open), text.find(&close))
+            && start < end
+        {
+            return text[start + open.len()..end].trim().to_string();
         }
     }
 

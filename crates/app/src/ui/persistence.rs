@@ -621,21 +621,22 @@ mod launch_resolution_tests {
     use crate::ui::settings::{AppSettings, Profile};
 
     fn settings_with_pwsh_default() -> AppSettings {
-        let mut settings = AppSettings::default();
-        settings.profiles = vec![
-            Profile {
-                name: "PowerShell".into(),
-                shell: r"C:\Program Files\PowerShell\7\pwsh.exe".into(),
-                args: String::new(),
-            },
-            Profile {
-                name: "WSL".into(),
-                shell: "wsl.exe".into(),
-                args: "-d Ubuntu".into(),
-            },
-        ];
-        settings.default_profile = "PowerShell".into();
-        settings
+        AppSettings {
+            profiles: vec![
+                Profile {
+                    name: "PowerShell".into(),
+                    shell: r"C:\Program Files\PowerShell\7\pwsh.exe".into(),
+                    args: String::new(),
+                },
+                Profile {
+                    name: "WSL".into(),
+                    shell: "wsl.exe".into(),
+                    args: "-d Ubuntu".into(),
+                },
+            ],
+            default_profile: "PowerShell".into(),
+            ..AppSettings::default()
+        }
     }
 
     fn tab(shell: Option<&str>, args: &[&str]) -> TabState {

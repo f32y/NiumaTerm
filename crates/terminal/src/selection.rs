@@ -278,21 +278,20 @@ impl Selection {
         mut end: Pos,
         escape_chars: &str,
     ) -> SelectionRange {
-        if start == end {
-            if let Some(matching) = grid.bracket_search(start) {
-                if (matching.row == start.row && matching.col < start.col)
-                    || (matching.row < start.row)
-                {
-                    start = matching;
-                } else {
-                    end = matching;
-                }
-                return SelectionRange {
-                    start,
-                    end,
-                    is_block: false,
-                };
+        if start == end
+            && let Some(matching) = grid.bracket_search(start)
+        {
+            if (matching.row == start.row && matching.col < start.col) || (matching.row < start.row)
+            {
+                start = matching;
+            } else {
+                end = matching;
             }
+            return SelectionRange {
+                start,
+                end,
+                is_block: false,
+            };
         }
         let start = grid.semantic_search_left(start, escape_chars);
         let end = grid.semantic_search_right(end, escape_chars);

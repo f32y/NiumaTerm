@@ -12,9 +12,9 @@ use crate::workspace::TerminalActivity;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TerminalVisual {
-    CommandRunning,
-    CommandSucceeded,
-    CommandFailed,
+    Running,
+    Succeeded,
+    Failed,
 }
 
 /// The mark's meaning, absent while no command is running and none has
@@ -24,15 +24,15 @@ pub(crate) fn terminal_presentation(
 ) -> Option<(TerminalVisual, &'static str)> {
     match terminal {
         TerminalActivity::Running => Some((
-            TerminalVisual::CommandRunning,
+            TerminalVisual::Running,
             i18n("terminal-status-command-running"),
         )),
         TerminalActivity::Finished(CommandOutcome::Succeeded) => Some((
-            TerminalVisual::CommandSucceeded,
+            TerminalVisual::Succeeded,
             i18n("terminal-status-command-succeeded"),
         )),
         TerminalActivity::Finished(CommandOutcome::Failed) => Some((
-            TerminalVisual::CommandFailed,
+            TerminalVisual::Failed,
             i18n("terminal-status-command-failed"),
         )),
         TerminalActivity::Idle => None,
@@ -45,9 +45,9 @@ pub(crate) fn terminal_dot(visual: TerminalVisual, size: f32, cx: &App) -> AnyEl
     // reads in the muted accent; its result then takes the colors the rest of
     // the app uses to grade an outcome.
     let color = match visual {
-        TerminalVisual::CommandRunning => cx.theme().muted_foreground,
-        TerminalVisual::CommandSucceeded => cx.theme().success,
-        TerminalVisual::CommandFailed => cx.theme().danger,
+        TerminalVisual::Running => cx.theme().muted_foreground,
+        TerminalVisual::Succeeded => cx.theme().success,
+        TerminalVisual::Failed => cx.theme().danger,
     };
 
     div()
@@ -70,15 +70,15 @@ mod tests {
         assert_eq!(visual(TerminalActivity::Idle), None);
         assert_eq!(
             visual(TerminalActivity::Running),
-            Some(TerminalVisual::CommandRunning)
+            Some(TerminalVisual::Running)
         );
         assert_eq!(
             visual(TerminalActivity::Finished(CommandOutcome::Succeeded)),
-            Some(TerminalVisual::CommandSucceeded)
+            Some(TerminalVisual::Succeeded)
         );
         assert_eq!(
             visual(TerminalActivity::Finished(CommandOutcome::Failed)),
-            Some(TerminalVisual::CommandFailed)
+            Some(TerminalVisual::Failed)
         );
     }
 }

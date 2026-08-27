@@ -213,7 +213,7 @@ pub(crate) fn fork_checkpoints(page: &Value) -> Vec<ForkCheckpoint> {
             };
             Some(ForkCheckpoint {
                 prompt: prompt.clone(),
-                timestamp: at.map(|millis| unix_millis_to_rfc3339(millis)),
+                timestamp: at.map(unix_millis_to_rfc3339),
                 anchor: ForkAnchor::DeepSeekThrough(*kept),
             })
         })

@@ -425,11 +425,11 @@ impl Render for Shell {
 
         // Re-render the shell whenever the wrapping Root changes (dialog
         // open/close), since the shell draws the dialog layer.
-        if !self.root_observed {
-            if let Some(Some(root)) = window.root::<Root>() {
-                cx.observe(&root, |_, _, cx| cx.notify()).detach();
-                self.root_observed = true;
-            }
+        if !self.root_observed
+            && let Some(Some(root)) = window.root::<Root>()
+        {
+            cx.observe(&root, |_, _, cx| cx.notify()).detach();
+            self.root_observed = true;
         }
 
         // Root stores opened dialogs but does not draw them; the app renders the

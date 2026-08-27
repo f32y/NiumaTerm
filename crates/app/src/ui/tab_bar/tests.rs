@@ -53,7 +53,7 @@ fn a_shrinking_tab_gives_up_the_title_first() {
     assert_eq!(tab_density(FULL_TAB_WIDTH - 1.0), TabDensity::Compact);
     assert_eq!(tab_density(COMPACT_TAB_WIDTH), TabDensity::Compact);
     assert_eq!(tab_density(COMPACT_TAB_WIDTH - 1.0), TabDensity::IconOnly);
-    assert!(MIN_AUTO_TAB_WIDTH < COMPACT_TAB_WIDTH);
+    const { assert!(MIN_AUTO_TAB_WIDTH < COMPACT_TAB_WIDTH) };
     assert_eq!(tab_density(MIN_AUTO_TAB_WIDTH), TabDensity::IconOnly);
 }
 

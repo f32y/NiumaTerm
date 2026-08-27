@@ -652,6 +652,7 @@ impl AgentPane {
     /// One dropdown showing `icon · current value · chevron`. Every picker uses
     /// the same quiet color treatment; the model remains wider so its value is
     /// easier to scan. Menus keep the existing protocol values and setters.
+    #[allow(clippy::too_many_arguments)]
     fn setting_picker(
         cx: &mut Context<Self>,
         id: &'static str,

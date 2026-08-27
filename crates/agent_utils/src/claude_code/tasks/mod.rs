@@ -369,33 +369,30 @@ impl ClaudeTasks {
             .into_iter()
             .flatten()
         {
-            match block["type"].as_str() {
-                Some("tool_result") => {
-                    let Some(tool_use_id) = block["tool_use_id"].as_str() else {
-                        continue;
-                    };
-                    // Only a result matching a known launch is a child
-                    // outcome; every other tool result belongs to the parent.
-                    let Some(canonical) = self.canonical(tool_use_id) else {
-                        continue;
-                    };
-                    let failed = block["is_error"].as_bool().unwrap_or(false);
-                    changed |= self.apply(
-                        &canonical,
-                        BackgroundTaskUpdate {
-                            state: Some(if failed {
-                                BackgroundTaskState::Failed
-                            } else {
-                                BackgroundTaskState::Done
-                            }),
-                            status: result_text(block),
-                            completed_at: Some(SystemTime::now()),
-                            updated_at: Some(SystemTime::now()),
-                            ..BackgroundTaskUpdate::default()
-                        },
-                    );
-                }
-                _ => {}
+            if let Some("tool_result") = block["type"].as_str() {
+                let Some(tool_use_id) = block["tool_use_id"].as_str() else {
+                    continue;
+                };
+                // Only a result matching a known launch is a child
+                // outcome; every other tool result belongs to the parent.
+                let Some(canonical) = self.canonical(tool_use_id) else {
+                    continue;
+                };
+                let failed = block["is_error"].as_bool().unwrap_or(false);
+                changed |= self.apply(
+                    &canonical,
+                    BackgroundTaskUpdate {
+                        state: Some(if failed {
+                            BackgroundTaskState::Failed
+                        } else {
+                            BackgroundTaskState::Done
+                        }),
+                        status: result_text(block),
+                        completed_at: Some(SystemTime::now()),
+                        updated_at: Some(SystemTime::now()),
+                        ..BackgroundTaskUpdate::default()
+                    },
+                );
             }
         }
         changed

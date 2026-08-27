@@ -94,21 +94,19 @@ impl TerminalPane {
             && event.modifiers.control
             && !event.modifiers.alt
             && !event.modifiers.shift
+            && let Some(link) = self.link_at_position(event.position, cx)
         {
-            if let Some(link) = self.link_at_position(event.position, cx) {
-                info!(url = link.url, "ctrl+click open url");
-                cx.open_url(&link.url);
-                return;
-            }
+            info!(url = link.url, "ctrl+click open url");
+            cx.open_url(&link.url);
+            return;
         }
 
         if BLOCK_GUTTER_SELECTION_ENABLED
             && event.button == MouseButton::Left
             && self.block_chrome_enabled(cx)
+            && self.try_select_frozen_item(event.position, cx)
         {
-            if self.try_select_frozen_item(event.position, cx) {
-                return;
-            }
+            return;
         }
 
         // Block-split: a left press in the frozen region starts a frozen
@@ -123,28 +121,27 @@ impl TerminalPane {
             (event.button == MouseButton::Left && !reports_mouse).then_some(event.position);
 
         if self.block_list_mode(cx) && !reports_mouse {
-            if event.button == MouseButton::Left {
-                if let Some(BlockListPoint::Frozen(pt)) =
+            if event.button == MouseButton::Left
+                && let Some(BlockListPoint::Frozen(pt)) =
                     self.block_list_point_at(event.position, cx)
-                {
-                    // The engine highlight is baked into the cached frame, so
-                    // clearing the selection needs a frame rebuild too.
-                    self.surface.clear_selection();
+            {
+                // The engine highlight is baked into the cached frame, so
+                // clearing the selection needs a frame rebuild too.
+                self.surface.clear_selection();
 
-                    if selection_type == SelectionType::Simple {
-                        self.frozen_selection = None;
-                        self.frozen_select_anchor = Some(pt);
-                    } else {
-                        self.frozen_selection = self.expanded_frozen_selection(pt, selection_type);
-                        self.frozen_select_anchor = None;
-                    }
-
-                    self.invalidate(cx);
-
-                    cx.notify();
-
-                    return;
+                if selection_type == SelectionType::Simple {
+                    self.frozen_selection = None;
+                    self.frozen_select_anchor = Some(pt);
+                } else {
+                    self.frozen_selection = self.expanded_frozen_selection(pt, selection_type);
+                    self.frozen_select_anchor = None;
                 }
+
+                self.invalidate(cx);
+
+                cx.notify();
+
+                return;
             }
 
             if self.frozen_selection.take().is_some() {
@@ -299,6 +296,7 @@ impl TerminalPane {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn apply_mouse_event(
         &mut self,
         position: Point<Pixels>,

@@ -69,8 +69,7 @@ pub fn fetch() -> Result<UsageSnapshot, String> {
     let result = (|| {
         writeln!(
             stdin,
-            "{}",
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"NiumaTerm","version":"0.1.0"}}}"#,
+            "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"clientInfo\":{{\"name\":\"NiumaTerm\",\"version\":\"0.1.0\"}}}}}}",
         )
         .map_err(|err| format!("failed to initialize Codex app-server: {err}"))?;
 
@@ -102,14 +101,12 @@ pub fn fetch() -> Result<UsageSnapshot, String> {
                 Some(1) if !requested_limits => {
                     writeln!(
                         stdin,
-                        "{}",
-                        r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#,
+                        "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}",
                     )
                     .and_then(|_| {
                         writeln!(
                             stdin,
-                            "{}",
-                            r#"{"jsonrpc":"2.0","id":2,"method":"account/rateLimits/read","params":{}}"#,
+                            "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"account/rateLimits/read\",\"params\":{{}}}}",
                         )
                     })
                     .and_then(|_| stdin.flush())

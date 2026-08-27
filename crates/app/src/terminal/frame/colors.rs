@@ -90,7 +90,7 @@ impl BackgroundColors {
                 if dim {
                     TerminalColor::from_color_arr((*rgb * DIM_FACTOR).to_arr())
                 } else {
-                    (*rgb).into()
+                    *rgb
                 }
             }
             AnsiColor::Indexed(index) => {

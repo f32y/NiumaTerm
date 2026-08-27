@@ -101,7 +101,7 @@ pub struct PtyPipe<T: EventedPty, U: EventListener> {
     /// Optional observer for the exact VT stream accepted by the engine. It runs
     /// under the engine lock so a checkpoint and its following byte sequence can
     /// be ordered atomically; observers must therefore return promptly.
-    output_sink: Option<Arc<dyn Fn(Arc<[u8]>) + Send + Sync>>,
+    output_sink: Option<OutputSink>,
     terminal_responses_enabled: bool,
     event_proxy: U,
     window_id: WindowId,
@@ -228,6 +228,7 @@ where
     T: EventedPty + Send + 'static,
     U: EventListener + Send + 'static,
 {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         render_buffer: Arc<FairMutex<RenderBuffer>>,
         vt_modes: Arc<AtomicU32>,
@@ -431,25 +432,25 @@ where
         if nmt_platform::USES_CONPTY && self.su_realign_armed && repaint_window {
             self.su_realign_armed = false;
 
-            if !engine.mode(mode::ALT_SCREEN) {
-                if let Some((n, r_conpty)) = su_realign_count(
+            if !engine.mode(mode::ALT_SCREEN)
+                && let Some((n, r_conpty)) = su_realign_count(
                     input,
                     self.conpty_resize_prompt_row,
                     self.conpty_resize_cols,
                     self.conpty_resize_rows,
                     engine.cols(),
                     engine.rows(),
-                ) {
-                    let realign = format!("\x1b[{n}S").into_bytes();
+                )
+            {
+                let realign = format!("\x1b[{n}S").into_bytes();
 
-                    engine.write_vt(&realign);
+                engine.write_vt(&realign);
 
-                    synthetic_prefix = Some(realign);
+                synthetic_prefix = Some(realign);
 
-                    su_realigned_to = Some(r_conpty);
+                su_realigned_to = Some(r_conpty);
 
-                    self.conpty_resize_echo_pending = false;
-                }
+                self.conpty_resize_echo_pending = false;
             }
         }
 
@@ -1036,17 +1037,15 @@ where
                 // The waker token (and any stray token) needs no handling.
             }
 
-            if child_exited {
-                if let Some(ChildEvent::Exited) = self.pty.next_child_event() {
-                    // Emit `CloseTerminal` directly; PtyPipe owns the event proxy and route id.
-                    self.event_proxy
-                        .send_event(TerminalEvent::CloseTerminal(self.route_id), self.window_id);
+            if child_exited && let Some(ChildEvent::Exited) = self.pty.next_child_event() {
+                // Emit `CloseTerminal` directly; PtyPipe owns the event proxy and route id.
+                self.event_proxy
+                    .send_event(TerminalEvent::CloseTerminal(self.route_id), self.window_id);
 
-                    self.event_proxy
-                        .send_event(TerminalEvent::Render, self.window_id);
+                self.event_proxy
+                    .send_event(TerminalEvent::Render, self.window_id);
 
-                    break 'event_loop;
-                }
+                break 'event_loop;
             }
 
             // Don't do I/O on a dead PTY (Unix HUP / `is_read_closed`).
@@ -1059,26 +1058,24 @@ where
                 // A saturated batch self-wakes, while synchronized output uses the
                 // poll deadline. Either path runs `pty_read` without new PTY bytes
                 // so the pending snapshot can flush (it reads WouldBlock at worst).
-                if do_read || self.snapshot_pending {
-                    if let Err(err) = self.pty_read(&mut state, &mut buf) {
-                        // On Linux, a `read` on the master side of a PTY can fail
-                        // with `EIO` if the client side hangs up. In that case, just
-                        // loop back round for the inevitable `Exited` event.
-                        #[cfg(target_os = "linux")]
-                        if err.raw_os_error() == Some(EIO) {
-                            continue;
-                        }
-
-                        error!("Error reading from PTY in event loop: {}", err);
-                        break 'event_loop;
+                if (do_read || self.snapshot_pending)
+                    && let Err(err) = self.pty_read(&mut state, &mut buf)
+                {
+                    // On Linux, a `read` on the master side of a PTY can fail
+                    // with `EIO` if the client side hangs up. In that case, just
+                    // loop back round for the inevitable `Exited` event.
+                    #[cfg(target_os = "linux")]
+                    if err.raw_os_error() == Some(EIO) {
+                        continue;
                     }
+
+                    error!("Error reading from PTY in event loop: {}", err);
+                    break 'event_loop;
                 }
 
-                if do_write {
-                    if let Err(err) = self.pty_write(&mut state) {
-                        error!("Error writing to PTY in event loop: {}", err);
-                        break 'event_loop;
-                    }
+                if do_write && let Err(err) = self.pty_write(&mut state) {
+                    error!("Error writing to PTY in event loop: {}", err);
+                    break 'event_loop;
                 }
             }
 

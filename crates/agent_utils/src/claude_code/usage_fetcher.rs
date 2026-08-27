@@ -773,8 +773,7 @@ mod tests {
     #[test]
     fn a_cancelled_request_reports_cancellation_not_failure() {
         let error = fetch_with_cancel(&AtomicBool::new(true))
-            .err()
-            .expect("a cancelled fetch produces no snapshot");
+            .expect_err("a cancelled fetch produces no snapshot");
         assert!(
             matches!(error, UsageFetchError::Cancelled),
             "expected Cancelled, got {error:?}"

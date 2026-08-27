@@ -102,10 +102,11 @@ impl AgentPane {
             Some(i18n("agent-composer-no-skills").to_string())
         } else if rows.is_empty() {
             Some(i18n("agent-composer-no-matching-skills").to_string())
-        } else if let Some(error) = skill_catalog.errors.first() {
-            Some(i18n("agent-composer-skill-load-partial").replace("{error}", error))
         } else {
-            None
+            skill_catalog
+                .errors
+                .first()
+                .map(|error| i18n("agent-composer-skill-load-partial").replace("{error}", error))
         };
 
         PaletteModel { rows, note }
@@ -125,10 +126,10 @@ impl AgentPane {
         let input = self.input.read(cx);
         let text = input.text().to_string();
 
-        if self.kind.caps().skill_references {
-            if let Some(query) = parse_skill_prefix(&text) {
-                return Some(self.skill_palette_model(&query));
-            }
+        if self.kind.caps().skill_references
+            && let Some(query) = parse_skill_prefix(&text)
+        {
+            return Some(self.skill_palette_model(&query));
         }
 
         let parsed = parse_slash_command(&text)?;

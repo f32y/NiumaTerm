@@ -381,10 +381,10 @@ impl Sidebar {
                             .on_drop(cx.listener(|this, drag: &SidebarTabDrag, window, cx| {
                                 this.sidebar.tab_dragging = None;
 
-                                if let Some((ws, to)) = this.sidebar.tab_drag_over.take() {
-                                    if drag.workspace == ws {
-                                        this.reorder_tab(drag.tab, drag.from, to, window, cx);
-                                    }
+                                if let Some((ws, to)) = this.sidebar.tab_drag_over.take()
+                                    && drag.workspace == ws
+                                {
+                                    this.reorder_tab(drag.tab, drag.from, to, window, cx);
                                 }
 
                                 cx.notify();

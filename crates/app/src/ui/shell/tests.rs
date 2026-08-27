@@ -209,7 +209,7 @@ fn title_bar_controls_stay_inside_a_narrow_window(cx: &mut TestAppContext) {
 
     use crate::ui::workspace_sidebar::MAX_WIDTH;
 
-    cx.update(|cx| gpui_component::init(cx));
+    cx.update(gpui_component::init);
 
     let probe: TitleBarProbe = Default::default();
     let handle = cx.add_window({

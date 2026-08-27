@@ -174,7 +174,7 @@ pub(crate) fn watch_themes(cx: &mut App) -> Option<Task<()>> {
         let _watcher = watcher;
 
         while rx.next().await.is_some() {
-            let _ = cx.update(reload_themes);
+            cx.update(reload_themes);
         }
     }))
 }

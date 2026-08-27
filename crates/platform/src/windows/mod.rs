@@ -123,6 +123,7 @@ pub fn create_managed_pty_with_env(
     Ok(pty)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn create_pty_with_management(
     shell: &str,
     args: Vec<String>,

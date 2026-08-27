@@ -216,7 +216,7 @@ impl TryFrom<PersistedAgentProfile> for AgentProfile {
             })?,
             None => (persisted.api_base_url, persisted.api_key),
         };
-        let launcher = persisted.launcher.unwrap_or_else(|| {
+        let launcher = persisted.launcher.unwrap_or({
             if persisted.via_npx {
                 AgentProfileLauncher::Npx
             } else {

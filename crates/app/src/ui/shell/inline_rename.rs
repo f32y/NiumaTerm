@@ -6,6 +6,9 @@ use gpui::{
 use gpui_component::Sizable as _;
 use gpui_component::input::{Input, InputState};
 
+/// Callback invoked when the rename input is dismissed without committing.
+type CancelRename = Box<dyn Fn(&mut Window, &mut App)>;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::ui) enum InlineRenameStyle {
     HorizontalTab,
@@ -22,7 +25,7 @@ pub(in crate::ui) struct InlineRename {
     label: SharedString,
     input: Entity<InputState>,
     style: InlineRenameStyle,
-    cancel: Box<dyn Fn(&mut Window, &mut App)>,
+    cancel: CancelRename,
 }
 
 impl InlineRename {

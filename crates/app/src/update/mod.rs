@@ -210,7 +210,7 @@ pub(crate) fn install_now(window: &mut Window, cx: &mut App) {
             .spawn(async move { download::stage(&download_release, &staging) })
             .await;
 
-        let _ = cx.update(|cx| match staged {
+        cx.update(|cx| match staged {
             Ok(staged) => prepare_install(release, staged, initiating_window, testing, cx),
             Err(error) => fail_install(error, cx),
         });
@@ -266,7 +266,7 @@ fn inspect_file_users(cx: &mut App) {
             .background_executor()
             .spawn(async move { file_usage(&dll) })
             .await;
-        let _ = cx.update(|cx| finish_file_use_inspection(result, cx));
+        cx.update(|cx| finish_file_use_inspection(result, cx));
     })
     .detach();
 }
@@ -456,10 +456,10 @@ pub(crate) fn close_file_users(cx: &mut App) {
 
         match prepared {
             ClosePreparation::Clear => {
-                let _ = cx.update(continue_install);
+                cx.update(continue_install);
             }
             ClosePreparation::Prompt(prompt) => {
-                let _ = cx.update(|cx| show_file_use_prompt(prompt, cx));
+                cx.update(|cx| show_file_use_prompt(prompt, cx));
             }
             ClosePreparation::Released {
                 session,
@@ -679,7 +679,7 @@ pub(crate) fn schedule_automatic_checks(cx: &mut App) {
         loop {
             // Read the switch every tick rather than at startup: the user can
             // turn checking on and off while the app runs.
-            let _ = cx.update(|cx| {
+            cx.update(|cx| {
                 if cx.global::<AppSettings>().check_updates {
                     check(cx);
                 }
@@ -705,7 +705,7 @@ fn check(cx: &mut App) {
             .background_executor()
             .spawn(async move { releases::latest(channel) })
             .await;
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             // The channel can move while the request is out. A result for the
             // channel the user left says nothing about the one they chose, and
             // the switch has already started the check that does.

@@ -191,20 +191,22 @@ fn load_falls_back_to_default_profile() {
 
 #[test]
 fn default_profile_command_resolves_by_name() {
-    let mut settings = AppSettings::default();
-    settings.profiles = vec![
-        Profile {
-            name: "PowerShell".into(),
-            shell: DEFAULT_SHELL.into(),
-            args: String::new(),
-        },
-        Profile {
-            name: "Cmd".into(),
-            shell: "cmd.exe".into(),
-            args: "/k echo hi".into(),
-        },
-    ];
-    settings.default_profile = "Cmd".into();
+    let mut settings = AppSettings {
+        profiles: vec![
+            Profile {
+                name: "PowerShell".into(),
+                shell: DEFAULT_SHELL.into(),
+                args: String::new(),
+            },
+            Profile {
+                name: "Cmd".into(),
+                shell: "cmd.exe".into(),
+                args: "/k echo hi".into(),
+            },
+        ],
+        default_profile: "Cmd".into(),
+        ..AppSettings::default()
+    };
 
     let (shell, args) = settings.default_profile_command();
     assert_eq!(shell.as_deref(), Some("cmd.exe"));
@@ -373,8 +375,10 @@ fn defaults_have_one_powershell_profile() {
 
 #[test]
 fn scroll_to_bottom_when_typing_maps_to_saved_appearance() {
-    let mut settings = AppSettings::default();
-    settings.scroll_to_bottom_when_typing = false;
+    let settings = AppSettings {
+        scroll_to_bottom_when_typing: false,
+        ..AppSettings::default()
+    };
 
     assert!(!settings.appearance_config().scroll_to_bottom_when_typing);
 }

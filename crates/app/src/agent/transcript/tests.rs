@@ -275,7 +275,7 @@ mod prompt_truncation_tests {
                     && source.is_char_boundary(range.end)
                     && range.len() <= VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES)
         );
-        assert!(segments.iter().filter(|range| range.len() > 0).count() > 3);
+        assert!(segments.iter().filter(|range| !range.is_empty()).count() > 3);
     }
 
     #[test]

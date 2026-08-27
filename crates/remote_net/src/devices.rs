@@ -25,7 +25,7 @@ pub fn hex_encode(bytes: &[u8]) -> String {
 /// Inverse of [`hex_encode`], for keys that round-tripped through a config or
 /// device-list file.
 pub fn hex_decode(hex: &str) -> Option<Vec<u8>> {
-    if hex.len() % 2 != 0 {
+    if !hex.len().is_multiple_of(2) {
         return None;
     }
     (0..hex.len())

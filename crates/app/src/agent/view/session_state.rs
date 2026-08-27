@@ -32,13 +32,15 @@ impl AgentPane {
         // left, so it travels with the objective rather than waiting for the
         // goal to run out on its own.
         let goal = self.goal.as_ref().map(|goal| {
-            let rounds = (goal.max_rounds > 0)
-                .then(|| {
+            let rounds = if goal.max_rounds > 0 {
+                {
                     i18n("agent-session-goal-rounds")
                         .replace("{used}", &goal.rounds_started.to_string())
                         .replace("{total}", &goal.max_rounds.to_string())
-                })
-                .unwrap_or_default();
+                }
+            } else {
+                Default::default()
+            };
 
             h_flex()
                 .flex_1()

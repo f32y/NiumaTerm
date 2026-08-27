@@ -380,6 +380,7 @@ pub(super) fn is_current_session_epoch(current: u64, event_epoch: u64) -> bool {
 
 /// Reset command-only session state while keeping provider history and the
 /// tab's history-dismissal choice outside this function untouched.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn reset_command_runtime<A, T>(
     commands_ready: bool,
     pending_approval: &mut Option<A>,

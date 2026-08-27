@@ -85,7 +85,7 @@ impl InstallationKey {
 
         for name in UPDATE_ENVIRONMENT_NAMES {
             digest.update(name.to_ascii_uppercase().as_bytes());
-            digest.update([b'=']);
+            digest.update(*b"=");
             if let Some(value) = launcher.effective_env_os(name) {
                 digest.update(value.to_string_lossy().as_bytes());
             }
@@ -775,14 +775,12 @@ fn write_cache(path: &Path, cache: &CacheFile) {
         return;
     };
     let temporary = path.with_extension("tmp");
-    if fs::write(&temporary, bytes).is_ok() {
-        if fs::rename(&temporary, path).is_err() {
-            // Windows rename does not replace an existing destination. Cache
-            // loss is recoverable by probing again, so a short replacement
-            // gap is preferable to leaving every later result stale.
-            let _ = fs::remove_file(path);
-            let _ = fs::rename(temporary, path);
-        }
+    if fs::write(&temporary, bytes).is_ok() && fs::rename(&temporary, path).is_err() {
+        // Windows rename does not replace an existing destination. Cache
+        // loss is recoverable by probing again, so a short replacement
+        // gap is preferable to leaving every later result stale.
+        let _ = fs::remove_file(path);
+        let _ = fs::rename(temporary, path);
     }
 }
 
