@@ -1,10 +1,4 @@
-# agent-session-history
-
-## Purpose
-
-When an Agent Tab opens, it displays historical sessions for the current working directory and lets the user restore and continue a conversation with either Claude Code through its stream-json CLI or Codex through app-server.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Show historical sessions in the empty state
 When Agent Tab is empty, meaning the transcript has no item and the user has neither sent a message nor selected a session to restore, the system SHALL display historical sessions for the tab's primary directory above the composer. Additional workspace directories SHALL NOT widen this provider-history query. The list SHALL be ordered by last-active time in descending order.
@@ -24,35 +18,6 @@ When Agent Tab is empty, meaning the transcript has no item and the user has nei
 #### Scenario: History loads asynchronously
 - **WHEN** the history scan or request has not completed
 - **THEN** the UI remains usable and accepts composer input; the list appears after loading, while a load failure hides the list and records the reason in the log
-
-### Requirement: Display session details in each row
-Each row SHALL display a session title derived from the first user message and truncated to one line, plus a relative last-active time. When the session includes Git branch information, the row SHALL display the branch name. When no user message can provide a title, the row SHALL use the first eight characters of the session id.
-
-#### Scenario: Normal session row
-- **WHEN** the first user message is "fix the login bug", the session was active five minutes ago, and its branch is dev
-- **THEN** the row shows the truncated prompt, branch `dev`, and a relative time styled as `5m`
-
-#### Scenario: Session has no user message
-- **WHEN** no user text message can be parsed from a historical session file
-- **THEN** the row title is the first eight characters of the session id
-
-### Requirement: Use a scrolling virtual list
-The list SHALL show at most 10 rows at once by default and allow scrolling to additional rows. It SHALL use virtualization and render only the visible range so hundreds of sessions remain responsive.
-
-#### Scenario: More than 10 historical sessions exist
-- **WHEN** a cwd has 50 historical sessions
-- **THEN** the list remains 10 rows high, the user can scroll through the other 40, and each frame renders only visible rows
-
-### Requirement: Hide the list after the user proceeds
-After the user selects a historical session or sends the first new message without selecting one, the system SHALL hide the history list for the remainder of that tab's lifetime.
-
-#### Scenario: Send a new message directly
-- **WHEN** the user enters and sends a message while the list is visible
-- **THEN** the list disappears and a new session starts normally
-
-#### Scenario: Select a session to restore
-- **WHEN** the user selects a historical session
-- **THEN** the list disappears and the restore flow begins
 
 ### Requirement: Enumerate Claude Code sessions
 For the Claude Code backend, the system SHALL enumerate historical sessions by scanning `~/.claude/projects/<munged-primary-cwd>/*.jsonl`, where munged-primary-cwd replaces every non-alphanumeric character in the workspace's primary directory with `-`. It SHALL derive the session id from the filename, last-active time from mtime, and title and branch from the first record near the start of the file whose `type == "user"` and whose content includes text. Scanning and title parsing SHALL run on a background thread and read only a bounded prefix of each file.
@@ -84,25 +49,6 @@ After the user selects a Claude history row, the system SHALL start Claude with 
 - **WHEN** Claude returns an error such as "No conversation found" because the session file was deleted
 - **THEN** the transcript displays a restore error and the composer remains usable
 
-### Requirement: Replay the active Claude Code transcript chain
-When replaying JSONL, the system SHALL reconstruct the current message chain by walking `parentUuid` backward from the last valid active leaf. It SHALL render only user text, assistant text, and reasoning from that chain. Messages abandoned on another branch MUST NOT appear in the transcript. The system SHALL associate each chain `tool_use` with a later `tool_result` through `tool_use_id` and preserve every tool type already supported by the live transcript, its input summary, result output, success or failure state, and file-change diff. Tool rows MAY reuse the live transcript's grouping and on-demand expansion, but grouping SHALL affect only presentation and SHALL NOT reduce persisted details to a count or discard them. Hook output, internal sidechain records, meta records, and queue-operation records SHALL be skipped. When multiple leaves exist, the system SHALL choose the last valid leaf in JSONL file order. If a parent is missing, it SHALL replay only messages that can be shown to be connected, record a non-fatal diagnostic, and MUST NOT join another branch to fill the gap.
-
-#### Scenario: History contains tool calls
-- **WHEN** the restored active message chain contains 20 tool calls and five user and assistant exchanges
-- **THEN** the transcript shows all five exchanges and all 20 tool calls; consecutive calls may be grouped by default, and expanding the group reveals each call's true type, title, state, result, and available diff
-
-#### Scenario: Associate tool results with calls
-- **WHEN** a chain tool call has id `tool_123` and a later `tool_result.tool_use_id` is `tool_123`
-- **THEN** the system updates that tool row with the result and completion state, allowing the restored row to reveal the result instead of creating a count placeholder or separate result row
-
-#### Scenario: History contains an abandoned branch
-- **WHEN** Claude JSONL retains an old branch and a new branch continued from an earlier message
-- **THEN** the transcript shows only the `parentUuid` chain reachable from the last valid leaf and omits user, assistant, and tool content unique to the old branch
-
-#### Scenario: The active chain has a missing parent
-- **WHEN** a `parentUuid` referenced by the last valid leaf is absent from the transcript
-- **THEN** the system replays only the connected suffix that can be established from the leaf, records a non-fatal diagnostic, and does not add records from another leaf
-
 ### Requirement: Enumerate Codex sessions
 For the Codex backend, after App Server initialization the system SHALL request historical sessions through `thread/list` with the workspace's primary directory as `cwd`, `sortKey: "recency_at"`, and default sourceKinds for interactive sources only. Additional directories SHALL NOT widen the history query. It SHALL map row fields as id from `id`, title from `name` or `preview`, time from `recencyAt`, and branch from `gitInfo` when available. It SHALL load additional pages on demand through `nextCursor`.
 
@@ -121,12 +67,7 @@ After the user selects a Codex history row, the system SHALL call `thread/resume
 - **WHEN** `thread/resume` returns an error because the thread was deleted or damaged
 - **THEN** the transcript shows an error, the tab returns to its unstarted state, and the composer can start a new session
 
-### Requirement: Match the composer visual style
-The history list SHALL reuse the rounded composer shell hierarchy as a block above the input, separated by a hairline in the same structure as the approval panel. Rows SHALL follow the existing settings-row control style with small text, subdued foreground colors, a brighter hover color, a left-aligned truncated title, and a right-aligned relative time in tabular digits.
-
-#### Scenario: Visual consistency
-- **WHEN** the history list and approval panel are compared side by side
-- **THEN** they share the rounded outer container and divider treatment, and list rows match the style of controls in the bottom settings row
+## ADDED Requirements
 
 ### Requirement: Enumerate and restore DeepSeek sessions by primary directory
 For DeepSeek Harness, the system SHALL filter the harness's session list by the workspace's primary directory. Restoring a matching session SHALL keep that primary directory and SHALL present the same additional-directory limitation as a new DeepSeek conversation.
