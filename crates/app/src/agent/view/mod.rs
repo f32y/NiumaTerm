@@ -99,8 +99,8 @@ impl Render for AgentPane {
         let approval = self.render_approval_panel(cx);
         let questions = self.render_question_panel(cx);
 
-        let running = composer_action(self.status) == ComposerAction::Stop;
-        let update_suspended = self.update_suspension.is_some();
+        let running = composer_action(self.runtime.status) == ComposerAction::Stop;
+        let update_suspended = self.runtime.update_suspension.is_some();
         let update_banner = self.render_update_banner(cx);
         let multi_root_notice = self.render_multi_root_notice(cx);
         let update_overlay = self.render_update_overlay(cx);
@@ -182,7 +182,7 @@ impl Render for AgentPane {
                     // model is told to assume and continue, so Escape here
                     // deliberately does not interrupt.
                     this.respond_questions(false, cx);
-                } else if this.status == Status::Running {
+                } else if this.runtime.status == Status::Running {
                     this.interrupt_from_ui(window, cx);
                 }
             }))

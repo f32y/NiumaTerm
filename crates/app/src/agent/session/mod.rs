@@ -242,34 +242,42 @@ impl AgentPane {
             conversation_named: false,
             transcript,
             input,
-            session: None,
-            session_epoch: 0,
-            status: Status::Starting,
-            start_failure: None,
-            start_overlay_visible: false,
+            runtime: SessionRuntime {
+                backend: None,
+                epoch: 0,
+                status: Status::Starting,
+                start_failure: None,
+                start_overlay_visible: false,
+                update_suspension: None,
+                last_recovery_snapshot: None,
+            },
             history_ui: SessionHistoryUi::default(),
-            effort_drag: None,
             pending_approval: None,
             pending_questions: None,
-            settings: ThreadSettings::default(),
-            seed_thread_defaults: true,
-            seed_approval_reviewer: false,
-            restore_thread_settings_on_ready: None,
-            models: Vec::new(),
-            approval_presets: Vec::new(),
-            agent_presets: Vec::new(),
-            agent_preset: None,
-            turn_seq: 0,
-            turn_submitted_at: None,
-            first_output_latency: None,
-            unanswered_prompt: None,
-            pending_interrupt: None,
+            controls: ThreadControls {
+                settings: ThreadSettings::default(),
+                seed_thread_defaults: true,
+                seed_approval_reviewer: false,
+                restore_on_ready: None,
+                models: Vec::new(),
+                approval_presets: Vec::new(),
+                agent_presets: Vec::new(),
+                agent_preset: None,
+                effort_drag: None,
+            },
+            turn: TurnState {
+                seq: 0,
+                submitted_at: None,
+                first_output_latency: None,
+                unanswered_prompt: None,
+                pending_interrupt: None,
+                queued_user_messages: VecDeque::new(),
+                published_prompt: None,
+            },
             palette: SlashPalette {
                 provider_commands_ready: !kind.caps().async_command_discovery,
                 ..SlashPalette::default()
             },
-            queued_user_messages: VecDeque::new(),
-            published_prompt: None,
             rewind: RewindFlow::default(),
             fork: ForkFlow::default(),
             git_branch_poll: GitBranchPoll::default(),
@@ -278,11 +286,11 @@ impl AgentPane {
             goal: None,
             plan_mode: false,
             session_stats: None,
-            update_suspension: None,
-            last_recovery_snapshot: None,
-            restored_task_session: None,
-            background_tasks: None,
-            background_task_transcripts: HashMap::new(),
+            children: ChildAgents {
+                background_tasks: None,
+                transcripts: HashMap::new(),
+                restored_session: None,
+            },
             workflows: WorkflowUi::default(),
         };
 
@@ -330,7 +338,7 @@ impl AgentPane {
         self.history_ui.showing_search = false;
         self.history_ui.selected = 0;
 
-        if let Some(session) = self.session.as_mut() {
+        if let Some(session) = self.runtime.backend.as_mut() {
             session.request_history(self.history_ui.scope);
         }
         self.load_filesystem_history(cx);
@@ -450,7 +458,7 @@ impl AgentPane {
         images: Vec<Arc<Image>>,
         cx: &mut Context<Self>,
     ) {
-        let turn = self.turn_seq;
+        let turn = self.turn.seq;
         self.transcript
             .update(cx, |transcript, cx| transcript.push(turn, item, images, cx));
         cx.notify();
@@ -496,9 +504,9 @@ impl AgentPane {
         cx.emit(AgentPaneEvent::Lifecycle(AgentEvent {
             route: self.agent_route.clone(),
             agent: self.kind.id().to_string(),
-            session_id: format!("agent-tab-{}", self.session_epoch),
+            session_id: format!("agent-tab-{}", self.runtime.epoch),
             turn_id: (kind != AgentEventKind::SessionStarted)
-                .then(|| format!("turn-{}", self.turn_seq)),
+                .then(|| format!("turn-{}", self.turn.seq)),
             kind,
             title: normalize_title(title),
             body: normalize_body(body),
@@ -508,7 +516,7 @@ impl AgentPane {
     pub(super) fn latest_agent_message(&self, cx: &App) -> Option<String> {
         self.transcript
             .read(cx)
-            .latest_agent_message(self.turn_seq)
+            .latest_agent_message(self.turn.seq)
             .map(str::to_owned)
     }
 
@@ -562,14 +570,14 @@ impl AgentPane {
         // handshake, so the picker need not flash the backend default while a
         // custom endpoint is starting.
         if !preserve_thread_settings && let Some(model) = self.profile_model() {
-            self.settings.model = Some(model);
+            self.controls.settings.model = Some(model);
         }
 
         // A pinned effort reaches the backend through the launch, so the
         // picker shows it from the first frame rather than the level the
         // agent would otherwise have used.
         if !preserve_thread_settings && let Some(effort) = self.profile_effort() {
-            self.settings.effort = Some(effort);
+            self.controls.settings.effort = Some(effort);
         }
 
         let kind = self.kind;
@@ -583,28 +591,28 @@ impl AgentPane {
         // A resume into a backend that replays its own thread controls keeps
         // them; anything else starts from the remembered picks. The reviewer is
         // seeded separately because a backend can replay the rest without it.
-        self.seed_thread_defaults = !preserve_thread_settings
+        self.controls.seed_thread_defaults = !preserve_thread_settings
             && (recovery.is_none() || !caps.resume_restores_thread_settings);
-        self.seed_approval_reviewer = !preserve_thread_settings
+        self.controls.seed_approval_reviewer = !preserve_thread_settings
             && recovery.is_some()
             && caps.resume_restores_thread_settings
             && !caps.resume_restores_approval_reviewer;
-        self.restore_thread_settings_on_ready =
-            preserve_thread_settings.then(|| self.settings.clone());
+        self.controls.restore_on_ready =
+            preserve_thread_settings.then(|| self.controls.settings.clone());
 
         // Replacing a conversation must clear any running or unread state
         // associated with the previous backend before the new epoch can emit.
         cx.emit(AgentPaneEvent::Interrupted);
         // The previous attempt's reason describes a backend nobody is waiting
         // on any more, and this start is what the pane now reports.
-        self.start_failure = None;
-        self.session_epoch = next_session_epoch(self.session_epoch);
+        self.runtime.start_failure = None;
+        self.runtime.epoch = next_session_epoch(self.runtime.epoch);
         // A replacement conversation names the tab again from its own opening
         // message; the previous one's subject no longer describes the tab.
         self.conversation_named = false;
         self.palette.skill_catalog = None;
         self.palette.skill_binding = None;
-        let epoch = self.session_epoch;
+        let epoch = self.runtime.epoch;
 
         let (tx, mut rx) = mpsc::unbounded::<Value>();
         let deliver = move |message| {
@@ -619,7 +627,7 @@ impl AgentPane {
         // tab with neither leaves the flag off and starts on the CLI's
         // configured model.
         if caps.model_baked_into_launch {
-            launch.model = self.settings.model.clone().or_else(|| {
+            launch.model = self.controls.settings.model.clone().or_else(|| {
                 self.stored_thread_settings(cx)
                     .and_then(|stored| stored.model.clone())
             });
@@ -642,18 +650,18 @@ impl AgentPane {
         // frames if it runs on the UI thread. The pane already models the gap
         // as `Status::Starting` with no backend installed, so the spawn moves
         // to a background thread and the result arrives in a later update.
-        self.status = Status::Starting;
+        self.runtime.status = Status::Starting;
         // A host that is already running answers within a frame or two, so the
         // overlay is held back rather than shown and pulled away as a flicker.
         // Nothing repaints while the start runs, so the hold has to wake the
         // pane itself instead of being read from a clock at render time.
-        self.start_overlay_visible = false;
+        self.runtime.start_overlay_visible = false;
         if self.wears_start_overlay() {
             cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(START_OVERLAY_DELAY).await;
                 let _ = this.update(cx, |this, cx| {
-                    if this.status == Status::Starting {
-                        this.start_overlay_visible = true;
+                    if this.runtime.status == Status::Starting {
+                        this.runtime.start_overlay_visible = true;
                         cx.notify();
                     }
                 });
@@ -689,11 +697,11 @@ impl AgentPane {
                 let updated = this.update(cx, |this, cx| {
                     // A newer session owns the pane now; this pump's
                     // messages belong to the replaced process.
-                    if !is_current_session_epoch(this.session_epoch, epoch) {
+                    if !is_current_session_epoch(this.runtime.epoch, epoch) {
                         return false;
                     }
 
-                    let events = match this.session.as_mut() {
+                    let events = match this.runtime.backend.as_mut() {
                         Some(session) => session.process(message),
                         None => Vec::new(),
                     };
@@ -713,11 +721,12 @@ impl AgentPane {
             let _ = this.update(cx, |this, cx| {
                 // A deliberately replaced session exits by design;
                 // only the live session's death is worth a line.
-                if !is_current_session_epoch(this.session_epoch, epoch) {
+                if !is_current_session_epoch(this.runtime.epoch, epoch) {
                     return;
                 }
                 let exit_events = this
-                    .session
+                    .runtime
+                    .backend
                     .as_mut()
                     .map(Backend::process_exit)
                     .unwrap_or_default();
@@ -725,9 +734,12 @@ impl AgentPane {
                     this.apply_event(event, cx);
                 }
                 cx.emit(AgentPaneEvent::Interrupted);
-                this.status = Status::Exited;
-                if matches!(this.update_suspension, Some(UpdateSuspension::Reconnecting)) {
-                    this.update_suspension = Some(UpdateSuspension::Failed(
+                this.runtime.status = Status::Exited;
+                if matches!(
+                    this.runtime.update_suspension,
+                    Some(UpdateSuspension::Reconnecting)
+                ) {
+                    this.runtime.update_suspension = Some(UpdateSuspension::Failed(
                         i18n("agent-session-exited-before-restored").replace("{name}", name),
                     ));
                 }
@@ -764,7 +776,7 @@ impl AgentPane {
         name: &'static str,
         cx: &mut Context<Self>,
     ) -> Option<bool> {
-        if !is_current_session_epoch(self.session_epoch, epoch) {
+        if !is_current_session_epoch(self.runtime.epoch, epoch) {
             if let Ok(mut orphan) = spawned {
                 cx.background_executor()
                     .spawn(async move {
@@ -775,23 +787,23 @@ impl AgentPane {
             return None;
         }
 
-        self.start_overlay_visible = false;
+        self.runtime.start_overlay_visible = false;
         Some(match spawned {
             Ok(session) => {
-                self.session = Some(session);
+                self.runtime.backend = Some(session);
                 true
             }
             Err(err) => {
                 cx.emit(AgentPaneEvent::Interrupted);
-                self.status = Status::Exited;
+                self.runtime.status = Status::Exited;
                 self.palette.awaiting_command_turn = false;
                 self.palette.command_queue.clear();
-                self.queued_user_messages.clear();
+                self.turn.queued_user_messages.clear();
                 let text = i18n("agent-session-start-failed")
                     .replace("{name}", name)
                     .replace("{error}", &err);
-                self.start_failure = Some(text.clone());
-                let turn = self.turn_seq;
+                self.runtime.start_failure = Some(text.clone());
+                let turn = self.turn.seq;
                 self.transcript.update(cx, |transcript, _| {
                     transcript.push_stamped(turn, SessionItem::Error { text });
                 });
@@ -879,9 +891,9 @@ impl AgentPane {
                 opening_line,
             })
         };
-        let settings = self.settings.clone();
+        let settings = self.controls.settings.clone();
         let scratch = scratch_dir(self.agent_route.as_str());
-        let outcome = match self.session.as_mut() {
+        let outcome = match self.runtime.backend.as_mut() {
             Some(session) if let Some(title) = title_request.as_ref() => session
                 .send_user_message_with_title(
                     &text,
@@ -930,16 +942,16 @@ impl AgentPane {
 
         match outcome {
             SendOutcome::StartedTurn => {
-                self.turn_seq += 1;
+                self.turn.seq += 1;
                 // A backend that publishes its pending inbox lists this prompt
                 // until the turn claims it; the row below is the claim's, so
                 // the claim has to know it was already drawn.
                 if self.kind.caps().queued_prompt_delivery == QueuedPromptDelivery::PendingInbox {
-                    self.published_prompt = Some(text.clone());
+                    self.turn.published_prompt = Some(text.clone());
                 }
                 let unanswered_prompt =
                     restore_on_interrupt.map(|(text, response_annotations)| UnansweredPrompt {
-                        turn: self.turn_seq,
+                        turn: self.turn.seq,
                         text,
                         response_annotations,
                         skill: skill.cloned(),
@@ -949,14 +961,15 @@ impl AgentPane {
                     sent_images,
                     cx,
                 );
-                self.unanswered_prompt = unanswered_prompt;
+                self.turn.unanswered_prompt = unanswered_prompt;
                 self.start_working(cx);
             }
             SendOutcome::Steered => {
                 // The backend may republish this row with an identity of its
                 // own a moment later; until then it is this side's record that
                 // the message is pending, and it carries no removal control.
-                self.queued_user_messages
+                self.turn
+                    .queued_user_messages
                     .push_back(QueuedPrompt::local(text));
                 cx.notify();
             }
@@ -969,24 +982,24 @@ impl AgentPane {
     pub(super) fn clear_conversation_presentation(&mut self, cx: &mut Context<Self>) {
         self.transcript
             .update(cx, |transcript, _| transcript.clear());
-        self.turn_seq = 0;
-        self.turn_submitted_at = None;
-        self.published_prompt = None;
-        self.first_output_latency = None;
+        self.turn.seq = 0;
+        self.turn.submitted_at = None;
+        self.turn.published_prompt = None;
+        self.turn.first_output_latency = None;
         // The reading answers "how long has this conversation been waiting on
         // me"; the replaced conversation's last answer says nothing about the
         // fresh one, which has never been answered at all.
         self.last_response_at = None;
-        self.unanswered_prompt = None;
+        self.turn.unanswered_prompt = None;
         // The new conversation restarts turn ids from zero, so a stop request
         // left over from the old one could match an unrelated future turn.
-        self.pending_interrupt = None;
+        self.turn.pending_interrupt = None;
         self.context_window_usage = None;
         self.context_composition = None;
         self.goal = None;
         self.plan_mode = false;
         self.session_stats = None;
-        self.queued_user_messages.clear();
+        self.turn.queued_user_messages.clear();
         self.rewind.state = None;
         self.rewind.file_completion = None;
         self.fork.state = None;
@@ -998,8 +1011,8 @@ impl AgentPane {
         // Child rows belong to the conversation being replaced; keeping them
         // would show another parent session's tasks until the new adapter
         // publishes its first snapshot.
-        self.background_tasks = None;
-        self.background_task_transcripts.clear();
+        self.children.background_tasks = None;
+        self.children.transcripts.clear();
         // Workflow runs are scoped the same way, and their refresh must not
         // keep polling a directory that belongs to the replaced conversation.
         self.clear_workflows();
@@ -1013,26 +1026,27 @@ impl AgentPane {
     /// parent transcript or composer.
     pub(in crate::agent) fn restore_background_tasks(&mut self, cx: &mut Context<Self>) {
         let Some(session_id) = self
-            .session
+            .runtime
+            .backend
             .as_ref()
             .and_then(|session| session.session_id())
             .map(str::to_owned)
         else {
             return;
         };
-        if self.restored_task_session.as_deref() == Some(session_id.as_str()) {
+        if self.children.restored_session.as_deref() == Some(session_id.as_str()) {
             return;
         }
-        self.restored_task_session = Some(session_id.clone());
+        self.children.restored_session = Some(session_id.clone());
 
-        let Some(session) = self.session.as_mut() else {
+        let Some(session) = self.runtime.backend.as_mut() else {
             return;
         };
         // Captured before the read starts so live updates that land while it
         // runs keep their newer state.
         let starting_sequence = session.begin_task_restoration();
         let cwd = self.cwd();
-        let epoch = self.session_epoch;
+        let epoch = self.runtime.epoch;
 
         cx.spawn(async move |this, cx| {
             let restored = cx
@@ -1041,10 +1055,10 @@ impl AgentPane {
                 .await;
 
             let _ = this.update(cx, |this, cx| {
-                if this.session_epoch != epoch {
+                if this.runtime.epoch != epoch {
                     return;
                 }
-                let Some(session) = this.session.as_mut() else {
+                let Some(session) = this.runtime.backend.as_mut() else {
                     return;
                 };
                 for event in session.finish_task_restoration(restored, starting_sequence) {
@@ -1059,13 +1073,13 @@ impl AgentPane {
     /// Pass a tab rename through to the conversation, so the name reaches the
     /// harness's own session record rather than living only in this tab.
     pub(crate) fn rename_session(&mut self, title: &str) {
-        if let Some(session) = self.session.as_mut() {
+        if let Some(session) = self.runtime.backend.as_mut() {
             session.rename_session(title);
         }
     }
 
     pub(crate) fn refresh_background_tasks(&mut self) {
-        if let Some(session) = self.session.as_mut() {
+        if let Some(session) = self.runtime.backend.as_mut() {
             session.refresh_background_tasks();
         }
     }
@@ -1074,7 +1088,7 @@ impl AgentPane {
     /// `None` until the backend reports a thread or session id, which is what
     /// disables the title-bar `Background Tasks` button.
     pub(crate) fn background_task_parent(&self) -> Option<BackgroundTaskKey> {
-        let identity = self.session.as_ref()?.recovery_identity()?;
+        let identity = self.runtime.backend.as_ref()?.recovery_identity()?;
         Some(match identity.kind {
             AgentKind::Codex => BackgroundTaskKey::codex(identity.id),
             AgentKind::Claude => BackgroundTaskKey::claude_code(identity.id),
@@ -1092,7 +1106,7 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) {
         let cwd = self.cwd();
-        let Some(session) = self.session.as_mut() else {
+        let Some(session) = self.runtime.backend.as_mut() else {
             return;
         };
         for event in session.load_background_task_transcript(key, cwd.as_deref()) {
@@ -1105,7 +1119,8 @@ impl AgentPane {
     /// turns out not to be stoppable after all — the snapshot a row was drawn
     /// from can be a moment behind the child finishing on its own.
     pub(crate) fn interrupt_background_task(&mut self, key: &BackgroundTaskKey) -> bool {
-        self.session
+        self.runtime
+            .backend
             .as_mut()
             .is_some_and(|session| session.interrupt_background_task(key))
     }
@@ -1117,7 +1132,7 @@ impl AgentPane {
         key: &BackgroundTaskKey,
     ) -> Option<&BackgroundTaskTranscript> {
         self.background_tasks()?;
-        self.background_task_transcripts.get(key)
+        self.children.transcripts.get(key)
     }
 
     /// The latest snapshot, only while it still describes the session the pane
@@ -1126,7 +1141,7 @@ impl AgentPane {
     pub(crate) fn background_tasks(&self) -> Option<&BackgroundTaskSnapshot> {
         scoped_background_tasks(
             self.background_task_parent().as_ref(),
-            self.background_tasks.as_ref(),
+            self.children.background_tasks.as_ref(),
         )
     }
 
@@ -1147,12 +1162,12 @@ impl AgentPane {
     }
 
     pub(super) fn reset_conversation(&mut self, cx: &mut Context<Self>) {
-        self.session = None;
+        self.runtime.backend = None;
         // A fresh conversation always follows the live tail again, even if
         // the previous transcript was scrolled up when it was discarded.
         self.clear_conversation_presentation(cx);
-        self.settings = ThreadSettings::default();
-        self.models.clear();
+        self.controls.settings = ThreadSettings::default();
+        self.controls.models.clear();
         self.palette.skill_catalog = None;
         self.palette.skill_binding = None;
         reset_command_runtime(
@@ -1180,7 +1195,7 @@ impl AgentPane {
     /// Start the turn clock and drive the once-a-second repaint of the live
     /// progress row; the ticker stops itself once `finish_working` clears it.
     pub(super) fn start_working(&mut self, cx: &mut Context<Self>) {
-        self.turn_submitted_at = Some(Instant::now());
+        self.turn.submitted_at = Some(Instant::now());
         self.transcript
             .update(cx, |transcript, cx| transcript.start_working(cx));
         cx.notify();
@@ -1210,7 +1225,7 @@ impl AgentPane {
     /// row. These values are UI state rather than provider transcript content,
     /// so they stay outside the shared item stream.
     pub(super) fn finish_working(&mut self, cx: &mut Context<Self>) {
-        let turn = self.turn_seq;
+        let turn = self.turn.seq;
         self.transcript
             .update(cx, |transcript, cx| transcript.settle_turn(turn, cx));
         self.note_response_settled(cx);
@@ -1255,28 +1270,30 @@ impl AgentPane {
         // Only the first output of a turn answers "how long until it said
         // something", so taking the stamp both records the reading and closes
         // the measurement for the rest of the turn.
-        if let Some(submitted_at) = self.turn_submitted_at.take() {
-            self.first_output_latency = Some(submitted_at.elapsed());
+        if let Some(submitted_at) = self.turn.submitted_at.take() {
+            self.turn.first_output_latency = Some(submitted_at.elapsed());
         }
 
         if self
+            .turn
             .unanswered_prompt
             .as_ref()
-            .is_some_and(|prompt| prompt.turn == self.turn_seq)
+            .is_some_and(|prompt| prompt.turn == self.turn.seq)
         {
-            self.unanswered_prompt = None;
+            self.turn.unanswered_prompt = None;
         }
     }
 
     pub(super) fn interrupt_from_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let working = self.transcript.read(cx).is_working();
         if working {
-            self.pending_interrupt = Some(self.turn_seq);
+            self.turn.pending_interrupt = Some(self.turn.seq);
         }
         if let Some(prompt) = self
+            .turn
             .unanswered_prompt
             .take()
-            .filter(|prompt| prompt.turn == self.turn_seq && working)
+            .filter(|prompt| prompt.turn == self.turn.seq && working)
         {
             let turn = prompt.turn;
             self.transcript
@@ -1300,7 +1317,7 @@ impl AgentPane {
     }
 
     pub(super) fn interrupt(&mut self, cx: &mut Context<Self>) {
-        if let Some(session) = self.session.as_mut() {
+        if let Some(session) = self.runtime.backend.as_mut() {
             session.interrupt();
             cx.emit(AgentPaneEvent::Interrupted);
             cx.notify();
@@ -1313,7 +1330,7 @@ impl AgentPane {
         self.pending_approval = None;
         self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
 
-        if let Some(session) = self.session.as_mut() {
+        if let Some(session) = self.runtime.backend.as_mut() {
             session.respond_approval(decision);
         }
         cx.notify();
@@ -1388,7 +1405,7 @@ impl AgentPane {
 
         self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
 
-        if let Some(session) = self.session.as_mut() {
+        if let Some(session) = self.runtime.backend.as_mut() {
             session.respond_questions(answers);
         }
         cx.notify();
@@ -1401,10 +1418,10 @@ impl AgentPane {
     /// to, because a picker left showing a value the harness never adopted
     /// would misreport which model the next turn runs on.
     pub(super) fn apply_model_selection(&mut self, cx: &mut Context<Self>) {
-        let Some(model) = self.settings.model.clone() else {
+        let Some(model) = self.controls.settings.model.clone() else {
             return;
         };
-        let Some(session) = self.session.as_mut() else {
+        let Some(session) = self.runtime.backend.as_mut() else {
             return;
         };
 
@@ -1413,7 +1430,7 @@ impl AgentPane {
         // therefore travels alone and lets the adapter apply its own default,
         // which is also why no caller has to clear the effort itself.
         let effort = (session.selection().0 == Some(model.as_str()))
-            .then(|| self.settings.effort.clone())
+            .then(|| self.controls.settings.effort.clone())
             .flatten();
 
         // Seeding the pickers from a remembered pick reaches here too, and it
@@ -1428,8 +1445,8 @@ impl AgentPane {
         // session is actually set to: the harness answers a model change with
         // the effort it chose, and a refusal leaves the previous pair standing.
         let (model, effort) = session.selection();
-        self.settings.model = model.map(str::to_string);
-        self.settings.effort = effort.map(str::to_string);
+        self.controls.settings.model = model.map(str::to_string);
+        self.controls.settings.effort = effort.map(str::to_string);
 
         match outcome {
             Ok(()) => cx.notify(),
@@ -1444,16 +1461,16 @@ impl AgentPane {
     /// tools. That rule is not repeated here: the picker reports whatever the
     /// harness answers, and the row stays on the preset still in force.
     pub(super) fn apply_agent_preset(&mut self, preset: String, cx: &mut Context<Self>) {
-        let Some(session) = self.session.as_mut() else {
+        let Some(session) = self.runtime.backend.as_mut() else {
             return;
         };
-        if self.agent_preset.as_deref() == Some(preset.as_str()) {
+        if self.controls.agent_preset.as_deref() == Some(preset.as_str()) {
             return;
         }
 
         match session.select_agent_preset(&preset) {
             Ok(()) => {
-                self.agent_preset = Some(preset);
+                self.controls.agent_preset = Some(preset);
                 cx.notify();
             }
             Err(error) => self.set_command_feedback(CommandFeedbackKind::Error, error, cx),
@@ -1489,17 +1506,17 @@ impl AgentPane {
             return;
         }
 
-        let previous_status = self.status;
+        let previous_status = self.runtime.status;
         self.history_ui.mode = RecentSessionsMode::Loading;
         self.history_ui.selected = index;
         self.history_ui.pending_resume_replay = None;
-        self.status = Status::Starting;
+        self.runtime.status = Status::Starting;
         // A backend that replays the resumed conversation's controls owns them;
         // otherwise they stay local profile preferences. The reviewer is seeded
         // separately because a backend can replay the rest without it.
         let caps = self.kind.caps();
-        self.seed_thread_defaults = !caps.resume_restores_thread_settings;
-        self.seed_approval_reviewer =
+        self.controls.seed_thread_defaults = !caps.resume_restores_thread_settings;
+        self.controls.seed_approval_reviewer =
             caps.resume_restores_thread_settings && !caps.resume_restores_approval_reviewer;
         self.set_command_feedback(
             CommandFeedbackKind::Notice,
@@ -1512,12 +1529,13 @@ impl AgentPane {
             // and both answer whether the request reached a backend that could.
             AgentKind::Codex | AgentKind::DeepSeek => {
                 if !self
-                    .session
+                    .runtime
+                    .backend
                     .as_mut()
                     .is_some_and(|session| session.resume_thread(&id))
                 {
                     self.history_ui.mode = RecentSessionsMode::Open;
-                    self.status = previous_status;
+                    self.runtime.status = previous_status;
                     self.set_command_feedback(
                         CommandFeedbackKind::Error,
                         i18n("agent-session-codex-recent-not-ready").to_string(),
@@ -1613,7 +1631,7 @@ impl AgentPane {
             let defaults = cx.default_global::<AgentThreadDefaults>();
             defaults
                 .0
-                .insert(self.defaults_key(), self.settings.clone());
+                .insert(self.defaults_key(), self.controls.settings.clone());
             defaults.to_local_state()
         };
 

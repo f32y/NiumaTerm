@@ -56,15 +56,15 @@ impl AgentPane {
             }
             SessionEvent::Ready(settings) => self.on_ready(settings, cx),
             SessionEvent::Models(models) => {
-                self.models = models;
+                self.controls.models = models;
                 cx.notify();
             }
             SessionEvent::ApprovalPresets { presets, current } => {
                 // The harness owns this control: it reports the presets its
                 // deployment serves and which one is in force, so a remembered
                 // pick has no say and the row shows what actually applies.
-                self.approval_presets = presets;
-                self.settings.approval = current;
+                self.controls.approval_presets = presets;
+                self.controls.settings.approval = current;
                 cx.notify();
             }
             SessionEvent::AgentPresets { presets, current } => {
@@ -72,8 +72,8 @@ impl AgentPane {
                 // the conversation is created, and a resumed one carries
                 // whichever preset built it rather than whichever this tab last
                 // showed.
-                self.agent_presets = presets;
-                self.agent_preset = current;
+                self.controls.agent_presets = presets;
+                self.controls.agent_preset = current;
                 cx.notify();
             }
             SessionEvent::Commands(commands) => {
@@ -216,7 +216,7 @@ impl AgentPane {
                 // the session is on. The reason goes to the feedback strip
                 // above the composer: it answers for the control the user just
                 // used, and the transcript is what the conversation said.
-                self.settings.effort = effort;
+                self.controls.settings.effort = effort;
                 self.remember_thread_defaults(cx);
                 self.set_command_feedback(CommandFeedbackKind::Error, message, cx);
             }
@@ -229,7 +229,7 @@ impl AgentPane {
             SessionEvent::BackgroundTaskTranscript { key, update } => {
                 // A child's conversation is view content only: it never
                 // reaches the parent transcript, composer, or turn state.
-                if update.apply_to(self.background_task_transcripts.entry(key).or_default()) {
+                if update.apply_to(self.children.transcripts.entry(key).or_default()) {
                     cx.notify();
                 }
             }
@@ -284,7 +284,10 @@ impl AgentPane {
         // confirms the permission mode); a payload without effort
         // keeps the user's pick — Claude never reports effort, so
         // None there means "unknown", never "reset".
-        let effort = settings.effort.clone().or(self.settings.effort.clone());
+        let effort = settings
+            .effort
+            .clone()
+            .or(self.controls.settings.effort.clone());
         let mut next = ThreadSettings { effort, ..settings };
 
         // Fresh conversations, and resumes into a harness that does not
@@ -292,14 +295,14 @@ impl AgentPane {
         // another Ready arrives during first-turn initialization, that
         // later confirmation preserves the controls in use instead of
         // restoring the ones the CLI reports.
-        let seed_thread_defaults = take(&mut self.seed_thread_defaults);
-        let seed_approval_reviewer = take(&mut self.seed_approval_reviewer);
+        let seed_thread_defaults = take(&mut self.controls.seed_thread_defaults);
+        let seed_approval_reviewer = take(&mut self.controls.seed_approval_reviewer);
         let stored = (seed_thread_defaults || seed_approval_reviewer)
             .then(|| self.stored_thread_settings(cx))
             .flatten();
         let preserve_current = self.kind.caps().repeats_ready_during_init && !seed_thread_defaults;
         let local = if preserve_current {
-            Some(&self.settings)
+            Some(&self.controls.settings)
         } else {
             stored
         };
@@ -316,11 +319,11 @@ impl AgentPane {
             startup_effort.as_deref(),
         );
 
-        if let Some(restored) = self.restore_thread_settings_on_ready.take() {
+        if let Some(restored) = self.controls.restore_on_ready.take() {
             next = resolve_ready_settings(next, Some(&restored), true, false, None, None);
         }
 
-        self.settings = next;
+        self.controls.settings = next;
         // Seeding only fills in the pickers. Where the harness adopts a
         // model through its own request, a remembered or profile pick
         // still has to be pushed, or the row would name a model the
@@ -331,17 +334,20 @@ impl AgentPane {
         info!(
             "agent thread ready: profile=\"{}\", model={:?}, profile_model={:?}",
             self.profile.name,
-            self.settings.model,
+            self.controls.settings.model,
             self.profile_model()
         );
         // Claude's first-turn init confirms settings after its
         // synthetic TurnStarted event; that confirmation must not
         // make an active turn look idle and admit overlapping work.
-        if self.status != Status::Running {
-            self.status = Status::Idle;
+        if self.runtime.status != Status::Running {
+            self.runtime.status = Status::Idle;
         }
-        if matches!(self.update_suspension, Some(UpdateSuspension::Reconnecting)) {
-            self.update_suspension = None;
+        if matches!(
+            self.runtime.update_suspension,
+            Some(UpdateSuspension::Reconnecting)
+        ) {
+            self.runtime.update_suspension = None;
         }
         // The session id is known by now, so child agents that ran
         // before this tab opened can be rebuilt from history.
@@ -375,7 +381,7 @@ impl AgentPane {
                     }),
                     cx,
                 );
-                if self.palette.awaiting_command_turn && self.status != Status::Running {
+                if self.palette.awaiting_command_turn && self.runtime.status != Status::Running {
                     self.palette.awaiting_command_turn = false;
                     self.run_next_queued_command(cx);
                 }
@@ -407,7 +413,7 @@ impl AgentPane {
         let harness_opened = !command_turn && !self.transcript.read(cx).is_working();
 
         if command_turn || harness_opened {
-            self.turn_seq += 1;
+            self.turn.seq += 1;
             self.start_working(cx);
         }
         // The prompt the harness held is what this turn answers, so it
@@ -417,7 +423,7 @@ impl AgentPane {
         {
             self.publish_queued_user_messages(cx);
         }
-        self.status = Status::Running;
+        self.runtime.status = Status::Running;
         self.emit_lifecycle(AgentEventKind::PromptSubmitted, "", "", cx);
         cx.notify();
     }
@@ -428,12 +434,12 @@ impl AgentPane {
     /// never shows an "Interrupted" row above live output. A stale request
     /// for an earlier turn is dropped at this boundary.
     fn on_turn_completed(&mut self, error: Option<String>, cx: &mut Context<Self>) {
-        if self.pending_interrupt.take() == Some(self.turn_seq) {
-            let turn = self.turn_seq;
+        if self.turn.pending_interrupt.take() == Some(self.turn.seq) {
+            let turn = self.turn.seq;
             self.transcript
                 .update(cx, |transcript, _| transcript.mark_interrupted(turn));
         }
-        let interrupted_by_user = self.transcript.read(cx).was_interrupted(self.turn_seq);
+        let interrupted_by_user = self.transcript.read(cx).was_interrupted(self.turn.seq);
         let completion_body = error
             .clone()
             .or_else(|| self.latest_agent_message(cx))
@@ -441,7 +447,7 @@ impl AgentPane {
                 i18n("agent-session-turn-completed").replace("{name}", self.kind.display())
             });
         self.palette.awaiting_command_turn = false;
-        self.unanswered_prompt = None;
+        self.turn.unanswered_prompt = None;
         // Compaction lives inside a turn; a flag surviving the turn
         // would leave the indicator spinning with nothing behind it.
         self.transcript
@@ -456,8 +462,8 @@ impl AgentPane {
         }
         self.finish_working(cx);
         self.refresh_git_branch(cx);
-        if self.status == Status::Running {
-            self.status = Status::Idle;
+        if self.runtime.status == Status::Running {
+            self.runtime.status = Status::Idle;
         }
         if let Some(text) = error
             && !interrupted_by_user
@@ -485,7 +491,7 @@ impl AgentPane {
             // composer behind a conversation that is not being cut.
             self.abandon_conversation_branch();
             if !fatal {
-                self.status = Status::Idle;
+                self.runtime.status = Status::Idle;
             }
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
@@ -493,14 +499,19 @@ impl AgentPane {
                 cx,
             );
         }
-        if fatal && matches!(self.update_suspension, Some(UpdateSuspension::Reconnecting)) {
-            self.update_suspension = Some(UpdateSuspension::Failed(message.clone()));
+        if fatal
+            && matches!(
+                self.runtime.update_suspension,
+                Some(UpdateSuspension::Reconnecting)
+            )
+        {
+            self.runtime.update_suspension = Some(UpdateSuspension::Failed(message.clone()));
         }
         let cancelled_queue = fatal && !self.palette.command_queue.is_empty();
         if fatal {
             cx.emit(AgentPaneEvent::Interrupted);
-            self.status = Status::Exited;
-            self.unanswered_prompt = None;
+            self.runtime.status = Status::Exited;
+            self.turn.unanswered_prompt = None;
             self.palette.awaiting_command_turn = false;
             self.palette.command_queue.clear();
             self.publish_queued_user_messages(cx);
@@ -551,7 +562,7 @@ impl AgentPane {
             self.background_task_count(),
             self.running_background_tasks(),
         );
-        self.background_tasks = Some(snapshot);
+        self.children.background_tasks = Some(snapshot);
         // The chrome reveals its control on this tab's first child and
         // then carries the running count, so it is told when either
         // number moves rather than on every refreshed snapshot. A child
@@ -585,17 +596,17 @@ impl AgentPane {
         // same message twice for that whole window, so it is dropped
         // from the list here and the snapshot that stops naming it —
         // the moment the turn took it — retires the record.
-        if let Some(drawn) = self.published_prompt.take() {
+        if let Some(drawn) = self.turn.published_prompt.take() {
             let before = prompts.len();
             prompts.retain(|prompt| prompt.text != drawn);
             if prompts.len() != before {
-                self.published_prompt = Some(drawn);
+                self.turn.published_prompt = Some(drawn);
             }
         }
 
-        let claimed = claimed_prompts(&self.queued_user_messages, &prompts);
+        let claimed = claimed_prompts(&self.turn.queued_user_messages, &prompts);
 
-        self.queued_user_messages = prompts.into();
+        self.turn.queued_user_messages = prompts.into();
         for text in claimed {
             self.push_item(SessionItem::UserMessage { text: Some(text) }, cx);
         }
@@ -632,8 +643,8 @@ impl AgentPane {
         for turn in replay {
             // Each restored turn takes its own id, so the sequence continues
             // past the replay and new turns cannot merge into the last one.
-            self.turn_seq += 1;
-            let id = self.turn_seq;
+            self.turn.seq += 1;
+            let id = self.turn.seq;
             self.transcript
                 .update(cx, |transcript, cx| transcript.append_replay(id, turn, cx));
         }
@@ -644,12 +655,13 @@ impl AgentPane {
         if let SessionItem::UserMessage { text } = &item {
             if let Some(text) = text
                 && self
+                    .turn
                     .queued_user_messages
                     .front()
                     .is_some_and(|queued| &queued.text == text)
             {
                 let text = text.clone();
-                self.queued_user_messages.pop_front();
+                self.turn.queued_user_messages.pop_front();
                 self.push_item(SessionItem::UserMessage { text: Some(text) }, cx);
             }
             return;
@@ -678,7 +690,7 @@ impl AgentPane {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        while let Some(queued) = self.queued_user_messages.pop_front() {
+        while let Some(queued) = self.turn.queued_user_messages.pop_front() {
             self.push_item(
                 SessionItem::UserMessage {
                     text: Some(queued.text),

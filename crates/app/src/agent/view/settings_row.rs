@@ -44,6 +44,7 @@ impl AgentPane {
     /// support (e.g. Haiku) get no effort control.
     fn render_claude_settings_row(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let model_options: Vec<(String, String)> = self
+            .controls
             .models
             .iter()
             .map(|m| (m.model.clone(), m.display.clone()))
@@ -57,9 +58,10 @@ impl AgentPane {
         // advertises none (Haiku) gets no control rather than one whose every
         // value it would reject.
         let supports_effort = self
+            .controls
             .models
             .iter()
-            .find(|m| Some(&m.model) == self.settings.model.as_ref())
+            .find(|m| Some(&m.model) == self.controls.settings.model.as_ref())
             .is_some_and(|m| !m.efforts.is_empty());
 
         let model = Self::setting_picker(
@@ -67,11 +69,11 @@ impl AgentPane {
             "agent-model",
             i18n("agent-setting-model"),
             IconName::Cpu,
-            self.settings.model.clone(),
+            self.controls.settings.model.clone(),
             model_options,
             true,
             |this, value, cx| {
-                this.settings.model = Some(value);
+                this.controls.settings.model = Some(value);
                 this.remember_thread_defaults(cx);
             },
         )
@@ -80,12 +82,12 @@ impl AgentPane {
             cx,
             "agent-permission",
             i18n("agent-setting-permissions"),
-            permission_icon(self.settings.approval.as_deref()),
-            self.settings.approval.clone(),
+            permission_icon(self.controls.settings.approval.as_deref()),
+            self.controls.settings.approval.clone(),
             permission_options,
             false,
             |this, value, cx| {
-                this.settings.approval = Some(value);
+                this.controls.settings.approval = Some(value);
                 this.remember_thread_defaults(cx);
             },
         )
@@ -113,13 +115,14 @@ impl AgentPane {
                 // The protocol never reports the session's current effort;
                 // until the user picks one, the honest label is the CLI's
                 // own per-model default rather than an empty dash.
-                self.settings
+                self.controls
+                    .settings
                     .effort
                     .clone()
                     .or_else(|| Some("default".to_string())),
                 Self::effort_levels(self.kind),
                 |this, value, cx| {
-                    this.settings.effort = Some(value);
+                    this.controls.settings.effort = Some(value);
                     this.remember_thread_defaults(cx);
                 },
             )
@@ -144,6 +147,7 @@ impl AgentPane {
     /// service reports none, and then the control is absent rather than empty.
     fn render_deepseek_settings_row(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let model_options: Vec<(String, String)> = self
+            .controls
             .models
             .iter()
             .map(|m| (m.model.clone(), m.display.clone()))
@@ -152,9 +156,10 @@ impl AgentPane {
         // advertises no levels simply has no effort control; the levels it
         // then offers are the shared ladder.
         let supports_effort = self
+            .controls
             .models
             .iter()
-            .find(|m| Some(&m.model) == self.settings.model.as_ref())
+            .find(|m| Some(&m.model) == self.controls.settings.model.as_ref())
             .is_some_and(|m| !m.efforts.is_empty());
 
         let model = Self::setting_picker(
@@ -162,11 +167,11 @@ impl AgentPane {
             "agent-model",
             i18n("agent-setting-model"),
             IconName::Cpu,
-            self.settings.model.clone(),
+            self.controls.settings.model.clone(),
             model_options,
             true,
             |this, value, cx| {
-                this.settings.model = Some(value);
+                this.controls.settings.model = Some(value);
                 this.remember_thread_defaults(cx);
                 this.apply_model_selection(cx);
             },
@@ -186,8 +191,9 @@ impl AgentPane {
 
         // A deployment that composes no presets has one composition for every
         // conversation, so the control would offer a choice that does not exist.
-        if !self.agent_presets.is_empty() {
+        if !self.controls.agent_presets.is_empty() {
             let composition_options: Vec<(String, String)> = self
+                .controls
                 .agent_presets
                 .iter()
                 .map(|preset| (preset.value.clone(), preset.label.clone()))
@@ -198,7 +204,7 @@ impl AgentPane {
                 "agent-composition",
                 i18n("agent-setting-agent-preset"),
                 IconName::Bot,
-                self.agent_preset.clone(),
+                self.controls.agent_preset.clone(),
                 composition_options,
                 false,
                 |this, value, cx| this.apply_agent_preset(value, cx),
@@ -212,8 +218,9 @@ impl AgentPane {
             ));
         }
 
-        if !self.approval_presets.is_empty() {
+        if !self.controls.approval_presets.is_empty() {
             let preset_options: Vec<(String, String)> = self
+                .controls
                 .approval_presets
                 .iter()
                 .map(|preset| (preset.value.clone(), preset.label.clone()))
@@ -223,8 +230,8 @@ impl AgentPane {
                 cx,
                 "agent-permission",
                 i18n("agent-setting-permissions"),
-                permission_icon(self.settings.approval.as_deref()),
-                self.settings.approval.clone(),
+                permission_icon(self.controls.settings.approval.as_deref()),
+                self.controls.settings.approval.clone(),
                 preset_options,
                 false,
                 |this, value, cx| {
@@ -246,10 +253,10 @@ impl AgentPane {
         if supports_effort {
             let effort = Self::effort_panel(
                 cx,
-                self.settings.effort.clone(),
+                self.controls.settings.effort.clone(),
                 Self::effort_levels(self.kind),
                 |this, value, cx| {
-                    this.settings.effort = Some(value);
+                    this.controls.settings.effort = Some(value);
                     this.remember_thread_defaults(cx);
                     this.apply_model_selection(cx);
                 },
@@ -271,6 +278,7 @@ impl AgentPane {
     /// overrides on the next `turn/start`.
     fn render_codex_settings_row(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let model_options: Vec<(String, String)> = self
+            .controls
             .models
             .iter()
             .map(|m| (m.model.clone(), m.display.clone()))
@@ -283,9 +291,10 @@ impl AgentPane {
             vec![(String::new(), setting_value_label("normal"))];
 
         tier_options.extend(
-            self.models
+            self.controls
+                .models
                 .iter()
-                .find(|m| Some(&m.model) == self.settings.model.as_ref())
+                .find(|m| Some(&m.model) == self.controls.settings.model.as_ref())
                 .map(|m| m.tiers.clone())
                 .unwrap_or_default(),
         );
@@ -306,22 +315,23 @@ impl AgentPane {
             "agent-model",
             i18n("agent-setting-model"),
             IconName::Cpu,
-            self.settings.model.clone(),
+            self.controls.settings.model.clone(),
             model_options,
             true,
             |this, value, cx| {
                 // A tier the new model doesn't offer falls back to that
                 // model's default tier instead of erroring the next turn.
-                if let Some(info) = this.models.iter().find(|m| m.model == value)
+                if let Some(info) = this.controls.models.iter().find(|m| m.model == value)
                     && !this
+                        .controls
                         .settings
                         .tier
                         .as_ref()
                         .is_some_and(|tier| info.tiers.iter().any(|(id, _)| id == tier))
                 {
-                    this.settings.tier = info.default_tier.clone();
+                    this.controls.settings.tier = info.default_tier.clone();
                 }
-                this.settings.model = Some(value);
+                this.controls.settings.model = Some(value);
                 this.remember_thread_defaults(cx);
             },
         )
@@ -330,12 +340,12 @@ impl AgentPane {
             cx,
             "agent-approval",
             i18n("agent-setting-approval"),
-            permission_icon(self.settings.approval.as_deref()),
-            self.settings.approval.clone(),
+            permission_icon(self.controls.settings.approval.as_deref()),
+            self.controls.settings.approval.clone(),
             approval_options,
             false,
             |this, value, cx| {
-                this.settings.approval = Some(value);
+                this.controls.settings.approval = Some(value);
                 this.remember_thread_defaults(cx);
             },
         )
@@ -345,11 +355,11 @@ impl AgentPane {
             "agent-sandbox",
             i18n("agent-setting-sandbox"),
             IconName::Shield,
-            self.settings.sandbox.clone(),
+            self.controls.settings.sandbox.clone(),
             sandbox_options,
             false,
             |this, value, cx| {
-                this.settings.sandbox = Some(value);
+                this.controls.settings.sandbox = Some(value);
                 this.remember_thread_defaults(cx);
             },
         )
@@ -359,21 +369,21 @@ impl AgentPane {
             "agent-approval-reviewer",
             i18n("agent-setting-approval-reviewer"),
             IconName::User,
-            self.settings.approvals_reviewer.clone(),
+            self.controls.settings.approvals_reviewer.clone(),
             reviewer_options,
             false,
             |this, value, cx| {
-                this.settings.approvals_reviewer = Some(value);
+                this.controls.settings.approvals_reviewer = Some(value);
                 this.remember_thread_defaults(cx);
             },
         )
         .into_any_element();
         let effort = Self::effort_panel(
             cx,
-            self.settings.effort.clone(),
+            self.controls.settings.effort.clone(),
             Self::effort_levels(self.kind),
             |this, value, cx| {
-                this.settings.effort = Some(value);
+                this.controls.settings.effort = Some(value);
                 this.remember_thread_defaults(cx);
             },
         )
@@ -383,11 +393,11 @@ impl AgentPane {
             "agent-tier",
             i18n("agent-setting-tier"),
             IconName::Zap,
-            Some(self.settings.tier.clone().unwrap_or_default()),
+            Some(self.controls.settings.tier.clone().unwrap_or_default()),
             tier_options,
             false,
             |this, value, cx| {
-                this.settings.tier = (!value.is_empty()).then_some(value);
+                this.controls.settings.tier = (!value.is_empty()).then_some(value);
                 this.remember_thread_defaults(cx);
             },
         )
@@ -504,7 +514,7 @@ impl AgentPane {
                 let width = relative(1.0 / stops as f32);
                 // While a drag is in flight the thumb sits where the pointer
                 // is rather than where the session is.
-                let thumb = pane.read(cx).effort_drag.or(selected);
+                let thumb = pane.read(cx).controls.effort_drag.or(selected);
 
                 v_flex()
                     .w(px(260.))
@@ -549,7 +559,7 @@ impl AgentPane {
                                 let pane = pane.clone();
                                 move |_, _, cx| {
                                     pane.update(cx, |this, cx| {
-                                        if this.effort_drag.take().is_some() {
+                                        if this.controls.effort_drag.take().is_some() {
                                             cx.notify();
                                         }
                                     });
@@ -603,7 +613,7 @@ impl AgentPane {
                                             let pane = pane.clone();
                                             move |_, _, cx| {
                                                 pane.update(cx, |this, cx| {
-                                                    this.effort_drag = Some(index);
+                                                    this.controls.effort_drag = Some(index);
                                                     cx.notify();
                                                 });
                                             }
@@ -621,12 +631,12 @@ impl AgentPane {
                                                     // move with no drag in
                                                     // flight started outside
                                                     // the track.
-                                                    if this.effort_drag.is_none()
-                                                        || this.effort_drag == Some(index)
+                                                    if this.controls.effort_drag.is_none()
+                                                        || this.controls.effort_drag == Some(index)
                                                     {
                                                         return;
                                                     }
-                                                    this.effort_drag = Some(index);
+                                                    this.controls.effort_drag = Some(index);
                                                     cx.notify();
                                                 });
                                             }
@@ -638,7 +648,7 @@ impl AgentPane {
                                         // them two round trips.
                                         .on_mouse_up(MouseButton::Left, move |_, _, cx| {
                                             pane.update(cx, |this, cx| {
-                                                this.effort_drag = None;
+                                                this.controls.effort_drag = None;
                                                 set(this, value.clone(), cx);
                                                 cx.notify();
                                             });

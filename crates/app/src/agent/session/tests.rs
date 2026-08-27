@@ -363,16 +363,16 @@ mod queued_prompt_placement_tests {
 
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
-                pane.session = Some(Backend::Test(TestBackend::new(
+                pane.runtime.backend = Some(Backend::Test(TestBackend::new(
                     [SendOutcome::StartedTurn, SendOutcome::Steered],
                     SlashCommandOutcome::NotReady,
                     Vec::new(),
                 )));
-                pane.status = Status::Idle;
+                pane.runtime.status = Status::Idle;
 
                 assert!(pane.send_text("open the turn".into(), cx));
                 pane.apply_event(SessionEvent::TurnStarted, cx);
-                let first_turn = pane.turn_seq;
+                let first_turn = pane.turn.seq;
 
                 assert!(pane.send_text("queued behind it".into(), cx));
                 pane.apply_event(
@@ -393,8 +393,8 @@ mod queued_prompt_placement_tests {
                 // The CLI answers the held prompt in a turn nothing here sent.
                 pane.apply_event(SessionEvent::TurnStarted, cx);
 
-                assert_eq!(pane.turn_seq, first_turn + 1, "that turn is numbered");
-                assert_eq!(pane.status, Status::Running);
+                assert_eq!(pane.turn.seq, first_turn + 1, "that turn is numbered");
+                assert_eq!(pane.runtime.status, Status::Running);
                 assert!(pane.transcript.read(cx).is_working());
                 assert_eq!(
                     user_rows(pane, cx),
@@ -419,12 +419,12 @@ mod queued_prompt_placement_tests {
 
         cx.update(|_, cx| {
             pane.update(cx, |pane, cx| {
-                pane.session = Some(Backend::Test(TestBackend::new(
+                pane.runtime.backend = Some(Backend::Test(TestBackend::new(
                     [SendOutcome::StartedTurn],
                     SlashCommandOutcome::NotReady,
                     Vec::new(),
                 )));
-                pane.status = Status::Idle;
+                pane.runtime.status = Status::Idle;
 
                 let text = "Reply with exactly: ok".to_string();
                 assert!(pane.send_text(text.clone(), cx));
@@ -440,7 +440,7 @@ mod queued_prompt_placement_tests {
                     cx,
                 );
                 assert!(
-                    pane.queued_user_messages.is_empty(),
+                    pane.turn.queued_user_messages.is_empty(),
                     "a prompt already in the transcript is not also waiting"
                 );
 
@@ -458,7 +458,7 @@ mod queued_prompt_placement_tests {
                     vec![(1, text)],
                     "the message appears once, in the turn it opened"
                 );
-                assert!(pane.queued_user_messages.is_empty());
+                assert!(pane.turn.queued_user_messages.is_empty());
             });
         });
     }

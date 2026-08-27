@@ -7,6 +7,7 @@ mod commands;
 mod composer;
 mod context_usage;
 mod links;
+mod pane_state;
 mod profile;
 mod session;
 pub(crate) mod transcript;
@@ -53,12 +54,11 @@ use nmt_agent_utils::background_task::{
     BackgroundTaskKey, BackgroundTaskProvider, BackgroundTaskSnapshot, BackgroundTaskTranscript,
 };
 use nmt_agent_utils::chat::{
-    AgentPreset, ApprovalPreset, Compaction, CompactionTrigger, ContextComposition,
-    ContextWindowUsage, Event as SessionEvent, ForkAnchor, ForkCheckpoint, GoalStatus,
-    Item as SessionItem, ModelInfo, Question, QuestionOption, QueuedPrompt, ReplayTurn,
-    SendOutcome, SessionScope, SessionStats, SessionSummary, SkillCatalog, SkillInfo,
-    SkillReference, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome,
-    SlashCommandRunPolicy, SlashCommandSource, ThreadSettings, TurnActivity,
+    Compaction, CompactionTrigger, ContextComposition, ContextWindowUsage, Event as SessionEvent,
+    ForkAnchor, ForkCheckpoint, GoalStatus, Item as SessionItem, Question, QuestionOption,
+    QueuedPrompt, ReplayTurn, SendOutcome, SessionScope, SessionStats, SessionSummary,
+    SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments, SlashCommandInfo,
+    SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings, TurnActivity,
 };
 use nmt_agent_utils::claude_code::workflows::{
     RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult,
@@ -91,6 +91,7 @@ use crate::agent::composer::{
     CommandFeedback, ForkFlow, PALETTE_MAX_HEIGHT, PendingSlashCommand, RewindState,
 };
 use crate::agent::input_history::{InputHistoryNavigation, InputHistoryScope};
+use crate::agent::pane_state::{ChildAgents, SessionRuntime, ThreadControls, TurnState};
 pub(crate) use crate::agent::profile::{AgentKind, AgentThreadDefaults, agent_launch};
 use crate::agent::session::{Backend, Status, UpdateSuspension};
 pub(crate) use crate::agent::session::{
@@ -596,25 +597,15 @@ pub(crate) struct AgentPane {
     /// view so a child agent's conversation renders through the same code.
     transcript: Entity<TranscriptView>,
     input: Entity<InputState>,
-    session: Option<Backend>,
-    /// Bumped on every (re)spawn; the message pump and EOF handler of an
-    /// older session compare against it and stand down, so deliberately
-    /// replacing the session (resume) doesn't route stale messages into the
-    /// new one or report a bogus exit.
-    session_epoch: u64,
-    status: Status,
-    /// Why the backend never came up, while that is still the pane's whole
-    /// state. Held rather than derived from [`Status::Exited`], which a
-    /// conversation that ran and then ended also reaches.
-    start_failure: Option<String>,
-    /// Whether the start has taken long enough to be worth covering the tab
-    /// for. Set by a timer rather than compared against a clock at render
-    /// time, because a pane waiting on its backend repaints for nothing else.
-    start_overlay_visible: bool,
     history_ui: SessionHistoryUi,
-    /// Stop the effort slider's thumb is being dragged to while the button is
-    /// down. The level itself is applied on release.
-    effort_drag: Option<usize>,
+    /// The backend process and its lifecycle; a (re)spawn replaces it whole.
+    runtime: SessionRuntime,
+    /// Thread controls under the composer: values, catalogs, seeding flags.
+    controls: ThreadControls,
+    /// The running turn's bookkeeping, from submission to settled output.
+    turn: TurnState,
+    /// Child-agent activity the provider adapter reports for this session.
+    children: ChildAgents,
     /// Description of the approval request blocking the turn, shown as the
     /// card above the input; the request id lives in the session.
     pending_approval: Option<String>,
@@ -622,63 +613,7 @@ pub(crate) struct AgentPane {
     /// selection the user has built so far. The request id lives in the
     /// session, so this holds only what the card renders.
     pending_questions: Option<QuestionPrompt>,
-    /// Current thread settings, seeded from the session's `Ready` event and
-    /// changed via the dropdowns under the input; sent as overrides on every
-    /// turn start (idempotent when unchanged).
-    settings: ThreadSettings,
-    /// Whether the next `Ready` should overlay all remembered settings. True
-    /// for fresh conversations and resumed Claude conversations; later Claude
-    /// confirmations keep the values currently selected under the input.
-    seed_thread_defaults: bool,
-    /// Whether the next resumed Codex thread should take the locally remembered
-    /// approval reviewer while preserving its other stored settings.
-    seed_approval_reviewer: bool,
-    /// A rewind starts a new backend identity but keeps the user's current
-    /// thread controls. The first Ready payload describes process defaults,
-    /// so these values are overlaid once instead of being replaced by them.
-    restore_thread_settings_on_ready: Option<ThreadSettings>,
-    /// Model catalog; service tiers are per model, so the tier dropdown lists
-    /// the selected model's tiers.
-    models: Vec<ModelInfo>,
-    /// Execution-permission presets, for a harness whose preset table belongs
-    /// to its deployment. Empty for one whose presets this UI can name itself.
-    approval_presets: Vec<ApprovalPreset>,
-    /// Agent compositions this deployment offers, and the one this conversation
-    /// was built from. Empty where the deployment composes none, which is a
-    /// picker with nothing to choose between rather than an unsupported one.
-    agent_presets: Vec<AgentPreset>,
-    agent_preset: Option<String>,
-    /// Monotonic turn counter; entries are tagged with the turn they arrived
-    /// in so a settled turn can fold as one unit.
-    turn_seq: u64,
-    /// When the running turn was handed to the backend, kept until its first
-    /// visible output answers it. Measured from submission rather than from the
-    /// backend's turn-started event, so the reading covers the whole wait the
-    /// user sat through, CLI and RPC latency included.
-    turn_submitted_at: Option<Instant>,
-    /// How long the last turn took to produce anything visible. Survives the
-    /// turn so the composer keeps reporting it while the conversation is idle.
-    first_output_latency: Option<Duration>,
-    /// The active prompt remains recoverable until provider activity becomes
-    /// visible, allowing an immediate stop to return it to the composer.
-    unanswered_prompt: Option<UnansweredPrompt>,
-    /// Turn the user asked to stop. Interruption is a completion state of a
-    /// turn, so the "Interrupted" transcript row is drawn only when that turn
-    /// actually ends; a backend that keeps streaming past the stop request
-    /// keeps its truthful working row until then.
-    pending_interrupt: Option<u64>,
     palette: SlashPalette,
-    /// Mid-turn inputs stay near the composer until provider activity confirms
-    /// they have joined the running response. A backend that owns its own
-    /// pending queue republishes this whole list, which is what gives the rows
-    /// the identities a removal needs.
-    queued_user_messages: VecDeque<QueuedPrompt>,
-    /// The prompt this side already put in the transcript because the backend
-    /// admitted it as a new turn. A backend that publishes its pending inbox
-    /// keeps listing that prompt until the turn claims it, and every list it
-    /// appears in would show the message a second time beside the row that is
-    /// already there.
-    published_prompt: Option<String>,
     rewind: RewindFlow,
     fork: ForkFlow,
     git_branch_poll: GitBranchPoll,
@@ -697,23 +632,6 @@ pub(crate) struct AgentPane {
     /// backend reports none, because counting the visible transcript instead
     /// would disagree with the conversation's real length.
     session_stats: Option<SessionStats>,
-    /// Process replacement for a provider update is pane state rather than a
-    /// terminal exit. Keeping it separate retains transcript and composer
-    /// contents while preventing input from reaching a missing backend.
-    update_suspension: Option<UpdateSuspension>,
-    last_recovery_snapshot: Option<RecoverySnapshot>,
-    /// Claude session id whose child agents were already restored from
-    /// history. Ready fires again during first-turn initialization, so the
-    /// read happens once per conversation rather than once per confirmation.
-    restored_task_session: Option<String>,
-    /// Latest child-agent snapshot published by the provider adapter. The
-    /// adapter owns child lifecycle; the pane keeps only this replacement copy
-    /// so the right-side view never maintains a second mutable registry.
-    background_tasks: Option<BackgroundTaskSnapshot>,
-    /// Each child's own conversation, accumulated here rather than in the
-    /// adapter so live activity is retained once and the retention bound
-    /// applies to what is actually shown.
-    background_task_transcripts: HashMap<BackgroundTaskKey, BackgroundTaskTranscript>,
     /// Workflow runs of this session and the agent conversation the user has
     /// open. Workflow agents are not child agents, so they never reach the
     /// `Background Tasks` state above.

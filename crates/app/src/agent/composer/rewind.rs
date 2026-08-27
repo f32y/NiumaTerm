@@ -136,7 +136,7 @@ impl AgentPane {
         target: Option<PromptTarget>,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.status != Status::Idle || self.is_command_busy() {
+        if self.runtime.status != Status::Idle || self.is_command_busy() {
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-rewind-idle-only").to_string(),
@@ -146,7 +146,8 @@ impl AgentPane {
         }
 
         let Some(session_id) = self
-            .session
+            .runtime
+            .backend
             .as_ref()
             .and_then(Backend::session_id)
             .map(str::to_owned)
@@ -412,7 +413,8 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) {
         let outcome = self
-            .session
+            .runtime
+            .backend
             .as_mut()
             .map(|session| session.rewind_files(&checkpoint.user_message_id))
             .unwrap_or(SlashCommandOutcome::NotReady);
@@ -512,7 +514,8 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) {
         let Some(source_session_id) = self
-            .session
+            .runtime
+            .backend
             .as_ref()
             .and_then(Backend::session_id)
             .map(str::to_owned)
@@ -593,7 +596,7 @@ impl AgentPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.session = None;
+        self.runtime.backend = None;
         self.clear_conversation_presentation(cx);
         self.palette.skill_catalog = None;
         self.palette.skill_binding = None;

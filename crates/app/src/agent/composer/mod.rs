@@ -343,7 +343,7 @@ impl AgentPane {
             let choices = self.command_choices(&command.name);
             match resolve_choice(&parsed.arguments, &choices) {
                 Ok(value) if command.name == "model" => {
-                    self.settings.model = Some(value.clone());
+                    self.controls.settings.model = Some(value.clone());
                     self.remember_thread_defaults(cx);
                     self.set_command_feedback(
                         CommandFeedbackKind::Notice,
@@ -360,7 +360,7 @@ impl AgentPane {
                     return true;
                 }
                 Ok(value) if command.name == "permissions" => {
-                    self.settings.approval = Some(value.clone());
+                    self.controls.settings.approval = Some(value.clone());
                     self.remember_thread_defaults(cx);
                     self.set_command_feedback(
                         CommandFeedbackKind::Notice,
@@ -468,7 +468,7 @@ impl AgentPane {
         command: PendingSlashCommand,
         cx: &mut Context<Self>,
     ) -> bool {
-        let outcome = match self.session.as_mut() {
+        let outcome = match self.runtime.backend.as_mut() {
             Some(session) => session.execute_slash_command(&command.name, &command.arguments),
             None => SlashCommandOutcome::NotReady,
         };
@@ -523,7 +523,7 @@ impl AgentPane {
     }
 
     pub(super) fn show_status(&mut self, cx: &mut Context<Self>) {
-        let status = match self.status {
+        let status = match self.runtime.status {
             Status::Starting => i18n("agent-composer-status-starting"),
             Status::Idle => i18n("agent-composer-status-idle"),
             Status::Running => i18n("agent-composer-status-running"),
@@ -539,20 +539,26 @@ impl AgentPane {
         ];
 
         for (name, value) in [
-            (i18n("agent-setting-model"), self.settings.model.as_deref()),
+            (
+                i18n("agent-setting-model"),
+                self.controls.settings.model.as_deref(),
+            ),
             (
                 i18n("agent-setting-permissions"),
-                self.settings.approval.as_deref(),
+                self.controls.settings.approval.as_deref(),
             ),
             (
                 i18n("agent-setting-sandbox"),
-                self.settings.sandbox.as_deref(),
+                self.controls.settings.sandbox.as_deref(),
             ),
             (
                 i18n("agent-setting-effort"),
-                self.settings.effort.as_deref(),
+                self.controls.settings.effort.as_deref(),
             ),
-            (i18n("agent-setting-tier"), self.settings.tier.as_deref()),
+            (
+                i18n("agent-setting-tier"),
+                self.controls.settings.tier.as_deref(),
+            ),
         ] {
             if let Some(value) = value {
                 fields.push(
@@ -614,7 +620,7 @@ impl AgentPane {
     }
 
     pub(super) fn is_command_busy(&self) -> bool {
-        self.status == Status::Running
+        self.runtime.status == Status::Running
             || self.palette.awaiting_command_turn
             || self.history_ui.mode == RecentSessionsMode::Loading
             || self.branch_flow_holds_composer()
@@ -623,8 +629,8 @@ impl AgentPane {
     pub(super) fn skill_disabled_reason(&self, skill: &SkillInfo) -> Option<String> {
         if !skill.enabled {
             Some(i18n("agent-composer-disabled-by-codex").to_string())
-        } else if matches!(self.status, Status::Starting | Status::Exited) {
-            Some(match self.status {
+        } else if matches!(self.runtime.status, Status::Starting | Status::Exited) {
+            Some(match self.runtime.status {
                 Status::Starting => i18n("agent-composer-agent-starting").to_string(),
                 Status::Exited => i18n("agent-composer-agent-exited").to_string(),
                 _ => unreachable!(),
@@ -636,7 +642,8 @@ impl AgentPane {
 
     pub(super) fn command_catalog(&self) -> Vec<SlashCommandInfo> {
         let adapter = self
-            .session
+            .runtime
+            .backend
             .as_ref()
             .map(Backend::adapter_commands)
             .unwrap_or_else(|| match self.kind {
@@ -655,6 +662,7 @@ impl AgentPane {
     pub(super) fn command_choices(&self, command: &str) -> Vec<(String, String)> {
         match command {
             "model" => self
+                .controls
                 .models
                 .iter()
                 .map(|model| (model.model.clone(), model.display.clone()))

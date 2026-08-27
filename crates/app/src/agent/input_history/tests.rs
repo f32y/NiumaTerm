@@ -450,7 +450,7 @@ fn accepted_new_turn_and_steering_record_only_typed_input(cx: &mut TestAppContex
 
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
-            pane.session = Some(Backend::Test(TestBackend::new(
+            pane.runtime.backend = Some(Backend::Test(TestBackend::new(
                 [
                     SendOutcome::StartedTurn,
                     SendOutcome::Steered,
@@ -459,7 +459,7 @@ fn accepted_new_turn_and_steering_record_only_typed_input(cx: &mut TestAppContex
                 SlashCommandOutcome::NotReady,
                 Vec::new(),
             )));
-            pane.status = Status::Idle;
+            pane.runtime.status = Status::Idle;
 
             pane.input.update(cx, |input, cx| {
                 input.set_value("  start the turn  ", window, cx)
@@ -489,24 +489,24 @@ fn slash_history_requires_a_successful_action(cx: &mut TestAppContext) {
 
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
-            pane.session = Some(Backend::Test(TestBackend::new(
+            pane.runtime.backend = Some(Backend::Test(TestBackend::new(
                 [],
                 SlashCommandOutcome::Accepted,
                 app_server::Session::adapter_commands(),
             )));
-            pane.status = Status::Idle;
+            pane.runtime.status = Status::Idle;
             pane.input
                 .update(cx, |input, cx| input.set_value("/compact", window, cx));
             pane.submit_current_slash(window, cx);
 
-            pane.session = Some(Backend::Test(TestBackend::new(
+            pane.runtime.backend = Some(Backend::Test(TestBackend::new(
                 [],
                 SlashCommandOutcome::Rejected {
                     message: "rejected".into(),
                 },
                 app_server::Session::adapter_commands(),
             )));
-            pane.status = Status::Idle;
+            pane.runtime.status = Status::Idle;
             pane.palette.awaiting_command_turn = false;
             pane.input
                 .update(cx, |input, cx| input.set_value("/review", window, cx));
@@ -539,8 +539,8 @@ fn unavailable_session_keeps_input_without_recording(cx: &mut TestAppContext) {
 
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
-            pane.session = None;
-            pane.status = Status::Starting;
+            pane.runtime.backend = None;
+            pane.runtime.status = Status::Starting;
             pane.input
                 .update(cx, |input, cx| input.set_value("not accepted", window, cx));
             pane.send_user_message(window, cx);
