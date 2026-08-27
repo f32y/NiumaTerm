@@ -50,11 +50,7 @@ impl WindowsWindowInner {
     ) -> LRESULT {
         let started_at = frame_stats::enabled().then(Instant::now);
         let handled = match msg {
-            // eagerly activate the window, so calls to `active_window` will work correctly
-            WM_MOUSEACTIVATE => {
-                unsafe { SetActiveWindow(handle).ok() };
-                None
-            }
+            WM_MOUSEACTIVATE => self.handle_mouse_activate_msg(handle),
             WM_ACTIVATE => self.handle_activate_msg(wparam),
             WM_CREATE => self.handle_create_msg(handle),
             WM_MOVE => self.handle_move_msg(handle, lparam),
@@ -438,6 +434,21 @@ impl WindowsWindowInner {
         });
 
         Some(0)
+    }
+
+    fn handle_mouse_activate_msg(&self, handle: HWND) -> Option<isize> {
+        let extended_style = unsafe { GetWindowLongPtrW(handle, GWL_EXSTYLE) } as u32;
+        if extended_style & WS_EX_NOACTIVATE.0 != 0 {
+            // A rapid follow-up click can land on a flyout immediately after it
+            // appears. Explicitly reject activation because SetActiveWindow can
+            // activate a WS_EX_NOACTIVATE window when called by its own thread.
+            return Some(MA_NOACTIVATE as isize);
+        }
+
+        // Ordinary application windows activate eagerly so `active_window` is
+        // correct while the mouse-down message from the same click is handled.
+        unsafe { SetActiveWindow(handle).ok() };
+        None
     }
 
     fn handle_mouse_down_msg(
@@ -952,7 +963,13 @@ impl WindowsWindowInner {
         };
 
         unsafe { ScreenToClient(handle, &mut cursor_point).ok().log_err() };
-        if !self.state.is_maximized() && 0 <= cursor_point.y && cursor_point.y <= frame_y {
+        let style = unsafe { GetWindowLongPtrW(handle, GWL_STYLE) } as u32;
+        let is_resizable = style & WS_THICKFRAME.0 != 0;
+        if is_resizable
+            && !self.state.is_maximized()
+            && 0 <= cursor_point.y
+            && cursor_point.y <= frame_y
+        {
             // x-axis actually goes from -frame_x to 0
             return Some(if cursor_point.x <= 0 {
                 HTTOPLEFT
