@@ -210,9 +210,9 @@ impl AgentPane {
                     {
                         Some(i18n("agent-composer-available-when-idle").to_string())
                     } else if command.source != SlashCommandSource::Local
-                        && matches!(self.status, Status::Starting | Status::Exited)
+                        && matches!(self.runtime.status, Status::Starting | Status::Exited)
                     {
-                        Some(match self.status {
+                        Some(match self.runtime.status {
                             Status::Starting => i18n("agent-composer-agent-starting").to_string(),
                             Status::Exited => i18n("agent-composer-agent-exited").to_string(),
                             _ => unreachable!(),

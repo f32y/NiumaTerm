@@ -339,7 +339,7 @@ impl AgentPane {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        self.update_suspension.as_ref().and_then(|state| {
+        self.runtime.update_suspension.as_ref().and_then(|state| {
             // The phases that tear the backend down and bring it back own the
             // whole surface through `render_update_overlay`, so the strip only
             // covers the two states the tab stays usable in.
@@ -420,7 +420,7 @@ impl AgentPane {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let label = update_overlay_phase(self.update_suspension.as_ref()?)?.label();
+        let label = update_overlay_phase(self.runtime.update_suspension.as_ref()?)?.label();
 
         let body = v_flex()
             .items_center()
@@ -460,8 +460,8 @@ impl AgentPane {
             return None;
         }
 
-        let failure = self.start_failure.clone();
-        if failure.is_none() && !self.start_overlay_visible {
+        let failure = self.runtime.start_failure.clone();
+        if failure.is_none() && !self.runtime.start_overlay_visible {
             return None;
         }
 
@@ -535,12 +535,12 @@ impl AgentPane {
         let turns = self
             .session_stats
             .map(|stats| stats.turns)
-            .unwrap_or(self.turn_seq);
+            .unwrap_or(self.turn.seq);
 
         let stats = composer_stats_label(
             turns,
-            self.transcript.read(cx).turn_steps(self.turn_seq),
-            self.first_output_latency,
+            self.transcript.read(cx).turn_steps(self.turn.seq),
+            self.turn.first_output_latency,
             self.context_window_usage.and_then(cache_hit_percent),
         );
 
