@@ -109,6 +109,9 @@ const SKILLS_FRAME: &str = "nmt/skills";
 const PRESETS_FRAME: &str = "nmt/agent-presets";
 const WORKFLOW_TRANSCRIPT_FRAME: &str = "nmt/workflow-transcript";
 const FORK_CHECKPOINTS_FRAME: &str = "nmt/fork-checkpoints";
+/// The pending-inbox snapshot is the one frame type the harness itself
+/// publishes under its own name rather than through the nmt bridge.
+const QUEUE_FRAME: &str = "session/queue";
 
 /// How much of a resumed conversation is rebuilt. The harness pages history at
 /// whole-message boundaries, so this is a count of messages rather than of
@@ -233,6 +236,50 @@ pub(crate) fn queued_prompts(items: &Value) -> Vec<QueuedPrompt> {
             })
         })
         .collect()
+}
+
+/// Frame decoders with no session state of their own: each turns one bridge
+/// frame into the events it announces. They are addressed to this tab by the
+/// request that provoked them, so they carry no session id to check.
+fn workflow_transcript_events(payload: &Value) -> Vec<Event> {
+    let (Some(task_id), Some(agent_id)) = (payload["taskId"].as_str(), payload["agentId"].as_str())
+    else {
+        return Vec::new();
+    };
+    vec![Event::WorkflowAgentTranscript {
+        task_id: task_id.to_string(),
+        agent_id: agent_id.to_string(),
+        items: history::items(&payload["page"]),
+    }]
+}
+
+fn history_events(payload: &Value) -> Vec<Event> {
+    vec![Event::History(history::sessions(
+        &payload["sessions"],
+        payload["cwd"].as_str(),
+    ))]
+}
+
+fn search_events(payload: &Value) -> Vec<Event> {
+    if let Some(message) = payload["error"].as_str() {
+        return vec![Event::Error {
+            message: message.to_string(),
+            // Only the search failed; the conversation is untouched.
+            fatal: false,
+        }];
+    }
+    vec![Event::SessionSearchResults(history::search_results(
+        &payload["matches"],
+        &payload["sessions"],
+        payload["cwd"].as_str(),
+    ))]
+}
+
+fn fork_checkpoint_events(payload: &Value) -> Vec<Event> {
+    vec![Event::ForkCheckpoints(match payload["error"].as_str() {
+        Some(message) => Err(message.to_string()),
+        None => Ok(history::fork_checkpoints(&payload["page"])),
+    })]
 }
 
 /// Run one content search and deliver the conversations it matched.
@@ -794,191 +841,27 @@ impl Session {
             return events;
         }
 
-        if frame["payload"]["type"] == SUBAGENTS_FRAME {
-            let payload = &frame["payload"];
-            let activity = payload["activity"].as_u64().unwrap_or_default();
-            // Several reads can be in flight, and an older answer describes a
-            // moment the panel has already moved past.
-            if payload["sessionId"].as_str() != Some(&self.session_id)
-                || activity < self.subagent_activity
-            {
-                return Vec::new();
+        let payload = &frame["payload"];
+        match payload["type"].as_str() {
+            Some(SUBAGENTS_FRAME) => return self.on_subagents(payload),
+            Some(SUBAGENT_TRANSCRIPT_FRAME) => return self.on_subagent_transcript(payload),
+            Some(WORKFLOW_TRANSCRIPT_FRAME) => return workflow_transcript_events(payload),
+            Some(SKILLS_FRAME) => return self.on_skills(payload),
+            Some(PRESETS_FRAME) => return self.on_presets(payload),
+            Some(COMMANDS_FRAME) => return self.on_commands(payload),
+            Some(HISTORY_FRAME) => return history_events(payload),
+            Some(SEARCH_FRAME) => return search_events(payload),
+            // A queue snapshot for a conversation this tab has since left is
+            // not this tab's inbox, but the frame still carries ordinary log
+            // events, so it falls through to the mapping below instead of
+            // being swallowed here.
+            Some(QUEUE_FRAME) if self.is_current_session(payload) => {
+                return self.on_queue(payload);
             }
-            let snapshot = subagents::snapshot(&payload["catalog"], &self.session_id, activity);
-            self.subagent_modes = snapshot
-                .tasks
-                .iter()
-                .filter_map(|task| match &task.refs {
-                    BackgroundTaskRefs::DeepSeek { continuable, .. } => {
-                        Some((task.key.id.clone(), *continuable))
-                    }
-                    _ => None,
-                })
-                .collect();
-            return vec![Event::BackgroundTasks(snapshot)];
-        }
-
-        if frame["payload"]["type"] == SUBAGENT_TRANSCRIPT_FRAME {
-            let payload = &frame["payload"];
-            if payload["sessionId"].as_str() != Some(&self.session_id) {
-                return Vec::new();
-            }
-            let Some(child) = payload["childSessionId"].as_str() else {
-                return Vec::new();
-            };
-            return vec![Event::BackgroundTaskTranscript {
-                key: BackgroundTaskKey::deepseek(child),
-                update: BackgroundTaskTranscriptUpdate::loaded(history::items(&payload["page"])),
-            }];
-        }
-
-        if frame["payload"]["type"] == WORKFLOW_TRANSCRIPT_FRAME {
-            let payload = &frame["payload"];
-            let (Some(task_id), Some(agent_id)) =
-                (payload["taskId"].as_str(), payload["agentId"].as_str())
-            else {
-                return Vec::new();
-            };
-            return vec![Event::WorkflowAgentTranscript {
-                task_id: task_id.to_string(),
-                agent_id: agent_id.to_string(),
-                items: history::items(&payload["page"]),
-            }];
-        }
-
-        if frame["payload"]["type"] == SKILLS_FRAME {
-            if frame["payload"]["sessionId"].as_str() != Some(&self.session_id) {
-                return Vec::new();
-            }
-            return vec![Event::Skills(commands::skills(&frame["payload"]["skills"]))];
-        }
-
-        if frame["payload"]["type"] == PRESETS_FRAME {
-            let payload = &frame["payload"];
-            if payload["sessionId"].as_str() != Some(&self.session_id) {
-                return Vec::new();
-            }
-            return vec![Event::AgentPresets {
-                presets: presets::catalog(&payload["presets"]),
-                current: payload["current"].as_str().map(str::to_string),
-            }];
-        }
-
-        if frame["payload"]["type"] == COMMANDS_FRAME {
-            // A registry read for the conversation this tab has since left
-            // describes an agent it no longer talks to.
-            if frame["payload"]["sessionId"].as_str() != Some(&self.session_id) {
-                return Vec::new();
-            }
-            return vec![Event::Commands(commands::catalog(
-                &frame["payload"]["commands"],
-            ))];
-        }
-
-        if frame["payload"]["type"] == HISTORY_FRAME {
-            let payload = &frame["payload"];
-            return vec![Event::History(history::sessions(
-                &payload["sessions"],
-                payload["cwd"].as_str(),
-            ))];
-        }
-
-        if frame["payload"]["type"] == SEARCH_FRAME {
-            let payload = &frame["payload"];
-            if let Some(message) = payload["error"].as_str() {
-                return vec![Event::Error {
-                    message: message.to_string(),
-                    // Only the search failed; the conversation is untouched.
-                    fatal: false,
-                }];
-            }
-            return vec![Event::SessionSearchResults(history::search_results(
-                &payload["matches"],
-                &payload["sessions"],
-                payload["cwd"].as_str(),
-            ))];
-        }
-
-        // The harness republishes its whole pending inbox after every change,
-        // so this replaces what the tab holds rather than amending it: an
-        // increment would have to guess at removals another client made.
-        if frame["payload"]["type"] == "session/queue"
-            && frame["payload"]["sessionId"].as_str() == Some(&self.session_id)
-        {
-            let prompts = queued_prompts(&frame["payload"]["items"]);
-            self.queued_prompt_ids = prompts
-                .iter()
-                .filter_map(|prompt| prompt.id.clone())
-                .collect();
-            return vec![Event::QueuedPrompts(prompts)];
-        }
-
-        if frame["payload"]["type"] == REPLAY_FRAME {
-            // A page belonging to the conversation this tab has since left
-            // would replace the visible transcript with another one's.
-            if frame["payload"]["sessionId"].as_str() != Some(&self.session_id) {
-                return Vec::new();
-            }
-            if let Some(message) = frame["payload"]["error"].as_str() {
-                return vec![Event::Error {
-                    message: message.to_string(),
-                    // The conversation was attached before the page was read,
-                    // so the tab works; only its earlier turns are missing.
-                    fatal: false,
-                }];
-            }
-
-            let page = &frame["payload"]["page"];
-            // The tail page is also where a projection's current value can be
-            // read: a live push reports only what changed after the tab
-            // attached, so accounting and the permission preset would otherwise
-            // stay blank until one of them happened to move.
-            let mut events = self.usage.apply_baseline(&page["projections"]["values"]);
-
-            // A run's rows are folded from the same events the log carries, so
-            // a resumed conversation rebuilds them from its own history rather
-            // than from a record kept beside it.
-            let mut folded = false;
-            for entry in page["events"].as_array().into_iter().flatten() {
-                folded |= self.workflows.apply(&entry["event"]);
-            }
-            if folded {
-                events.push(Event::Workflows(self.workflows.snapshot(&self.session_id)));
-            }
-
-            events.push(Event::Replay(history::replay(page)));
-            return events;
-        }
-
-        if frame["payload"]["type"] == FORK_CHECKPOINTS_FRAME {
-            return vec![Event::ForkCheckpoints(
-                match frame["payload"]["error"].as_str() {
-                    Some(message) => Err(message.to_string()),
-                    None => Ok(history::fork_checkpoints(&frame["payload"]["page"])),
-                },
-            )];
-        }
-
-        if frame["payload"]["type"] == MODELS_FRAME {
-            self.models = ModelDirectory::parse(&frame["payload"]["models"]);
-            // The catalog and the selection travel together, so the pickers
-            // gain their options and their current value in one repaint.
-            let mut events = vec![
-                Event::Models(self.models.catalog()),
-                Event::Ready(ready_settings(&self.models, &self.usage)),
-            ];
-
-            // A refused selection travels with the catalog that outlived it, so
-            // the level reported alongside the reason is the one the session is
-            // actually on rather than the one that was asked for.
-            if let Some(message) = frame["payload"]["error"].as_str() {
-                events.push(Event::EffortRejected {
-                    message: message.to_string(),
-                    effort: self.models.effort().map(str::to_string),
-                });
-            }
-
-            return events;
+            Some(REPLAY_FRAME) => return self.on_replay(payload),
+            Some(FORK_CHECKPOINTS_FRAME) => return fork_checkpoint_events(payload),
+            Some(MODELS_FRAME) => return self.on_models(payload),
+            _ => {}
         }
 
         // A child announces itself in the parent's own log, and the catalog is
@@ -986,8 +869,8 @@ impl Session {
         // that would ask for one is hidden until a child is known to exist.
         // A finished turn re-reads it because a child's activity is sampled
         // when asked rather than pushed.
-        let event_type = frame["payload"]["event"]["type"].as_str();
-        if frame["payload"]["sessionId"].as_str() == Some(&self.session_id)
+        let event_type = payload["event"]["type"].as_str();
+        if self.is_current_session(payload)
             && (event_type == Some("subagent/descriptor")
                 || (event_type == Some("turn/end") && !self.subagent_modes.is_empty()))
         {
@@ -999,9 +882,7 @@ impl Session {
         // Workflow rows are folded from the log rather than mapped one event to
         // one row, so they are published beside whatever else the frame
         // produced instead of through the transcript vocabulary.
-        if frame["payload"]["sessionId"].as_str() == Some(&self.session_id)
-            && self.workflows.apply(&frame["payload"]["event"])
-        {
+        if self.is_current_session(payload) && self.workflows.apply(&payload["event"]) {
             events.push(Event::Workflows(self.workflows.snapshot(&self.session_id)));
         }
 
@@ -1018,6 +899,142 @@ impl Session {
                 Event::QuestionsResolved => self.pending_questions = None,
                 _ => {}
             }
+        }
+
+        events
+    }
+
+    /// Whether a frame names the conversation this tab holds. A read for a
+    /// conversation the tab has since left describes an agent it no longer
+    /// talks to.
+    fn is_current_session(&self, payload: &Value) -> bool {
+        payload["sessionId"].as_str() == Some(&self.session_id)
+    }
+
+    fn on_subagents(&mut self, payload: &Value) -> Vec<Event> {
+        let activity = payload["activity"].as_u64().unwrap_or_default();
+        // Several reads can be in flight, and an older answer describes a
+        // moment the panel has already moved past.
+        if !self.is_current_session(payload) || activity < self.subagent_activity {
+            return Vec::new();
+        }
+        let snapshot = subagents::snapshot(&payload["catalog"], &self.session_id, activity);
+        self.subagent_modes = snapshot
+            .tasks
+            .iter()
+            .filter_map(|task| match &task.refs {
+                BackgroundTaskRefs::DeepSeek { continuable, .. } => {
+                    Some((task.key.id.clone(), *continuable))
+                }
+                _ => None,
+            })
+            .collect();
+        vec![Event::BackgroundTasks(snapshot)]
+    }
+
+    fn on_subagent_transcript(&self, payload: &Value) -> Vec<Event> {
+        if !self.is_current_session(payload) {
+            return Vec::new();
+        }
+        let Some(child) = payload["childSessionId"].as_str() else {
+            return Vec::new();
+        };
+        vec![Event::BackgroundTaskTranscript {
+            key: BackgroundTaskKey::deepseek(child),
+            update: BackgroundTaskTranscriptUpdate::loaded(history::items(&payload["page"])),
+        }]
+    }
+
+    fn on_skills(&self, payload: &Value) -> Vec<Event> {
+        if !self.is_current_session(payload) {
+            return Vec::new();
+        }
+        vec![Event::Skills(commands::skills(&payload["skills"]))]
+    }
+
+    fn on_presets(&self, payload: &Value) -> Vec<Event> {
+        if !self.is_current_session(payload) {
+            return Vec::new();
+        }
+        vec![Event::AgentPresets {
+            presets: presets::catalog(&payload["presets"]),
+            current: payload["current"].as_str().map(str::to_string),
+        }]
+    }
+
+    fn on_commands(&self, payload: &Value) -> Vec<Event> {
+        if !self.is_current_session(payload) {
+            return Vec::new();
+        }
+        vec![Event::Commands(commands::catalog(&payload["commands"]))]
+    }
+
+    /// The harness republishes its whole pending inbox after every change,
+    /// so this replaces what the tab holds rather than amending it: an
+    /// increment would have to guess at removals another client made.
+    fn on_queue(&mut self, payload: &Value) -> Vec<Event> {
+        let prompts = queued_prompts(&payload["items"]);
+        self.queued_prompt_ids = prompts
+            .iter()
+            .filter_map(|prompt| prompt.id.clone())
+            .collect();
+        vec![Event::QueuedPrompts(prompts)]
+    }
+
+    fn on_replay(&mut self, payload: &Value) -> Vec<Event> {
+        // A page belonging to the conversation this tab has since left
+        // would replace the visible transcript with another one's.
+        if !self.is_current_session(payload) {
+            return Vec::new();
+        }
+        if let Some(message) = payload["error"].as_str() {
+            return vec![Event::Error {
+                message: message.to_string(),
+                // The conversation was attached before the page was read,
+                // so the tab works; only its earlier turns are missing.
+                fatal: false,
+            }];
+        }
+
+        let page = &payload["page"];
+        // The tail page is also where a projection's current value can be
+        // read: a live push reports only what changed after the tab
+        // attached, so accounting and the permission preset would otherwise
+        // stay blank until one of them happened to move.
+        let mut events = self.usage.apply_baseline(&page["projections"]["values"]);
+
+        // A run's rows are folded from the same events the log carries, so
+        // a resumed conversation rebuilds them from its own history rather
+        // than from a record kept beside it.
+        let mut folded = false;
+        for entry in page["events"].as_array().into_iter().flatten() {
+            folded |= self.workflows.apply(&entry["event"]);
+        }
+        if folded {
+            events.push(Event::Workflows(self.workflows.snapshot(&self.session_id)));
+        }
+
+        events.push(Event::Replay(history::replay(page)));
+        events
+    }
+
+    fn on_models(&mut self, payload: &Value) -> Vec<Event> {
+        self.models = ModelDirectory::parse(&payload["models"]);
+        // The catalog and the selection travel together, so the pickers
+        // gain their options and their current value in one repaint.
+        let mut events = vec![
+            Event::Models(self.models.catalog()),
+            Event::Ready(ready_settings(&self.models, &self.usage)),
+        ];
+
+        // A refused selection travels with the catalog that outlived it, so
+        // the level reported alongside the reason is the one the session is
+        // actually on rather than the one that was asked for.
+        if let Some(message) = payload["error"].as_str() {
+            events.push(Event::EffortRejected {
+                message: message.to_string(),
+                effort: self.models.effort().map(str::to_string),
+            });
         }
 
         events
