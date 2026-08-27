@@ -9,11 +9,11 @@
 //! Only `task_started` carries `task_type`; the `task_progress` records that
 //! follow identify their run by `task_id` alone, so a run must be remembered
 //! from its start for its own updates to be recognized.
-
 use std::collections::HashMap;
 
 use serde_json::Value;
 
+use crate::json::text_field;
 use crate::workflow::{
     WorkflowAgent, WorkflowAgentState, WorkflowPhase, WorkflowRun, WorkflowRunState,
     WorkflowSnapshot,
@@ -314,16 +314,6 @@ fn agent_state(entry: &Value) -> WorkflowAgentState {
         _ if entry["startedAt"].as_u64().is_some() => WorkflowAgentState::Running,
         _ => WorkflowAgentState::Queued,
     }
-}
-
-pub(crate) fn text_field(value: &Value, keys: &[&str]) -> Option<String> {
-    keys.iter().find_map(|key| {
-        value[*key]
-            .as_str()
-            .map(str::trim)
-            .filter(|text| !text.is_empty())
-            .map(str::to_owned)
-    })
 }
 
 fn replace_text(current: &mut Option<String>, incoming: &Option<String>) -> bool {

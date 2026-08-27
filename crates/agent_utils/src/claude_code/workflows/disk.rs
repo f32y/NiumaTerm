@@ -20,7 +20,8 @@ use serde_json::Value;
 
 use crate::chat::Item;
 use crate::claude_code::sessions::{parse_child_replay, project_dir};
-use crate::claude_code::workflows::{WorkflowRefresh, parse_progress, text_field};
+use crate::claude_code::workflows::{WorkflowRefresh, parse_progress};
+use crate::json::text_field;
 use crate::workflow::{WorkflowAgent, WorkflowAgentState, WorkflowRun, WorkflowRunState};
 
 /// One agent's line in a run journal. `result` is present once the agent has

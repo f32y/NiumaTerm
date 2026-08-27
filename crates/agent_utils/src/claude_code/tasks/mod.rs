@@ -29,6 +29,7 @@ use crate::background_task::{
 use crate::chat::Item;
 use crate::claude_code::sessions::RestoredTask;
 use crate::claude_code::tool_items::{complete_tool_item, tool_item};
+use crate::json::{condense, text_field};
 
 /// Tool names that launch a child agent.
 const LAUNCH_TOOLS: [&str; 2] = ["Task", "Agent"];
@@ -715,28 +716,6 @@ fn sidechain_preview(message: &Value) -> Option<String> {
         }
     }
     None
-}
-
-fn condense(text: &str) -> Option<String> {
-    const MAX_PREVIEW_CHARS: usize = 160;
-    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if text.is_empty() {
-        return None;
-    }
-    Some(match text.char_indices().nth(MAX_PREVIEW_CHARS) {
-        Some((cut, _)) => format!("{}…", &text[..cut]),
-        None => text,
-    })
-}
-
-fn text_field(value: &Value, keys: &[&str]) -> Option<String> {
-    keys.iter().find_map(|key| {
-        value[*key]
-            .as_str()
-            .map(str::trim)
-            .filter(|text| !text.is_empty())
-            .map(str::to_owned)
-    })
 }
 
 #[cfg(test)]

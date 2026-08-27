@@ -19,6 +19,7 @@ use crate::background_task::{
 };
 use crate::chat::Item;
 use crate::codex::app_server::background_tasks::launch_messages::LaunchMessages;
+use crate::json::{condense, text_field};
 
 /// Page size for descendant discovery. Threads are cheap metadata rows and the
 /// cursor is followed to completion, so this only bounds one response.
@@ -770,31 +771,13 @@ fn waiting_on_user(status: &Value) -> bool {
 /// Short label for the child's most recent transcript item, used as the row
 /// preview. Long agent text is truncated because the row is one line.
 fn item_preview(item: &Value) -> Option<String> {
-    const MAX_PREVIEW_CHARS: usize = 160;
     let text = item["text"]
         .as_str()
         .or_else(|| item["summary"].as_str())
         .or_else(|| item["command"].as_str())
         .or_else(|| item["title"].as_str())
         .or_else(|| item["type"].as_str())?;
-    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if text.is_empty() {
-        return None;
-    }
-    Some(match text.char_indices().nth(MAX_PREVIEW_CHARS) {
-        Some((cut, _)) => format!("{}…", &text[..cut]),
-        None => text,
-    })
-}
-
-fn text_field(value: &Value, keys: &[&str]) -> Option<String> {
-    keys.iter().find_map(|key| {
-        value[*key]
-            .as_str()
-            .map(str::trim)
-            .filter(|text| !text.is_empty())
-            .map(str::to_owned)
-    })
+    condense(text)
 }
 
 fn unix_seconds(value: &Value, keys: &[&str]) -> Option<SystemTime> {
