@@ -1,0 +1,31 @@
+[package]
+name = "nmt_app_agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+nmt_agent_utils.workspace = true
+nmt_app_terminal.workspace = true
+nmt_config.workspace = true
+nmt_i18n.workspace = true
+nmt_platform.workspace = true
+
+chrono.workspace = true
+futures.workspace = true
+gpui.workspace = true
+gpui-component.workspace = true
+# Pasted images become GPUI `RenderImage` frames; same crate/version GPUI
+# links, so `image_rs::Frame` unifies with `gpui`'s `Frame`.
+image_rs.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }

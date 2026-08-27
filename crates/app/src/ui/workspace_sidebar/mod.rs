@@ -10,12 +10,12 @@ use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::scroll::Scrollbar;
 use gpui_component::{ActiveTheme, Icon, IconName, IconNamed, Selectable, Sizable, h_flex, v_flex};
 use nmt_agent_utils::AgentRuntimeStatus;
+use nmt_app_agent::AgentKind;
 use nmt_config::appearance::TabBarStyle;
 use nmt_i18n::i18n;
 use nmt_terminal::event::ProgressReport;
 
-use crate::agent::AgentKind;
-use crate::agent::usage::AgentUsageView;
+use crate::agent_usage::AgentUsageView;
 use crate::tabs::TabId;
 use crate::ui::composition::{
     FLOATING_SURFACE_BOTTOM_INSET, FLOATING_SURFACE_SIDE_INSET, FLOATING_SURFACE_TOP_INSET,

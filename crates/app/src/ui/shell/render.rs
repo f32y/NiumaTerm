@@ -1,8 +1,8 @@
 use gpui::KeyDownEvent;
 use gpui_component::modern_menu::dispatch_modern_menu_key;
+use nmt_app_agent::RecoveryIdentity;
 use nmt_i18n::i18n;
 
-use crate::agent::RecoveryIdentity;
 use crate::ui::shell::*;
 
 /// Width the tab strip keeps once the title bar runs out of room: about one

@@ -43,6 +43,7 @@ use nmt_agent_utils::{
     AgentActivityPolicy, AgentEvent, AgentMonitor, AgentNotification, AgentRoute,
     AgentRuntimeStatus, AgentWorkspace, agent_process, request_native_delivery,
 };
+use nmt_app_agent::{AgentKind, AgentPane, AgentPaneEvent};
 use nmt_app_terminal::session::HostEvent;
 use nmt_app_terminal::view::{AgentInterrupted, TerminalPane};
 use nmt_config::get;
@@ -54,12 +55,11 @@ use nmt_platform::{
 };
 use tracing::warn;
 
-use crate::agent::updates::{
+use crate::agent_updates::{
     self as agent_updates, AgentUpdates, FocusedVisibleLifetime, NotificationPrimaryAction,
     NotificationProgress, UpdateNotificationTone, UpdateNotificationView,
 };
-use crate::agent::usage::AgentUsageView;
-use crate::agent::{AgentKind, AgentPane, AgentPaneEvent};
+use crate::agent_usage::AgentUsageView;
 use crate::cli::CliAction;
 use crate::pane_tree::{PaneId, PaneNode, PaneTree, RemoveOutcome, SplitDirection, SplitOutcome};
 use crate::tabs::{CommandOutcome, Tab, TabId, TabManager};

@@ -61,7 +61,6 @@ use nmt_platform::{
 };
 use tracing::warn;
 
-use crate::agent::updates as agent_updates;
 use crate::ui::UI_RADIUS;
 use crate::ui::composition::sidebar_surface;
 use crate::ui::settings::about_page::about_page;
@@ -122,7 +121,7 @@ use crate::ui::settings::theme::theme_list;
 pub(crate) use crate::ui::settings::theme::{
     apply_ui_theme, apply_window_translucency, watch_themes,
 };
-use crate::{PlatformHandle, ui};
+use crate::{PlatformHandle, agent_updates, ui};
 
 const APP_VERSION: &str = env!("NIUMATERM_VERSION");
 const APP_INTERNAL_VERSION: &str = env!("NIUMATERM_INTERNAL_VERSION");

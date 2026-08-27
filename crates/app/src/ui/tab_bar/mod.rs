@@ -11,10 +11,10 @@ use gpui_component::menu::DropdownMenu as _;
 use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::tab::{Tab, TabBar, TabVariant};
 use gpui_component::{ActiveTheme, ElementExt as _, IconName, Sizable};
+use nmt_app_agent::AgentKind;
 use nmt_i18n::i18n;
 use nmt_terminal::event::{ProgressReport, ProgressState};
 
-use crate::agent::AgentKind;
 use crate::tabs::{TabId, TabManager};
 use crate::ui::composition::{
     HoverActionLayout, HoverActionVisibility, StatusMark, StatusMarkTone, hover_action,

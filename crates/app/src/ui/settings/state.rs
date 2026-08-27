@@ -1,5 +1,6 @@
 use gpui::{Global, SharedString};
 use nmt_agent_utils::deepseek;
+use nmt_app_agent::AgentKind;
 use nmt_config::agent::AgentConfig;
 pub use nmt_config::agent::CollapseRows;
 use nmt_config::appearance::{AppearanceConfig, SmoothScrollingMode};
@@ -18,7 +19,6 @@ use nmt_i18n::i18n;
 use nmt_platform::windows::powershell;
 use tracing::warn;
 
-use crate::agent::AgentKind;
 use crate::ui::settings::MAX_TAB_WIDTH;
 use crate::ui::settings::theme::load_theme_choices;
 

@@ -20,7 +20,8 @@ use nmt_platform::windows::ipc as platform_ipc;
 use nmt_platform::windows::window::show_error_dialog;
 use tracing::warn;
 
-mod agent;
+mod agent_updates;
+mod agent_usage;
 mod cli;
 mod ipc;
 mod logging;
@@ -34,11 +35,11 @@ mod utils;
 mod window;
 mod workspace;
 
+use nmt_app_agent::{AgentThreadDefaults, input_history};
 use nmt_app_terminal::view::{
     CopyBlockCommand, CopyBlockOutput, NextBlock, PreviousBlock, RerunBlock, SendShiftTab, SendTab,
 };
 
-use crate::agent::AgentThreadDefaults;
 use crate::cli::CliAction;
 use crate::ui::{
     AppAssets, AppSettings, CloseTab, NewAgentTab, NewRemoteTab, NewTab, NewWindow, NewWorkspace,
@@ -244,8 +245,8 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
             ui::install_terminal_settings(cx);
             ui::install_agent_settings(cx);
             let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
-            agent::updates::initialize(testing, &agent_profiles, cx);
-            agent::input_history::initialize(testing, cx);
+            agent_updates::initialize(testing, &agent_profiles, cx);
+            input_history::initialize(testing, cx);
             update::initialize(testing, cx);
             // The files a previous update renamed aside are only removable once
             // whoever had them mapped has exited, which for the instance that
@@ -277,7 +278,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
             // deferred to when the settings dialog closes (see Shell::on_show_settings).
             cx.observe_global::<AppSettings>(|cx| {
                 let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
-                agent::updates::reconcile_profiles(&agent_profiles, cx);
+                agent_updates::reconcile_profiles(&agent_profiles, cx);
                 update::settings_changed(cx);
                 let smooth_panels = cx.global::<AppSettings>().smooth_scrolling.panels_enabled();
                 cx.set_smooth_wheel_scrolling(smooth_panels);
@@ -427,7 +428,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
             .detach();
 
             cx.on_app_quit(|cx| {
-                if let Err(error) = agent::input_history::flush(cx) {
+                if let Err(error) = input_history::flush(cx) {
                     warn!("failed to flush Agent input history: {error}");
                 }
 
@@ -461,7 +462,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
             for initial in initials {
                 AppWindow::open(cx, initial);
             }
-            agent::updates::schedule_automatic_checks(cx);
+            agent_updates::schedule_automatic_checks(cx);
             update::schedule_automatic_checks(cx);
 
             // Apply CLI actions (argv + forwarded over the IPC pipe) on the
