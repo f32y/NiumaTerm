@@ -54,88 +54,7 @@ impl AgentPane {
                 self.conversation_named = true;
                 cx.emit(AgentPaneEvent::TitleSuggested(title));
             }
-            SessionEvent::Ready(settings) => {
-                if self.history_ui.mode == RecentSessionsMode::Loading
-                    && let Some(replay) = self.history_ui.pending_resume_replay.take()
-                {
-                    self.clear_conversation_presentation(cx);
-                    self.history_ui.mode = RecentSessionsMode::Hidden;
-                    self.palette.feedback = None;
-                    self.apply_replay(replay, cx);
-                }
-
-                // Seed the settings dropdowns with the thread's effective
-                // configuration so they show real values before any change.
-                // Ready can fire again mid-session (Claude's first-turn init
-                // confirms the permission mode); a payload without effort
-                // keeps the user's pick — Claude never reports effort, so
-                // None there means "unknown", never "reset".
-                let effort = settings.effort.clone().or(self.settings.effort.clone());
-                let mut next = ThreadSettings { effort, ..settings };
-
-                // Fresh conversations, and resumes into a harness that does not
-                // replay its own controls, seed all remembered picks. Where
-                // another Ready arrives during first-turn initialization, that
-                // later confirmation preserves the controls in use instead of
-                // restoring the ones the CLI reports.
-                let seed_thread_defaults = take(&mut self.seed_thread_defaults);
-                let seed_approval_reviewer = take(&mut self.seed_approval_reviewer);
-                let stored = (seed_thread_defaults || seed_approval_reviewer)
-                    .then(|| self.stored_thread_settings(cx))
-                    .flatten();
-                let preserve_current =
-                    self.kind.caps().repeats_ready_during_init && !seed_thread_defaults;
-                let local = if preserve_current {
-                    Some(&self.settings)
-                } else {
-                    stored
-                };
-                let startup_model = seed_thread_defaults.then(|| self.profile_model()).flatten();
-                let startup_effort = seed_thread_defaults
-                    .then(|| self.profile_effort())
-                    .flatten();
-                next = resolve_ready_settings(
-                    next,
-                    local,
-                    seed_thread_defaults || preserve_current,
-                    seed_approval_reviewer,
-                    startup_model.as_deref(),
-                    startup_effort.as_deref(),
-                );
-
-                if let Some(restored) = self.restore_thread_settings_on_ready.take() {
-                    next = resolve_ready_settings(next, Some(&restored), true, false, None, None);
-                }
-
-                self.settings = next;
-                // Seeding only fills in the pickers. Where the harness adopts a
-                // model through its own request, a remembered or profile pick
-                // still has to be pushed, or the row would name a model the
-                // session was never switched to.
-                if self.kind.caps().model_selection_is_a_request {
-                    self.apply_model_selection(cx);
-                }
-                info!(
-                    "agent thread ready: profile=\"{}\", model={:?}, profile_model={:?}",
-                    self.profile.name,
-                    self.settings.model,
-                    self.profile_model()
-                );
-                // Claude's first-turn init confirms settings after its
-                // synthetic TurnStarted event; that confirmation must not
-                // make an active turn look idle and admit overlapping work.
-                if self.status != Status::Running {
-                    self.status = Status::Idle;
-                }
-                if matches!(self.update_suspension, Some(UpdateSuspension::Reconnecting)) {
-                    self.update_suspension = None;
-                }
-                // The session id is known by now, so child agents that ran
-                // before this tab opened can be rebuilt from history.
-                self.restore_background_tasks(cx);
-                self.restore_workflows(cx);
-                cx.notify();
-            }
+            SessionEvent::Ready(settings) => self.on_ready(settings, cx),
             SessionEvent::Models(models) => {
                 self.models = models;
                 cx.notify();
@@ -168,122 +87,11 @@ impl AgentPane {
                 self.palette.selected = 0;
                 cx.notify();
             }
-            SessionEvent::SlashCommandResult { name, outcome } => match outcome {
-                SlashCommandOutcome::Accepted => {
-                    self.set_command_feedback(
-                        CommandFeedbackKind::Notice,
-                        i18n("agent-session-command-accepted").replace("{name}", &name),
-                        cx,
-                    );
-                }
-                SlashCommandOutcome::Completed { message } => {
-                    self.set_command_feedback(
-                        CommandFeedbackKind::Notice,
-                        message.unwrap_or_else(|| {
-                            i18n("agent-session-command-completed").replace("{name}", &name)
-                        }),
-                        cx,
-                    );
-                    if self.palette.awaiting_command_turn && self.status != Status::Running {
-                        self.palette.awaiting_command_turn = false;
-                        self.run_next_queued_command(cx);
-                    }
-                }
-                SlashCommandOutcome::Rejected { message } => {
-                    self.palette.awaiting_command_turn = false;
-                    self.set_command_feedback(CommandFeedbackKind::Error, message, cx);
-                    self.run_next_queued_command(cx);
-                }
-                SlashCommandOutcome::NotReady => {
-                    self.palette.awaiting_command_turn = false;
-                    self.set_command_feedback(
-                        CommandFeedbackKind::Error,
-                        i18n("agent-session-provider-not-ready")
-                            .replace("{name}", self.kind.display()),
-                        cx,
-                    );
-                    self.run_next_queued_command(cx);
-                }
-            },
-            SessionEvent::TurnStarted => {
-                // A turn a send opened numbered itself and started its timer
-                // at send time. A command's turn and a turn the harness opened
-                // on its own — running a prompt it held while the last turn
-                // finished — both arrive with neither done, and without them
-                // the whole turn would be filed under the previous one and
-                // leave the pane looking idle while it runs.
-                let command_turn =
-                    claim_command_turn_start(&mut self.palette.awaiting_command_turn);
-                let harness_opened = !command_turn && !self.transcript.read(cx).is_working();
-
-                if command_turn || harness_opened {
-                    self.turn_seq += 1;
-                    self.start_working(cx);
-                }
-                // The prompt the harness held is what this turn answers, so it
-                // heads this turn rather than trailing the finished one.
-                if harness_opened
-                    && self.kind.caps().queued_prompt_delivery
-                        == QueuedPromptDelivery::FollowingTurn
-                {
-                    self.publish_queued_user_messages(cx);
-                }
-                self.status = Status::Running;
-                self.emit_lifecycle(AgentEventKind::PromptSubmitted, "", "", cx);
-                cx.notify();
+            SessionEvent::SlashCommandResult { name, outcome } => {
+                self.on_slash_command_result(&name, outcome, cx)
             }
-            SessionEvent::TurnCompleted { error } => {
-                // Interruption is a completion state of the turn: the stop
-                // request recorded at press time becomes the transcript mark
-                // only once the backend actually ended the turn, so a backend
-                // that keeps streaming never shows an "Interrupted" row above
-                // live output. A stale request for an earlier turn is dropped
-                // at this boundary.
-                if self.pending_interrupt.take() == Some(self.turn_seq) {
-                    let turn = self.turn_seq;
-                    self.transcript
-                        .update(cx, |transcript, _| transcript.mark_interrupted(turn));
-                }
-                let interrupted_by_user = self.transcript.read(cx).was_interrupted(self.turn_seq);
-                let completion_body = error
-                    .clone()
-                    .or_else(|| self.latest_agent_message(cx))
-                    .unwrap_or_else(|| {
-                        i18n("agent-session-turn-completed").replace("{name}", self.kind.display())
-                    });
-                self.palette.awaiting_command_turn = false;
-                self.unanswered_prompt = None;
-                // Compaction lives inside a turn; a flag surviving the turn
-                // would leave the indicator spinning with nothing behind it.
-                self.transcript
-                    .update(cx, |transcript, cx| transcript.set_compacting(false, cx));
-                // A prompt steered into this turn is one the backend never
-                // acknowledges, so the turn's end is the last moment that can
-                // still say it went in. The other two deliveries run their
-                // queue in a turn of its own, which the end of this one does
-                // not make sent.
-                if self.kind.caps().queued_prompt_delivery == QueuedPromptDelivery::RunningTurn {
-                    self.publish_queued_user_messages(cx);
-                }
-                self.finish_working(cx);
-                self.refresh_git_branch(cx);
-                if self.status == Status::Running {
-                    self.status = Status::Idle;
-                }
-                if let Some(text) = error
-                    && !interrupted_by_user
-                {
-                    self.push_item(SessionItem::Error { text }, cx);
-                }
-                self.emit_lifecycle(
-                    AgentEventKind::Stopped,
-                    &i18n("agent-session-provider-finished").replace("{name}", self.kind.display()),
-                    &completion_body,
-                    cx,
-                );
-                self.run_next_queued_command(cx);
-                cx.notify();
-            }
+            SessionEvent::TurnStarted => self.on_turn_started(cx),
+            SessionEvent::TurnCompleted { error } => self.on_turn_completed(error, cx),
             SessionEvent::TurnOutputTokensUpdated(output_tokens) => {
                 self.transcript.update(cx, |transcript, cx| {
                     transcript.set_working_output_tokens(output_tokens, cx)
@@ -314,7 +122,7 @@ impl AgentPane {
             SessionEvent::ItemStarted(item) => self.start_item(item, cx),
             SessionEvent::ItemCompleted(item) => self.complete_item(item, cx),
             SessionEvent::AgentMessageDelta { item_id, delta } => {
-                let visible = self.append_delta(
+                self.append_delta(
                     &item_id,
                     &delta,
                     |item| match item {
@@ -323,13 +131,9 @@ impl AgentPane {
                     },
                     cx,
                 );
-                if visible {
-                    self.note_visible_agent_output();
-                }
-                cx.notify();
             }
             SessionEvent::ReasoningSummaryDelta { item_id, delta } => {
-                let visible = self.append_delta(
+                self.append_delta(
                     &item_id,
                     &delta,
                     |item| match item {
@@ -338,13 +142,9 @@ impl AgentPane {
                     },
                     cx,
                 );
-                if visible {
-                    self.note_visible_agent_output();
-                }
-                cx.notify();
             }
             SessionEvent::CommandOutputDelta { item_id, delta } => {
-                let visible = self.append_delta(
+                self.append_delta(
                     &item_id,
                     &delta,
                     |item| match item {
@@ -355,10 +155,6 @@ impl AgentPane {
                     },
                     cx,
                 );
-                if visible {
-                    self.note_visible_agent_output();
-                }
-                cx.notify();
             }
             SessionEvent::ApprovalRequested { description } => {
                 self.note_visible_agent_output();
@@ -414,48 +210,7 @@ impl AgentPane {
                     warn!("received a Claude file rewind result with no pending UI operation");
                 }
             }
-            SessionEvent::Error { message, fatal } => {
-                self.note_visible_agent_output();
-                if self.history_ui.mode == RecentSessionsMode::Loading {
-                    self.history_ui.mode = RecentSessionsMode::Open;
-                    self.history_ui.pending_resume_replay = None;
-                    // A branch that never arrives would otherwise hold the
-                    // composer behind a conversation that is not being cut.
-                    self.abandon_conversation_branch();
-                    if !fatal {
-                        self.status = Status::Idle;
-                    }
-                    self.set_command_feedback(
-                        CommandFeedbackKind::Error,
-                        i18n("agent-session-open-failed").replace("{error}", &message),
-                        cx,
-                    );
-                }
-                if fatal && matches!(self.update_suspension, Some(UpdateSuspension::Reconnecting)) {
-                    self.update_suspension = Some(UpdateSuspension::Failed(message.clone()));
-                }
-                let cancelled_queue = fatal && !self.palette.command_queue.is_empty();
-                if fatal {
-                    cx.emit(AgentPaneEvent::Interrupted);
-                    self.status = Status::Exited;
-                    self.unanswered_prompt = None;
-                    self.palette.awaiting_command_turn = false;
-                    self.palette.command_queue.clear();
-                    self.publish_queued_user_messages(cx);
-                } else if self.palette.awaiting_command_turn {
-                    self.palette.awaiting_command_turn = false;
-                }
-                self.push_item(SessionItem::Error { text: message }, cx);
-                if cancelled_queue {
-                    self.set_command_feedback(
-                        CommandFeedbackKind::Error,
-                        i18n("agent-session-queued-cancelled-failed").to_string(),
-                        cx,
-                    );
-                } else if !fatal {
-                    self.run_next_queued_command(cx);
-                }
-            }
+            SessionEvent::Error { message, fatal } => self.on_error(message, fatal, cx),
             SessionEvent::EffortRejected { message, effort } => {
                 // The pick did not take, so the control returns to the level
                 // the session is on. The reason goes to the feedback strip
@@ -465,29 +220,7 @@ impl AgentPane {
                 self.remember_thread_defaults(cx);
                 self.set_command_feedback(CommandFeedbackKind::Error, message, cx);
             }
-            SessionEvent::History(sessions) => {
-                // A list of what is recent answers a different question than
-                // the search currently on screen, so it replaces those rows
-                // rather than being appended to them.
-                if take(&mut self.history_ui.showing_search) {
-                    self.history_ui.sessions.clear();
-                }
-
-                // Pages accumulate: the first page lands in an empty list,
-                // later cursor pages extend it. A /new backend may publish
-                // the first page again, so ids are deduplicated in place.
-                for session in sessions {
-                    if !self
-                        .history_ui
-                        .sessions
-                        .iter()
-                        .any(|existing| existing.id == session.id)
-                    {
-                        self.history_ui.sessions.push(session);
-                    }
-                }
-                cx.notify();
-            }
+            SessionEvent::History(sessions) => self.on_history(sessions, cx),
             SessionEvent::SessionSearchResults(results) => self.show_search_results(results, cx),
             SessionEvent::ContextCompositionUpdated(composition) => {
                 self.context_composition = Some(composition);
@@ -500,63 +233,8 @@ impl AgentPane {
                     cx.notify();
                 }
             }
-            SessionEvent::BackgroundTasks(snapshot) => {
-                // Child lifecycle is reduced by the adapter, so this replaces
-                // the pane's copy without touching the composer, transcript,
-                // approval, queued commands, or running state.
-                let before = (
-                    self.background_task_count(),
-                    self.running_background_tasks(),
-                );
-                self.background_tasks = Some(snapshot);
-                // The chrome reveals its control on this tab's first child and
-                // then carries the running count, so it is told when either
-                // number moves rather than on every refreshed snapshot. A child
-                // that is created and finishes within one batch of provider
-                // messages never moves the running count, but it does move the
-                // total, and it is still a child the view can open.
-                if (
-                    self.background_task_count(),
-                    self.running_background_tasks(),
-                ) != before
-                {
-                    cx.emit(AgentPaneEvent::BackgroundTaskActivity);
-                }
-                cx.notify();
-            }
-            // The backend owns its pending inbox, so its snapshot replaces
-            // whatever this side queued optimistically. Anything it dropped is
-            // gone from the list by being absent rather than by a second event
-            // saying so, and a dropped prompt was claimed into the running
-            // turn — which is when its transcript row is due.
-            //
-            // The backend's own echo of that message claims the row too, and
-            // either can arrive first. Both read the same list and remove what
-            // they publish, so whichever loses the race finds nothing left to
-            // publish and the row appears exactly once.
-            SessionEvent::QueuedPrompts(mut prompts) => {
-                // A prompt whose own send started the turn is already in the
-                // transcript, and the backend keeps listing it until the turn
-                // claims it. Repeating it above the composer would show the
-                // same message twice for that whole window, so it is dropped
-                // from the list here and the snapshot that stops naming it —
-                // the moment the turn took it — retires the record.
-                if let Some(drawn) = self.published_prompt.take() {
-                    let before = prompts.len();
-                    prompts.retain(|prompt| prompt.text != drawn);
-                    if prompts.len() != before {
-                        self.published_prompt = Some(drawn);
-                    }
-                }
-
-                let claimed = claimed_prompts(&self.queued_user_messages, &prompts);
-
-                self.queued_user_messages = prompts.into();
-                for text in claimed {
-                    self.push_item(SessionItem::UserMessage { text: Some(text) }, cx);
-                }
-                cx.notify();
-            }
+            SessionEvent::BackgroundTasks(snapshot) => self.on_background_tasks(snapshot, cx),
+            SessionEvent::QueuedPrompts(prompts) => self.on_queued_prompts(prompts, cx),
             SessionEvent::GoalUpdated(goal) => {
                 self.goal = goal;
                 cx.notify();
@@ -581,28 +259,366 @@ impl AgentPane {
                 // user can type into rather than one still being cut.
                 self.finish_conversation_branch(cx);
             }
-            // The working row carries it: a turn waiting out a provider retry
-            // is indistinguishable from one thinking slowly, and the elapsed
-            // time and token count say nothing about which it is.
-            SessionEvent::StatusDetail(detail) => {
-                let detail = detail.map(|activity| match activity {
-                    TurnActivity::Retrying {
-                        attempt,
-                        total,
-                        reason,
-                    } => i18n("agent-transcript-retrying")
-                        .replace("{attempt}", &attempt.to_string())
-                        .replace("{total}", &total.to_string())
-                        .replace("{reason}", &reason),
-                });
-                self.transcript.update(cx, |transcript, cx| {
-                    transcript.set_working_detail(detail, cx)
-                });
-            }
+            SessionEvent::StatusDetail(detail) => self.on_status_detail(detail, cx),
             SessionEvent::ForkCheckpoints(checkpoints) => {
                 self.show_fork_checkpoints(checkpoints, cx)
             }
         }
+    }
+
+    /// Handshake finished. Fold the reported thread settings together with
+    /// remembered picks, settle status, and rebuild child state from history.
+    fn on_ready(&mut self, settings: ThreadSettings, cx: &mut Context<Self>) {
+        if self.history_ui.mode == RecentSessionsMode::Loading
+            && let Some(replay) = self.history_ui.pending_resume_replay.take()
+        {
+            self.clear_conversation_presentation(cx);
+            self.history_ui.mode = RecentSessionsMode::Hidden;
+            self.palette.feedback = None;
+            self.apply_replay(replay, cx);
+        }
+
+        // Seed the settings dropdowns with the thread's effective
+        // configuration so they show real values before any change.
+        // Ready can fire again mid-session (Claude's first-turn init
+        // confirms the permission mode); a payload without effort
+        // keeps the user's pick — Claude never reports effort, so
+        // None there means "unknown", never "reset".
+        let effort = settings.effort.clone().or(self.settings.effort.clone());
+        let mut next = ThreadSettings { effort, ..settings };
+
+        // Fresh conversations, and resumes into a harness that does not
+        // replay its own controls, seed all remembered picks. Where
+        // another Ready arrives during first-turn initialization, that
+        // later confirmation preserves the controls in use instead of
+        // restoring the ones the CLI reports.
+        let seed_thread_defaults = take(&mut self.seed_thread_defaults);
+        let seed_approval_reviewer = take(&mut self.seed_approval_reviewer);
+        let stored = (seed_thread_defaults || seed_approval_reviewer)
+            .then(|| self.stored_thread_settings(cx))
+            .flatten();
+        let preserve_current = self.kind.caps().repeats_ready_during_init && !seed_thread_defaults;
+        let local = if preserve_current {
+            Some(&self.settings)
+        } else {
+            stored
+        };
+        let startup_model = seed_thread_defaults.then(|| self.profile_model()).flatten();
+        let startup_effort = seed_thread_defaults
+            .then(|| self.profile_effort())
+            .flatten();
+        next = resolve_ready_settings(
+            next,
+            local,
+            seed_thread_defaults || preserve_current,
+            seed_approval_reviewer,
+            startup_model.as_deref(),
+            startup_effort.as_deref(),
+        );
+
+        if let Some(restored) = self.restore_thread_settings_on_ready.take() {
+            next = resolve_ready_settings(next, Some(&restored), true, false, None, None);
+        }
+
+        self.settings = next;
+        // Seeding only fills in the pickers. Where the harness adopts a
+        // model through its own request, a remembered or profile pick
+        // still has to be pushed, or the row would name a model the
+        // session was never switched to.
+        if self.kind.caps().model_selection_is_a_request {
+            self.apply_model_selection(cx);
+        }
+        info!(
+            "agent thread ready: profile=\"{}\", model={:?}, profile_model={:?}",
+            self.profile.name,
+            self.settings.model,
+            self.profile_model()
+        );
+        // Claude's first-turn init confirms settings after its
+        // synthetic TurnStarted event; that confirmation must not
+        // make an active turn look idle and admit overlapping work.
+        if self.status != Status::Running {
+            self.status = Status::Idle;
+        }
+        if matches!(self.update_suspension, Some(UpdateSuspension::Reconnecting)) {
+            self.update_suspension = None;
+        }
+        // The session id is known by now, so child agents that ran
+        // before this tab opened can be rebuilt from history.
+        self.restore_background_tasks(cx);
+        self.restore_workflows(cx);
+        cx.notify();
+    }
+
+    /// Asynchronous provider acknowledgement for a command request; feedback
+    /// goes to the strip above the composer, and a settled command hands the
+    /// queue to the next one.
+    fn on_slash_command_result(
+        &mut self,
+        name: &str,
+        outcome: SlashCommandOutcome,
+        cx: &mut Context<Self>,
+    ) {
+        match outcome {
+            SlashCommandOutcome::Accepted => {
+                self.set_command_feedback(
+                    CommandFeedbackKind::Notice,
+                    i18n("agent-session-command-accepted").replace("{name}", name),
+                    cx,
+                );
+            }
+            SlashCommandOutcome::Completed { message } => {
+                self.set_command_feedback(
+                    CommandFeedbackKind::Notice,
+                    message.unwrap_or_else(|| {
+                        i18n("agent-session-command-completed").replace("{name}", name)
+                    }),
+                    cx,
+                );
+                if self.palette.awaiting_command_turn && self.status != Status::Running {
+                    self.palette.awaiting_command_turn = false;
+                    self.run_next_queued_command(cx);
+                }
+            }
+            SlashCommandOutcome::Rejected { message } => {
+                self.palette.awaiting_command_turn = false;
+                self.set_command_feedback(CommandFeedbackKind::Error, message, cx);
+                self.run_next_queued_command(cx);
+            }
+            SlashCommandOutcome::NotReady => {
+                self.palette.awaiting_command_turn = false;
+                self.set_command_feedback(
+                    CommandFeedbackKind::Error,
+                    i18n("agent-session-provider-not-ready").replace("{name}", self.kind.display()),
+                    cx,
+                );
+                self.run_next_queued_command(cx);
+            }
+        }
+    }
+
+    /// A turn a send opened numbered itself and started its timer at send
+    /// time. A command's turn and a turn the harness opened on its own —
+    /// running a prompt it held while the last turn finished — both arrive
+    /// with neither done, and without them the whole turn would be filed
+    /// under the previous one and leave the pane looking idle while it runs.
+    fn on_turn_started(&mut self, cx: &mut Context<Self>) {
+        let command_turn = claim_command_turn_start(&mut self.palette.awaiting_command_turn);
+        let harness_opened = !command_turn && !self.transcript.read(cx).is_working();
+
+        if command_turn || harness_opened {
+            self.turn_seq += 1;
+            self.start_working(cx);
+        }
+        // The prompt the harness held is what this turn answers, so it
+        // heads this turn rather than trailing the finished one.
+        if harness_opened
+            && self.kind.caps().queued_prompt_delivery == QueuedPromptDelivery::FollowingTurn
+        {
+            self.publish_queued_user_messages(cx);
+        }
+        self.status = Status::Running;
+        self.emit_lifecycle(AgentEventKind::PromptSubmitted, "", "", cx);
+        cx.notify();
+    }
+
+    /// Interruption is a completion state of the turn: the stop request
+    /// recorded at press time becomes the transcript mark only once the
+    /// backend actually ended the turn, so a backend that keeps streaming
+    /// never shows an "Interrupted" row above live output. A stale request
+    /// for an earlier turn is dropped at this boundary.
+    fn on_turn_completed(&mut self, error: Option<String>, cx: &mut Context<Self>) {
+        if self.pending_interrupt.take() == Some(self.turn_seq) {
+            let turn = self.turn_seq;
+            self.transcript
+                .update(cx, |transcript, _| transcript.mark_interrupted(turn));
+        }
+        let interrupted_by_user = self.transcript.read(cx).was_interrupted(self.turn_seq);
+        let completion_body = error
+            .clone()
+            .or_else(|| self.latest_agent_message(cx))
+            .unwrap_or_else(|| {
+                i18n("agent-session-turn-completed").replace("{name}", self.kind.display())
+            });
+        self.palette.awaiting_command_turn = false;
+        self.unanswered_prompt = None;
+        // Compaction lives inside a turn; a flag surviving the turn
+        // would leave the indicator spinning with nothing behind it.
+        self.transcript
+            .update(cx, |transcript, cx| transcript.set_compacting(false, cx));
+        // A prompt steered into this turn is one the backend never
+        // acknowledges, so the turn's end is the last moment that can
+        // still say it went in. The other two deliveries run their
+        // queue in a turn of its own, which the end of this one does
+        // not make sent.
+        if self.kind.caps().queued_prompt_delivery == QueuedPromptDelivery::RunningTurn {
+            self.publish_queued_user_messages(cx);
+        }
+        self.finish_working(cx);
+        self.refresh_git_branch(cx);
+        if self.status == Status::Running {
+            self.status = Status::Idle;
+        }
+        if let Some(text) = error
+            && !interrupted_by_user
+        {
+            self.push_item(SessionItem::Error { text }, cx);
+        }
+        self.emit_lifecycle(
+            AgentEventKind::Stopped,
+            &i18n("agent-session-provider-finished").replace("{name}", self.kind.display()),
+            &completion_body,
+            cx,
+        );
+        self.run_next_queued_command(cx);
+        cx.notify();
+    }
+
+    /// A backend error lands in the transcript; a fatal one also ends the
+    /// session, returns queued work, and reports the interruption outward.
+    fn on_error(&mut self, message: String, fatal: bool, cx: &mut Context<Self>) {
+        self.note_visible_agent_output();
+        if self.history_ui.mode == RecentSessionsMode::Loading {
+            self.history_ui.mode = RecentSessionsMode::Open;
+            self.history_ui.pending_resume_replay = None;
+            // A branch that never arrives would otherwise hold the
+            // composer behind a conversation that is not being cut.
+            self.abandon_conversation_branch();
+            if !fatal {
+                self.status = Status::Idle;
+            }
+            self.set_command_feedback(
+                CommandFeedbackKind::Error,
+                i18n("agent-session-open-failed").replace("{error}", &message),
+                cx,
+            );
+        }
+        if fatal && matches!(self.update_suspension, Some(UpdateSuspension::Reconnecting)) {
+            self.update_suspension = Some(UpdateSuspension::Failed(message.clone()));
+        }
+        let cancelled_queue = fatal && !self.palette.command_queue.is_empty();
+        if fatal {
+            cx.emit(AgentPaneEvent::Interrupted);
+            self.status = Status::Exited;
+            self.unanswered_prompt = None;
+            self.palette.awaiting_command_turn = false;
+            self.palette.command_queue.clear();
+            self.publish_queued_user_messages(cx);
+        } else if self.palette.awaiting_command_turn {
+            self.palette.awaiting_command_turn = false;
+        }
+        self.push_item(SessionItem::Error { text: message }, cx);
+        if cancelled_queue {
+            self.set_command_feedback(
+                CommandFeedbackKind::Error,
+                i18n("agent-session-queued-cancelled-failed").to_string(),
+                cx,
+            );
+        } else if !fatal {
+            self.run_next_queued_command(cx);
+        }
+    }
+
+    /// A list of what is recent answers a different question than the search
+    /// currently on screen, so it replaces those rows rather than being
+    /// appended to them.
+    fn on_history(&mut self, sessions: Vec<SessionSummary>, cx: &mut Context<Self>) {
+        if take(&mut self.history_ui.showing_search) {
+            self.history_ui.sessions.clear();
+        }
+
+        // Pages accumulate: the first page lands in an empty list,
+        // later cursor pages extend it. A /new backend may publish
+        // the first page again, so ids are deduplicated in place.
+        for session in sessions {
+            if !self
+                .history_ui
+                .sessions
+                .iter()
+                .any(|existing| existing.id == session.id)
+            {
+                self.history_ui.sessions.push(session);
+            }
+        }
+        cx.notify();
+    }
+
+    /// Child lifecycle is reduced by the adapter, so this replaces the pane's
+    /// copy without touching the composer, transcript, approval, queued
+    /// commands, or running state.
+    fn on_background_tasks(&mut self, snapshot: BackgroundTaskSnapshot, cx: &mut Context<Self>) {
+        let before = (
+            self.background_task_count(),
+            self.running_background_tasks(),
+        );
+        self.background_tasks = Some(snapshot);
+        // The chrome reveals its control on this tab's first child and
+        // then carries the running count, so it is told when either
+        // number moves rather than on every refreshed snapshot. A child
+        // that is created and finishes within one batch of provider
+        // messages never moves the running count, but it does move the
+        // total, and it is still a child the view can open.
+        if (
+            self.background_task_count(),
+            self.running_background_tasks(),
+        ) != before
+        {
+            cx.emit(AgentPaneEvent::BackgroundTaskActivity);
+        }
+        cx.notify();
+    }
+
+    /// The backend owns its pending inbox, so its snapshot replaces whatever
+    /// this side queued optimistically. Anything it dropped is gone from the
+    /// list by being absent rather than by a second event saying so, and a
+    /// dropped prompt was claimed into the running turn — which is when its
+    /// transcript row is due.
+    ///
+    /// The backend's own echo of that message claims the row too, and either
+    /// can arrive first. Both read the same list and remove what they
+    /// publish, so whichever loses the race finds nothing left to publish and
+    /// the row appears exactly once.
+    fn on_queued_prompts(&mut self, mut prompts: Vec<QueuedPrompt>, cx: &mut Context<Self>) {
+        // A prompt whose own send started the turn is already in the
+        // transcript, and the backend keeps listing it until the turn
+        // claims it. Repeating it above the composer would show the
+        // same message twice for that whole window, so it is dropped
+        // from the list here and the snapshot that stops naming it —
+        // the moment the turn took it — retires the record.
+        if let Some(drawn) = self.published_prompt.take() {
+            let before = prompts.len();
+            prompts.retain(|prompt| prompt.text != drawn);
+            if prompts.len() != before {
+                self.published_prompt = Some(drawn);
+            }
+        }
+
+        let claimed = claimed_prompts(&self.queued_user_messages, &prompts);
+
+        self.queued_user_messages = prompts.into();
+        for text in claimed {
+            self.push_item(SessionItem::UserMessage { text: Some(text) }, cx);
+        }
+        cx.notify();
+    }
+
+    /// The working row carries it: a turn waiting out a provider retry is
+    /// indistinguishable from one thinking slowly, and the elapsed time and
+    /// token count say nothing about which it is.
+    fn on_status_detail(&mut self, detail: Option<TurnActivity>, cx: &mut Context<Self>) {
+        let detail = detail.map(|activity| match activity {
+            TurnActivity::Retrying {
+                attempt,
+                total,
+                reason,
+            } => i18n("agent-transcript-retrying")
+                .replace("{attempt}", &attempt.to_string())
+                .replace("{total}", &total.to_string())
+                .replace("{reason}", &reason),
+        });
+        self.transcript.update(cx, |transcript, cx| {
+            transcript.set_working_detail(detail, cx)
+        });
     }
 
     /// Pre-fill the transcript with a resumed session's reconstructed
@@ -695,15 +711,21 @@ impl AgentPane {
         cx.notify();
     }
 
+    /// Append streamed text to the item `select` picks out. A delta that
+    /// actually landed is visible agent output, which resets the idle clock.
     pub(in crate::agent) fn append_delta(
         &mut self,
         item_id: &str,
         delta: &str,
         select: fn(&mut SessionItem) -> Option<&mut Option<String>>,
         cx: &mut Context<Self>,
-    ) -> bool {
-        self.transcript.update(cx, |transcript, _| {
+    ) {
+        let visible = self.transcript.update(cx, |transcript, _| {
             transcript.append_delta(item_id, delta, select)
-        })
+        });
+        if visible {
+            self.note_visible_agent_output();
+        }
+        cx.notify();
     }
 }
