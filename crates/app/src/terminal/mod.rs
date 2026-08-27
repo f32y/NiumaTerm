@@ -11,6 +11,7 @@ pub(crate) mod net_pty;
 pub(crate) mod paint_text;
 pub(crate) mod scrollbar;
 pub(crate) mod session;
+pub(crate) mod settings;
 pub(crate) mod surface;
 pub(crate) mod terminal_view;
 pub(crate) mod theme;

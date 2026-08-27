@@ -43,8 +43,8 @@ pub(crate) use crate::ui::assets::AppAssets;
 pub(crate) use crate::ui::git_status::current_branch;
 pub(crate) use crate::ui::settings::{
     AppSettings, CollapseRows, apply_ui_theme, apply_window_translucency,
-    background_image_layer_opacity, main_view_background_opacity, watch_themes,
-    window_background_appearance,
+    background_image_layer_opacity, install_terminal_settings, main_view_background_opacity,
+    watch_themes, window_background_appearance,
 };
 pub(crate) use crate::ui::shell::{
     CloseTab, NewAgentTab, NewRemoteTab, NewTab, NewWindow, NewWorkspace, NextTab, NextWorkspace,
