@@ -7,29 +7,13 @@ mod prompt_truncation_tests {
     };
     use crate::agent::transcript::{
         AGENT_DISCLOSURE_DETAIL_INSET, AGENT_DISCLOSURE_GAP, AGENT_DISCLOSURE_PADDING,
-        AGENT_DISCLOSURE_SLOT, AGENT_TEXT_MEASURE_REMS, AgentKind, Status, TranscriptView,
-        TurnSummary, USER_TEXT_MEASURE_REMS, VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES,
-        command_execution_detail, command_execution_heading, compaction_accounting,
-        compaction_label, compaction_row_is_expandable, elapsed_label, entry_copy_text,
-        interrupted_status_label, is_work_row, last_response_label, should_show_jump_to_latest,
-        should_virtualize_transcript, transcript_segments, truncated_user_prompt, turn_summary,
-        worked_status_label, working_status_label,
+        AGENT_DISCLOSURE_SLOT, AgentKind, Status, TranscriptView, TurnSummary,
+        VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES, command_execution_detail, command_execution_heading,
+        compaction_accounting, compaction_label, compaction_row_is_expandable, elapsed_label,
+        entry_copy_text, interrupted_status_label, is_work_row, last_response_label,
+        should_show_jump_to_latest, should_virtualize_transcript, transcript_segments,
+        truncated_user_prompt, turn_summary, worked_status_label, working_status_label,
     };
-
-    /// The reading measures are expressed in rems but chosen as character
-    /// counts, so the conversion is worth stating: a monospaced glyph averages
-    /// about 0.6em, making a rem roughly 1.67 characters.
-    #[test]
-    fn the_reading_measures_are_the_intended_line_lengths() {
-        const CHARS_PER_REM: f32 = 1.0 / 0.6;
-
-        assert_eq!((AGENT_TEXT_MEASURE_REMS * CHARS_PER_REM).round(), 80.0);
-        assert_eq!((USER_TEXT_MEASURE_REMS * CHARS_PER_REM).round(), 50.0);
-        assert!(
-            USER_TEXT_MEASURE_REMS < AGENT_TEXT_MEASURE_REMS,
-            "a prompt reads as an aside to the reply beside it"
-        );
-    }
 
     #[test]
     fn transcript_code_style_uses_configured_font_and_size() {

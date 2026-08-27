@@ -8,7 +8,7 @@ mod virtual_code;
 #[cfg(test)]
 use crate::agent::transcript::disclosure_row::{
     AGENT_DISCLOSURE_DETAIL_INSET, AGENT_DISCLOSURE_GAP, AGENT_DISCLOSURE_PADDING,
-    AGENT_DISCLOSURE_SLOT, AGENT_TEXT_MEASURE_REMS, USER_TEXT_MEASURE_REMS,
+    AGENT_DISCLOSURE_SLOT,
 };
 pub(super) use crate::agent::transcript::format::{
     LAST_RESPONSE_LIMIT, command_execution_detail, command_execution_heading, compact_token_count,

@@ -5,8 +5,7 @@ use nmt_i18n::i18n;
 use crate::agent::composer::attachments::MAX_ATTACHMENTS;
 use crate::agent::composer::{annotation_count_label, parse_annotated_prompt};
 use crate::agent::transcript::disclosure_row::{
-    AGENT_DISCLOSURE_DETAIL_INSET, AGENT_TEXT_MEASURE_REMS, AgentDisclosureRow,
-    USER_TEXT_MEASURE_REMS,
+    AGENT_DISCLOSURE_DETAIL_INSET, AgentDisclosureRow, USER_BUBBLE_WIDTH_FRACTION,
 };
 use crate::agent::transcript::format::{interrupted_status_label, worked_status_label};
 use crate::agent::transcript::{
@@ -379,15 +378,10 @@ impl TranscriptView {
             })
         });
         let message = div()
-            // The bubble tracks its text rather than the pane, so a
-            // long prompt wraps at the prompt measure instead of
-            // stretching a tinted block across the transcript.
-            .max_w(rems(USER_TEXT_MEASURE_REMS))
-            // The measure is a cap, not a floor: a container narrower
-            // than it — the side panels showing a child or workflow
-            // agent conversation — must still wrap the bubble. Without
-            // this the item keeps its content width and, being
-            // right-aligned, overflows past the container's left edge.
+            // The width cap lives on the column below, which has a definite
+            // width to take a fraction of. A fraction here would resolve
+            // against this bubble's own shrink-to-fit parent instead, wrapping
+            // every prompt at a fraction of its natural single-line width.
             .min_w_0()
             .px_3()
             .py_2()
@@ -412,8 +406,10 @@ impl TranscriptView {
                 v_flex()
                     // The annotation bubble is as wide as the prompt bubble
                     // because both fill this column, so the cap that keeps the
-                    // prompt at its measure lives here rather than on either.
-                    .max_w(rems(USER_TEXT_MEASURE_REMS))
+                    // prompt off the full width lives here rather than on
+                    // either. The row above is `w_full`, so the fraction has a
+                    // definite width to resolve against and tracks the pane.
+                    .max_w(relative(USER_BUBBLE_WIDTH_FRACTION))
                     .min_w_0()
                     .items_end()
                     .gap_1()
@@ -482,19 +478,11 @@ impl TranscriptView {
     }
 
     fn agent_text_style(cx: &App) -> TextViewStyle {
-        let measure = rems(AGENT_TEXT_MEASURE_REMS);
-        // Only the ceiling is set: these blocks keep their own width behaviour
-        // below it, so a short snippet still fills the measure rather than
-        // shrinking to a box the width of its longest line.
-        let mut code_block = Self::configured_transcript_code_block_style(cx);
-        code_block.max_size.width = Some(measure.into());
-        let mut table = StyleRefinement::default();
-        table.max_size.width = Some(measure.into());
-
-        TextViewStyle::default()
-            .prose_max_width(measure)
-            .code_block(code_block)
-            .table(table)
+        // Assistant output takes the full transcript column: prose, code
+        // blocks, and tables all reflow with the pane, so a wide window shows
+        // long lines and wide tables without an inner scroll or a wrap the
+        // reader has to undo mentally.
+        TextViewStyle::default().code_block(Self::configured_transcript_code_block_style(cx))
     }
 
     fn work_detail_text_style(cx: &App) -> TextViewStyle {
@@ -520,26 +508,31 @@ impl TranscriptView {
         h_flex()
             .id(("entry", index))
             .group("entry")
+            .relative()
             .w_full()
             .items_end()
-            .gap_2()
             .modern_context_menu(Self::copy_menu(cx.entity().downgrade(), index))
             .child(
-                // The body stops at the reading measure plus its own padding,
-                // so the timestamp that follows it sits beside the text rather
-                // than being pushed out to the pane's right edge.
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .max_w(rems(AGENT_TEXT_MEASURE_REMS + 0.5))
-                    .px_1()
-                    .child(
-                        Self::markdown_view(("agent-md", index), text, self.cwd.clone())
-                            .style(Self::agent_text_style(cx))
-                            .selectable(true),
-                    ),
+                div().flex_1().min_w_0().px_1().child(
+                    Self::markdown_view(("agent-md", index), text, self.cwd.clone())
+                        .style(Self::agent_text_style(cx))
+                        .selectable(true),
+                ),
             )
-            .child(self.hover_stamp(index, cx))
+            .child(
+                // A stamp in the flow would reserve its width on every row,
+                // ending assistant output short of the pane by a strip that is
+                // blank whenever the pointer is elsewhere. Out of the flow it
+                // costs nothing until it appears, and the tinted chip keeps it
+                // legible where it lands over the last line.
+                self.hover_stamp(index, cx)
+                    .absolute()
+                    .right_1()
+                    .bottom_0()
+                    .px_1()
+                    .rounded(UI_RADIUS)
+                    .bg(cx.theme().muted),
+            )
             .into_any_element()
     }
 
@@ -878,10 +871,6 @@ impl TranscriptView {
                     // indentation level inside an already grouped tool call.
                     .ml(px(AGENT_DISCLOSURE_DETAIL_INSET))
                     .mt_1()
-                    // Expanded technical content uses the same readable
-                    // measure as assistant prose instead of stretching across
-                    // the remaining window width.
-                    .max_w(rems(AGENT_TEXT_MEASURE_REMS))
                     .relative()
                     .child(body)
             }))
@@ -990,7 +979,6 @@ impl TranscriptView {
 
         v_flex()
             .ml(px(AGENT_DISCLOSURE_DETAIL_INSET))
-            .max_w(rems(AGENT_TEXT_MEASURE_REMS))
             .gap_1()
             .text_xs()
             .children(accounting_rows.into_iter().filter_map(|(name, value)| {
