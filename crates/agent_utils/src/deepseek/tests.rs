@@ -1968,3 +1968,49 @@ fn recent_conversations_are_filtered_by_the_primary_directory() {
     let ids: Vec<_> = rows.iter().map(|row| row.id.as_str()).collect();
     assert_eq!(ids, ["in-primary"]);
 }
+
+/// A bridge frame that drops or renames a field this side requires must be
+/// refused as a whole (and logged) instead of decoding into empty-looking
+/// events; a well-formed frame keeps decoding as before.
+#[test]
+fn a_frame_missing_a_required_field_is_dropped_not_emptied() {
+    use crate::deepseek::session::{
+        fork_checkpoint_events, history_events, search_events, workflow_transcript_events,
+    };
+
+    // Renamed identity field: the whole frame is refused.
+    let renamed = json!({ "type": "nmt/workflow-transcript", "task": "t1", "agentId": "a1" });
+    assert_eq!(workflow_transcript_events(&renamed), Vec::new());
+
+    let complete = json!({
+        "type": "nmt/workflow-transcript", "taskId": "t1", "agentId": "a1",
+        "page": { "events": [] },
+    });
+    assert!(matches!(
+        complete_events(&complete).as_slice(),
+        [Event::WorkflowAgentTranscript { task_id, agent_id, .. }]
+            if task_id == "t1" && agent_id == "a1"
+    ));
+    fn complete_events(payload: &Value) -> Vec<Event> {
+        workflow_transcript_events(payload)
+    }
+
+    // A search error whose value is not a string is drift, never a success.
+    let drifted = json!({ "type": "nmt/search", "error": 500 });
+    assert_eq!(search_events(&drifted), Vec::new());
+    let failed = json!({ "type": "nmt/search", "error": "index unavailable" });
+    assert!(matches!(
+        search_events(&failed).as_slice(),
+        [Event::Error { fatal: false, .. }]
+    ));
+
+    // All-optional frames still decode when fields are absent.
+    assert!(matches!(
+        history_events(&json!({ "type": "nmt/history" })).as_slice(),
+        [Event::History(sessions)] if sessions.is_empty()
+    ));
+    assert!(matches!(
+        fork_checkpoint_events(&json!({ "type": "nmt/fork-checkpoints" })).as_slice(),
+        [Event::ForkCheckpoints(Ok(checkpoints))] if checkpoints.is_empty()
+    ));
+}
