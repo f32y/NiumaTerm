@@ -30,7 +30,7 @@ use gpui::{
     AnyElement, App, ClipboardItem, Context, Div, ElementId, Entity, FocusHandle, FollowMode,
     FontWeight, Hsla, ListAlignment, ListHorizontalSizingBehavior, ListOffset, ListSizingBehavior,
     ListState, MouseButton, Pixels, ScrollHandle, ScrollStrategy, SharedString, Stateful,
-    StyleRefinement, Task, UniformListScrollHandle, Window, div, list, px, relative, rems, size,
+    StyleRefinement, Task, UniformListScrollHandle, Window, div, list, px, relative, size,
     uniform_list,
 };
 use gpui_component::button::{Button, ButtonVariants as _};

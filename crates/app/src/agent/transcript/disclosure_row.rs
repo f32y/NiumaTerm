@@ -6,14 +6,11 @@ pub(super) const AGENT_DISCLOSURE_GAP: f32 = 4.0;
 pub(super) const AGENT_DISCLOSURE_PADDING: f32 = 4.0;
 pub(super) const AGENT_DISCLOSURE_DETAIL_INSET: f32 =
     AGENT_DISCLOSURE_PADDING + AGENT_DISCLOSURE_SLOT * 2.0 + AGENT_DISCLOSURE_GAP * 2.0;
-/// Monospaced glyphs average roughly 0.6em wide, so a rem measure is about
-/// 1.67 characters. 48rem gives assistant output an 80-character line.
-pub(super) const AGENT_TEXT_MEASURE_REMS: f32 = 48.0;
-
 /// A prompt is the user's own words read back, and it sits in a tinted bubble
-/// against the right edge. A shorter line keeps that block from spanning the
-/// pane and reads as an aside to the reply beside it: 30rem is 50 characters.
-pub(super) const USER_TEXT_MEASURE_REMS: f32 = 30.0;
+/// against the right edge. Capping it at a share of the transcript column keeps
+/// that block from spanning the pane, so it reads as an aside to the reply
+/// beside it while still growing with the window.
+pub(super) const USER_BUBBLE_WIDTH_FRACTION: f32 = 0.6;
 
 /// Shared geometry for expandable transcript rows. Empty chevron, type-icon,
 /// and trailing slots keep labels aligned by default; summary toggles can omit
@@ -110,11 +107,6 @@ impl AgentDisclosureRow {
         h_flex()
             .id(self.id)
             .w_full()
-            // The row's hover fill would otherwise run to the pane's edge,
-            // marking a band far wider than the text column it belongs to.
-            // Holding it to the reading measure keeps its right edge with the
-            // assistant prose above it, and a preview still truncates there.
-            .max_w(rems(AGENT_TEXT_MEASURE_REMS))
             .min_h(px(24.))
             .gap(px(AGENT_DISCLOSURE_GAP))
             .items_center()
