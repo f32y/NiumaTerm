@@ -15,6 +15,7 @@ mod api;
 mod close;
 mod commands;
 mod events;
+mod frames;
 mod history;
 mod host;
 mod mapping;

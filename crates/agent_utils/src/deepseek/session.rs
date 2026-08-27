@@ -28,7 +28,7 @@ use crate::deepseek::mapping::{self, ApprovalRequest, QuestionRequest, ToolTrack
 use crate::deepseek::models::ModelDirectory;
 use crate::deepseek::projections::ProjectionTracker;
 use crate::deepseek::workflows::WorkflowTracker;
-use crate::deepseek::{commands, history, presets, settings, subagents};
+use crate::deepseek::{commands, frames, history, presets, settings, subagents};
 use crate::workspace::AgentWorkspace;
 
 pub struct Session {
@@ -241,44 +241,56 @@ pub(crate) fn queued_prompts(items: &Value) -> Vec<QueuedPrompt> {
 /// Frame decoders with no session state of their own: each turns one bridge
 /// frame into the events it announces. They are addressed to this tab by the
 /// request that provoked them, so they carry no session id to check.
-fn workflow_transcript_events(payload: &Value) -> Vec<Event> {
-    let (Some(task_id), Some(agent_id)) = (payload["taskId"].as_str(), payload["agentId"].as_str())
+pub(super) fn workflow_transcript_events(payload: &Value) -> Vec<Event> {
+    let Some(frame) =
+        frames::parse::<frames::WorkflowTranscriptFrame>(WORKFLOW_TRANSCRIPT_FRAME, payload)
     else {
         return Vec::new();
     };
     vec![Event::WorkflowAgentTranscript {
-        task_id: task_id.to_string(),
-        agent_id: agent_id.to_string(),
-        items: history::items(&payload["page"]),
+        task_id: frame.task_id,
+        agent_id: frame.agent_id,
+        items: history::items(&frame.page),
     }]
 }
 
-fn history_events(payload: &Value) -> Vec<Event> {
+pub(super) fn history_events(payload: &Value) -> Vec<Event> {
+    let Some(frame) = frames::parse::<frames::HistoryFrame>(HISTORY_FRAME, payload) else {
+        return Vec::new();
+    };
     vec![Event::History(history::sessions(
-        &payload["sessions"],
-        payload["cwd"].as_str(),
+        &frame.sessions,
+        frame.cwd.as_deref(),
     ))]
 }
 
-fn search_events(payload: &Value) -> Vec<Event> {
-    if let Some(message) = payload["error"].as_str() {
+pub(super) fn search_events(payload: &Value) -> Vec<Event> {
+    let Some(frame) = frames::parse::<frames::SearchFrame>(SEARCH_FRAME, payload) else {
+        return Vec::new();
+    };
+    if let Some(message) = frame.error {
         return vec![Event::Error {
-            message: message.to_string(),
+            message,
             // Only the search failed; the conversation is untouched.
             fatal: false,
         }];
     }
     vec![Event::SessionSearchResults(history::search_results(
-        &payload["matches"],
-        &payload["sessions"],
-        payload["cwd"].as_str(),
+        &frame.matches,
+        &frame.sessions,
+        frame.cwd.as_deref(),
     ))]
 }
 
-fn fork_checkpoint_events(payload: &Value) -> Vec<Event> {
-    vec![Event::ForkCheckpoints(match payload["error"].as_str() {
-        Some(message) => Err(message.to_string()),
-        None => Ok(history::fork_checkpoints(&payload["page"])),
+pub(super) fn fork_checkpoint_events(payload: &Value) -> Vec<Event> {
+    let Some(frame) =
+        frames::parse::<frames::ForkCheckpointsFrame>(FORK_CHECKPOINTS_FRAME, payload)
+    else {
+        return Vec::new();
+    };
+    vec![Event::ForkCheckpoints(match frame.error {
+        Some(message) => Err(message),
+        None => Ok(history::fork_checkpoints(&frame.page)),
     })]
 }
 
@@ -912,13 +924,15 @@ impl Session {
     }
 
     fn on_subagents(&mut self, payload: &Value) -> Vec<Event> {
-        let activity = payload["activity"].as_u64().unwrap_or_default();
+        let Some(frame) = frames::parse::<frames::SubagentsFrame>(SUBAGENTS_FRAME, payload) else {
+            return Vec::new();
+        };
         // Several reads can be in flight, and an older answer describes a
         // moment the panel has already moved past.
-        if !self.is_current_session(payload) || activity < self.subagent_activity {
+        if frame.session_id != self.session_id || frame.activity < self.subagent_activity {
             return Vec::new();
         }
-        let snapshot = subagents::snapshot(&payload["catalog"], &self.session_id, activity);
+        let snapshot = subagents::snapshot(&frame.catalog, &self.session_id, frame.activity);
         self.subagent_modes = snapshot
             .tasks
             .iter()
@@ -933,47 +947,61 @@ impl Session {
     }
 
     fn on_subagent_transcript(&self, payload: &Value) -> Vec<Event> {
-        if !self.is_current_session(payload) {
-            return Vec::new();
-        }
-        let Some(child) = payload["childSessionId"].as_str() else {
+        let Some(frame) =
+            frames::parse::<frames::SubagentTranscriptFrame>(SUBAGENT_TRANSCRIPT_FRAME, payload)
+        else {
             return Vec::new();
         };
+        if frame.session_id != self.session_id {
+            return Vec::new();
+        }
         vec![Event::BackgroundTaskTranscript {
-            key: BackgroundTaskKey::deepseek(child),
-            update: BackgroundTaskTranscriptUpdate::loaded(history::items(&payload["page"])),
+            key: BackgroundTaskKey::deepseek(&frame.child_session_id),
+            update: BackgroundTaskTranscriptUpdate::loaded(history::items(&frame.page)),
         }]
     }
 
     fn on_skills(&self, payload: &Value) -> Vec<Event> {
-        if !self.is_current_session(payload) {
+        let Some(frame) = frames::parse::<frames::SkillsFrame>(SKILLS_FRAME, payload) else {
+            return Vec::new();
+        };
+        if frame.session_id != self.session_id {
             return Vec::new();
         }
-        vec![Event::Skills(commands::skills(&payload["skills"]))]
+        vec![Event::Skills(commands::skills(&frame.skills))]
     }
 
     fn on_presets(&self, payload: &Value) -> Vec<Event> {
-        if !self.is_current_session(payload) {
+        let Some(frame) = frames::parse::<frames::PresetsFrame>(PRESETS_FRAME, payload) else {
+            return Vec::new();
+        };
+        if frame.session_id != self.session_id {
             return Vec::new();
         }
         vec![Event::AgentPresets {
-            presets: presets::catalog(&payload["presets"]),
-            current: payload["current"].as_str().map(str::to_string),
+            presets: presets::catalog(&frame.presets),
+            current: frame.current,
         }]
     }
 
     fn on_commands(&self, payload: &Value) -> Vec<Event> {
-        if !self.is_current_session(payload) {
+        let Some(frame) = frames::parse::<frames::CommandsFrame>(COMMANDS_FRAME, payload) else {
+            return Vec::new();
+        };
+        if frame.session_id != self.session_id {
             return Vec::new();
         }
-        vec![Event::Commands(commands::catalog(&payload["commands"]))]
+        vec![Event::Commands(commands::catalog(&frame.commands))]
     }
 
     /// The harness republishes its whole pending inbox after every change,
     /// so this replaces what the tab holds rather than amending it: an
     /// increment would have to guess at removals another client made.
     fn on_queue(&mut self, payload: &Value) -> Vec<Event> {
-        let prompts = queued_prompts(&payload["items"]);
+        let Some(frame) = frames::parse::<frames::QueueFrame>(QUEUE_FRAME, payload) else {
+            return Vec::new();
+        };
+        let prompts = queued_prompts(&frame.items);
         self.queued_prompt_ids = prompts
             .iter()
             .filter_map(|prompt| prompt.id.clone())
@@ -982,21 +1010,24 @@ impl Session {
     }
 
     fn on_replay(&mut self, payload: &Value) -> Vec<Event> {
+        let Some(frame) = frames::parse::<frames::ReplayFrame>(REPLAY_FRAME, payload) else {
+            return Vec::new();
+        };
         // A page belonging to the conversation this tab has since left
         // would replace the visible transcript with another one's.
-        if !self.is_current_session(payload) {
+        if frame.session_id != self.session_id {
             return Vec::new();
         }
-        if let Some(message) = payload["error"].as_str() {
+        if let Some(message) = frame.error {
             return vec![Event::Error {
-                message: message.to_string(),
+                message,
                 // The conversation was attached before the page was read,
                 // so the tab works; only its earlier turns are missing.
                 fatal: false,
             }];
         }
 
-        let page = &payload["page"];
+        let page = &frame.page;
         // The tail page is also where a projection's current value can be
         // read: a live push reports only what changed after the tab
         // attached, so accounting and the permission preset would otherwise
@@ -1019,7 +1050,10 @@ impl Session {
     }
 
     fn on_models(&mut self, payload: &Value) -> Vec<Event> {
-        self.models = ModelDirectory::parse(&payload["models"]);
+        let Some(frame) = frames::parse::<frames::ModelsFrame>(MODELS_FRAME, payload) else {
+            return Vec::new();
+        };
+        self.models = ModelDirectory::parse(&frame.models);
         // The catalog and the selection travel together, so the pickers
         // gain their options and their current value in one repaint.
         let mut events = vec![
@@ -1030,9 +1064,9 @@ impl Session {
         // A refused selection travels with the catalog that outlived it, so
         // the level reported alongside the reason is the one the session is
         // actually on rather than the one that was asked for.
-        if let Some(message) = payload["error"].as_str() {
+        if let Some(message) = frame.error {
             events.push(Event::EffortRejected {
-                message: message.to_string(),
+                message,
                 effort: self.models.effort().map(str::to_string),
             });
         }
