@@ -10,7 +10,7 @@ impl AgentPane {
     /// Both belong here rather than in the transcript because neither is
     /// something the conversation said — they are what the next turn will be
     /// governed by, which is the question the composer is asking.
-    pub(in crate::view) fn render_session_state(
+    pub(super) fn render_session_state(
         &self,
         cx: &mut Context<Self>,
     ) -> Option<impl IntoElement + use<>> {

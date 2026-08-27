@@ -32,13 +32,13 @@ pub struct TranscriptView {
     /// Reading position from before a picker started scrolling the transcript
     /// to the prompt it highlights, so cancelling that picker returns the
     /// conversation to where the user was reading it.
-    pub(in crate::transcript) stashed_position: Option<ReadingPosition>,
+    pub(super) stashed_position: Option<ReadingPosition>,
     /// A picker is following the transcript, so empty space is left below the
     /// conversation. Without that room a prompt near the end cannot be lifted
     /// clear of the picker: the list stops scrolling once its last row is on
     /// screen, which leaves exactly those prompts behind the list naming
     /// them.
-    pub(in crate::transcript) reserve_below: bool,
+    pub(super) reserve_below: bool,
     /// Collapsed work-log runs the user has expanded, keyed by the index of
     /// the run's first transcript entry (stable — the list only appends).
     pub(crate) expanded_groups: HashSet<usize>,

@@ -77,8 +77,8 @@ pub(crate) use crate::ui::shell::actions::{
 };
 #[cfg(test)]
 use crate::ui::shell::close::{should_confirm_close, should_confirm_tab_close};
-pub(in crate::ui) use crate::ui::shell::inline_rename::{InlineRename, InlineRenameStyle};
-pub(in crate::ui) use crate::ui::shell::tab_presentation::pending_tab_icon;
+pub(super) use crate::ui::shell::inline_rename::{InlineRename, InlineRenameStyle};
+pub(super) use crate::ui::shell::tab_presentation::pending_tab_icon;
 pub(crate) use crate::ui::shell::tab_surface::TabSurface;
 use crate::ui::shell::updates_layer::UpdateCard;
 use crate::ui::shell::workspace_dirs::WorkspaceDirsEditor;

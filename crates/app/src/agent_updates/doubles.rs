@@ -7,9 +7,9 @@ use nmt_agent_utils::update::{
 };
 use semver::Version;
 
-pub(in crate::agent_updates) struct UnavailableMaintenance {
-    pub(in crate::agent_updates) provider: ProviderKind,
-    pub(in crate::agent_updates) reason: String,
+pub(super) struct UnavailableMaintenance {
+    pub(super) provider: ProviderKind,
+    pub(super) reason: String,
 }
 
 impl ProviderMaintenance for UnavailableMaintenance {
@@ -28,13 +28,13 @@ impl ProviderMaintenance for UnavailableMaintenance {
 
 /// `--testing` exposes a complete fake workflow without touching provider
 /// executables, release endpoints, or the production cache.
-pub(in crate::agent_updates) struct FakeMaintenance {
+pub(super) struct FakeMaintenance {
     provider: ProviderKind,
     updated: AtomicBool,
 }
 
 impl FakeMaintenance {
-    pub(in crate::agent_updates) fn new(provider: ProviderKind) -> Self {
+    pub(super) fn new(provider: ProviderKind) -> Self {
         Self {
             provider,
             updated: AtomicBool::new(false),

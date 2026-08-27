@@ -25,12 +25,12 @@ use crate::ui::{AppSettings, Shell, UI_RADIUS};
 use crate::workspace::TerminalActivity;
 
 mod drag;
-pub(in crate::ui) mod menu;
+pub(super) mod menu;
 #[cfg(test)]
 mod tests;
 
 use crate::ui::tab_bar::drag::{TabDrag, TabDragPreview};
-pub(in crate::ui) use crate::ui::tab_bar::menu::{new_tab_menu, tab_icon};
+pub(super) use crate::ui::tab_bar::menu::{new_tab_menu, tab_icon};
 
 pub(super) struct TabStrip {
     /// Scroll position of the tab strip (tabs overflow horizontally once their

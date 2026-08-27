@@ -6,10 +6,7 @@ impl AgentPane {
     /// Absent until a turn has settled, and while one is running: the
     /// transcript's own live "Working for" reading is the answer then, and two
     /// clocks a few pixels apart would be read as disagreeing.
-    pub(in crate::view) fn render_last_response(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    pub(super) fn render_last_response(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let at = self.last_response_at?;
         if self.transcript.read(cx).is_working() {
             return None;

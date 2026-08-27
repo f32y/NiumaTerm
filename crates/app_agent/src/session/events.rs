@@ -682,7 +682,7 @@ impl AgentPane {
         self.push_item(item, cx);
     }
 
-    pub(in crate::session) fn publish_queued_user_messages(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn publish_queued_user_messages(&mut self, cx: &mut Context<Self>) {
         while let Some(queued) = self.turn.queued_user_messages.pop_front() {
             self.push_item(
                 SessionItem::UserMessage {
