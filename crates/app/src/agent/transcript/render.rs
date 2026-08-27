@@ -1,4 +1,4 @@
-use gpui::{ObjectFit, img};
+use gpui::{Font, ObjectFit, img};
 use gpui_component::modern_menu::{ModernMenu, ModernMenuExt as _};
 use nmt_i18n::i18n;
 
@@ -15,7 +15,6 @@ use crate::agent::transcript::{
     should_virtualize_transcript, strip_read_gutter, truncated_user_prompt, working_label,
 };
 use crate::agent::*;
-use crate::ui::font_with_default_fallback;
 
 /// Edge of a transcript thumbnail, matching the composer strip so an image
 /// does not change size when the message it belongs to is sent.
@@ -459,22 +458,16 @@ impl TranscriptView {
     /// same width: a code block or table left full-width would run its
     /// background past the text above it, so the tint would mark a column the
     /// reader is not reading along.
-    pub(super) fn transcript_code_block_style(
-        family: SharedString,
-        font_size: f64,
-    ) -> StyleRefinement {
+    pub(super) fn transcript_code_block_style(font: Font, font_size: f32) -> StyleRefinement {
         StyleRefinement::default()
-            .font(font_with_default_fallback(family))
-            .text_size(px(font_size as f32))
+            .font(font)
+            .text_size(px(font_size))
     }
 
     fn configured_transcript_code_block_style(cx: &App) -> StyleRefinement {
-        let settings = cx.global::<AppSettings>();
+        let settings = cx.global::<AgentSettings>();
 
-        Self::transcript_code_block_style(
-            settings.agent_transcript_font_family.clone(),
-            settings.agent_transcript_font_size,
-        )
+        Self::transcript_code_block_style(settings.transcript_font(), settings.transcript_font_size)
     }
 
     fn agent_text_style(cx: &App) -> TextViewStyle {
@@ -721,10 +714,9 @@ impl TranscriptView {
                         )
                     };
                     let segment_count = segments.len();
-                    let settings = cx.global::<AppSettings>();
-                    let transcript_font =
-                        font_with_default_fallback(settings.agent_transcript_font_family.clone());
-                    let transcript_font_size = px(settings.agent_transcript_font_size as f32);
+                    let settings = cx.global::<AgentSettings>();
+                    let transcript_font = settings.transcript_font();
+                    let transcript_font_size = px(settings.transcript_font_size);
                     let line_height = transcript_font_size * 1.5;
                     let text_color = cx.theme().muted_foreground;
                     let list_source = source.clone();

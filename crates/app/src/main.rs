@@ -242,6 +242,7 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
 
             cx.set_global(AppSettings::load());
             ui::install_terminal_settings(cx);
+            ui::install_agent_settings(cx);
             let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
             agent::updates::initialize(testing, &agent_profiles, cx);
             agent::input_history::initialize(testing, cx);

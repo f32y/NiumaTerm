@@ -3,43 +3,20 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use gpui::prelude::*;
-use gpui::{AnyElement, Context, FontWeight, Hsla, SharedString, Window, div, px, relative};
+use gpui::{AnyElement, Context, FontWeight, Hsla, Window, div, px, relative};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::hover_card::HoverCard;
-use gpui_component::{ActiveTheme as _, Icon, IconNamed, Sizable as _, h_flex, v_flex};
+use gpui_component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
 use nmt_agent_utils::claude_code::usage_fetcher::{self as claude_usage, UsageFetchError};
 use nmt_agent_utils::codex::usage_fetcher as codex_usage;
 use nmt_agent_utils::usage::{UsageSnapshot, UsageWindow, now_unix_millis};
 use nmt_i18n::i18n;
 use tracing::warn;
 
+use crate::agent::profile::{ClaudeIcon, CodexIcon};
 use crate::ui::AppSettings;
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
-
-pub(crate) struct CodexIcon;
-
-impl IconNamed for CodexIcon {
-    fn path(self) -> SharedString {
-        "icons/codex.svg".into()
-    }
-}
-
-pub(crate) struct ClaudeIcon;
-
-impl IconNamed for ClaudeIcon {
-    fn path(self) -> SharedString {
-        "icons/claude.svg".into()
-    }
-}
-
-pub(crate) struct DeepSeekIcon;
-
-impl IconNamed for DeepSeekIcon {
-    fn path(self) -> SharedString {
-        "icons/deepseek.svg".into()
-    }
-}
 
 #[derive(Default)]
 struct ProviderRefresh {

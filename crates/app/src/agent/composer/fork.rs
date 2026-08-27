@@ -161,7 +161,7 @@ impl AgentPane {
             return;
         };
 
-        let smooth = cx.global::<AppSettings>().smooth_scrolling.agent_enabled();
+        let smooth = cx.global::<AgentSettings>().smooth_wheel;
         self.transcript.update(cx, |transcript, cx| {
             transcript.scroll_to_prompt(&target, smooth, cx)
         });

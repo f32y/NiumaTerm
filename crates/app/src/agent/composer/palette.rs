@@ -142,7 +142,7 @@ impl AgentPane {
         // a convenience and follows nothing.
         let caps = self.kind.caps();
         let slash_skills = caps.slash_skills_are_prompts
-            || (caps.skill_references && cx.global::<AppSettings>().codex_skill_command_compat);
+            || (caps.skill_references && cx.global::<AgentSettings>().codex_skill_command_compat);
 
         if parsed.has_argument_separator {
             let command = catalog.iter().find(|command| command.name == parsed.name)?;

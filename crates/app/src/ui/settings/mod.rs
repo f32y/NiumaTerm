@@ -112,7 +112,9 @@ use crate::ui::settings::system_page::system_page;
 use crate::ui::settings::table::{
     ENV_OPERATION_COLUMN, TABLE_OPERATION_BUTTON, TrashIcon, table_frame, table_header, table_row,
 };
-pub(crate) use crate::ui::settings::terminal_bridge::install_terminal_settings;
+pub(crate) use crate::ui::settings::terminal_bridge::{
+    install_agent_settings, install_terminal_settings,
+};
 use crate::ui::settings::terminal_page::terminal_page;
 #[cfg(test)]
 use crate::ui::settings::theme::tab_background_opacity;

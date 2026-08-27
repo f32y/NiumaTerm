@@ -16,7 +16,7 @@ const DOT_MAX_OPACITY: f32 = 0.88;
 
 /// Three pulsing dots for an ongoing operation with no measurable completion.
 #[derive(IntoElement)]
-pub(crate) struct WorkingIndicator {
+pub(in crate::agent) struct WorkingIndicator {
     color: Hsla,
 }
 

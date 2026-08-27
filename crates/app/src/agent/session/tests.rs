@@ -311,6 +311,7 @@ mod queued_prompt_placement_tests {
     use nmt_config::profile::{AgentProfile, AgentProfileKind};
 
     use crate::agent::session::{Backend, Status, TestBackend};
+    use crate::agent::settings::AgentSettings;
     use crate::agent::{AgentPane, AgentThreadDefaults};
     use crate::ui::AppSettings;
 
@@ -329,6 +330,7 @@ mod queued_prompt_placement_tests {
         let window = cx.update(|cx| {
             gpui_component::init(cx);
             cx.set_global(AppSettings::default());
+            cx.set_global(AgentSettings::default());
             cx.set_global(AgentThreadDefaults::default());
             cx.open_window(Default::default(), |window, cx| {
                 let agent =

@@ -40,18 +40,16 @@ pub(crate) fn default_font_fallbacks() -> FontFallbacks {
 
 pub(crate) use crate::ui::active_list::{ActiveList, HasId};
 pub(crate) use crate::ui::assets::AppAssets;
-pub(crate) use crate::ui::git_status::current_branch;
 pub(crate) use crate::ui::settings::{
-    AppSettings, CollapseRows, apply_ui_theme, apply_window_translucency,
-    background_image_layer_opacity, install_terminal_settings, main_view_background_opacity,
-    watch_themes, window_background_appearance,
+    AppSettings, apply_ui_theme, apply_window_translucency, background_image_layer_opacity,
+    install_agent_settings, install_terminal_settings, main_view_background_opacity, watch_themes,
+    window_background_appearance,
 };
 pub(crate) use crate::ui::shell::{
     CloseTab, NewAgentTab, NewRemoteTab, NewTab, NewWindow, NewWorkspace, NextTab, NextWorkspace,
     PrevTab, PrevWorkspace, ResizePaneDown, ResizePaneLeft, ResizePaneRight, ResizePaneUp, Shell,
     ShowSettings, SplitDown, SplitLeft, SplitRight, SplitUp, TabSurface, ToggleSidebar,
 };
-pub(crate) use crate::ui::working_indicator::WorkingIndicator;
 
 mod active_list;
 mod assets;
@@ -74,5 +72,4 @@ mod terminal_status;
 mod tests;
 mod token_usage;
 mod workflows;
-mod working_indicator;
 mod workspace_sidebar;

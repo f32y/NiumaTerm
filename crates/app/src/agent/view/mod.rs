@@ -20,7 +20,6 @@ use crate::agent::composer::{
     CommandFeedbackKind, ComposerAction, PaletteControl, composer_action,
 };
 use crate::agent::*;
-use crate::ui::{font_with_default_fallback, main_view_background_opacity};
 
 struct StopResponseIcon;
 
@@ -113,8 +112,8 @@ impl Render for AgentPane {
         let branch_flow_working = self.branch_flow_is_working();
         let session_loading = self.history_ui.mode == RecentSessionsMode::Loading;
         let background = if cx
-            .global::<AppSettings>()
-            .agent_pane_use_terminal_background
+            .global::<AgentSettings>()
+            .pane_background_follows_terminal
         {
             gpui::rgb(theme_default_background().rgb_u32()).into()
         } else {
@@ -162,7 +161,7 @@ impl Render for AgentPane {
             .relative()
             // The outer frame matches the window chrome. The Agent surface owns
             // its fill so an opaque main view does not color the rounded frame.
-            .bg(background.alpha(main_view_background_opacity(cx)))
+            .bg(background.alpha(cx.global::<AgentSettings>().background_opacity))
             .rounded(UI_RADIUS - px(1.))
             .overflow_hidden()
             .track_focus(&self.focus)
@@ -189,10 +188,8 @@ impl Render for AgentPane {
             // The agent tab is a terminal surface stand-in, so it overrides the
             // chrome's UI font with its own configured font (Settings → Agent
             // Font), same as the terminal pane does with the terminal font.
-            .font(font_with_default_fallback(
-                cx.global::<AppSettings>().agent_font_family.clone(),
-            ))
-            .text_size(px(cx.global::<AppSettings>().agent_font_size as f32))
+            .font(cx.global::<AgentSettings>().font())
+            .text_size(px(cx.global::<AgentSettings>().font_size))
             .children(multi_root_notice)
             .children(update_banner)
             .child(
@@ -328,7 +325,7 @@ impl Render for AgentPane {
                                         .capture_action(cx.listener(
                                             |this, action: &Enter, window, cx| {
                                                 match composer_enter_behavior(
-                                                    cx.global::<AppSettings>().newline_shortcut,
+                                                    cx.global::<AgentSettings>().newline_shortcut,
                                                     action,
                                                 ) {
                                                     ComposerEnterBehavior::InsertNewline => {
@@ -372,9 +369,7 @@ impl Render for AgentPane {
                                         // chrome around it (t3code uses 16px over
                                         // a 14px UI); +2 keeps that ratio at any
                                         // configured agent font size.
-                                        .text_size(px(cx.global::<AppSettings>().agent_font_size
-                                            as f32
-                                            + 2.0))
+                                        .text_size(px(cx.global::<AgentSettings>().font_size + 2.0))
                                         .child(Input::new(&self.input).appearance(false).disabled(
                                             branch_flow_working
                                                 || session_loading

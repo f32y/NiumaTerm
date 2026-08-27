@@ -7,8 +7,8 @@ use std::{fs, io, path};
 use gpui::prelude::*;
 use gpui::{Context, Entity, SharedString, Window, div};
 use gpui_component::{ActiveTheme, h_flex};
+use nmt_agent_utils::git::run_git;
 use nmt_i18n::i18n;
-use nmt_platform::windows::process::hidden_command;
 use tracing::warn;
 
 use crate::ui::AppSettings;
@@ -50,45 +50,10 @@ pub(crate) struct DiffLine {
     pub(crate) text: SharedString,
 }
 
-fn run_git(dir: &str, args: &[&str]) -> Result<Vec<u8>, String> {
-    let output = hidden_command("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .output()
-        .map_err(|err| format!("failed to run git: {err}"))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "git {} exited with {}: {}",
-            args.first().unwrap_or(&""),
-            output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-
-    Ok(output.stdout)
-}
-
 pub(crate) fn resolve_repo_root(cwd: &str) -> Option<String> {
     let out = run_git(cwd, &["rev-parse", "--show-toplevel"]).ok()?;
     let root = String::from_utf8_lossy(&out).trim().to_string();
     (!root.is_empty()).then_some(root)
-}
-
-/// Return the checked-out branch for a working directory. Detached HEADs use
-/// their short commit so the footer never presents an empty branch label.
-pub(crate) fn current_branch(cwd: &str) -> Option<String> {
-    let branch = run_git(cwd, &["branch", "--show-current"])
-        .ok()
-        .map(|out| String::from_utf8_lossy(&out).trim().to_string())
-        .filter(|branch| !branch.is_empty());
-
-    branch.or_else(|| {
-        let commit = run_git(cwd, &["rev-parse", "--short", "HEAD"]).ok()?;
-        let commit = String::from_utf8_lossy(&commit).trim().to_string();
-        (!commit.is_empty()).then(|| i18n("git-status-detached").replace("{commit}", &commit))
-    })
 }
 
 /// Full status snapshot for `root`: porcelain file list joined with summed
