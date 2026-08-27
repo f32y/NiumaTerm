@@ -80,6 +80,7 @@ use crate::ui::shell::close::{should_confirm_close, should_confirm_tab_close};
 pub(in crate::ui) use crate::ui::shell::inline_rename::{InlineRename, InlineRenameStyle};
 pub(in crate::ui) use crate::ui::shell::tab_presentation::pending_tab_icon;
 pub(crate) use crate::ui::shell::tab_surface::TabSurface;
+use crate::ui::shell::updates_layer::UpdateCard;
 use crate::ui::shell::workspace_dirs::WorkspaceDirsEditor;
 use crate::ui::tab_bar::TabStrip;
 use crate::ui::token_usage::TokenUsageView;
@@ -199,9 +200,10 @@ pub(crate) struct Shell {
     right_panel: Entity<RightPanel>,
     /// Stable entities let each installation's card replace content in place
     /// without entering the transient Root notification lifecycle.
-    update_notifications: collections::HashMap<String, Entity<Notification>>,
-    update_notification_views: collections::HashMap<String, UpdateNotificationView>,
-    update_terminal_elapsed: collections::HashMap<String, FocusedVisibleLifetime>,
+    /// On-screen provider-update notifications by key. Card entity, source
+    /// view, and auto-hide clock live in one record so retiring a key cannot
+    /// leave a stale sibling behind.
+    update_cards: collections::HashMap<String, UpdateCard>,
     update_notification_timer_running: bool,
     /// Workspace directories the last background availability check could not
     /// reach, keyed by normalized path identity. A saved directory keeps its
@@ -373,9 +375,7 @@ impl Shell {
                 cx.new(|_| RightPanel::new(git, tasks, workflows))
             },
             git_model,
-            update_notifications: collections::HashMap::new(),
-            update_notification_views: collections::HashMap::new(),
-            update_terminal_elapsed: collections::HashMap::new(),
+            update_cards: collections::HashMap::new(),
             update_notification_timer_running: false,
             unavailable_roots: collections::HashSet::new(),
             doomed_workspace: None,

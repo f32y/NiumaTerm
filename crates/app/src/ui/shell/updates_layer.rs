@@ -2,6 +2,16 @@ use nmt_i18n::i18n;
 
 use crate::ui::shell::*;
 
+/// One on-screen provider-update notification: the reduced view it was built
+/// from, the card entity presenting it, and, for the auto-hiding phases, the
+/// focused-visible clock that retires it. One record per key, so the three
+/// cannot fall out of step.
+pub(super) struct UpdateCard {
+    view: UpdateNotificationView,
+    card: Entity<Notification>,
+    elapsed: Option<FocusedVisibleLifetime>,
+}
+
 impl Shell {
     fn update_notification_card(
         view: UpdateNotificationView,
@@ -112,49 +122,45 @@ impl Shell {
             .iter()
             .map(|view| view.key.clone())
             .collect::<collections::HashSet<_>>();
-        self.update_notifications
-            .retain(|key, _| active_keys.contains(key));
-        self.update_notification_views
-            .retain(|key, _| active_keys.contains(key));
-
-        let terminal_keys = views
-            .iter()
-            .filter(|view| view.terminal_timeout)
-            .map(|view| (view.key.clone(), view.phase))
-            .collect::<collections::HashMap<_, _>>();
-        self.update_terminal_elapsed
-            .retain(|key, _| terminal_keys.contains_key(key));
-        for (key, phase) in terminal_keys {
-            let timer = self
-                .update_terminal_elapsed
-                .entry(key)
-                .or_insert_with(|| FocusedVisibleLifetime::new(phase));
-            timer.set_phase(phase);
-        }
+        self.update_cards.retain(|key, _| active_keys.contains(key));
 
         let shell = cx.weak_entity();
         let mut cards = Vec::with_capacity(views.len());
         for view in views {
-            let changed = self
-                .update_notification_views
-                .get(&view.key)
-                .is_none_or(|previous| previous != &view);
-            let card = if let Some(card) = self.update_notifications.get(&view.key) {
-                if changed {
-                    card.update(cx, |card, _| {
-                        *card = Self::update_notification_card(view.clone(), shell.clone())
-                    });
+            let entry = match self.update_cards.entry(view.key.clone()) {
+                collections::hash_map::Entry::Occupied(occupied) => {
+                    let entry = occupied.into_mut();
+                    if entry.view != view {
+                        entry.card.update(cx, |card, _| {
+                            *card = Self::update_notification_card(view.clone(), shell.clone())
+                        });
+                    }
+                    entry.view = view;
+                    entry
                 }
-                card.clone()
-            } else {
-                let card = cx.new(|_| Self::update_notification_card(view.clone(), shell.clone()));
-                self.update_notifications
-                    .insert(view.key.clone(), card.clone());
-                card
+                collections::hash_map::Entry::Vacant(vacant) => {
+                    let card =
+                        cx.new(|_| Self::update_notification_card(view.clone(), shell.clone()));
+                    vacant.insert(UpdateCard {
+                        view,
+                        card,
+                        elapsed: None,
+                    })
+                }
             };
-            self.update_notification_views
-                .insert(view.key.clone(), view);
-            cards.push(card);
+            // Auto-hiding phases keep a focused-visible clock; entering a
+            // sticky one clears it, so a card cannot expire on time banked
+            // while it still counted down.
+            if entry.view.terminal_timeout {
+                let phase = entry.view.phase;
+                entry
+                    .elapsed
+                    .get_or_insert_with(|| FocusedVisibleLifetime::new(phase))
+                    .set_phase(phase);
+            } else {
+                entry.elapsed = None;
+            }
+            cards.push(entry.card.clone());
         }
 
         self.ensure_update_notification_timer(cx);
@@ -171,7 +177,11 @@ impl Shell {
     }
 
     fn ensure_update_notification_timer(&mut self, cx: &mut Context<Self>) {
-        if self.update_notification_timer_running || self.update_terminal_elapsed.is_empty() {
+        let any_expiring = self
+            .update_cards
+            .values()
+            .any(|entry| entry.elapsed.is_some());
+        if self.update_notification_timer_running || !any_expiring {
             return;
         }
         self.update_notification_timer_running = true;
@@ -184,8 +194,10 @@ impl Shell {
                     .update(cx, |shell, cx| {
                         let mut expired = Vec::new();
                         if shell.window_active {
-                            for (key, lifetime) in &mut shell.update_terminal_elapsed {
-                                if lifetime.tick(true, time::Duration::from_millis(100)) {
+                            for (key, entry) in &mut shell.update_cards {
+                                if let Some(lifetime) = &mut entry.elapsed
+                                    && lifetime.tick(true, time::Duration::from_millis(100))
+                                {
                                     expired.push(key.clone());
                                 }
                             }
@@ -193,14 +205,20 @@ impl Shell {
                         if !expired.is_empty() {
                             let coordinator = cx.global::<AgentUpdates>().coordinator.clone();
                             for key in &expired {
-                                if let Some(view) = shell.update_notification_views.get(key) {
-                                    coordinator.hide_notification(&view.installation);
+                                if let Some(entry) = shell.update_cards.get_mut(key) {
+                                    coordinator.hide_notification(&entry.view.installation);
+                                    // The card stays until the coordinator's
+                                    // next snapshot retires its key; only the
+                                    // clock is spent.
+                                    entry.elapsed = None;
                                 }
-                                shell.update_terminal_elapsed.remove(key);
                             }
                             cx.refresh_windows();
                         }
-                        !shell.update_terminal_elapsed.is_empty()
+                        shell
+                            .update_cards
+                            .values()
+                            .any(|entry| entry.elapsed.is_some())
                     })
                     .unwrap_or(false);
                 if !keep_running {
