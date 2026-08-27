@@ -1,10 +1,10 @@
 use gpui::{App, Entity};
 use gpui_component::resizable::ResizableState;
+use nmt_app_terminal::view::TerminalPane;
 use nmt_config::local_state::TabState;
 
 use crate::agent::{AgentKind, AgentPane};
 use crate::pane_tree::{PaneId, PaneTree};
-use crate::terminal::view::TerminalPane;
 
 pub(crate) type TerminalPaneTree = PaneTree<Entity<TerminalPane>, Entity<ResizableState>>;
 

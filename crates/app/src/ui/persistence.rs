@@ -3,6 +3,7 @@ use std::process;
 use dirs::home_dir;
 use gpui::{App, AppContext, Axis, Context, Entity, Window};
 use gpui_component::resizable::ResizableState;
+use nmt_app_terminal::view::TerminalPane;
 use nmt_config::local_state::{
     PaneNodeState, PaneSplitAxis, SessionState, TabState, WorkspaceState,
 };
@@ -15,7 +16,6 @@ use super::shell::{TabSurface, agent_workspace};
 use crate::agent::{AgentKind, AgentPane};
 use crate::pane_tree::{PaneId, PaneNode, PaneTree};
 use crate::tabs::{TabId, TabManager};
-use crate::terminal::view::TerminalPane;
 use crate::window::WindowRegistry;
 use crate::workspace::{
     WorkspaceId, WorkspaceKind, WorkspaceManager, WorkspaceRoots, default_workspace_name,

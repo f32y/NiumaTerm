@@ -1,0 +1,33 @@
+[package]
+name = "nmt_app_terminal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+nmt_agent_utils.workspace = true
+nmt_config.workspace = true
+nmt_i18n.workspace = true
+nmt_input.workspace = true
+nmt_platform.workspace = true
+nmt_remote_net.workspace = true
+nmt_terminal.workspace = true
+
+futures.workspace = true
+gpui.workspace = true
+gpui-component.workspace = true
+# Kitty graphics: construct GPUI `RenderImage` frames from decoded pixels. Same
+# crate/version GPUI links, so `image_rs::Frame` unifies with `gpui`'s `Frame`.
+image_rs.workspace = true
+parking_lot.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+base64.workspace = true
+gpui = { workspace = true, features = ["test-support"] }
+gpui_windows.workspace = true
+tokio.workspace = true
