@@ -10,6 +10,7 @@ use std::{env, fs, io, process, thread};
 
 use gpui::{App, Context, Entity, Global, Window};
 use gpui_component::input::InputState;
+use nmt_agent_utils::AgentWorkspace;
 use tracing::warn;
 
 use crate::agent::input_history::store::{
@@ -24,18 +25,25 @@ pub(crate) struct InputHistoryScope {
     target: String,
     backend: String,
     cwd: String,
+    /// Signature of the additional workspace directories, empty for a
+    /// single-directory workspace. Two workspaces that share a primary
+    /// directory but attach different ones are different working contexts, so
+    /// their prompt histories stay apart; keeping the field empty when there
+    /// are no additions is what leaves every existing history entry reachable.
+    additional: String,
 }
 
 impl InputHistoryScope {
-    pub(crate) fn local(kind: AgentKind, cwd: Option<&str>) -> Self {
-        Self::new(LOCAL_TARGET, kind, cwd)
+    pub(crate) fn local(kind: AgentKind, workspace: &AgentWorkspace) -> Self {
+        Self::new(LOCAL_TARGET, kind, workspace)
     }
 
-    fn new(target: impl Into<String>, kind: AgentKind, cwd: Option<&str>) -> Self {
+    fn new(target: impl Into<String>, kind: AgentKind, workspace: &AgentWorkspace) -> Self {
         Self {
             target: target.into(),
             backend: kind.id().to_string(),
-            cwd: normalize_working_directory(cwd),
+            cwd: normalize_working_directory(workspace.primary()),
+            additional: workspace.history_signature(),
         }
     }
 }

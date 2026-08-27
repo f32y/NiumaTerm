@@ -11,9 +11,9 @@ use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 use std::{env, fs};
 
-use nmt_agent_utils::LaunchConfig;
 use nmt_agent_utils::chat::{Event, Item, SendOutcome};
 use nmt_agent_utils::deepseek::{Host, Session};
+use nmt_agent_utils::{AgentWorkspace, LaunchConfig};
 
 /// A prompt into an idle conversation starts a turn of its own. Steering means
 /// this side thought a turn was running, and a refusal means the harness would
@@ -84,7 +84,7 @@ fn folded_text(events: &[Event]) -> String {
 #[ignore = "starts a real harness host and spends a model call"]
 fn a_turn_streams_and_survives_being_stopped() {
     let (tx, frames) = channel();
-    let mut session = Session::create(&launch(), None, move |frame| {
+    let mut session = Session::create(&launch(), &AgentWorkspace::default(), move |frame| {
         let _ = tx.send(frame);
     })
     .expect("the harness host should start and open a conversation");
@@ -179,13 +179,13 @@ fn the_host_serves_whether_or_not_it_knows_the_no_browser_flag() {
 #[ignore = "starts a real harness host"]
 fn two_sessions_share_one_host_and_do_not_see_each_other() {
     let (first_tx, first_frames) = channel();
-    let mut first = Session::create(&launch(), None, move |frame| {
+    let mut first = Session::create(&launch(), &AgentWorkspace::default(), move |frame| {
         let _ = first_tx.send(frame);
     })
     .expect("the first conversation should open");
 
     let (second_tx, second_frames) = channel();
-    let mut second = Session::create(&launch(), None, move |frame| {
+    let mut second = Session::create(&launch(), &AgentWorkspace::default(), move |frame| {
         let _ = second_tx.send(frame);
     })
     .expect("the second conversation should reuse the running host");
@@ -235,7 +235,7 @@ fn an_approval_is_raised_answered_and_the_turn_continues() {
     let _ = fs::remove_file(&outside);
 
     let (tx, frames) = channel();
-    let mut session = Session::create(&launch(), None, move |frame| {
+    let mut session = Session::create(&launch(), &AgentWorkspace::default(), move |frame| {
         let _ = tx.send(frame);
     })
     .expect("the harness host should start and open a conversation");
@@ -313,7 +313,7 @@ fn a_real_turn_shows_its_commands_and_file_changes() {
     let (tx, frames) = channel();
     let mut session = Session::create(
         &launch(),
-        Some(workspace.display().to_string()),
+        &AgentWorkspace::single(Some(workspace.display().to_string())),
         move |frame| {
             let _ = tx.send(frame);
         },
@@ -422,7 +422,7 @@ fn a_profile_pinning_an_unserved_effort_is_told_rather_than_ignored() {
     };
 
     let (tx, frames) = channel();
-    let mut session = Session::create(&launch, None, move |frame| {
+    let mut session = Session::create(&launch, &AgentWorkspace::default(), move |frame| {
         let _ = tx.send(frame);
     })
     .expect("the harness host should start and open a conversation");
@@ -448,7 +448,7 @@ fn a_profile_pinning_an_unserved_effort_is_told_rather_than_ignored() {
 #[ignore = "starts a real harness host"]
 fn the_agent_preset_roster_reaches_the_picker() {
     let (tx, frames) = channel();
-    let mut session = Session::create(&launch(), None, move |frame| {
+    let mut session = Session::create(&launch(), &AgentWorkspace::default(), move |frame| {
         let _ = tx.send(frame);
     })
     .expect("the harness host should start and open a conversation");

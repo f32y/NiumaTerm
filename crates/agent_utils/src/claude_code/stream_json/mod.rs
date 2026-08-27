@@ -14,7 +14,6 @@
 use std::collections::{HashMap, VecDeque};
 #[cfg(test)]
 use std::fs;
-#[cfg(test)]
 use std::process::Command;
 use std::time::Duration;
 
@@ -59,6 +58,7 @@ use crate::claude_code::workflows::{
 };
 use crate::launcher::AgentCli;
 use crate::subprocess::JsonLineProcess;
+use crate::workspace::AgentWorkspace;
 
 mod control;
 mod launch;
@@ -203,7 +203,76 @@ impl Session {
             },
         ]
     }
+}
 
+/// Assemble the CLI invocation for one conversation. Kept apart from the spawn
+/// so the exact argument boundaries can be inspected without starting a
+/// process: a path pushed as its own argument is never re-parsed, which is what
+/// keeps a directory containing spaces or shell metacharacters intact.
+fn claude_command(
+    launcher: &AgentCli,
+    launch: &LaunchConfig,
+    workspace: &AgentWorkspace,
+    resume: Option<&str>,
+    initial_model: &Option<String>,
+) -> Command {
+    let mut command = launcher.command([
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--input-format",
+        "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        "--permission-prompt-tool",
+        "stdio",
+        "--allow-dangerously-skip-permissions",
+    ]);
+
+    // File snapshots are opt-in for stream-json SDK clients. This is
+    // applied after profile overrides so every NiumaTerm Claude session
+    // can create checkpoints for subsequent `/rewind` operations.
+    enable_file_checkpointing(&mut command);
+
+    // The CLI takes effort as a launch flag; its `/effort` command is the
+    // only other way in, and that costs a visible turn on every new
+    // conversation.
+    if let Some(effort) = &launch.effort {
+        command.args(["--effort", effort]);
+    }
+
+    // The CLI resolves the model once during its handshake and builds the
+    // system prompt from it, including the identity it states to the model
+    // itself. A later `set_model` reroutes the requests while that prompt
+    // keeps describing the startup model, so a model the tab already knows
+    // about has to arrive as a launch flag. Without one the CLI starts on
+    // the model from its own configuration.
+    if let Some(model) = initial_model {
+        command.args(["--model", model]);
+    }
+
+    if let Some(session_id) = resume {
+        command.args(["--resume", session_id]);
+    }
+
+    // Additional workspace directories reach the CLI through its own
+    // `--add-dir` flag, applied to new and resumed conversations alike. The
+    // primary directory is not repeated because the process already starts
+    // there, and Claude keeps its session storage and configuration discovery
+    // anchored on that directory.
+    if workspace.is_multi_root() {
+        command.arg("--add-dir");
+        command.args(workspace.additional());
+    }
+
+    if let Some(cwd) = workspace.primary() {
+        command.current_dir(cwd);
+    }
+
+    command
+}
+
+impl Session {
     /// Spawn `claude` in bidirectional stream-json mode and send the SDK-style
     /// `initialize` control request. Every parsed stdout line is handed to
     /// `deliver` (from a reader thread — hop threads before calling
@@ -216,7 +285,7 @@ impl Session {
     /// UI pre-fills its transcript from the session file instead.
     pub fn spawn(
         launch: &LaunchConfig,
-        cwd: Option<String>,
+        workspace: &AgentWorkspace,
         resume: Option<String>,
         deliver: impl Fn(Value) + Send + 'static,
         on_stderr: impl Fn(String) + Send + 'static,
@@ -224,48 +293,13 @@ impl Session {
         let initial_model = launch_model(launch);
         let launcher = AgentCli::from_launch(launch, "claude");
         let executable = launcher.executable().to_string();
-        let mut command = launcher.command([
-            "-p",
-            "--output-format",
-            "stream-json",
-            "--input-format",
-            "stream-json",
-            "--verbose",
-            "--include-partial-messages",
-            "--permission-prompt-tool",
-            "stdio",
-            "--allow-dangerously-skip-permissions",
-        ]);
-
-        // File snapshots are opt-in for stream-json SDK clients. This is
-        // applied after profile overrides so every NiumaTerm Claude session
-        // can create checkpoints for subsequent `/rewind` operations.
-        enable_file_checkpointing(&mut command);
-
-        // The CLI takes effort as a launch flag; its `/effort` command is the
-        // only other way in, and that costs a visible turn on every new
-        // conversation.
-        if let Some(effort) = &launch.effort {
-            command.args(["--effort", effort]);
-        }
-
-        // The CLI resolves the model once during its handshake and builds the
-        // system prompt from it, including the identity it states to the model
-        // itself. A later `set_model` reroutes the requests while that prompt
-        // keeps describing the startup model, so a model the tab already knows
-        // about has to arrive as a launch flag. Without one the CLI starts on
-        // the model from its own configuration.
-        if let Some(model) = &initial_model {
-            command.args(["--model", model]);
-        }
-
-        if let Some(session_id) = &resume {
-            command.args(["--resume", session_id]);
-        }
-
-        if let Some(cwd) = cwd {
-            command.current_dir(cwd);
-        }
+        let command = claude_command(
+            &launcher,
+            launch,
+            workspace,
+            resume.as_deref(),
+            &initial_model,
+        );
 
         let process = JsonLineProcess::spawn(command, &executable, "Claude", deliver, on_stderr)?;
 

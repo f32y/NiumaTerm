@@ -304,6 +304,7 @@ fn a_directory_reads_as_its_last_two_components() {
 /// finished writing, and drawing it twice at once.
 mod queued_prompt_placement_tests {
     use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext, WindowHandle};
+    use nmt_agent_utils::AgentWorkspace;
     use nmt_agent_utils::chat::{
         Event as SessionEvent, Item as SessionItem, QueuedPrompt, SendOutcome, SlashCommandOutcome,
     };
@@ -330,7 +331,8 @@ mod queued_prompt_placement_tests {
             cx.set_global(AppSettings::default());
             cx.set_global(AgentThreadDefaults::default());
             cx.open_window(Default::default(), |window, cx| {
-                let agent = cx.new(|cx| AgentPane::new(profile, None, window, cx));
+                let agent =
+                    cx.new(|cx| AgentPane::new(profile, AgentWorkspace::default(), window, cx));
                 pane = Some(agent.clone());
                 cx.new(|cx| gpui_component::Root::new(agent, window, cx))
             })

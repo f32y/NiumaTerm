@@ -231,7 +231,7 @@ impl AgentPane {
         }
         self.workflows.restored_session = Some(session_id.clone());
 
-        let cwd = self.cwd.clone();
+        let cwd = self.cwd();
         let epoch = self.session_epoch;
         let read = cx
             .background_executor()
@@ -350,7 +350,7 @@ impl AgentPane {
             .collect::<Vec<_>>();
 
         (!requests.is_empty()).then_some(RefreshPlan {
-            cwd: self.cwd.clone(),
+            cwd: self.cwd(),
             session_id,
             epoch: self.session_epoch,
             requests,
@@ -421,7 +421,7 @@ impl AgentPane {
             open_agent: Some(open.agent_id.clone()),
             open_agent_len: None,
         };
-        let cwd = self.cwd.clone();
+        let cwd = self.cwd();
         let epoch = self.session_epoch;
         let read = cx
             .background_executor()

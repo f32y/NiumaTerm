@@ -95,6 +95,13 @@ pub struct WorkspaceState {
     pub name: String,
     #[serde(default)]
     pub cwd: Option<String>,
+    /// Directories the workspace owns beyond its primary `cwd`, in workspace
+    /// order. Defaulting when absent lets a snapshot written before
+    /// multi-directory workspaces restore as a single-directory workspace, and
+    /// omitting an empty list keeps those snapshots byte-identical. TOML
+    /// requires every scalar field ahead of the `tabs` array of tables.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub additional_cwds: Vec<String>,
     #[serde(default)]
     pub pinned: bool,
     #[serde(default)]
@@ -281,6 +288,7 @@ mod tests {
                         workspaces: vec![WorkspaceState {
                             name: "Workspace 1".into(),
                             cwd: Some("C:/Projects/example".into()),
+                            additional_cwds: vec!["C:/Projects/library".into(), "D:/Docs".into()],
                             pinned: true,
                             active_tab: 9,
                             tabs: vec![TabState {
@@ -458,6 +466,7 @@ mod tests {
                     workspaces: vec![WorkspaceState {
                         name: "Workspace 1".into(),
                         cwd: None,
+                        additional_cwds: Vec::new(),
                         pinned: false,
                         active_tab: 0,
                         tabs: vec![split_tab],
@@ -479,6 +488,7 @@ mod tests {
                     workspaces: vec![WorkspaceState {
                         name: "Workspace 1".into(),
                         cwd: None,
+                        additional_cwds: Vec::new(),
                         pinned: false,
                         active_tab: 0,
                         tabs: vec![TabState::default()],
@@ -511,6 +521,99 @@ shell = "pwsh.exe"
         assert_eq!(tab.name.as_deref(), Some("Tab 1"));
         assert_eq!(tab.panes, None);
         assert!(!loaded.windows[0].session.as_ref().unwrap().workspaces[0].pinned);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn additional_workspace_directories_survive_older_and_newer_snapshots() {
+        let dir = env::temp_dir().join("NiumaTerm-additional-cwds-test");
+        let _ = fs::remove_dir_all(&dir);
+        let path = dir.join("local_state.toml");
+        fs::create_dir_all(&dir).unwrap();
+
+        // A snapshot written before multi-directory workspaces existed.
+        fs::write(
+            &path,
+            r#"
+[[windows]]
+[windows.session]
+active_workspace = 0
+[[windows.session.workspaces]]
+name = "Workspace 1"
+cwd = "C:/Projects/example"
+active_tab = 0
+"#,
+        )
+        .unwrap();
+        let workspace = load_from(&path).windows[0]
+            .session
+            .clone()
+            .unwrap()
+            .workspaces
+            .remove(0);
+        assert_eq!(workspace.cwd.as_deref(), Some("C:/Projects/example"));
+        assert!(workspace.additional_cwds.is_empty());
+
+        // A workspace without additions writes no key at all, so an older
+        // build reads back exactly what it wrote.
+        let single = LocalState {
+            agent_defaults: Default::default(),
+            windows: vec![WindowLocalState {
+                window: None,
+                session: Some(SessionState {
+                    active_workspace: 0,
+                    workspaces: vec![WorkspaceState {
+                        name: "Workspace 1".into(),
+                        cwd: Some("C:/Projects/example".into()),
+                        additional_cwds: Vec::new(),
+                        pinned: false,
+                        active_tab: 0,
+                        tabs: vec![TabState::default()],
+                    }],
+                }),
+                sidebar_width: None,
+            }],
+        };
+        save_to(&path, &single).unwrap();
+        assert!(
+            !fs::read_to_string(&path)
+                .unwrap()
+                .contains("additional_cwds")
+        );
+        assert_eq!(load_from(&path), single);
+
+        // Ordered additions round-trip, and an older build that ignores the
+        // key still restores the primary directory and the tabs.
+        let mut multi = single.clone();
+        multi.windows[0].session.as_mut().unwrap().workspaces[0].additional_cwds =
+            vec!["C:/Projects/library".into(), "D:/Docs".into()];
+        save_to(&path, &multi).unwrap();
+        assert_eq!(load_from(&path), multi);
+
+        #[derive(Debug, Deserialize)]
+        struct LegacyWorkspace {
+            cwd: Option<String>,
+            #[serde(default)]
+            tabs: Vec<TabState>,
+        }
+        #[derive(Debug, Deserialize)]
+        struct LegacySession {
+            workspaces: Vec<LegacyWorkspace>,
+        }
+        #[derive(Debug, Deserialize)]
+        struct LegacyWindow {
+            session: LegacySession,
+        }
+        #[derive(Debug, Deserialize)]
+        struct LegacyState {
+            windows: Vec<LegacyWindow>,
+        }
+        let legacy: LegacyState =
+            toml::from_str(&fs::read_to_string(&path).unwrap()).expect("older build parses");
+        let workspace = &legacy.windows[0].session.workspaces[0];
+        assert_eq!(workspace.cwd.as_deref(), Some("C:/Projects/example"));
+        assert_eq!(workspace.tabs.len(), 1);
 
         let _ = fs::remove_dir_all(&dir);
     }

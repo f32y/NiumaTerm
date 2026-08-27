@@ -150,11 +150,11 @@ fn scoped_background_tasks<'a>(
 impl AgentPane {
     pub(crate) fn new(
         profile: AgentProfile,
-        cwd: Option<String>,
+        workspace: AgentWorkspace,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        Self::new_resuming(profile, cwd, None, window, cx)
+        Self::new_resuming(profile, workspace, None, window, cx)
     }
 
     /// A pane whose first session continues `resume` instead of opening a
@@ -163,13 +163,14 @@ impl AgentPane {
     /// listed it.
     pub(crate) fn new_resuming(
         profile: AgentProfile,
-        cwd: Option<String>,
+        workspace: AgentWorkspace,
         resume: Option<RecoveryIdentity>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let kind = AgentKind::from_profile(profile.kind);
-        let input_history_scope = InputHistoryScope::local(kind, cwd.as_deref());
+        let cwd = workspace.primary().map(str::to_string);
+        let input_history_scope = InputHistoryScope::local(kind, &workspace);
         let name = kind.display();
         // Auto-grow wraps long prompts instead of scrolling them off-screen.
         // The view intercepts modified Enter actions before this input's
@@ -229,7 +230,10 @@ impl AgentPane {
             agent_route: agent_process().allocate_route(),
             kind,
             profile,
-            cwd,
+            // Nothing has started yet, so the active snapshot matches the
+            // configured list until the first conversation clones it.
+            active_workspace: workspace.clone(),
+            workspace,
             input_history_scope,
             input_history_navigation: InputHistoryNavigation::default(),
             attachments: PendingAttachments::default(),
@@ -344,7 +348,7 @@ impl AgentPane {
             return;
         }
 
-        let cwd = self.cwd.clone();
+        let cwd = self.cwd();
         let scope = self.history_ui.scope;
 
         cx.spawn(async move |this, cx| {
@@ -397,9 +401,39 @@ impl AgentPane {
         self.kind
     }
 
-    /// The tab's working directory, which transcript links resolve against.
+    /// The tab's primary directory, which transcript links resolve against.
     pub(crate) fn working_directory(&self) -> Option<String> {
-        self.cwd.clone()
+        self.cwd()
+    }
+
+    /// The tab's primary directory: where its process runs, what its provider
+    /// session history is scoped to, and what a relative path resolves against.
+    pub(in crate::agent) fn cwd(&self) -> Option<String> {
+        self.workspace.primary().map(str::to_string)
+    }
+
+    /// The directories this tab is currently configured with. A conversation
+    /// started from now on receives these.
+    pub(in crate::agent) fn configured_workspace(&self) -> &AgentWorkspace {
+        &self.workspace
+    }
+
+    /// The directories the running conversation was started with.
+    #[cfg(test)]
+    pub(in crate::agent) fn active_workspace(&self) -> &AgentWorkspace {
+        &self.active_workspace
+    }
+
+    /// Replace the configured directory list after the parent workspace was
+    /// edited. The running conversation keeps the snapshot it started with;
+    /// the next one clones this.
+    pub(crate) fn set_workspace(&mut self, workspace: AgentWorkspace, cx: &mut Context<Self>) {
+        if self.workspace == workspace {
+            return;
+        }
+        self.input_history_scope = InputHistoryScope::local(self.kind, &workspace);
+        self.workspace = workspace;
+        cx.notify();
     }
 
     /// Append one item to the conversation, tagged with the current turn so
@@ -427,7 +461,7 @@ impl AgentPane {
             return;
         }
 
-        let Some(cwd) = self.cwd.clone().or_else(|| {
+        let Some(cwd) = self.cwd().or_else(|| {
             env::current_dir()
                 .ok()
                 .map(|path| path.to_string_lossy().to_string())
@@ -540,7 +574,10 @@ impl AgentPane {
 
         let kind = self.kind;
         let name = kind.display();
-        let cwd = self.cwd.clone();
+        // The conversation about to start owns this snapshot for its whole
+        // life; a later workspace edit reaches the one after it.
+        self.active_workspace = self.workspace.clone();
+        let workspace = self.active_workspace.clone();
 
         let caps = kind.caps();
         // A resume into a backend that replays its own thread controls keeps
@@ -625,7 +662,7 @@ impl AgentPane {
         }
         let spawned = cx
             .background_executor()
-            .spawn(async move { Backend::spawn(kind, &launch, cwd, recovery, deliver) });
+            .spawn(async move { Backend::spawn(kind, &launch, &workspace, recovery, deliver) });
 
         cx.spawn(async move |this, cx| {
             let spawned = spawned.await;
@@ -994,7 +1031,7 @@ impl AgentPane {
         // Captured before the read starts so live updates that land while it
         // runs keep their newer state.
         let starting_sequence = session.begin_task_restoration();
-        let cwd = self.cwd.clone();
+        let cwd = self.cwd();
         let epoch = self.session_epoch;
 
         cx.spawn(async move |this, cx| {
@@ -1054,7 +1091,7 @@ impl AgentPane {
         key: &BackgroundTaskKey,
         cx: &mut Context<Self>,
     ) {
-        let cwd = self.cwd.clone();
+        let cwd = self.cwd();
         let Some(session) = self.session.as_mut() else {
             return;
         };
@@ -1433,7 +1470,7 @@ impl AgentPane {
         let elsewhere = summary
             .cwd
             .clone()
-            .filter(|cwd| !directories_match(Some(cwd.as_str()), self.cwd.as_deref()));
+            .filter(|cwd| !directories_match(Some(cwd.as_str()), self.cwd().as_deref()));
 
         if self.history_ui.mode == RecentSessionsMode::Loading {
             return;
@@ -1489,7 +1526,7 @@ impl AgentPane {
                 }
             }
             AgentKind::Claude => {
-                let cwd = self.cwd.clone();
+                let cwd = self.cwd();
                 let replay_id = id.clone();
                 let selected = index;
 

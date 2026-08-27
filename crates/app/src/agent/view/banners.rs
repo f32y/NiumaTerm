@@ -304,6 +304,37 @@ impl AgentPane {
             .into_any_element()
     }
 
+    /// A strip naming the workspace directories the installed harness cannot
+    /// use. It is not dismissible and appears before the first prompt, because
+    /// a user who attached three directories would otherwise only discover the
+    /// reduction from the agent failing to find a file.
+    pub(in crate::agent::view) fn render_multi_root_notice(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let notice = multi_root_notice(self.kind, self.configured_workspace())?;
+
+        Some(
+            h_flex()
+                .w_full()
+                .px_4()
+                .py_2()
+                .gap_3()
+                .border_b_1()
+                .border_color(cx.theme().border)
+                .bg(cx.theme().warning.opacity(0.10))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(notice),
+                )
+                .into_any_element(),
+        )
+    }
+
     pub(in crate::agent::view) fn render_update_banner(
         &self,
         cx: &mut Context<Self>,
@@ -565,4 +596,26 @@ impl AgentPane {
             )
             .into_any_element()
     }
+}
+
+/// What an Agent Tab has to disclose about the directories its harness cannot
+/// reach, or `None` when there is nothing to disclose. Derived from the
+/// harness's declared access and the workspace alone, so a permission-preset
+/// change can neither raise nor clear it: choosing a broader preset widens what
+/// the harness may do inside the one root it has, and does not give it
+/// selected-root isolation across the others.
+pub(in crate::agent::view) fn multi_root_notice(
+    kind: AgentKind,
+    workspace: &AgentWorkspace,
+) -> Option<String> {
+    if kind.caps().multi_root_access == MultiRootAccess::Full || !workspace.is_multi_root() {
+        return None;
+    }
+
+    Some(
+        i18n("agent-multi-root-primary-only")
+            .replace("{agent}", kind.display())
+            .replace("{path}", workspace.primary().unwrap_or_default())
+            .replace("{count}", &workspace.additional().len().to_string()),
+    )
 }

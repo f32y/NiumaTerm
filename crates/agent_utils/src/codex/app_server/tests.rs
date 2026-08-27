@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use crate::codex::app_server::protocol::{command_purpose, turn_start_params};
 use crate::codex::app_server::*;
+use crate::workspace::AgentWorkspace;
 
 /// Replayed conversation with its turn grouping flattened away, for the tests
 /// that assert what a thread replays rather than how it is divided.
@@ -314,7 +315,8 @@ fn turn_start_sends_the_selected_approval_reviewer() {
         turn_start_params(
             "thr_123",
             json!([{"type": "text", "text": "continue"}]),
-            &settings
+            &settings,
+            &AgentWorkspace::single(Some("C:/A".into())),
         ),
         json!({
             "threadId": "thr_123",
@@ -355,18 +357,109 @@ fn thread_start_injects_profile_model_and_provider_without_a_secret() {
     });
     expected["config"]["model_providers.niumaterm-a1"][PROVIDER_API_FIELD] = json!("responses");
 
-    assert_eq!(thread_start_params(&profile), expected);
+    assert_eq!(
+        thread_start_params(&profile, &AgentWorkspace::single(Some("C:/A".into()))),
+        expected
+    );
+}
+
+#[test]
+fn a_single_directory_thread_start_carries_no_root_keys() {
+    let profile = ThreadProfile::default();
+
+    // An older NiumaTerm build sent exactly this, so a single-directory
+    // conversation keeps working against every supported CLI version.
+    for workspace in [
+        AgentWorkspace::default(),
+        AgentWorkspace::single(Some("C:/A".into())),
+    ] {
+        let params = thread_start_params(&profile, &workspace);
+        assert_eq!(params, json!({"experimentalRawEvents": true}));
+    }
+}
+
+#[test]
+fn a_multi_directory_thread_start_names_the_primary_and_every_root() {
+    let params = thread_start_params(
+        &ThreadProfile::default(),
+        &AgentWorkspace::new(
+            Some(r"C:\Work\api".into()),
+            vec![r"C:\Work\web".into(), r"D:\Shared docs".into()],
+        ),
+    );
+
+    assert_eq!(params["cwd"], json!(r"C:\Work\api"));
+    assert_eq!(
+        params["runtimeWorkspaceRoots"],
+        json!([r"C:\Work\api", r"C:\Work\web", r"D:\Shared docs"])
+    );
+}
+
+#[test]
+fn workspace_write_turns_list_every_selected_root() {
+    let settings = ThreadSettings {
+        sandbox: Some("workspaceWrite".into()),
+        ..ThreadSettings::default()
+    };
+    let workspace = AgentWorkspace::new(Some("C:/A".into()), vec!["C:/B".into(), "C:/C".into()]);
+
+    let params = turn_start_params("thr_1", json!([]), &settings, &workspace);
+    assert_eq!(
+        params["sandboxPolicy"],
+        json!({
+            "type": "workspaceWrite",
+            "writableRoots": ["C:/A", "C:/B", "C:/C"],
+        })
+    );
+}
+
+#[test]
+fn narrower_and_broader_sandbox_modes_keep_their_own_meaning() {
+    let workspace = AgentWorkspace::new(Some("C:/A".into()), vec!["C:/B".into()]);
+
+    // Read-only grants no write anywhere and danger-full-access already
+    // exceeds the selected roots, so neither is redefined by them.
+    for mode in ["readOnly", "dangerFullAccess"] {
+        let settings = ThreadSettings {
+            sandbox: Some(mode.into()),
+            ..ThreadSettings::default()
+        };
+        let params = turn_start_params("thr_1", json!([]), &settings, &workspace);
+        assert_eq!(params["sandboxPolicy"], json!({"type": mode}));
+    }
+
+    // A single-directory workspace-write turn stays on the bare shape.
+    let settings = ThreadSettings {
+        sandbox: Some("workspaceWrite".into()),
+        ..ThreadSettings::default()
+    };
+    let params = turn_start_params(
+        "thr_1",
+        json!([]),
+        &settings,
+        &AgentWorkspace::single(Some("C:/A".into())),
+    );
+    assert_eq!(params["sandboxPolicy"], json!({"type": "workspaceWrite"}));
 }
 
 #[test]
 fn initial_resume_never_creates_an_orphan_thread() {
     let profile = ThreadProfile::default();
-    let resumed = initial_thread_request(Some("thr_retained"), &profile);
+    let workspace = AgentWorkspace::new(Some("C:/A".into()), vec!["C:/B".into()]);
+    let resumed = initial_thread_request(Some("thr_retained"), &profile, &workspace);
     assert_eq!(resumed["method"], "thread/resume");
     assert_eq!(resumed["id"], THREAD_RESUME_RPC_ID);
     assert_eq!(resumed["params"]["threadId"], "thr_retained");
 
-    let fresh = initial_thread_request(None, &profile);
+    // A resumed thread keeps the directory the server persisted for it; its
+    // access follows the current snapshot through the turns that come next.
+    assert!(resumed["params"]["runtimeWorkspaceRoots"].is_null());
+
+    let fresh = initial_thread_request(None, &profile, &workspace);
+    assert_eq!(
+        fresh["params"]["runtimeWorkspaceRoots"],
+        json!(["C:/A", "C:/B"])
+    );
     assert_eq!(fresh["method"], "thread/start");
     assert_eq!(fresh["id"], THREAD_START_RPC_ID);
 }

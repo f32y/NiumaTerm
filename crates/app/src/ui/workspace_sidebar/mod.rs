@@ -163,6 +163,18 @@ fn workspace_display_label(name: &str, cwd: &str) -> String {
         .unwrap_or_else(|| name.to_string())
 }
 
+/// The full ordered directory list a workspace row exposes through its tooltip
+/// and accessibility text: the primary path first, marked as primary, then
+/// every additional path in workspace order.
+fn workspace_dirs_description(cwd: &str, additional: &[String]) -> String {
+    let mut description = i18n("sidebar-workspace-primary-label").replace("{path}", cwd);
+    for path in additional {
+        description.push('\n');
+        description.push_str(path);
+    }
+    description
+}
+
 fn tail_preserving_path(path: &str, max_chars: usize) -> String {
     let length = path.chars().count();
     if length <= max_chars || max_chars == 0 {

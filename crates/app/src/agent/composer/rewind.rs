@@ -170,7 +170,7 @@ impl AgentPane {
             cx,
         );
 
-        let cwd = self.cwd.clone();
+        let cwd = self.cwd();
         let load = cx
             .background_executor()
             .spawn(async move { sessions::load_checkpoints(cwd.as_deref(), &session_id) });
@@ -533,7 +533,7 @@ impl AgentPane {
             return;
         };
 
-        let cwd = self.cwd.clone();
+        let cwd = self.cwd();
         let user_message_id = checkpoint.user_message_id.clone();
         self.rewind.state = Some(RewindState::ForkingConversation { operation_id });
         self.set_command_feedback(

@@ -479,9 +479,9 @@ impl Shell {
     ) {
         let home = home_dir()
             .map(|home| home.display().to_string())
-            .unwrap_or_default();
+            .unwrap_or_else(|| ".".to_string());
 
-        self.create_workspace(String::new(), home, window, cx);
+        self.create_workspace(String::new(), WorkspaceRoots::single(home), window, cx);
 
         self.close_workspace_now(id, window, cx);
     }

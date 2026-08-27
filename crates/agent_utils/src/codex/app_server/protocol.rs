@@ -12,6 +12,7 @@ use crate::chat::{
 use crate::codex::app_server::{
     PROVIDER_API_FIELD, THREAD_LIST_LIMIT, THREAD_RESUME_RPC_ID, THREAD_START_RPC_ID, ThreadProfile,
 };
+use crate::workspace::AgentWorkspace;
 
 pub(super) fn parse_context_window_usage(value: &Value) -> Option<ContextWindowUsage> {
     let current = parse_token_usage_breakdown(&value["last"])?;
@@ -143,7 +144,7 @@ pub(super) fn add_provider_config(params: &mut Value, provider: &CodexProviderCo
     params["config"] = Value::Object(config);
 }
 
-pub(super) fn thread_start_params(profile: &ThreadProfile) -> Value {
+pub(super) fn thread_start_params(profile: &ThreadProfile, workspace: &AgentWorkspace) -> Value {
     let mut params = json!({"experimentalRawEvents": true});
     if let Some(model) = profile.model.as_deref() {
         params["model"] = json!(model);
@@ -152,10 +153,32 @@ pub(super) fn thread_start_params(profile: &ThreadProfile) -> Value {
         params["modelProvider"] = json!(provider.id.as_str());
         add_provider_config(&mut params, provider);
     }
+    add_workspace_roots(&mut params, workspace);
     params
 }
 
-pub(super) fn initial_thread_request(thread_id: Option<&str>, profile: &ThreadProfile) -> Value {
+/// Name the thread's primary directory and the whole set of directories it may
+/// reach. The primary directory owns `cwd`, which is what Git discovery,
+/// configuration lookup, and history filtering key on; the runtime root list
+/// carries every directory in workspace order.
+///
+/// A single-directory conversation writes neither key, so its request stays
+/// byte-identical to what earlier NiumaTerm builds sent.
+fn add_workspace_roots(params: &mut Value, workspace: &AgentWorkspace) {
+    if !workspace.is_multi_root() {
+        return;
+    }
+    if let Some(primary) = workspace.primary() {
+        params["cwd"] = json!(primary);
+    }
+    params["runtimeWorkspaceRoots"] = json!(workspace.ordered().collect::<Vec<_>>());
+}
+
+pub(super) fn initial_thread_request(
+    thread_id: Option<&str>,
+    profile: &ThreadProfile,
+    workspace: &AgentWorkspace,
+) -> Value {
     if let Some(thread_id) = thread_id {
         json!({
             "jsonrpc": "2.0",
@@ -168,12 +191,15 @@ pub(super) fn initial_thread_request(thread_id: Option<&str>, profile: &ThreadPr
             "jsonrpc": "2.0",
             "id": THREAD_START_RPC_ID,
             "method": "thread/start",
-            "params": thread_start_params(profile),
+            "params": thread_start_params(profile, workspace),
         })
     }
 }
 
 pub(super) fn thread_resume_params(thread_id: &str, profile: &ThreadProfile) -> Value {
+    // Resume identifies a thread the server already persisted with its own
+    // directory; the workspace snapshot reaches it through the turns that
+    // follow, so re-declaring roots here would only risk contradicting it.
     let mut params = json!({"threadId": thread_id});
     if let Some(model) = profile.model.as_deref() {
         params["model"] = json!(model);
@@ -225,7 +251,12 @@ pub(super) fn parse_thread_settings(result: &Value) -> ThreadSettings {
     }
 }
 
-pub(super) fn turn_start_params(thread_id: &str, input: Value, settings: &ThreadSettings) -> Value {
+pub(super) fn turn_start_params(
+    thread_id: &str,
+    input: Value,
+    settings: &ThreadSettings,
+    workspace: &AgentWorkspace,
+) -> Value {
     let mut params = json!({
         "threadId": thread_id,
         "input": input,
@@ -241,7 +272,7 @@ pub(super) fn turn_start_params(thread_id: &str, input: Value, settings: &Thread
         params["approvalsReviewer"] = json!(reviewer);
     }
     if let Some(sandbox) = &settings.sandbox {
-        params["sandboxPolicy"] = json!({"type": sandbox});
+        params["sandboxPolicy"] = sandbox_policy(sandbox, workspace);
     }
     if let Some(effort) = &settings.effort {
         params["effort"] = json!(effort);
@@ -250,6 +281,22 @@ pub(super) fn turn_start_params(thread_id: &str, input: Value, settings: &Thread
     params["serviceTier"] = json!(settings.tier);
 
     params
+}
+
+/// The sandbox policy for one turn. Workspace-write is the only mode whose
+/// meaning depends on which directories the workspace owns: it names its
+/// writable roots explicitly, so every selected directory has to be listed or
+/// the turn silently loses write access to all but one. Read-only and
+/// danger-full-access are deliberately narrower and broader than the selected
+/// roots, so neither takes a root list.
+fn sandbox_policy(sandbox: &str, workspace: &AgentWorkspace) -> Value {
+    if sandbox != "workspaceWrite" || !workspace.is_multi_root() {
+        return json!({"type": sandbox});
+    }
+    json!({
+        "type": sandbox,
+        "writableRoots": workspace.ordered().collect::<Vec<_>>(),
+    })
 }
 
 pub(super) fn resumed_thread_events(result: &Value, suppress_replay: bool) -> Vec<Event> {

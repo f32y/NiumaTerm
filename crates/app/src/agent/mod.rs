@@ -69,8 +69,8 @@ use nmt_agent_utils::launcher::AgentCli;
 use nmt_agent_utils::update::{InstallationKey, ProviderKind};
 use nmt_agent_utils::workflow::{WorkflowAgentState, WorkflowRun, WorkflowSnapshot};
 use nmt_agent_utils::{
-    AgentEvent, AgentEventKind, AgentRoute, CodexProviderConfig, LaunchConfig, agent_process,
-    deepseek, normalize_body, normalize_title,
+    AgentEvent, AgentEventKind, AgentRoute, AgentWorkspace, CodexProviderConfig, LaunchConfig,
+    MultiRootAccess, agent_process, deepseek, normalize_body, normalize_title,
 };
 use nmt_config::local_state::{self, AgentDefaults as StoredAgentDefaults};
 use nmt_config::profile::{AgentProfile, AgentProfileKind, AgentProfileLauncher};
@@ -566,10 +566,16 @@ pub(crate) struct AgentPane {
     /// The launch profile this pane was opened with (executable, endpoint,
     /// env vars); every session (re)start uses it.
     profile: AgentProfile,
-    /// The tab's working directory; the session process runs here and the
-    /// session history is scoped to it (resume ids only resolve against the
-    /// same directory).
-    cwd: Option<String>,
+    /// The directories this tab is configured with. The primary one is the
+    /// tab's working directory: the session process runs there and provider
+    /// session history is scoped to it, because a resume id only resolves
+    /// against the directory its conversation ran in. Editing the parent
+    /// workspace replaces this list for the next conversation.
+    workspace: AgentWorkspace,
+    /// The directory list the running conversation was started with. Held
+    /// apart from `workspace` so an edit never changes what a process already
+    /// running was granted.
+    active_workspace: AgentWorkspace,
     input_history_scope: InputHistoryScope,
     input_history_navigation: InputHistoryNavigation,
     /// Images the pending message carries, anchored to the composer text by

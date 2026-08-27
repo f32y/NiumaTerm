@@ -72,7 +72,7 @@ impl Backend {
     pub(in crate::agent) fn spawn(
         kind: AgentKind,
         launch: &LaunchConfig,
-        cwd: Option<String>,
+        workspace: &AgentWorkspace,
         recovery: Option<RecoveryIdentity>,
         deliver: impl Fn(Value) + Send + Sync + 'static,
     ) -> Result<Self, String> {
@@ -86,19 +86,19 @@ impl Backend {
             AgentKind::Codex => match resume {
                 Some(thread_id) => app_server::Session::spawn_resuming(
                     launch,
-                    cwd,
+                    workspace,
                     thread_id,
                     true,
                     deliver,
                     |line| trace!("codex app-server: {line}"),
                 ),
-                None => app_server::Session::spawn(launch, cwd, deliver, |line| {
+                None => app_server::Session::spawn(launch, workspace, deliver, |line| {
                     trace!("codex app-server: {line}")
                 }),
             }
             .map(Backend::Codex),
             AgentKind::Claude => {
-                stream_json::Session::spawn(launch, cwd, resume, deliver, |line| {
+                stream_json::Session::spawn(launch, workspace, resume, deliver, |line| {
                     trace!("claude: {line}")
                 })
                 .map(Backend::Claude)
@@ -107,7 +107,7 @@ impl Backend {
             // every DeepSeek tab, and this attaches a conversation to it,
             // starting it only if no tab holds one yet. `resume` is unused
             // because continuing an earlier conversation is not mapped yet.
-            AgentKind::DeepSeek => deepseek::Session::create(launch, cwd, deliver)
+            AgentKind::DeepSeek => deepseek::Session::create(launch, workspace, deliver)
                 .map(Backend::DeepSeek)
                 .map_err(|error| error.message().to_string()),
         }

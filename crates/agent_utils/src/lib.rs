@@ -12,6 +12,7 @@ pub mod launcher;
 pub mod update;
 pub mod usage;
 pub mod workflow;
+pub mod workspace;
 
 mod hook_store;
 #[cfg(target_os = "windows")]
@@ -23,6 +24,7 @@ mod monitor;
 mod process;
 
 pub use codex::ProviderConfig as CodexProviderConfig;
+pub use workspace::{AgentWorkspace, MultiRootAccess};
 
 #[cfg(test)]
 use crate::event::MAX_TITLE_CHARS;
