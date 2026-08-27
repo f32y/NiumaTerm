@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::thread;
 
 use crate::claude_code::stream_json::*;
+use crate::workspace::AgentWorkspace;
 
 #[test]
 fn turn_output_usage_accumulates_model_responses() {
@@ -145,7 +146,7 @@ fn fake_stream_json_process_never_receives_rewind_as_a_user_turn() {
     let (messages_tx, messages_rx) = mpsc::channel();
     let mut session = Session::spawn(
         &launch,
-        None,
+        &AgentWorkspace::default(),
         None,
         move |message| {
             let _ = messages_tx.send(message);
@@ -203,8 +204,14 @@ fn resumed_session_id_is_available_before_the_first_init_event() {
         ..LaunchConfig::default()
     };
     let resume_id = "70000000-0000-4000-8000-000000000000".to_string();
-    let session = Session::spawn(&launch, None, Some(resume_id.clone()), |_| {}, |_| {})
-        .expect("fake resumed Claude process starts");
+    let session = Session::spawn(
+        &launch,
+        &AgentWorkspace::default(),
+        Some(resume_id.clone()),
+        |_| {},
+        |_| {},
+    )
+    .expect("fake resumed Claude process starts");
 
     let published_id = session.session_id().map(str::to_owned);
     drop(session);
@@ -815,7 +822,7 @@ fn a_resumed_session_asks_for_its_context_before_the_first_turn() {
     };
     let mut session = Session::spawn(
         &launch,
-        None,
+        &AgentWorkspace::default(),
         Some("70000000-0000-4000-8000-000000000000".to_string()),
         |_| {},
         |_| {},
@@ -1035,8 +1042,8 @@ fn model_output_after_a_finished_turn_opens_the_next_one() {
         )],
         ..LaunchConfig::default()
     };
-    let mut session =
-        Session::spawn(&launch, None, None, |_| {}, |_| {}).expect("fake Claude process starts");
+    let mut session = Session::spawn(&launch, &AgentWorkspace::default(), None, |_| {}, |_| {})
+        .expect("fake Claude process starts");
     session.ready = true;
 
     let assistant = json!({
@@ -1079,4 +1086,79 @@ fn model_output_after_a_finished_turn_opens_the_next_one() {
 
     drop(session);
     let _ = fs::remove_file(log);
+}
+
+/// The arguments `claude_command` would run, as owned strings.
+fn launch_arguments(workspace: &AgentWorkspace, resume: Option<&str>) -> Vec<String> {
+    let launch = LaunchConfig {
+        executable: "claude".into(),
+        ..LaunchConfig::default()
+    };
+    let launcher = AgentCli::from_launch(&launch, "claude");
+    claude_command(&launcher, &launch, workspace, resume, &None)
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect()
+}
+
+/// The `--add-dir` group of `arguments`, or `None` when the launch carries no
+/// additional directories at all.
+fn add_dir_group(arguments: &[String]) -> Option<&[String]> {
+    let start = arguments.iter().position(|arg| arg == "--add-dir")?;
+    let rest = &arguments[start + 1..];
+    let end = rest
+        .iter()
+        .position(|arg| arg.starts_with("--"))
+        .unwrap_or(rest.len());
+    Some(&rest[..end])
+}
+
+#[test]
+fn a_single_directory_launch_carries_no_additional_directory_flag() {
+    for workspace in [
+        AgentWorkspace::default(),
+        AgentWorkspace::single(Some(r"C:\Work\api".into())),
+    ] {
+        assert_eq!(add_dir_group(&launch_arguments(&workspace, None)), None);
+    }
+}
+
+#[test]
+fn every_additional_directory_is_one_argument_in_workspace_order() {
+    let workspace = AgentWorkspace::new(
+        Some(r"C:\Work\api".into()),
+        vec![
+            r"C:\Work\web client".into(),
+            r"D:\Shared & Docs\notes".into(),
+            r"E:\a;b|c".into(),
+        ],
+    );
+
+    // The primary directory is absent: the process already starts there.
+    assert_eq!(
+        add_dir_group(&launch_arguments(&workspace, None)),
+        Some(
+            &[
+                r"C:\Work\web client".to_string(),
+                r"D:\Shared & Docs\notes".to_string(),
+                r"E:\a;b|c".to_string(),
+            ][..]
+        )
+    );
+}
+
+#[test]
+fn a_resumed_launch_carries_both_the_session_id_and_the_directories() {
+    let workspace = AgentWorkspace::new(Some(r"C:\Work\api".into()), vec![r"C:\Work\web".into()]);
+    let arguments = launch_arguments(&workspace, Some("8365ddfc"));
+
+    let resume = arguments
+        .iter()
+        .position(|arg| arg == "--resume")
+        .expect("resume flag");
+    assert_eq!(arguments[resume + 1], "8365ddfc");
+    assert_eq!(
+        add_dir_group(&arguments),
+        Some(&[r"C:\Work\web".to_string()][..])
+    );
 }

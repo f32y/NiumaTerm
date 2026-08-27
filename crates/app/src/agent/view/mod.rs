@@ -102,6 +102,7 @@ impl Render for AgentPane {
         let running = composer_action(self.status) == ComposerAction::Stop;
         let update_suspended = self.update_suspension.is_some();
         let update_banner = self.render_update_banner(cx);
+        let multi_root_notice = self.render_multi_root_notice(cx);
         let update_overlay = self.render_update_overlay(cx);
         let start_overlay = self.render_start_overlay(cx);
         // A branch settled from the backend's answer has no window to reach
@@ -192,6 +193,7 @@ impl Render for AgentPane {
                 cx.global::<AppSettings>().agent_font_family.clone(),
             ))
             .text_size(px(cx.global::<AppSettings>().agent_font_size as f32))
+            .children(multi_root_notice)
             .children(update_banner)
             .child(
                 div()

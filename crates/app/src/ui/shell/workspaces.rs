@@ -297,8 +297,9 @@ impl Shell {
         cx.notify();
     }
 
-    /// Open the new-workspace dialog with the shared default name and a working
-    /// directory. Confirming creates the workspace; cancel creates nothing.
+    /// Open the new-workspace dialog: a name plus the shared directory editor,
+    /// so a workspace can be created with several directories in one step.
+    /// Confirming creates the workspace; cancel creates nothing.
     pub(crate) fn on_new_workspace(
         &mut self,
         _: &NewWorkspace,
@@ -310,17 +311,18 @@ impl Shell {
                 .default_value(i18n("shell-workspace-default-name").to_string())
         });
 
-        let dir_input = cx.new(|cx| {
-            InputState::new(window, cx).placeholder(i18n("shell-workspace-dir-placeholder"))
-        });
+        // A new workspace starts with no directory at all, which the editor's
+        // non-empty invariant cannot express; the picker fills the first one
+        // in and Create stays refused until it does.
+        let dirs = cx.new(|cx| WorkspaceDirsEditor::new(None, cx));
 
         let shell = cx.entity();
 
         window.open_dialog(cx, move |dialog, window, _| {
             let name_input = name_input.clone();
-            let dir_input = dir_input.clone();
+            let dirs = dirs.clone();
             let content_name = name_input.clone();
-            let content_dir = dir_input.clone();
+            let content_dirs = dirs.clone();
             let shell = shell.clone();
             let margin_top = ((window.viewport_size().height - px(300.)) * 0.5).max(px(16.));
 
@@ -355,70 +357,24 @@ impl Shell {
                             ),
                         ),
                 )
-                .content(move |content, _, cx| {
-                    let browse_dir = content_dir.clone();
+                .content(move |content, _, _| {
                     content.child(
                         v_flex()
                             .gap_2()
                             .child(div().text_sm().child(i18n("shell-workspace-name-label")))
                             .child(Input::new(&content_name))
-                            .child(div().text_sm().child(i18n("shell-workspace-dir-label")))
-                            .child(
-                                h_flex()
-                                    .gap_2()
-                                    .child(div().flex_1().child(Input::new(&content_dir)))
-                                    .child(
-                                        Button::new("browse-workspace-dir")
-                                            .label(i18n("shell-workspace-browse"))
-                                            .on_click(move |_, window, cx| {
-                                                let rx = cx.prompt_for_paths(PathPromptOptions {
-                                                    files: false,
-                                                    directories: true,
-                                                    multiple: false,
-                                                    prompt: None,
-                                                    file_types: Vec::new(),
-                                                });
-
-                                                let dir_input = browse_dir.clone();
-
-                                                window
-                                                    .spawn(cx, async move |cx| {
-                                                        if let Ok(Ok(Some(paths))) = rx.await
-                                                            && let Some(path) = paths.first()
-                                                        {
-                                                            let value = path.display().to_string();
-
-                                                            let _ = dir_input.update_in(
-                                                                cx,
-                                                                |state, window, cx| {
-                                                                    state.set_value(
-                                                                        value, window, cx,
-                                                                    )
-                                                                },
-                                                            );
-                                                        }
-                                                    })
-                                                    .detach();
-                                            }),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(i18n("shell-workspace-dir-description")),
-                            ),
+                            .child(content_dirs.clone()),
                     )
                 })
                 .on_ok(move |_, window, cx| {
                     let name = name_input.read(cx).value().trim().to_string();
-                    let dir = dir_input.read(cx).value().trim().to_string();
-
-                    if dir.is_empty() {
+                    let Some(roots) = dirs.read(cx).roots().cloned() else {
                         return false;
-                    }
+                    };
 
-                    shell.update(cx, |this, cx| this.create_workspace(name, dir, window, cx));
+                    shell.update(cx, |this, cx| {
+                        this.create_workspace(name, roots, window, cx)
+                    });
 
                     true
                 })
@@ -445,7 +401,7 @@ impl Shell {
     pub(super) fn create_workspace(
         &mut self,
         name: String,
-        dir: String,
+        roots: WorkspaceRoots,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -455,7 +411,7 @@ impl Shell {
             name
         };
 
-        let cwd = explicit_cwd(&dir);
+        let cwd = explicit_cwd(roots.primary());
         let surface_id = Self::alloc_id(&mut self.next_id);
         let default_profile = Self::default_profile(cx);
         let pane = Self::spawn_default_pane(cx, surface_id, default_profile, cwd.clone());
@@ -471,16 +427,16 @@ impl Shell {
         );
 
         let ws_id = Self::alloc_id(&mut self.next_id);
-        let ws_cwd = cwd.unwrap_or_else(|| ".".to_string());
 
         let ws_id = self
             .workspaces
-            .new_workspace(tabs, WorkspaceId(ws_id), name, ws_cwd);
+            .new_workspace(tabs, WorkspaceId(ws_id), name, roots);
 
         self.workspaces.set_temporary(ws_id, true);
 
         self.focus_active(window, cx);
 
+        self.refresh_root_availability(cx);
         self.sync_session_memory(cx);
 
         cx.notify();

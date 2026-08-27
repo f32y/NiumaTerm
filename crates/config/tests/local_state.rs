@@ -7,6 +7,7 @@ fn session_indexes_clamp_to_existing_entries() {
         workspaces: vec![WorkspaceState {
             name: "Workspace 1".into(),
             cwd: None,
+            additional_cwds: Vec::new(),
             pinned: false,
             active_tab: 99,
             tabs: vec![

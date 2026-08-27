@@ -6,6 +6,7 @@ use std::time::SystemTime;
 use std::{env, fs, process};
 
 use gpui::{Entity, TestAppContext, VisualTestContext, WindowHandle};
+use nmt_agent_utils::AgentWorkspace;
 use nmt_agent_utils::chat::{SendOutcome, SessionSummary, SlashCommandOutcome};
 use nmt_config::profile::{AgentProfile, AgentProfileKind};
 
@@ -46,7 +47,27 @@ impl Drop for TestDirectory {
 }
 
 fn scope(target: &str, kind: AgentKind, cwd: &Path) -> InputHistoryScope {
-    InputHistoryScope::new(target, kind, cwd.to_str())
+    InputHistoryScope::new(
+        target,
+        kind,
+        &AgentWorkspace::single(cwd.to_str().map(str::to_string)),
+    )
+}
+
+/// A scope for a workspace whose primary directory is `cwd` and which also
+/// owns `additional`.
+fn multi_root_scope(kind: AgentKind, cwd: &Path, additional: &[&Path]) -> InputHistoryScope {
+    InputHistoryScope::new(
+        "local",
+        kind,
+        &AgentWorkspace::new(
+            cwd.to_str().map(str::to_string),
+            additional
+                .iter()
+                .filter_map(|path| path.to_str().map(str::to_string))
+                .collect(),
+        ),
+    )
 }
 
 fn open_test_pane(
@@ -78,7 +99,8 @@ fn open_test_pane(
             writer: None,
         });
         cx.open_window(Default::default(), |window, cx| {
-            let agent = cx.new(|cx| AgentPane::new(profile, Some(cwd), window, cx));
+            let agent =
+                cx.new(|cx| AgentPane::new(profile, AgentWorkspace::single(Some(cwd)), window, cx));
             pane = Some(agent.clone());
             cx.new(|cx| gpui_component::Root::new(agent, window, cx))
         })
@@ -566,4 +588,98 @@ fn restored_multiline_text_places_the_utf8_cursor_at_the_end(cx: &mut gpui::Test
         assert_eq!(input.cursor(), expected_end);
         assert_eq!(input.selected_range(), expected_end..expected_end);
     });
+}
+
+#[test]
+fn workspaces_sharing_a_primary_directory_keep_separate_histories() {
+    let directory = TestDirectory::new();
+    let primary = directory.path().join("api");
+    let web = directory.path().join("web");
+    let docs = directory.path().join("docs");
+    for path in [&primary, &web, &docs] {
+        fs::create_dir_all(path).expect("create directory");
+    }
+
+    let alone = multi_root_scope(AgentKind::Codex, &primary, &[]);
+    let with_web = multi_root_scope(AgentKind::Codex, &primary, &[&web]);
+    let with_docs = multi_root_scope(AgentKind::Codex, &primary, &[&docs]);
+    let both = multi_root_scope(AgentKind::Codex, &primary, &[&web, &docs]);
+    let reordered = multi_root_scope(AgentKind::Codex, &primary, &[&docs, &web]);
+
+    // Attaching a directory changes the working context, so the prompts
+    // recorded in one root set do not surface in another.
+    assert_ne!(alone, with_web);
+    assert_ne!(with_web, with_docs);
+    assert_ne!(both, reordered);
+
+    // An equivalent spelling of the same ordered directories is the same
+    // scope, so history survives a path written with other separators.
+    let equivalent = multi_root_scope(AgentKind::Codex, &primary, &[&web.join(".")]);
+    assert_eq!(with_web, equivalent);
+
+    // A single-directory workspace still resolves to the scope that predates
+    // multi-directory workspaces, which is what keeps its history reachable.
+    assert_eq!(alone, scope("local", AgentKind::Codex, &primary));
+
+    let mut history = HistoryStore::default();
+    history.record(&alone, "alone".into());
+    history.record(&with_web, "with web".into());
+    history.record(&both, "both".into());
+    assert_eq!(history.entries(&alone), ["alone"]);
+    assert_eq!(history.entries(&with_web), ["with web"]);
+    assert_eq!(history.entries(&both), ["both"]);
+}
+
+#[gpui::test]
+async fn editing_a_workspace_reaches_the_next_conversation_only(cx: &mut TestAppContext) {
+    let directory = TestDirectory::new();
+    let (pane, _window) = open_test_pane(cx, &directory);
+
+    let started = AgentWorkspace::single(Some(directory.path().to_string_lossy().into_owned()));
+    let edited = AgentWorkspace::new(
+        Some(directory.path().to_string_lossy().into_owned()),
+        vec![
+            directory
+                .path()
+                .join("attached")
+                .to_string_lossy()
+                .into_owned(),
+        ],
+    );
+
+    pane.update(cx, |pane, cx| {
+        // The pane's first start already cloned its configured list.
+        assert_eq!(pane.active_workspace(), &started);
+
+        pane.set_workspace(edited.clone(), cx);
+
+        // The conversation in flight keeps what it was granted; only the
+        // configured list moved.
+        assert_eq!(pane.configured_workspace(), &edited);
+        assert_eq!(pane.active_workspace(), &started);
+
+        // The scope follows the configured list, so the edited workspace has
+        // its own prompt history from here on.
+        assert_eq!(
+            pane.input_history_scope,
+            multi_root_scope(
+                AgentKind::Codex,
+                directory.path(),
+                &[&directory.path().join("attached")],
+            )
+        );
+        cx.global_mut::<AgentInputHistory>()
+            .record(&pane.input_history_scope, "after the edit".into());
+    });
+
+    // The prompts recorded before the edit stay with the root set they were
+    // typed in.
+    let entries = cx.update(|cx| {
+        cx.global::<AgentInputHistory>().entries(&scope(
+            "local",
+            AgentKind::Codex,
+            directory.path(),
+        ))
+    });
+    assert!(entries.is_empty());
 }

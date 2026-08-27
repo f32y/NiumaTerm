@@ -9,6 +9,7 @@ mod tab_presentation;
 mod tab_surface;
 mod tabs_open;
 mod updates_layer;
+mod workspace_dirs;
 mod workspaces;
 
 #[cfg(test)]
@@ -21,8 +22,7 @@ use dirs::home_dir;
 use gpui::prelude::*;
 use gpui::{
     Anchor, AnyElement, App, Axis, Context, Div, Entity, FocusHandle, Focusable, MouseDownEvent,
-    ObjectFit, PathPromptOptions, Pixels, Render, SharedString, Task, Window, WindowBounds,
-    WindowId, div, img, px,
+    ObjectFit, Pixels, Render, SharedString, Task, Window, WindowBounds, WindowId, div, img, px,
 };
 use gpui_component::button::{Button, ButtonVariants, Toggle, ToggleVariants};
 use gpui_component::dialog::{
@@ -41,7 +41,7 @@ use gpui_component::{
 use nmt_agent_utils::update::{ProviderKind, UpdatePhase};
 use nmt_agent_utils::{
     AgentActivityPolicy, AgentEvent, AgentMonitor, AgentNotification, AgentRoute,
-    AgentRuntimeStatus, agent_process, request_native_delivery,
+    AgentRuntimeStatus, AgentWorkspace, agent_process, request_native_delivery,
 };
 use nmt_config::get;
 use nmt_config::local_state::WindowState;
@@ -80,6 +80,7 @@ use crate::ui::shell::close::{should_confirm_close, should_confirm_tab_close};
 pub(in crate::ui) use crate::ui::shell::inline_rename::{InlineRename, InlineRenameStyle};
 pub(in crate::ui) use crate::ui::shell::tab_presentation::pending_tab_icon;
 pub(crate) use crate::ui::shell::tab_surface::TabSurface;
+use crate::ui::shell::workspace_dirs::WorkspaceDirsEditor;
 use crate::ui::tab_bar::TabStrip;
 use crate::ui::token_usage::TokenUsageView;
 use crate::ui::workflows::WorkflowsView;
@@ -87,7 +88,7 @@ use crate::ui::workspace_sidebar::{self, Sidebar, SidebarTab};
 use crate::window::{AppWindow, LastActiveWindow, ShellEntry, ShellRegistry, WindowRegistry};
 use crate::workspace::{
     self, ProgressTally, TerminalActivity, WorkspaceId, WorkspaceKind, WorkspaceManager,
-    best_match, exact_match,
+    WorkspaceRoots, best_match, exact_match,
 };
 use crate::{remote, ui};
 
@@ -103,6 +104,23 @@ pub(super) fn settings_title() -> &'static str {
 pub(super) fn explicit_cwd(cwd: &str) -> Option<String> {
     let cwd = cwd.trim();
     (!cwd.is_empty() && cwd != ".").then(|| cwd.to_string())
+}
+
+/// The directory list an Agent Tab of `roots` starts with. Placeholder entries
+/// are dropped for the same reason [`explicit_cwd`] drops them: they name no
+/// directory a harness could be pointed at.
+pub(super) fn agent_workspace(roots: Option<&WorkspaceRoots>) -> AgentWorkspace {
+    let Some(roots) = roots else {
+        return AgentWorkspace::default();
+    };
+    AgentWorkspace::new(
+        explicit_cwd(roots.primary()),
+        roots
+            .additional()
+            .iter()
+            .filter_map(|path| explicit_cwd(path))
+            .collect(),
+    )
 }
 
 /// A conversation to reopen in a tab rooted where it ran, carrying the profile
@@ -185,6 +203,11 @@ pub(crate) struct Shell {
     update_notification_views: collections::HashMap<String, UpdateNotificationView>,
     update_terminal_elapsed: collections::HashMap<String, FocusedVisibleLifetime>,
     update_notification_timer_running: bool,
+    /// Workspace directories the last background availability check could not
+    /// reach, keyed by normalized path identity. A saved directory keeps its
+    /// place in its workspace whether or not the filesystem can see it, so
+    /// this drives presentation only.
+    unavailable_roots: collections::HashSet<String>,
     /// Workspace excluded from session persistence: the user chose Quit in
     /// the close-last-workspace dialog, so it must not be restored on the
     /// next launch. Only set on the quit path — cancelling keeps everything.
@@ -319,7 +342,7 @@ impl Shell {
 
         let git_model = cx.new(GitStatusModel::new);
 
-        let this = Self {
+        let mut this = Self {
             workspaces,
             next_id,
             agent_monitor,
@@ -354,10 +377,12 @@ impl Shell {
             update_notification_views: collections::HashMap::new(),
             update_terminal_elapsed: collections::HashMap::new(),
             update_notification_timer_running: false,
+            unavailable_roots: collections::HashSet::new(),
             doomed_workspace: None,
         };
 
         this.sync_session_memory(cx);
+        this.refresh_root_availability(cx);
 
         this
     }
@@ -812,7 +837,9 @@ impl Shell {
             tabs,
             WorkspaceId(ws_id),
             settings_title().to_string(),
-            String::new(),
+            // The settings entry is a view of the configuration file, so it
+            // owns no directory and never contributes to path routing.
+            None,
             WorkspaceKind::Settings,
         );
 

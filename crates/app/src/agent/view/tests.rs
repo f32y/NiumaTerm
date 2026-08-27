@@ -2,13 +2,16 @@ use std::time::Duration;
 
 use gpui_component::input::Enter;
 use nmt_agent_utils::chat::QueuedPrompt;
+use nmt_agent_utils::{AgentWorkspace, MultiRootAccess};
 use nmt_config::system::NewlineShortcut;
 
-use crate::agent::UpdateSuspension;
 use crate::agent::composer::prompt_with_response_annotations;
-use crate::agent::view::banners::{UpdateOverlayPhase, composer_stats_label, update_overlay_phase};
+use crate::agent::view::banners::{
+    UpdateOverlayPhase, composer_stats_label, multi_root_notice, update_overlay_phase,
+};
 use crate::agent::view::history::queued_message_label;
 use crate::agent::view::{ComposerEnterBehavior, composer_enter_behavior};
+use crate::agent::{AgentKind, UpdateSuspension};
 
 #[test]
 fn queued_message_label_flattens_a_multi_line_prompt() {
@@ -109,4 +112,40 @@ fn composer_newline_shortcut_controls_enter_behavior() {
         assert_eq!(composer_enter_behavior(shortcut, &ctrl), ctrl_behavior);
         assert_eq!(composer_enter_behavior(shortcut, &shift), shift_behavior);
     }
+}
+
+#[test]
+fn a_harness_with_full_access_discloses_nothing() {
+    let workspace = AgentWorkspace::new(Some("C:/A".into()), vec!["C:/B".into(), "C:/C".into()]);
+
+    for kind in [AgentKind::Codex, AgentKind::Claude] {
+        assert_eq!(kind.caps().multi_root_access, MultiRootAccess::Full);
+        assert_eq!(multi_root_notice(kind, &workspace), None);
+    }
+}
+
+#[test]
+fn a_primary_only_harness_names_the_directories_it_cannot_reach() {
+    assert_eq!(
+        AgentKind::DeepSeek.caps().multi_root_access,
+        MultiRootAccess::PrimaryOnly
+    );
+
+    // A single-directory workspace loses nothing, so it is told nothing.
+    assert_eq!(
+        multi_root_notice(
+            AgentKind::DeepSeek,
+            &AgentWorkspace::single(Some("C:/A".into()))
+        ),
+        None
+    );
+
+    let notice = multi_root_notice(
+        AgentKind::DeepSeek,
+        &AgentWorkspace::new(Some("C:/A".into()), vec!["C:/B".into(), "C:/C".into()]),
+    )
+    .expect("a multi-directory workspace is told what its harness cannot use");
+
+    assert!(notice.contains("C:/A"));
+    assert!(notice.contains('2'));
 }

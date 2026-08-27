@@ -99,6 +99,11 @@ pub(crate) struct Capabilities {
     /// session at all. Where the pick instead rides the launch or the next
     /// turn, seeding the picker is the whole of applying it.
     pub(crate) model_selection_is_a_request: bool,
+    /// Whether the harness can use every workspace directory or only the
+    /// primary one. A harness that cannot take the whole set must say so in
+    /// the tab rather than quietly working against one directory, and must
+    /// never be widened to a common ancestor to look like one that can.
+    pub(crate) multi_root_access: MultiRootAccess,
 }
 
 const CODEX: Capabilities = Capabilities {
@@ -121,6 +126,7 @@ const CODEX: Capabilities = Capabilities {
     session_rename: false,
     session_search: false,
     model_selection_is_a_request: false,
+    multi_root_access: MultiRootAccess::Full,
 };
 
 const CLAUDE: Capabilities = Capabilities {
@@ -143,6 +149,7 @@ const CLAUDE: Capabilities = Capabilities {
     session_rename: false,
     session_search: false,
     model_selection_is_a_request: false,
+    multi_root_access: MultiRootAccess::Full,
 };
 
 /// `skill_references` is false because the harness has no structured skill
@@ -169,6 +176,13 @@ const DEEPSEEK: Capabilities = Capabilities {
     session_rename: true,
     session_search: true,
     model_selection_is_a_request: true,
+    // The installed Harness resolves one workspace root per session and its
+    // workspace-write policy has no additional writable roots, so a
+    // multi-directory workspace reduces to its primary directory and the tab
+    // says which directories that leaves out. When a supported version
+    // publishes a per-session multi-root policy this becomes `Full` and the
+    // adapter passes every selected root.
+    multi_root_access: MultiRootAccess::PrimaryOnly,
 };
 
 impl AgentKind {

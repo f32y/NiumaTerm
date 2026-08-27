@@ -16,7 +16,10 @@ use crate::chat::{Event, Item};
 use crate::deepseek::api::ApiClient;
 use crate::deepseek::close::{CloseAction, run_close_actions};
 use crate::deepseek::events::pump_for_test;
+use crate::deepseek::history::sessions;
 use crate::deepseek::mapping::{ToolTracker, map_frame};
+use crate::deepseek::session::session_create_payload;
+use crate::workspace::AgentWorkspace;
 
 const SESSION: &str = "session-debb6efc";
 
@@ -435,7 +438,7 @@ fn an_unresolvable_harness_is_reported_as_missing_rather_than_as_a_failed_start(
     };
 
     assert!(matches!(
-        Session::create(&launch, None, |_| {}),
+        Session::create(&launch, &AgentWorkspace::default(), |_| {}),
         Err(HostError::NotInstalled(_))
     ));
 }
@@ -1929,4 +1932,39 @@ fn branch_points_pair_each_prompt_with_the_seq_of_the_one_ahead_of_it() {
             },
         ]
     );
+}
+
+#[test]
+fn a_conversation_opens_with_the_primary_directory_alone() {
+    let workspace = AgentWorkspace::new(
+        Some(r"C:\Work\api".into()),
+        vec![r"C:\Work\web".into(), r"D:\Docs".into()],
+    );
+
+    // Only the primary directory has a field in the session header, so this is
+    // the whole of what a multi-directory workspace can send.
+    assert_eq!(
+        session_create_payload(workspace.primary(), None),
+        json!({"cwd": r"C:\Work\api"})
+    );
+
+    // Resuming reopens the same conversation in the same directory.
+    assert_eq!(
+        session_create_payload(workspace.primary(), Some("sess_1")),
+        json!({"cwd": r"C:\Work\api", "sessionId": "sess_1"})
+    );
+}
+
+#[test]
+fn recent_conversations_are_filtered_by_the_primary_directory() {
+    let listed = json!({
+        "items": [
+            {"sessionId": "in-primary", "cwd": r"C:\Work\api", "updatedAt": 2},
+            {"sessionId": "in-additional", "cwd": r"C:\Work\web", "updatedAt": 3},
+        ]
+    });
+
+    let rows = sessions(&listed, Some(r"C:\Work\api"));
+    let ids: Vec<_> = rows.iter().map(|row| row.id.as_str()).collect();
+    assert_eq!(ids, ["in-primary"]);
 }

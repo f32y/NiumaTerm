@@ -6,7 +6,6 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 use std::{env, fs};
 
-use nmt_agent_utils::LaunchConfig;
 use nmt_agent_utils::chat::Event;
 use nmt_agent_utils::claude_code::stream_json;
 use nmt_agent_utils::codex::app_server;
@@ -15,6 +14,7 @@ use nmt_agent_utils::update::{
     ClaudeMaintenance, ClaudeReleaseChannel, CodexMaintenance, InstallationKey, ProviderKind,
     ProviderMaintenance, UpdateCoordinator, UpdateError, UpdatePhase,
 };
+use nmt_agent_utils::{AgentWorkspace, LaunchConfig};
 use semver::Version;
 use serde_json::Value;
 use uuid::Uuid;
@@ -316,7 +316,7 @@ fn one_claude_update_restores_multiple_sessions_in_place() {
         let (sender, receiver) = mpsc::channel();
         let mut session = stream_json::Session::spawn(
             launch,
-            None,
+            &AgentWorkspace::default(),
             None,
             move |value| {
                 let _ = sender.send(value);
@@ -342,7 +342,7 @@ fn one_claude_update_restores_multiple_sessions_in_place() {
         let (sender, receiver) = mpsc::channel();
         let mut resumed = stream_json::Session::spawn(
             launch,
-            None,
+            &AgentWorkspace::default(),
             Some(id.clone()),
             move |value| {
                 let _ = sender.send(value);
@@ -385,7 +385,7 @@ fn one_codex_update_restores_multiple_threads_without_starting_new_ones() {
         let (sender, receiver) = mpsc::channel();
         let mut session = app_server::Session::spawn(
             launch,
-            None,
+            &AgentWorkspace::default(),
             move |value| {
                 let _ = sender.send(value);
             },
@@ -409,7 +409,7 @@ fn one_codex_update_restores_multiple_threads_without_starting_new_ones() {
         let (sender, receiver) = mpsc::channel();
         let mut resumed = app_server::Session::spawn_resuming(
             launch,
-            None,
+            &AgentWorkspace::default(),
             id.clone(),
             true,
             move |value| {

@@ -75,7 +75,9 @@ impl Sidebar {
                     .aria_label(i18n("sidebar-tab-new"))
                     .size(px(NEW_TAB_BUTTON))
                     .child("+")
-                    .dropdown_menu(move |menu, _, cx| new_tab_menu(menu, &menu_shell, cx)),
+                    .dropdown_menu(move |menu, window, cx| {
+                        new_tab_menu(menu, &menu_shell, window, cx)
+                    }),
             )
             .capture_any_mouse_down(cx.listener(move |this, _, window, cx| {
                 this.workspaces.activate(idx);
@@ -134,10 +136,26 @@ impl Sidebar {
             .child(controls);
 
         let full_path = ws.cwd.clone();
+        // The `+N` token holds a fixed lane beside the path, so the path's own
+        // budget shrinks by its width instead of pushing it off the row.
+        let additional_count = ws.additional_cwds.len();
+        let additional_summary = (additional_count > 0).then(|| {
+            i18n("sidebar-workspace-additional-count")
+                .replace("{count}", &additional_count.to_string())
+        });
+        let path_budget = (self.width
+            - 80.0
+            - additional_summary
+                .as_ref()
+                .map_or(0.0, |token| 8.0 + 7.0 * token.chars().count() as f32))
+            / 7.0;
         let display_path = tail_preserving_path(
             &full_path,
-            (((self.width - 80.0) / 7.0).floor() as usize).clamp(8, 64),
+            (path_budget.floor().max(0.0) as usize).clamp(8, 64),
         );
+        // Tooltip and assistive technology get every directory in order; the
+        // row itself only has room for the primary path.
+        let dirs_description = workspace_dirs_description(&ws.cwd, &ws.additional_cwds);
         // A temporary workspace wears the same `*` an unsaved document does,
         // so its absence from the next session is visible before the user
         // closes the window.
@@ -181,13 +199,15 @@ impl Sidebar {
         let drag_width = (self.width - 36.0).max(80.0);
         let item = Button::new(("workspace", idx))
             .ghost()
-            .when(!settings_entry, |this| this.tooltip(full_path.clone()))
+            .when(!settings_entry, |this| {
+                this.tooltip(dirs_description.clone())
+            })
             .aria_label(if settings_entry {
                 display_label.clone()
             } else {
                 i18n("sidebar-workspace-item-label")
                     .replace("{name}", &display_label)
-                    .replace("{path}", &full_path)
+                    .replace("{path}", &dirs_description)
                     .replace("{status}", &status_label)
             })
             // The active tab's own row is highlighted in the vertical tab-bar
@@ -221,26 +241,46 @@ impl Sidebar {
                             .items_start()
                             .child(name)
                             .child(
-                                div()
-                                    .id(("workspace-path", idx))
+                                h_flex()
                                     .w_full()
-                                    .text_left()
-                                    .text_xs()
-                                    .overflow_hidden()
-                                    .whitespace_nowrap()
-                                    .when(!settings_entry, |this| {
-                                        this.aria_label(full_path.clone())
-                                    })
-                                    .text_color(cx.theme().sidebar_foreground.opacity(0.6))
-                                    // The settings entry has no working
-                                    // directory. A blank run still forms a line
-                                    // box, so its row stands as tall as the
-                                    // workspaces around it.
-                                    .child(if settings_entry {
-                                        SharedString::new_static(" ")
-                                    } else {
-                                        display_path.into()
-                                    }),
+                                    .gap_1()
+                                    .items_center()
+                                    .child(
+                                        div()
+                                            .id(("workspace-path", idx))
+                                            .flex_1()
+                                            .text_left()
+                                            .text_xs()
+                                            .overflow_hidden()
+                                            .whitespace_nowrap()
+                                            .when(!settings_entry, |this| {
+                                                this.aria_label(dirs_description.clone())
+                                            })
+                                            .text_color(cx.theme().sidebar_foreground.opacity(0.6))
+                                            // The settings entry has no working
+                                            // directory. A blank run still forms a line
+                                            // box, so its row stands as tall as the
+                                            // workspaces around it.
+                                            .child(if settings_entry {
+                                                SharedString::new_static(" ")
+                                            } else {
+                                                display_path.into()
+                                            }),
+                                    )
+                                    .children(additional_summary.map(|token| {
+                                        div()
+                                            .id(("workspace-additional-dirs", idx))
+                                            .flex_none()
+                                            .text_xs()
+                                            .aria_label(
+                                                i18n("sidebar-workspace-additional-label").replace(
+                                                    "{count}",
+                                                    &additional_count.to_string(),
+                                                ),
+                                            )
+                                            .text_color(cx.theme().sidebar_foreground.opacity(0.6))
+                                            .child(token)
+                                    })),
                             ),
                     )
                     .child(suffix),
@@ -320,6 +360,7 @@ impl Sidebar {
             }))
             .modern_context_menu(move |menu, _, _| {
                 let rename_shell = shell.clone();
+                let dirs_shell = shell.clone();
                 let close_shell = shell.clone();
                 let pin_shell = shell.clone();
                 let activate_shell = shell.clone();
@@ -357,6 +398,14 @@ impl Sidebar {
                         });
                     })
                     .icon(IconName::PenLine)
+                    .item(
+                        i18n("sidebar-workspace-menu-edit-dirs"),
+                        move |window, cx| {
+                            dirs_shell
+                                .update(cx, |this, cx| this.edit_workspace_dirs(ws_id, window, cx));
+                        },
+                    )
+                    .icon(IconName::Folder)
                     .item(i18n("sidebar-workspace-menu-copy-path"), move |_, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(cwd.clone()));
                     })

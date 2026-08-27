@@ -3,13 +3,18 @@
 //! active, and the set is never empty — `close_workspace` refuses the last one, so
 //! `active` always points at a real workspace (mirrors `TabManager`'s invariant).
 //!
-use std::path;
+use std::{iter, path};
 
 use nmt_agent_utils::AgentRuntimeStatus;
 use nmt_i18n::i18n;
 
 use crate::tabs::{CommandOutcome, TabId, TabManager};
 use crate::ui::{ActiveList, HasId, TabSurface};
+use crate::workspace::roots::path_identity;
+
+mod roots;
+
+pub use crate::workspace::roots::{RootChange, WorkspaceRoots, root_identity};
 
 /// What a workspace entry reports about the terminals inside it, folded over
 /// every tab it owns.
@@ -105,7 +110,10 @@ pub enum WorkspaceKind {
 pub struct Workspace {
     id: WorkspaceId,
     name: String,
-    cwd: String,
+    /// Where the workspace lives. `None` only for the Settings pseudo
+    /// workspace, which is a view of the configuration file and has no
+    /// filesystem location at all.
+    roots: Option<WorkspaceRoots>,
     pinned: bool,
     /// A workspace the user has not adopted yet: it stays out of the saved
     /// session, so opening a directory to run one command leaves nothing
@@ -130,64 +138,72 @@ pub fn default_workspace_name() -> &'static str {
     i18n("shell-workspace-default-name")
 }
 
-/// A path as comparable components: separators unified by `Path`, each
-/// component lowercased (Windows filesystems are case-insensitive). Literal
-/// comparison only — no symlink resolution, no filesystem access.
-fn cmp_components(path: &path::Path) -> Vec<String> {
-    path.components()
-        .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
-        .collect()
+/// Every directory a summary owns, primary first, skipping placeholder
+/// entries that do not name a concrete filesystem location.
+fn summary_roots(ws: &WorkspaceSummary) -> impl Iterator<Item = (bool, Vec<String>)> {
+    iter::once((true, ws.cwd.as_str()))
+        .chain(ws.additional_cwds.iter().map(|cwd| (false, cwd.as_str())))
+        .filter_map(|(primary, cwd)| Some((primary, root_identity(cwd)?)))
 }
 
-/// The first workspace whose cwd identifies exactly `target`. Comparison uses
-/// the same case-insensitive, separator-agnostic component identity as
-/// [`best_match`], while placeholder cwds remain ineligible.
+/// The first workspace that owns exactly `target` as one of its directories.
+/// A primary directory outranks an additional directory that identifies the
+/// same path, so the workspace whose defaults live there wins the tie.
+/// Comparison uses the same case-insensitive, separator-agnostic component
+/// identity as [`best_match`], while placeholder cwds remain ineligible.
 pub fn exact_match(summaries: &[WorkspaceSummary], target: &path::Path) -> Option<WorkspaceId> {
-    let target = cmp_components(target);
+    let target = path_identity(target);
     if target.is_empty() {
         return None;
     }
 
-    summaries.iter().find_map(|ws| {
-        let cwd = ws.cwd.trim();
-        if cwd.is_empty() || cwd == "." {
-            return None;
-        }
-
-        (cmp_components(path::Path::new(cwd)) == target).then_some(ws.id)
-    })
-}
-
-/// The workspace whose cwd is an ancestor of (or equal to) `target`, chosen
-/// by longest prefix in path components; ties go to the earlier workspace.
-/// Workspaces with an empty or `"."` cwd never match because they do not identify
-/// a concrete filesystem location.
-pub fn best_match(summaries: &[WorkspaceSummary], target: &path::Path) -> Option<WorkspaceId> {
-    let target = cmp_components(target);
-    let mut best: Option<(usize, WorkspaceId)> = None;
+    let mut additional: Option<WorkspaceId> = None;
     for ws in summaries {
-        let cwd = ws.cwd.trim();
-        if cwd.is_empty() || cwd == "." {
-            continue;
-        }
-        let comps = cmp_components(path::Path::new(cwd));
-        if comps.is_empty() || comps.len() > target.len() {
-            continue;
-        }
-        if comps.iter().zip(&target).all(|(a, b)| a == b)
-            && best.is_none_or(|(len, _)| comps.len() > len)
-        {
-            best = Some((comps.len(), ws.id));
+        for (primary, comps) in summary_roots(ws) {
+            if comps != target {
+                continue;
+            }
+            if primary {
+                return Some(ws.id);
+            }
+            additional = additional.or(Some(ws.id));
         }
     }
-    best.map(|(_, id)| id)
+    additional
+}
+
+/// The workspace owning a directory that is an ancestor of (or equal to)
+/// `target`. Candidates rank by longest matching root in path components, then
+/// by a primary directory over an additional one, then by workspace order.
+/// Workspaces whose only directories are empty or `"."` never match because
+/// they do not identify a concrete filesystem location.
+pub fn best_match(summaries: &[WorkspaceSummary], target: &path::Path) -> Option<WorkspaceId> {
+    let target = path_identity(target);
+    let mut best: Option<(usize, bool, WorkspaceId)> = None;
+    for ws in summaries {
+        for (primary, comps) in summary_roots(ws) {
+            if comps.len() > target.len() || !comps.iter().zip(&target).all(|(a, b)| a == b) {
+                continue;
+            }
+            let better = best.is_none_or(|(len, was_primary, _)| {
+                comps.len() > len || (comps.len() == len && primary && !was_primary)
+            });
+            if better {
+                best = Some((comps.len(), primary, ws.id));
+            }
+        }
+    }
+    best.map(|(_, _, id)| id)
 }
 
 /// Chrome-facing summary of a workspace (presentation-agnostic).
 pub struct WorkspaceSummary {
     pub id: WorkspaceId,
     pub name: String,
+    /// The primary directory, or `""` for the location-free Settings entry.
     pub cwd: String,
+    /// Directories owned beyond `cwd`, in workspace order.
+    pub additional_cwds: Vec<String>,
     pub active: bool,
     pub agent_status: AgentRuntimeStatus,
     /// Terminal activity across this workspace's tabs. The manager cannot see
@@ -222,12 +238,17 @@ fn tabs_progress(tabs: &TabManager<TabSurface>) -> ProgressTally {
 
 impl WorkspaceManager {
     /// Start with a single active workspace. There is no empty state.
-    pub fn new(tabs: TabManager<TabSurface>, id: WorkspaceId, name: String, cwd: String) -> Self {
+    pub fn new(
+        tabs: TabManager<TabSurface>,
+        id: WorkspaceId,
+        name: String,
+        roots: WorkspaceRoots,
+    ) -> Self {
         Self {
             workspaces: ActiveList::new(Workspace {
                 id,
                 name,
-                cwd,
+                roots: Some(roots),
                 pinned: false,
                 temporary: false,
                 kind: WorkspaceKind::Normal,
@@ -242,9 +263,9 @@ impl WorkspaceManager {
         tabs: TabManager<TabSurface>,
         id: WorkspaceId,
         name: String,
-        cwd: String,
+        roots: WorkspaceRoots,
     ) -> WorkspaceId {
-        self.new_workspace_of_kind(tabs, id, name, cwd, WorkspaceKind::Normal)
+        self.new_workspace_of_kind(tabs, id, name, Some(roots), WorkspaceKind::Normal)
     }
 
     /// Append a workspace of an explicit kind and make it active.
@@ -253,13 +274,13 @@ impl WorkspaceManager {
         tabs: TabManager<TabSurface>,
         id: WorkspaceId,
         name: String,
-        cwd: String,
+        roots: Option<WorkspaceRoots>,
         kind: WorkspaceKind,
     ) -> WorkspaceId {
         self.workspaces.push_active(Workspace {
             id,
             name,
-            cwd,
+            roots,
             pinned: false,
             temporary: false,
             kind,
@@ -319,10 +340,10 @@ impl WorkspaceManager {
         tabs: TabManager<TabSurface>,
         id: WorkspaceId,
         name: String,
-        cwd: String,
+        roots: WorkspaceRoots,
         pinned: bool,
     ) -> WorkspaceId {
-        let id = self.new_workspace(tabs, id, name, cwd);
+        let id = self.new_workspace(tabs, id, name, roots);
         self.set_pinned(id, pinned);
         id
     }
@@ -378,9 +399,36 @@ impl WorkspaceManager {
         &self.workspaces.active().tabs
     }
 
-    /// The active workspace's current directory.
+    /// The active workspace's primary directory, or `""` for the Settings
+    /// entry. New terminals, new Agent Tabs, generated labels, relative-path
+    /// resolution, and Git discovery all anchor here; additional directories
+    /// widen access without displacing these defaults.
     pub fn active_cwd(&self) -> &str {
-        &self.workspaces.active().cwd
+        self.workspaces
+            .active()
+            .roots
+            .as_ref()
+            .map_or("", WorkspaceRoots::primary)
+    }
+
+    /// Every directory the active workspace owns, primary first.
+    pub fn active_roots(&self) -> Option<&WorkspaceRoots> {
+        self.workspaces.active().roots.as_ref()
+    }
+
+    /// Every directory the workspace with `id` owns, primary first.
+    pub fn roots_of(&self, id: WorkspaceId) -> Option<&WorkspaceRoots> {
+        self.workspaces.find(id)?.roots.as_ref()
+    }
+
+    /// Replace the directories of the workspace with `id`. The Settings
+    /// entry keeps its location-free state.
+    pub fn set_roots(&mut self, id: WorkspaceId, roots: WorkspaceRoots) {
+        if let Some(workspace) = self.workspaces.find_mut(id)
+            && workspace.kind == WorkspaceKind::Normal
+        {
+            workspace.roots = Some(roots);
+        }
     }
 
     /// Rename the workspace with `id`. Blank names and unknown ids are ignored.
@@ -469,7 +517,14 @@ impl WorkspaceManager {
             .map(|(index, ws)| WorkspaceSummary {
                 id: ws.id,
                 name: ws.name.clone(),
-                cwd: ws.cwd.clone(),
+                cwd: ws
+                    .roots
+                    .as_ref()
+                    .map_or(String::new(), |roots| roots.primary().to_string()),
+                additional_cwds: ws
+                    .roots
+                    .as_ref()
+                    .map_or_else(Vec::new, |roots| roots.additional().to_vec()),
                 active: index == self.workspaces.active_index(),
                 agent_status: AgentRuntimeStatus::Idle,
                 terminal_activity: TerminalActivity::Idle,
@@ -496,257 +551,4 @@ impl WorkspaceManager {
 }
 
 #[cfg(test)]
-mod tests {
-    use nmt_terminal::event::{ProgressReport, ProgressState};
-
-    use super::*;
-
-    /// Summaries with the given cwds, ids = 1-based position.
-    fn summaries(cwds: &[&str]) -> Vec<WorkspaceSummary> {
-        cwds.iter()
-            .enumerate()
-            .map(|(i, cwd)| WorkspaceSummary {
-                id: WorkspaceId(i as u64 + 1),
-                name: format!("Workspace {}", i + 1),
-                cwd: cwd.to_string(),
-                active: i == 0,
-                agent_status: AgentRuntimeStatus::Idle,
-                terminal_activity: TerminalActivity::Idle,
-                unread_count: 0,
-                latest_unread_text: None,
-                pinned: false,
-                closeable: cwds.len() > 1,
-                temporary: false,
-                kind: WorkspaceKind::Normal,
-                progress: ProgressTally::default(),
-            })
-            .collect()
-    }
-
-    /// A manager holding `normal` normal workspaces (ids 1..=normal), with a
-    /// settings entry appended last when `settings` is set (id 100).
-    fn manager(normal: u64, settings: bool) -> WorkspaceManager {
-        let tabs = || {
-            TabManager::new(
-                TabSurface::Pending(Box::default()),
-                TabId(0),
-                "Tab".to_string(),
-            )
-        };
-
-        let mut manager = WorkspaceManager::new(
-            tabs(),
-            WorkspaceId(1),
-            "Workspace 1".to_string(),
-            "C:/one".to_string(),
-        );
-
-        for id in 2..=normal {
-            manager.new_workspace(
-                tabs(),
-                WorkspaceId(id),
-                format!("Workspace {id}"),
-                format!("C:/{id}"),
-            );
-        }
-
-        if settings {
-            manager.new_workspace_of_kind(
-                TabManager::new(TabSurface::Settings, TabId(100), "Settings".to_string()),
-                WorkspaceId(100),
-                "Settings".to_string(),
-                String::new(),
-                WorkspaceKind::Settings,
-            );
-        }
-
-        manager
-    }
-
-    #[test]
-    fn workspace_progress_averages_the_tabs_reporting_a_percentage() {
-        let mut tabs = TabManager::new(
-            TabSurface::Pending(Box::default()),
-            TabId(1),
-            "Tab".to_string(),
-        );
-        tabs.new_tab(
-            TabSurface::Pending(Box::default()),
-            TabId(2),
-            "Tab".to_string(),
-        );
-        tabs.new_tab(
-            TabSurface::Pending(Box::default()),
-            TabId(3),
-            "Tab".to_string(),
-        );
-
-        assert_eq!(tabs_progress(&tabs).fraction(), None);
-
-        let set = |progress| ProgressReport {
-            state: ProgressState::Set,
-            progress,
-        };
-        tabs.set_progress(TabId(1), set(Some(50)));
-        tabs.set_progress(TabId(2), set(Some(100)));
-        // No percentage to add, so this tab stays out of the average.
-        tabs.set_progress(
-            TabId(3),
-            ProgressReport {
-                state: ProgressState::Indeterminate,
-                progress: None,
-            },
-        );
-
-        assert_eq!(tabs_progress(&tabs).fraction(), Some(0.75));
-    }
-
-    #[test]
-    fn terminal_percentages_and_agent_tasks_share_one_scale() {
-        // A half-finished command plus a task list with one of three items
-        // done: 1.5 units of 4.
-        let tally = ProgressTally::percent(50).merge(ProgressTally::tasks(1, 3));
-
-        assert_eq!(tally.fraction(), Some(1.5 / 4.0));
-        assert_eq!(ProgressTally::tasks(0, 0).fraction(), None);
-    }
-
-    #[test]
-    fn an_unseen_result_outranks_a_running_command() {
-        let running = TerminalActivity::Running;
-        let succeeded = TerminalActivity::Finished(CommandOutcome::Succeeded);
-        let failed = TerminalActivity::Finished(CommandOutcome::Failed);
-
-        assert_eq!(running.merge(succeeded), succeeded);
-        assert_eq!(succeeded.merge(running), succeeded);
-        assert_eq!(succeeded.merge(failed), failed);
-        assert_eq!(failed.merge(succeeded), failed);
-        assert_eq!(TerminalActivity::Idle.merge(running), running);
-        assert_eq!(
-            TerminalActivity::Idle.merge(TerminalActivity::Idle),
-            TerminalActivity::Idle
-        );
-    }
-
-    #[test]
-    fn settings_entry_is_left_out_of_the_real_count() {
-        let manager = manager(1, true);
-
-        assert_eq!(manager.len(), 2);
-        assert_eq!(manager.real_len(), 1);
-        assert_eq!(manager.settings_id(), Some(WorkspaceId(100)));
-        assert_eq!(manager.kind_of(WorkspaceId(1)), Some(WorkspaceKind::Normal));
-    }
-
-    #[test]
-    fn a_lone_normal_workspace_stays_closed_off_beside_settings() {
-        let summaries = manager(1, true).summaries();
-
-        // The one real workspace routes into the quit/replace decision rather
-        // than closing outright; the settings entry always closes.
-        assert!(!summaries[0].closeable);
-        assert!(summaries[1].closeable);
-    }
-
-    #[test]
-    fn settings_closes_without_taking_the_last_slot() {
-        let mut manager = manager(1, true);
-
-        assert!(manager.close_workspace(WorkspaceId(100)).is_some());
-        assert_eq!(manager.len(), 1);
-        assert_eq!(manager.settings_id(), None);
-        assert_eq!(manager.active_id(), WorkspaceId(1));
-    }
-
-    #[test]
-    fn settings_reorders_like_any_other_entry() {
-        let mut manager = manager(2, true);
-
-        manager.reorder(2, 0);
-
-        let order: Vec<_> = manager.summaries().into_iter().map(|ws| ws.id).collect();
-
-        assert_eq!(
-            order,
-            vec![WorkspaceId(100), WorkspaceId(1), WorkspaceId(2)]
-        );
-        // The settings entry was active before the move and stays active.
-        assert_eq!(manager.active_id(), WorkspaceId(100));
-    }
-
-    #[test]
-    fn leaving_settings_lands_on_a_normal_workspace() {
-        let mut manager = manager(2, true);
-
-        assert_eq!(manager.active_kind(), WorkspaceKind::Settings);
-
-        manager.activate(manager.first_normal_index());
-
-        assert_eq!(manager.active_id(), WorkspaceId(1));
-        assert_eq!(manager.active_kind(), WorkspaceKind::Normal);
-    }
-
-    fn matched(cwds: &[&str], target: &str) -> Option<WorkspaceId> {
-        best_match(&summaries(cwds), path::Path::new(target))
-    }
-
-    fn exactly_matched(cwds: &[&str], target: &str) -> Option<WorkspaceId> {
-        exact_match(&summaries(cwds), path::Path::new(target))
-    }
-
-    #[test]
-    fn deepest_ancestor_wins() {
-        assert_eq!(
-            matched(&["C:/A/B", "C:/A"], "C:/A/B/C"),
-            Some(WorkspaceId(1))
-        );
-    }
-
-    #[test]
-    fn shallow_ancestor_matches_when_deep_does_not() {
-        assert_eq!(matched(&["C:/A/B", "C:/A"], "C:/A/D"), Some(WorkspaceId(2)));
-    }
-
-    #[test]
-    fn unrelated_target_matches_nothing() {
-        assert_eq!(matched(&["C:/A/B", "C:/A"], "C:/E"), None);
-    }
-
-    #[test]
-    fn equal_path_matches() {
-        assert_eq!(matched(&["C:/A/B"], "C:/A/B"), Some(WorkspaceId(1)));
-    }
-
-    #[test]
-    fn match_is_case_insensitive_and_separator_agnostic() {
-        assert_eq!(matched(&["c:\\a\\b\\"], "C:/A/B/C"), Some(WorkspaceId(1)));
-    }
-
-    #[test]
-    fn component_boundary_is_respected() {
-        assert_eq!(matched(&["C:/A/B"], "C:/A/BC"), None);
-    }
-
-    #[test]
-    fn placeholder_cwds_are_skipped() {
-        assert_eq!(matched(&[".", "", "  "], "C:/A"), None);
-    }
-
-    #[test]
-    fn tie_on_depth_goes_to_the_earlier_workspace() {
-        assert_eq!(matched(&["C:/A", "c:/a"], "C:/A/B"), Some(WorkspaceId(1)));
-    }
-
-    #[test]
-    fn exact_match_reuses_the_same_workspace_path() {
-        assert_eq!(
-            exactly_matched(&["C:/A", "c:\\work\\project\\"], "C:/WORK/PROJECT"),
-            Some(WorkspaceId(2))
-        );
-    }
-
-    #[test]
-    fn exact_match_does_not_reuse_ancestor_workspace() {
-        assert_eq!(exactly_matched(&["C:/A"], "C:/A/child"), None);
-    }
-}
+mod tests;

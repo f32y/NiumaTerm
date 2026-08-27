@@ -29,6 +29,7 @@ use crate::deepseek::models::ModelDirectory;
 use crate::deepseek::projections::ProjectionTracker;
 use crate::deepseek::workflows::WorkflowTracker;
 use crate::deepseek::{commands, history, presets, settings, subagents};
+use crate::workspace::AgentWorkspace;
 
 pub struct Session {
     client: ApiClient,
@@ -146,11 +147,15 @@ struct OpenedConversation {
 /// The same call serves both: naming an existing id returns that session
 /// unchanged when the directory matches, and refuses when it does not, which is
 /// what makes reattaching safe to attempt without a separate probe.
-fn open_conversation(
-    client: &ApiClient,
-    cwd: Option<&str>,
-    session_id: Option<&str>,
-) -> Result<OpenedConversation, String> {
+/// What NiumaTerm asks the harness to open a conversation with.
+///
+/// The header carries exactly one working directory, which the harness
+/// resolves into the single workspace root of the session's sandbox. Additional
+/// workspace directories therefore have no field to travel in and are
+/// deliberately absent rather than approximated: no common ancestor is
+/// substituted, and no broader permission preset is selected on the user's
+/// behalf. The Agent Tab discloses what that leaves out.
+pub(crate) fn session_create_payload(cwd: Option<&str>, session_id: Option<&str>) -> Value {
     let mut payload = json!({});
     if let Some(cwd) = cwd {
         payload["cwd"] = json!(cwd);
@@ -158,9 +163,16 @@ fn open_conversation(
     if let Some(session_id) = session_id {
         payload["sessionId"] = json!(session_id);
     }
+    payload
+}
 
+fn open_conversation(
+    client: &ApiClient,
+    cwd: Option<&str>,
+    session_id: Option<&str>,
+) -> Result<OpenedConversation, String> {
     let created = client
-        .call("session.create", payload)
+        .call("session.create", session_create_payload(cwd, session_id))
         .map_err(|error| error.message().to_string())?;
 
     let session_id = created["sessionId"]
@@ -597,9 +609,19 @@ impl Session {
     /// working directory applies when it is absent.
     pub fn create(
         launch: &crate::LaunchConfig,
-        cwd: Option<String>,
+        workspace: &AgentWorkspace,
         deliver: impl Fn(Value) + Send + Sync + 'static,
     ) -> Result<Self, HostError> {
+        // The installed Harness resolves exactly one workspace root from the
+        // session header, and its workspace-write policy has no additional
+        // writable roots. Sending only the primary directory is therefore the
+        // truthful reduction; approximating the rest with a common ancestor
+        // would hand the agent directories the user never selected. The Agent
+        // Tab discloses what is missing before the first prompt.
+        let cwd = workspace.primary().map(str::to_string);
+        // The host is shared by every DeepSeek tab and keyed by launch
+        // configuration alone, so which directories a conversation uses must
+        // not enter that identity.
         let host = host::shared(launch)?;
         let client = host.client().clone();
         let opened = open_conversation(&client, cwd.as_deref(), None).map_err(|error| {

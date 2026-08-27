@@ -188,6 +188,7 @@ mod tests {
             workspaces: vec![WorkspaceState {
                 name: "Workspace 1".into(),
                 cwd: Some("C:/Projects/example".into()),
+                additional_cwds: Vec::new(),
                 pinned: false,
                 active_tab: 0,
                 tabs: vec![TabState {

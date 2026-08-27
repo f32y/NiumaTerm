@@ -25,7 +25,7 @@ use crate::ui::{AppSettings, Shell, UI_RADIUS};
 use crate::workspace::TerminalActivity;
 
 mod drag;
-mod menu;
+pub(in crate::ui) mod menu;
 #[cfg(test)]
 mod tests;
 
@@ -297,7 +297,7 @@ impl TabStrip {
             .ghost()
             .px_2()
             .child("+")
-            .dropdown_menu(move |menu, _, cx| new_tab_menu(menu, &menu_shell, cx));
+            .dropdown_menu(move |menu, window, cx| new_tab_menu(menu, &menu_shell, window, cx));
 
         let tab_count = items.len();
         // The settings entry presents one tab and no way to add another, so

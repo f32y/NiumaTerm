@@ -11,13 +11,15 @@ use tracing::warn;
 
 use super::Shell;
 use super::settings::{AgentProfile, AppSettings, builtin_agent_profile};
-use super::shell::{TabSurface, explicit_cwd};
+use super::shell::{TabSurface, agent_workspace};
 use crate::agent::{AgentKind, AgentPane};
 use crate::pane_tree::{PaneId, PaneNode, PaneTree};
 use crate::tabs::{TabId, TabManager};
 use crate::terminal::view::TerminalPane;
 use crate::window::WindowRegistry;
-use crate::workspace::{WorkspaceId, WorkspaceKind, WorkspaceManager, default_workspace_name};
+use crate::workspace::{
+    WorkspaceId, WorkspaceKind, WorkspaceManager, WorkspaceRoots, default_workspace_name,
+};
 
 /// A pane that runs the current default profile's exact command is saved with
 /// `shell = None` — "follow the default profile" — so later profile changes apply
@@ -174,7 +176,7 @@ impl Shell {
             tabs,
             WorkspaceId(workspace_id),
             default_workspace_name().into(),
-            cwd,
+            WorkspaceRoots::single(cwd),
         )
     }
 
@@ -194,6 +196,7 @@ impl Shell {
             let WorkspaceState {
                 name,
                 cwd,
+                additional_cwds,
                 pinned,
                 active_tab,
                 tabs,
@@ -215,11 +218,27 @@ impl Shell {
             let cwd = cwd
                 .filter(|cwd| !cwd.trim().is_empty())
                 .unwrap_or_else(|| ".".to_string());
+            // A saved directory restores whether or not it currently resolves:
+            // a disconnected drive or a temporarily missing tree would
+            // otherwise silently drop the workspace's own tabs and layout. The
+            // sidebar marks what it cannot reach.
+            let roots = WorkspaceRoots::new(
+                cwd,
+                additional_cwds
+                    .into_iter()
+                    .filter(|cwd| !cwd.trim().is_empty())
+                    .collect(),
+            );
 
             if let Some(manager) = &mut workspaces {
-                manager.new_workspace_with_pinned(tab_manager, workspace_id, name, cwd, pinned);
+                manager.new_workspace_with_pinned(tab_manager, workspace_id, name, roots, pinned);
             } else {
-                workspaces = Some(WorkspaceManager::new(tab_manager, workspace_id, name, cwd));
+                workspaces = Some(WorkspaceManager::new(
+                    tab_manager,
+                    workspace_id,
+                    name,
+                    roots,
+                ));
                 workspaces
                     .as_mut()
                     .expect("workspace manager was just created")
@@ -260,13 +279,13 @@ impl Shell {
         // An unknown agent kind (a newer snapshot) degrades to the terminal
         // path below rather than losing the tab.
         if let Some(kind) = state.agent.as_deref().and_then(AgentKind::from_id) {
-            let cwd = explicit_cwd(workspaces.active_cwd());
+            let workspace = agent_workspace(workspaces.active_roots());
             let profile = restored_agent_profile(
                 state.agent_profile.as_deref(),
                 kind,
                 cx.global::<AppSettings>(),
             );
-            let pane = cx.new(|cx| AgentPane::new(profile, cwd, window, cx));
+            let pane = cx.new(|cx| AgentPane::new(profile, workspace, window, cx));
 
             Self::watch_agent_tab(&pane, cx);
 
@@ -536,6 +555,7 @@ impl Shell {
             workspaces.push(WorkspaceState {
                 name: workspace.name,
                 cwd: (!workspace.cwd.is_empty()).then_some(workspace.cwd),
+                additional_cwds: workspace.additional_cwds,
                 pinned: workspace.pinned,
                 active_tab: tabs.active_index(),
                 tabs: tabs

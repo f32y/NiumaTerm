@@ -330,9 +330,21 @@ impl Render for Shell {
         }
 
         if let Some(request) = self.pending_agent_resume.take() {
+            // The conversation ran in a directory of its own. Where a
+            // workspace owns that directory, the reopened tab gets that
+            // workspace's whole directory list; otherwise the conversation's
+            // own directory is all this tab can honestly claim.
+            let workspace =
+                exact_match(&self.workspaces.summaries(), path::Path::new(&request.cwd))
+                    .and_then(|id| self.workspaces.roots_of(id))
+                    .map_or_else(
+                        || AgentWorkspace::single(Some(request.cwd.clone())),
+                        |roots| agent_workspace(Some(roots)),
+                    );
+
             self.open_agent_tab_in(
                 &request.profile,
-                Some(request.cwd),
+                workspace,
                 Some(RecoveryIdentity::new(
                     AgentKind::from_profile(request.profile.kind),
                     request.session_id,

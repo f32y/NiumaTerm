@@ -26,6 +26,7 @@ pub use crate::chat::{
 };
 use crate::launcher::AgentCli;
 use crate::subprocess::JsonLineProcess;
+use crate::workspace::AgentWorkspace;
 use crate::{CodexProviderConfig, LaunchConfig};
 
 mod background_tasks;
@@ -171,6 +172,10 @@ pub struct Session {
     /// Profile-level model/provider overrides reused for thread start, history
     /// filtering, and resume. Provider credentials remain only in process env.
     thread_profile: ThreadProfile,
+    /// The directories this conversation was started with. Held for the life
+    /// of the session so every turn declares the same writable roots the
+    /// thread was opened with.
+    workspace: AgentWorkspace,
     initial_resume: Option<String>,
     suppress_resume_replay: bool,
     /// Descendant-thread tracking for the `Background Tasks` view.
@@ -224,11 +229,11 @@ impl Session {
     /// closure is owned by the reader thread and dropped when the pipe closes.
     pub fn spawn(
         launch: &LaunchConfig,
-        cwd: Option<String>,
+        workspace: &AgentWorkspace,
         deliver: impl Fn(Value) + Send + 'static,
         on_stderr: impl Fn(String) + Send + 'static,
     ) -> Result<Self, String> {
-        Self::spawn_inner(launch, cwd, None, false, deliver, on_stderr)
+        Self::spawn_inner(launch, workspace, None, false, deliver, on_stderr)
     }
 
     /// Start app-server directly into an existing thread. The initialize
@@ -237,7 +242,7 @@ impl Session {
     /// the visible transcript in place.
     pub fn spawn_resuming(
         launch: &LaunchConfig,
-        cwd: Option<String>,
+        workspace: &AgentWorkspace,
         thread_id: String,
         suppress_replay: bool,
         deliver: impl Fn(Value) + Send + 'static,
@@ -245,7 +250,7 @@ impl Session {
     ) -> Result<Self, String> {
         Self::spawn_inner(
             launch,
-            cwd,
+            workspace,
             Some(thread_id),
             suppress_replay,
             deliver,
@@ -255,7 +260,7 @@ impl Session {
 
     fn spawn_inner(
         launch: &LaunchConfig,
-        cwd: Option<String>,
+        workspace: &AgentWorkspace,
         initial_resume: Option<String>,
         suppress_resume_replay: bool,
         deliver: impl Fn(Value) + Send + 'static,
@@ -266,7 +271,10 @@ impl Session {
         let executable = launcher.executable().to_string();
         let mut command = launcher.command(["app-server"]);
 
-        if let Some(cwd) = cwd {
+        // The process runs in the primary directory: Codex resolves its own
+        // configuration and Git context from where it starts, and the
+        // additional directories widen access without moving that anchor.
+        if let Some(cwd) = workspace.primary() {
             command.current_dir(cwd);
         }
 
@@ -292,6 +300,7 @@ impl Session {
             compaction: CompactionState::default(),
             turn_output_usage: TurnOutputUsage::default(),
             thread_profile,
+            workspace: workspace.clone(),
             initial_resume,
             suppress_resume_replay,
             background: CodexTasks::default(),
@@ -376,7 +385,7 @@ impl Session {
             return SendOutcome::Steered;
         }
 
-        let params = turn_start_params(&thread_id, input, settings);
+        let params = turn_start_params(&thread_id, input, settings, &self.workspace);
 
         self.send(json!({
             "jsonrpc": "2.0",
@@ -851,6 +860,7 @@ impl Session {
                 self.send(initial_thread_request(
                     self.initial_resume.as_deref(),
                     &self.thread_profile,
+                    &self.workspace,
                 ));
 
                 Vec::new()

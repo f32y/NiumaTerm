@@ -22,6 +22,11 @@ struct StoredScope {
     target: String,
     backend: String,
     cwd: String,
+    /// Absent from a file written before workspaces could own more than one
+    /// directory, which is exactly the single-directory case this field is
+    /// empty for.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    additional: String,
     entries: Vec<String>,
 }
 
@@ -66,6 +71,7 @@ impl HistoryStore {
                     target: scope.target.clone(),
                     backend: scope.backend.clone(),
                     cwd: scope.cwd.clone(),
+                    additional: scope.additional.clone(),
                     entries: entries.iter().cloned().collect(),
                 })
                 .collect(),
@@ -96,6 +102,7 @@ pub(super) fn load_from_path(path: &Path) -> io::Result<HistoryStore> {
             target: scope.target,
             backend: scope.backend,
             cwd: scope.cwd,
+            additional: scope.additional,
         };
         for entry in scope.entries {
             history.record(&key, entry);
