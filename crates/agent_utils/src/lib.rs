@@ -20,6 +20,7 @@ mod subprocess;
 
 mod event;
 mod hook_command;
+mod json;
 mod monitor;
 mod process;
 

@@ -24,6 +24,7 @@ use crate::claude_code::sessions::paths::project_dir;
 use crate::claude_code::sessions::replay::parse_child_replay;
 use crate::claude_code::sessions::titles::conversation_user_text;
 use crate::claude_code::tool_items::{complete_tool_item, tool_item};
+use crate::json::{condense, text_field};
 
 /// Tool names whose launch creates a child agent.
 const LAUNCH_TOOLS: [&str; 2] = ["Task", "Agent"];
@@ -468,18 +469,6 @@ fn sidechain_preview(record: &Value) -> Option<String> {
     None
 }
 
-fn condense(text: &str) -> Option<String> {
-    const MAX_PREVIEW_CHARS: usize = 160;
-    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if text.is_empty() {
-        return None;
-    }
-    Some(match text.char_indices().nth(MAX_PREVIEW_CHARS) {
-        Some((cut, _)) => format!("{}…", &text[..cut]),
-        None => text,
-    })
-}
-
 /// Transcript records carry RFC 3339 timestamps. A record without a usable one
 /// still restores its row; only the elapsed and completion labels are lost.
 fn timestamp(record: &Value) -> Option<SystemTime> {
@@ -487,14 +476,4 @@ fn timestamp(record: &Value) -> Option<SystemTime> {
     let parsed = DateTime::parse_from_rfc3339(raw).ok()?;
     let seconds = u64::try_from(parsed.timestamp()).ok()?;
     Some(UNIX_EPOCH + Duration::from_secs(seconds))
-}
-
-fn text_field(value: &Value, keys: &[&str]) -> Option<String> {
-    keys.iter().find_map(|key| {
-        value[*key]
-            .as_str()
-            .map(str::trim)
-            .filter(|text| !text.is_empty())
-            .map(str::to_owned)
-    })
 }
