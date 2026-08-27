@@ -126,9 +126,9 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
 
         match record["type"].as_str() {
             Some("user") => {
-                complete_replayed_tools(&record, &mut items, &mut pending_tools);
+                complete_replayed_tools(record, &mut items, &mut pending_tools);
 
-                if let Some(summary) = compaction_summary_text(&record) {
+                if let Some(summary) = compaction_summary_text(record) {
                     match boundary_awaiting_summary
                         .take()
                         .and_then(|index| items.get_mut(index))
@@ -143,7 +143,7 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                             items.push(ReplayItem {
                                 at,
                                 item: Item::Compaction {
-                                    id: replayed_compaction_id(&record, compaction_seq),
+                                    id: replayed_compaction_id(record, compaction_seq),
                                     detail: Compaction {
                                         summary: Some(summary),
                                         ..Compaction::default()
@@ -155,7 +155,7 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                     continue;
                 }
 
-                if let Some(text) = conversation_user_text(&record) {
+                if let Some(text) = conversation_user_text(record) {
                     let text = if sidechain {
                         text.trim().to_owned()
                     } else {
@@ -178,7 +178,7 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                 }
             }
             Some("system") if record["subtype"].as_str() == Some("compact_boundary") => {
-                let detail = parse_compaction(compaction_metadata(&record));
+                let detail = parse_compaction(compaction_metadata(record));
 
                 match summary_awaiting_boundary
                     .take()
@@ -189,7 +189,7 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                         // The boundary marker is the record the live protocol
                         // reports, so adopting its identity keeps a resumed row
                         // and a live one from being two separate entries.
-                        *id = replayed_compaction_id(&record, compaction_seq);
+                        *id = replayed_compaction_id(record, compaction_seq);
                         *opened = Compaction {
                             summary: opened.summary.take(),
                             ..detail
@@ -205,7 +205,7 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                         items.push(ReplayItem {
                             at,
                             item: Item::Compaction {
-                                id: replayed_compaction_id(&record, compaction_seq),
+                                id: replayed_compaction_id(record, compaction_seq),
                                 detail,
                             },
                         });

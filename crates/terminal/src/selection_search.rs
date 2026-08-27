@@ -194,10 +194,7 @@ impl<'a> VisibleGrid<'a> {
             } else {
                 self.prev(cur)
             };
-            let p = match next {
-                Some(p) => p,
-                None => return None,
-            };
+            let p = next?;
             let c = self.cell(p).c();
             if c == end_char && skip_pairs == 0 {
                 return Some(p);

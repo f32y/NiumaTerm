@@ -97,10 +97,10 @@ pub fn list_devices() -> Vec<nmt_remote_net::DeviceEntry> {
 }
 
 pub fn revoke_device(public_key_hex: &str) {
-    if let Some(handle) = STATE.lock().handle.as_ref() {
-        if let Err(e) = handle.revoke_device(public_key_hex) {
-            warn!("failed to revoke device: {e}");
-        }
+    if let Some(handle) = STATE.lock().handle.as_ref()
+        && let Err(e) = handle.revoke_device(public_key_hex)
+    {
+        warn!("failed to revoke device: {e}");
     }
 }
 

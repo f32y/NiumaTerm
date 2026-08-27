@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::time::{Duration, Instant};
 
 use crate::AgentRoute;
@@ -142,12 +143,11 @@ impl AgentMonitor {
         activity_policy: AgentActivityPolicy,
         now: Instant,
     ) -> bool {
-        if self.panes.contains_key(&route) {
-            false
-        } else {
-            self.panes
-                .insert(route, AgentPaneState::new(now, activity_policy));
+        if let Entry::Vacant(entry) = self.panes.entry(route) {
+            entry.insert(AgentPaneState::new(now, activity_policy));
             true
+        } else {
+            false
         }
     }
 
@@ -403,7 +403,6 @@ impl AgentMonitor {
         MonitorMutation {
             visible_changed: true,
             removed_notifications: vec![notification.clone()],
-            ..MonitorMutation::default()
         }
     }
 
@@ -496,7 +495,6 @@ impl AgentMonitor {
         MonitorMutation {
             visible_changed: !removed_notifications.is_empty(),
             removed_notifications,
-            ..MonitorMutation::default()
         }
     }
 }

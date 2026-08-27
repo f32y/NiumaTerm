@@ -52,10 +52,9 @@ impl KillOnCloseJob {
     }
 
     pub fn attach_or_kill(child: &mut Child) -> io::Result<Self> {
-        Self::attach(child).map_err(|error| {
+        Self::attach(child).inspect_err(|_| {
             let _ = child.kill();
             let _ = child.wait();
-            error
         })
     }
 

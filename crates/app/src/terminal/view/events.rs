@@ -1,3 +1,4 @@
+use crate::terminal::session::TerminalSessionConfig;
 use crate::terminal::view::*;
 
 pub(super) fn terminal_surface_for_tab(
@@ -9,17 +10,18 @@ pub(super) fn terminal_surface_for_tab(
     environment_overrides: Vec<(String, String)>,
     manage_process_tree: bool,
 ) -> Result<TerminalSurface, String> {
-    match TerminalSurface::for_gpui(
-        wake.clone(),
-        surface_id,
-        state.shell.clone(),
-        state.args.clone(),
-        state.cwd.clone(),
-        profile_name.to_string(),
+    let launch = TerminalSessionConfig {
+        shell: state.shell.clone(),
+        args: state.args.clone(),
+        working_dir: state.cwd.clone(),
+        starting_title: Some(profile_name.to_string()),
         cursor_shape,
-        environment_overrides.clone(),
+        environment_overrides,
         manage_process_tree,
-    ) {
+        ..TerminalSessionConfig::default()
+    };
+
+    match TerminalSurface::for_gpui(wake.clone(), surface_id, launch.clone()) {
         Ok(surface) => Ok(surface),
 
         Err(error) if state.cwd.is_some() => {
@@ -28,13 +30,10 @@ pub(super) fn terminal_surface_for_tab(
             TerminalSurface::for_gpui(
                 wake.clone(),
                 surface_id,
-                state.shell.clone(),
-                state.args.clone(),
-                None,
-                profile_name.to_string(),
-                cursor_shape,
-                environment_overrides,
-                manage_process_tree,
+                TerminalSessionConfig {
+                    working_dir: None,
+                    ..launch
+                },
             )
         }
         Err(error) => Err(error),

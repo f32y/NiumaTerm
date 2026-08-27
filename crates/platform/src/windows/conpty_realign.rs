@@ -119,10 +119,10 @@ fn last_cup_row(bytes: &[u8]) -> Option<u16> {
     let mut last = None;
 
     for_each_csi(bytes, |start, fin| {
-        if is_cup(bytes[fin]) {
-            if let (Some(r), _) = cup_row_col(&bytes[start + 2..fin]) {
-                last = Some(r);
-            }
+        if is_cup(bytes[fin])
+            && let (Some(r), _) = cup_row_col(&bytes[start + 2..fin])
+        {
+            last = Some(r);
         }
     });
     last

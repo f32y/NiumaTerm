@@ -303,12 +303,12 @@ fn start_transaction(
             let error = UpdateError::new(UpdateErrorKind::Recovery, error);
             restore_tabs(&coordinator, &key, &panes, &snapshots, &suspended, cx).await;
             coordinator.finish_update(&key, None, Some(error), 0);
-            let _ = cx.update(|cx| cx.refresh_windows());
+            cx.update(|cx| cx.refresh_windows());
             return;
         }
 
         coordinator.transition(&key, UpdatePhase::Updating, None);
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             for pane in &panes {
                 pane.update(cx, |pane, cx| pane.mark_provider_updating(cx));
             }
@@ -341,7 +341,7 @@ fn start_transaction(
             restore_tabs(&coordinator, &key, &panes, &snapshots, &suspended, cx).await;
         operation_error = combine_transaction_error(operation_error, restore_failures);
         coordinator.finish_update(&key, verified, operation_error, 0);
-        let _ = cx.update(|cx| cx.refresh_windows());
+        cx.update(|cx| cx.refresh_windows());
     })
     .detach();
 }
@@ -359,7 +359,7 @@ fn finish_preflight_failure(
         Some(UpdateError::new(UpdateErrorKind::Recovery, message)),
         0,
     );
-    let _ = cx.update(|cx| {
+    cx.update(|cx| {
         for pane in panes {
             pane.update(cx, |pane, cx| pane.cancel_update_wait(cx));
         }
@@ -420,7 +420,7 @@ async fn restore_tabs(
                 total: suspended.len(),
             }),
         );
-        let _ = cx.update(|cx| cx.refresh_windows());
+        cx.update(|cx| cx.refresh_windows());
         if pending == 0 {
             break;
         }

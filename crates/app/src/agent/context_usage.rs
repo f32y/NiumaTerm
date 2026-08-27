@@ -1,3 +1,4 @@
+use std::cmp;
 use std::time::Duration;
 
 use gpui::prelude::*;
@@ -88,7 +89,7 @@ fn context_segment_rows(composition: &ContextComposition) -> Vec<ContextSegmentR
         })
         .collect();
 
-    rows.sort_by(|left, right| right.tokens.cmp(&left.tokens));
+    rows.sort_by_key(|row| cmp::Reverse(row.tokens));
     rows
 }
 

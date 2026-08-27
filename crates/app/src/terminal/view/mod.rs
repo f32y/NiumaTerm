@@ -249,6 +249,7 @@ impl TerminalPane {
         }))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn from_surface(
         cx: &mut Context<Self>,
         surface_id: u64,

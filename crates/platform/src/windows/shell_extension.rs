@@ -216,6 +216,11 @@ impl IClassFactory_Impl for NiumaTermClassFactory_Impl {
     }
 }
 
+/// # Safety
+///
+/// COM entry point: `rclsid` and `riid` must point to valid GUIDs and `ppv`
+/// to a writable interface-pointer slot, as the `DllGetClassObject` calling
+/// convention guarantees. Null pointers are rejected before any dereference.
 pub unsafe fn dll_get_class_object(
     rclsid: *const ffi::c_void,
     riid: *const ffi::c_void,

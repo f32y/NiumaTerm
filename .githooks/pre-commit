@@ -242,8 +242,8 @@ EOF
         set -- "$@" -p "$package"
     done
 
-    echo "pre-commit: running clippy::absolute_paths on changed first-party members"
-    cargo clippy --all-targets --no-deps --quiet "$@" -- -D clippy::absolute_paths
+    echo "pre-commit: running strict clippy groups on changed first-party members"
+    cargo clippy --all-targets --no-deps --quiet "$@" --         -D clippy::absolute_paths         -D clippy::complexity         -D clippy::perf         -D clippy::style
 }
 
 branch=$(git symbolic-ref --quiet --short HEAD || true)

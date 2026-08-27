@@ -108,7 +108,7 @@ fn validation_is_strict_and_presentation_is_bounded() {
 fn session_start_does_not_invent_running() {
     let now = Instant::now();
     let r = route("pane-1");
-    let mut monitor = monitor(now, &[r.clone()]);
+    let mut monitor = monitor(now, slice::from_ref(&r));
     monitor.apply(event(&r, "s1", None, AgentEventKind::SessionStarted), now);
     let state = monitor.pane(&r).unwrap();
     assert_eq!(state.status, AgentRuntimeStatus::Idle);
@@ -119,7 +119,7 @@ fn session_start_does_not_invent_running() {
 fn prompt_claims_owner_and_replay_does_not_advance_generation() {
     let now = Instant::now();
     let r = route("pane-1");
-    let mut monitor = monitor(now, &[r.clone()]);
+    let mut monitor = monitor(now, slice::from_ref(&r));
     let prompt = event(&r, "s1", Some("opaque-b"), AgentEventKind::PromptSubmitted);
     monitor.apply(prompt.clone(), now);
     monitor.apply(prompt, now + Duration::from_secs(1));
@@ -133,7 +133,7 @@ fn prompt_claims_owner_and_replay_does_not_advance_generation() {
 fn new_prompt_supersedes_needs_input_and_old_stop_is_ignored() {
     let now = Instant::now();
     let r = route("pane-1");
-    let mut monitor = monitor(now, &[r.clone()]);
+    let mut monitor = monitor(now, slice::from_ref(&r));
     monitor.apply(
         event(&r, "s1", Some("z"), AgentEventKind::PromptSubmitted),
         now,
@@ -165,7 +165,7 @@ fn new_prompt_supersedes_needs_input_and_old_stop_is_ignored() {
 fn nested_session_and_opaque_turn_events_cannot_steal_owner() {
     let now = Instant::now();
     let r = route("pane-1");
-    let mut monitor = monitor(now, &[r.clone()]);
+    let mut monitor = monitor(now, slice::from_ref(&r));
     monitor.apply(
         event(&r, "parent", Some("10"), AgentEventKind::PromptSubmitted),
         now,
@@ -189,7 +189,7 @@ fn nested_session_and_opaque_turn_events_cannot_steal_owner() {
 fn stop_quiets_then_commits_once_and_resumed_work_cancels() {
     let now = Instant::now();
     let r = route("pane-1");
-    let mut monitor = monitor(now, &[r.clone()]);
+    let mut monitor = monitor(now, slice::from_ref(&r));
     monitor.apply(
         event(&r, "s", Some("t"), AgentEventKind::PromptSubmitted),
         now,
@@ -218,7 +218,7 @@ fn stop_quiets_then_commits_once_and_resumed_work_cancels() {
 fn stop_without_current_runtime_evidence_never_notifies() {
     let now = Instant::now();
     let r = route("pane-1");
-    let mut monitor = monitor(now, &[r.clone()]);
+    let mut monitor = monitor(now, slice::from_ref(&r));
     monitor.apply(event(&r, "s", None, AgentEventKind::SessionStarted), now);
     monitor.apply(event(&r, "s", Some("t"), AgentEventKind::Stopped), now);
     monitor.process_due(now + COMPLETION_QUIET_WINDOW);
@@ -229,7 +229,7 @@ fn stop_without_current_runtime_evidence_never_notifies() {
 fn stale_active_state_becomes_idle_without_notification() {
     let now = Instant::now();
     let r = route("pane-1");
-    let mut monitor = monitor(now, &[r.clone()]);
+    let mut monitor = monitor(now, slice::from_ref(&r));
     monitor.apply(
         event(&r, "s", Some("t"), AgentEventKind::PromptSubmitted),
         now,
@@ -279,7 +279,7 @@ fn matching_update_reschedules_stale_expiry() {
     let now = Instant::now();
     let update = now + Duration::from_secs(60);
     let r = route("pane-1");
-    let mut monitor = monitor(now, &[r.clone()]);
+    let mut monitor = monitor(now, slice::from_ref(&r));
     monitor.apply(
         event(&r, "s", Some("t"), AgentEventKind::PromptSubmitted),
         now,
@@ -305,7 +305,7 @@ fn matching_update_reschedules_stale_expiry() {
 fn old_generation_completion_timer_cannot_complete_new_prompt() {
     let now = Instant::now();
     let r = route("pane-1");
-    let mut monitor = monitor(now, &[r.clone()]);
+    let mut monitor = monitor(now, slice::from_ref(&r));
     monitor.apply(
         event(&r, "s", Some("old"), AgentEventKind::PromptSubmitted),
         now,
@@ -327,7 +327,7 @@ fn old_generation_completion_timer_cannot_complete_new_prompt() {
 fn latest_notification_acknowledgement_and_status_are_independent() {
     let now = Instant::now();
     let r = route("pane-1");
-    let mut monitor = monitor(now, &[r.clone()]);
+    let mut monitor = monitor(now, slice::from_ref(&r));
     monitor.apply(
         event(&r, "s", Some("t"), AgentEventKind::PromptSubmitted),
         now,
@@ -362,7 +362,7 @@ fn latest_notification_acknowledgement_and_status_are_independent() {
 fn failed_native_operations_cannot_clear_internal_attention() {
     let now = Instant::now();
     let r = route("pane-1");
-    let mut monitor = monitor(now, &[r.clone()]);
+    let mut monitor = monitor(now, slice::from_ref(&r));
     monitor.apply(
         event(&r, "s", Some("t"), AgentEventKind::PromptSubmitted),
         now,
@@ -530,7 +530,7 @@ fn osc_style_notification_replaces_latest_without_changing_agent_state() {
 fn closed_route_cancels_pending_and_rejects_late_events() {
     let now = Instant::now();
     let r = route("pane-1");
-    let mut monitor = monitor(now, &[r.clone()]);
+    let mut monitor = monitor(now, slice::from_ref(&r));
     monitor.apply(
         event(&r, "s", Some("t"), AgentEventKind::PromptSubmitted),
         now,

@@ -438,8 +438,8 @@ impl TerminalPane {
             let cols = self.content_cols();
             let pad_rows = block_pad_rows(cx);
             let store = self.surface.block_store();
-            let live_rows = frame_content_rows(&frame);
-            let history_rows = self.live_history_rows(&frame);
+            let live_rows = frame_content_rows(frame);
+            let history_rows = self.live_history_rows(frame);
             let metrics = {
                 let store = store.lock();
                 block_list_render_metrics(
@@ -510,7 +510,7 @@ impl TerminalPane {
                 self.block_list.list.set_scroll_handler({
                     let pane = pane.clone();
                     move |_, _window, cx| {
-                        let _ = pane.update(cx, |pane, cx| pane.mark_scroll_activity(cx));
+                        pane.update(cx, |pane, cx| pane.mark_scroll_activity(cx));
                     }
                 });
 

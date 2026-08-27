@@ -378,6 +378,7 @@ impl BackgroundTasksView {
             .into_any_element()
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render_section(
         &self,
         id: &'static str,

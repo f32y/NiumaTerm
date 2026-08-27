@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::{env, fs, process};
+use std::{env, fs, process, slice};
 
 use gpui::TestAppContext;
 use nmt_config::update::UpdateChannel;
@@ -334,7 +334,7 @@ fn file_use_results_distinguish_clear_used_unknown_and_reboot_states() {
     };
     let prompt = classify_file_usage(Ok(used)).unwrap().unwrap();
     assert_eq!(prompt.reason, FileUsePromptReason::InUse);
-    assert_eq!(prompt.applications, [explorer.clone()]);
+    assert_eq!(prompt.applications, slice::from_ref(&explorer));
 
     let reboot = FileUsage {
         applications: vec![explorer],

@@ -113,29 +113,19 @@ impl TerminalSurface {
     pub(crate) fn for_gpui(
         wake: WakeSignal,
         surface_id: u64,
-        shell: Option<String>,
-        args: Vec<String>,
-        working_dir: Option<String>,
-        starting_title: String,
-        cursor_shape: CursorShape,
-        environment_overrides: Vec<(String, String)>,
-        manage_process_tree: bool,
+        launch: TerminalSessionConfig,
     ) -> Result<Self, String> {
         let wake_sender = WakeSender::from_fn(move |kind: Wake| {
             wake.signal(kind);
         });
 
+        // The initial grid is always the fixed metrics size; the real
+        // dimensions arrive with the first layout pass, so a caller-supplied
+        // size would only be overwritten.
         let config = TerminalSessionConfig {
-            shell: shell.clone(),
-            args: args.clone(),
-            working_dir: working_dir.clone(),
-            starting_title: Some(starting_title),
             cols: metrics::COLS,
             rows: metrics::ROWS,
-            cursor_shape,
-            environment_overrides,
-            manage_process_tree,
-            ..TerminalSessionConfig::default()
+            ..launch
         };
 
         Self::new(config, surface_id, Some(wake_sender))

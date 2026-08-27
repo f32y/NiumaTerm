@@ -169,11 +169,11 @@ fn active_rows_show_elapsed_time_and_terminal_rows_show_a_relative_end() {
         .build();
 
     assert_eq!(
-        row_timing(&running_rows(&snapshot)[0], at(190)),
+        row_timing(running_rows(&snapshot)[0], at(190)),
         Some("1m".to_string())
     );
     assert_eq!(
-        row_timing(&finished_rows(&snapshot)[0], at(560)),
+        row_timing(finished_rows(&snapshot)[0], at(560)),
         Some("1m ago".to_string())
     );
 

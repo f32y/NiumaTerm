@@ -290,8 +290,11 @@ impl TerminalPane {
         // the grid width), so the URL's char range maps directly onto rows.
         let mut rects = Vec::new();
 
-        if width > 0 {
-            for seg in range.start / width..=(range.end - 1) / width {
+        if let (Some(first_seg), Some(last_seg)) = (
+            range.start.checked_div(width),
+            (range.end - 1).checked_div(width),
+        ) {
+            for seg in first_seg..=last_seg {
                 let start = range.start.max(seg * width);
                 let end = range.end.min((seg + 1) * width);
 

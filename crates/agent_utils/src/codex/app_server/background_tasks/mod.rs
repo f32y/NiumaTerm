@@ -199,9 +199,7 @@ impl CodexTasks {
         let mut current = thread_id.to_owned();
         let mut depth = 1;
         loop {
-            let Some(parent) = self.parents.get(&current) else {
-                return None;
-            };
+            let parent = self.parents.get(&current)?;
             if parent == root {
                 return Some(depth);
             }

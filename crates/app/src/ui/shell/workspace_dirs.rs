@@ -442,7 +442,7 @@ impl Shell {
                     paths
                         .into_iter()
                         .filter(|path| !path::Path::new(path).is_dir())
-                        .filter_map(|path| Some(root_key(&path)?))
+                        .filter_map(|path| root_key(&path))
                         .collect::<collections::HashSet<String>>()
                 })
                 .await;

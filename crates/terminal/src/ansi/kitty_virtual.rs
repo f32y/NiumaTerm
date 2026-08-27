@@ -360,10 +360,10 @@ pub fn encode_placeholder(row: u32, col: u32, image_id_high: Option<u8>) -> Stri
     }
 
     // Add high byte diacritic if needed
-    if let Some(high) = image_id_high {
-        if let Some(d) = index_to_diacritic(high as u32) {
-            result.push(d);
-        }
+    if let Some(high) = image_id_high
+        && let Some(d) = index_to_diacritic(high as u32)
+    {
+        result.push(d);
     }
 
     result

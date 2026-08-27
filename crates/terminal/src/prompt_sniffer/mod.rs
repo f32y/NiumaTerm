@@ -412,17 +412,18 @@ impl PromptSniffer {
 
             self.command_buf.clear();
 
-            if was_trusted && !command.is_empty() {
-                if let Some(started_at) = started_at {
-                    self.command_finished = Some(CommandCapture {
-                        seq: 0, // stamped by the mark-closure caller (block-split)
-                        command,
-                        exit_code: exit,
-                        cwd: None, // filled by the caller from its ;C latch
-                        started_at,
-                        ended_at: time::SystemTime::now(),
-                    });
-                }
+            if was_trusted
+                && !command.is_empty()
+                && let Some(started_at) = started_at
+            {
+                self.command_finished = Some(CommandCapture {
+                    seq: 0, // stamped by the mark-closure caller (block-split)
+                    command,
+                    exit_code: exit,
+                    cwd: None, // filled by the caller from its ;C latch
+                    started_at,
+                    ended_at: time::SystemTime::now(),
+                });
             }
         }
 

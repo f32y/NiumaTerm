@@ -502,7 +502,7 @@ fn startup_error_and_exit(file: &str, error: &str) -> ! {
 }
 
 pub(crate) fn show_startup_error_dialog(message: &str) {
-    show_error_dialog(&nmt_i18n::i18n("startup-configuration-error"), message);
+    show_error_dialog(nmt_i18n::i18n("startup-configuration-error"), message);
 }
 
 #[cfg(test)]

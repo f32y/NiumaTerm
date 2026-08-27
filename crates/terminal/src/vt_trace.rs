@@ -10,7 +10,7 @@
 //! with `NMT_VT_TRACE_DIR`. REMOVE this module once the resize bug is fixed.
 
 use std::io::Write as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{self};
 use std::{env, fmt, fs, time};
@@ -135,7 +135,7 @@ fn trailing_pad_report(s: &RenderBuffer) -> String {
     out
 }
 
-fn append_master(dir: &PathBuf, line: &str) {
+fn append_master(dir: &Path, line: &str) {
     let path = dir.join("nmt-vt-trace.log");
     if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(path) {
         let _ = f.write_all(line.as_bytes());

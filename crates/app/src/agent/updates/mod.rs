@@ -162,7 +162,7 @@ pub(crate) fn manual_check_profiles(profiles: &[AgentProfile], cx: &mut App) {
             }
         });
         worker.await;
-        let _ = cx.update(|cx| cx.refresh_windows());
+        cx.update(|cx| cx.refresh_windows());
     })
     .detach();
 }

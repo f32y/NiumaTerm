@@ -163,13 +163,11 @@ pub(in crate::agent) fn truncated_user_prompt(text: &str) -> Option<&str> {
     const MAX_SOURCE_LINES: usize = 3;
     const MAX_CHARS: usize = 512;
 
-    let mut chars = 0;
     let mut completed_lines = 0;
-    for (index, ch) in text.char_indices() {
+    for (chars, (index, ch)) in text.char_indices().enumerate() {
         if chars == MAX_CHARS {
             return Some(&text[..index]);
         }
-        chars += 1;
 
         if ch == '\n' {
             completed_lines += 1;

@@ -24,7 +24,7 @@ impl GhosttyTerminal {
     #[cfg(test)]
     pub(crate) fn has_prompt_tagged_row(&mut self) -> bool {
         self.row_semantic_prompts()
-            .map(|tags| tags.iter().any(|&t| t == VtRowSemanticPrompt::PROMPT))
+            .map(|tags| tags.contains(&VtRowSemanticPrompt::PROMPT))
             .unwrap_or(false)
     }
 
@@ -167,10 +167,11 @@ impl GhosttyTerminal {
                 )
             })?;
 
-            if !full && row_dirty {
-                if let Some(version) = self.row_versions.get_mut(row) {
-                    *version = revision;
-                }
+            if !full
+                && row_dirty
+                && let Some(version) = self.row_versions.get_mut(row)
+            {
+                *version = revision;
             }
 
             Error::from_code(unsafe {

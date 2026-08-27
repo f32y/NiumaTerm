@@ -201,9 +201,11 @@ impl AgentUsageView {
     fn accessibility_label(&self) -> String {
         let [codex_five_hour, codex_week] = self.codex.compact_values();
         let [claude_five_hour, claude_week] = self.claude.compact_values();
-        let refreshing = (self.codex_refresh.refreshing || self.claude_refresh.refreshing)
-            .then_some(i18n("agent-usage-accessibility-refreshing"))
-            .unwrap_or_default();
+        let refreshing = if self.codex_refresh.refreshing || self.claude_refresh.refreshing {
+            i18n("agent-usage-accessibility-refreshing")
+        } else {
+            ""
+        };
 
         i18n("agent-usage-accessibility")
             .replace("{codex_session}", &codex_five_hour)
@@ -254,10 +256,10 @@ fn usage_window_rows(usage: &UsageSnapshot) -> Vec<UsageWindowRow<'_>> {
 }
 
 fn format_window_duration(window_minutes: u32) -> String {
-    if window_minutes % (24 * 60) == 0 {
+    if window_minutes.is_multiple_of(24 * 60) {
         i18n("agent-usage-duration-days")
             .replace("{count}", &(window_minutes / (24 * 60)).to_string())
-    } else if window_minutes % 60 == 0 {
+    } else if window_minutes.is_multiple_of(60) {
         i18n("agent-usage-duration-hours").replace("{count}", &(window_minutes / 60).to_string())
     } else {
         i18n("agent-usage-duration-minutes").replace("{count}", &window_minutes.to_string())

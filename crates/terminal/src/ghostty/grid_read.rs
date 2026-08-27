@@ -288,12 +288,10 @@ impl GhosttyTerminal {
                 }
             }
 
-            if has_link {
-                if let Some(uri) = grid_ref_hyperlink_uri(&grid_ref) {
-                    match hyperlinks.last_mut() {
-                        Some((_, end, last_uri)) if *end + 1 == x && *last_uri == uri => *end = x,
-                        _ => hyperlinks.push((x, x, uri)),
-                    }
+            if has_link && let Some(uri) = grid_ref_hyperlink_uri(&grid_ref) {
+                match hyperlinks.last_mut() {
+                    Some((_, end, last_uri)) if *end + 1 == x && *last_uri == uri => *end = x,
+                    _ => hyperlinks.push((x, x, uri)),
                 }
             }
 
