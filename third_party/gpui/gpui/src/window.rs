@@ -2358,16 +2358,6 @@ impl Window {
         self.platform_window.hide();
     }
 
-    /// Turn this window into a flyout of `owner` — a menu or popover that is
-    /// owned by that window, drawn above it, and never takes activation from it.
-    ///
-    /// Show it with [`Self::show_flyout`] rather than the ordinary show path,
-    /// which would activate it, and take it back off screen with [`Self::hide`].
-    pub fn attach_as_flyout_of(&self, owner: &Window) {
-        self.platform_window
-            .attach_as_flyout(owner.platform_window.as_ref());
-    }
-
     /// Place this flyout at `bounds` and show it without giving it focus.
     pub fn show_flyout(&self, bounds: Bounds<Pixels>) {
         self.platform_window.show_flyout(bounds);

@@ -469,7 +469,7 @@ impl WindowsWindow {
         );
 
         let (mut dwexstyle, dwstyle) = if params.kind == WindowKind::PopUp {
-            (WS_EX_TOOLWINDOW, WINDOW_STYLE(0x0))
+            (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, WS_POPUP)
         } else {
             let mut dwstyle = WS_SYSMENU;
 
@@ -553,6 +553,9 @@ impl WindowsWindow {
         register_drag_drop(&this)?;
         set_non_rude_hwnd(hwnd, true);
         configure_dwm_dark_mode(hwnd, appearance);
+        if params.kind == WindowKind::PopUp {
+            configure_flyout_window(hwnd);
+        }
         this.state.border_offset.update(hwnd)?;
         let placement = retrieve_window_placement(
             hwnd,
@@ -605,6 +608,34 @@ impl Drop for WindowsWindow {
             })
             .detach();
     }
+}
+
+fn configure_flyout_window(hwnd: HWND) {
+    // The XAML menu surface uses an eight-pixel overlay radius. DWM clips the
+    // backdrop and the swap chain to the same outer shape.
+    let preference = DWMWCP_ROUND;
+    unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            (&raw const preference).cast(),
+            std::mem::size_of_val(&preference) as u32,
+        )
+    }
+    .log_err();
+
+    // The menu paints its own subtle inner stroke. Suppressing the top-level
+    // frame prevents DWM from adding a second grey ring around that stroke.
+    let border_color: u32 = 0xFFFF_FFFE;
+    unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_BORDER_COLOR,
+            (&raw const border_color).cast(),
+            std::mem::size_of_val(&border_color) as u32,
+        )
+    }
+    .log_err();
 }
 
 impl PlatformWindow for WindowsWindow {
@@ -898,58 +929,6 @@ impl PlatformWindow for WindowsWindow {
         // Async so the caller is not held behind the compositor: this exists
         // to return the UI thread to the teardown that follows it.
         unsafe { ShowWindowAsync(self.0.hwnd, SW_HIDE).ok().log_err() };
-    }
-
-    fn attach_as_flyout(&self, owner: &dyn PlatformWindow) {
-        let hwnd = self.0.hwnd;
-        let Ok(owner) = rwh::HasWindowHandle::window_handle(owner) else {
-            return;
-        };
-        let rwh::RawWindowHandle::Win32(owner) = owner.as_raw() else {
-            return;
-        };
-
-        unsafe {
-            // An unowned popup does not keep activation once it is given any:
-            // Windows hands it straight back to the window that had it, which
-            // the flyout would read as the user having clicked away. Ownership
-            // also keeps it above its owner and takes it down with the owner.
-            SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, owner.hwnd.get());
-            // Refusing activation outright is what keeps the owner rendering as
-            // the focused window for as long as the flyout is up.
-            let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | WS_EX_NOACTIVATE.0 as isize);
-        }
-
-        // DWMWCP_ROUND: the corner Windows 11 gives its own menus and popovers.
-        // DWM clips the window, backdrop included, to the frame it rounds, so the
-        // window does not have to mask itself.
-        let preference = DWMWCP_ROUND;
-        unsafe {
-            DwmSetWindowAttribute(
-                hwnd,
-                DWMWA_WINDOW_CORNER_PREFERENCE,
-                (&raw const preference).cast(),
-                std::mem::size_of_val(&preference) as u32,
-            )
-        }
-        .log_err();
-
-        // Rounding a window also gets it the frame border DWM draws for a
-        // top-level window, which on a flyout reads as a grey ring around a
-        // surface that is supposed to be defined by its shadow alone. The
-        // sentinel below is what suppresses that border; an ordinary color
-        // would only repaint it.
-        let border_color: u32 = 0xFFFF_FFFE;
-        unsafe {
-            DwmSetWindowAttribute(
-                hwnd,
-                DWMWA_BORDER_COLOR,
-                (&raw const border_color).cast(),
-                std::mem::size_of_val(&border_color) as u32,
-            )
-        }
-        .log_err();
     }
 
     fn hide_flyout(&self) {

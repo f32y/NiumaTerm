@@ -652,19 +652,11 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     /// default does nothing, so a platform that has not implemented it simply
     /// keeps the window up until it is dropped.
     fn hide(&self) {}
-    /// Turn this window into a flyout of `owner`: owned by it, drawn above it,
-    /// and shaped the way the platform shapes its own menus and popovers.
-    ///
-    /// A flyout must never take activation. Its owner keeps that, which is what
-    /// lets the owner keep the appearance of the focused window while the flyout
-    /// is up, and on Windows also what lets its backdrop material keep rendering.
-    ///
-    /// The default does nothing, leaving the window an ordinary one.
-    fn attach_as_flyout(&self, _owner: &dyn PlatformWindow) {}
     /// Place a flyout at `bounds` and show it without giving it focus.
     ///
-    /// Pairs with [`Self::attach_as_flyout`]. Called instead of the usual show
-    /// path because that one activates the window.
+    /// Windows created as [`WindowKind::PopUp`] are configured not to activate.
+    /// This path also keeps placement and visibility ordered with
+    /// [`Self::hide_flyout`].
     fn show_flyout(&self, _bounds: Bounds<Pixels>) {}
     /// Take a flyout back off the screen, in order with [`Self::show_flyout`].
     ///
