@@ -644,6 +644,16 @@ impl AgentPane {
                     .and_then(|stored| stored.model.clone())
             });
         }
+        let codex_host_catalog = if kind == AgentKind::Codex {
+            cx.global::<AgentSettings>()
+                .profiles
+                .iter()
+                .filter(|profile| profile.kind == AgentProfileKind::Codex)
+                .map(agent_launch)
+                .collect()
+        } else {
+            Vec::new()
+        };
         // Env names only: the values can carry API keys.
         info!(
             "agent session start: profile=\"{}\", executable=\"{}\", model={:?}, env=[{}]",
@@ -680,9 +690,16 @@ impl AgentPane {
             })
             .detach();
         }
-        let spawned = cx
-            .background_executor()
-            .spawn(async move { Backend::spawn(kind, &launch, &workspace, recovery, deliver) });
+        let spawned = cx.background_executor().spawn(async move {
+            Backend::spawn(
+                kind,
+                &launch,
+                &codex_host_catalog,
+                &workspace,
+                recovery,
+                deliver,
+            )
+        });
 
         cx.spawn(async move |this, cx| {
             let spawned = spawned.await;
@@ -1174,13 +1191,9 @@ impl AgentPane {
     }
 
     pub(super) fn reset_conversation(&mut self, cx: &mut Context<Self>) {
-        // The DeepSeek host is one process shared by every tab holding a
-        // session on it, and it stops once the last holder lets go. Releasing
-        // the outgoing session here would kill that host whenever this is the
-        // only tab using it, so the replacement would pay Node's start cost
-        // again for a restart that changes nothing about the host. Holding the
-        // retired session until the new one has taken its own reference hands
-        // the running host over instead.
+        // DeepSeek and Codex hosts stop once their final session reference is
+        // released. Keeping the retired backend until the replacement starts
+        // transfers that reference without restarting an unchanged host.
         let retiring = self.runtime.backend.take();
         // A fresh conversation always follows the live tail again, even if
         // the previous transcript was scrolled up when it was discarded.

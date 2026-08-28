@@ -108,6 +108,7 @@ impl AgentKind {
 
 pub(super) const ANTHROPIC_MODEL_ENV: &str = "ANTHROPIC_MODEL";
 pub(super) const OPENAI_API_KEY_ENV: &str = "OPENAI_API_KEY";
+const CODEX_CREDENTIAL_ENV_PREFIX: &str = "NIUMATERM_CODEX_API_KEY_";
 /// DeepSeek Harness layers credential sources by trust and puts the inherited
 /// process environment above its own managed store, so a key exported here
 /// authenticates the host whatever that store holds.
@@ -140,6 +141,20 @@ fn codex_provider_id(profile_name: &str) -> String {
     format!("niumaterm-{hash:016x}")
 }
 
+fn codex_credential_env(provider_id: &str) -> String {
+    let suffix: String = provider_id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("{CODEX_CREDENTIAL_ENV_PREFIX}{suffix}")
+}
+
 pub(super) fn launch_env_value(launch: &LaunchConfig, target: &str) -> Option<String> {
     launch
         .env
@@ -156,6 +171,11 @@ pub(super) fn launch_env_value(launch: &LaunchConfig, target: &str) -> Option<St
 pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
     let mut env: Vec<(String, String)> = Vec::new();
     let model = (!profile.model.trim().is_empty()).then(|| profile.model.trim().to_string());
+    let codex_provider_id = (profile.kind == AgentProfileKind::Codex
+        && profile.use_custom_endpoint
+        && !profile.api_base_url.trim().is_empty())
+    .then(|| codex_provider_id(&profile.name));
+    let codex_credential_env = codex_provider_id.as_deref().map(codex_credential_env);
 
     if profile.use_custom_endpoint {
         // Codex is absent because it reaches its endpoint through a generated
@@ -178,7 +198,9 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
         if !key.is_empty() {
             let key_env = match profile.kind {
                 AgentProfileKind::ClaudeCode => "ANTHROPIC_API_KEY",
-                AgentProfileKind::Codex => OPENAI_API_KEY_ENV,
+                AgentProfileKind::Codex => codex_credential_env
+                    .as_deref()
+                    .unwrap_or(OPENAI_API_KEY_ENV),
                 AgentProfileKind::DeepSeek => DEEPSEEK_API_KEY_ENV,
             };
             env.push((key_env.to_string(), key.to_string()));
@@ -205,25 +227,30 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
             .map(|var| (var.name.trim().to_string(), var.value.clone())),
     );
 
-    let api_key_env = env
-        .iter()
-        .rev()
-        .find(|(name, _)| name.trim().eq_ignore_ascii_case(OPENAI_API_KEY_ENV))
-        .filter(|(_, value)| !value.trim().is_empty())
-        .map(|_| OPENAI_API_KEY_ENV.to_string());
-    let codex_provider = (profile.kind == AgentProfileKind::Codex && profile.use_custom_endpoint)
-        .then(|| profile.api_base_url.trim())
-        .filter(|url| !url.is_empty())
-        .map(|base_url| CodexProviderConfig {
-            id: codex_provider_id(&profile.name),
-            name: if profile.name.trim().is_empty() {
-                "NiumaTerm custom endpoint".to_string()
-            } else {
-                profile.name.trim().to_string()
-            },
-            base_url: base_url.to_string(),
-            api_key_env,
-        });
+    if let Some(generated_name) = codex_credential_env.as_deref() {
+        let generated_value = launch_env_value_from_entries(&env, generated_name)
+            .or_else(|| launch_env_value_from_entries(&env, OPENAI_API_KEY_ENV));
+        env.retain(|(name, _)| !name.eq_ignore_ascii_case(OPENAI_API_KEY_ENV));
+        if launch_env_value_from_entries(&env, generated_name).is_none()
+            && let Some(value) = generated_value
+        {
+            env.push((generated_name.to_string(), value));
+        }
+    }
+
+    let api_key_env = codex_credential_env.filter(|name| {
+        launch_env_value_from_entries(&env, name).is_some_and(|value| !value.trim().is_empty())
+    });
+    let codex_provider = codex_provider_id.map(|id| CodexProviderConfig {
+        id,
+        name: if profile.name.trim().is_empty() {
+            "NiumaTerm custom endpoint".to_string()
+        } else {
+            profile.name.trim().to_string()
+        },
+        base_url: profile.api_base_url.trim().to_string(),
+        api_key_env,
+    });
 
     // Package launchers move the package name into their own arguments and
     // leave the configured executable unused. Other agent kinds always launch
@@ -254,6 +281,14 @@ pub fn agent_launch(profile: &AgentProfile) -> LaunchConfig {
             && profile.vision_model
             && !profile.model.trim().is_empty(),
     }
+}
+
+fn launch_env_value_from_entries(env: &[(String, String)], target: &str) -> Option<String> {
+    env.iter()
+        .rev()
+        .find(|(name, _)| name.trim().eq_ignore_ascii_case(target))
+        .map(|(_, value)| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 /// The reasoning effort this profile pins, or `None` when it leaves the choice
@@ -323,8 +358,9 @@ mod agent_profile_launch_tests {
     use nmt_config::profile::{AgentProfile, AgentProfileKind, AgentProfileLauncher, EnvVar};
 
     use crate::profile::{
-        ANTHROPIC_MODEL_ENV, ANTHROPIC_SUB_MODEL_ENVS, DEEPSEEK_API_KEY_ENV, DEEPSEEK_BASE_URL_ENV,
-        OPENAI_API_KEY_ENV, agent_launch, launch_env_value,
+        ANTHROPIC_MODEL_ENV, ANTHROPIC_SUB_MODEL_ENVS, CODEX_CREDENTIAL_ENV_PREFIX,
+        DEEPSEEK_API_KEY_ENV, DEEPSEEK_BASE_URL_ENV, OPENAI_API_KEY_ENV, agent_launch,
+        launch_env_value,
     };
 
     #[test]
@@ -575,10 +611,11 @@ mod agent_profile_launch_tests {
 
         let launch = agent_launch(&profile);
         let provider = launch.provider.as_ref().expect("custom provider");
+        let credential_env = provider.api_key_env.as_deref().expect("credential env");
 
         assert_eq!(launch.model.as_deref(), Some("vendor/custom-model"));
         assert_eq!(provider.base_url, "https://proxy.example.com/v1");
-        assert_eq!(provider.api_key_env.as_deref(), Some(OPENAI_API_KEY_ENV));
+        assert!(credential_env.starts_with(CODEX_CREDENTIAL_ENV_PREFIX));
         assert!(
             launch
                 .env
@@ -586,8 +623,9 @@ mod agent_profile_launch_tests {
                 .all(|(name, _)| !name.eq_ignore_ascii_case("OPENAI_BASE_URL"))
         );
         assert_eq!(
-            launch_env_value(&launch, OPENAI_API_KEY_ENV).as_deref(),
+            launch_env_value(&launch, credential_env).as_deref(),
             Some("secret")
         );
+        assert_eq!(launch_env_value(&launch, OPENAI_API_KEY_ENV), None);
     }
 }

@@ -531,3 +531,80 @@ mod session_replacement_tests {
         });
     }
 }
+
+mod shared_host_recovery_tests {
+    use gpui::{AppContext as _, TestAppContext, VisualTestContext};
+    use nmt_agent_utils::AgentWorkspace;
+    use nmt_agent_utils::chat::{Event as SessionEvent, SendOutcome, SlashCommandOutcome};
+    use nmt_config::profile::{AgentProfile, AgentProfileKind};
+
+    use crate::session::{Backend, Status, TestBackend, UpdateSuspension};
+    use crate::settings::AgentSettings;
+    use crate::{AgentKind, AgentPane, AgentThreadDefaults};
+
+    #[gpui::test]
+    fn a_host_exit_retains_the_thread_for_retry(cx: &mut TestAppContext) {
+        let profile = AgentProfile {
+            name: "Codex Recovery Test".into(),
+            kind: AgentProfileKind::Codex,
+            executable: "missing-codex.exe".into(),
+            ..AgentProfile::default()
+        };
+        let mut pane = None;
+        let window = cx.update(|cx| {
+            gpui_component::init(cx);
+            cx.set_global(AgentSettings::default());
+            cx.set_global(AgentThreadDefaults::default());
+            cx.open_window(Default::default(), |window, cx| {
+                let agent =
+                    cx.new(|cx| AgentPane::new(profile, AgentWorkspace::default(), window, cx));
+                pane = Some(agent.clone());
+                cx.new(|cx| gpui_component::Root::new(agent, window, cx))
+            })
+            .expect("open Agent test window")
+        });
+        let pane = pane.expect("create Agent pane");
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.runtime.backend = Some(Backend::Test(
+                    TestBackend::new(
+                        [SendOutcome::StartedTurn],
+                        SlashCommandOutcome::NotReady,
+                        Vec::new(),
+                    )
+                    .with_recovery(AgentKind::Codex, "thread-recovery"),
+                ));
+                pane.runtime.status = Status::Idle;
+
+                pane.apply_event(
+                    SessionEvent::HostExited {
+                        message: "Codex app-server stopped unexpectedly".into(),
+                    },
+                    cx,
+                );
+
+                assert_eq!(pane.runtime.status, Status::Exited);
+                assert!(matches!(
+                    pane.runtime.update_suspension,
+                    Some(UpdateSuspension::Failed(_))
+                ));
+                let snapshot = pane
+                    .runtime
+                    .last_recovery_snapshot
+                    .as_ref()
+                    .expect("recovery snapshot");
+                assert_eq!(snapshot.profile_name, "Codex Recovery Test");
+                assert_eq!(
+                    snapshot
+                        .identity
+                        .as_ref()
+                        .map(|identity| identity.id.as_str()),
+                    Some("thread-recovery")
+                );
+                assert!(pane.runtime.backend.is_some());
+            });
+        });
+    }
+}

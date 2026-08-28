@@ -116,6 +116,10 @@ impl CodexTasks {
             .map(|registry| registry.parent_session().id.as_str())
     }
 
+    pub(super) fn confirmed_thread_ids(&self) -> Vec<String> {
+        self.confirmed.iter().cloned().collect()
+    }
+
     pub(super) fn snapshot(&self) -> Option<BackgroundTaskSnapshot> {
         let mut snapshot = self
             .registry

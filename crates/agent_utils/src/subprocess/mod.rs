@@ -30,11 +30,32 @@ impl JsonLineProcess {
     /// reader threads. `display_command` is the human-readable command line
     /// quoted in the spawn error.
     pub(crate) fn spawn(
+        command: Command,
+        display_command: &str,
+        provider: &'static str,
+        deliver: impl Fn(Value) + Send + 'static,
+        on_stderr: impl Fn(String) + Send + 'static,
+    ) -> Result<Self, String> {
+        Self::spawn_with_stdout_closed(
+            command,
+            display_command,
+            provider,
+            deliver,
+            on_stderr,
+            || {},
+        )
+    }
+
+    /// Spawn a JSON-line process and report when its stdout reader reaches EOF.
+    /// Shared hosts need an explicit exit signal because their router outlives
+    /// every individual delivery callback.
+    pub(crate) fn spawn_with_stdout_closed(
         mut command: Command,
         display_command: &str,
         provider: &'static str,
         deliver: impl Fn(Value) + Send + 'static,
         on_stderr: impl Fn(String) + Send + 'static,
+        on_stdout_closed: impl FnOnce() + Send + 'static,
     ) -> Result<Self, String> {
         command
             .stdin(Stdio::piped())
@@ -65,6 +86,7 @@ impl JsonLineProcess {
                     deliver(message);
                 }
             }
+            on_stdout_closed();
         });
 
         thread::spawn(move || {
@@ -144,3 +166,6 @@ impl Drop for JsonLineProcess {
         let _ = self.shutdown(Duration::from_millis(250), true);
     }
 }
+
+#[cfg(test)]
+mod tests;

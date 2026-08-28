@@ -263,7 +263,22 @@ impl AgentPane {
             SessionEvent::ForkCheckpoints(checkpoints) => {
                 self.show_fork_checkpoints(checkpoints, cx)
             }
+            SessionEvent::HostExited { message } => self.on_host_exited(message, cx),
         }
+    }
+
+    fn on_host_exited(&mut self, message: String, cx: &mut Context<Self>) {
+        let identity = self
+            .runtime
+            .backend
+            .as_ref()
+            .and_then(Backend::recovery_identity);
+        self.runtime.last_recovery_snapshot = Some(RecoverySnapshot {
+            identity,
+            profile_name: self.profile.name.clone(),
+        });
+        self.runtime.update_suspension = Some(UpdateSuspension::Failed(message.clone()));
+        self.on_error(message, true, cx);
     }
 
     /// Handshake finished. Fold the reported thread settings together with

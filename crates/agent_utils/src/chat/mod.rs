@@ -754,6 +754,12 @@ pub enum Event {
     /// behind the connection report it here; where the history is a file this
     /// side can read, the list is read directly instead of asked for.
     ForkCheckpoints(Result<Vec<ForkCheckpoint>, String>),
+    /// A process shared by several sessions stopped without a requested
+    /// shutdown. The UI retains the conversation identity and visible content
+    /// so a replacement process can resume it.
+    HostExited {
+        message: String,
+    },
     Error {
         message: String,
         /// The handshake itself failed; the session will not become usable.
