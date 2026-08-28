@@ -1174,7 +1174,14 @@ impl AgentPane {
     }
 
     pub(super) fn reset_conversation(&mut self, cx: &mut Context<Self>) {
-        self.runtime.backend = None;
+        // The DeepSeek host is one process shared by every tab holding a
+        // session on it, and it stops once the last holder lets go. Releasing
+        // the outgoing session here would kill that host whenever this is the
+        // only tab using it, so the replacement would pay Node's start cost
+        // again for a restart that changes nothing about the host. Holding the
+        // retired session until the new one has taken its own reference hands
+        // the running host over instead.
+        let retiring = self.runtime.backend.take();
         // A fresh conversation always follows the live tail again, even if
         // the previous transcript was scrolled up when it was discarded.
         self.clear_conversation_presentation(cx);
@@ -1201,7 +1208,7 @@ impl AgentPane {
 
         // History records belong to the provider and remain intact; only the
         // live backend and this tab's conversation presentation are reset.
-        self.start_session(None, cx);
+        self.start_session_with_options(None, false, move |_, _, _| drop(retiring), cx);
     }
 
     /// Start the turn clock and drive the once-a-second repaint of the live
