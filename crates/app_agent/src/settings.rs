@@ -7,7 +7,7 @@
 //! type alone.
 
 use gpui::{Font, FontFallbacks, Global, Pixels, SharedString, font, px};
-use nmt_config::agent::CollapseRows;
+use nmt_config::agent::{CollapseRows, ModelListStyle};
 use nmt_config::profile::AgentProfile;
 use nmt_config::system::NewlineShortcut;
 
@@ -29,6 +29,8 @@ pub struct AgentSettings {
     /// Offer `$skill` references through the composer even where the harness
     /// resolves them by prompt text.
     pub codex_skill_command_compat: bool,
+    /// How the composer's model picker spells each model it offers.
+    pub model_list_style: ModelListStyle,
     pub smooth_wheel: bool,
     /// Seconds between branch-label refreshes of the pane's working
     /// directory.
@@ -76,6 +78,7 @@ impl Default for AgentSettings {
             newline_shortcut: NewlineShortcut::default(),
             collapse_tool_calls: CollapseRows::default(),
             codex_skill_command_compat: false,
+            model_list_style: ModelListStyle::default(),
             smooth_wheel: true,
             git_status_refresh_interval: 30,
             profiles: Vec::new(),

@@ -70,6 +70,7 @@ show-agent-usage = true
 collapse-tool-calls = "work-and-tool-calls"
 check-agent-updates = true
 codex-skill-command-compat = true
+model-list-style = "name-and-id"
 
 [system]
 restore-last-session-when-opening = true

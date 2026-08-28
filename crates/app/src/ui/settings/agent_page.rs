@@ -102,6 +102,37 @@ pub(super) fn agent_page(agent_profiles: &[AgentProfile], cx: &App) -> SettingPa
                 ),
             )
             .description(i18n("settings-agent-codex-skill-compat-description")),
+        )
+        .item(
+            SettingItem::new(
+                i18n("settings-agent-model-list-style"),
+                SettingField::dropdown(
+                    vec![
+                        (
+                            ModelListStyle::NameAndId.as_str().into(),
+                            i18n("settings-agent-model-list-style-name-and-id").into(),
+                        ),
+                        (
+                            ModelListStyle::IdAndName.as_str().into(),
+                            i18n("settings-agent-model-list-style-id-and-name").into(),
+                        ),
+                        (
+                            ModelListStyle::NameOnly.as_str().into(),
+                            i18n("settings-agent-model-list-style-name-only").into(),
+                        ),
+                        (
+                            ModelListStyle::IdOnly.as_str().into(),
+                            i18n("settings-agent-model-list-style-id-only").into(),
+                        ),
+                    ],
+                    |cx| cx.global::<AppSettings>().model_list_style.as_str().into(),
+                    |value, cx| {
+                        cx.global_mut::<AppSettings>().model_list_style =
+                            ModelListStyle::from_value(&value);
+                    },
+                ),
+            )
+            .description(i18n("settings-agent-model-list-style-description")),
         );
 
     let mut cli_updates = SettingGroup::new()

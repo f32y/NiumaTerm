@@ -2,7 +2,7 @@ use gpui::{Global, SharedString};
 use nmt_agent_utils::deepseek;
 use nmt_app_agent::AgentKind;
 use nmt_config::agent::AgentConfig;
-pub use nmt_config::agent::CollapseRows;
+pub use nmt_config::agent::{CollapseRows, ModelListStyle};
 use nmt_config::appearance::{AppearanceConfig, SmoothScrollingMode};
 pub use nmt_config::appearance::{InputStyle, Language, TabBarStyle, WindowBackdrop};
 use nmt_config::defaults::default_theme;
@@ -116,6 +116,8 @@ pub struct AppSettings {
     /// List Codex skills in the `/` command palette and rewrite a chosen one
     /// to its `$name` form.
     pub codex_skill_command_compat: bool,
+    /// How the composer's model picker spells each model it offers.
+    pub model_list_style: ModelListStyle,
     /// Ask GitHub in the background whether the selected channel published
     /// something newer than this build.
     pub check_updates: bool,
@@ -195,6 +197,7 @@ impl Default for AppSettings {
             collapse_tool_calls: CollapseRows::WorkAndToolCalls,
             check_agent_updates: true,
             codex_skill_command_compat: true,
+            model_list_style: ModelListStyle::default(),
             check_updates: true,
             update_channel: UpdateChannel::default(),
             restore_last_session_when_opening: true,
@@ -485,6 +488,7 @@ impl AppSettings {
             collapse_tool_calls: config.agent.collapse_tool_calls,
             check_agent_updates: config.agent.check_agent_updates,
             codex_skill_command_compat: config.agent.codex_skill_command_compat,
+            model_list_style: config.agent.model_list_style,
             check_updates: config.update.check_updates,
             update_channel: config.update.channel,
             restore_last_session_when_opening: config.system.restore_last_session_when_opening,
@@ -709,6 +713,7 @@ impl AppSettings {
             collapse_tool_calls: self.collapse_tool_calls,
             check_agent_updates: self.check_agent_updates,
             codex_skill_command_compat: self.codex_skill_command_compat,
+            model_list_style: self.model_list_style,
         };
 
         let system = SystemConfig {
