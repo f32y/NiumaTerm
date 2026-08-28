@@ -29,11 +29,19 @@ Each registered harness SHALL declare whether it provides full multi-directory a
 - **THEN** the tab identifies which additional directories are unavailable before the user sends a prompt
 
 ### Requirement: Codex receives all workspace directories
-For a Codex conversation, the App Server process and thread SHALL use the primary directory as `cwd`, and the thread's runtime workspace roots SHALL contain the primary and every additional directory in workspace order. In workspace-write mode, every runtime workspace root SHALL be included in the writable-root policy sent for turns.
+For a Codex conversation, the thread SHALL use the primary directory as `cwd`, and the thread's runtime workspace roots SHALL contain the primary and every additional directory in workspace order. Every Codex request whose behavior depends on a working directory, including thread creation, history filtering, and skill discovery, SHALL carry the applicable absolute primary directory instead of relying on the shared App Server process working directory. In workspace-write mode, every runtime workspace root SHALL be included in the writable-root policy sent for turns.
 
 #### Scenario: Start a Codex conversation
 - **WHEN** Codex starts from workspace directories A, B, and C
-- **THEN** the process and thread use A as `cwd` and the runtime root list is A, B, C
+- **THEN** the thread uses absolute directory A as `cwd`, the runtime root list is A, B, C, and the shared process does not change its working directory for that conversation
+
+#### Scenario: Start a single-directory Codex conversation
+- **WHEN** Codex starts from workspace directory A on an app-server shared with another workspace
+- **THEN** `thread/start` explicitly names absolute directory A even though there are no additional roots
+
+#### Scenario: Query workspace-scoped Codex data
+- **WHEN** a Codex tab requests current-directory history or skills
+- **THEN** the request carries the tab's absolute primary directory and does not use `.` as a proxy for process state
 
 #### Scenario: Run Codex in workspace-write mode
 - **WHEN** a Codex turn starts in workspace-write mode with directories A, B, and C
