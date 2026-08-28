@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::mem::take;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 #[cfg(test)]
 use std::time::UNIX_EPOCH;
@@ -24,13 +25,12 @@ pub use crate::chat::{
     SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings,
     TokenUsageBreakdown,
 };
-use crate::launcher::AgentCli;
-use crate::subprocess::JsonLineProcess;
 use crate::workspace::AgentWorkspace;
 use crate::{CodexProviderConfig, LaunchConfig};
 
 mod background_tasks;
 mod compaction;
+mod host;
 mod options;
 mod protocol;
 mod skills;
@@ -39,6 +39,7 @@ use crate::codex::app_server::background_tasks::{CodexTasks, ThreadScope, notifi
 use crate::codex::app_server::compaction::{
     CompactionState, compaction_completed, compaction_started, is_legacy_compaction_notification,
 };
+use crate::codex::app_server::host::{CodexHost, HOST_EXIT_METHOD, RegistrationId};
 pub use crate::codex::app_server::options::{
     APPROVAL_OPTIONS, APPROVAL_REVIEWER_OPTIONS, SANDBOX_OPTIONS,
 };
@@ -57,7 +58,6 @@ use crate::codex::app_server::skills::{SkillRefreshState, skill_catalog_from_res
 
 /// JSON-RPC ids for the fixed handshake requests; turn requests count up from
 /// `FIRST_TURN_RPC_ID` so response routing can tell the phases apart.
-const INIT_RPC_ID: u64 = 1;
 const THREAD_START_RPC_ID: u64 = 2;
 const MODEL_LIST_RPC_ID: u64 = 3;
 const THREAD_LIST_RPC_ID: u64 = 4;
@@ -102,18 +102,6 @@ impl From<&LaunchConfig> for ThreadProfile {
     }
 }
 
-fn initialize_request() -> Value {
-    json!({
-        "jsonrpc": "2.0",
-        "id": INIT_RPC_ID,
-        "method": "initialize",
-        "params": {
-            "clientInfo": {"name": "NiumaTerm", "version": "0.1.0"},
-            "capabilities": {"experimentalApi": true},
-        },
-    })
-}
-
 #[derive(Default)]
 struct TurnOutputUsage {
     latest_total: Option<u64>,
@@ -151,7 +139,9 @@ struct PendingThreadName {
 }
 
 pub struct Session {
-    process: JsonLineProcess,
+    host: Option<Arc<CodexHost>>,
+    registration_id: RegistrationId,
+    detached: bool,
     next_rpc_id: u64,
     thread_id: Option<String>,
     current_turn: Option<String>,
@@ -222,34 +212,43 @@ impl Session {
         ]
     }
 
-    /// Spawn `codex app-server` with piped stdio and send the `initialize`
-    /// request. Every parsed stdout line is handed to `deliver` (from a
-    /// reader thread — hop threads before calling [`Session::process`]);
-    /// stderr lines go to `on_stderr`. Dropping `deliver` signals EOF: the
-    /// closure is owned by the reader thread and dropped when the pipe closes.
+    /// Attach a conversation to the shared app-server, starting and
+    /// initializing the host only when no compatible generation is live.
+    /// Messages for this conversation are handed to `deliver` from the host's
+    /// reader thread, so callers hop threads before invoking [`Session::process`].
     pub fn spawn(
         launch: &LaunchConfig,
+        host_catalog: &[LaunchConfig],
         workspace: &AgentWorkspace,
-        deliver: impl Fn(Value) + Send + 'static,
-        on_stderr: impl Fn(String) + Send + 'static,
-    ) -> Result<Self, String> {
-        Self::spawn_inner(launch, workspace, None, false, deliver, on_stderr)
-    }
-
-    /// Start app-server directly into an existing thread. The initialize
-    /// handshake sends `thread/resume` instead of creating a disposable empty
-    /// thread first; replay can be suppressed when the caller already retains
-    /// the visible transcript in place.
-    pub fn spawn_resuming(
-        launch: &LaunchConfig,
-        workspace: &AgentWorkspace,
-        thread_id: String,
-        suppress_replay: bool,
-        deliver: impl Fn(Value) + Send + 'static,
+        deliver: impl Fn(Value) + Send + Sync + 'static,
         on_stderr: impl Fn(String) + Send + 'static,
     ) -> Result<Self, String> {
         Self::spawn_inner(
             launch,
+            host_catalog,
+            workspace,
+            None,
+            false,
+            deliver,
+            on_stderr,
+        )
+    }
+
+    /// Attach directly to an existing thread without creating a disposable
+    /// empty thread first. Replay can be suppressed when the caller already
+    /// retains the visible transcript in place.
+    pub fn spawn_resuming(
+        launch: &LaunchConfig,
+        host_catalog: &[LaunchConfig],
+        workspace: &AgentWorkspace,
+        thread_id: String,
+        suppress_replay: bool,
+        deliver: impl Fn(Value) + Send + Sync + 'static,
+        on_stderr: impl Fn(String) + Send + 'static,
+    ) -> Result<Self, String> {
+        Self::spawn_inner(
+            launch,
+            host_catalog,
             workspace,
             Some(thread_id),
             suppress_replay,
@@ -260,34 +259,21 @@ impl Session {
 
     fn spawn_inner(
         launch: &LaunchConfig,
+        host_catalog: &[LaunchConfig],
         workspace: &AgentWorkspace,
         initial_resume: Option<String>,
         suppress_resume_replay: bool,
-        deliver: impl Fn(Value) + Send + 'static,
+        deliver: impl Fn(Value) + Send + Sync + 'static,
         on_stderr: impl Fn(String) + Send + 'static,
     ) -> Result<Self, String> {
         let thread_profile = ThreadProfile::from(launch);
-        let launcher = AgentCli::from_launch(launch, "codex");
-        let executable = launcher.executable().to_string();
-        let mut command = launcher.command(["app-server"]);
-
-        // The process runs in the primary directory: Codex resolves its own
-        // configuration and Git context from where it starts, and the
-        // additional directories widen access without moving that anchor.
-        if let Some(cwd) = workspace.primary() {
-            command.current_dir(cwd);
-        }
-
-        let process = JsonLineProcess::spawn(
-            command,
-            &format!("{executable} app-server"),
-            "Codex",
-            deliver,
-            on_stderr,
-        )?;
+        let host = CodexHost::acquire(launch, host_catalog, on_stderr)?;
+        let registration_id = host.register(deliver);
 
         let mut session = Self {
-            process,
+            host: Some(host),
+            registration_id,
+            detached: false,
             next_rpc_id: FIRST_TURN_RPC_ID,
             thread_id: None,
             current_turn: None,
@@ -305,8 +291,13 @@ impl Session {
             suppress_resume_replay,
             background: CodexTasks::default(),
         };
-
-        session.send(initialize_request());
+        session.request_skills(false);
+        let initial_request = initial_thread_request(
+            session.initial_resume.as_deref(),
+            &session.thread_profile,
+            &session.workspace,
+        );
+        session.send(initial_request);
 
         Ok(session)
     }
@@ -322,11 +313,57 @@ impl Session {
             || self.compaction.active.is_some()
     }
 
-    /// Close the protocol input and wait for the owned process tree to exit.
-    /// Forced termination is opt-in because it can interrupt an active tool
-    /// operation; dropping the Job Object affects only this session's tree.
+    /// Detach this thread from the shared host. The final owner performs the
+    /// requested bounded process shutdown.
     pub fn shutdown(&mut self, timeout: Duration, force: bool) -> Result<(), String> {
-        self.process.shutdown(timeout, force)
+        self.detach_with(timeout, force)
+    }
+
+    fn detach(&mut self) {
+        let _ = self.detach_with(Duration::from_millis(250), true);
+    }
+
+    fn detach_with(&mut self, timeout: Duration, force: bool) -> Result<(), String> {
+        if self.detached {
+            return Ok(());
+        }
+        if let (Some(thread_id), Some(turn_id)) =
+            (self.thread_id.clone(), self.current_turn.clone())
+        {
+            let rpc_id = self.alloc_rpc_id();
+            self.send(json!({
+                "jsonrpc": "2.0",
+                "id": rpc_id,
+                "method": "turn/interrupt",
+                "params": {"threadId": thread_id, "turnId": turn_id},
+            }));
+        }
+        if let Some(thread_id) = self.thread_id.clone() {
+            let rpc_id = self.alloc_rpc_id();
+            self.send(json!({
+                "jsonrpc": "2.0",
+                "id": rpc_id,
+                "method": "thread/unsubscribe",
+                "params": {"threadId": thread_id},
+            }));
+        }
+        let result = if let Some(host) = self.host.take() {
+            if host.detach(self.registration_id) {
+                host.shutdown(timeout, force)
+            } else {
+                Ok(())
+            }
+        } else {
+            Ok(())
+        };
+        self.detached = true;
+        result
+    }
+
+    fn sync_descendant_owners(&self) {
+        if let Some(host) = &self.host {
+            host.claim_descendants(self.registration_id, self.background.confirmed_thread_ids());
+        }
     }
 
     /// Handle one message from the server: advances the handshake, answers
@@ -335,12 +372,14 @@ impl Session {
         let id = message["id"].as_u64();
         let method = message["method"].as_str().map(str::to_owned);
 
-        match (id, method.as_deref()) {
+        let events = match (id, method.as_deref()) {
             (Some(rpc_id), Some(method)) => self.process_server_request(rpc_id, method, &message),
             (Some(rpc_id), None) => self.process_response(rpc_id, &message),
             (None, Some(method)) => self.process_notification(method, &message["params"]),
             (None, None) => Vec::new(),
-        }
+        };
+        self.sync_descendant_owners();
+        events
     }
 
     /// A message typed while a turn is running becomes a steer (mid-turn
@@ -565,7 +604,7 @@ impl Session {
         self.history_scope = scope;
         self.history_cursor = None;
 
-        let params = thread_list_params(&self.thread_profile, None, scope);
+        let params = thread_list_params(&self.thread_profile, None, scope, &self.workspace);
         self.send(json!({
             "jsonrpc": "2.0",
             "id": THREAD_LIST_RPC_ID,
@@ -580,7 +619,12 @@ impl Session {
             return;
         };
 
-        let params = thread_list_params(&self.thread_profile, Some(&cursor), self.history_scope);
+        let params = thread_list_params(
+            &self.thread_profile,
+            Some(&cursor),
+            self.history_scope,
+            &self.workspace,
+        );
         self.send(json!({
             "jsonrpc": "2.0",
             "id": THREAD_LIST_RPC_ID,
@@ -682,13 +726,19 @@ impl Session {
 
         let rpc_id = self.alloc_rpc_id();
         self.skill_refresh.start(rpc_id);
-        self.send(skills_list_request(rpc_id, force_reload));
+        let request = skills_list_request(rpc_id, force_reload, &self.workspace);
+        self.send(request);
     }
 
     /// Write one request line; write failures stay unsurfaced because the
     /// reader-side EOF is the single exit-detection path.
     fn send(&mut self, message: Value) {
-        self.process.write_line(&message);
+        let Some(host) = &self.host else {
+            return;
+        };
+        if let Err(error) = host.send(self.registration_id, message) {
+            tracing::warn!("could not write Codex app-server request: {error}");
+        }
     }
 
     fn process_server_request(&mut self, rpc_id: u64, method: &str, message: &Value) -> Vec<Event> {
@@ -854,17 +904,6 @@ impl Session {
         }
 
         match rpc_id {
-            INIT_RPC_ID => {
-                self.send(json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}));
-                self.request_skills(false);
-                self.send(initial_thread_request(
-                    self.initial_resume.as_deref(),
-                    &self.thread_profile,
-                    &self.workspace,
-                ));
-
-                Vec::new()
-            }
             THREAD_START_RPC_ID => {
                 let result = &message["result"];
 
@@ -883,10 +922,14 @@ impl Session {
 
                 vec![Event::Ready(parse_thread_settings(result))]
             }
-            MODEL_LIST_RPC_ID => vec![Event::Models(parse_models(
-                &message["result"],
-                self.thread_profile.model.as_deref(),
-            ))],
+            MODEL_LIST_RPC_ID => {
+                let models = if self.thread_profile.provider.is_some() {
+                    parse_models(&json!({"data": []}), self.thread_profile.model.as_deref())
+                } else {
+                    parse_models(&message["result"], self.thread_profile.model.as_deref())
+                };
+                vec![Event::Models(models)]
+            }
             THREAD_LIST_RPC_ID => {
                 let result = &message["result"];
 
@@ -923,6 +966,18 @@ impl Session {
     }
 
     fn process_notification(&mut self, method: &str, params: &Value) -> Vec<Event> {
+        if method == HOST_EXIT_METHOD {
+            self.current_turn = None;
+            self.pending_approval = None;
+            self.pending_commands.clear();
+            self.compaction.reset_thread();
+            return vec![Event::HostExited {
+                message: params["message"]
+                    .as_str()
+                    .unwrap_or("Codex app-server stopped unexpectedly")
+                    .to_string(),
+            }];
+        }
         if is_legacy_compaction_notification(method) {
             // Current servers can publish this deprecated notification beside
             // the authoritative item lifecycle. Ignoring it prevents a second
@@ -1080,6 +1135,12 @@ impl Session {
             "thread/status/changed" => Vec::new(),
             _ => Vec::new(),
         }
+    }
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        self.detach();
     }
 }
 

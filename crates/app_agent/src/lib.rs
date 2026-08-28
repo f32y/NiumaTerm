@@ -1,5 +1,6 @@
-//! The agent conversation pane: one backend process per tab, the composer,
-//! the transcript, thread controls, and child-agent views.
+//! The agent conversation pane: one backend session per tab, the composer,
+//! the transcript, thread controls, and child-agent views. Harnesses may share
+//! a process while keeping their session state isolated.
 //!
 //! The application shell owns tabs, chrome, provider updates, and settings;
 //! this crate reads only the [`settings::AgentSettings`] snapshot the shell

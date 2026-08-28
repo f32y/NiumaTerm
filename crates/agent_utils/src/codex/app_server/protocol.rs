@@ -67,12 +67,18 @@ pub(super) fn codex_command_request(rpc_id: u64, thread_id: &str, name: &str) ->
     }
 }
 
-pub(super) fn skills_list_request(rpc_id: u64, force_reload: bool) -> Value {
-    let params = if force_reload {
-        json!({"forceReload": true})
-    } else {
-        json!({})
-    };
+pub(super) fn skills_list_request(
+    rpc_id: u64,
+    force_reload: bool,
+    workspace: &AgentWorkspace,
+) -> Value {
+    let mut params = json!({});
+    if force_reload {
+        params["forceReload"] = json!(true);
+    }
+    if let Some(primary) = workspace.primary() {
+        params["cwds"] = json!([primary]);
+    }
 
     json!({
         "jsonrpc": "2.0",
@@ -153,6 +159,9 @@ pub(super) fn thread_start_params(profile: &ThreadProfile, workspace: &AgentWork
         params["modelProvider"] = json!(provider.id.as_str());
         add_provider_config(&mut params, provider);
     }
+    if let Some(primary) = workspace.primary() {
+        params["cwd"] = json!(primary);
+    }
     add_workspace_roots(&mut params, workspace);
     params
 }
@@ -167,9 +176,6 @@ pub(super) fn thread_start_params(profile: &ThreadProfile, workspace: &AgentWork
 fn add_workspace_roots(params: &mut Value, workspace: &AgentWorkspace) {
     if !workspace.is_multi_root() {
         return;
-    }
-    if let Some(primary) = workspace.primary() {
-        params["cwd"] = json!(primary);
     }
     params["runtimeWorkspaceRoots"] = json!(workspace.ordered().collect::<Vec<_>>());
 }
@@ -220,16 +226,16 @@ pub(super) fn thread_list_params(
     profile: &ThreadProfile,
     cursor: Option<&str>,
     scope: SessionScope,
+    workspace: &AgentWorkspace,
 ) -> Value {
     let mut params = json!({
         "sortKey": "recency_at",
         "limit": THREAD_LIST_LIMIT,
     });
-    // `"."` resolves against the app-server process cwd, which is the
-    // directory the started thread runs in; the server treats the filter as an
-    // exact match. Omitting it is how the protocol asks for every directory.
-    if scope == SessionScope::CurrentDirectory {
-        params["cwd"] = json!(".");
+    if scope == SessionScope::CurrentDirectory
+        && let Some(primary) = workspace.primary()
+    {
+        params["cwd"] = json!(primary);
     }
     if let Some(provider) = profile.provider.as_ref() {
         params["modelProviders"] = json!([provider.id.as_str()]);

@@ -55,6 +55,7 @@ pub(crate) struct TestBackend {
     /// lets go of the session. A DeepSeek session's release is what can stop
     /// the shared host process, so when it happens is behavior of its own.
     released: Option<Arc<AtomicBool>>,
+    recovery: Option<RecoveryIdentity>,
 }
 
 #[cfg(test)]
@@ -69,11 +70,17 @@ impl TestBackend {
             slash_outcome,
             commands,
             released: None,
+            recovery: None,
         }
     }
 
     pub(crate) fn watch_release(mut self, released: Arc<AtomicBool>) -> Self {
         self.released = Some(released);
+        self
+    }
+
+    pub(crate) fn with_recovery(mut self, kind: AgentKind, id: impl Into<String>) -> Self {
+        self.recovery = Some(RecoveryIdentity::new(kind, id));
         self
     }
 }
@@ -95,6 +102,7 @@ impl Backend {
     pub(crate) fn spawn(
         kind: AgentKind,
         launch: &LaunchConfig,
+        host_catalog: &[LaunchConfig],
         workspace: &AgentWorkspace,
         recovery: Option<RecoveryIdentity>,
         deliver: impl Fn(Value) + Send + Sync + 'static,
@@ -109,15 +117,18 @@ impl Backend {
             AgentKind::Codex => match resume {
                 Some(thread_id) => app_server::Session::spawn_resuming(
                     launch,
+                    host_catalog,
                     workspace,
                     thread_id,
                     true,
                     deliver,
                     |line| trace!("codex app-server: {line}"),
                 ),
-                None => app_server::Session::spawn(launch, workspace, deliver, |line| {
-                    trace!("codex app-server: {line}")
-                }),
+                None => {
+                    app_server::Session::spawn(launch, host_catalog, workspace, deliver, |line| {
+                        trace!("codex app-server: {line}")
+                    })
+                }
             }
             .map(Backend::Codex),
             AgentKind::Claude => {
@@ -497,7 +508,7 @@ impl Backend {
                 .session_id()
                 .map(|id| RecoveryIdentity::new(AgentKind::DeepSeek, id)),
             #[cfg(test)]
-            Backend::Test(_) => None,
+            Backend::Test(session) => session.recovery.clone(),
         }
     }
 

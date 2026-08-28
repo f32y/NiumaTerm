@@ -15,22 +15,6 @@ fn replayed_items(turns: &Value) -> Vec<Item> {
 }
 
 #[test]
-fn codex_initialize_enables_experimental_api_for_descendant_queries() {
-    assert_eq!(
-        initialize_request(),
-        json!({
-            "jsonrpc": "2.0",
-            "id": INIT_RPC_ID,
-            "method": "initialize",
-            "params": {
-                "clientInfo": {"name": "NiumaTerm", "version": "0.1.0"},
-                "capabilities": {"experimentalApi": true},
-            },
-        })
-    );
-}
-
-#[test]
 fn turn_output_usage_tracks_growth_across_model_responses() {
     let mut usage = TurnOutputUsage::default();
 
@@ -134,18 +118,19 @@ fn context_usage_accepts_older_sparse_breakdowns() {
 
 #[test]
 fn skill_list_requests_and_refresh_state_coalesce_invalidations() {
+    let workspace = AgentWorkspace::single(Some("C:/Repo".into()));
     assert_eq!(
-        skills_list_request(10, false),
+        skills_list_request(10, false, &workspace),
         json!({
             "jsonrpc": "2.0",
             "id": 10,
             "method": "skills/list",
-            "params": {},
+            "params": {"cwds": ["C:/Repo"]},
         })
     );
     assert_eq!(
-        skills_list_request(11, true)["params"],
-        json!({"forceReload": true})
+        skills_list_request(11, true, &workspace)["params"],
+        json!({"forceReload": true, "cwds": ["C:/Repo"]})
     );
 
     let mut refresh = SkillRefreshState::default();
@@ -347,6 +332,7 @@ fn thread_start_injects_profile_model_and_provider_without_a_secret() {
         "model": "vendor/custom-model",
         "modelProvider": "niumaterm-a1",
         "experimentalRawEvents": true,
+        "cwd": "C:/A",
         "config": {
             "model_providers.niumaterm-a1": {
                 "name": "Proxy",
@@ -364,18 +350,17 @@ fn thread_start_injects_profile_model_and_provider_without_a_secret() {
 }
 
 #[test]
-fn a_single_directory_thread_start_carries_no_root_keys() {
+fn a_single_directory_thread_start_carries_an_explicit_cwd() {
     let profile = ThreadProfile::default();
 
-    // An older NiumaTerm build sent exactly this, so a single-directory
-    // conversation keeps working against every supported CLI version.
-    for workspace in [
-        AgentWorkspace::default(),
-        AgentWorkspace::single(Some("C:/A".into())),
-    ] {
-        let params = thread_start_params(&profile, &workspace);
-        assert_eq!(params, json!({"experimentalRawEvents": true}));
-    }
+    assert_eq!(
+        thread_start_params(&profile, &AgentWorkspace::default()),
+        json!({"experimentalRawEvents": true})
+    );
+    assert_eq!(
+        thread_start_params(&profile, &AgentWorkspace::single(Some("C:/A".into()))),
+        json!({"experimentalRawEvents": true, "cwd": "C:/A"})
+    );
 }
 
 #[test]
@@ -521,29 +506,26 @@ fn custom_profile_filters_history_and_adds_an_unknown_selected_model() {
             ..CodexProviderConfig::default()
         }),
     };
-    let scoped = thread_list_params(&profile, Some("next"), SessionScope::CurrentDirectory);
+    let workspace = AgentWorkspace::single(Some("C:/A".into()));
+    let scoped = thread_list_params(
+        &profile,
+        Some("next"),
+        SessionScope::CurrentDirectory,
+        &workspace,
+    );
     assert_eq!(scoped["modelProviders"], json!(["niumaterm-a1"]));
     // The exact-match filter is what keeps other projects out; asking for
     // every directory is expressed by leaving it off.
-    assert_eq!(scoped["cwd"], json!("."));
+    assert_eq!(scoped["cwd"], json!("C:/A"));
     assert_eq!(
-        thread_list_params(&profile, None, SessionScope::AllDirectories)["cwd"],
+        thread_list_params(&profile, None, SessionScope::AllDirectories, &workspace,)["cwd"],
         Value::Null
     );
 
-    let models = parse_models(
-        &json!({
-            "data": [{
-                "model": "gpt-default",
-                "displayName": "GPT Default",
-                "hidden": false
-            }]
-        }),
-        profile.model.as_deref(),
-    );
+    let models = parse_models(&json!({"data": []}), profile.model.as_deref());
 
     assert_eq!(models[0].model, "vendor/custom-model");
-    assert_eq!(models[1].model, "gpt-default");
+    assert_eq!(models.len(), 1);
 }
 
 #[test]
