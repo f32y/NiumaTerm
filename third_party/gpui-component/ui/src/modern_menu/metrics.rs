@@ -150,17 +150,30 @@ pub(super) fn menu_size(
     )
 }
 
+/// Which side of the anchor a menu takes when there is room for it there.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum Side {
+    /// The anchor is the menu's top edge, which is where a pointer press wants
+    /// it: the menu unfolds away from the pointer.
+    #[default]
+    Below,
+    /// The anchor is the menu's bottom edge, for a menu about something the
+    /// pointer is not on, such as a text selection the menu must not cover.
+    Above,
+}
+
 /// Top-left corner for a menu of `menu` size opened at `anchor`.
 ///
-/// The menu opens down and to the right of the anchor, and flips to the opposite
-/// side when that would leave the work area. Flipping rather than sliding keeps
-/// the anchor on a corner of the menu, so the pointer never ends up resting on an
-/// item the user did not aim at. Clamping is the last resort, for a menu taller
-/// or wider than the space on either side of the anchor.
+/// The menu opens to the right of the anchor and on `side` of it, and flips to
+/// the opposite side when that would leave the work area. Flipping rather than
+/// sliding keeps the anchor on a corner of the menu, so the pointer never ends up
+/// resting on an item the user did not aim at. Clamping is the last resort, for a
+/// menu taller or wider than the space on either side of the anchor.
 pub(super) fn place(
     anchor: Point<Pixels>,
     menu: Size<Pixels>,
     work_area: Bounds<Pixels>,
+    side: Side,
 ) -> Point<Pixels> {
     let left = work_area.origin.x + EDGE_MARGIN;
     let top = work_area.origin.y + EDGE_MARGIN;
@@ -172,10 +185,11 @@ pub(super) fn place(
     } else {
         anchor.x
     };
-    let y = if anchor.y + menu.height > bottom {
-        anchor.y - menu.height
-    } else {
-        anchor.y
+    let y = match side {
+        Side::Below if anchor.y + menu.height > bottom => anchor.y - menu.height,
+        Side::Below => anchor.y,
+        Side::Above if anchor.y - menu.height < top => anchor.y,
+        Side::Above => anchor.y - menu.height,
     };
 
     point(

@@ -128,6 +128,7 @@ pub struct ModernMenu {
     entries: Vec<Entry>,
     font: Option<Font>,
     input: ModernMenuInput,
+    side: metrics::Side,
 }
 
 impl ModernMenu {
@@ -258,6 +259,17 @@ impl ModernMenu {
         self.show_at_with_input(position, ModernMenuInput::Mouse, window, cx);
     }
 
+    /// Open the menu with its bottom edge at `position` rather than its top.
+    ///
+    /// For a menu about a region of the window instead of the point that was
+    /// pressed - a text selection, say, which the menu has to leave visible for
+    /// the choice it offers to mean anything. It still opens below when there is
+    /// no room above.
+    pub fn show_above(mut self, position: Point<Pixels>, window: &mut Window, cx: &mut App) {
+        self.side = metrics::Side::Above;
+        self.show_at_with_input(position, ModernMenuInput::Mouse, window, cx);
+    }
+
     /// Open the menu using the spacing for the input that requested it.
     pub fn show_at_with_input(
         mut self,
@@ -332,6 +344,7 @@ impl ModernMenu {
         };
 
         let input = self.input;
+        let side = self.side;
         let entries = self.entries;
         let _ = menu.update(cx, |view, menu_window, cx| {
             // Shaped in the window that will render them rather than the one the
@@ -387,7 +400,7 @@ impl ModernMenu {
             };
             let menu_size = metrics::menu_size(widest, content, input);
             let bounds = Bounds {
-                origin: metrics::place(anchor, menu_size, work_area),
+                origin: metrics::place(anchor, menu_size, work_area, side),
                 size: menu_size,
             };
 

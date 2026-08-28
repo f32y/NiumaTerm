@@ -6,7 +6,7 @@ use crate::modern_menu::{Activation, Entry, Item, ModernMenuInput, normalize_sep
 
 use crate::modern_menu::metrics::{
     BORDER_WIDTH, COMMAND_BUTTON_WIDTH, COMMAND_ROW_HEIGHT, Content, ICON_GAP, ICON_SIZE,
-    ITEM_MARGIN_X, ITEM_PADDING_X, MIN_MENU_WIDTH, PRESENTER_PADDING_Y, SEPARATOR_HEIGHT,
+    ITEM_MARGIN_X, ITEM_PADDING_X, MIN_MENU_WIDTH, PRESENTER_PADDING_Y, SEPARATOR_HEIGHT, Side,
     TOUCH_MIN_MENU_WIDTH, item_height, menu_size, place,
 };
 
@@ -121,15 +121,35 @@ fn menu_opens_down_and_right_when_it_fits() {
     let menu = size(px(200.0), px(100.0));
 
     assert_eq!(
-        place(point(px(100.0), px(100.0)), menu, work_area()),
+        place(point(px(100.0), px(100.0)), menu, work_area(), Side::Below),
         point(px(100.0), px(100.0))
+    );
+}
+
+#[test]
+fn an_above_menu_ends_at_its_anchor() {
+    let menu = size(px(200.0), px(100.0));
+
+    assert_eq!(
+        place(point(px(100.0), px(300.0)), menu, work_area(), Side::Above),
+        point(px(100.0), px(200.0))
+    );
+}
+
+#[test]
+fn an_above_menu_with_no_room_opens_below_instead() {
+    let menu = size(px(200.0), px(100.0));
+
+    assert_eq!(
+        place(point(px(100.0), px(20.0)), menu, work_area(), Side::Above),
+        point(px(100.0), px(20.0))
     );
 }
 
 #[test]
 fn menu_flips_to_the_other_side_of_a_crowded_anchor() {
     let menu = size(px(200.0), px(100.0));
-    let placed = place(point(px(950.0), px(760.0)), menu, work_area());
+    let placed = place(point(px(950.0), px(760.0)), menu, work_area(), Side::Below);
 
     assert_eq!(placed, point(px(750.0), px(660.0)));
 }
@@ -137,7 +157,7 @@ fn menu_flips_to_the_other_side_of_a_crowded_anchor() {
 #[test]
 fn a_menu_taller_than_the_work_area_keeps_its_top_on_screen() {
     let menu = size(px(200.0), px(900.0));
-    let placed = place(point(px(100.0), px(700.0)), menu, work_area());
+    let placed = place(point(px(100.0), px(700.0)), menu, work_area(), Side::Below);
 
     assert_eq!(placed.y, px(4.0));
 }
