@@ -20,6 +20,21 @@ impl AgentPane {
     /// answers to.
     const EFFORT_LEVELS: [&'static str; 5] = ["low", "medium", "high", "xhigh", "max"];
 
+    /// The model catalog as picker entries, spelled the way the settings ask
+    /// for. A catalog entry carries both names of one model - the one the
+    /// harness displays and the route id a pick is sent as - and which of them
+    /// tells the user what they are choosing depends on the deployment, so the
+    /// pairing is a setting rather than a decision made here.
+    fn model_options(&self, cx: &App) -> Vec<(String, String)> {
+        let style = cx.global::<AgentSettings>().model_list_style;
+
+        self.controls
+            .models
+            .iter()
+            .map(|m| (m.model.clone(), style.label(&m.display, &m.model)))
+            .collect()
+    }
+
     /// The shared ladder plus the one level a harness puts above it. Each of
     /// these is a single harness's own top mode, so neither belongs in the
     /// ladder the others share.
@@ -43,12 +58,7 @@ impl AgentPane {
     /// via control requests before the next message. Models without effort
     /// support (e.g. Haiku) get no effort control.
     fn render_claude_settings_row(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let model_options: Vec<(String, String)> = self
-            .controls
-            .models
-            .iter()
-            .map(|m| (m.model.clone(), m.display.clone()))
-            .collect();
+        let model_options = self.model_options(cx);
         let permission_options: Vec<(String, String)> = stream_json::PERMISSION_OPTIONS
             .iter()
             .map(|v| (v.to_string(), setting_value_label(v)))
@@ -146,12 +156,7 @@ impl AgentPane {
     /// not serve and hide the ones it does. A composition with no permission
     /// service reports none, and then the control is absent rather than empty.
     fn render_deepseek_settings_row(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let model_options: Vec<(String, String)> = self
-            .controls
-            .models
-            .iter()
-            .map(|m| (m.model.clone(), m.display.clone()))
-            .collect();
+        let model_options = self.model_options(cx);
         // The setting belongs to the exact model route, so a model that
         // advertises no levels simply has no effort control; the levels it
         // then offers are the shared ladder.
@@ -277,12 +282,7 @@ impl AgentPane {
     /// reasoning effort, and service tier. Values are thread settings sent as
     /// overrides on the next `turn/start`.
     fn render_codex_settings_row(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let model_options: Vec<(String, String)> = self
-            .controls
-            .models
-            .iter()
-            .map(|m| (m.model.clone(), m.display.clone()))
-            .collect();
+        let model_options = self.model_options(cx);
         // Service tiers are per model, and the catalog only lists the
         // additional tiers (e.g. "Fast") — the normal tier is implicit, so
         // the menu carries a synthetic entry for it. Empty protocol value =

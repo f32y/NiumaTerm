@@ -54,6 +54,7 @@ fn sample_agent() -> AgentConfig {
         collapse_tool_calls: agent::CollapseRows::WorkAndToolCalls,
         check_agent_updates: false,
         codex_skill_command_compat: false,
+        model_list_style: agent::ModelListStyle::IdOnly,
     }
 }
 
@@ -681,4 +682,31 @@ fn example_config_matches_the_serialized_defaults() {
         generated.trim(),
         "assets/config-example.toml is out of date"
     );
+}
+
+#[test]
+fn a_model_entry_carries_the_names_the_style_asks_for() {
+    use agent::ModelListStyle;
+
+    assert_eq!(
+        ModelListStyle::NameAndId.label("Opus 5", "claude-opus-5"),
+        "Opus 5 (claude-opus-5)"
+    );
+    assert_eq!(
+        ModelListStyle::IdAndName.label("Opus 5", "claude-opus-5"),
+        "claude-opus-5 (Opus 5)"
+    );
+    assert_eq!(
+        ModelListStyle::NameOnly.label("Opus 5", "claude-opus-5"),
+        "Opus 5"
+    );
+    assert_eq!(
+        ModelListStyle::IdOnly.label("Opus 5", "claude-opus-5"),
+        "claude-opus-5"
+    );
+
+    // A harness with one name for a model states it once under every style.
+    assert_eq!(ModelListStyle::NameAndId.label("gpt-5", "gpt-5"), "gpt-5");
+    assert_eq!(ModelListStyle::IdAndName.label("", "gpt-5"), "gpt-5");
+    assert_eq!(ModelListStyle::NameOnly.label("  ", "gpt-5"), "gpt-5");
 }

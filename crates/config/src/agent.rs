@@ -29,6 +29,9 @@ pub struct AgentConfig {
     /// only and `$` is the sole skill trigger.
     #[serde(default = "default_bool_true", rename = "codex-skill-command-compat")]
     pub codex_skill_command_compat: bool,
+    /// How the composer's model picker spells each model it offers.
+    #[serde(default, rename = "model-list-style")]
+    pub model_list_style: ModelListStyle,
 }
 
 impl Default for AgentConfig {
@@ -39,6 +42,60 @@ impl Default for AgentConfig {
             collapse_tool_calls: CollapseRows::WorkAndToolCalls,
             check_agent_updates: true,
             codex_skill_command_compat: true,
+            model_list_style: ModelListStyle::default(),
+        }
+    }
+}
+
+/// How the composer's model picker spells a model. A harness reports two
+/// names for one model - the one it displays and the route id a pick is sent
+/// as - and which of them identifies the model to the reader depends on the
+/// deployment: display names repeat across snapshots of the same model, while
+/// ids carry the snapshot date and the provider prefix.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ModelListStyle {
+    #[default]
+    NameAndId,
+    IdAndName,
+    NameOnly,
+    IdOnly,
+}
+
+impl ModelListStyle {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NameAndId => "name-and-id",
+            Self::IdAndName => "id-and-name",
+            Self::NameOnly => "name-only",
+            Self::IdOnly => "id-only",
+        }
+    }
+
+    pub fn from_value(value: &str) -> Self {
+        match value {
+            "id-and-name" => Self::IdAndName,
+            "name-only" => Self::NameOnly,
+            "id-only" => Self::IdOnly,
+            _ => Self::NameAndId,
+        }
+    }
+
+    /// One picker entry, from the harness's display name and the route id it
+    /// is selected by. A harness that reports the id as the display name, or
+    /// no name at all, leaves nothing to put beside the id, so the paired
+    /// styles print the id once instead of twice.
+    pub fn label(self, name: &str, id: &str) -> String {
+        let name = name.trim();
+        if name.is_empty() || name == id {
+            return id.to_string();
+        }
+
+        match self {
+            Self::NameAndId => format!("{name} ({id})"),
+            Self::IdAndName => format!("{id} ({name})"),
+            Self::NameOnly => name.to_string(),
+            Self::IdOnly => id.to_string(),
         }
     }
 }
@@ -106,4 +163,5 @@ pub(crate) fn patch_document(doc: &mut DocumentMut, agent: &AgentConfig) {
     doc["agent"]["collapse-tool-calls"] = value(agent.collapse_tool_calls.as_str());
     doc["agent"]["check-agent-updates"] = value(agent.check_agent_updates);
     doc["agent"]["codex-skill-command-compat"] = value(agent.codex_skill_command_compat);
+    doc["agent"]["model-list-style"] = value(agent.model_list_style.as_str());
 }
