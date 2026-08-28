@@ -3,25 +3,41 @@
 //! Every dimension here is resolved before the menu window exists. `PlatformWindow`
 //! can resize a window but has no way to move one, and its resize is queued on the
 //! platform executor, so a menu that measured itself after creation would present
-//! at least one frame at the wrong place. Because the menu has no submenus and no
-//! separators, its size is a plain function of the widest label and the item count.
+//! at least one frame at the wrong place. Its size is a plain function of the
+//! widest label and the counts of each row kind.
 
 use gpui::{Bounds, Pixels, Point, Size, point, px, size};
 
-/// Row height of a menu item, matching the Windows 11 flyout metric at 100% scale.
-pub(super) const ITEM_HEIGHT: Pixels = px(32.0);
-/// Space between the menu edge and the first and last row.
-pub(super) const MENU_PADDING: Pixels = px(4.0);
-/// Horizontal inset of the item label.
-pub(super) const ITEM_PADDING_X: Pixels = px(12.0);
+use crate::modern_menu::ModernMenuInput;
+
+/// Vertical inset of the item list inside the presenter.
+pub(super) const PRESENTER_PADDING_Y: Pixels = px(2.0);
+/// Stroke drawn inside the DWM-clipped popup surface.
+pub(super) const BORDER_WIDTH: Pixels = px(1.0);
+/// Space between an item background and the presenter edge.
+pub(super) const ITEM_MARGIN_X: Pixels = px(4.0);
+/// Space between adjacent item backgrounds.
+pub(super) const ITEM_MARGIN_Y: Pixels = px(2.0);
+/// Horizontal inset of an item's content.
+pub(super) const ITEM_PADDING_X: Pixels = px(11.0);
 /// The column every row keeps for an icon, and the gap between it and the label.
 ///
 /// Reserved whether or not a given item has an icon, which is what keeps the
-/// labels of one menu aligned with each other. Measured off a system context
-/// menu at 150% scale: its icons sit 16 in from the menu's inner edge and its
-/// labels start at 43, leaving 11 between the two.
+/// labels of one menu aligned with each other. WinUI reserves 28 pixels for the
+/// placeholder, leaving 12 after the 16-pixel icon.
 pub(super) const ICON_SIZE: Pixels = px(16.0);
-pub(super) const ICON_GAP: Pixels = px(11.0);
+pub(super) const ICON_GAP: Pixels = px(12.0);
+
+/// Total row bands include the two-pixel margin above and below the fill.
+const COMPACT_ITEM_HEIGHT: Pixels = px(32.0);
+const TOUCH_ITEM_HEIGHT: Pixels = px(40.0);
+
+pub(super) fn item_height(input: ModernMenuInput) -> Pixels {
+    match input {
+        ModernMenuInput::Mouse | ModernMenuInput::Keyboard => COMPACT_ITEM_HEIGHT,
+        ModernMenuInput::Touch => TOUCH_ITEM_HEIGHT,
+    }
+}
 
 /// A command row's height, and the width and label size of the buttons in it.
 ///
@@ -36,10 +52,8 @@ pub(super) const COMMAND_LABEL_SIZE: Pixels = px(11.0);
 /// Space between a command button's icon and its label.
 pub(super) const COMMAND_LABEL_GAP: Pixels = px(6.0);
 
-/// Height a separator occupies: a one pixel rule with room either side of it.
-/// Measured off a system context menu, whose rule sits six device pixels clear of
-/// the rows above and below it at 150% scale.
-pub(super) const SEPARATOR_HEIGHT: Pixels = px(9.0);
+/// Height a separator occupies: a one-pixel rule with one pixel above and below.
+pub(super) const SEPARATOR_HEIGHT: Pixels = px(3.0);
 /// Thickness of the rule itself.
 pub(super) const SEPARATOR_THICKNESS: Pixels = px(1.0);
 
@@ -65,17 +79,26 @@ pub(super) const CORNER_RADIUS: Pixels = px(8.0);
 /// labels wash out over bright content.
 pub(super) const TINT_ALPHA: f32 = 0.35;
 
-/// Alpha of the separator rule, which is always black.
-///
-/// Measured off a system context menu, whose rule sits 12 levels under the 252
-/// surface behind it. The dark value is heavier because the same separation has
-/// to survive against a dark surface.
-pub(super) fn separator_alpha(dark: bool) -> f32 {
-    if dark { 0.2 } else { 0.048 }
+/// Alpha values transcribed from the WinUI menu resources.
+pub(super) fn surface_stroke_alpha(dark: bool) -> f32 {
+    if dark { 0.2 } else { 15.0 / 255.0 }
 }
 
-/// Narrow menus still read as menus rather than as tooltips.
-const MIN_LABEL_WIDTH: Pixels = px(96.0);
+pub(super) fn separator_alpha(dark: bool) -> f32 {
+    if dark { 21.0 / 255.0 } else { 15.0 / 255.0 }
+}
+
+pub(super) fn hover_alpha(dark: bool) -> f32 {
+    if dark { 15.0 / 255.0 } else { 9.0 / 255.0 }
+}
+
+pub(super) fn pressed_alpha(dark: bool) -> f32 {
+    if dark { 10.0 / 255.0 } else { 6.0 / 255.0 }
+}
+
+/// WinUI applies these floors to the complete presenter, not to its label.
+pub(super) const MIN_MENU_WIDTH: Pixels = px(96.0);
+pub(super) const TOUCH_MIN_MENU_WIDTH: Pixels = px(240.0);
 /// Past this the label is ellipsized; a menu wider than this stops being scannable.
 const MAX_LABEL_WIDTH: Pixels = px(320.0);
 
@@ -95,20 +118,35 @@ pub(super) struct Content {
 }
 
 /// Outer size of a menu whose widest label shapes to `widest_label`.
-pub(super) fn menu_size(widest_label: Pixels, content: Content) -> Size<Pixels> {
-    let label = widest_label.max(MIN_LABEL_WIDTH).min(MAX_LABEL_WIDTH);
+pub(super) fn menu_size(
+    widest_label: Pixels,
+    content: Content,
+    input: ModernMenuInput,
+) -> Size<Pixels> {
+    let label = widest_label.min(MAX_LABEL_WIDTH);
     // A command row spans the same area the item rows do but keeps none of their
     // icon column, so the two ask for different widths and the menu takes the
     // larger.
-    let rows = label + ICON_SIZE + ICON_GAP + ITEM_PADDING_X * 2.0;
-    let commands = COMMAND_BUTTON_WIDTH * content.widest_command_row as f32;
+    let rows = label
+        + ICON_SIZE
+        + ICON_GAP
+        + ITEM_PADDING_X * 2.0
+        + ITEM_MARGIN_X * 2.0
+        + BORDER_WIDTH * 2.0;
+    let commands = COMMAND_BUTTON_WIDTH * content.widest_command_row as f32
+        + ITEM_MARGIN_X * 2.0
+        + BORDER_WIDTH * 2.0;
+    let min_width = match input {
+        ModernMenuInput::Mouse | ModernMenuInput::Keyboard => MIN_MENU_WIDTH,
+        ModernMenuInput::Touch => TOUCH_MIN_MENU_WIDTH,
+    };
 
     size(
-        rows.max(commands) + MENU_PADDING * 2.0,
-        ITEM_HEIGHT * content.items as f32
+        rows.max(commands).max(min_width),
+        item_height(input) * content.items as f32
             + SEPARATOR_HEIGHT * content.separators as f32
             + COMMAND_ROW_HEIGHT * content.command_rows as f32
-            + MENU_PADDING * 2.0,
+            + (PRESENTER_PADDING_Y + BORDER_WIDTH) * 2.0,
     )
 }
 

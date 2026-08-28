@@ -2,11 +2,12 @@ use std::rc::Rc;
 
 use gpui::{Bounds, Pixels, point, px, size};
 
-use crate::modern_menu::{Activation, Entry, Item, normalize_separators};
+use crate::modern_menu::{Activation, Entry, Item, ModernMenuInput, normalize_separators};
 
 use crate::modern_menu::metrics::{
-    COMMAND_BUTTON_WIDTH, COMMAND_ROW_HEIGHT, Content, ICON_GAP, ICON_SIZE, ITEM_HEIGHT,
-    ITEM_PADDING_X, MENU_PADDING, SEPARATOR_HEIGHT, menu_size, place,
+    BORDER_WIDTH, COMMAND_BUTTON_WIDTH, COMMAND_ROW_HEIGHT, Content, ICON_GAP, ICON_SIZE,
+    ITEM_MARGIN_X, ITEM_PADDING_X, MIN_MENU_WIDTH, PRESENTER_PADDING_Y, SEPARATOR_HEIGHT,
+    TOUCH_MIN_MENU_WIDTH, item_height, menu_size, place,
 };
 
 fn rows(items: usize, separators: usize) -> Content {
@@ -24,19 +25,44 @@ fn work_area() -> Bounds<Pixels> {
     }
 }
 
+fn compact_menu_size(widest_label: Pixels, content: Content) -> gpui::Size<Pixels> {
+    menu_size(widest_label, content, ModernMenuInput::Mouse)
+}
+
 #[test]
 fn menu_height_follows_item_count() {
-    let one = menu_size(px(200.0), rows(1, 0));
-    let three = menu_size(px(200.0), rows(3, 0));
+    let one = compact_menu_size(px(200.0), rows(1, 0));
+    let three = compact_menu_size(px(200.0), rows(3, 0));
 
-    assert_eq!(one.height, ITEM_HEIGHT + MENU_PADDING * 2.0);
-    assert_eq!(three.height - one.height, ITEM_HEIGHT * 2.0);
+    assert_eq!(
+        one.height,
+        item_height(ModernMenuInput::Mouse) + (PRESENTER_PADDING_Y + BORDER_WIDTH) * 2.0
+    );
+    assert_eq!(
+        three.height - one.height,
+        item_height(ModernMenuInput::Mouse) * 2.0
+    );
+}
+
+#[test]
+fn touch_rows_and_minimum_width_are_larger() {
+    let compact = menu_size(px(1.0), rows(2, 0), ModernMenuInput::Mouse);
+    let keyboard = menu_size(px(1.0), rows(2, 0), ModernMenuInput::Keyboard);
+    let touch = menu_size(px(1.0), rows(2, 0), ModernMenuInput::Touch);
+
+    assert_eq!(keyboard, compact);
+    assert_eq!(compact.width, MIN_MENU_WIDTH);
+    assert_eq!(touch.width, TOUCH_MIN_MENU_WIDTH);
+    assert_eq!(
+        touch.height - compact.height,
+        (item_height(ModernMenuInput::Touch) - item_height(ModernMenuInput::Mouse)) * 2.0
+    );
 }
 
 #[test]
 fn separators_add_their_own_height() {
-    let plain = menu_size(px(200.0), rows(3, 0));
-    let divided = menu_size(px(200.0), rows(3, 2));
+    let plain = compact_menu_size(px(200.0), rows(3, 0));
+    let divided = compact_menu_size(px(200.0), rows(3, 2));
 
     assert_eq!(divided.height - plain.height, SEPARATOR_HEIGHT * 2.0);
     assert_eq!(divided.width, plain.width);
@@ -44,26 +70,25 @@ fn separators_add_their_own_height() {
 
 #[test]
 fn a_label_gets_exactly_the_room_it_was_measured_for() {
-    // Everything a row is inset by: the outline, the menu's own padding, the
-    // item's, and the icon column every row keeps. Miss one and the widest label
-    // is clipped by the window edge.
-    let inset = (MENU_PADDING + ITEM_PADDING_X) * 2.0 + ICON_SIZE + ICON_GAP;
+    // Everything around the label must be included or the widest label is
+    // clipped by the popup edge.
+    let inset = (ITEM_MARGIN_X + ITEM_PADDING_X + BORDER_WIDTH) * 2.0 + ICON_SIZE + ICON_GAP;
 
-    assert_eq!(menu_size(px(200.0), rows(1, 0)).width - px(200.0), inset);
-}
-
-#[test]
-fn narrow_labels_do_not_shrink_the_menu_below_its_floor() {
     assert_eq!(
-        menu_size(px(1.0), rows(1, 0)).width,
-        menu_size(px(96.0), rows(1, 0)).width
+        compact_menu_size(px(200.0), rows(1, 0)).width - px(200.0),
+        inset
     );
 }
 
 #[test]
+fn minimum_width_applies_to_the_complete_menu() {
+    assert_eq!(compact_menu_size(px(1.0), rows(1, 0)).width, MIN_MENU_WIDTH);
+}
+
+#[test]
 fn a_command_row_adds_its_height_and_can_widen_the_menu() {
-    let plain = menu_size(px(200.0), rows(2, 0));
-    let with_row = menu_size(
+    let plain = compact_menu_size(px(200.0), rows(2, 0));
+    let with_row = compact_menu_size(
         px(200.0),
         Content {
             items: 2,
@@ -86,9 +111,9 @@ fn a_command_row_wider_than_the_labels_sets_the_width() {
         widest_command_row: 6,
         ..Default::default()
     };
-    let expected = COMMAND_BUTTON_WIDTH * 6.0 + MENU_PADDING * 2.0;
+    let expected = COMMAND_BUTTON_WIDTH * 6.0 + ITEM_MARGIN_X * 2.0 + BORDER_WIDTH * 2.0;
 
-    assert_eq!(menu_size(px(96.0), content).width, expected);
+    assert_eq!(compact_menu_size(px(96.0), content).width, expected);
 }
 
 #[test]
