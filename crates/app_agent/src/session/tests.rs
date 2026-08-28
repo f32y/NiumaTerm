@@ -463,3 +463,71 @@ mod queued_prompt_placement_tests {
         });
     }
 }
+
+/// What `/new` does with the session it replaces. The DeepSeek host is one
+/// process shared by every tab holding a session on it, so releasing the old
+/// session before the replacement has taken its own hold stops the host
+/// whenever this is the only tab using it.
+mod session_replacement_tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use gpui::{AppContext as _, TestAppContext, VisualTestContext};
+    use nmt_agent_utils::AgentWorkspace;
+    use nmt_agent_utils::chat::{SendOutcome, SlashCommandOutcome};
+    use nmt_config::profile::{AgentProfile, AgentProfileKind};
+
+    use crate::session::{Backend, Status, TestBackend};
+    use crate::settings::AgentSettings;
+    use crate::{AgentPane, AgentThreadDefaults};
+
+    #[gpui::test]
+    fn a_reset_holds_its_old_session_until_the_replacement_is_installed(cx: &mut TestAppContext) {
+        let profile = AgentProfile {
+            name: "Session Replacement Test".into(),
+            kind: AgentProfileKind::DeepSeek,
+            // The replacement start never reaches a process: the spawn runs on
+            // the background executor, which this test does not run.
+            executable: "missing-agent.exe".into(),
+            ..AgentProfile::default()
+        };
+        let mut pane = None;
+        let window = cx.update(|cx| {
+            gpui_component::init(cx);
+            cx.set_global(AgentSettings::default());
+            cx.set_global(AgentThreadDefaults::default());
+            cx.open_window(Default::default(), |window, cx| {
+                let agent =
+                    cx.new(|cx| AgentPane::new(profile, AgentWorkspace::default(), window, cx));
+                pane = Some(agent.clone());
+                cx.new(|cx| gpui_component::Root::new(agent, window, cx))
+            })
+            .expect("open Agent test window")
+        });
+        let pane = pane.expect("create Agent pane");
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        let released = Arc::new(AtomicBool::new(false));
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.runtime.backend = Some(Backend::Test(
+                    TestBackend::new(
+                        [SendOutcome::StartedTurn],
+                        SlashCommandOutcome::NotReady,
+                        Vec::new(),
+                    )
+                    .watch_release(released.clone()),
+                ));
+                pane.runtime.status = Status::Idle;
+
+                pane.reset_conversation(cx);
+
+                assert!(pane.runtime.backend.is_none(), "the pane sends nowhere");
+                assert!(
+                    !released.load(Ordering::SeqCst),
+                    "the replaced session outlives the reset, so the host it holds keeps running"
+                );
+            });
+        });
+    }
+}
