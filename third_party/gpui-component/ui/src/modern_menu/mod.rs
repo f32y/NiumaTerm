@@ -6,12 +6,12 @@
 //! and the shape it gives its own menus, and lets it extend past the owner's
 //! edges.
 //!
-//! The window never takes activation ([`Window::attach_as_flyout_of`]). Its owner
-//! keeps that, so the owner goes on rendering as the focused window — and on
-//! Windows, so its own backdrop material goes on rendering at all, since DWM
-//! drops that for a window that is not active. The cost is that the menu never
-//! receives a key press or a press outside itself: the owner does, and is
-//! responsible for calling [`dismiss_modern_menu`] when it sees one.
+//! The popup window never takes activation. Its logical owner goes on rendering
+//! as the focused window — and on Windows, so its own backdrop material goes on
+//! rendering at all, since DWM drops that for a window that is not active. The
+//! cost is that the menu never receives a key press or a press outside itself:
+//! the owner does, and is responsible for calling [`dismiss_modern_menu`] when it
+//! sees one.
 //!
 //! ```ignore
 //! ModernMenu::new()
@@ -23,25 +23,35 @@
 use std::rc::Rc;
 
 use gpui::{
-    Action, AnyWindowHandle, App, AppContext as _, Bounds, Context, Font, Global,
-    InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, ParentElement as _, Pixels,
-    Point, Render, SharedString, Styled as _, TextRun, Window, WindowAppearance,
-    WindowBackgroundAppearance, WindowBounds, WindowHandle, WindowKind, WindowOptions, div, font,
-    point, px, size,
+    Action, AnyWindowHandle, App, AppContext as _, Bounds, Context, Font, Global, KeyDownEvent,
+    Pixels, Point, SharedString, TextRun, Window, WindowAppearance, WindowBackgroundAppearance,
+    WindowBounds, WindowHandle, WindowKind, WindowOptions, font, point, px, size,
 };
 
 use crate::{ActiveTheme as _, Icon};
-use gpui::prelude::FluentBuilder as _;
 
 mod ext;
 mod metrics;
 #[cfg(test)]
 mod tests;
+mod view;
 
 pub use ext::ModernMenuExt;
 
 /// Runs against the window the menu was opened from, never the menu's own window.
 type Handler = Rc<dyn Fn(&mut Window, &mut App)>;
+
+/// The input that requested a menu, which selects the matching WinUI spacing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ModernMenuInput {
+    /// Mouse and pen menus use the compact row layout.
+    #[default]
+    Mouse,
+    /// Keyboard menus use the same compact row layout as mouse menus.
+    Keyboard,
+    /// Touch menus use larger vertical targets and a wider minimum surface.
+    Touch,
+}
 
 /// What choosing an item does.
 ///
@@ -73,7 +83,10 @@ enum Entry {
 ///
 /// Building it costs a graphics device, a swap chain and a composition tree,
 /// which measured around 400ms — far too long to sit between a right click and a
-/// menu. Showing the window that already exists costs a window move.
+/// menu. Showing the window that already exists costs a window move. Its HWND is
+/// deliberately unowned so the same prewarmed surface can serve every application
+/// window without transferring Win32 ownership or being destroyed with one of
+/// those windows; `MenuView::owner` records only where commands are dispatched.
 #[derive(Default)]
 struct MenuWindow {
     window: Option<WindowHandle<MenuView>>,
@@ -114,6 +127,7 @@ impl gpui::prelude::FluentBuilder for ModernMenu {}
 pub struct ModernMenu {
     entries: Vec<Entry>,
     font: Option<Font>,
+    input: ModernMenuInput,
 }
 
 impl ModernMenu {
@@ -240,10 +254,22 @@ impl ModernMenu {
     }
 
     /// Open the menu at `position`, in the owner window's coordinates.
-    pub fn show_at(mut self, position: Point<Pixels>, window: &mut Window, cx: &mut App) {
+    pub fn show_at(self, position: Point<Pixels>, window: &mut Window, cx: &mut App) {
+        self.show_at_with_input(position, ModernMenuInput::Mouse, window, cx);
+    }
+
+    /// Open the menu using the spacing for the input that requested it.
+    pub fn show_at_with_input(
+        mut self,
+        position: Point<Pixels>,
+        input: ModernMenuInput,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
         if self.is_empty() {
             return;
         }
+        self.input = input;
         self.entries = normalize_separators(self.entries);
 
         #[cfg(target_os = "windows")]
@@ -305,6 +331,7 @@ impl ModernMenu {
             return;
         };
 
+        let input = self.input;
         let entries = self.entries;
         let _ = menu.update(cx, |view, menu_window, cx| {
             // Shaped in the window that will render them rather than the one the
@@ -358,7 +385,7 @@ impl ModernMenu {
                     .max()
                     .unwrap_or_default(),
             };
-            let menu_size = metrics::menu_size(widest, content);
+            let menu_size = metrics::menu_size(widest, content, input);
             let bounds = Bounds {
                 origin: metrics::place(anchor, menu_size, work_area),
                 size: menu_size,
@@ -367,7 +394,7 @@ impl ModernMenu {
             view.entries = entries;
             view.owner = Some(owner);
             view.font = Some(menu_font);
-            menu_window.attach_as_flyout_of(window);
+            view.input = input;
             menu_window.show_flyout(bounds);
             cx.notify();
         });
@@ -609,6 +636,7 @@ struct MenuView {
     /// one menu window serves every application window. `None` until the window
     /// has been shown for the first time.
     owner: Option<AnyWindowHandle>,
+    input: ModernMenuInput,
 }
 
 impl MenuView {
@@ -618,6 +646,7 @@ impl MenuView {
             selected: None,
             font: None,
             owner: None,
+            input: ModernMenuInput::Mouse,
         }
     }
 
@@ -691,166 +720,5 @@ impl MenuView {
                 Activation::Action(action) => window.dispatch_action(action.boxed_clone(), cx),
             });
         });
-    }
-}
-
-impl Render for MenuView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
-        let enabled_color = theme.popover_foreground;
-        let disabled_color = theme.muted_foreground;
-        let hover_color = theme.accent;
-        let separator_color = gpui::black().opacity(metrics::separator_alpha(theme.is_dark()));
-        let tint_color = theme.tokens.popover.opacity(metrics::TINT_ALPHA);
-
-        let selected = self.selected;
-        // Snapshotted so the closures below can move what they need without
-        // borrowing the view they are being built inside. Command buttons carry
-        // an id of their own because their entry holds several of them.
-        let mut next_button = 0;
-        let rows: Vec<Row> = self
-            .entries
-            .iter()
-            .enumerate()
-            .map(|(index, entry)| match entry {
-                Entry::Separator => Row::Separator,
-                Entry::Item(item) => Row::Item(index, snapshot(item)),
-                Entry::Commands(items) => Row::Commands(
-                    items
-                        .iter()
-                        .map(|item| {
-                            next_button += 1;
-                            (next_button, snapshot(item))
-                        })
-                        .collect(),
-                ),
-            })
-            .collect();
-
-        div()
-            .size_full()
-            // The material itself comes from underneath this window; what is
-            // painted here is only the tint over it. The shadow the platform
-            // draws around the window is what lifts the menu off its background,
-            // so no edge stroke is needed to separate the two.
-            .bg(tint_color)
-            .p(metrics::MENU_PADDING)
-            .rounded(metrics::CORNER_RADIUS)
-            .font(
-                self.font
-                    .clone()
-                    .unwrap_or_else(|| font(cx.theme().font_family.clone())),
-            )
-            .text_size(metrics::FONT_SIZE)
-            .flex()
-            .flex_col()
-            .children(rows.into_iter().map(|row| {
-                let (index, (label, disabled, activation, icon)) = match row {
-                    Row::Separator => {
-                        return div()
-                            .h(metrics::SEPARATOR_HEIGHT)
-                            .flex()
-                            .items_center()
-                            .child(
-                                div()
-                                    .h(metrics::SEPARATOR_THICKNESS)
-                                    .w_full()
-                                    .bg(separator_color),
-                            )
-                            .into_any_element();
-                    }
-                    Row::Commands(buttons) => {
-                        return div()
-                            .h(metrics::COMMAND_ROW_HEIGHT)
-                            .flex()
-                            .items_center()
-                            // Centred rather than left-aligned: the buttons keep
-                            // a fixed width, so in a menu made wide by its labels
-                            // a left-aligned row sits off to one side.
-                            .justify_center()
-                            .children(buttons.into_iter().map(
-                                |(id, (label, disabled, activation, icon))| {
-                                    let button = div()
-                                        .id(("modern-menu-command", id))
-                                        .w(metrics::COMMAND_BUTTON_WIDTH)
-                                        .h_full()
-                                        .rounded(metrics::ITEM_RADIUS)
-                                        .flex()
-                                        .flex_col()
-                                        .items_center()
-                                        .justify_center()
-                                        .gap(metrics::COMMAND_LABEL_GAP)
-                                        .child(div().flex_none().size(metrics::ICON_SIZE).children(
-                                            icon.map(|icon| icon.size(metrics::ICON_SIZE)),
-                                        ))
-                                        .child(
-                                            div()
-                                                .text_size(metrics::COMMAND_LABEL_SIZE)
-                                                .child(label),
-                                        );
-
-                                    if disabled {
-                                        return button.text_color(disabled_color);
-                                    }
-
-                                    button
-                                        .text_color(enabled_color)
-                                        .hover(|this| this.bg(hover_color))
-                                        .on_mouse_up(
-                                            MouseButton::Left,
-                                            cx.listener(move |this, _, _, cx| {
-                                                this.choose(activation.clone(), cx);
-                                            }),
-                                        )
-                                },
-                            ))
-                            .into_any_element();
-                    }
-                    Row::Item(index, snapshot) => (index, snapshot),
-                };
-
-                let row = div()
-                    .id(("modern-menu-item", index))
-                    .h(metrics::ITEM_HEIGHT)
-                    .px(metrics::ITEM_PADDING_X)
-                    .rounded(metrics::ITEM_RADIUS)
-                    .flex()
-                    .items_center()
-                    .gap(metrics::ICON_GAP)
-                    // Kept even when the item has no icon, so the labels of one
-                    // menu line up with each other.
-                    .child(
-                        div()
-                            .flex_none()
-                            .size(metrics::ICON_SIZE)
-                            .children(icon.map(|icon| icon.size(metrics::ICON_SIZE))),
-                    )
-                    .child(label);
-
-                if disabled {
-                    return row.text_color(disabled_color).into_any_element();
-                }
-
-                row.text_color(enabled_color)
-                    .when(selected == Some(index), |this| this.bg(hover_color))
-                    .hover(|this| this.bg(hover_color))
-                    // Moving the pointer takes the highlight back from the
-                    // keyboard, so the two never show a selection at once.
-                    .on_mouse_move(cx.listener(move |this, _, _, cx| {
-                        if this.selected != Some(index) {
-                            this.selected = Some(index);
-                            cx.notify();
-                        }
-                    }))
-                    // Menus commit on release, so a press that started outside
-                    // and ended on an item still chooses it.
-                    .on_mouse_up(
-                        MouseButton::Left,
-                        cx.listener(move |this, _, _, cx| {
-                            this.choose(activation.clone(), cx);
-                        }),
-                    )
-                    .into_any_element()
-            }))
     }
 }
