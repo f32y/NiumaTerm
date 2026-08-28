@@ -296,6 +296,17 @@ impl WorkspaceManager {
         }
     }
 
+    /// Normal workspaces that remain outside session persistence, in sidebar
+    /// order. The Settings entry is excluded even if a caller accidentally
+    /// marks it temporary.
+    pub fn temporary_ids(&self) -> impl Iterator<Item = WorkspaceId> + '_ {
+        self.workspaces
+            .items()
+            .iter()
+            .filter(|workspace| workspace.kind == WorkspaceKind::Normal && workspace.temporary)
+            .map(|workspace| workspace.id)
+    }
+
     /// Id of the settings pseudo workspace, when one is open in this window.
     pub fn settings_id(&self) -> Option<WorkspaceId> {
         self.workspaces

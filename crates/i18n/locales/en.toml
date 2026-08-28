@@ -953,3 +953,8 @@
 "settings-about-recovery-warning-message" = "Reopen these applications manually: {applications}"
 "settings-about-recovery-warning-status" = "Update installed; reopen manually: {applications}"
 "settings-about-recovery-restart" = "Restart NiumaTerm"
+"sidebar-workspace-close-temporary" = "Close all temporary workspaces"
+"shell-close-temporary-workspaces-title" = "Close all temporary workspaces?"
+"shell-close-temporary-workspaces-description" = "All tabs in every temporary workspace will be closed and their shells terminated."
+"shell-close-temporary-workspaces-processes-description" = "{processes} in the temporary workspaces. Closing them will terminate those processes and close the workspaces."
+"sidebar-workspaces-title" = "Workspaces"
