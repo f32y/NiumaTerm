@@ -666,6 +666,15 @@ mod resumed_collapse_tests {
                 assert_eq!(row_count(transcript, CollapseRows::ToolCalls), 2);
                 // Every row on its own line.
                 assert_eq!(row_count(transcript, CollapseRows::Off), 4);
+
+                // Reading work inline is the point of "only tool calls", so
+                // the turn carries no fold disclosure to hide it again.
+                assert!(
+                    !transcript
+                        .build_row_specs(CollapseRows::ToolCalls)
+                        .iter()
+                        .any(|spec| matches!(spec, RowSpec::TurnFold { .. }))
+                );
             });
         });
     }

@@ -282,11 +282,14 @@ impl TranscriptView {
         }
 
         // Only the mode that names work folds a settled turn's work away by
-        // default. The other two leave it on screen with the same disclosure
-        // above it, so the turn can still be folded by hand — which is what
-        // the toggle records, in whichever direction the default points.
+        // default, and only the modes that offer the disclosure can fold at
+        // all. "Only tool calls" reads the work inline, so it carries no
+        // disclosure and no per-turn toggle; the other two keep the control
+        // and record hand-folds against whichever direction their default
+        // points.
+        let discloses_work = !matches!(collapse, CollapseRows::ToolCalls);
         let folds_by_default = matches!(collapse, CollapseRows::WorkAndToolCalls);
-        let folded = folds_by_default != self.toggled_turns.contains(&turn);
+        let folded = discloses_work && folds_by_default != self.toggled_turns.contains(&turn);
 
         // The final reply stays visible when the turn folds; everything
         // between the prompt and the answer is what the fold hides.
@@ -326,7 +329,7 @@ impl TranscriptView {
 
         // Above the rows it discloses, so expanding inserts them below the
         // control the user just clicked instead of further up the turn.
-        if row_count > 0 {
+        if discloses_work && row_count > 0 {
             rows.push(RowSpec::TurnFold {
                 turn,
                 row_count,
