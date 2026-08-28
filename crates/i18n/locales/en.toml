@@ -917,7 +917,7 @@
 "workflows-conversation-unavailable-detail" = "This agent has not written a transcript."
 "workflows-agent-stopped" = "Stopped"
 "workflows-running-agents" = "Workflows — {count} agents running"
-"agent-transcript-quote-and-ask" = "Quote and Ask"
+"agent-transcript-quote" = "Quote"
 "agent-composer-context-label" = "Message context"
 "agent-composer-annotation-count-one" = "{count} Annotation"
 "agent-composer-annotation-count-other" = "{count} Annotations"
