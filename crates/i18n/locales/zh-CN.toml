@@ -916,7 +916,7 @@
 "workflows-conversation-unavailable-detail" = "该 Agent 尚未写出对话记录。"
 "workflows-agent-stopped" = "已中断"
 "workflows-running-agents" = "工作流 — {count} 个 Agent 运行中"
-"agent-transcript-quote-and-ask" = "引用并提问"
+"agent-transcript-quote" = "引用"
 "agent-composer-context-label" = "消息上下文"
 "agent-composer-annotation-count-one" = "{count} 条标注"
 "agent-composer-annotation-count-other" = "{count} 条标注"
