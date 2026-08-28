@@ -952,3 +952,8 @@
 "settings-about-recovery-warning-message" = "请手动重新打开这些应用程序：{applications}"
 "settings-about-recovery-warning-status" = "更新已安装；请手动重新打开：{applications}"
 "settings-about-recovery-restart" = "重启 NiumaTerm"
+"sidebar-workspace-close-temporary" = "关闭所有临时工作区"
+"shell-close-temporary-workspaces-title" = "关闭所有临时工作区？"
+"shell-close-temporary-workspaces-description" = "所有临时工作区中的标签页都会关闭，其 Shell 也会终止。"
+"shell-close-temporary-workspaces-processes-description" = "临时工作区中有{processes}。关闭它们将终止这些进程并关闭工作区。"
+"sidebar-workspaces-title" = "工作区"

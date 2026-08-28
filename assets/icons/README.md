@@ -30,5 +30,6 @@ were removed because accessible names are supplied by the consuming controls.
 ## Sidebar controls
 
 `side-bar-collapse.svg` and `side-bar-expand.svg` are local vector redraws of
-the supplied button captures. They use the same 24-by-24 `currentColor`
-convention as the other application icons.
+the supplied button captures. `terminal-close.svg` is an original local drawing
+for the temporary-workspace cleanup control. They use the same 24-by-24
+`currentColor` convention as the other application icons.

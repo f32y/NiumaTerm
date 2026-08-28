@@ -381,6 +381,73 @@ impl Shell {
         );
     }
 
+    /// Close every temporary normal workspace through one confirmation. The
+    /// aggregate process count keeps the existing subprocess warning setting
+    /// effective without presenting one dialog per workspace.
+    pub(crate) fn request_close_temporary_workspaces(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let ids = self.workspaces.temporary_ids().collect::<Vec<_>>();
+        if ids.is_empty() {
+            return;
+        }
+
+        let process_count = ids
+            .iter()
+            .map(|id| self.workspace_process_count(*id, cx))
+            .sum();
+        let settings = cx.global::<AppSettings>();
+        let confirm = settings.confirm_before_closing;
+        let warn = settings.warn_before_terminating_shell;
+
+        if !should_confirm_close(confirm, warn, process_count) {
+            self.close_temporary_workspaces_now(&ids, window, cx);
+            return;
+        }
+
+        let description = if process_count > 0 {
+            i18n("shell-close-temporary-workspaces-processes-description")
+                .replace("{processes}", &Self::processes_running(process_count))
+        } else {
+            i18n("shell-close-temporary-workspaces-description").to_string()
+        };
+
+        Self::open_close_confirm(
+            window,
+            cx,
+            i18n("shell-close-temporary-workspaces-title"),
+            description,
+            None,
+            move |this, window, cx| this.close_temporary_workspaces_now(&ids, window, cx),
+        );
+    }
+
+    fn close_temporary_workspaces_now(
+        &mut self,
+        ids: &[WorkspaceId],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if ids.len() == self.workspaces.real_len() {
+            let home = home_dir()
+                .map(|home| home.display().to_string())
+                .unwrap_or_else(|| ".".to_string());
+
+            self.create_workspace(String::new(), WorkspaceRoots::single(home), window, cx);
+            let replacement = self.workspaces.active_id();
+            self.workspaces.set_temporary(replacement, false);
+        }
+
+        for &id in ids {
+            // This command explicitly includes every temporary workspace, so a
+            // pin cannot leave an otherwise hidden temporary entry behind.
+            self.workspaces.set_pinned(id, false);
+            self.close_workspace_now(id, window, cx);
+        }
+    }
+
     /// Closing the last workspace is a three-way choice: quit the app (the
     /// workspace is then dropped from local_state, since the user asked to
     /// close it), swap in a fresh home-directory workspace, or cancel (a

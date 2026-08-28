@@ -487,3 +487,18 @@ fn workspace_identity_survives_root_edits() {
         None
     );
 }
+
+#[test]
+fn temporary_ids_include_pinned_normal_workspaces_but_not_settings() {
+    let mut manager = manager(3, true);
+    let second = WorkspaceId(2);
+    let third = WorkspaceId(3);
+    let settings = WorkspaceId(100);
+
+    manager.set_temporary(second, true);
+    manager.set_temporary(third, true);
+    manager.set_temporary(settings, true);
+    manager.set_pinned(second, true);
+
+    assert_eq!(manager.temporary_ids().collect::<Vec<_>>(), [second, third]);
+}

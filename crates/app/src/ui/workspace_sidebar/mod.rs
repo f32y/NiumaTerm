@@ -8,7 +8,9 @@ use gpui_component::input::InputState;
 use gpui_component::menu::DropdownMenu as _;
 use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::scroll::Scrollbar;
-use gpui_component::{ActiveTheme, Icon, IconName, IconNamed, Selectable, Sizable, h_flex, v_flex};
+use gpui_component::{
+    ActiveTheme, Disableable, Icon, IconName, IconNamed, Selectable, Sizable, h_flex, v_flex,
+};
 use nmt_agent_utils::AgentRuntimeStatus;
 use nmt_app_agent::AgentKind;
 use nmt_config::appearance::TabBarStyle;
@@ -205,6 +207,16 @@ impl IconNamed for PinIcon {
     }
 }
 
+/// Terminal with a lower-right close mark
+/// (`assets/icons/terminal-close.svg`).
+struct CloseTemporaryWorkspacesIcon;
+
+impl IconNamed for CloseTemporaryWorkspacesIcon {
+    fn path(self) -> SharedString {
+        "icons/terminal-close.svg".into()
+    }
+}
+
 /// One tab rendered as a child row of its workspace, in the vertical tab-bar
 /// style. Snapshotted out of the tab manager before the render closures borrow
 /// the shell.
@@ -328,6 +340,7 @@ impl Sidebar {
         }
 
         let width = self.width;
+        let has_temporary_workspaces = summaries.iter().any(|workspace| workspace.temporary);
 
         // Fixed-width content; the animated wrapper below clips it so the buttons
         // don't reflow while the sidebar slides. The transparent panel inherits
@@ -341,12 +354,39 @@ impl Sidebar {
             .px_2()
             .gap_1()
             .child(
-                Button::new("new-workspace")
-                    .ghost()
-                    .label(i18n("sidebar-workspace-new"))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.on_new_workspace(&NewWorkspace, window, cx)
-                    })),
+                h_flex()
+                    .w_full()
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_size(px(16.0))
+                            .child(i18n("sidebar-workspaces-title")),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .child(
+                                Button::new("new-workspace")
+                                    .ghost()
+                                    .icon(IconName::Plus)
+                                    .aria_label(i18n("shell-workspace-new-title"))
+                                    .tooltip(i18n("shell-workspace-new-title"))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.on_new_workspace(&NewWorkspace, window, cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new("close-temporary-workspaces")
+                                    .ghost()
+                                    .icon(CloseTemporaryWorkspacesIcon)
+                                    .aria_label(i18n("sidebar-workspace-close-temporary"))
+                                    .tooltip(i18n("sidebar-workspace-close-temporary"))
+                                    .disabled(!has_temporary_workspaces)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.request_close_temporary_workspaces(window, cx)
+                                    })),
+                            ),
+                    ),
             )
             .child(
                 // The scrollbar sits in this non-scrolling wrapper: an absolute
