@@ -5,7 +5,7 @@ use nmt_i18n::i18n;
 use crate::composer::attachments::MAX_ATTACHMENTS;
 use crate::composer::{annotation_count_label, parse_annotated_prompt};
 use crate::transcript::disclosure_row::{
-    AGENT_CARD_DETAIL_SIZE, AGENT_CARD_PADDING_X, AGENT_CARD_PADDING_Y,
+    AGENT_CARD_BODY_PADDING_Y, AGENT_CARD_DETAIL_SIZE, AGENT_CARD_PADDING_X,
     AGENT_DISCLOSURE_DETAIL_INSET, AgentCardTone, AgentDisclosureRow, USER_BUBBLE_PADDING_X,
     USER_BUBBLE_PADDING_Y, USER_BUBBLE_RADIUS, USER_BUBBLE_TAIL_RADIUS, USER_BUBBLE_WIDTH_FRACTION,
     agent_card,
@@ -770,7 +770,7 @@ impl TranscriptView {
                     .w_full()
                     .pl(px(AGENT_DISCLOSURE_DETAIL_INSET))
                     .pr(px(AGENT_CARD_PADDING_X))
-                    .pb(px(AGENT_CARD_PADDING_Y))
+                    .pb(px(AGENT_CARD_BODY_PADDING_Y))
                     .text_size(px(AGENT_CARD_DETAIL_SIZE))
                     .text_color(cx.theme().danger.opacity(0.85))
                     .child(reason)
@@ -948,7 +948,7 @@ impl TranscriptView {
                     .border_t_1()
                     .border_color(cx.theme().border.opacity(0.6))
                     .px(px(AGENT_CARD_PADDING_X))
-                    .py(px(AGENT_CARD_PADDING_Y))
+                    .py(px(AGENT_CARD_BODY_PADDING_Y))
                     .relative()
                     .child(body)
             }))
@@ -1065,7 +1065,7 @@ impl TranscriptView {
             .border_t_1()
             .border_color(cx.theme().border.opacity(0.6))
             .px(px(AGENT_CARD_PADDING_X))
-            .py(px(AGENT_CARD_PADDING_Y))
+            .py(px(AGENT_CARD_BODY_PADDING_Y))
             .gap_1()
             .text_xs()
             .children(accounting_rows.into_iter().filter_map(|(name, value)| {
