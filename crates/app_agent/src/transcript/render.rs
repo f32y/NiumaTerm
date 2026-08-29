@@ -28,7 +28,7 @@ const TRANSCRIPT_THUMBNAIL: f32 = 56.0;
 /// side that leaves. Expressed as a share rather than as a fixed measure
 /// because a fixed one reads as a narrow strip down the middle of a wide
 /// display.
-pub(crate) const TRANSCRIPT_COLUMN_FRACTION: f32 = 0.7;
+pub(crate) const TRANSCRIPT_COLUMN_FRACTION: f32 = 0.8;
 pub(crate) fn transcript_column_margin() -> f32 {
     (1.0 - TRANSCRIPT_COLUMN_FRACTION) / 2.0
 }
