@@ -21,6 +21,7 @@ pub(super) use crate::transcript::format::{
 use crate::transcript::format::{
     elapsed_label, interrupted_status_label, worked_status_label, working_status_label,
 };
+pub(super) use crate::transcript::render::transcript_column_margin;
 pub(super) use crate::transcript::rows::{Entry, ReadingPosition, RowSpec};
 #[cfg(test)]
 pub(super) use crate::transcript::rows::{TurnSummary, turn_summary};

@@ -17,11 +17,11 @@ use nmt_app_terminal::frame::theme_default_background;
 use nmt_i18n::i18n;
 
 use crate::composer::{CommandFeedbackKind, ComposerAction, PaletteControl, composer_action};
+// The composer takes the same share of the pane as the transcript column above
+// it, so the two edges line up at every window width.
+use crate::transcript::transcript_column_margin;
 use crate::*;
 
-/// Reading measure of the composer card, matching the transcript column above
-/// it so the two edges line up on a wide window.
-pub(super) const COMPOSER_WIDTH: f32 = 800.0;
 /// The composer is the one surface the user types into, so it carries a softer
 /// corner than the cards inside the conversation.
 const COMPOSER_RADIUS: f32 = 16.0;
@@ -258,15 +258,12 @@ impl Render for AgentPane {
                 // behind the input card.
                 div()
                     .w_full()
-                    .px_3()
+                    .px(relative(transcript_column_margin()))
                     .pb_3()
                     .pt_1()
-                    .flex()
-                    .justify_center()
                     .child(
                         div()
                             .w_full()
-                            .max_w(px(COMPOSER_WIDTH))
                             .relative()
                             .children(history.map(|history| {
                                 div()
