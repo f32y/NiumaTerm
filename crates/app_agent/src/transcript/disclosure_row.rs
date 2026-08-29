@@ -33,6 +33,10 @@ pub(super) const AGENT_DISCLOSURE_DETAIL_INSET: f32 =
 pub(super) const AGENT_CARD_TITLE_SIZE: f32 = 13.0;
 pub(super) const AGENT_CARD_DETAIL_SIZE: f32 = 12.0;
 pub(super) const AGENT_CARD_HINT_SIZE: f32 = 11.0;
+/// How much of the theme's foreground-alpha tint a card takes as its fill. At
+/// full strength the tint reads as a well cut into the pane; at half it reads
+/// as a surface resting on it, which is what a card in a work log should be.
+const AGENT_CARD_WASH: f32 = 0.5;
 /// A prompt is the user's own words read back, and it sits in a tinted bubble
 /// against the right edge. Capping it at a share of the transcript column keeps
 /// that block from spanning the pane, so it reads as an aside to the reply
@@ -74,7 +78,7 @@ impl AgentCardTone {
             // whatever the pane paints without ever leaving that surface.
             Self::Neutral => AgentCardColors {
                 border: cx.theme().border,
-                background: cx.theme().accent,
+                background: cx.theme().accent.opacity(AGENT_CARD_WASH),
                 icon_block: cx.theme().muted,
                 icon: cx.theme().muted_foreground,
                 hover: cx.theme().list_hover,
