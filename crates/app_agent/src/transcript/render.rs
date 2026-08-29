@@ -939,16 +939,15 @@ impl TranscriptView {
                 };
 
                 div()
-                    // Expanded transcript content starts at the same horizontal
-                    // position as its title; inner padding would add a redundant
-                    // indentation level inside an already grouped tool call.
-                    // The rule above it is what separates the detail from the
-                    // header without a second card edge inside the card.
+                    // Expanded content takes the card's own inset on both
+                    // sides. The rule above it already says the detail belongs
+                    // to the header, so indenting it as well would spend a
+                    // third of a narrow card on saying it twice — and command
+                    // output is exactly the content that needs the width.
                     .w_full()
                     .border_t_1()
                     .border_color(cx.theme().border.opacity(0.6))
-                    .pl(px(AGENT_DISCLOSURE_DETAIL_INSET))
-                    .pr(px(AGENT_CARD_PADDING_X))
+                    .px(px(AGENT_CARD_PADDING_X))
                     .py(px(AGENT_CARD_PADDING_Y))
                     .relative()
                     .child(body)
@@ -1065,8 +1064,7 @@ impl TranscriptView {
             .w_full()
             .border_t_1()
             .border_color(cx.theme().border.opacity(0.6))
-            .pl(px(AGENT_DISCLOSURE_DETAIL_INSET))
-            .pr(px(AGENT_CARD_PADDING_X))
+            .px(px(AGENT_CARD_PADDING_X))
             .py(px(AGENT_CARD_PADDING_Y))
             .gap_1()
             .text_xs()
