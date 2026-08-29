@@ -2,6 +2,9 @@ use nmt_i18n::i18n;
 
 use crate::context_usage::{ContextUsageIndicator, cache_hit_percent};
 use crate::view::blocking_overlay::BlockingOverlay;
+use crate::view::{
+    COMPOSER_STATUS_PADDING_X, COMPOSER_STATUS_PADDING_Y, COMPOSER_STATUS_TEXT_SIZE,
+};
 use crate::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -521,55 +524,54 @@ impl AgentPane {
             self.context_window_usage.and_then(cache_hit_percent),
         );
 
-        v_flex()
-            .w(relative(0.95))
-            .rounded_b(UI_RADIUS)
-            .border_1()
-            .border_t_0()
+        h_flex()
+            .w_full()
+            .min_h(px(24.))
+            // The rule is the footer edge inside the composer card, so the
+            // status keeps the card fill rather than sitting on one of its own.
+            .border_t_1()
             .border_color(cx.theme().border.opacity(0.6))
-            .bg(cx.theme().popover)
-            .pt(px(18.))
+            .px(px(COMPOSER_STATUS_PADDING_X))
+            .py(px(COMPOSER_STATUS_PADDING_Y))
+            .items_center()
+            .justify_between()
+            .gap_3()
+            .text_size(px(COMPOSER_STATUS_TEXT_SIZE))
             .child(
                 h_flex()
-                    .w_full()
-                    .min_h(px(26.))
-                    .px_4()
-                    .pt(px(6.))
-                    .pb(px(6.))
+                    .min_w_0()
+                    .gap_1p5()
                     .items_center()
-                    .justify_between()
-                    .gap_3()
-                    .text_xs()
+                    .text_color(cx.theme().muted_foreground.opacity(branch_opacity))
+                    .child(Icon::new(IconName::GitBranch).size_3())
                     .child(
-                        h_flex()
+                        div()
                             .min_w_0()
-                            .gap_1p5()
-                            .items_center()
-                            .text_color(cx.theme().muted_foreground.opacity(branch_opacity))
-                            .child(Icon::new(IconName::GitBranch).size_3())
-                            .child(div().min_w_0().truncate().child(branch)),
-                    )
-                    .child(
-                        // The readouts belong with the context indicator rather
-                        // than centered between it and the branch: both report
-                        // what the conversation has spent, and a variable-width
-                        // group in the middle would drift as its parts appear.
-                        h_flex()
-                            .flex_none()
-                            .gap_3()
-                            .items_center()
-                            .children(stats.map(|stats| {
-                                div()
-                                    .id("agent-composer-stats")
-                                    .aria_label(
-                                        i18n("agent-status-accessibility")
-                                            .replace("{stats}", &stats),
-                                    )
-                                    .text_color(cx.theme().muted_foreground.opacity(0.72))
-                                    .child(stats)
-                            }))
-                            .children(usage),
+                            .truncate()
+                            .font(cx.global::<AgentSettings>().transcript_font())
+                            .child(branch),
                     ),
+            )
+            .child(
+                // The readouts belong with the context indicator rather than
+                // centered between it and the branch: both report what the
+                // conversation has spent, and a variable-width group in the
+                // middle would drift as its parts appear.
+                h_flex()
+                    .flex_none()
+                    .gap_3()
+                    .items_center()
+                    .children(stats.map(|stats| {
+                        div()
+                            .id("agent-composer-stats")
+                            .aria_label(
+                                i18n("agent-status-accessibility").replace("{stats}", &stats),
+                            )
+                            .font(cx.global::<AgentSettings>().transcript_font())
+                            .text_color(cx.theme().muted_foreground.opacity(0.72))
+                            .child(stats)
+                    }))
+                    .children(usage),
             )
             .into_any_element()
     }

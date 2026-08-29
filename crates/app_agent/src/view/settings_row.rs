@@ -3,6 +3,19 @@ use nmt_i18n::i18n;
 use crate::transcript::permission_icon;
 use crate::*;
 
+/// One composer setting, drawn as its own pill. Each pill opens its own menu
+/// and changes one value, so each carries its own outline: a shared frame
+/// around several of them reads as a segmented control whose parts move
+/// together, which is the opposite of what these do.
+const SETTINGS_PILL_RADIUS: f32 = 8.0;
+const SETTINGS_PILL_PADDING_X: f32 = 9.0;
+const SETTINGS_PILL_GAP: f32 = 6.0;
+const SETTINGS_PILL_TEXT: f32 = 13.0;
+const SETTINGS_PILL_ICON: f32 = 12.0;
+/// The disclosure mark is the quietest thing on a pill: it says the value can
+/// be changed, while the value itself is what the user came to read.
+const SETTINGS_PILL_CHEVRON: f32 = 10.0;
+
 impl AgentPane {
     /// The dropdown row under the input, per agent kind.
     pub(super) fn render_settings_row(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -105,18 +118,16 @@ impl AgentPane {
 
         let mut row = h_flex()
             .w_full()
-            .gap_1()
+            .gap(px(SETTINGS_PILL_GAP))
             .flex_wrap()
             .text_color(cx.theme().muted_foreground)
             .child(Self::settings_group(
                 i18n("agent-settings-model"),
                 vec![model],
-                cx,
             ))
             .child(Self::settings_group(
                 i18n("agent-settings-execution-policy"),
                 vec![permission],
-                cx,
             ));
 
         if supports_effort {
@@ -140,7 +151,6 @@ impl AgentPane {
             row = row.child(Self::settings_group(
                 i18n("agent-settings-quality-cost"),
                 vec![effort],
-                cx,
             ));
         }
 
@@ -185,13 +195,12 @@ impl AgentPane {
 
         let mut row = h_flex()
             .w_full()
-            .gap_1()
+            .gap(px(SETTINGS_PILL_GAP))
             .flex_wrap()
             .text_color(cx.theme().muted_foreground)
             .child(Self::settings_group(
                 i18n("agent-settings-model"),
                 vec![model],
-                cx,
             ));
 
         // A deployment that composes no presets has one composition for every
@@ -219,7 +228,6 @@ impl AgentPane {
             row = row.child(Self::settings_group(
                 i18n("agent-settings-agent-preset"),
                 vec![composition],
-                cx,
             ));
         }
 
@@ -251,7 +259,6 @@ impl AgentPane {
             row = row.child(Self::settings_group(
                 i18n("agent-settings-execution-policy"),
                 vec![permission],
-                cx,
             ));
         }
 
@@ -271,7 +278,6 @@ impl AgentPane {
             row = row.child(Self::settings_group(
                 i18n("agent-settings-quality-cost"),
                 vec![effort],
-                cx,
             ));
         }
 
@@ -405,41 +411,44 @@ impl AgentPane {
 
         h_flex()
             .w_full()
-            .gap_1()
+            .gap(px(SETTINGS_PILL_GAP))
             .flex_wrap()
             .text_color(cx.theme().muted_foreground)
             .child(Self::settings_group(
                 i18n("agent-settings-model"),
                 vec![model],
-                cx,
             ))
             .child(Self::settings_group(
                 i18n("agent-settings-execution-policy"),
                 vec![approval, reviewer, sandbox],
-                cx,
             ))
             .child(Self::settings_group(
                 i18n("agent-settings-quality-cost"),
                 vec![effort, tier],
-                cx,
             ))
     }
 
-    fn settings_group(
-        label: &'static str,
-        controls: Vec<AnyElement>,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
+    /// The pills that belong to one aspect of the thread, named for assistive
+    /// technology. Purely a grouping: the pills inside it are spaced exactly
+    /// like the pills on either side of it, so the row reads as one line of
+    /// independent settings.
+    fn settings_group(label: &'static str, controls: Vec<AnyElement>) -> Stateful<Div> {
         h_flex()
             .id(label)
             .aria_label(label)
-            .gap_0p5()
-            .p(px(1.))
-            .rounded(UI_RADIUS)
-            .border_1()
-            .border_color(cx.theme().border.opacity(0.65))
-            .bg(cx.theme().muted.opacity(0.2))
+            .gap(px(SETTINGS_PILL_GAP))
             .children(controls)
+    }
+
+    /// The outline, corner and inner spacing every composer pill shares.
+    fn settings_pill(button: Button, cx: &App) -> Button {
+        button
+            .ghost()
+            .small()
+            .rounded(px(SETTINGS_PILL_RADIUS))
+            .border_1()
+            .border_color(cx.theme().border)
+            .px(px(SETTINGS_PILL_PADDING_X))
     }
 
     /// Height of the effort track, and the inset its thumb keeps from the
@@ -482,9 +491,7 @@ impl AgentPane {
             .as_ref()
             .and_then(|value| options.iter().position(|(option, _)| option == value));
 
-        let trigger = Button::new("agent-effort")
-            .ghost()
-            .small()
+        let trigger = Self::settings_pill(Button::new("agent-effort"), cx)
             .tooltip(name)
             .aria_label(format!("{name}: {current_label}"))
             .child(
@@ -493,13 +500,17 @@ impl AgentPane {
                     .items_center()
                     .child(
                         Icon::new(IconName::Gauge)
-                            .size_4()
+                            .size(px(SETTINGS_PILL_ICON))
                             .text_color(cx.theme().muted_foreground.opacity(0.8)),
                     )
-                    .child(div().text_sm().child(current_label.clone()))
+                    .child(
+                        div()
+                            .text_size(px(SETTINGS_PILL_TEXT))
+                            .child(current_label.clone()),
+                    )
                     .child(
                         Icon::new(IconName::ChevronDown)
-                            .size_3()
+                            .size(px(SETTINGS_PILL_CHEVRON))
                             .text_color(cx.theme().muted_foreground.opacity(0.7)),
                     ),
             );
@@ -687,10 +698,8 @@ impl AgentPane {
             })
             .unwrap_or_else(|| "—".to_string());
 
-        Button::new(id)
-            .ghost()
+        Self::settings_pill(Button::new(id), cx)
             .when(is_model, |this| this.min_w(px(120.)))
-            .small()
             .tooltip(name)
             .aria_label(format!("{name}: {current_label}"))
             .child(
@@ -699,13 +708,13 @@ impl AgentPane {
                     .items_center()
                     .child(
                         Icon::new(icon)
-                            .size_4()
+                            .size(px(SETTINGS_PILL_ICON))
                             .text_color(cx.theme().muted_foreground.opacity(0.8)),
                     )
-                    .child(div().text_sm().child(current_label))
+                    .child(div().text_size(px(SETTINGS_PILL_TEXT)).child(current_label))
                     .child(
                         Icon::new(IconName::ChevronDown)
-                            .size_3()
+                            .size(px(SETTINGS_PILL_CHEVRON))
                             .text_color(cx.theme().muted_foreground.opacity(0.7)),
                     ),
             )
