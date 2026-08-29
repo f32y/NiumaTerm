@@ -24,10 +24,14 @@ use crate::*;
 /// does not change size when the message it belongs to is sent.
 const TRANSCRIPT_THUMBNAIL: f32 = 56.0;
 
-/// Reading measure for the conversation column. Prose set much wider than this
-/// costs a long return sweep on every line, so a wide window gets margins
-/// rather than longer lines; a narrow one still gets the full pane.
-const TRANSCRIPT_COLUMN_WIDTH: f32 = 820.0;
+/// Share of the pane the conversation column takes, and the margin on each
+/// side that leaves. Expressed as a share rather than as a fixed measure
+/// because a fixed one reads as a narrow strip down the middle of a wide
+/// display.
+pub(crate) const TRANSCRIPT_COLUMN_FRACTION: f32 = 0.7;
+pub(crate) fn transcript_column_margin() -> f32 {
+    (1.0 - TRANSCRIPT_COLUMN_FRACTION) / 2.0
+}
 /// Space below one message group, and the tighter space between the steps
 /// inside a single run of work. Ranking the two is what makes a turn read as
 /// message / work / message rather than as one undifferentiated stack.
@@ -84,15 +88,15 @@ impl TranscriptView {
 
         // Each row is laid out on its own by the virtual list, so the reading
         // column has to be re-established per row rather than once around the
-        // conversation: a centered box holds every row to the same measure and
-        // the same left edge however wide the pane gets.
+        // conversation. The margin does that here rather than a centered inner
+        // box: an inner box is one more level for a width to resolve through,
+        // and a row whose width goes indefinite wraps its text at the minimum
+        // — one glyph per line for CJK prose.
         div()
             .w_full()
-            .flex()
-            .justify_center()
-            .px_3()
+            .px(relative(transcript_column_margin()))
             .pb(px(gap))
-            .child(div().w_full().max_w(px(TRANSCRIPT_COLUMN_WIDTH)).child(row))
+            .child(row)
             .into_any_element()
     }
 
