@@ -13,7 +13,9 @@ use gpui_component::modern_menu::ModernMenu;
 /// point rather than from an element, so the button's rectangle has to reach the
 /// press that opens the menu. The canvas records it while the frame is laid out;
 /// the press reads what the last frame measured, which is where the button was
-/// when it was clicked.
+/// when it was clicked. Its insets are what pin it over the button: an absolute
+/// element without them keeps the place in the flow it would have had, which
+/// here is a full button-height below the button.
 pub(crate) fn modern_dropdown(
     button: Button,
     builder: impl Fn(ModernMenu, &mut Window, &mut App) -> ModernMenu + 'static,
@@ -34,6 +36,6 @@ pub(crate) fn modern_dropdown(
         .child(
             canvas(move |bounds, _, _| recorded.set(bounds), |_, _, _, _| {})
                 .absolute()
-                .size_full(),
+                .inset_0(),
         )
 }
