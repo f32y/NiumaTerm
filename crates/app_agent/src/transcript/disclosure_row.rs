@@ -6,12 +6,20 @@ use crate::*;
 /// are the numbers that keep their headers on a single baseline grid.
 pub(super) const AGENT_CARD_RADIUS: f32 = 12.0;
 pub(super) const AGENT_CARD_PADDING_X: f32 = 14.0;
-pub(super) const AGENT_CARD_PADDING_Y: f32 = 10.0;
+pub(super) const AGENT_CARD_PADDING_Y: f32 = 4.0;
+/// Vertical inset of a card's body. Looser than the header's, because the
+/// header is one line of labels while the body is a block of output that
+/// needs air between it and the rule above it.
+pub(super) const AGENT_CARD_BODY_PADDING_Y: f32 = 8.0;
 pub(super) const AGENT_CARD_GAP: f32 = 10.0;
 /// The square that holds a row's type icon, and the icon drawn inside it.
-pub(super) const AGENT_CARD_ICON_BLOCK: f32 = 26.0;
-pub(super) const AGENT_CARD_ICON_BLOCK_RADIUS: f32 = 7.0;
-pub(super) const AGENT_CARD_ICON: f32 = 13.0;
+pub(super) const AGENT_CARD_ICON_BLOCK: f32 = 18.0;
+pub(super) const AGENT_CARD_ICON_BLOCK_RADIUS: f32 = 5.0;
+pub(super) const AGENT_CARD_ICON: f32 = 11.0;
+/// Leading inside a card header. The transcript sets prose leading for text
+/// read in paragraphs; a header is one line of labels, and inheriting that
+/// leading is what would otherwise decide the card's height.
+pub(super) const AGENT_CARD_LINE_HEIGHT: f32 = 1.2;
 /// Where a card's title starts, measured from the card's leading edge. The
 /// expanded body lines up with the title rather than with the icon, so a run
 /// of detail lines reads as belonging to the heading above it.
@@ -55,12 +63,17 @@ pub(super) struct AgentCardColors {
 impl AgentCardTone {
     pub(super) fn colors(self, cx: &App) -> AgentCardColors {
         match self {
+            // Tinted with the theme's own foreground-alpha wash rather than
+            // filled with the popover colour. A popover is opaque and near
+            // white in most light themes, which over a grey panel reads as a
+            // sheet of paper laid on the pane; the wash lifts the card off
+            // whatever the pane paints without ever leaving that surface.
             Self::Neutral => AgentCardColors {
                 border: cx.theme().border,
-                background: cx.theme().popover,
+                background: cx.theme().accent,
                 icon_block: cx.theme().muted,
                 icon: cx.theme().muted_foreground,
-                hover: cx.theme().muted.opacity(0.4),
+                hover: cx.theme().list_hover,
             },
             Self::Failed => AgentCardColors {
                 border: cx.theme().danger.opacity(0.3),
@@ -210,6 +223,7 @@ impl AgentDisclosureRow {
             .items_center()
             .px(px(AGENT_CARD_PADDING_X))
             .py(px(AGENT_CARD_PADDING_Y))
+            .line_height(relative(AGENT_CARD_LINE_HEIGHT))
             .aria_label(self.accessible_label)
             .when(expandable, |this| {
                 this.cursor_pointer()
