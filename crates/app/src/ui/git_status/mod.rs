@@ -7,7 +7,7 @@ use std::{fs, io, path};
 use gpui::prelude::*;
 use gpui::{Context, Entity, SharedString, Window, div};
 use gpui_component::{ActiveTheme, h_flex};
-use nmt_agent_utils::git::run_git;
+use nmt_agent_utils::git::{CheckedOut, current_branch, run_git};
 use nmt_i18n::i18n;
 use tracing::warn;
 
@@ -29,6 +29,10 @@ pub(crate) struct FileEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct GitSnapshot {
     pub(crate) repo_root: String,
+    /// What `HEAD` points at, for the chrome that names it. `None` on a
+    /// repository whose `HEAD` cannot be resolved at all, such as one with no
+    /// commits yet.
+    pub(crate) branch: Option<String>,
     pub(crate) files: Vec<FileEntry>,
     pub(crate) total_added: u64,
     pub(crate) total_removed: u64,
@@ -103,6 +107,10 @@ pub(crate) fn fetch_snapshot(root: &str) -> Result<GitSnapshot, String> {
 
     Ok(GitSnapshot {
         repo_root: root.to_string(),
+        branch: current_branch(root).map(|checked_out| match checked_out {
+            CheckedOut::Branch(branch) => branch,
+            CheckedOut::Detached(commit) => commit,
+        }),
         files,
         total_added,
         total_removed,
