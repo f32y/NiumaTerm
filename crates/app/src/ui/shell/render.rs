@@ -103,9 +103,14 @@ impl Shell {
                     .min_w_0()
                     .overflow_hidden()
                     .gap(px(TITLE_BAR_BUTTON_GAP))
-                    .child(div().occlude().child(self.render_app_menu_button(cx)))
                     .child(
-                        div().occlude().child(
+                        div()
+                            .flex_none()
+                            .occlude()
+                            .child(self.render_app_menu_button(cx)),
+                    )
+                    .child(
+                        div().flex_none().occlude().child(
                             Button::new("toggle-sidebar")
                                 .ghost()
                                 .size(px(TITLE_BAR_BUTTON))
@@ -121,23 +126,25 @@ impl Shell {
                     )
                     // Left in the drag region: naming the application is not a
                     // control, so the pointer keeps the whole strip to move
-                    // the window by.
+                    // the window by. It is also the one thing here that gives
+                    // up width: this zone is sized to the sidebar and clipped,
+                    // and a name pushing a control out of the window is a
+                    // worse trade than a truncated name.
                     .child(
                         div()
-                            .flex_none()
+                            .min_w_0()
+                            .truncate()
                             .pl(px(TITLE_BAR_WORDMARK_INSET))
                             .text_size(px(TITLE_BAR_WORDMARK_TEXT))
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(SharedString::new_static("NiumaTerm")),
                     )
-                    // The jump controls close the zone from its trailing edge,
-                    // so they stay put as the wordmark and the buttons before
-                    // them keep their own widths.
+                    // The jump controls close the zone from its trailing edge.
                     .child(div().flex_1().min_w_0())
                     // Stays out of the chrome while every background tab is
                     // caught up; there is nowhere for it to jump to then.
                     .children(self.next_ready_tab(cx).is_some().then(|| {
-                        div().occlude().child(
+                        div().flex_none().occlude().child(
                             Button::new("next-ready-tab")
                                 .ghost()
                                 .size(px(TITLE_BAR_BUTTON))
@@ -162,6 +169,7 @@ impl Shell {
                     // to while every tab is idle.
                     .children(self.next_busy_tab(cx).is_some().then(|| {
                         div()
+                            .flex_none()
                             .occlude()
                             .relative()
                             .child(
