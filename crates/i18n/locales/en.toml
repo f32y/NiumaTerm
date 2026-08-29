@@ -710,6 +710,8 @@
 "agent-transcript-accessibility-collapsed" = ". Collapsed"
 "agent-transcript-expanded" = "Expanded"
 "agent-transcript-collapsed" = "Collapsed"
+"agent-transcript-expand-hint" = "▸ Expand"
+"agent-transcript-collapse-hint" = "▾ Collapse"
 "agent-transcript-before" = "Before"
 "agent-transcript-after" = "After"
 "agent-transcript-messages-summarized" = "Messages summarized"

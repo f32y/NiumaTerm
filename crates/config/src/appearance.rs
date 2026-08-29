@@ -240,8 +240,12 @@ fn default_scroll_to_bottom_when_typing() -> bool {
     true
 }
 
+/// Agent transcript prose is chat text, not terminal output: it wraps at a
+/// reading measure and mixes Latin with CJK, both of which a proportional UI
+/// face sets better than the fixed-pitch terminal face. Code inside a
+/// transcript keeps its own family through `agent-transcript-font-family`.
 fn default_agent_font_family() -> String {
-    default_terminal_font_family()
+    default_ui_font()
 }
 
 fn default_agent_font_size() -> f64 {

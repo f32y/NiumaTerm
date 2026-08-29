@@ -1,6 +1,7 @@
 use nmt_i18n::i18n;
 
 use crate::transcript::is_work_row;
+use crate::transcript::render::TRANSCRIPT_LINE_HEIGHT;
 use crate::*;
 
 /// One agent conversation as the user reads it: the entry list, the row
@@ -457,6 +458,10 @@ impl Render for TranscriptView {
             .relative()
             .size_full()
             .min_h_0()
+            // Set here rather than on each row: every row of a conversation
+            // shares one leading, including the ones built from Markdown that
+            // never see the row builder's own styles.
+            .line_height(relative(TRANSCRIPT_LINE_HEIGHT))
             .child(
                 div()
                     .id("agent-transcript")

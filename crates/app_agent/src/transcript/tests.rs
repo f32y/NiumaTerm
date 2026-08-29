@@ -5,13 +5,13 @@ mod prompt_truncation_tests {
     use crate::composer::{ComposerAction, composer_action, prompt_with_response_annotations};
     use crate::settings::AgentSettings;
     use crate::transcript::{
-        AGENT_DISCLOSURE_DETAIL_INSET, AGENT_DISCLOSURE_GAP, AGENT_DISCLOSURE_PADDING,
-        AGENT_DISCLOSURE_SLOT, AgentKind, Status, TranscriptView, TurnSummary,
-        VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES, command_execution_detail, command_execution_heading,
-        compaction_accounting, compaction_label, compaction_row_is_expandable, elapsed_label,
-        entry_copy_text, interrupted_status_label, is_work_row, last_response_label,
-        should_show_jump_to_latest, should_virtualize_transcript, transcript_segments,
-        truncated_user_prompt, turn_summary, worked_status_label, working_status_label,
+        AGENT_CARD_GAP, AGENT_CARD_ICON_BLOCK, AGENT_CARD_PADDING_X, AGENT_DISCLOSURE_DETAIL_INSET,
+        AgentKind, Status, TranscriptView, TurnSummary, VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES,
+        command_execution_detail, command_execution_heading, compaction_accounting,
+        compaction_label, compaction_row_is_expandable, elapsed_label, entry_copy_text,
+        interrupted_status_label, is_work_row, last_response_label, should_show_jump_to_latest,
+        should_virtualize_transcript, transcript_segments, truncated_user_prompt, turn_summary,
+        worked_status_label, working_status_label,
     };
 
     #[test]
@@ -36,7 +36,7 @@ mod prompt_truncation_tests {
     fn disclosure_detail_matches_the_title_start() {
         assert_eq!(
             AGENT_DISCLOSURE_DETAIL_INSET,
-            AGENT_DISCLOSURE_PADDING + AGENT_DISCLOSURE_SLOT * 2.0 + AGENT_DISCLOSURE_GAP * 2.0
+            AGENT_CARD_PADDING_X + AGENT_CARD_ICON_BLOCK + AGENT_CARD_GAP
         );
     }
 

@@ -21,7 +21,6 @@ pub mod settings;
 pub mod transcript;
 mod view;
 mod workflows;
-mod working_indicator;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
@@ -110,7 +109,6 @@ pub use crate::session::{
 use crate::settings::{AgentSettings, UI_RADIUS};
 use crate::transcript::{Entry, ReadingPosition, RowSpec, TranscriptView, VirtualTranscriptState};
 use crate::workflows::WorkflowUi;
-use crate::working_indicator::WorkingIndicator;
 
 #[derive(Clone)]
 pub enum AgentPaneEvent {

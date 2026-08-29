@@ -177,7 +177,7 @@ impl Default for AppSettings {
             terminal_font_family: initial_font_family(),
             terminal_font_size: DEFAULT_FONT_SIZE,
             terminal_line_height: DEFAULT_LINE_HEIGHT,
-            agent_font_family: initial_font_family(),
+            agent_font_family: DEFAULT_UI_FONT.into(),
             agent_font_size: DEFAULT_FONT_SIZE,
             agent_transcript_font_family: initial_font_family(),
             agent_transcript_font_size: DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE,
@@ -459,7 +459,7 @@ impl AppSettings {
             terminal_font_family: terminal_font_or_default(&appearance.terminal_font_family),
             terminal_font_size: clamp_terminal_font_size(appearance.terminal_font_size),
             terminal_line_height: clamp_terminal_line_height(appearance.terminal_line_height),
-            agent_font_family: terminal_font_or_default(&appearance.agent_font_family),
+            agent_font_family: ui_font_or_default(&appearance.agent_font_family),
             agent_font_size: clamp_terminal_font_size(appearance.agent_font_size),
             agent_transcript_font_family: terminal_font_or_default(
                 &appearance.agent_transcript_font_family,
