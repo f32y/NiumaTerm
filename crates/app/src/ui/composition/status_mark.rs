@@ -3,7 +3,7 @@ use std::time::Duration;
 use gpui::prelude::*;
 use gpui::{
     Animation, AnimationExt as _, App, ElementId, IntoElement, Pixels, RenderOnce, SharedString,
-    Window, div, ease_in_out, px,
+    Window, div, ease_in_out,
 };
 use gpui_component::progress::ProgressCircle;
 use gpui_component::{ActiveTheme as _, Sizable as _};
@@ -12,17 +12,10 @@ use gpui_component::{ActiveTheme as _, Sizable as _};
 /// to read as ongoing work rather than as a blinking alert.
 const PULSE_PERIOD: Duration = Duration::from_millis(1_600);
 const PULSE_MIN_OPACITY: f32 = 0.35;
-/// Stroke of a hollow mark. The ring has to survive being drawn at 7px, so it
-/// is thicker than a hairline.
-const IDLE_RING_WIDTH: Pixels = px(1.5);
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StatusMarkTone {
     Primary,
     Warning,
-    /// Nothing is happening. Drawn as an outline so a quiet row still fills
-    /// the status lane and its label stays aligned with its busy neighbours.
-    Idle,
 }
 
 enum StatusMarkVisual {
@@ -86,9 +79,6 @@ impl RenderOnce for StatusMark {
                 let mark = match tone {
                     StatusMarkTone::Primary => mark.bg(cx.theme().primary),
                     StatusMarkTone::Warning => mark.bg(cx.theme().warning),
-                    StatusMarkTone::Idle => mark
-                        .border(IDLE_RING_WIDTH)
-                        .border_color(cx.theme().sidebar_foreground.opacity(0.25)),
                 };
 
                 if !self.pulse {

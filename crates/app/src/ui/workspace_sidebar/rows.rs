@@ -462,18 +462,20 @@ impl Sidebar {
         // Ordered by what is worth acting on first: an agent mid-turn, then
         // what the shell is doing, then output nobody has read. A tab's own
         // kind of status therefore outranks the generic unread dot, the way
-        // the horizontal strip orders them too. A quiet row still fills the
-        // lane with a hollow mark, so every label in the list starts at the
-        // same x however many rows are busy.
-        let status_mark: AnyElement = match (tab.agent_kind.is_some(), tab.busy) {
-            (true, true) => StatusMark::new(
-                ("sidebar-tab-busy", key),
-                StatusMarkTone::Warning,
-                px(TAB_ROW_DOT),
-            )
-            .pulse()
-            .label(i18n("sidebar-workspace-status-running"))
-            .into_any_element(),
+        // the horizontal strip orders them too. A row with nothing to report
+        // shows no mark: in a list where most rows are quiet, a placeholder on
+        // each of them is what the eye has to filter out to find the busy one.
+        let status_mark: Option<AnyElement> = match (tab.agent_kind.is_some(), tab.busy) {
+            (true, true) => Some(
+                StatusMark::new(
+                    ("sidebar-tab-busy", key),
+                    StatusMarkTone::Warning,
+                    px(TAB_ROW_DOT),
+                )
+                .pulse()
+                .label(i18n("sidebar-workspace-status-running"))
+                .into_any_element(),
+            ),
             _ => terminal_presentation(tab.terminal)
                 .map(|(visual, aria)| {
                     div()
@@ -493,14 +495,6 @@ impl Sidebar {
                         .label(i18n("sidebar-workspace-unread-label").replace("{count}", "1"))
                         .into_any_element()
                     })
-                })
-                .unwrap_or_else(|| {
-                    StatusMark::new(
-                        ("sidebar-tab-idle", key),
-                        StatusMarkTone::Idle,
-                        px(TAB_ROW_DOT),
-                    )
-                    .into_any_element()
                 }),
         };
 
@@ -574,7 +568,6 @@ impl Sidebar {
                     .font_weight(FontWeight::SEMIBOLD)
                     .border_1()
                     .border_color(cx.theme().border)
-                    .shadow_sm()
             })
             .when(!active, |this| {
                 this.text_color(selection.idle_foreground)
@@ -583,7 +576,7 @@ impl Sidebar {
             // The status mark leads the row: what a session is doing is what
             // the eye is scanning the list for, and its kind only matters once
             // that row has been found.
-            .child(status_mark)
+            .children(status_mark)
             .child(
                 div()
                     .flex_none()
