@@ -21,9 +21,8 @@ use std::{collections, path, thread, time};
 use dirs::home_dir;
 use gpui::prelude::*;
 use gpui::{
-    Anchor, AnyElement, App, Axis, Context, Div, Entity, FocusHandle, Focusable, FontWeight,
-    MouseDownEvent, ObjectFit, Pixels, Render, SharedString, Task, Window, WindowBounds, WindowId,
-    div, img, px,
+    Anchor, AnyElement, App, Axis, Context, Div, Entity, FocusHandle, Focusable, MouseDownEvent,
+    ObjectFit, Pixels, Render, SharedString, Task, Window, WindowBounds, WindowId, div, img, px,
 };
 use gpui_component::button::{Button, ButtonVariants, Toggle, ToggleVariants};
 use gpui_component::dialog::{
