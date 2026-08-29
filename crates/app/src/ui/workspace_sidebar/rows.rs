@@ -1,5 +1,6 @@
 use gpui::{ClipboardItem, Role, relative};
 
+use crate::ui::modern_dropdown;
 use crate::ui::workspace_sidebar::*;
 
 impl Sidebar {
@@ -66,18 +67,18 @@ impl Sidebar {
                 i18n("sidebar-tab-new"),
                 HoverActionLayout::Bare,
                 HoverActionVisibility::OnGroupHover("ws-item".into()),
-                Button::new(("workspace-new-tab-button", idx))
-                    // A pixel size leaves the box to the styles below:
-                    // Button only derives its padding and glyph size from
-                    // it, while the named sizes would pin the height too.
-                    .with_size(px(NEW_TAB_GLYPH))
-                    .ghost()
-                    .aria_label(i18n("sidebar-tab-new"))
-                    .size(px(NEW_TAB_BUTTON))
-                    .child("+")
-                    .dropdown_menu(move |menu, window, cx| {
-                        new_tab_menu(menu, &menu_shell, window, cx)
-                    }),
+                modern_dropdown(
+                    Button::new(("workspace-new-tab-button", idx))
+                        // A pixel size leaves the box to the styles below:
+                        // Button only derives its padding and glyph size from
+                        // it, while the named sizes would pin the height too.
+                        .with_size(px(NEW_TAB_GLYPH))
+                        .ghost()
+                        .aria_label(i18n("sidebar-tab-new"))
+                        .size(px(NEW_TAB_BUTTON))
+                        .child("+"),
+                    move |menu, _, cx| new_tab_menu(menu, &menu_shell, cx),
+                ),
             )
             .capture_any_mouse_down(cx.listener(move |this, _, window, cx| {
                 this.workspaces.activate(idx);
