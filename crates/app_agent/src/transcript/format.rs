@@ -257,6 +257,18 @@ pub(crate) fn command_execution_detail(command: &str, aggregated_output: Option<
     detail
 }
 
+/// The one line of a failed command's output worth putting on the card
+/// itself. A reader deciding what to do next needs the first thing that went
+/// wrong, and the lines after it are usually the same failure restated as a
+/// stack or a usage dump; the whole output stays one click away.
+pub(crate) fn command_failure_reason(aggregated_output: Option<&str>) -> Option<String> {
+    aggregated_output?
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
+}
+
 /// Full text of an entry for the right-click Copy action — the whole message,
 /// independent of any partial selection or truncated preview.
 pub(crate) fn entry_copy_text(item: &SessionItem) -> String {

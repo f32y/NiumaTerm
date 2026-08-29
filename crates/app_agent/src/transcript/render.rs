@@ -5,20 +5,38 @@ use nmt_i18n::i18n;
 use crate::composer::attachments::MAX_ATTACHMENTS;
 use crate::composer::{annotation_count_label, parse_annotated_prompt};
 use crate::transcript::disclosure_row::{
-    AGENT_DISCLOSURE_DETAIL_INSET, AgentDisclosureRow, USER_BUBBLE_WIDTH_FRACTION,
+    AGENT_CARD_DETAIL_SIZE, AGENT_CARD_PADDING_X, AGENT_CARD_PADDING_Y,
+    AGENT_DISCLOSURE_DETAIL_INSET, AgentCardTone, AgentDisclosureRow, USER_BUBBLE_PADDING_X,
+    USER_BUBBLE_PADDING_Y, USER_BUBBLE_RADIUS, USER_BUBBLE_TAIL_RADIUS, USER_BUBBLE_WIDTH_FRACTION,
+    agent_card,
 };
 use crate::transcript::format::{interrupted_status_label, worked_status_label};
 use crate::transcript::{
     code_transcript_format, command_execution_detail, command_execution_heading,
-    compact_token_count, compaction_accounting, compaction_label, compaction_row_is_expandable,
-    compaction_trigger_label, entry_copy_text, fenced_code_block_as, is_work_row,
-    should_virtualize_transcript, strip_read_gutter, truncated_user_prompt, working_label,
+    command_failure_reason, compact_token_count, compaction_accounting, compaction_label,
+    compaction_row_is_expandable, compaction_trigger_label, entry_copy_text, fenced_code_block_as,
+    is_work_row, should_virtualize_transcript, strip_read_gutter, truncated_user_prompt,
+    working_label,
 };
 use crate::*;
 
 /// Edge of a transcript thumbnail, matching the composer strip so an image
 /// does not change size when the message it belongs to is sent.
 const TRANSCRIPT_THUMBNAIL: f32 = 56.0;
+
+/// Reading measure for the conversation column. Prose set much wider than this
+/// costs a long return sweep on every line, so a wide window gets margins
+/// rather than longer lines; a narrow one still gets the full pane.
+const TRANSCRIPT_COLUMN_WIDTH: f32 = 820.0;
+/// Space below one message group, and the tighter space between the steps
+/// inside a single run of work. Ranking the two is what makes a turn read as
+/// message / work / message rather than as one undifferentiated stack.
+const TRANSCRIPT_GROUP_GAP: f32 = 24.0;
+const TRANSCRIPT_STEP_GAP: f32 = 8.0;
+/// Leading for transcript text, as a multiple of the font size. Conversation
+/// prose is read in paragraphs rather than scanned line by line the way
+/// terminal output is, so it is set looser than the chrome around it.
+pub(super) const TRANSCRIPT_LINE_HEIGHT: f32 = 1.6;
 
 impl TranscriptView {
     /// Build the element for one visible row. Row indices come from the list
@@ -32,6 +50,13 @@ impl TranscriptView {
     ) -> AnyElement {
         let Some(spec) = self.row_specs.get(ix).cloned() else {
             return div().into_any_element();
+        };
+
+        let gap = match &spec {
+            RowSpec::Work { .. } | RowSpec::RunToggle { .. } | RowSpec::TurnFold { .. } => {
+                TRANSCRIPT_STEP_GAP
+            }
+            _ => TRANSCRIPT_GROUP_GAP,
         };
 
         let row = match spec {
@@ -57,10 +82,18 @@ impl TranscriptView {
             RowSpec::Working { compacting } => self.render_working_row(compacting, cx),
         };
 
-        // The pre-virtualization container spaced rows with `gap_2` inside a
-        // `p_3` body; each row now carries its own horizontal inset and
-        // bottom gap.
-        div().w_full().px_3().pb_2().child(row).into_any_element()
+        // Each row is laid out on its own by the virtual list, so the reading
+        // column has to be re-established per row rather than once around the
+        // conversation: a centered box holds every row to the same measure and
+        // the same left edge however wide the pane gets.
+        div()
+            .w_full()
+            .flex()
+            .justify_center()
+            .px_3()
+            .pb(px(gap))
+            .child(div().w_full().max_w(px(TRANSCRIPT_COLUMN_WIDTH)).child(row))
+            .into_any_element()
     }
 
     /// The live progress line. While the backend is compacting it names that
@@ -113,11 +146,16 @@ impl TranscriptView {
             .gap_2()
             .items_center()
             .px_1()
-            .child(WorkingIndicator::new(cx.theme().muted_foreground))
+            .child(
+                Spinner::new()
+                    .icon(IconName::LoaderCircle)
+                    .with_size(px(12.))
+                    .color(cx.theme().warning),
+            )
             .child(
                 div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground.opacity(0.7))
+                    .text_size(px(AGENT_CARD_DETAIL_SIZE))
+                    .text_color(cx.theme().muted_foreground)
                     .child(working_label(
                         started,
                         self.working_output_tokens,
@@ -382,9 +420,14 @@ impl TranscriptView {
             // against this bubble's own shrink-to-fit parent instead, wrapping
             // every prompt at a fraction of its natural single-line width.
             .min_w_0()
-            .px_3()
-            .py_2()
-            .rounded(UI_RADIUS)
+            .px(px(USER_BUBBLE_PADDING_X))
+            .py(px(USER_BUBBLE_PADDING_Y))
+            .rounded_tl(px(USER_BUBBLE_RADIUS))
+            .rounded_tr(px(USER_BUBBLE_RADIUS))
+            .rounded_bl(px(USER_BUBBLE_RADIUS))
+            // The one square-ish corner faces the conversation the prompt was
+            // sent into, which is what marks the bubble as this side of it.
+            .rounded_br(px(USER_BUBBLE_TAIL_RADIUS))
             .bg(cx.theme().muted)
             // Plain, not markdown: the prompt is user-authored text and
             // must render verbatim, but stays drag-selectable.
@@ -553,9 +596,11 @@ impl TranscriptView {
             .into_any_element()
     }
 
-    /// One work-log line: chevron · type icon · heading · status.
-    /// Rows with detail (command output, reasoning text) expand on click into
-    /// a bounded transcript surface with its own scroll position.
+    /// One step of the work log, as a card: icon block · heading · the
+    /// technical text the heading names · outcome badge. Rows with detail
+    /// (command output, reasoning text) expand on click into a bounded
+    /// transcript surface with its own scroll position, drawn inside the same
+    /// card so the detail stays visibly attached to the step it belongs to.
     pub(crate) fn render_work_row(
         &mut self,
         index: usize,
@@ -563,7 +608,7 @@ impl TranscriptView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let cwd = self.cwd.clone();
-        let (icon, heading, status, detail) = match &self.items[index].item {
+        let (icon, heading, mono_detail, reason, status, detail) = match &self.items[index].item {
             SessionItem::CommandExecution {
                 command,
                 purpose,
@@ -583,6 +628,10 @@ impl TranscriptView {
                 (
                     IconName::SquareTerminal,
                     command_execution_heading(purpose.as_deref()).to_string(),
+                    Some(command.clone()),
+                    failed
+                        .then(|| command_failure_reason(aggregated_output.as_deref()))
+                        .flatten(),
                     Some(state.to_string()),
                     Some(Cow::Owned(detail)),
                 )
@@ -595,6 +644,8 @@ impl TranscriptView {
             } => (
                 IconName::File,
                 i18n("agent-transcript-edit-paths").replace("{paths}", paths),
+                None,
+                None,
                 Some(status.as_deref().unwrap_or("inProgress").to_string()),
                 diff.as_deref()
                     .filter(|diff| !diff.trim().is_empty())
@@ -617,6 +668,8 @@ impl TranscriptView {
                 } else {
                     format!("{kind} {title}")
                 },
+                None,
+                None,
                 Some(status.as_deref().unwrap_or("inProgress").to_string()),
                 output
                     .as_deref()
@@ -626,6 +679,8 @@ impl TranscriptView {
             SessionItem::Reasoning { summary, .. } => (
                 IconName::Bot,
                 i18n("agent-transcript-thinking").to_string(),
+                None,
+                None,
                 None,
                 summary
                     .as_deref()
@@ -645,17 +700,21 @@ impl TranscriptView {
             Some(status) => status,
             None => i18n("agent-transcript-no-status"),
         };
-        let status_glyph = status.as_ref().map(|state| {
-            let (name, color) = match state.as_str() {
-                "failed" | "declined" => (IconName::CircleX, cx.theme().danger),
-                "completed" => (IconName::Check, cx.theme().muted_foreground),
-                _ => (IconName::Minus, cx.theme().muted_foreground.opacity(0.6)),
+        // A card carries its outcome as a stated badge rather than as a glyph:
+        // the same slot then reads for a step that failed, one that succeeded
+        // and one still running, without three symbols to learn first.
+        let tone = match status.as_deref() {
+            Some("failed" | "declined") => AgentCardTone::Failed,
+            _ => AgentCardTone::Neutral,
+        };
+        let badge = status.as_ref().map(|state| {
+            let color = match state.as_str() {
+                "failed" | "declined" => cx.theme().danger,
+                "completed" => cx.theme().success,
+                _ => cx.theme().muted_foreground,
             };
 
-            Icon::new(name)
-                .size_3()
-                .text_color(color)
-                .into_any_element()
+            (status_label.to_string(), color)
         });
 
         let accessible_label = format!(
@@ -674,8 +733,14 @@ impl TranscriptView {
         );
         let mut header = AgentDisclosureRow::new(("wl-head", index), heading)
             .type_icon(icon)
-            .trailing(status_glyph)
+            .tone(tone)
             .accessible_label(accessible_label);
+        if let Some(mono_detail) = mono_detail {
+            header = header.mono_detail(mono_detail);
+        }
+        if let Some((label, color)) = badge {
+            header = header.badge(label, color);
+        }
         if expandable {
             header = header.expanded(expanded);
         }
@@ -689,11 +754,23 @@ impl TranscriptView {
             }))
         });
 
-        v_flex()
+        agent_card(tone, cx)
             .id(("entry", index))
-            .w_full()
             .modern_context_menu(Self::copy_menu(cx.entity().downgrade(), index))
             .child(header)
+            // Why a step failed belongs on the card rather than behind the
+            // disclosure: it is what the reader decides their next move from,
+            // and the full transcript below it is usually a stack trace.
+            .children(reason.map(|reason| {
+                div()
+                    .w_full()
+                    .pl(px(AGENT_DISCLOSURE_DETAIL_INSET))
+                    .pr(px(AGENT_CARD_PADDING_X))
+                    .pb(px(AGENT_CARD_PADDING_Y))
+                    .text_size(px(AGENT_CARD_DETAIL_SIZE))
+                    .text_color(cx.theme().danger.opacity(0.85))
+                    .child(reason)
+            }))
             .children(detail.as_deref().filter(|_| expanded).map(|detail| {
                 let code_format = code_transcript_format(&self.items[index].item, detail);
                 let virtualized = should_virtualize_transcript(code_format.is_some(), detail);
@@ -717,7 +794,7 @@ impl TranscriptView {
                     let settings = cx.global::<AgentSettings>();
                     let transcript_font = settings.transcript_font();
                     let transcript_font_size = px(settings.transcript_font_size);
-                    let line_height = transcript_font_size * 1.5;
+                    let line_height = transcript_font_size * TRANSCRIPT_LINE_HEIGHT;
                     let text_color = cx.theme().muted_foreground;
                     let list_source = source.clone();
                     let list_segments = segments.clone();
@@ -861,8 +938,14 @@ impl TranscriptView {
                     // Expanded transcript content starts at the same horizontal
                     // position as its title; inner padding would add a redundant
                     // indentation level inside an already grouped tool call.
-                    .ml(px(AGENT_DISCLOSURE_DETAIL_INSET))
-                    .mt_1()
+                    // The rule above it is what separates the detail from the
+                    // header without a second card edge inside the card.
+                    .w_full()
+                    .border_t_1()
+                    .border_color(cx.theme().border.opacity(0.6))
+                    .pl(px(AGENT_DISCLOSURE_DETAIL_INSET))
+                    .pr(px(AGENT_CARD_PADDING_X))
+                    .py(px(AGENT_CARD_PADDING_Y))
                     .relative()
                     .child(body)
             }))
@@ -923,8 +1006,13 @@ impl TranscriptView {
             // The rule sits above the heading: it closes off the conversation
             // that the summary below replaced.
             .child(div().w_full().h(px(1.)).bg(accent.opacity(0.35)))
-            .child(header)
-            .children(expanded.then(|| self.render_compaction_detail(index, &detail, window, cx)))
+            .child(
+                agent_card(AgentCardTone::Neutral, cx)
+                    .child(header)
+                    .children(
+                        expanded.then(|| self.render_compaction_detail(index, &detail, window, cx)),
+                    ),
+            )
             .into_any_element()
     }
 
@@ -970,7 +1058,12 @@ impl TranscriptView {
             .clone();
 
         v_flex()
-            .ml(px(AGENT_DISCLOSURE_DETAIL_INSET))
+            .w_full()
+            .border_t_1()
+            .border_color(cx.theme().border.opacity(0.6))
+            .pl(px(AGENT_DISCLOSURE_DETAIL_INSET))
+            .pr(px(AGENT_CARD_PADDING_X))
+            .py(px(AGENT_CARD_PADDING_Y))
             .gap_1()
             .text_xs()
             .children(accounting_rows.into_iter().filter_map(|(name, value)| {
@@ -1060,24 +1153,27 @@ impl TranscriptView {
             i18n("agent-transcript-turn-work-hide").to_string()
         };
 
-        AgentDisclosureRow::new(("turn-fold", turn as usize), label.clone())
-            .expanded(!folded)
-            .without_type_icon_slot()
-            .accessible_label(format!(
-                "{label}. {}",
-                if folded {
-                    i18n("agent-transcript-collapsed")
-                } else {
-                    i18n("agent-transcript-expanded")
-                }
-            ))
-            .render(cx)
-            .on_click(cx.listener(move |this, _, _, cx| {
-                if !this.toggled_turns.insert(turn) {
-                    this.toggled_turns.remove(&turn);
-                }
-                cx.notify();
-            }))
+        agent_card(AgentCardTone::Neutral, cx)
+            .child(
+                AgentDisclosureRow::new(("turn-fold", turn as usize), label.clone())
+                    .expanded(!folded)
+                    .type_icon(IconName::GalleryVerticalEnd)
+                    .accessible_label(format!(
+                        "{label}. {}",
+                        if folded {
+                            i18n("agent-transcript-collapsed")
+                        } else {
+                            i18n("agent-transcript-expanded")
+                        }
+                    ))
+                    .render(cx)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if !this.toggled_turns.insert(turn) {
+                            this.toggled_turns.remove(&turn);
+                        }
+                        cx.notify();
+                    })),
+            )
             .into_any_element()
     }
 
@@ -1093,17 +1189,12 @@ impl TranscriptView {
     ) -> AnyElement {
         let label = worked_status_label(seconds, output_tokens);
 
-        v_flex()
+        div()
             .w_full()
-            .gap_1()
-            .child(
-                div()
-                    .px_1()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground.opacity(0.7))
-                    .child(label),
-            )
-            .child(div().w_full().h(px(1.)).bg(cx.theme().border.opacity(0.6)))
+            .px_1()
+            .text_size(px(AGENT_CARD_DETAIL_SIZE))
+            .text_color(cx.theme().muted_foreground)
+            .child(label)
             .into_any_element()
     }
 
@@ -1112,17 +1203,12 @@ impl TranscriptView {
         output_tokens: Option<u64>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        v_flex()
+        div()
             .w_full()
-            .gap_1()
-            .child(
-                div()
-                    .px_1()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground.opacity(0.7))
-                    .child(interrupted_status_label(output_tokens)),
-            )
-            .child(div().w_full().h(px(1.)).bg(cx.theme().border.opacity(0.6)))
+            .px_1()
+            .text_size(px(AGENT_CARD_DETAIL_SIZE))
+            .text_color(cx.theme().muted_foreground)
+            .child(interrupted_status_label(output_tokens))
             .into_any_element()
     }
 
@@ -1140,24 +1226,27 @@ impl TranscriptView {
             i18n("agent-transcript-tool-calls").replace("{count}", &tool_count.to_string())
         };
 
-        AgentDisclosureRow::new(("wl-run", run_start), label.clone())
-            .expanded(expanded)
-            .without_type_icon_slot()
-            .accessible_label(format!(
-                "{label}. {}",
-                if expanded {
-                    i18n("agent-transcript-expanded")
-                } else {
-                    i18n("agent-transcript-collapsed")
-                }
-            ))
-            .render(cx)
-            .on_click(cx.listener(move |this, _, _, cx| {
-                if !this.expanded_groups.insert(run_start) {
-                    this.expanded_groups.remove(&run_start);
-                }
-                cx.notify();
-            }))
+        agent_card(AgentCardTone::Neutral, cx)
+            .child(
+                AgentDisclosureRow::new(("wl-run", run_start), label.clone())
+                    .expanded(expanded)
+                    .type_icon(IconName::SquareTerminal)
+                    .accessible_label(format!(
+                        "{label}. {}",
+                        if expanded {
+                            i18n("agent-transcript-expanded")
+                        } else {
+                            i18n("agent-transcript-collapsed")
+                        }
+                    ))
+                    .render(cx)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if !this.expanded_groups.insert(run_start) {
+                            this.expanded_groups.remove(&run_start);
+                        }
+                        cx.notify();
+                    })),
+            )
             .into_any_element()
     }
 }
