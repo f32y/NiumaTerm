@@ -600,11 +600,13 @@ impl TranscriptView {
             .into_any_element()
     }
 
-    /// One step of the work log, as a card: icon block · heading · the
-    /// technical text the heading names · outcome badge. Rows with detail
-    /// (command output, reasoning text) expand on click into a bounded
-    /// transcript surface with its own scroll position, drawn inside the same
-    /// card so the detail stays visibly attached to the step it belongs to.
+    /// One step of the work log, as a card: icon block · heading · outcome
+    /// mark. A collapsed card states what the step was and how it went, and
+    /// nothing else — the command it ran and the output it produced are the
+    /// first thing behind the disclosure. Rows with detail (command output,
+    /// reasoning text) expand on click into a bounded transcript surface with
+    /// its own scroll position, drawn inside the same card so the detail stays
+    /// visibly attached to the step it belongs to.
     pub(crate) fn render_work_row(
         &mut self,
         index: usize,
@@ -612,7 +614,7 @@ impl TranscriptView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let cwd = self.cwd.clone();
-        let (icon, heading, mono_detail, reason, status, detail) = match &self.items[index].item {
+        let (icon, heading, reason, status, detail) = match &self.items[index].item {
             SessionItem::CommandExecution {
                 command,
                 purpose,
@@ -632,7 +634,6 @@ impl TranscriptView {
                 (
                     IconName::SquareTerminal,
                     command_execution_heading(purpose.as_deref()).to_string(),
-                    Some(command.clone()),
                     failed
                         .then(|| command_failure_reason(aggregated_output.as_deref()))
                         .flatten(),
@@ -648,7 +649,6 @@ impl TranscriptView {
             } => (
                 IconName::File,
                 i18n("agent-transcript-edit-paths").replace("{paths}", paths),
-                None,
                 None,
                 Some(status.as_deref().unwrap_or("inProgress").to_string()),
                 diff.as_deref()
@@ -673,7 +673,6 @@ impl TranscriptView {
                     format!("{kind} {title}")
                 },
                 None,
-                None,
                 Some(status.as_deref().unwrap_or("inProgress").to_string()),
                 output
                     .as_deref()
@@ -683,7 +682,6 @@ impl TranscriptView {
             SessionItem::Reasoning { summary, .. } => (
                 IconName::Bot,
                 i18n("agent-transcript-thinking").to_string(),
-                None,
                 None,
                 None,
                 summary
@@ -735,9 +733,6 @@ impl TranscriptView {
             .type_icon(icon)
             .tone(tone)
             .accessible_label(accessible_label);
-        if let Some(mono_detail) = mono_detail {
-            header = header.mono_detail(mono_detail);
-        }
         if let Some((icon, color)) = status_icon {
             header = header.status(icon, color);
         }
