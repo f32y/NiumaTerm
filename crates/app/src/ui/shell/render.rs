@@ -1,14 +1,42 @@
 use gpui::KeyDownEvent;
+use gpui_component::menu::{DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_component::modern_menu::dispatch_modern_menu_key;
 use nmt_app_agent::RecoveryIdentity;
 use nmt_i18n::i18n;
 
 use crate::ui::shell::*;
+use crate::ui::tab_bar::new_tab_menu;
+use crate::update::check_now;
 
 /// Width the tab strip keeps once the title bar runs out of room: about one
 /// truncated tab plus the new-tab button, so the strip stays visible and its
 /// horizontal scroll stays reachable at the window's minimum width.
 pub(super) const TAB_STRIP_MIN_WIDTH: f32 = 120.0;
+
+/// The bar is taller than the Fluent standard strip because it carries
+/// controls, a wordmark and a session heading rather than a title alone.
+const TITLE_BAR_HEIGHT: f32 = 44.0;
+/// A leading-zone control: square, and spaced tightly enough that the group
+/// reads as one cluster rather than as separate buttons.
+const TITLE_BAR_BUTTON: f32 = 26.0;
+const TITLE_BAR_BUTTON_GAP: f32 = 4.0;
+/// Separation between the control cluster and the wordmark it precedes.
+const TITLE_BAR_WORDMARK_INSET: f32 = 6.0;
+const TITLE_BAR_WORDMARK_TEXT: f32 = 13.0;
+/// The session heading in the middle of the bar, and the branch chip beside
+/// it. The chip is set smaller than the title because it qualifies the title
+/// rather than competing with it.
+const TITLE_BAR_HEADING_TEXT: f32 = 13.0;
+const TITLE_BAR_HEADING_GAP: f32 = 10.0;
+const TITLE_BAR_CHIP_TEXT: f32 = 12.0;
+const TITLE_BAR_CHIP_RADIUS: f32 = 6.0;
+const TITLE_BAR_CHIP_PADDING_X: f32 = 8.0;
+const TITLE_BAR_CHIP_PADDING_Y: f32 = 2.0;
+const TITLE_BAR_CHIP_ICON: f32 = 11.0;
+/// The mark on the busy-session control. The control only appears while work
+/// is in flight, and the dot is what says so before the arrow is read as
+/// navigation rather than as decoration.
+const TITLE_BAR_BADGE: f32 = 6.0;
 
 impl Shell {
     fn bind_actions(element: Div, cx: &mut Context<Self>) -> Div {
@@ -42,6 +70,10 @@ impl Shell {
         tab_bar: impl IntoElement,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        // Vertical tabs move the strip into the sidebar, which leaves the
+        // middle of the bar free to name the session on screen instead.
+        let vertical_tabs = cx.global::<AppSettings>().tab_bar_style == TabBarStyle::Vertical;
+
         // Interactive chrome lives in the titlebar but is wrapped in
         // `occlude()`: that blocks the drag hitbox beneath it, so Windows
         // treats these regions as client (clickable) while the empty titlebar
@@ -49,6 +81,7 @@ impl Shell {
         // `flex_1`), or they'd cover the whole bar and leave nothing to drag.
         // Add future titlebar buttons the same way.
         TitleBar::new()
+            .h(px(TITLE_BAR_HEIGHT))
             // The default X calls `remove_window()` directly (no
             // WM_CLOSE), skipping `on_window_should_close` — so the
             // shared close confirmation is handled here too.
@@ -69,10 +102,13 @@ impl Shell {
                     ))
                     .min_w_0()
                     .overflow_hidden()
+                    .gap(px(TITLE_BAR_BUTTON_GAP))
+                    .child(div().occlude().child(self.render_app_menu_button(cx)))
                     .child(
                         div().occlude().child(
                             Button::new("toggle-sidebar")
                                 .ghost()
+                                .size(px(TITLE_BAR_BUTTON))
                                 .icon(if self.sidebar.collapsed {
                                     SideBarIcon::Expand
                                 } else {
@@ -83,22 +119,28 @@ impl Shell {
                                 })),
                         ),
                     )
+                    // Left in the drag region: naming the application is not a
+                    // control, so the pointer keeps the whole strip to move
+                    // the window by.
                     .child(
-                        div().occlude().child(
-                            Button::new("settings")
-                                .ghost()
-                                .icon(IconName::Settings)
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.on_show_settings(&ShowSettings, window, cx)
-                                })),
-                        ),
+                        div()
+                            .flex_none()
+                            .pl(px(TITLE_BAR_WORDMARK_INSET))
+                            .text_size(px(TITLE_BAR_WORDMARK_TEXT))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(SharedString::new_static("NiumaTerm")),
                     )
+                    // The jump controls close the zone from its trailing edge,
+                    // so they stay put as the wordmark and the buttons before
+                    // them keep their own widths.
+                    .child(div().flex_1().min_w_0())
                     // Stays out of the chrome while every background tab is
                     // caught up; there is nowhere for it to jump to then.
                     .children(self.next_ready_tab(cx).is_some().then(|| {
                         div().occlude().child(
                             Button::new("next-ready-tab")
                                 .ghost()
+                                .size(px(TITLE_BAR_BUTTON))
                                 .icon(IconName::Bell)
                                 .tooltip(i18n("shell-next-ready-tab"))
                                 // The target is picked on the click rather
@@ -119,20 +161,39 @@ impl Shell {
                     // Same bargain for work still in flight: nothing to jump
                     // to while every tab is idle.
                     .children(self.next_busy_tab(cx).is_some().then(|| {
-                        div().occlude().child(
-                            Button::new("next-busy-tab")
-                                .ghost()
-                                .icon(NextBusyTabIcon)
-                                .tooltip(i18n("shell-next-busy-tab"))
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    let Some((workspace_index, tab_index)) = this.next_busy_tab(cx)
-                                    else {
-                                        return;
-                                    };
+                        div()
+                            .occlude()
+                            .relative()
+                            .child(
+                                Button::new("next-busy-tab")
+                                    .ghost()
+                                    .size(px(TITLE_BAR_BUTTON))
+                                    .icon(NextBusyTabIcon)
+                                    .tooltip(i18n("shell-next-busy-tab"))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        let Some((workspace_index, tab_index)) =
+                                            this.next_busy_tab(cx)
+                                        else {
+                                            return;
+                                        };
 
-                                    this.jump_to_tab(workspace_index, tab_index, window, cx);
-                                })),
-                        )
+                                        this.jump_to_tab(workspace_index, tab_index, window, cx);
+                                    })),
+                            )
+                            // Ringed in the bar's own background so the mark
+                            // stays legible over whatever the icon under it
+                            // happens to be.
+                            .child(
+                                div()
+                                    .absolute()
+                                    .top(px(2.))
+                                    .right(px(2.))
+                                    .size(px(TITLE_BAR_BADGE))
+                                    .rounded_full()
+                                    .border_1()
+                                    .border_color(cx.theme().title_bar)
+                                    .bg(cx.theme().warning),
+                            )
                     })),
             )
             // The container keeps the title-bar drag area. Tabs and the
@@ -149,7 +210,11 @@ impl Shell {
                     .h_full()
                     .flex()
                     .items_center()
-                    .child(tab_bar),
+                    .min_w_0()
+                    .map(|this| match vertical_tabs {
+                        true => this.child(self.render_session_heading(cx)),
+                        false => this.child(tab_bar),
+                    }),
             )
             .child(
                 h_flex()
@@ -213,6 +278,60 @@ impl Shell {
                         None
                     }),
             )
+    }
+
+    /// The leading control of the title bar. It carries the commands that have
+    /// no chrome of their own; anything with a visible button of its own stays
+    /// on that button rather than being listed here as well.
+    fn render_app_menu_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let shell = cx.entity();
+
+        Button::new("app-menu")
+            .ghost()
+            .size(px(TITLE_BAR_BUTTON))
+            .icon(IconName::Menu)
+            .tooltip(i18n("shell-app-menu"))
+            .aria_label(i18n("shell-app-menu"))
+            .dropdown_menu(move |menu, window, cx| app_menu(menu, &shell, window, cx))
+    }
+
+    /// What the title bar names in the vertical tab-bar style, where the strip
+    /// that would otherwise fill this space lives in the sidebar: the session
+    /// on screen, and the branch its working directory is on.
+    fn render_session_heading(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let branch = self
+            .git_model
+            .read(cx)
+            .snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.branch.clone());
+
+        h_flex()
+            .min_w_0()
+            .gap(px(TITLE_BAR_HEADING_GAP))
+            .items_center()
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(px(TITLE_BAR_HEADING_TEXT))
+                    .text_color(cx.theme().muted_foreground)
+                    .child(self.active_tab_title()),
+            )
+            .children(branch.map(|branch| {
+                h_flex()
+                    .flex_none()
+                    .gap_1()
+                    .items_center()
+                    .rounded(px(TITLE_BAR_CHIP_RADIUS))
+                    .px(px(TITLE_BAR_CHIP_PADDING_X))
+                    .py(px(TITLE_BAR_CHIP_PADDING_Y))
+                    .bg(cx.theme().muted)
+                    .text_size(px(TITLE_BAR_CHIP_TEXT))
+                    .text_color(cx.theme().muted_foreground)
+                    .child(Icon::new(IconName::GitBranch).size(px(TITLE_BAR_CHIP_ICON)))
+                    .child(branch)
+            }))
     }
 
     /// Upper-right `Workflows` control, revealed once a run exists. It carries
@@ -284,6 +403,56 @@ impl IconNamed for SideBarIcon {
         }
         .into()
     }
+}
+
+/// The application menu: opening things, then the two application-wide
+/// commands. Every entry here is reachable by keyboard as well, so the menu is
+/// a place to find them rather than the only way to reach them.
+fn app_menu(
+    menu: PopupMenu,
+    shell: &Entity<Shell>,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
+    let window_shell = shell.clone();
+    let workspace_shell = shell.clone();
+    let settings_shell = shell.clone();
+
+    new_tab_menu(menu, shell, window, cx)
+        .separator()
+        .item(
+            PopupMenuItem::new(i18n("shell-menu-new-window"))
+                .icon(Icon::new(IconName::Frame))
+                .on_click(move |_, window, cx| {
+                    window_shell.update(cx, |this, cx| {
+                        this.on_new_window(&NewWindow, window, cx);
+                    });
+                }),
+        )
+        .item(
+            PopupMenuItem::new(i18n("shell-workspace-new-title"))
+                .icon(Icon::new(IconName::Folder))
+                .on_click(move |_, window, cx| {
+                    workspace_shell.update(cx, |this, cx| {
+                        this.on_new_workspace(&NewWorkspace, window, cx);
+                    });
+                }),
+        )
+        .separator()
+        .item(
+            PopupMenuItem::new(i18n("shell-workspace-settings-title"))
+                .icon(Icon::new(IconName::Settings))
+                .on_click(move |_, window, cx| {
+                    settings_shell.update(cx, |this, cx| {
+                        this.on_show_settings(&ShowSettings, window, cx);
+                    });
+                }),
+        )
+        .item(
+            PopupMenuItem::new(i18n("shell-menu-check-updates"))
+                .icon(Icon::new(IconName::ArrowDown))
+                .on_click(|_, _, cx| check_now(cx)),
+        )
 }
 
 struct GitIcon;
