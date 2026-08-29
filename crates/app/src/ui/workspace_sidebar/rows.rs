@@ -168,7 +168,8 @@ impl Sidebar {
             .aria_label(display_label.clone())
             .w_full()
             .text_left()
-            .text_sm()
+            .text_size(px(WORKSPACE_NAME_TEXT))
+            .font_weight(FontWeight::SEMIBOLD)
             .truncate();
 
         let name: AnyElement = if let Some(input) = renaming {
@@ -225,8 +226,8 @@ impl Sidebar {
             })
             .w_full()
             .h_auto()
-            .px_2()
-            .py_1()
+            .px(px(TAB_ROW_INDENT))
+            .py_0p5()
             .group("ws-item")
             .child(
                 h_flex()
@@ -250,7 +251,7 @@ impl Sidebar {
                                             .id(("workspace-path", idx))
                                             .flex_1()
                                             .text_left()
-                                            .text_xs()
+                                            .text_size(px(WORKSPACE_PATH_TEXT))
                                             .overflow_hidden()
                                             .whitespace_nowrap()
                                             .when(!settings_entry, |this| {
@@ -271,7 +272,7 @@ impl Sidebar {
                                         div()
                                             .id(("workspace-additional-dirs", idx))
                                             .flex_none()
-                                            .text_xs()
+                                            .text_size(px(WORKSPACE_PATH_TEXT))
                                             .aria_label(
                                                 i18n("sidebar-workspace-additional-label").replace(
                                                     "{count}",
@@ -461,9 +462,18 @@ impl Sidebar {
         // Ordered by what is worth acting on first: an agent mid-turn, then
         // what the shell is doing, then output nobody has read. A tab's own
         // kind of status therefore outranks the generic unread dot, the way
-        // the horizontal strip orders them too.
-        let status_mark: Option<AnyElement> = match (tab.agent_kind.is_some(), tab.busy) {
-            (true, true) => Some(StatusMark::busy(("sidebar-tab-busy", key)).into_any_element()),
+        // the horizontal strip orders them too. A quiet row still fills the
+        // lane with a hollow mark, so every label in the list starts at the
+        // same x however many rows are busy.
+        let status_mark: AnyElement = match (tab.agent_kind.is_some(), tab.busy) {
+            (true, true) => StatusMark::new(
+                ("sidebar-tab-busy", key),
+                StatusMarkTone::Warning,
+                px(TAB_ROW_DOT),
+            )
+            .pulse()
+            .label(i18n("sidebar-workspace-status-running"))
+            .into_any_element(),
             _ => terminal_presentation(tab.terminal)
                 .map(|(visual, aria)| {
                     div()
@@ -483,6 +493,14 @@ impl Sidebar {
                         .label(i18n("sidebar-workspace-unread-label").replace("{count}", "1"))
                         .into_any_element()
                     })
+                })
+                .unwrap_or_else(|| {
+                    StatusMark::new(
+                        ("sidebar-tab-idle", key),
+                        StatusMarkTone::Idle,
+                        px(TAB_ROW_DOT),
+                    )
+                    .into_any_element()
                 }),
         };
 
@@ -535,50 +553,50 @@ impl Sidebar {
             .relative()
             .w_full()
             .h(px(TAB_ROW_HEIGHT))
-            // Indent past the workspace item's status column so the rows read
-            // as belonging to the workspace above them.
-            .pl_6()
-            .pr_1()
-            .gap_1()
+            // Indented under the workspace it belongs to, which is what makes
+            // a workspace and its tabs read as one block.
+            .ml(px(TAB_ROW_INDENT))
+            .px(px(TAB_ROW_PADDING_X))
+            .gap(px(TAB_ROW_GAP))
             .items_center()
             .rounded(UI_RADIUS)
-            .text_xs()
+            .text_size(px(TAB_ROW_TEXT))
             // A restored-but-not-yet-spawned tab renders faded, the same
             // "sleeping tab" cue the horizontal strip uses.
             .when(tab.pending, |this| this.opacity(0.6))
-            .children(active.then(|| selection_bar(cx)))
+            // The selected row is lifted off the panel rather than marked
+            // beside it: a fill with its own edge and shadow reads as the row
+            // on screen from anywhere in the list, where an accent bar in the
+            // gutter has to be found first.
             .when(active, |this| {
                 this.bg(selection.active_background)
                     .text_color(selection.active_foreground)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .shadow_sm()
             })
             .when(!active, |this| {
                 this.text_color(selection.idle_foreground)
                     .hover(|this| this.bg(selection.hover_background))
             })
-            .child(div().flex_none().flex().child(match tab.pending {
-                true => pending_tab_icon(("sidebar-tab-pending", key)).into_any_element(),
-                false => tab_icon(tab.agent_kind, tab.settings).into_any_element(),
-            }))
-            .child(label)
-            // The status mark sits in the lane the workspace item's status
-            // column occupies — between that item's horizontal padding and
-            // this row's indent — so every tab's mark lines up under it,
-            // whatever kind of tab it is. Out of the flow, because that lane
-            // is this row's left padding. The offset is 2px short of that
-            // item's own padding because the item is a button, and its chrome
-            // shifts the column it draws right of where the padding alone puts
-            // it; matching the drawn column is what the eye reads as one line.
-            .children(status_mark.map(|mark| {
+            // The status mark leads the row: what a session is doing is what
+            // the eye is scanning the list for, and its kind only matters once
+            // that row has been found.
+            .child(status_mark)
+            .child(
                 div()
-                    .absolute()
-                    .left(px(6.0))
-                    .w_4()
-                    .h_full()
+                    .flex_none()
+                    .size(px(TAB_ROW_ICON))
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(mark)
-            }))
+                    .child(match tab.pending {
+                        true => pending_tab_icon(("sidebar-tab-pending", key)).into_any_element(),
+                        false => tab_icon(tab.agent_kind, tab.settings).into_any_element(),
+                    }),
+            )
+            .child(label)
             // Bell dot, in the warning color so it reads apart from the unread
             // dot when a tab carries both.
             .children(tab.bell.then(|| {

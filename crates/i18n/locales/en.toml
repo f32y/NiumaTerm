@@ -110,7 +110,7 @@
 "settings-appearance-tab-width-description" = "Fixed tab width in pixels; long titles are clipped."
 "settings-appearance-title-bar" = "Title Bar"
 "settings-appearance-daily-token-usage" = "Show daily token usage"
-"settings-appearance-daily-token-usage-description" = "Show today's ccusage token totals in the titlebar, refreshed every 60 seconds (click to refresh now)."
+"settings-appearance-daily-token-usage-description" = "Show today's ccusage token totals in the sidebar status cluster, refreshed every 60 seconds (click to refresh now)."
 "settings-appearance-git-status" = "Show Git Status on Title Bar"
 "settings-appearance-git-status-description" = "Show the active repository's +added -removed line counts in the titlebar."
 "settings-appearance-git-interval" = "Git Status Refresh Interval"

@@ -3,13 +3,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use gpui::prelude::*;
-use gpui::{AnyElement, Context, FontWeight, Hsla, Window, div, px, relative};
+use gpui::{AnyElement, App, Context, FontWeight, Hsla, Window, div, px, relative};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::hover_card::HoverCard;
 use gpui_component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
 use nmt_agent_utils::claude_code::usage_fetcher::{self as claude_usage, UsageFetchError};
 use nmt_agent_utils::codex::usage_fetcher as codex_usage;
-use nmt_agent_utils::usage::{UsageSnapshot, UsageWindow, now_unix_millis};
+use nmt_agent_utils::usage::{UsageSnapshot, UsageWindow, format_remaining, now_unix_millis};
 use nmt_app_agent::profile::{ClaudeIcon, CodexIcon};
 use nmt_i18n::i18n;
 use tracing::warn;
@@ -17,6 +17,57 @@ use tracing::warn;
 use crate::ui::AppSettings;
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
+
+/// Height of the quota row, matched to the daily-total row above it so the two
+/// stack as one cluster.
+const QUOTA_ROW_HEIGHT: f32 = 24.0;
+/// The gauge track. A bar states how much of a subscription window is left
+/// without the reader having to compare two numbers, and a percentage beside
+/// it keeps the exact value available.
+const QUOTA_TRACK_HEIGHT: f32 = 4.0;
+const QUOTA_ICON: f32 = 12.0;
+/// A provider with nothing to report leaves an empty track, so the row keeps
+/// its shape whether one provider is signed in or both.
+const QUOTA_FILL_OPACITY: f32 = 0.7;
+
+/// One provider half of the quota row: its mark, how much of the shorter
+/// window is left, and that same figure spelled out.
+fn quota_gauge(
+    id: &'static str,
+    label: &'static str,
+    icon: Icon,
+    window: Option<&UsageWindow>,
+    cx: &App,
+) -> AnyElement {
+    let value = format_remaining(window);
+
+    h_flex()
+        .id(id)
+        .aria_label(format!("{label}: {value}"))
+        .flex_1()
+        .min_w_0()
+        .gap_1p5()
+        .items_center()
+        .child(icon.with_size(px(QUOTA_ICON)))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .h(px(QUOTA_TRACK_HEIGHT))
+                .rounded(px(QUOTA_TRACK_HEIGHT / 2.0))
+                .overflow_hidden()
+                .bg(cx.theme().sidebar_foreground.opacity(0.12))
+                .children(window.map(|window| {
+                    div()
+                        .h_full()
+                        .w(relative(f32::from(window.remaining_percentage) / 100.0))
+                        .rounded_full()
+                        .bg(cx.theme().primary.opacity(QUOTA_FILL_OPACITY))
+                })),
+        )
+        .child(div().flex_none().child(value))
+        .into_any_element()
+}
 
 #[derive(Default)]
 struct ProviderRefresh {
@@ -462,8 +513,6 @@ fn render_provider_panel(
 
 impl Render for AgentUsageView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let [codex_five_hour, codex_week] = self.codex.compact_values();
-        let [claude_five_hour, claude_week] = self.claude.compact_values();
         let refreshing = self.codex_refresh.refreshing || self.claude_refresh.refreshing;
         let codex = self.codex.clone();
         let claude = self.claude.clone();
@@ -476,7 +525,7 @@ impl Render for AgentUsageView {
             .ghost()
             .small()
             .w_full()
-            .h(px(28.))
+            .h(px(QUOTA_ROW_HEIGHT))
             .px_1()
             .aria_label(self.accessibility_label())
             // Opacity communicates in-flight work without replacing or moving
@@ -486,28 +535,31 @@ impl Render for AgentUsageView {
                 h_flex()
                     .w_full()
                     .min_w_0()
-                    .justify_center()
-                    .gap_1()
+                    .gap_2()
+                    .items_center()
                     .text_xs()
+                    .text_color(cx.theme().sidebar_foreground.opacity(0.65))
+                    .child(quota_gauge(
+                        "agent-usage-codex",
+                        i18n("agent-provider-codex"),
+                        Icon::new(CodexIcon),
+                        self.codex.five_hour.as_ref(),
+                        cx,
+                    ))
                     .child(
                         div()
-                            .id("agent-usage-codex-icon")
-                            .aria_label(i18n("agent-provider-codex"))
-                            .child(Icon::new(CodexIcon).xsmall()),
+                            .flex_none()
+                            .w(px(1.))
+                            .h(px(12.))
+                            .bg(cx.theme().sidebar_foreground.opacity(0.15)),
                     )
-                    .child(codex_five_hour)
-                    .child(codex_week)
-                    // The outer one-space gap plus these margins yields the
-                    // required two-space separation on each side of `|`.
-                    .child(div().mx_1().child("|"))
-                    .child(
-                        div()
-                            .id("agent-usage-claude-icon")
-                            .aria_label(i18n("agent-provider-claude"))
-                            .child(Icon::new(ClaudeIcon).xsmall()),
-                    )
-                    .child(claude_five_hour)
-                    .child(claude_week),
+                    .child(quota_gauge(
+                        "agent-usage-claude",
+                        i18n("agent-provider-claude"),
+                        Icon::new(ClaudeIcon),
+                        self.claude.five_hour.as_ref(),
+                        cx,
+                    )),
             )
             .on_click(cx.listener(|this, _, _, cx| this.refresh_all(cx)));
 

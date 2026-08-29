@@ -1,7 +1,7 @@
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Context, DragMoveEvent, ElementId, Entity, ScrollHandle, SharedString, div,
-    px, relative,
+    AnyElement, App, Context, DragMoveEvent, ElementId, Entity, FontWeight, ScrollHandle,
+    SharedString, div, px, relative,
 };
 use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants};
 use gpui_component::input::InputState;
@@ -29,6 +29,7 @@ use crate::ui::shell::{InlineRename, InlineRenameStyle, pending_tab_icon};
 use crate::ui::sidebar_resize::{self, ResizeDrag};
 use crate::ui::tab_bar::{new_tab_menu, progress_visual, tab_icon};
 use crate::ui::terminal_status::{terminal_dot, terminal_presentation};
+use crate::ui::token_usage::TokenUsageView;
 use crate::ui::{AppSettings, NewWorkspace, Shell, UI_RADIUS};
 use crate::window::WindowRegistry;
 use crate::workspace::{TerminalActivity, WorkspaceId, WorkspaceKind, WorkspaceSummary};
@@ -239,11 +240,39 @@ pub(crate) struct SidebarTab {
 /// Height of a tab row. A workspace item stacks a name and a path line, so a
 /// row stays visibly shorter than one and the two tiers read as ranked, while
 /// leaving the row a comfortable click target.
-const TAB_ROW_HEIGHT: f32 = 30.0;
+const TAB_ROW_HEIGHT: f32 = 28.0;
 
 /// Diameter of a tab row's status dot. Smaller than the workspace column's,
 /// which keeps the two tiers apart at a glance.
-const TAB_ROW_DOT: f32 = 6.0;
+const TAB_ROW_DOT: f32 = 7.0;
+
+/// How far a tab row is indented under the workspace it belongs to, and the
+/// spacing inside the row itself.
+const TAB_ROW_INDENT: f32 = 6.0;
+const TAB_ROW_PADDING_X: f32 = 8.0;
+const TAB_ROW_GAP: f32 = 8.0;
+/// Edge of a tab row's type icon, and the size its label is set at.
+const TAB_ROW_ICON: f32 = 14.0;
+const TAB_ROW_TEXT: f32 = 13.0;
+
+/// Insets and rhythm of the workspace list. Groups are spaced further apart
+/// than the rows inside them, which is what makes a workspace and its tabs
+/// read as one block rather than as a flat list.
+const SIDEBAR_PADDING_X: f32 = 12.0;
+const SIDEBAR_PADDING_TOP: f32 = 14.0;
+const SIDEBAR_GROUP_GAP: f32 = 10.0;
+/// The list heading. It names the column rather than competing with the
+/// workspaces under it, so it is the smallest run of text in the panel.
+const SIDEBAR_SECTION_TEXT: f32 = 11.0;
+const SIDEBAR_SECTION_BUTTON: f32 = 20.0;
+/// A workspace heading: its name, and the path line under it.
+const WORKSPACE_NAME_TEXT: f32 = 13.0;
+const WORKSPACE_PATH_TEXT: f32 = 11.0;
+/// The status cluster along the bottom edge: today's spend over the
+/// subscription gauges. Both report what the agents have consumed, so they
+/// stack as one block under a single rule rather than each carrying an edge.
+const SIDEBAR_STATUS_PADDING_Y: f32 = 8.0;
+const SIDEBAR_STATUS_ROW_GAP: f32 = 2.0;
 
 /// Distance from the row box's leading edge. The row is a rounded rectangle,
 /// so a mark flush against that edge would sit outside the fill at the corners.
@@ -268,6 +297,13 @@ fn selection_bar(cx: &App) -> impl IntoElement {
                 .rounded(px(SELECTION_BAR_RADIUS))
                 .bg(cx.theme().primary),
         )
+}
+
+/// The two readouts the status cluster draws. The shell owns both, so their
+/// refresh loops survive a sidebar collapse and a tab-bar style change.
+pub(crate) struct SidebarUsage {
+    pub(crate) daily: Entity<TokenUsageView>,
+    pub(crate) quotas: Entity<AgentUsageView>,
 }
 
 /// Workspace-sidebar view state: collapse/expand plus the persisted expanded
@@ -325,7 +361,7 @@ impl Sidebar {
         tabs: Vec<Vec<SidebarTab>>,
         rename: Option<&(WorkspaceId, Entity<InputState>)>,
         tab_rename: Option<&(TabId, Entity<InputState>)>,
-        agent_usage: Entity<AgentUsageView>,
+        usage: SidebarUsage,
         cx: &mut Context<Shell>,
     ) -> AnyElement {
         // Runs every render: close the make-way gap once the drag is gone
@@ -341,6 +377,8 @@ impl Sidebar {
 
         let width = self.width;
         let has_temporary_workspaces = summaries.iter().any(|workspace| workspace.temporary);
+        let show_daily_usage = cx.global::<AppSettings>().show_daily_token_usage;
+        let show_quotas = cx.global::<AppSettings>().show_agent_usage;
 
         // Fixed-width content; the animated wrapper below clips it so the buttons
         // don't reflow while the sidebar slides. The transparent panel inherits
@@ -351,15 +389,18 @@ impl Sidebar {
             .overflow_hidden()
             .flex()
             .flex_col()
-            .px_2()
-            .gap_1()
+            .px(px(SIDEBAR_PADDING_X))
+            .pt(px(SIDEBAR_PADDING_TOP))
+            .gap(px(SIDEBAR_GROUP_GAP))
             .child(
                 h_flex()
                     .w_full()
                     .justify_between()
                     .child(
                         div()
-                            .text_size(px(16.0))
+                            .text_size(px(SIDEBAR_SECTION_TEXT))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(cx.theme().sidebar_foreground.opacity(0.65))
                             .child(i18n("sidebar-workspaces-title")),
                     )
                     .child(
@@ -368,6 +409,7 @@ impl Sidebar {
                             .child(
                                 Button::new("new-workspace")
                                     .ghost()
+                                    .size(px(SIDEBAR_SECTION_BUTTON))
                                     .icon(IconName::Plus)
                                     .aria_label(i18n("shell-workspace-new-title"))
                                     .tooltip(i18n("shell-workspace-new-title"))
@@ -378,6 +420,7 @@ impl Sidebar {
                             .child(
                                 Button::new("close-temporary-workspaces")
                                     .ghost()
+                                    .size(px(SIDEBAR_SECTION_BUTTON))
                                     .icon(CloseTemporaryWorkspacesIcon)
                                     .aria_label(i18n("sidebar-workspace-close-temporary"))
                                     .tooltip(i18n("sidebar-workspace-close-temporary"))
@@ -401,7 +444,7 @@ impl Sidebar {
                         v_flex()
                             .id("workspace-list")
                             .size_full()
-                            .gap_1()
+                            .gap(px(SIDEBAR_GROUP_GAP))
                             .pr_3()
                             .overflow_y_scroll()
                             .track_scroll(&self.scroll)
@@ -429,23 +472,12 @@ impl Sidebar {
 
                                 cx.notify();
                             }))
-                            .children(summaries.iter().enumerate().flat_map(|(idx, ws)| {
-                                // Each workspace row is followed by that
-                                // workspace's own tab rows, so the rule goes
-                                // above the row rather than below it: drawn
-                                // below, it would separate a workspace from
-                                // its first tab instead of from the next
-                                // workspace.
+                            .children(summaries.iter().enumerate().map(|(idx, ws)| {
+                                // A workspace heads its own tab rows, and the
+                                // list gap is what separates one such block
+                                // from the next; a rule between them would
+                                // draw a second boundary inside the same gap.
                                 let mut rows = Vec::new();
-                                if idx > 0 {
-                                    rows.push(
-                                        div()
-                                            .h(px(1.))
-                                            .flex_shrink_0()
-                                            .bg(cx.theme().border.opacity(0.6))
-                                            .into_any_element(),
-                                    );
-                                }
                                 rows.push(self.render_item(idx, ws, rename, cx));
                                 let ws_tabs = tabs.get(idx).map(Vec::as_slice).unwrap_or_default();
                                 // Closing a workspace's last tab falls through to
@@ -462,20 +494,22 @@ impl Sidebar {
                                     )
                                 }));
 
-                                rows
+                                v_flex().w_full().children(rows)
                             })),
                     )
                     .child(workspace_list_scrollbar(&self.scroll)),
             )
-            .children(cx.global::<AppSettings>().show_agent_usage.then(|| {
-                h_flex()
+            .children((show_daily_usage || show_quotas).then(|| {
+                v_flex()
                     .id("workspace-sidebar-status")
                     .w_full()
                     .flex_none()
-                    .pt_1()
+                    .gap(px(SIDEBAR_STATUS_ROW_GAP))
+                    .py(px(SIDEBAR_STATUS_PADDING_Y))
                     .border_t_1()
                     .border_color(cx.theme().sidebar_border)
-                    .child(agent_usage)
+                    .children(show_daily_usage.then_some(usage.daily))
+                    .children(show_quotas.then_some(usage.quotas))
             }));
 
         // The terminal column's left gutter forms the gap between panels and

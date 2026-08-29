@@ -85,7 +85,7 @@ use crate::ui::shell::workspace_dirs::WorkspaceDirsEditor;
 use crate::ui::tab_bar::TabStrip;
 use crate::ui::token_usage::TokenUsageView;
 use crate::ui::workflows::WorkflowsView;
-use crate::ui::workspace_sidebar::{self, Sidebar, SidebarTab};
+use crate::ui::workspace_sidebar::{self, Sidebar, SidebarTab, SidebarUsage};
 use crate::window::{AppWindow, LastActiveWindow, ShellEntry, ShellRegistry, WindowRegistry};
 use crate::workspace::{
     self, ProgressTally, TerminalActivity, WorkspaceId, WorkspaceKind, WorkspaceManager,
@@ -187,7 +187,8 @@ pub(crate) struct Shell {
     /// this entry.
     pub(crate) window_id: WindowId,
     /// Titlebar daily-token-usage widget; rendered only while the
-    /// `show_daily_token_usage` setting is on.
+    /// `show_daily_token_usage` setting is on. Rendered by the sidebar status
+    /// cluster; the shell owns it so it outlives a sidebar collapse.
     token_usage: Entity<TokenUsageView>,
     /// Compact Codex and Claude rate limits, refreshed independently of terminals.
     agent_usage: Entity<AgentUsageView>,
