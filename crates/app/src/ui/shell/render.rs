@@ -1,4 +1,5 @@
 use gpui::KeyDownEvent;
+use gpui_component::Disableable;
 use gpui_component::modern_menu::{ModernMenu, dispatch_modern_menu_key};
 use nmt_app_agent::RecoveryIdentity;
 use nmt_i18n::i18n;
@@ -13,15 +14,12 @@ use crate::update::check_now;
 pub(super) const TAB_STRIP_MIN_WIDTH: f32 = 120.0;
 
 /// The bar is taller than the Fluent standard strip because it carries
-/// controls, a wordmark and a session heading rather than a title alone.
+/// controls and a session heading rather than a title alone.
 const TITLE_BAR_HEIGHT: f32 = 44.0;
 /// A leading-zone control: square, and spaced tightly enough that the group
 /// reads as one cluster rather than as separate buttons.
 const TITLE_BAR_BUTTON: f32 = 26.0;
 const TITLE_BAR_BUTTON_GAP: f32 = 4.0;
-/// Separation between the control cluster and the wordmark it precedes.
-const TITLE_BAR_WORDMARK_INSET: f32 = 6.0;
-const TITLE_BAR_WORDMARK_TEXT: f32 = 13.0;
 /// The session heading in the middle of the bar, and the branch chip beside
 /// it. The chip is set smaller than the title because it qualifies the title
 /// rather than competing with it.
@@ -32,8 +30,8 @@ const TITLE_BAR_CHIP_RADIUS: f32 = 6.0;
 const TITLE_BAR_CHIP_PADDING_X: f32 = 8.0;
 const TITLE_BAR_CHIP_PADDING_Y: f32 = 2.0;
 const TITLE_BAR_CHIP_ICON: f32 = 11.0;
-/// The mark on the busy-session control. The control only appears while work
-/// is in flight, and the dot is what says so before the arrow is read as
+/// The mark on the busy-session control. The control itself is always drawn,
+/// so the dot is what says work is in flight before the arrow is read as
 /// navigation rather than as decoration.
 const TITLE_BAR_BADGE: f32 = 6.0;
 
@@ -123,32 +121,20 @@ impl Shell {
                                 })),
                         ),
                     )
-                    // Left in the drag region: naming the application is not a
-                    // control, so the pointer keeps the whole strip to move
-                    // the window by. It is also the one thing here that gives
-                    // up width: this zone is sized to the sidebar and clipped,
-                    // and a name pushing a control out of the window is a
-                    // worse trade than a truncated name.
+                    // Anchored to the leading edge behind two fixed-width
+                    // controls, so their screen position never moves with the
+                    // sidebar width or the session title: repeated clicks can
+                    // cycle through targets without the pointer chasing them.
+                    // Both stay mounted and go disabled when there is nowhere
+                    // to jump, which is what keeps that position stable.
                     .child(
-                        div()
-                            .min_w_0()
-                            .truncate()
-                            .pl(px(TITLE_BAR_WORDMARK_INSET))
-                            .text_size(px(TITLE_BAR_WORDMARK_TEXT))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(SharedString::new_static("NiumaTerm")),
-                    )
-                    // The jump controls close the zone from its trailing edge.
-                    .child(div().flex_1().min_w_0())
-                    // Stays out of the chrome while every background tab is
-                    // caught up; there is nowhere for it to jump to then.
-                    .children(self.next_ready_tab(cx).is_some().then(|| {
                         div().flex_none().occlude().child(
                             Button::new("next-ready-tab")
                                 .ghost()
                                 .size(px(TITLE_BAR_BUTTON))
                                 .icon(IconName::Bell)
                                 .tooltip(i18n("shell-next-ready-tab"))
+                                .disabled(self.next_ready_tab(cx).is_none())
                                 // The target is picked on the click rather
                                 // than captured here, so a tab that went ready
                                 // (or was closed) since this frame is still
@@ -162,11 +148,9 @@ impl Shell {
 
                                     this.jump_to_tab(workspace_index, tab_index, window, cx);
                                 })),
-                        )
-                    }))
-                    // Same bargain for work still in flight: nothing to jump
-                    // to while every tab is idle.
-                    .children(self.next_busy_tab(cx).is_some().then(|| {
+                        ),
+                    )
+                    .child(
                         div()
                             .flex_none()
                             .occlude()
@@ -177,6 +161,7 @@ impl Shell {
                                     .size(px(TITLE_BAR_BUTTON))
                                     .icon(NextBusyTabIcon)
                                     .tooltip(i18n("shell-next-busy-tab"))
+                                    .disabled(self.next_busy_tab(cx).is_none())
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         let Some((workspace_index, tab_index)) =
                                             this.next_busy_tab(cx)
@@ -190,7 +175,7 @@ impl Shell {
                             // Ringed in the bar's own background so the mark
                             // stays legible over whatever the icon under it
                             // happens to be.
-                            .child(
+                            .children(self.next_busy_tab(cx).is_some().then(|| {
                                 div()
                                     .absolute()
                                     .top(px(2.))
@@ -199,9 +184,12 @@ impl Shell {
                                     .rounded_full()
                                     .border_1()
                                     .border_color(cx.theme().title_bar)
-                                    .bg(cx.theme().warning),
-                            )
-                    })),
+                                    .bg(cx.theme().warning)
+                            })),
+                    )
+                    // Absorbs the leftover width so the controls stay packed
+                    // against the leading edge.
+                    .child(div().flex_1().min_w_0()),
             )
             // The container keeps the title-bar drag area. Tabs and the
             // new-tab button block only their own bounds.
