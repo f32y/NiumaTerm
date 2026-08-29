@@ -93,11 +93,6 @@ impl Shell {
                                 })),
                         ),
                     )
-                    .children(
-                        cx.global::<AppSettings>()
-                            .show_daily_token_usage
-                            .then(|| div().occlude().child(self.token_usage.clone())),
-                    )
                     // Stays out of the chrome while every background tab is
                     // caught up; there is nowhere for it to jump to then.
                     .children(self.next_ready_tab(cx).is_some().then(|| {
@@ -419,7 +414,10 @@ impl Render for Shell {
             sidebar_tabs,
             self.workspace_rename.as_ref(),
             self.tab_rename.as_ref(),
-            self.agent_usage.clone(),
+            SidebarUsage {
+                daily: self.token_usage.clone(),
+                quotas: self.agent_usage.clone(),
+            },
             cx,
         );
 

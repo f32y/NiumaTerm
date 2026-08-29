@@ -1,6 +1,6 @@
-//! Titlebar widget showing today's Claude token usage from `ccusage`.
+//! Sidebar widget showing today's Claude token usage from `ccusage`.
 //!
-//! The background refresh reads the daily JSON report. The titlebar keeps a
+//! The background refresh reads the daily JSON report. The status row keeps a
 //! compact total while the hover card shows exact totals and per-model input,
 //! output, cache creation, cache-read counts, and prices.
 
@@ -16,7 +16,7 @@ use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::hover_card::HoverCard;
 use gpui_component::list::{List, ListDelegate, ListItem, ListState};
 use gpui_component::{
-    ActiveTheme as _, IconNamed, IndexPath, Sizable as _, StyledExt as _, h_flex, v_flex,
+    ActiveTheme as _, Icon, IconNamed, IndexPath, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
 use nmt_i18n::i18n;
 use nmt_platform::windows::process::hidden_cmd_command;
@@ -30,6 +30,13 @@ use crate::ui::composition::{framed_region, table_header as table_header_style};
 
 /// Shown before the first successful fetch and retained after fetch errors.
 const PLACEHOLDER: &str = "-";
+
+/// Height of the status row, matched to the quota row under it so the two
+/// stack as one cluster.
+const STATUS_ROW_HEIGHT: f32 = 24.0;
+/// The glyph sits well below the value it introduces: the number is the
+/// readout, and the coin only says which number it is.
+const STATUS_ICON_OPACITY: f32 = 0.45;
 
 const USAGE_PANEL_WIDTH: Pixels = px(800.0);
 const MODEL_ROW_HEIGHT: f32 = 40.0;
@@ -200,10 +207,23 @@ impl Render for TokenUsageView {
         let trigger = Button::new("token-usage")
             .ghost()
             .small()
-            .icon(TokenIcon)
-            .label(label)
+            .w_full()
+            .h(px(STATUS_ROW_HEIGHT))
+            .px_1()
+            .justify_start()
             .aria_label(self.accessibility_label())
             .loading(self.state.user_requested)
+            .child(
+                h_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap_1p5()
+                    .items_center()
+                    .text_xs()
+                    .text_color(cx.theme().sidebar_foreground.opacity(0.65))
+                    .child(Icon::new(TokenIcon).xsmall().opacity(STATUS_ICON_OPACITY))
+                    .child(label),
+            )
             .on_click(cx.listener(|this, _, _, cx| auto_refresh::refresh_from_user(this, cx)));
 
         HoverCard::new("token-usage-details")

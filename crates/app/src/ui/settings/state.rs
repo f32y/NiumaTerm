@@ -56,7 +56,7 @@ pub struct AppSettings {
     pub default_agent_profile: String,
     /// Render command blocks as a split frozen-history list.
     pub command_blocks: bool,
-    /// Show today's ccusage token totals in the titlebar.
+    /// Show today's ccusage token totals in the sidebar status cluster.
     pub show_daily_token_usage: bool,
     /// Show the git `+added -removed` line counts in the titlebar.
     pub show_git_status_on_title_bar: bool,

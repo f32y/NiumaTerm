@@ -109,7 +109,7 @@
 "settings-appearance-tab-width-description" = "固定标签宽度（像素）；较长标题会被截断。"
 "settings-appearance-title-bar" = "标题栏"
 "settings-appearance-daily-token-usage" = "显示每日词元用量"
-"settings-appearance-daily-token-usage-description" = "在标题栏中显示 ccusage 的今日词元总量，每 60 秒刷新一次（单击可立即刷新）。"
+"settings-appearance-daily-token-usage-description" = "在侧栏状态区显示 ccusage 的今日词元总量，每 60 秒刷新一次（单击可立即刷新）。"
 "settings-appearance-git-status" = "在标题栏显示 Git 状态"
 "settings-appearance-git-status-description" = "在标题栏中显示当前仓库的新增和删除行数。"
 "settings-appearance-git-interval" = "Git 状态刷新间隔"
