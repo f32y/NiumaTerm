@@ -28,6 +28,14 @@ pub(super) const ITEM_PADDING_X: Pixels = px(11.0);
 pub(super) const ICON_SIZE: Pixels = px(16.0);
 pub(super) const ICON_GAP: Pixels = px(12.0);
 
+/// The chevron a submenu row ends with, and the gap before it.
+///
+/// Every row of a menu that holds one submenu keeps this column, so the labels
+/// of that menu end at the same place whether or not their own row opens
+/// anything.
+pub(super) const CHEVRON_SIZE: Pixels = px(12.0);
+pub(super) const CHEVRON_GAP: Pixels = px(12.0);
+
 /// Total row bands include the two-pixel margin above and below the fill.
 const COMPACT_ITEM_HEIGHT: Pixels = px(32.0);
 const TOUCH_ITEM_HEIGHT: Pixels = px(40.0);
@@ -112,6 +120,9 @@ pub(super) struct Content {
     pub items: usize,
     pub separators: usize,
     pub command_rows: usize,
+    /// Whether any row opens a submenu, which gives every row of the menu a
+    /// chevron column to keep their labels aligned.
+    pub chevrons: bool,
     /// Buttons in the command row that has the most of them, which is what a
     /// command row needs the menu to be wide enough for.
     pub widest_command_row: usize,
@@ -127,9 +138,15 @@ pub(super) fn menu_size(
     // A command row spans the same area the item rows do but keeps none of their
     // icon column, so the two ask for different widths and the menu takes the
     // larger.
+    let chevrons = if content.chevrons {
+        CHEVRON_SIZE + CHEVRON_GAP
+    } else {
+        px(0.0)
+    };
     let rows = label
         + ICON_SIZE
         + ICON_GAP
+        + chevrons
         + ITEM_PADDING_X * 2.0
         + ITEM_MARGIN_X * 2.0
         + BORDER_WIDTH * 2.0;
@@ -147,6 +164,48 @@ pub(super) fn menu_size(
             + SEPARATOR_HEIGHT * content.separators as f32
             + COMMAND_ROW_HEIGHT * content.command_rows as f32
             + (PRESENTER_PADDING_Y + BORDER_WIDTH) * 2.0,
+    )
+}
+
+/// How far a submenu overlaps the menu it opens from.
+///
+/// The two surfaces share an edge rather than sitting apart, so the pointer
+/// crosses no gap on its way into the submenu and cannot land on the window
+/// behind them on the way.
+const SUBMENU_OVERLAP: Pixels = px(2.0);
+
+/// Top-left corner for a submenu of `child` size opened from a row that starts
+/// `row_offset` below the top of `parent`.
+///
+/// The submenu takes the right side of its parent and falls back to the left
+/// when the work area has no room there, which is the one direction a pointer
+/// travelling out of the row can reach without crossing another row. Vertically
+/// it slides rather than flips: the rows of a menu and the submenu it opened
+/// read as one path, and a submenu that jumped above its own row would break it.
+pub(super) fn place_submenu(
+    parent: Bounds<Pixels>,
+    row_offset: Pixels,
+    child: Size<Pixels>,
+    work_area: Bounds<Pixels>,
+) -> Point<Pixels> {
+    let left = work_area.origin.x + EDGE_MARGIN;
+    let top = work_area.origin.y + EDGE_MARGIN;
+    let right = work_area.origin.x + work_area.size.width - EDGE_MARGIN;
+    let bottom = work_area.origin.y + work_area.size.height - EDGE_MARGIN;
+
+    let beside = parent.origin.x + parent.size.width - SUBMENU_OVERLAP;
+    let x = if beside + child.width > right {
+        parent.origin.x - child.width + SUBMENU_OVERLAP
+    } else {
+        beside
+    };
+    // Both menus inset their first row by the same border and padding, so
+    // aligning the surfaces by the row offset alone lines up the two rows.
+    let y = parent.origin.y + row_offset;
+
+    point(
+        clamp(x, left, right - child.width),
+        clamp(y, top, bottom - child.height),
     )
 }
 

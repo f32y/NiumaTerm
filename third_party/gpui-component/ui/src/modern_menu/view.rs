@@ -4,8 +4,8 @@ use gpui::{
     StatefulInteractiveElement as _, Styled as _, Window, div, font,
 };
 
-use crate::ActiveTheme as _;
 use crate::modern_menu::{MenuView, Row, metrics, snapshot};
+use crate::{ActiveTheme as _, Icon, IconName};
 
 impl Render for MenuView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -34,6 +34,9 @@ impl Render for MenuView {
             .map(|(index, entry)| match entry {
                 crate::modern_menu::Entry::Separator => Row::Separator,
                 crate::modern_menu::Entry::Item(item) => Row::Item(index, snapshot(item)),
+                crate::modern_menu::Entry::Submenu(submenu) => {
+                    Row::Submenu(index, submenu.label.clone(), submenu.icon.clone())
+                }
                 crate::modern_menu::Entry::Commands(items) => Row::Commands(
                     items
                         .iter()
@@ -127,6 +130,58 @@ impl Render for MenuView {
                             ))
                             .into_any_element();
                     }
+                    Row::Submenu(index, label, icon) => {
+                        // The row stays lit while its submenu is up, so the two
+                        // surfaces read as one path rather than as a menu that
+                        // appeared beside an unrelated row.
+                        let lit = selected == Some(index) || self.open_child == Some(index);
+
+                        return div()
+                            .h(metrics::item_height(self.input))
+                            .px(metrics::ITEM_MARGIN_X)
+                            .py(metrics::ITEM_MARGIN_Y)
+                            .child(
+                                div()
+                                    .id(("modern-menu-submenu", index))
+                                    .h_full()
+                                    .px(metrics::ITEM_PADDING_X)
+                                    .rounded(metrics::ITEM_RADIUS)
+                                    .flex()
+                                    .items_center()
+                                    .gap(metrics::ICON_GAP)
+                                    .text_color(enabled_color)
+                                    .when(lit, |this| this.bg(hover_color))
+                                    .hover(|this| this.bg(hover_color))
+                                    .child(
+                                        div().flex_none().size(metrics::ICON_SIZE).children(
+                                            icon.map(|icon| icon.size(metrics::ICON_SIZE)),
+                                        ),
+                                    )
+                                    .child(label)
+                                    .child(div().flex_1())
+                                    .child(
+                                        Icon::new(IconName::ChevronRight)
+                                            .size(metrics::CHEVRON_SIZE),
+                                    )
+                                    // Pointing at the row is what opens it; a
+                                    // press is accepted as well, for a pointer
+                                    // that arrived by clicking rather than by
+                                    // travelling across the menu.
+                                    .on_mouse_move(cx.listener(move |this, _, _, cx| {
+                                        this.selected = Some(index);
+                                        this.open_submenu(index, false, cx);
+                                        cx.notify();
+                                    }))
+                                    .on_mouse_up(
+                                        MouseButton::Left,
+                                        cx.listener(move |this, _, _, cx| {
+                                            this.open_submenu(index, false, cx);
+                                            cx.notify();
+                                        }),
+                                    ),
+                            )
+                            .into_any_element();
+                    }
                     Row::Item(index, snapshot) => (index, snapshot),
                 };
 
@@ -169,6 +224,9 @@ impl Render for MenuView {
                             this.selected = Some(index);
                             cx.notify();
                         }
+                        // The submenu belongs to the row that opened it, which
+                        // is no longer the row being pointed at.
+                        this.close_submenu(cx);
                     }))
                     // Menus commit on release, so a press that started outside
                     // and ended on an item still chooses it.

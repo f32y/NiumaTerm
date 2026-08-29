@@ -2,12 +2,14 @@ use std::rc::Rc;
 
 use gpui::{Bounds, Pixels, point, px, size};
 
-use crate::modern_menu::{Activation, Entry, Item, ModernMenuInput, normalize_separators};
+use crate::modern_menu::{
+    Activation, Entry, Item, ModernMenu, ModernMenuInput, normalize_separators,
+};
 
 use crate::modern_menu::metrics::{
-    BORDER_WIDTH, COMMAND_BUTTON_WIDTH, COMMAND_ROW_HEIGHT, Content, ICON_GAP, ICON_SIZE,
-    ITEM_MARGIN_X, ITEM_PADDING_X, MIN_MENU_WIDTH, PRESENTER_PADDING_Y, SEPARATOR_HEIGHT, Side,
-    TOUCH_MIN_MENU_WIDTH, item_height, menu_size, place,
+    BORDER_WIDTH, CHEVRON_GAP, CHEVRON_SIZE, COMMAND_BUTTON_WIDTH, COMMAND_ROW_HEIGHT, Content,
+    ICON_GAP, ICON_SIZE, ITEM_MARGIN_X, ITEM_PADDING_X, MIN_MENU_WIDTH, PRESENTER_PADDING_Y,
+    SEPARATOR_HEIGHT, Side, TOUCH_MIN_MENU_WIDTH, item_height, menu_size, place, place_submenu,
 };
 
 fn rows(items: usize, separators: usize) -> Content {
@@ -180,6 +182,7 @@ fn kinds(entries: &[Entry]) -> Vec<&'static str> {
             Entry::Separator => "rule",
             Entry::Item(_) => "item",
             Entry::Commands(_) => "commands",
+            Entry::Submenu(_) => "submenu",
         })
         .collect()
 }
@@ -210,4 +213,92 @@ fn a_command_row_with_nothing_after_it_gains_no_rule() {
     let entries = normalize_separators(vec![Entry::Commands(vec![])]);
 
     assert_eq!(kinds(&entries), ["commands"]);
+}
+
+#[test]
+fn a_menu_that_opens_submenus_keeps_a_chevron_column() {
+    let plain = compact_menu_size(px(200.0), rows(2, 0));
+    let nesting = compact_menu_size(
+        px(200.0),
+        Content {
+            items: 2,
+            chevrons: true,
+            ..Default::default()
+        },
+    );
+
+    assert_eq!(nesting.width - plain.width, CHEVRON_SIZE + CHEVRON_GAP);
+    assert_eq!(nesting.height, plain.height);
+}
+
+fn parent() -> Bounds<Pixels> {
+    Bounds {
+        origin: point(px(100.0), px(100.0)),
+        size: size(px(200.0), px(300.0)),
+    }
+}
+
+#[test]
+fn a_submenu_opens_beside_the_row_it_belongs_to() {
+    let placed = place_submenu(parent(), px(64.0), size(px(150.0), px(100.0)), work_area());
+
+    // Both menus inset their first row by the same amount, so aligning the
+    // surfaces this way puts the submenu's first row against its own row.
+    assert_eq!(placed.y, px(164.0));
+    assert!(
+        placed.x < px(300.0) && placed.x > px(280.0),
+        "the submenu shares its parent's right edge, got {placed:?}"
+    );
+}
+
+#[test]
+fn a_submenu_with_no_room_to_its_right_opens_to_the_left() {
+    let crowded = Bounds {
+        origin: point(px(700.0), px(100.0)),
+        size: size(px(280.0), px(300.0)),
+    };
+    let placed = place_submenu(crowded, px(0.0), size(px(260.0), px(100.0)), work_area());
+
+    assert!(
+        placed.x < crowded.origin.x,
+        "a submenu that would leave the work area takes the other side, got {placed:?}"
+    );
+}
+
+#[test]
+fn a_submenu_taller_than_the_room_below_its_row_slides_up() {
+    let placed = place_submenu(parent(), px(280.0), size(px(150.0), px(600.0)), work_area());
+
+    assert_eq!(
+        placed.y,
+        px(800.0) - px(4.0) - px(600.0),
+        "it stays inside the work area rather than running off the bottom"
+    );
+}
+
+#[test]
+fn a_submenu_with_nothing_in_it_is_dropped() {
+    let menu = ModernMenu::new()
+        .item("visible", |_, _| {})
+        .submenu("more", |menu| menu);
+
+    assert_eq!(kinds(&menu.entries), ["item"]);
+}
+
+#[test]
+fn a_submenu_row_carries_its_own_entries() {
+    let menu = ModernMenu::new().submenu("more", |menu| {
+        menu.separator()
+            .item("first", |_, _| {})
+            .item("second", |_, _| {})
+    });
+
+    let Some(Entry::Submenu(submenu)) = menu.entries.first() else {
+        panic!("the submenu row is kept");
+    };
+    assert_eq!(
+        kinds(&submenu.entries),
+        ["item", "item"],
+        "a submenu settles its own separators as any menu does"
+    );
 }
