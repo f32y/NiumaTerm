@@ -442,14 +442,14 @@ impl Render for AgentPane {
                                                     .child(self.render_settings_row(cx)),
                                             )
                                             .children(self.render_last_response(cx)),
-                                    )
-                                    // The status footer belongs inside the card
-                                    // rather than on a strip tucked behind it: the
-                                    // branch a message will act on and what the
-                                    // conversation has spent both qualify the
-                                    // message this card is about to send.
-                                    .child(self.render_composer_status(cx)),
+                                    ),
                             )
+                            // The status footer reads out what the session has
+                            // spent so far, which is context for the message
+                            // rather than part of composing it. It sits under
+                            // the card on the pane's own surface, so the card's
+                            // edge still ends at the input it encloses.
+                            .child(self.render_composer_status(cx))
                             .children(command_palette.map(|palette| {
                                 div()
                                     .absolute()

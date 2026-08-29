@@ -248,8 +248,8 @@ const TAB_ROW_DOT: f32 = 7.0;
 /// How far a tab row is indented under the workspace it belongs to, and the
 /// spacing inside the row itself.
 const TAB_ROW_INDENT: f32 = 6.0;
-const TAB_ROW_PADDING_X: f32 = 8.0;
-const TAB_ROW_GAP: f32 = 8.0;
+const TAB_ROW_PADDING_X: f32 = 6.0;
+const TAB_ROW_GAP: f32 = 6.0;
 /// Edge of a tab row's type icon, and the size its label is set at.
 const TAB_ROW_ICON: f32 = 14.0;
 const TAB_ROW_TEXT: f32 = 13.0;
@@ -257,7 +257,7 @@ const TAB_ROW_TEXT: f32 = 13.0;
 /// Insets and rhythm of the workspace list. Groups are spaced further apart
 /// than the rows inside them, which is what makes a workspace and its tabs
 /// read as one block rather than as a flat list.
-const SIDEBAR_PADDING_X: f32 = 12.0;
+const SIDEBAR_PADDING_X: f32 = 8.0;
 const SIDEBAR_PADDING_TOP: f32 = 14.0;
 const SIDEBAR_GROUP_GAP: f32 = 10.0;
 /// The list heading. It names the column rather than competing with the

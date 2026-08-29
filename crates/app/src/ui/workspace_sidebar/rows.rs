@@ -170,7 +170,7 @@ impl Sidebar {
             .w_full()
             .text_left()
             .text_size(px(WORKSPACE_NAME_TEXT))
-            .font_weight(FontWeight::SEMIBOLD)
+            .font_weight(FontWeight::MEDIUM)
             .truncate();
 
         let name: AnyElement = if let Some(input) = renaming {
@@ -233,7 +233,7 @@ impl Sidebar {
             .child(
                 h_flex()
                     .w_full()
-                    .gap_2()
+                    .gap_1p5()
                     .items_center()
                     .child(indicator)
                     .child(
@@ -530,9 +530,9 @@ impl Sidebar {
         let menu_shell = cx.entity();
         let drag_shell = cx.entity();
         let drag_label = tab.label.clone();
-        // The row spans the list column: sidebar width minus the card gutter,
-        // the card's inner padding, and the scrollbar lane.
-        let drag_width = (self.width - 36.0).max(80.0);
+        // The row spans the list column: sidebar width minus the panel inset
+        // on both sides and the scrollbar lane the list reserves.
+        let drag_width = (self.width - SIDEBAR_PADDING_X * 2.0 - 12.0).max(80.0);
 
         let row = h_flex()
             .id(("sidebar-tab", key))
@@ -559,25 +559,23 @@ impl Sidebar {
             // A restored-but-not-yet-spawned tab renders faded, the same
             // "sleeping tab" cue the horizontal strip uses.
             .when(tab.pending, |this| this.opacity(0.6))
-            // The selected row is lifted off the panel rather than marked
-            // beside it: a fill with its own edge and shadow reads as the row
-            // on screen from anywhere in the list, where an accent bar in the
-            // gutter has to be found first.
+            // The selected row is marked by its fill alone. The fill
+            // already separates the row from the list at a glance; adding an
+            // outline and a heavier weight on top of it states the same thing
+            // three times, and the weight change also reflows the label.
             .when(active, |this| {
                 this.bg(selection.active_background)
                     .text_color(selection.active_foreground)
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .border_1()
-                    .border_color(cx.theme().border)
             })
             .when(!active, |this| {
                 this.text_color(selection.idle_foreground)
                     .hover(|this| this.bg(selection.hover_background))
             })
-            // The status mark leads the row: what a session is doing is what
-            // the eye is scanning the list for, and its kind only matters once
-            // that row has been found.
-            .children(status_mark)
+            // The status mark takes over the type icon's slot instead of
+            // claiming a lane of its own ahead of it. What a session is doing
+            // is what the eye scans the list for, and its kind only matters
+            // once the row is found; sharing the slot also keeps the label
+            // from shifting sideways the moment a tab starts working.
             .child(
                 div()
                     .flex_none()
@@ -585,9 +583,12 @@ impl Sidebar {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(match tab.pending {
-                        true => pending_tab_icon(("sidebar-tab-pending", key)).into_any_element(),
-                        false => tab_icon(tab.agent_kind, tab.settings).into_any_element(),
+                    .child(match (status_mark, tab.pending) {
+                        (Some(mark), _) => mark,
+                        (None, true) => {
+                            pending_tab_icon(("sidebar-tab-pending", key)).into_any_element()
+                        }
+                        (None, false) => tab_icon(tab.agent_kind, tab.settings).into_any_element(),
                     }),
             )
             .child(label)
