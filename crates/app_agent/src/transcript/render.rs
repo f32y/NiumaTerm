@@ -37,10 +37,22 @@ pub(crate) fn transcript_column_margin() -> f32 {
 /// message / work / message rather than as one undifferentiated stack.
 const TRANSCRIPT_GROUP_GAP: f32 = 24.0;
 const TRANSCRIPT_STEP_GAP: f32 = 8.0;
+/// The rule down the left of a run of work rows, and the space it holds off
+/// them. The steps carry no border of their own, so this is what marks where
+/// a run starts and ends and keeps its rows reading as one block.
+const TRANSCRIPT_RUN_RULE: f32 = 2.0;
+const TRANSCRIPT_RUN_RULE_GAP: f32 = 12.0;
 /// Leading for transcript text, as a multiple of the font size. Conversation
 /// prose is read in paragraphs rather than scanned line by line the way
 /// terminal output is, so it is set looser than the chrome around it.
 pub(super) const TRANSCRIPT_LINE_HEIGHT: f32 = 1.6;
+
+/// Whether a row belongs to a run of work steps, and so is drawn inside the
+/// run's grouping rule. The turn fold heads the whole turn rather than one
+/// run, so it stays outside.
+fn is_run_row(spec: &RowSpec) -> bool {
+    matches!(spec, RowSpec::Work { .. } | RowSpec::RunToggle { .. })
+}
 
 impl TranscriptView {
     /// Build the element for one visible row. Row indices come from the list
@@ -62,6 +74,12 @@ impl TranscriptView {
             }
             _ => TRANSCRIPT_GROUP_GAP,
         };
+        // The list lays each row out on its own, so a run's grouping rule is
+        // drawn per row rather than around the run. Carrying the gap inside
+        // the rule while the next row is also part of the run is what makes
+        // the separate segments meet as one unbroken line.
+        let in_run = is_run_row(&spec);
+        let run_continues = in_run && self.row_specs.get(ix + 1).is_some_and(is_run_row);
 
         let row = match spec {
             RowSpec::Entry { index, .. } => self.render_entry_row(index, window, cx),
@@ -95,8 +113,18 @@ impl TranscriptView {
         div()
             .w_full()
             .px(relative(transcript_column_margin()))
-            .pb(px(gap))
-            .child(row)
+            .when(!run_continues, |this| this.pb(px(gap)))
+            .child(
+                div()
+                    .w_full()
+                    .when(in_run, |this| {
+                        this.border_l(px(TRANSCRIPT_RUN_RULE))
+                            .border_color(cx.theme().border)
+                            .pl(px(TRANSCRIPT_RUN_RULE_GAP))
+                    })
+                    .when(run_continues, |this| this.pb(px(gap)))
+                    .child(row),
+            )
             .into_any_element()
     }
 
@@ -1221,9 +1249,10 @@ impl TranscriptView {
 
         agent_card(AgentCardTone::Neutral, cx)
             .child(
+                // No type icon: the toggle names a count of steps rather than
+                // being one, and its own chevron already says what it does.
                 AgentDisclosureRow::new(("wl-run", run_start), label.clone())
                     .expanded(expanded)
-                    .type_icon(IconName::SquareTerminal)
                     .accessible_label(format!(
                         "{label}. {}",
                         if expanded {

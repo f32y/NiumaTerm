@@ -527,10 +527,9 @@ impl AgentPane {
         h_flex()
             .w_full()
             .min_h(px(24.))
-            // The rule is the footer edge inside the composer card, so the
-            // status keeps the card fill rather than sitting on one of its own.
-            .border_t_1()
-            .border_color(cx.theme().border.opacity(0.6))
+            // No rule and no fill of its own: the readouts are quiet text
+            // resting on the pane, and an edge under the composer would read
+            // as a second card boundary right below the card's own.
             .px(px(COMPOSER_STATUS_PADDING_X))
             .py(px(COMPOSER_STATUS_PADDING_Y))
             .items_center()
