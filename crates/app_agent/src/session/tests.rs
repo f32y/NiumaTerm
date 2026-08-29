@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use nmt_agent_utils::background_task::{
     BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskRegistry,
     BackgroundTaskSnapshot, BackgroundTaskState, BackgroundTaskUpdate,
@@ -6,8 +8,10 @@ use nmt_agent_utils::chat::ThreadSettings;
 
 use crate::session::events::resolve_ready_settings;
 use crate::session::{
-    directories_match, directory_label, scoped_background_tasks, tab_title_from_prompt,
+    directories_match, directory_label, replayed_response_age, scoped_background_tasks,
+    tab_title_from_prompt,
 };
+use crate::transcript::LAST_RESPONSE_LIMIT;
 
 fn snapshot_for(parent: BackgroundTaskKey) -> BackgroundTaskSnapshot {
     let mut registry = BackgroundTaskRegistry::new(parent);
@@ -607,4 +611,25 @@ mod shared_host_recovery_tests {
             });
         });
     }
+}
+
+#[test]
+fn a_replayed_answer_is_read_as_old_as_the_provider_recorded_it() {
+    let now = 1_700_000_000;
+
+    assert_eq!(
+        replayed_response_age(now - 20 * 60, now),
+        Duration::from_secs(20 * 60),
+        "a stamp from twenty minutes ago reads as twenty minutes of idling"
+    );
+    assert_eq!(
+        replayed_response_age(now - 5 * 24 * 60 * 60, now),
+        LAST_RESPONSE_LIMIT,
+        "conversations older than the label's longest reading all read the same"
+    );
+    assert_eq!(
+        replayed_response_age(now + 30, now),
+        Duration::ZERO,
+        "a clock the provider ran ahead of never reads as a future answer"
+    );
 }

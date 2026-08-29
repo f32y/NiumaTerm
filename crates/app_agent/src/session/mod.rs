@@ -8,6 +8,7 @@ mod update_recovery;
 use std::fs;
 use std::sync::Arc;
 
+use chrono::Utc;
 use gpui::Image;
 use nmt_agent_utils::git;
 use nmt_i18n::i18n;
@@ -49,6 +50,20 @@ const START_OVERLAY_DELAY: Duration = Duration::from_millis(400);
 /// old it already is. Matches the coarsest unit the label shows, so the pane
 /// redraws exactly as often as the words change, and `None` once the label has
 /// settled on "more than an hour" and will never change again.
+/// How long ago a resumed conversation was answered, from the wall-clock stamp
+/// the provider recorded for it.
+///
+/// The age is clamped to the span the label distinguishes: everything past it
+/// reads "more than an hour ago" and passes every idle threshold a profile can
+/// warn at, and the clamp keeps the caller's subtraction inside the monotonic
+/// clock's range, which on Windows starts at boot and so cannot reach back to a
+/// conversation from before the last restart. A stamp from ahead of this
+/// machine's clock is idle time that has not happened.
+fn replayed_response_age(at_unix: i64, now_unix: i64) -> Duration {
+    let seconds = u64::try_from(now_unix.saturating_sub(at_unix)).unwrap_or(0);
+    Duration::from_secs(seconds).min(LAST_RESPONSE_LIMIT)
+}
+
 fn response_age_tick(age: Duration) -> Option<Duration> {
     const MINUTE: u64 = 60;
 
@@ -1260,8 +1275,20 @@ impl AgentPane {
         let turn = self.turn.seq;
         self.transcript
             .update(cx, |transcript, cx| transcript.settle_turn(turn, cx));
-        self.note_response_settled(cx);
+        self.note_response_settled(Instant::now(), cx);
         cx.notify();
+    }
+
+    /// Carry a resumed conversation's own last answer into the reading, from
+    /// the provider's wall-clock stamp for it.
+    ///
+    /// Without this the reading restarts at the resume, which reads as a warm
+    /// conversation and skips the cold-prompt-cache warning in front of the
+    /// first message — the one send where the cache is certainly gone.
+    pub(super) fn note_replayed_response(&mut self, at_unix: i64, cx: &mut Context<Self>) {
+        let age = replayed_response_age(at_unix, Utc::now().timestamp());
+        let now = Instant::now();
+        self.note_response_settled(now.checked_sub(age).unwrap_or(now), cx);
     }
 
     /// Stamp the moment the agent stopped answering and keep the composer's
@@ -1271,9 +1298,9 @@ impl AgentPane {
     /// be redrawn every second, one in minutes only every minute. A pane whose
     /// last answer was an hour ago would otherwise hold the frame pump awake
     /// for a label that has not changed.
-    fn note_response_settled(&mut self, cx: &mut Context<Self>) {
+    fn note_response_settled(&mut self, at: Instant, cx: &mut Context<Self>) {
         let restart = self.last_response_at.is_none();
-        self.last_response_at = Some(Instant::now());
+        self.last_response_at = Some(at);
 
         if !restart {
             return;

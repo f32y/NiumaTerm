@@ -651,13 +651,22 @@ impl AgentPane {
     /// conversation. Replay entries share one turn and carry no fold header,
     /// so they render as a plain chronological stream above the new turns.
     pub(crate) fn apply_replay(&mut self, replay: Vec<ReplayTurn>, cx: &mut Context<Self>) {
+        let mut answered_at = None;
         for turn in replay {
             // Each restored turn takes its own id, so the sequence continues
             // past the replay and new turns cannot merge into the last one.
             self.turn.seq += 1;
             let id = self.turn.seq;
+            let newest = turn.items.iter().filter_map(|item| item.at).max();
+            answered_at = answered_at.max(newest);
             self.transcript
                 .update(cx, |transcript, cx| transcript.append_replay(id, turn, cx));
+        }
+        // The restored conversation's idle span runs from the provider's own
+        // stamp for its last answer. A transcript that carries no stamps leaves
+        // the reading absent, which is all it can honestly say.
+        if let Some(at) = answered_at {
+            self.note_replayed_response(at, cx);
         }
         cx.notify();
     }
