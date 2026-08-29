@@ -114,9 +114,6 @@ pub(crate) struct AgentDisclosureRow {
     expanded: Option<bool>,
     type_icon: Option<IconName>,
     label: String,
-    /// The technical text the heading names — a command line, a path — set in
-    /// the transcript's code font beside the title.
-    mono_detail: Option<String>,
     preview: Option<String>,
     /// The step's outcome, as the mark for it and the colour that mark carries.
     status: Option<(IconName, Hsla)>,
@@ -137,7 +134,6 @@ impl AgentDisclosureRow {
             type_icon: None,
             accessible_label: label.clone(),
             label,
-            mono_detail: None,
             preview: None,
             status: None,
             tone: AgentCardTone::Neutral,
@@ -163,11 +159,6 @@ impl AgentDisclosureRow {
 
     pub(super) fn type_icon(mut self, icon: IconName) -> Self {
         self.type_icon = Some(icon);
-        self
-    }
-
-    pub(super) fn mono_detail(mut self, detail: impl Into<String>) -> Self {
-        self.mono_detail = Some(detail.into());
         self
     }
 
@@ -209,8 +200,6 @@ impl AgentDisclosureRow {
                 .size(px(AGENT_CARD_ICON))
                 .text_color(icon_color)
         });
-        let mono_font = cx.global::<AgentSettings>().transcript_font();
-
         h_flex()
             .id(self.id)
             .w_full()
@@ -237,26 +226,20 @@ impl AgentDisclosureRow {
                     .bg(colors.icon_block)
                     .children(type_icon),
             )
+            // The title takes the row now that nothing follows it, rather
+            // than the half it shared with the command line: a purpose the
+            // harness wrote, or a list of edited paths, is what identifies a
+            // collapsed step.
             .child(
                 div()
-                    .flex_none()
-                    .max_w(relative(0.5))
+                    .flex_1()
+                    .min_w_0()
                     .truncate()
                     .text_size(px(AGENT_CARD_TITLE_SIZE))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(label_color)
                     .child(self.label),
             )
-            .children(self.mono_detail.map(|detail| {
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .font(mono_font)
-                    .text_size(px(AGENT_CARD_DETAIL_SIZE))
-                    .text_color(cx.theme().muted_foreground)
-                    .child(detail)
-            }))
             .children(self.preview.map(|preview| {
                 div()
                     .flex_1()
@@ -266,10 +249,6 @@ impl AgentDisclosureRow {
                     .text_color(cx.theme().muted_foreground.opacity(0.8))
                     .child(preview)
             }))
-            // Whatever the row had to say about itself has taken its width by
-            // now; this spacer closes the row from the trailing edge whether
-            // or not those middle slots were filled.
-            .child(div().flex_1().min_w_0())
             .children(self.status.map(|(icon, color)| {
                 Icon::new(icon)
                     .size(px(AGENT_CARD_DETAIL_SIZE))
