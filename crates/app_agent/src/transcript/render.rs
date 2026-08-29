@@ -704,21 +704,17 @@ impl TranscriptView {
             Some(status) => status,
             None => i18n("agent-transcript-no-status"),
         };
-        // A card carries its outcome as a stated badge rather than as a glyph:
-        // the same slot then reads for a step that failed, one that succeeded
-        // and one still running, without three symbols to learn first.
+        // The outcome is a mark rather than a word: it lands in the same slot
+        // on every card, so a run of steps can be scanned down that column
+        // instead of read. The wording stays in the row's accessible label.
         let tone = match status.as_deref() {
             Some("failed" | "declined") => AgentCardTone::Failed,
             _ => AgentCardTone::Neutral,
         };
-        let badge = status.as_ref().map(|state| {
-            let color = match state.as_str() {
-                "failed" | "declined" => cx.theme().danger,
-                "completed" => cx.theme().success,
-                _ => cx.theme().muted_foreground,
-            };
-
-            (status_label.to_string(), color)
+        let status_icon = status.as_deref().map(|state| match state {
+            "failed" | "declined" => (IconName::CircleX, cx.theme().danger),
+            "completed" => (IconName::Check, cx.theme().success),
+            _ => (IconName::Minus, cx.theme().muted_foreground.opacity(0.6)),
         });
 
         let accessible_label = format!(
@@ -742,8 +738,8 @@ impl TranscriptView {
         if let Some(mono_detail) = mono_detail {
             header = header.mono_detail(mono_detail);
         }
-        if let Some((label, color)) = badge {
-            header = header.badge(label, color);
+        if let Some((icon, color)) = status_icon {
+            header = header.status(icon, color);
         }
         if expandable {
             header = header.expanded(expanded);

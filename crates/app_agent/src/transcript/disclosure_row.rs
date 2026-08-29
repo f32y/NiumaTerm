@@ -4,9 +4,13 @@ use crate::*;
 /// Card geometry for the transcript's expandable rows. Every tool call, work
 /// run and structural break in the conversation is drawn as one card, so these
 /// are the numbers that keep their headers on a single baseline grid.
-pub(super) const AGENT_CARD_RADIUS: f32 = 12.0;
+pub(super) const AGENT_CARD_RADIUS: f32 = 6.0;
 pub(super) const AGENT_CARD_PADDING_X: f32 = 14.0;
 pub(super) const AGENT_CARD_PADDING_Y: f32 = 4.0;
+/// Resting height of a card header. A floor rather than a fixed height: the
+/// row keeps one rhythm down a run of steps, and still grows for a label that
+/// wraps at a narrow pane width.
+pub(super) const AGENT_CARD_HEADER_HEIGHT: f32 = 32.0;
 /// Vertical inset of a card's body. Looser than the header's, because the
 /// header is one line of labels while the body is a block of output that
 /// needs air between it and the rule above it.
@@ -101,20 +105,6 @@ pub(super) fn agent_card(tone: AgentCardTone, cx: &App) -> Div {
         .bg(colors.background)
 }
 
-/// One status pill: the step's own outcome, stated rather than drawn as a
-/// glyph the reader has to decode.
-pub(super) fn agent_card_badge(label: impl Into<SharedString>, color: Hsla) -> Div {
-    div()
-        .flex_none()
-        .rounded(px(6.))
-        .px(px(8.))
-        .py(px(2.))
-        .text_size(px(AGENT_CARD_DETAIL_SIZE))
-        .bg(color.opacity(0.1))
-        .text_color(color)
-        .child(label.into())
-}
-
 /// Shared header for the transcript's expandable rows: icon block, title, and
 /// the quieter runs that qualify it. A row without an expanded state renders
 /// the same header without the disclosure hint, so a plain step and an
@@ -128,7 +118,8 @@ pub(crate) struct AgentDisclosureRow {
     /// the transcript's code font beside the title.
     mono_detail: Option<String>,
     preview: Option<String>,
-    badge: Option<(String, Hsla)>,
+    /// The step's outcome, as the mark for it and the colour that mark carries.
+    status: Option<(IconName, Hsla)>,
     accessible_label: String,
     tone: AgentCardTone,
     /// Tint for the label and type icon, replacing the quiet work-log default.
@@ -148,7 +139,7 @@ impl AgentDisclosureRow {
             label,
             mono_detail: None,
             preview: None,
-            badge: None,
+            status: None,
             tone: AgentCardTone::Neutral,
             accent: None,
         }
@@ -185,8 +176,8 @@ impl AgentDisclosureRow {
         self
     }
 
-    pub(super) fn badge(mut self, label: impl Into<String>, color: Hsla) -> Self {
-        self.badge = Some((label.into(), color));
+    pub(super) fn status(mut self, icon: IconName, color: Hsla) -> Self {
+        self.status = Some((icon, color));
         self
     }
 
@@ -198,12 +189,16 @@ impl AgentDisclosureRow {
     pub(super) fn render(self, cx: &mut Context<TranscriptView>) -> Stateful<Div> {
         let colors = self.tone.colors(cx);
         let expandable = self.expanded.is_some();
-        let hint = self.expanded.map(|expanded| {
-            if expanded {
-                i18n("agent-transcript-collapse-hint")
-            } else {
-                i18n("agent-transcript-expand-hint")
-            }
+        // The chevron alone: what it means is already carried by the card it
+        // heads, and a word beside it repeats that in the widest slot of the
+        // row. The state assistive technology reads stays in the row label.
+        let chevron = self.expanded.map(|expanded| {
+            Icon::new(match expanded {
+                true => IconName::ChevronDown,
+                false => IconName::ChevronRight,
+            })
+            .size(px(AGENT_CARD_HINT_SIZE))
+            .text_color(cx.theme().muted_foreground.opacity(0.8))
         });
         let icon_color = self.accent.unwrap_or(colors.icon);
         let label_color = self
@@ -221,6 +216,7 @@ impl AgentDisclosureRow {
             .w_full()
             .gap(px(AGENT_CARD_GAP))
             .items_center()
+            .min_h(px(AGENT_CARD_HEADER_HEIGHT))
             .px(px(AGENT_CARD_PADDING_X))
             .py(px(AGENT_CARD_PADDING_Y))
             .line_height(relative(AGENT_CARD_LINE_HEIGHT))
@@ -274,16 +270,11 @@ impl AgentDisclosureRow {
             // now; this spacer closes the row from the trailing edge whether
             // or not those middle slots were filled.
             .child(div().flex_1().min_w_0())
-            .children(
-                self.badge
-                    .map(|(label, color)| agent_card_badge(label, color)),
-            )
-            .children(hint.map(|hint| {
-                div()
-                    .flex_none()
-                    .text_size(px(AGENT_CARD_HINT_SIZE))
-                    .text_color(cx.theme().muted_foreground.opacity(0.8))
-                    .child(hint)
+            .children(self.status.map(|(icon, color)| {
+                Icon::new(icon)
+                    .size(px(AGENT_CARD_DETAIL_SIZE))
+                    .text_color(color)
             }))
+            .children(chevron)
     }
 }
