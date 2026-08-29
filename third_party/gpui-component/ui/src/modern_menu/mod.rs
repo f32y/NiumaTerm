@@ -65,6 +65,7 @@ enum Activation {
     Action(Rc<dyn Action>),
 }
 
+#[derive(Clone)]
 struct Item {
     label: SharedString,
     disabled: bool,
@@ -72,11 +73,41 @@ struct Item {
     icon: Option<Icon>,
 }
 
+/// A row that opens a menu of its own beside it.
+#[derive(Clone)]
+struct Submenu {
+    label: SharedString,
+    icon: Option<Icon>,
+    entries: Vec<Entry>,
+}
+
+#[derive(Clone)]
 enum Entry {
     Separator,
     Item(Item),
     /// Items drawn side by side as icon buttons rather than stacked as rows.
     Commands(Vec<Item>),
+    Submenu(Submenu),
+}
+
+impl Entry {
+    /// The height this entry takes in a menu laid out for `input`.
+    fn height(&self, input: ModernMenuInput) -> Pixels {
+        match self {
+            Entry::Separator => metrics::SEPARATOR_HEIGHT,
+            Entry::Item(_) | Entry::Submenu(_) => metrics::item_height(input),
+            Entry::Commands(_) => metrics::COMMAND_ROW_HEIGHT,
+        }
+    }
+
+    /// Whether this entry is something the user can land on.
+    fn selectable(&self) -> bool {
+        match self {
+            Entry::Item(item) => !item.disabled,
+            Entry::Submenu(_) => true,
+            Entry::Separator | Entry::Commands(_) => false,
+        }
+    }
 }
 
 /// The one menu window, built on first use and reused from then on.
@@ -89,7 +120,10 @@ enum Entry {
 /// those windows; `MenuView::owner` records only where commands are dispatched.
 #[derive(Default)]
 struct MenuWindow {
-    window: Option<WindowHandle<MenuView>>,
+    /// One window per level of nesting, root first. A submenu is drawn beside
+    /// its parent rather than over it, so both are on screen at once and each
+    /// needs a surface of its own.
+    windows: Vec<WindowHandle<MenuView>>,
     /// Whether the window has already been asked for ahead of time, so the
     /// request is only made once.
     prewarm_requested: bool,
@@ -187,10 +221,36 @@ impl ModernMenu {
     /// constructor above, which would double each of them. A call with no item
     /// behind it is ignored.
     pub fn icon(mut self, icon: impl Into<Icon>) -> Self {
-        if let Some(Entry::Item(item)) = self.entries.last_mut() {
-            item.icon = Some(icon.into());
+        match self.entries.last_mut() {
+            Some(Entry::Item(item)) => item.icon = Some(icon.into()),
+            Some(Entry::Submenu(submenu)) => submenu.icon = Some(icon.into()),
+            Some(Entry::Separator | Entry::Commands(_)) | None => {}
         }
 
+        self
+    }
+
+    /// Append a row that opens `build`'s menu beside it.
+    ///
+    /// Nesting has no depth limit here; each level is drawn in a window of its
+    /// own, and a level opens only while the row above it is the one being
+    /// pointed at. A submenu that `build` leaves empty is dropped, so a caller
+    /// can offer one without first checking whether it has anything to list.
+    pub fn submenu(
+        mut self,
+        label: impl Into<SharedString>,
+        build: impl FnOnce(ModernMenu) -> ModernMenu,
+    ) -> Self {
+        let entries = normalize_separators(build(ModernMenu::new()).entries);
+        if entries.is_empty() {
+            return self;
+        }
+
+        self.entries.push(Entry::Submenu(Submenu {
+            label: label.into(),
+            icon: None,
+            entries,
+        }));
         self
     }
 
@@ -210,7 +270,7 @@ impl ModernMenu {
             .into_iter()
             .filter_map(|entry| match entry {
                 Entry::Item(item) => Some(item),
-                Entry::Separator | Entry::Commands(_) => None,
+                Entry::Separator | Entry::Commands(_) | Entry::Submenu(_) => None,
             })
             .collect();
 
@@ -248,10 +308,12 @@ impl ModernMenu {
 
     /// Whether the menu has nothing to show.
     pub fn is_empty(&self) -> bool {
-        !self
-            .entries
-            .iter()
-            .any(|entry| matches!(entry, Entry::Item(_) | Entry::Commands(_)))
+        !self.entries.iter().any(|entry| {
+            matches!(
+                entry,
+                Entry::Item(_) | Entry::Commands(_) | Entry::Submenu(_)
+            )
+        })
     }
 
     /// Open the menu at `position`, in the owner window's coordinates.
@@ -298,18 +360,31 @@ impl ModernMenu {
     /// off Windows is built from actions for that reason.
     #[cfg(not(target_os = "windows"))]
     fn show_as_native(self, position: Point<Pixels>, window: &mut Window, cx: &mut App) {
-        let mut native = crate::native_menu::NativeMenu::new();
-        for entry in self.entries {
+        native_menu(self.entries).show(position, window, cx);
+    }
+}
+
+/// The same entries as a menu the platform draws itself.
+#[cfg(not(target_os = "windows"))]
+fn native_menu(entries: Vec<Entry>) -> crate::native_menu::NativeMenu {
+    let mut native = crate::native_menu::NativeMenu::new();
+    {
+        for entry in entries {
             native = match entry {
                 Entry::Separator => native.separator(),
                 Entry::Item(item) => push_native(native, item),
                 Entry::Commands(items) => items.into_iter().fold(native, push_native),
+                Entry::Submenu(submenu) => {
+                    native.submenu(submenu.label, native_menu(submenu.entries))
+                }
             };
         }
-
-        native.show(position, window, cx);
     }
 
+    native
+}
+
+impl ModernMenu {
     #[cfg(target_os = "windows")]
     fn show_as_flyout(self, position: Point<Pixels>, window: &mut Window, cx: &mut App) {
         let menu_font = self
@@ -328,90 +403,177 @@ impl ModernMenu {
         // `bounds` is the window's client rect in the global space the work area
         // is also expressed in, so this is the anchor as the screen sees it.
         let anchor = window.bounds().origin + position;
-        let owner = window.window_handle();
 
-        // Placed off screen: the real rect needs the labels shaped, and they are
-        // shaped below in the window that will draw them.
-        let Some(menu) = menu_window(
-            Bounds {
-                origin: anchor,
-                size: size(px(1.0), px(1.0)),
+        present(
+            Presentation {
+                level: 0,
+                entries: self.entries,
+                placement: Placement::Anchored {
+                    anchor,
+                    side: self.side,
+                },
+                input: self.input,
+                font: menu_font,
+                work_area,
+                owner: window.window_handle(),
+                select_first: false,
             },
-            window_appearance(cx),
             cx,
-        ) else {
-            return;
-        };
+        );
+    }
+}
 
-        let input = self.input;
-        let side = self.side;
-        let entries = self.entries;
-        let _ = menu.update(cx, |view, menu_window, cx| {
-            // Shaped in the window that will render them rather than the one the
-            // menu was opened from: the two have separate text systems, and a
-            // label measured against the wrong one is given room that does not
-            // match what it draws.
-            let widest = entries
+/// Where a menu is put: against a point the caller named, or beside the row of
+/// the menu that opened it.
+enum Placement {
+    Anchored {
+        anchor: Point<Pixels>,
+        side: metrics::Side,
+    },
+    Beside {
+        parent: Bounds<Pixels>,
+        row_offset: Pixels,
+    },
+}
+
+/// One menu about to be drawn, at the level of nesting it belongs to.
+struct Presentation {
+    level: usize,
+    entries: Vec<Entry>,
+    placement: Placement,
+    input: ModernMenuInput,
+    font: Font,
+    work_area: Bounds<Pixels>,
+    owner: AnyWindowHandle,
+    /// Start on the first item, for a menu opened from the keyboard. A menu the
+    /// pointer opened starts with nothing selected, so the highlight follows the
+    /// pointer rather than appearing under it.
+    select_first: bool,
+}
+
+/// Draw `presentation` in the window that belongs to its level.
+fn present(presentation: Presentation, cx: &mut App) {
+    // Placed off screen: the real rect needs the labels shaped, and they are
+    // shaped below in the window that will draw them.
+    let seed = Bounds {
+        origin: match &presentation.placement {
+            Placement::Anchored { anchor, .. } => *anchor,
+            Placement::Beside { parent, .. } => parent.origin,
+        },
+        size: size(px(1.0), px(1.0)),
+    };
+    let appearance = window_appearance(cx);
+    let Some(menu) = menu_window(presentation.level, seed, appearance, cx) else {
+        return;
+    };
+
+    let Presentation {
+        level,
+        entries,
+        placement,
+        input,
+        font: menu_font,
+        work_area,
+        owner,
+        select_first,
+    } = presentation;
+    let opens_submenu = entries
+        .iter()
+        .any(|entry| matches!(entry, Entry::Submenu(_)));
+
+    let _ = menu.update(cx, |view, menu_window, cx| {
+        // Shaped in the window that will render them rather than the one the
+        // menu was opened from: the two have separate text systems, and a
+        // label measured against the wrong one is given room that does not
+        // match what it draws.
+        let widest = entries
+            .iter()
+            .filter_map(|entry| match entry {
+                Entry::Item(item) => Some(&item.label),
+                Entry::Submenu(submenu) => Some(&submenu.label),
+                // A command button's label is drawn small and centred under
+                // its icon, inside a button of fixed width; it has no say in
+                // how wide the menu is.
+                Entry::Separator | Entry::Commands(_) => None,
+            })
+            .map(|label| {
+                let run = TextRun {
+                    len: label.len(),
+                    font: menu_font.clone(),
+                    color: gpui::black(),
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                };
+                menu_window
+                    .text_system()
+                    .shape_line(label.clone(), metrics::FONT_SIZE, &[run], None)
+                    .width
+            })
+            .fold(px(0.0), Pixels::max);
+
+        let content = metrics::Content {
+            items: entries
+                .iter()
+                .filter(|entry| matches!(entry, Entry::Item(_) | Entry::Submenu(_)))
+                .count(),
+            separators: entries
+                .iter()
+                .filter(|entry| matches!(entry, Entry::Separator))
+                .count(),
+            command_rows: entries
+                .iter()
+                .filter(|entry| matches!(entry, Entry::Commands(_)))
+                .count(),
+            chevrons: opens_submenu,
+            widest_command_row: entries
                 .iter()
                 .filter_map(|entry| match entry {
-                    Entry::Item(item) => Some(item),
-                    // A command button's label is drawn small and centred under
-                    // its icon, inside a button of fixed width; it has no say in
-                    // how wide the menu is.
-                    Entry::Separator | Entry::Commands(_) => None,
+                    Entry::Commands(items) => Some(items.len()),
+                    Entry::Item(_) | Entry::Separator | Entry::Submenu(_) => None,
                 })
-                .map(|item| {
-                    let run = TextRun {
-                        len: item.label.len(),
-                        font: menu_font.clone(),
-                        color: gpui::black(),
-                        background_color: None,
-                        underline: None,
-                        strikethrough: None,
-                    };
-                    menu_window
-                        .text_system()
-                        .shape_line(item.label.clone(), metrics::FONT_SIZE, &[run], None)
-                        .width
-                })
-                .fold(px(0.0), Pixels::max);
+                .max()
+                .unwrap_or_default(),
+        };
+        let menu_size = metrics::menu_size(widest, content, input);
+        let bounds = Bounds {
+            origin: match placement {
+                Placement::Anchored { anchor, side } => {
+                    metrics::place(anchor, menu_size, work_area, side)
+                }
+                Placement::Beside { parent, row_offset } => {
+                    metrics::place_submenu(parent, row_offset, menu_size, work_area)
+                }
+            },
+            size: menu_size,
+        };
 
-            let content = metrics::Content {
-                items: entries
-                    .iter()
-                    .filter(|entry| matches!(entry, Entry::Item(_)))
-                    .count(),
-                separators: entries
-                    .iter()
-                    .filter(|entry| matches!(entry, Entry::Separator))
-                    .count(),
-                command_rows: entries
-                    .iter()
-                    .filter(|entry| matches!(entry, Entry::Commands(_)))
-                    .count(),
-                widest_command_row: entries
-                    .iter()
-                    .filter_map(|entry| match entry {
-                        Entry::Commands(items) => Some(items.len()),
-                        Entry::Item(_) | Entry::Separator => None,
-                    })
-                    .max()
-                    .unwrap_or_default(),
-            };
-            let menu_size = metrics::menu_size(widest, content, input);
-            let bounds = Bounds {
-                origin: metrics::place(anchor, menu_size, work_area, side),
-                size: menu_size,
-            };
+        view.selected = select_first.then(|| first_selectable(&entries)).flatten();
+        view.entries = entries;
+        view.owner = Some(owner);
+        view.font = Some(menu_font);
+        view.input = input;
+        view.level = level;
+        view.bounds = bounds;
+        view.work_area = work_area;
+        view.open_child = None;
+        menu_window.show_flyout(bounds);
+        cx.notify();
+    });
 
-            view.entries = entries;
-            view.owner = Some(owner);
-            view.font = Some(menu_font);
-            view.input = input;
-            menu_window.show_flyout(bounds);
-            cx.notify();
+    // Building a menu window costs the graphics setup described on
+    // [`MenuWindow`], which under a hover would arrive long after the pointer
+    // did. The level below is built while this one is on screen, so the first
+    // submenu opens as fast as the ones after it.
+    if opens_submenu {
+        cx.defer(move |cx| {
+            menu_window(level + 1, seed, appearance, cx);
         });
     }
+}
+
+fn first_selectable(entries: &[Entry]) -> Option<usize> {
+    entries.iter().position(Entry::selectable)
 }
 
 /// Append `item` to a native menu, dropping it if it carries a closure rather
@@ -458,7 +620,7 @@ pub fn prewarm_modern_menu(cx: &mut App) {
     };
 
     cx.defer(move |cx| {
-        menu_window(bounds, appearance, cx);
+        menu_window(0, bounds, appearance, cx);
     });
 }
 
@@ -469,35 +631,76 @@ pub fn prewarm_modern_menu(cx: &mut App) {
 /// `true` back should stop the press going any further, since the menu has just
 /// acted on it.
 pub fn dispatch_modern_menu_key(event: &KeyDownEvent, cx: &mut App) -> bool {
-    let Some(window) = cx.default_global::<MenuWindow>().window else {
+    // Keys go to the innermost menu on screen: that is the one the user stepped
+    // into, and the levels above it are showing the path taken to get there.
+    let Some((level, window)) = deepest_menu(cx) else {
         return false;
     };
-    // The window outlives any one menu — it is built once and reused — so its
-    // existence says nothing about whether a menu is up. Its entries do, and
-    // without that check every key here would be swallowed application-wide.
-    let showing = window
-        .update(cx, |view, _, _| !view.entries.is_empty())
-        .unwrap_or(false);
-    if !showing {
-        return false;
-    }
 
     let step = match event.keystroke.key.as_ref() {
-        "escape" => {
+        "escape" if level == 0 => {
             dismiss_modern_menu(cx);
             return true;
         }
+        // Inside a submenu, Escape gives up that level rather than the whole
+        // menu, so a wrong turn costs one press instead of reopening.
+        "escape" | "left" => Step::Close,
         "up" => Step::Previous,
         "down" => Step::Next,
         "home" => Step::First,
         "end" => Step::Last,
         "enter" => Step::Confirm,
+        "right" => Step::Open,
         _ => return false,
     };
 
     window
         .update(cx, |view, _, cx| view.walk(step, cx))
         .unwrap_or(false)
+}
+
+/// The innermost menu that is up, with the level it is drawn at.
+///
+/// A menu window outlives the menu it drew — they are built once and reused — so
+/// the entries are what say whether anything is on screen. Without that check
+/// every key handled here would be swallowed application-wide.
+fn deepest_menu(cx: &mut App) -> Option<(usize, WindowHandle<MenuView>)> {
+    let windows = cx.default_global::<MenuWindow>().windows.clone();
+
+    let mut deepest = None;
+    for (level, window) in windows.into_iter().enumerate() {
+        let showing = window
+            .update(cx, |view, _, _| !view.entries.is_empty())
+            .unwrap_or(false);
+        if !showing {
+            break;
+        }
+        deepest = Some((level, window));
+    }
+
+    deepest
+}
+
+/// Take every menu from `level` inwards off the screen.
+fn hide_menus_from(level: usize, cx: &mut App) {
+    let windows = cx.default_global::<MenuWindow>().windows.clone();
+
+    for window in windows.into_iter().skip(level).rev() {
+        let _ = window.update(cx, |view, menu_window, _| {
+            // The window outlives any one menu, so hiding it when nothing is up
+            // would race a menu that is about to be shown.
+            if view.entries.is_empty() {
+                return;
+            }
+
+            // A handler can hold the entities the menu was built from alive, and
+            // outliving the menu it belongs to would be surprising.
+            view.entries.clear();
+            view.selected = None;
+            view.open_child = None;
+            menu_window.hide_flyout();
+        });
+    }
 }
 
 /// How a key press moves through the menu.
@@ -508,37 +711,34 @@ enum Step {
     First,
     Last,
     Confirm,
+    /// Step into the submenu the selection opens.
+    Open,
+    /// Leave this submenu for the row it was opened from.
+    Close,
 }
 
-/// Take the menu off the screen. The window itself is kept for the next one.
+/// Take the menu off the screen. The windows themselves are kept for the next one.
 pub fn dismiss_modern_menu(cx: &mut App) {
-    let Some(window) = cx.default_global::<MenuWindow>().window else {
-        return;
-    };
-
-    let _ = window.update(cx, |view, menu_window, _| {
-        // The window outlives any one menu, so hiding it when nothing is up would
-        // race a menu that is about to be shown.
-        if view.entries.is_empty() {
-            return;
-        }
-
-        // A handler can hold the entities the menu was built from alive, and
-        // outliving the menu it belongs to would be surprising.
-        view.entries.clear();
-        view.selected = None;
-        menu_window.hide_flyout();
-    });
+    hide_menus_from(0, cx);
 }
 
-/// The menu window, built the first time a menu is asked for.
+/// The window that draws menus at `level`, built the first time that level is
+/// asked for.
+///
+/// Levels are built in order: a level is only ever reached through the row of
+/// the level above, which has to be on screen for that to happen.
 fn menu_window(
+    level: usize,
     bounds: Bounds<Pixels>,
     appearance: WindowAppearance,
     cx: &mut App,
 ) -> Option<WindowHandle<MenuView>> {
-    if let Some(window) = cx.default_global::<MenuWindow>().window {
-        return Some(window);
+    let windows = &cx.default_global::<MenuWindow>().windows;
+    if let Some(window) = windows.get(level) {
+        return Some(*window);
+    }
+    if windows.len() != level {
+        return None;
     }
 
     let opened = cx.open_window(
@@ -568,7 +768,7 @@ fn menu_window(
 
     match opened {
         Ok(window) => {
-            cx.default_global::<MenuWindow>().window = Some(window);
+            cx.default_global::<MenuWindow>().windows.push(window);
             Some(window)
         }
         Err(error) => {
@@ -606,6 +806,8 @@ enum Row {
     Separator,
     Item(usize, Snapshot),
     Commands(Vec<(usize, Snapshot)>),
+    /// A row that opens the menu beside it, with the label and icon it shows.
+    Submenu(usize, SharedString, Option<Icon>),
 }
 
 /// Settle the rules between entries.
@@ -650,6 +852,16 @@ struct MenuView {
     /// has been shown for the first time.
     owner: Option<AnyWindowHandle>,
     input: ModernMenuInput,
+    /// How deep this menu is nested, which is also the index of the window it
+    /// is drawn in.
+    level: usize,
+    /// Where this menu was placed, in the space the work area is expressed in.
+    /// A submenu is placed against it, so it has to survive the frame that
+    /// showed it.
+    bounds: Bounds<Pixels>,
+    work_area: Bounds<Pixels>,
+    /// The entry whose submenu is currently drawn beside this menu.
+    open_child: Option<usize>,
 }
 
 impl MenuView {
@@ -660,7 +872,68 @@ impl MenuView {
             font: None,
             owner: None,
             input: ModernMenuInput::Mouse,
+            level: 0,
+            bounds: Bounds::default(),
+            work_area: Bounds::default(),
+            open_child: None,
         }
+    }
+
+    /// How far below the top of this menu the row at `index` starts.
+    fn row_offset(&self, index: usize) -> Pixels {
+        self.entries[..index]
+            .iter()
+            .map(|entry| entry.height(self.input))
+            .fold(px(0.0), |total, height| total + height)
+    }
+
+    /// Draw the submenu at `index` beside this menu, replacing whatever was open.
+    ///
+    /// Deferred because it shows another window while this one is mid-update,
+    /// and because a hover that arrives during a frame would otherwise place the
+    /// submenu against bounds that frame is still changing.
+    fn open_submenu(&mut self, index: usize, select_first: bool, cx: &mut App) {
+        if self.open_child == Some(index) {
+            return;
+        }
+        let Some(Entry::Submenu(submenu)) = self.entries.get(index) else {
+            return;
+        };
+        let (Some(owner), Some(font)) = (self.owner, self.font.clone()) else {
+            return;
+        };
+
+        let presentation = Presentation {
+            level: self.level + 1,
+            entries: submenu.entries.clone(),
+            placement: Placement::Beside {
+                parent: self.bounds,
+                row_offset: self.row_offset(index),
+            },
+            input: self.input,
+            font,
+            work_area: self.work_area,
+            owner,
+            select_first,
+        };
+        self.open_child = Some(index);
+
+        cx.defer(move |cx| {
+            // Anything the previous row opened deeper down belongs to a path the
+            // pointer has left.
+            hide_menus_from(presentation.level + 1, cx);
+            present(presentation, cx);
+        });
+    }
+
+    /// Close whatever this menu has open beside it.
+    fn close_submenu(&mut self, cx: &mut App) {
+        if self.open_child.take().is_none() {
+            return;
+        }
+
+        let from = self.level + 1;
+        cx.defer(move |cx| hide_menus_from(from, cx));
     }
 
     /// Act on a key press, reporting whether it was used.
@@ -673,7 +946,7 @@ impl MenuView {
             .entries
             .iter()
             .enumerate()
-            .filter(|(_, entry)| matches!(entry, Entry::Item(item) if !item.disabled))
+            .filter(|(_, entry)| entry.selectable())
             .map(|(index, _)| index)
             .collect();
         let Some(&first) = selectable.first() else {
@@ -681,16 +954,40 @@ impl MenuView {
         };
         let &last = selectable.last().expect("a non-empty selection has a last");
 
-        if let Step::Confirm = step {
-            let Some(selected) = self.selected else {
-                return false;
-            };
-            let Some(Entry::Item(item)) = self.entries.get(selected) else {
-                return false;
-            };
-            let activation = item.activation.clone();
-            self.choose(activation, cx);
-            return true;
+        match step {
+            // Both confirm a row, and on a row that opens a submenu both mean
+            // stepping into it, landing on its first entry so the keyboard has
+            // somewhere to go from there.
+            Step::Confirm | Step::Open => {
+                let Some(selected) = self.selected else {
+                    return false;
+                };
+                match self.entries.get(selected) {
+                    Some(Entry::Item(item)) => {
+                        let activation = item.activation.clone();
+                        self.choose(activation, cx);
+                    }
+                    Some(Entry::Submenu(_)) => self.open_submenu(selected, true, cx),
+                    Some(Entry::Separator | Entry::Commands(_)) | None => return false,
+                }
+                return true;
+            }
+            // The row this menu was opened from goes on showing the path, so
+            // leaving is only ever a level at a time.
+            Step::Close => {
+                let level = self.level;
+                cx.defer(move |cx| {
+                    hide_menus_from(level, cx);
+                    if let Some((_, parent)) = deepest_menu(cx) {
+                        let _ = parent.update(cx, |view, _, cx| {
+                            view.open_child = None;
+                            cx.notify();
+                        });
+                    }
+                });
+                return true;
+            }
+            Step::Previous | Step::Next | Step::First | Step::Last => {}
         }
 
         // `position` is where the selection sits among the selectable entries,
@@ -708,8 +1005,13 @@ impl MenuView {
             (Step::Previous, Some(position)) => {
                 selectable[(position + selectable.len() - 1) % selectable.len()]
             }
-            (Step::Confirm, _) => unreachable!("confirm returned above"),
+            (Step::Confirm | Step::Open | Step::Close, _) => {
+                unreachable!("stepping into and out of a menu returned above")
+            }
         });
+        // A submenu belongs to the row the pointer or the keyboard is on, so it
+        // closes as soon as the selection moves off that row.
+        self.close_submenu(cx);
         cx.notify();
 
         true
