@@ -1210,12 +1210,17 @@ impl TranscriptView {
     ) -> AnyElement {
         let label = worked_status_label(seconds, output_tokens);
 
-        div()
+        v_flex()
             .w_full()
-            .px_1()
-            .text_size(px(AGENT_CARD_DETAIL_SIZE))
-            .text_color(cx.theme().muted_foreground)
-            .child(label)
+            .gap_1()
+            .child(
+                div()
+                    .px_1()
+                    .text_size(px(AGENT_CARD_DETAIL_SIZE))
+                    .text_color(cx.theme().muted_foreground)
+                    .child(label),
+            )
+            .child(div().w_full().h(px(1.)).bg(cx.theme().border.opacity(0.6)))
             .into_any_element()
     }
 
@@ -1224,12 +1229,17 @@ impl TranscriptView {
         output_tokens: Option<u64>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        div()
+        v_flex()
             .w_full()
-            .px_1()
-            .text_size(px(AGENT_CARD_DETAIL_SIZE))
-            .text_color(cx.theme().muted_foreground)
-            .child(interrupted_status_label(output_tokens))
+            .gap_1()
+            .child(
+                div()
+                    .px_1()
+                    .text_size(px(AGENT_CARD_DETAIL_SIZE))
+                    .text_color(cx.theme().muted_foreground)
+                    .child(interrupted_status_label(output_tokens)),
+            )
+            .child(div().w_full().h(px(1.)).bg(cx.theme().border.opacity(0.6)))
             .into_any_element()
     }
 
