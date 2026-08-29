@@ -536,6 +536,12 @@ impl AgentPane {
             .items_center()
             .justify_between()
             .gap_3()
+            // Everything the footer reports is an identifier or a figure — a
+            // branch name, turn counts, timings, percentages — so the whole
+            // strip is set in the code face rather than each readout choosing
+            // for itself and the context indicator between them falling back
+            // to the prose face.
+            .font(cx.global::<AgentSettings>().transcript_font())
             .text_size(px(COMPOSER_STATUS_TEXT_SIZE))
             .child(
                 h_flex()
@@ -544,13 +550,7 @@ impl AgentPane {
                     .items_center()
                     .text_color(cx.theme().muted_foreground.opacity(branch_opacity))
                     .child(Icon::new(IconName::GitBranch).size_3())
-                    .child(
-                        div()
-                            .min_w_0()
-                            .truncate()
-                            .font(cx.global::<AgentSettings>().transcript_font())
-                            .child(branch),
-                    ),
+                    .child(div().min_w_0().truncate().child(branch)),
             )
             .child(
                 // The readouts belong with the context indicator rather than
@@ -567,7 +567,6 @@ impl AgentPane {
                             .aria_label(
                                 i18n("agent-status-accessibility").replace("{stats}", &stats),
                             )
-                            .font(cx.global::<AgentSettings>().transcript_font())
                             .text_color(cx.theme().muted_foreground.opacity(0.72))
                             .child(stats)
                     }))
