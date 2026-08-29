@@ -7,7 +7,6 @@ use gpui::{
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::InputState;
-use gpui_component::menu::DropdownMenu as _;
 use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::tab::{Tab, TabBar, TabVariant};
 use gpui_component::{ActiveTheme, ElementExt as _, IconName, Sizable};
@@ -21,7 +20,7 @@ use crate::ui::composition::{
 };
 use crate::ui::shell::{InlineRename, InlineRenameStyle, TabSurface, pending_tab_icon};
 use crate::ui::terminal_status::{terminal_dot, terminal_presentation};
-use crate::ui::{AppSettings, Shell, UI_RADIUS};
+use crate::ui::{AppSettings, Shell, UI_RADIUS, modern_dropdown};
 use crate::workspace::TerminalActivity;
 
 mod drag;
@@ -293,11 +292,10 @@ impl TabStrip {
         // configured terminal profile, plus one per agent profile.
         // Ctrl+Shift+T still opens the default profile directly.
         let menu_shell = cx.entity();
-        let new_tab = Button::new("tab-new")
-            .ghost()
-            .px_2()
-            .child("+")
-            .dropdown_menu(move |menu, window, cx| new_tab_menu(menu, &menu_shell, window, cx));
+        let new_tab = modern_dropdown(
+            Button::new("tab-new").ghost().px_2().child("+"),
+            move |menu, _, cx| new_tab_menu(menu, &menu_shell, cx),
+        );
 
         let tab_count = items.len();
         // The settings entry presents one tab and no way to add another, so

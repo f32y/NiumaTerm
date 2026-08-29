@@ -1,5 +1,5 @@
-use gpui::{Context, Entity, Window};
-use gpui_component::menu::{PopupMenu, PopupMenuItem};
+use gpui::{App, Entity};
+use gpui_component::modern_menu::ModernMenu;
 use gpui_component::{Icon, IconName, Sizable as _};
 use nmt_app_agent::AgentKind;
 use nmt_config::profile::Profile;
@@ -79,11 +79,10 @@ pub(in crate::ui) fn profile_root_choices(
 /// The title-bar and sidebar entry points share one menu so both tab layouts
 /// expose terminal and agent profiles in the same order.
 pub(in crate::ui) fn new_tab_menu(
-    mut menu: PopupMenu,
+    mut menu: ModernMenu,
     shell: &Entity<Shell>,
-    window: &mut Window,
-    cx: &mut Context<PopupMenu>,
-) -> PopupMenu {
+    cx: &mut App,
+) -> ModernMenu {
     let profiles = cx.global::<AppSettings>().profiles.clone();
 
     for profile in profiles.clone() {
@@ -92,14 +91,12 @@ pub(in crate::ui) fn new_tab_menu(
         };
         let item_shell = shell.clone();
 
-        menu = menu.item(
-            PopupMenuItem::new(profile.name.clone())
-                .icon(tab_icon(None, false))
-                .on_click(move |_, window, cx| {
-                    let launch = launch.clone();
-                    item_shell.update(cx, |this, cx| this.open_profile_tab(launch, window, cx));
-                }),
-        );
+        menu = menu
+            .item(profile.name.clone(), move |window, cx| {
+                let launch = launch.clone();
+                item_shell.update(cx, |this, cx| this.open_profile_tab(launch, window, cx));
+            })
+            .icon(tab_icon(None, false));
     }
 
     // One snapshot of the active workspace's directories and their last known
@@ -114,32 +111,24 @@ pub(in crate::ui) fn new_tab_menu(
         let choices = profile_root_choices(&profiles, &roots);
         let submenu_shell = shell.clone();
 
-        menu = menu.submenu(
-            i18n("tabbar-menu-more"),
-            window,
-            cx,
-            move |mut menu, _, _| {
-                for choice in &choices {
-                    let item_shell = submenu_shell.clone();
-                    let launch = choice.launch.clone();
-                    let cwd = choice.cwd.clone();
+        menu = menu.submenu(i18n("tabbar-menu-more"), move |mut menu| {
+            for choice in choices {
+                let item_shell = submenu_shell.clone();
+                let launch = choice.launch;
+                let cwd = choice.cwd;
 
-                    menu = menu.item(
-                        PopupMenuItem::new(choice.label.clone())
-                            .icon(tab_icon(None, false))
-                            .disabled(!choice.enabled)
-                            .on_click(move |_, window, cx| {
-                                let launch = launch.clone();
-                                let cwd = cwd.clone();
-                                item_shell.update(cx, |this, cx| {
-                                    this.open_profile_tab_in_directory(launch, cwd, window, cx)
-                                });
-                            }),
-                    );
-                }
-                menu
-            },
-        );
+                menu = menu
+                    .item_disabled(choice.label, !choice.enabled, move |window, cx| {
+                        let launch = launch.clone();
+                        let cwd = cwd.clone();
+                        item_shell.update(cx, |this, cx| {
+                            this.open_profile_tab_in_directory(launch, cwd, window, cx)
+                        });
+                    })
+                    .icon(tab_icon(None, false));
+            }
+            menu
+        });
     }
 
     let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
@@ -154,15 +143,14 @@ pub(in crate::ui) fn new_tab_menu(
             profile.name.clone()
         };
         let item_shell = shell.clone();
+        let icon = tab_icon(Some(AgentKind::from_profile(profile.kind)), false);
 
-        menu = menu.item(
-            PopupMenuItem::new(label)
-                .icon(tab_icon(Some(AgentKind::from_profile(profile.kind)), false))
-                .on_click(move |_, window, cx| {
-                    let profile = profile.clone();
-                    item_shell.update(cx, |this, cx| this.open_agent_tab(profile, window, cx));
-                }),
-        );
+        menu = menu
+            .item(label, move |window, cx| {
+                let profile = profile.clone();
+                item_shell.update(cx, |this, cx| this.open_agent_tab(profile, window, cx));
+            })
+            .icon(icon);
     }
 
     menu

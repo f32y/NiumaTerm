@@ -40,6 +40,7 @@ pub(crate) fn default_font_fallbacks() -> FontFallbacks {
 
 pub(crate) use crate::ui::active_list::{ActiveList, HasId};
 pub(crate) use crate::ui::assets::AppAssets;
+pub(crate) use crate::ui::modern_dropdown::modern_dropdown;
 pub(crate) use crate::ui::settings::{
     AppSettings, apply_ui_theme, apply_window_translucency, background_image_layer_opacity,
     install_agent_settings, install_terminal_settings, main_view_background_opacity, watch_themes,
@@ -61,6 +62,7 @@ mod fluent;
 mod font_picker;
 mod git_sidebar;
 mod git_status;
+mod modern_dropdown;
 mod persistence;
 mod right_panel;
 mod settings;

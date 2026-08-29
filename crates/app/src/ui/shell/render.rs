@@ -1,6 +1,5 @@
 use gpui::KeyDownEvent;
-use gpui_component::menu::{DropdownMenu as _, PopupMenu, PopupMenuItem};
-use gpui_component::modern_menu::dispatch_modern_menu_key;
+use gpui_component::modern_menu::{ModernMenu, dispatch_modern_menu_key};
 use nmt_app_agent::RecoveryIdentity;
 use nmt_i18n::i18n;
 
@@ -294,13 +293,15 @@ impl Shell {
     fn render_app_menu_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let shell = cx.entity();
 
-        Button::new("app-menu")
-            .ghost()
-            .size(px(TITLE_BAR_BUTTON))
-            .icon(IconName::Menu)
-            .tooltip(i18n("shell-app-menu"))
-            .aria_label(i18n("shell-app-menu"))
-            .dropdown_menu(move |menu, window, cx| app_menu(menu, &shell, window, cx))
+        ui::modern_dropdown(
+            Button::new("app-menu")
+                .ghost()
+                .size(px(TITLE_BAR_BUTTON))
+                .icon(IconName::Menu)
+                .tooltip(i18n("shell-app-menu"))
+                .aria_label(i18n("shell-app-menu")),
+            move |menu, _, cx| app_menu(menu, &shell, cx),
+        )
     }
 
     /// What the title bar names in the vertical tab-bar style, where the strip
@@ -416,51 +417,34 @@ impl IconNamed for SideBarIcon {
 /// The application menu: opening things, then the two application-wide
 /// commands. Every entry here is reachable by keyboard as well, so the menu is
 /// a place to find them rather than the only way to reach them.
-fn app_menu(
-    menu: PopupMenu,
-    shell: &Entity<Shell>,
-    window: &mut Window,
-    cx: &mut Context<PopupMenu>,
-) -> PopupMenu {
+fn app_menu(menu: ModernMenu, shell: &Entity<Shell>, cx: &mut App) -> ModernMenu {
     let window_shell = shell.clone();
     let workspace_shell = shell.clone();
     let settings_shell = shell.clone();
 
-    new_tab_menu(menu, shell, window, cx)
+    new_tab_menu(menu, shell, cx)
         .separator()
-        .item(
-            PopupMenuItem::new(i18n("shell-menu-new-window"))
-                .icon(Icon::new(IconName::Frame))
-                .on_click(move |_, window, cx| {
-                    window_shell.update(cx, |this, cx| {
-                        this.on_new_window(&NewWindow, window, cx);
-                    });
-                }),
-        )
-        .item(
-            PopupMenuItem::new(i18n("shell-workspace-new-title"))
-                .icon(Icon::new(IconName::Folder))
-                .on_click(move |_, window, cx| {
-                    workspace_shell.update(cx, |this, cx| {
-                        this.on_new_workspace(&NewWorkspace, window, cx);
-                    });
-                }),
-        )
+        .item(i18n("shell-menu-new-window"), move |window, cx| {
+            window_shell.update(cx, |this, cx| {
+                this.on_new_window(&NewWindow, window, cx);
+            });
+        })
+        .icon(Icon::new(IconName::Frame))
+        .item(i18n("shell-workspace-new-title"), move |window, cx| {
+            workspace_shell.update(cx, |this, cx| {
+                this.on_new_workspace(&NewWorkspace, window, cx);
+            });
+        })
+        .icon(Icon::new(IconName::Folder))
         .separator()
-        .item(
-            PopupMenuItem::new(i18n("shell-workspace-settings-title"))
-                .icon(Icon::new(IconName::Settings))
-                .on_click(move |_, window, cx| {
-                    settings_shell.update(cx, |this, cx| {
-                        this.on_show_settings(&ShowSettings, window, cx);
-                    });
-                }),
-        )
-        .item(
-            PopupMenuItem::new(i18n("shell-menu-check-updates"))
-                .icon(Icon::new(IconName::ArrowDown))
-                .on_click(|_, _, cx| check_now(cx)),
-        )
+        .item(i18n("shell-workspace-settings-title"), move |window, cx| {
+            settings_shell.update(cx, |this, cx| {
+                this.on_show_settings(&ShowSettings, window, cx);
+            });
+        })
+        .icon(Icon::new(IconName::Settings))
+        .item(i18n("shell-menu-check-updates"), |_, cx| check_now(cx))
+        .icon(Icon::new(IconName::ArrowDown))
 }
 
 struct GitIcon;
