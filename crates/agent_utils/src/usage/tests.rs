@@ -43,3 +43,22 @@ fn provider_metadata_does_not_count_as_a_quota_window() {
         .is_unavailable()
     );
 }
+
+#[test]
+fn the_compact_window_falls_back_to_the_weekly_limit() {
+    let both = UsageSnapshot {
+        five_hour: Some(UsageWindow::new(90, FIVE_HOUR_WINDOW_MINUTES)),
+        weekly: Some(UsageWindow::new(40, WEEKLY_WINDOW_MINUTES)),
+        ..UsageSnapshot::default()
+    };
+    let weekly_only = UsageSnapshot {
+        weekly: Some(UsageWindow::new(40, WEEKLY_WINDOW_MINUTES)),
+        ..UsageSnapshot::default()
+    };
+
+    // The shorter window is the limit about to be hit, so it wins where a plan
+    // defines both; a plan that defines only the longer one still reports.
+    assert_eq!(both.compact_window(), both.five_hour.as_ref());
+    assert_eq!(weekly_only.compact_window(), weekly_only.weekly.as_ref());
+    assert_eq!(UsageSnapshot::default().compact_window(), None);
+}

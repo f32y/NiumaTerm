@@ -9,7 +9,7 @@ use gpui_component::hover_card::HoverCard;
 use gpui_component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
 use nmt_agent_utils::claude_code::usage_fetcher::{self as claude_usage, UsageFetchError};
 use nmt_agent_utils::codex::usage_fetcher as codex_usage;
-use nmt_agent_utils::usage::{UsageSnapshot, UsageWindow, format_remaining, now_unix_millis};
+use nmt_agent_utils::usage::{UsageSnapshot, UsageWindow, now_unix_millis};
 use nmt_app_agent::profile::{ClaudeIcon, CodexIcon};
 use nmt_i18n::i18n;
 use tracing::warn;
@@ -26,47 +26,50 @@ const QUOTA_ROW_HEIGHT: f32 = 24.0;
 /// it keeps the exact value available.
 const QUOTA_TRACK_HEIGHT: f32 = 4.0;
 const QUOTA_ICON: f32 = 12.0;
-/// A provider with nothing to report leaves an empty track, so the row keeps
-/// its shape whether one provider is signed in or both.
 const QUOTA_FILL_OPACITY: f32 = 0.7;
 
-/// One provider half of the quota row: its mark, how much of the shorter
-/// window is left, and that same figure spelled out.
+/// One provider half of the quota row: its mark, how much of the window it
+/// reports is left, and that same figure spelled out. A provider that reports
+/// no window at all gets no gauge, because an empty track would state a limit
+/// nothing was measured against.
 fn quota_gauge(
     id: &'static str,
     label: &'static str,
     icon: Icon,
-    window: Option<&UsageWindow>,
+    usage: &UsageSnapshot,
     cx: &App,
-) -> AnyElement {
-    let value = format_remaining(window);
+) -> Option<AnyElement> {
+    let window = usage.compact_window()?;
+    let value = format!("{}%", window.remaining_percentage);
 
-    h_flex()
-        .id(id)
-        .aria_label(format!("{label}: {value}"))
-        .flex_1()
-        .min_w_0()
-        .gap_1p5()
-        .items_center()
-        .child(icon.with_size(px(QUOTA_ICON)))
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .h(px(QUOTA_TRACK_HEIGHT))
-                .rounded(px(QUOTA_TRACK_HEIGHT / 2.0))
-                .overflow_hidden()
-                .bg(cx.theme().sidebar_foreground.opacity(0.12))
-                .children(window.map(|window| {
-                    div()
-                        .h_full()
-                        .w(relative(f32::from(window.remaining_percentage) / 100.0))
-                        .rounded_full()
-                        .bg(cx.theme().primary.opacity(QUOTA_FILL_OPACITY))
-                })),
-        )
-        .child(div().flex_none().child(value))
-        .into_any_element()
+    Some(
+        h_flex()
+            .id(id)
+            .aria_label(format!("{label}: {value}"))
+            .flex_1()
+            .min_w_0()
+            .gap_1p5()
+            .items_center()
+            .child(icon.with_size(px(QUOTA_ICON)))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h(px(QUOTA_TRACK_HEIGHT))
+                    .rounded(px(QUOTA_TRACK_HEIGHT / 2.0))
+                    .overflow_hidden()
+                    .bg(cx.theme().sidebar_foreground.opacity(0.12))
+                    .child(
+                        div()
+                            .h_full()
+                            .w(relative(f32::from(window.remaining_percentage) / 100.0))
+                            .rounded_full()
+                            .bg(cx.theme().primary.opacity(QUOTA_FILL_OPACITY)),
+                    ),
+            )
+            .child(div().flex_none().child(value))
+            .into_any_element(),
+    )
 }
 
 #[derive(Default)]
@@ -514,6 +517,37 @@ fn render_provider_panel(
 impl Render for AgentUsageView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let refreshing = self.codex_refresh.refreshing || self.claude_refresh.refreshing;
+        let codex_gauge = quota_gauge(
+            "agent-usage-codex",
+            i18n("agent-provider-codex"),
+            Icon::new(CodexIcon),
+            &self.codex,
+            cx,
+        );
+        let claude_gauge = quota_gauge(
+            "agent-usage-claude",
+            i18n("agent-provider-claude"),
+            Icon::new(ClaudeIcon),
+            &self.claude,
+            cx,
+        );
+
+        // Neither provider reports a limit at all, so there is nothing to
+        // gauge. A row of bare icons over empty tracks would read as two
+        // exhausted subscriptions rather than as two unknown ones.
+        if codex_gauge.is_none() && claude_gauge.is_none() {
+            return div().into_any_element();
+        }
+
+        // The divider separates two gauges; with one of them absent it would
+        // be an edge against nothing.
+        let divider = (codex_gauge.is_some() && claude_gauge.is_some()).then(|| {
+            div()
+                .flex_none()
+                .w(px(1.))
+                .h(px(12.))
+                .bg(cx.theme().sidebar_foreground.opacity(0.15))
+        });
         let codex = self.codex.clone();
         let claude = self.claude.clone();
         let codex_refreshing = self.codex_refresh.refreshing;
@@ -539,77 +573,62 @@ impl Render for AgentUsageView {
                     .items_center()
                     .text_xs()
                     .text_color(cx.theme().sidebar_foreground.opacity(0.65))
-                    .child(quota_gauge(
-                        "agent-usage-codex",
-                        i18n("agent-provider-codex"),
-                        Icon::new(CodexIcon),
-                        self.codex.five_hour.as_ref(),
-                        cx,
-                    ))
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(1.))
-                            .h(px(12.))
-                            .bg(cx.theme().sidebar_foreground.opacity(0.15)),
-                    )
-                    .child(quota_gauge(
-                        "agent-usage-claude",
-                        i18n("agent-provider-claude"),
-                        Icon::new(ClaudeIcon),
-                        self.claude.five_hour.as_ref(),
-                        cx,
-                    )),
+                    .children(codex_gauge)
+                    .children(divider)
+                    .children(claude_gauge),
             )
             .on_click(cx.listener(|this, _, _, cx| this.refresh_all(cx)));
 
-        div().w_full().child(
-            HoverCard::new("agent-usage-details")
-                .anchor(gpui::Anchor::BottomLeft)
-                .open_delay(Duration::from_millis(250))
-                .close_delay(Duration::from_millis(150))
-                .trigger(trigger)
-                .content(move |_, _, cx| {
-                    let colors = UsagePanelColors {
-                        foreground: cx.theme().foreground,
-                        muted: cx.theme().muted_foreground,
-                        border: cx.theme().border,
-                        track: cx.theme().muted.opacity(0.65),
-                        normal: cx.theme().primary,
-                        warning: cx.theme().warning,
-                        danger: cx.theme().danger,
-                    };
-                    let now = now_unix_millis();
+        div()
+            .w_full()
+            .child(
+                HoverCard::new("agent-usage-details")
+                    .anchor(gpui::Anchor::BottomLeft)
+                    .open_delay(Duration::from_millis(250))
+                    .close_delay(Duration::from_millis(150))
+                    .trigger(trigger)
+                    .content(move |_, _, cx| {
+                        let colors = UsagePanelColors {
+                            foreground: cx.theme().foreground,
+                            muted: cx.theme().muted_foreground,
+                            border: cx.theme().border,
+                            track: cx.theme().muted.opacity(0.65),
+                            normal: cx.theme().primary,
+                            warning: cx.theme().warning,
+                            danger: cx.theme().danger,
+                        };
+                        let now = now_unix_millis();
 
-                    v_flex()
-                        .w(px(272.))
-                        .gap_3()
-                        .child(render_provider_panel(
-                            i18n("agent-provider-codex"),
-                            Icon::new(CodexIcon).small().into_any_element(),
-                            &codex,
-                            codex_refreshing,
-                            codex_failed,
-                            now,
-                            colors,
-                        ))
-                        .child(
-                            div()
-                                .w_full()
-                                .border_t_1()
-                                .border_color(colors.border.opacity(0.65)),
-                        )
-                        .child(render_provider_panel(
-                            i18n("agent-provider-claude"),
-                            Icon::new(ClaudeIcon).small().into_any_element(),
-                            &claude,
-                            claude_refreshing,
-                            claude_failed,
-                            now,
-                            colors,
-                        ))
-                }),
-        )
+                        v_flex()
+                            .w(px(272.))
+                            .gap_3()
+                            .child(render_provider_panel(
+                                i18n("agent-provider-codex"),
+                                Icon::new(CodexIcon).small().into_any_element(),
+                                &codex,
+                                codex_refreshing,
+                                codex_failed,
+                                now,
+                                colors,
+                            ))
+                            .child(
+                                div()
+                                    .w_full()
+                                    .border_t_1()
+                                    .border_color(colors.border.opacity(0.65)),
+                            )
+                            .child(render_provider_panel(
+                                i18n("agent-provider-claude"),
+                                Icon::new(ClaudeIcon).small().into_any_element(),
+                                &claude,
+                                claude_refreshing,
+                                claude_failed,
+                                now,
+                                colors,
+                            ))
+                    }),
+            )
+            .into_any_element()
     }
 }
 

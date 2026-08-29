@@ -48,6 +48,15 @@ impl UsageSnapshot {
         self.five_hour.is_none() && self.weekly.is_none() && self.fable_weekly.is_none()
     }
 
+    /// The one window a compact readout can show. Which windows a plan defines
+    /// is the provider's business: some report only a rolling five hours, some
+    /// only a week. The shorter one is preferred because it is the limit a
+    /// user is about to hit, and the weekly figure stands in when there is no
+    /// shorter one to report.
+    pub fn compact_window(&self) -> Option<&UsageWindow> {
+        self.five_hour.as_ref().or(self.weekly.as_ref())
+    }
+
     pub fn compact_values(&self) -> [String; 2] {
         [
             format_remaining(self.five_hour.as_ref()),
