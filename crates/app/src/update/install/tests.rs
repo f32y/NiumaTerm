@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::{env, fs, process};
 
 use crate::update::InstallError;
-use crate::update::install::{InstallPlan, apply, differing};
+use crate::update::install::{InstallPlan, apply, differing, plan};
 
 fn versions(
     entries: [(&'static str, Option<&str>, Option<&str>); 3],
@@ -88,4 +88,13 @@ fn applying_a_plan_reports_a_missing_staged_file() {
         apply(&staging, &install, &plan),
         Err(InstallError::NotWritable)
     );
+}
+
+#[test]
+fn a_new_syntax_language_dll_is_selected_for_installation() {
+    let staging = scratch("syntax-staging");
+    let install = scratch("syntax-install");
+    fs::write(staging.join("tree_sitter.dll"), b"new syntax languages").unwrap();
+
+    assert!(plan(&staging, &install).contains("tree_sitter.dll"));
 }

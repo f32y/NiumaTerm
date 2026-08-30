@@ -30,19 +30,20 @@ pub(crate) const SHELL_EXTENSION_DLL: &str = "NmtShellExtension.dll";
 /// unchanged sources from counting as a change, and it is per file because the
 /// files do not move together:
 ///
-/// - The two executables and their release label advance with every release.
+/// - The two executables and the syntax-language DLL advance with every release.
 /// - Explorer keeps a registered context-menu extension mapped in its own
 ///   process, so replacing that DLL costs a stale menu until Explorer restarts.
 ///   Its `InternalVersion` names the revision its own sources last changed in,
 ///   which is the only value that says whether the cost buys anything.
 /// - The ConPTY pair is a vendored Microsoft build carrying Microsoft's version
 ///   resource, which moves only when the vendored copy is replaced.
-const PAYLOAD: [(&str, &str); 5] = [
+const PAYLOAD: [(&str, &str); 6] = [
     (APP_EXE, "FileVersion"),
     ("NmtAgentHook.exe", "FileVersion"),
     (SHELL_EXTENSION_DLL, "InternalVersion"),
     ("conpty.dll", "FileVersion"),
     ("OpenConsole.exe", "FileVersion"),
+    ("tree_sitter.dll", "FileVersion"),
 ];
 
 /// How long a restarting instance waits for its predecessor before starting

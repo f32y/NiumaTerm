@@ -64,6 +64,9 @@ percent-encoding.workspace = true
 raw-window-handle.workspace = true
 sha2.workspace = true
 zip.workspace = true
+tree-sitter.workspace = true
+tree-sitter-language.workspace = true
+windows-sys.workspace = true
 
 [target.'cfg(windows)'.dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
