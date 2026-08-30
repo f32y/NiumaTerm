@@ -28,6 +28,7 @@ mod logging;
 mod pane_tree;
 #[cfg(windows)]
 mod remote;
+mod syntax;
 mod tabs;
 mod ui;
 mod update;
@@ -229,6 +230,9 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
             // Initialize gpui-component (theme, root, component globals) before any
             // component renders. Themes without `[colors.ui]` retain the dark default.
             init_components(cx);
+            if let Err(error) = syntax::register_languages() {
+                warn!("syntax highlighting is limited to built-in languages: {error}");
+            }
 
             // The component library localizes its own chrome (dialog buttons,
             // search placeholders) through a separate catalog; keep it on the

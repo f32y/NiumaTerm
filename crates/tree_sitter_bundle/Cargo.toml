@@ -1,0 +1,56 @@
+[package]
+name = "nmt_tree_sitter_bundle"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "tree_sitter"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+tree-sitter-astro-next.workspace = true
+tree-sitter-bash.workspace = true
+tree-sitter-c.workspace = true
+tree-sitter-c-sharp.workspace = true
+tree-sitter-cmake.workspace = true
+tree-sitter-cpp.workspace = true
+tree-sitter-css.workspace = true
+tree-sitter-diff.workspace = true
+tree-sitter-elixir.workspace = true
+tree-sitter-embedded-template.workspace = true
+tree-sitter-go.workspace = true
+tree-sitter-graphql.workspace = true
+tree-sitter-html.workspace = true
+tree-sitter-java.workspace = true
+tree-sitter-javascript.workspace = true
+tree-sitter-jsdoc.workspace = true
+tree-sitter-kotlin-sg.workspace = true
+tree-sitter-lua.workspace = true
+tree-sitter-make.workspace = true
+tree-sitter-md.workspace = true
+tree-sitter-php.workspace = true
+tree-sitter-proto.workspace = true
+tree-sitter-python.workspace = true
+tree-sitter-ruby.workspace = true
+tree-sitter-rust.workspace = true
+tree-sitter-scala.workspace = true
+tree-sitter-sequel.workspace = true
+tree-sitter-svelte-next.workspace = true
+tree-sitter-swift.workspace = true
+tree-sitter-toml-ng.workspace = true
+tree-sitter-typescript.workspace = true
+tree-sitter-yaml.workspace = true
+tree-sitter-zig.workspace = true
+
+[build-dependencies]
+nmt_version.workspace = true
+winres.workspace = true
+
+[dev-dependencies]
+tree-sitter-language.workspace = true
+tree_sitter_runtime = { package = "tree-sitter", version = "0.26.10" }

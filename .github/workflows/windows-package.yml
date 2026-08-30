@@ -68,7 +68,8 @@ jobs:
             "target/release/NmtAgentHook.exe",
             "target/release/NmtShellExtension.dll",
             "target/release/conpty.dll",
-            "target/release/OpenConsole.exe"
+            "target/release/OpenConsole.exe",
+            "target/release/tree_sitter.dll"
           ) $package
 
           Compress-Archive `
