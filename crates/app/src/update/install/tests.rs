@@ -2,16 +2,16 @@ use std::path::PathBuf;
 use std::{env, fs, process};
 
 use crate::update::InstallError;
-use crate::update::install::{InstallPlan, apply, differing, plan};
+use crate::update::install::{APP_EXE, InstallPlan, apply, differing, install_additions, plan};
 
 fn versions(
-    entries: [(&'static str, Option<&str>, Option<&str>); 3],
-) -> Vec<(&'static str, Option<String>, Option<String>)> {
+    entries: [(&str, Option<&str>, Option<&str>); 3],
+) -> Vec<(String, Option<String>, Option<String>)> {
     entries
         .into_iter()
         .map(|(name, staged, installed)| {
             (
-                name,
+                name.to_owned(),
                 staged.map(str::to_owned),
                 installed.map(str::to_owned),
             )
@@ -81,7 +81,7 @@ fn applying_a_plan_reports_a_missing_staged_file() {
     let staging = scratch("staging");
     let install = scratch("install");
     let plan = InstallPlan {
-        names: vec!["NmtShellExtension.dll"],
+        names: vec!["NmtShellExtension.dll".to_owned()],
     };
 
     assert_eq!(
@@ -91,10 +91,79 @@ fn applying_a_plan_reports_a_missing_staged_file() {
 }
 
 #[test]
+fn a_file_no_build_knows_about_is_planned_from_the_package() {
+    let staging = scratch("unlisted-staging");
+    let install = scratch("unlisted-install");
+    // The build that performs a swap is the one being replaced, so a release
+    // adding a file can only install it if the list comes from the package.
+    fs::write(staging.join("nmt_later_addition.dll"), b"a later addition").unwrap();
+
+    assert!(plan(&staging, &install).contains("nmt_later_addition.dll"));
+}
+
+#[test]
 fn a_new_syntax_language_dll_is_selected_for_installation() {
     let staging = scratch("syntax-staging");
     let install = scratch("syntax-install");
     fs::write(staging.join("tree_sitter.dll"), b"new syntax languages").unwrap();
 
     assert!(plan(&staging, &install).contains("tree_sitter.dll"));
+}
+
+/// A file that carries a readable version resource, standing in for a build of
+/// the application: what attribution compares is a real resource, so a file
+/// written here cannot exercise it. A system DLL is the one such file present
+/// on every machine these tests run on.
+fn versioned_binary() -> PathBuf {
+    PathBuf::from(env::var_os("SystemRoot").expect("SystemRoot is set on Windows"))
+        .join("System32")
+        .join("kernel32.dll")
+}
+
+#[test]
+fn a_file_the_installation_lacks_is_taken_from_the_staged_package() {
+    let package = scratch("addition-package");
+    let install = scratch("addition-install");
+    fs::copy(versioned_binary(), package.join(APP_EXE)).unwrap();
+    fs::copy(versioned_binary(), install.join(APP_EXE)).unwrap();
+    fs::write(package.join("tree_sitter.dll"), b"staged languages").unwrap();
+
+    install_additions(&package, &install);
+
+    assert_eq!(
+        fs::read(install.join("tree_sitter.dll")).unwrap(),
+        b"staged languages"
+    );
+}
+
+#[test]
+fn an_installed_file_is_kept_over_the_staged_copy() {
+    let package = scratch("kept-package");
+    let install = scratch("kept-install");
+    fs::copy(versioned_binary(), package.join(APP_EXE)).unwrap();
+    fs::copy(versioned_binary(), install.join(APP_EXE)).unwrap();
+    fs::write(package.join("conpty.dll"), b"staged conpty").unwrap();
+    fs::write(install.join("conpty.dll"), b"installed conpty").unwrap();
+
+    install_additions(&package, &install);
+
+    assert_eq!(
+        fs::read(install.join("conpty.dll")).unwrap(),
+        b"installed conpty"
+    );
+}
+
+#[test]
+fn a_package_that_is_not_the_installed_release_contributes_nothing() {
+    let package = scratch("foreign-package");
+    let install = scratch("foreign-install");
+    // An executable whose version cannot be read names no release, so the
+    // package holding it cannot be shown to be the one installed.
+    fs::write(package.join(APP_EXE), b"not an executable").unwrap();
+    fs::copy(versioned_binary(), install.join(APP_EXE)).unwrap();
+    fs::write(package.join("tree_sitter.dll"), b"staged languages").unwrap();
+
+    install_additions(&package, &install);
+
+    assert!(!install.join("tree_sitter.dll").exists());
 }
