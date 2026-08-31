@@ -297,10 +297,7 @@ impl Render for AgentPane {
                                     .child(
                                         h_flex()
                                             .w_full()
-                                            .items_end()
-                                            .gap_3()
-                                            .pl(px(COMPOSER_EDGE_INSET))
-                                            .pr_3()
+                                            .px(px(COMPOSER_EDGE_INSET))
                                             .pt_3()
                                             .pb_1()
                                             // GPUI resolves these keystrokes
@@ -396,13 +393,31 @@ impl Render for AgentPane {
                                                         || session_loading
                                                         || update_suspended,
                                                 ),
-                                            ))
-                                            // Send closes the line being typed on
-                                            // rather than sitting among the thread
-                                            // settings below it: those change what
-                                            // the next message is sent as, and this
-                                            // one alone sends it. Stop replaces Send
-                                            // in place while a turn runs.
+                                            )),
+                                    )
+                                    .child(
+                                        h_flex()
+                                            .w_full()
+                                            .px(px(COMPOSER_EDGE_INSET))
+                                            .pb_2()
+                                            .pt_0p5()
+                                            .items_center()
+                                            .gap_2()
+                                            .child(
+                                                div()
+                                                    .flex_1()
+                                                    .min_w_0()
+                                                    .child(self.render_settings_row(cx)),
+                                            )
+                                            .children(self.render_last_response(cx))
+                                            // Send stands at the card's trailing
+                                            // corner, past the settings it is
+                                            // qualified by: those say what the next
+                                            // message is sent as, and this is the
+                                            // one control that sends it, so it is
+                                            // the last thing the eye reaches on its
+                                            // way out of the card. Stop replaces
+                                            // Send in place while a turn runs.
                                             .child(if running {
                                                 Button::new("agent-send")
                                                     .primary()
@@ -431,22 +446,6 @@ impl Render for AgentPane {
                                                         this.send_user_message(window, cx)
                                                     }))
                                             }),
-                                    )
-                                    .child(
-                                        h_flex()
-                                            .w_full()
-                                            .px(px(COMPOSER_EDGE_INSET))
-                                            .pb_2()
-                                            .pt_0p5()
-                                            .items_center()
-                                            .gap_2()
-                                            .child(
-                                                div()
-                                                    .flex_1()
-                                                    .min_w_0()
-                                                    .child(self.render_settings_row(cx)),
-                                            )
-                                            .children(self.render_last_response(cx)),
                                     ),
                             )
                             // The status footer reads out what the session has
