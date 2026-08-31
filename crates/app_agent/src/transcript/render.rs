@@ -815,7 +815,7 @@ impl TranscriptView {
             }))
         });
 
-        agent_card(tone, cx)
+        agent_card()
             .id(("entry", index))
             .modern_context_menu(Self::copy_menu(cx.entity().downgrade(), index))
             .child(header)
@@ -1066,13 +1066,9 @@ impl TranscriptView {
             // The rule sits above the heading: it closes off the conversation
             // that the summary below replaced.
             .child(div().w_full().h(px(1.)).bg(accent.opacity(0.35)))
-            .child(
-                agent_card(AgentCardTone::Neutral, cx)
-                    .child(header)
-                    .children(
-                        expanded.then(|| self.render_compaction_detail(index, &detail, window, cx)),
-                    ),
-            )
+            .child(agent_card().child(header).children(
+                expanded.then(|| self.render_compaction_detail(index, &detail, window, cx)),
+            ))
             .into_any_element()
     }
 
@@ -1212,7 +1208,7 @@ impl TranscriptView {
             i18n("agent-transcript-turn-work-hide").to_string()
         };
 
-        agent_card(AgentCardTone::Neutral, cx)
+        agent_card()
             .child(
                 AgentDisclosureRow::new(("turn-fold", turn as usize), label.clone())
                     .expanded(!folded)
@@ -1295,7 +1291,7 @@ impl TranscriptView {
             i18n("agent-transcript-tool-calls").replace("{count}", &tool_count.to_string())
         };
 
-        agent_card(AgentCardTone::Neutral, cx)
+        agent_card()
             .child(
                 // No type icon: the toggle names a count of steps rather than
                 // being one, and its own chevron already says what it does.
