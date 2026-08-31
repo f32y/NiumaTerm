@@ -369,6 +369,13 @@ impl TranscriptView {
             (Some(len), false) => text[..len].to_string(),
             _ => text.to_string(),
         };
+        // A prompt long enough to fold is a pasted block rather than a
+        // sentence, and it takes the column's whole measure. Sized to its
+        // content it would instead be as wide as the longest line of whichever
+        // half is on screen, so opening it would move its edges as well as its
+        // height; measuring the hidden half to avoid that is the layout pass
+        // the fold exists to skip.
+        let fills_column = head_len.is_some();
         let toggle = head_len.is_some().then(|| {
             div()
                 .mt_1()
@@ -502,6 +509,7 @@ impl TranscriptView {
             // against this bubble's own shrink-to-fit parent instead, wrapping
             // every prompt at a fraction of its natural single-line width.
             .min_w_0()
+            .when(fills_column, |this| this.w_full())
             .px(px(USER_BUBBLE_PADDING_X))
             .py(px(USER_BUBBLE_PADDING_Y))
             .rounded_tl(px(USER_BUBBLE_RADIUS))
@@ -533,7 +541,16 @@ impl TranscriptView {
                     // off the full width lives here rather than on either. The
                     // row above is `w_full`, so the fraction has a definite
                     // width to resolve against and tracks the pane.
-                    .max_w(relative(USER_BUBBLE_WIDTH_FRACTION))
+                    //
+                    // A foldable prompt takes that measure as its width rather
+                    // than as a ceiling: a bubble asking for the full width of
+                    // a shrink-to-fit column would still be sized by its own
+                    // longest line, since a percentage contributes nothing to
+                    // what a column asks for.
+                    .map(|this| match fills_column {
+                        true => this.w(relative(USER_BUBBLE_WIDTH_FRACTION)),
+                        false => this.max_w(relative(USER_BUBBLE_WIDTH_FRACTION)),
+                    })
                     .min_w_0()
                     .items_end()
                     .gap_1()
