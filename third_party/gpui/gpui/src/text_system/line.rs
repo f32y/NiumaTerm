@@ -461,6 +461,7 @@ fn paint_line(
                                     color: Some(run_underline.color.unwrap_or(style_run.color)),
                                     thickness: run_underline.thickness,
                                     wavy: run_underline.wavy,
+                                    dashed: run_underline.dashed,
                                 },
                             ));
                         }

@@ -83,6 +83,13 @@ pub const DEFAULT_ADDITIONAL_WINDOW_SIZE: Size<Pixels> = Size {
     height: Pixels(750.),
 };
 
+/// A dashed underline's dash and the space after it, as multiples of the
+/// stroke's own thickness. Tying them to the stroke keeps the pattern reading
+/// as a dash rather than as a dotted or a nearly solid line once the text is
+/// set larger or smaller.
+const UNDERLINE_DASH: f32 = 3.0;
+const UNDERLINE_DASH_GAP: f32 = 3.0;
+
 /// Represents the two different phases when dispatching events.
 #[derive(Default, Copy, Clone, Debug, Eq, PartialEq)]
 pub enum DispatchPhase {
@@ -3949,6 +3956,11 @@ impl Window {
     ) {
         self.invalidator.debug_assert_paint();
 
+        if style.dashed && !style.wavy {
+            self.paint_dashed_underline(origin, width, style);
+            return;
+        }
+
         let scale_factor = self.scale_factor();
         let thickness = self.snap_stroke(style.thickness);
         let height = if style.wavy {
@@ -3971,6 +3983,38 @@ impl Window {
             thickness,
             wavy: if style.wavy { 1 } else { 0 },
         });
+    }
+
+    /// Paint a dashed underline as a row of short solid ones.
+    ///
+    /// The underline primitive carries a wavy flag rather than a dash pattern,
+    /// so the pattern is laid out here instead of in the shader. The dash is
+    /// sized off the stroke rather than fixed, so it stays a dash at any text
+    /// size, and the last one is cut to the run's width so it cannot overhang
+    /// the text it belongs to.
+    fn paint_dashed_underline(
+        &mut self,
+        origin: Point<Pixels>,
+        width: Pixels,
+        style: &UnderlineStyle,
+    ) {
+        let dash = style.thickness * UNDERLINE_DASH;
+        let period = dash + style.thickness * UNDERLINE_DASH_GAP;
+        if period <= px(0.) || width <= px(0.) {
+            return;
+        }
+
+        let solid = UnderlineStyle {
+            dashed: false,
+            ..*style
+        };
+        let mut offset = px(0.);
+
+        while offset < width {
+            let length = dash.min(width - offset);
+            self.paint_underline(origin + point(offset, px(0.)), length, &solid);
+            offset += period;
+        }
     }
 
     /// Paint a strikethrough into the scene for the next frame at the current z-index.

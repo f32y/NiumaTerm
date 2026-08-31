@@ -841,6 +841,10 @@ pub struct UnderlineStyle {
 
     /// Whether the underline should be wavy, like in a spell checker.
     pub wavy: bool,
+
+    /// Whether the underline should be broken into dashes. Ignored while the
+    /// underline is wavy, which is already a pattern of its own.
+    pub dashed: bool,
 }
 
 /// The properties that can be applied to a strikethrough.
@@ -1366,6 +1370,7 @@ mod tests {
                 thickness: px(2.),
                 color: Some(red()),
                 wavy: true,
+                dashed: false,
             }),
         };
         let expected_style = style_b;
@@ -1398,6 +1403,7 @@ mod tests {
                 thickness: px(4.),
                 color: None,
                 wavy: false,
+                dashed: false,
             }),
         };
 
@@ -1416,6 +1422,7 @@ mod tests {
                 thickness: px(4.),
                 color: None,
                 wavy: false,
+                dashed: false,
             }),
         };
 

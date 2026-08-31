@@ -482,6 +482,7 @@ impl Element for TextElement {
                         color: Some(run.color),
                         thickness: px(1.0),
                         wavy: false,
+                        dashed: false,
                     }),
                     ..run.clone()
                 },
