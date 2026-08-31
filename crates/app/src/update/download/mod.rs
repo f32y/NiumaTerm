@@ -31,7 +31,8 @@ const MAX_PACKAGE_BYTES: u64 = 256 * 1024 * 1024;
 pub(crate) fn stage(release: &Release, staging: &Path) -> Result<PathBuf, InstallError> {
     let (package, checksum) = package_assets(&release.assets).ok_or(InstallError::NoPackage)?;
 
-    let directory = staging.join(sanitized(&release.label));
+    let name = sanitized(&release.label);
+    let directory = staging.join(&name);
 
     // A staging directory left by an earlier attempt may hold files from
     // another release, which unpacking over would mix into this one.
@@ -42,7 +43,11 @@ pub(crate) fn stage(release: &Release, staging: &Path) -> Result<PathBuf, Instal
         InstallError::Unreachable
     })?;
 
-    let archive = directory.join("package.zip");
+    // The archive is kept beside the unpacked directory rather than inside it,
+    // because that directory is read back as the list of files to install: a
+    // download left behind by a removal that could not complete would otherwise
+    // be installed as though the package had shipped it.
+    let archive = staging.join(format!("{name}.zip"));
 
     download(&package.url, &archive)?;
     verify(&archive, &fetch_text(&checksum.url)?)?;

@@ -230,6 +230,14 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
             // Initialize gpui-component (theme, root, component globals) before any
             // component renders. Themes without `[colors.ui]` retain the dark default.
             init_components(cx);
+            // An update is performed by the instance it replaces, so this
+            // startup is where the files that instance renamed aside are
+            // finally removable and where a package file it was too old to know
+            // about gets installed. Syntax highlighting loads one of those
+            // files, which is why this runs before it rather than beside the
+            // rest of the update setup below.
+            update::settle_previous_update();
+
             if let Err(error) = syntax::register_languages() {
                 warn!("syntax highlighting is limited to built-in languages: {error}");
             }
@@ -252,10 +260,6 @@ fn run_app(argv_url: Option<String>, testing: bool, profiling: bool) {
             agent_updates::initialize(testing, &agent_profiles, cx);
             input_history::initialize(testing, cx);
             update::initialize(testing, cx);
-            // The files a previous update renamed aside are only removable once
-            // whoever had them mapped has exited, which for the instance that
-            // performed it is this startup.
-            update::discard_replaced_files();
 
             // Bring up the remote host service if it was left enabled. Runs on
             // its own runtime thread; failures only log.

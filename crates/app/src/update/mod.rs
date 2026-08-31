@@ -612,17 +612,39 @@ fn show_recovery_warning(applications: Vec<String>, cx: &mut App) {
     complete_relaunch(cx);
 }
 
-/// Collect what a previous update renamed aside. The files are only removable
-/// once whoever had them mapped has exited, which for the executable this
-/// process replaced is now, and for the context-menu extension is whenever
-/// Explorer next restarts.
-pub(crate) fn discard_replaced_files() {
-    install::discard_previous(&get_exe_dir());
+/// Settle whatever an update that ran before this process started left behind.
+pub(crate) fn settle_previous_update() {
+    let install = get_exe_dir();
+    let staging = nmt_config::config_dir_path().join(STAGING_DIRECTORY);
+
+    install_staged_additions(&staging, &install);
+
+    // Collect what a previous update renamed aside. The files are only
+    // removable once whoever had them mapped has exited, which for the
+    // executable this process replaced is now, and for the context-menu
+    // extension is whenever Explorer next restarts.
+    install::discard_previous(&install);
 
     // Whatever was unpacked before this process started has either been
     // installed already or belongs to an attempt that ended; either way a
     // retry fetches the package again rather than trusting what is lying here.
-    let _ = fs::remove_dir_all(nmt_config::config_dir_path().join(STAGING_DIRECTORY));
+    let _ = fs::remove_dir_all(&staging);
+}
+
+/// Install package files the instance that performed the update did not know
+/// to install, which is every file the release it installed added.
+///
+/// Each staged package sits in its own directory named after the release it was
+/// fetched for, and only the one matching the installed executable contributes
+/// anything, so an unrelated directory left here costs a version read.
+fn install_staged_additions(staging: &Path, install: &Path) {
+    let Ok(entries) = fs::read_dir(staging) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        install::install_additions(&entry.path(), install);
+    }
 }
 
 /// Wait for the instance an update replaced, so the single-instance check that
