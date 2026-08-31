@@ -8,8 +8,8 @@ use nmt_agent_utils::chat::ThreadSettings;
 
 use crate::session::events::resolve_ready_settings;
 use crate::session::{
-    directories_match, directory_label, replayed_response_age, scoped_background_tasks,
-    tab_title_from_prompt,
+    conversation_title_request, directories_match, directory_label, replayed_response_age,
+    scoped_background_tasks, tab_title_from_prompt,
 };
 use crate::transcript::LAST_RESPONSE_LIMIT;
 
@@ -272,6 +272,115 @@ and the retry loop"
         tab_title_from_prompt(&long).map(|t| t.chars().count()),
         Some(60)
     );
+}
+
+#[test]
+fn title_requests_keep_each_provider_semantics() {
+    let codex = conversation_title_request(
+        crate::AgentKind::Codex,
+        "  Inspect title generation\n and its fallback  ",
+    )
+    .unwrap();
+    assert_eq!(
+        codex.provisional_title,
+        "Inspect title generation and its fallback"
+    );
+
+    let claude = conversation_title_request(
+        crate::AgentKind::Claude,
+        "  Inspect title generation\n and its fallback  ",
+    )
+    .unwrap();
+    assert_eq!(claude.provisional_title, "Inspect title generation");
+    assert!(conversation_title_request(crate::AgentKind::Codex, "/effort high").is_none());
+}
+
+mod conversation_title_tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use gpui::{
+        AppContext as _, Entity, Subscription, TestAppContext, VisualTestContext, WindowHandle,
+    };
+    use nmt_agent_utils::AgentWorkspace;
+    use nmt_agent_utils::chat::{SendOutcome, SlashCommandOutcome};
+    use nmt_config::profile::{AgentProfile, AgentProfileKind};
+
+    use crate::session::{Backend, Status, TestBackend};
+    use crate::settings::AgentSettings;
+    use crate::{AgentPane, AgentPaneEvent, AgentThreadDefaults};
+
+    fn open_pane(
+        cx: &mut TestAppContext,
+        kind: AgentProfileKind,
+    ) -> (Entity<AgentPane>, WindowHandle<gpui_component::Root>) {
+        let profile = AgentProfile {
+            name: "Conversation Title Test".into(),
+            kind,
+            // The test replaces the asynchronous launch before submitting.
+            executable: "missing-agent.exe".into(),
+            ..AgentProfile::default()
+        };
+        let mut pane = None;
+        let window = cx.update(|cx| {
+            gpui_component::init(cx);
+            cx.set_global(AgentSettings::default());
+            cx.set_global(AgentThreadDefaults::default());
+            cx.open_window(Default::default(), |window, cx| {
+                let agent =
+                    cx.new(|cx| AgentPane::new(profile, AgentWorkspace::default(), window, cx));
+                pane = Some(agent.clone());
+                cx.new(|cx| gpui_component::Root::new(agent, window, cx))
+            })
+            .expect("open Agent test window")
+        });
+        (pane.expect("create Agent pane"), window)
+    }
+
+    fn collect_titles(
+        pane: &Entity<AgentPane>,
+        cx: &mut VisualTestContext,
+    ) -> (Rc<RefCell<Vec<String>>>, Subscription) {
+        let titles = Rc::new(RefCell::new(Vec::new()));
+        let observed = Rc::clone(&titles);
+        let subscription = cx.update(|_, cx| {
+            cx.subscribe(pane, move |_, event: &AgentPaneEvent, _| {
+                if let AgentPaneEvent::TitleSuggested(title) = event {
+                    observed.borrow_mut().push(title.clone());
+                }
+            })
+        });
+        (titles, subscription)
+    }
+
+    #[gpui::test]
+    fn accepted_codex_prompt_publishes_a_provisional_title(cx: &mut TestAppContext) {
+        let (pane, window) = open_pane(cx, AgentProfileKind::Codex);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        let (titles, _subscription) = collect_titles(&pane, &mut cx);
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.runtime.backend = Some(Backend::Test(TestBackend::new(
+                    [SendOutcome::StartedTurn],
+                    SlashCommandOutcome::NotReady,
+                    Vec::new(),
+                )));
+                pane.runtime.status = Status::Idle;
+
+                assert!(
+                    pane.send_text("  Inspect title generation\n and its fallback  ".into(), cx)
+                );
+                assert!(pane.conversation_named);
+            });
+        });
+        cx.run_until_parked();
+
+        assert_eq!(
+            *titles.borrow(),
+            vec!["Inspect title generation and its fallback".to_string()]
+        );
+    }
 }
 
 #[test]

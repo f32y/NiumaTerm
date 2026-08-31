@@ -167,6 +167,46 @@ fn root_notifications_are_isolated_and_process_notifications_are_shared() {
 }
 
 #[test]
+fn auxiliary_title_thread_activity_never_reaches_the_primary_registration() {
+    let router = router();
+    let (primary, primary_rx) = register(&router);
+    let (title_worker, title_rx) = register(&router);
+    let mut primary_request = start_request(2);
+    let mut title_request = start_request(1);
+    router
+        .prepare_outgoing(primary, &mut primary_request)
+        .unwrap();
+    router
+        .prepare_outgoing(title_worker, &mut title_request)
+        .unwrap();
+    router.handle_message(start_response(
+        primary_request["id"].as_u64().unwrap(),
+        "thread-primary",
+    ));
+    router.handle_message(start_response(
+        title_request["id"].as_u64().unwrap(),
+        "thread-title",
+    ));
+    let _ = primary_rx.recv().unwrap();
+    let _ = title_rx.recv().unwrap();
+
+    router.handle_message(json!({
+        "method": "item/completed",
+        "params": {
+            "threadId": "thread-title",
+            "turnId": "turn-title",
+            "item": {"type": "agentMessage", "text": "generated"},
+        },
+    }));
+
+    assert_eq!(
+        title_rx.recv().unwrap()["params"]["threadId"],
+        "thread-title"
+    );
+    assert!(primary_rx.try_recv().is_err());
+}
+
+#[test]
 fn early_descendant_activity_waits_for_a_proven_owner() {
     let router = router();
     let (owner, rx) = register(&router);

@@ -152,6 +152,17 @@ fn tab_title_from_prompt(text: &str) -> Option<String> {
     (!line.starts_with('/')).then(|| line.chars().take(TAB_TITLE_CHARS).collect())
 }
 
+fn conversation_title_request(kind: AgentKind, text: &str) -> Option<ConversationTitleRequest> {
+    let provisional_title = match kind {
+        AgentKind::Codex => app_server::provisional_title_from_prompt(text),
+        AgentKind::Claude | AgentKind::DeepSeek => tab_title_from_prompt(text),
+    }?;
+    Some(ConversationTitleRequest {
+        description: text.to_string(),
+        provisional_title,
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Status {
     Starting,
@@ -267,6 +278,7 @@ impl AgentPane {
             response_annotations: Vec::new(),
             last_response_at: None,
             conversation_named: false,
+            pending_conversation_rename: None,
             transcript,
             input,
             runtime: SessionRuntime {
@@ -627,6 +639,10 @@ impl AgentPane {
         self.controls.restore_on_ready =
             preserve_thread_settings.then(|| self.controls.settings.clone());
 
+        if let Some(session) = self.runtime.backend.as_mut() {
+            session.cancel_title_generation();
+        }
+
         // Replacing a conversation must clear any running or unread state
         // associated with the previous backend before the new epoch can emit.
         cx.emit(AgentPaneEvent::Interrupted);
@@ -930,10 +946,7 @@ impl AgentPane {
         let title_request = if self.conversation_named {
             None
         } else {
-            tab_title_from_prompt(title_text).map(|opening_line| ConversationTitleRequest {
-                description: title_text.to_string(),
-                opening_line,
-            })
+            conversation_title_request(self.kind, title_text)
         };
         let settings = self.controls.settings.clone();
         let scratch = scratch_dir(self.agent_route.as_str());
@@ -965,6 +978,13 @@ impl AgentPane {
         if let Some(text) = refusal {
             self.push_item(SessionItem::Error { text }, cx);
             return false;
+        }
+
+        if self.kind == AgentKind::Codex
+            && let Some(title) = title_request
+        {
+            self.conversation_named = true;
+            cx.emit(AgentPaneEvent::TitleSuggested(title.provisional_title));
         }
 
         // Accepted: the images went with it, so the transcript keeps them and
@@ -1117,8 +1137,18 @@ impl AgentPane {
     /// Pass a tab rename through to the conversation, so the name reaches the
     /// harness's own session record rather than living only in this tab.
     pub fn rename_session(&mut self, title: &str) {
-        if let Some(session) = self.runtime.backend.as_mut() {
+        self.conversation_named = true;
+        let can_address_conversation = self
+            .runtime
+            .backend
+            .as_ref()
+            .and_then(Backend::recovery_identity)
+            .is_some();
+        if can_address_conversation && let Some(session) = self.runtime.backend.as_mut() {
             session.rename_session(title);
+            self.pending_conversation_rename = None;
+        } else {
+            self.pending_conversation_rename = Some(title.to_string());
         }
     }
 
@@ -1209,6 +1239,9 @@ impl AgentPane {
         // DeepSeek and Codex hosts stop once their final session reference is
         // released. Keeping the retired backend until the replacement starts
         // transfers that reference without restarting an unchanged host.
+        if let Some(session) = self.runtime.backend.as_mut() {
+            session.cancel_title_generation();
+        }
         let retiring = self.runtime.backend.take();
         // A fresh conversation always follows the live tail again, even if
         // the previous transcript was scrolled up when it was discarded.

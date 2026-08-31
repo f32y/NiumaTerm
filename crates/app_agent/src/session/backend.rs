@@ -43,7 +43,7 @@ pub(crate) enum Backend {
 
 pub(super) struct ConversationTitleRequest {
     pub(super) description: String,
-    pub(super) opening_line: String,
+    pub(super) provisional_title: String,
 }
 
 #[cfg(test)]
@@ -205,12 +205,12 @@ impl Backend {
         match self {
             Backend::Codex(session) => {
                 let paths = write_attachments(attachments, scratch);
-                session.send_user_message_with_thread_name(
+                session.send_user_message_with_generated_title(
                     text,
                     settings,
                     skill,
                     &paths,
-                    &title.opening_line,
+                    &title.provisional_title,
                 )
             }
             Backend::Claude(session) => {
@@ -512,15 +512,21 @@ impl Backend {
         }
     }
 
-    /// Name the conversation this backend holds. Only Claude Code keeps a
-    /// name of its own for one; where the harness keeps none, the tab's name
-    /// is this application's alone and there is nothing to tell.
+    /// Name the conversation this backend holds when its provider stores a
+    /// user-authored title of its own.
     pub(crate) fn rename_session(&mut self, title: &str) {
         match self {
             Backend::Claude(session) => session.rename_session(title),
-            Backend::Codex(_) | Backend::DeepSeek(_) => {}
+            Backend::Codex(session) => session.rename_thread(title),
+            Backend::DeepSeek(_) => {}
             #[cfg(test)]
             Backend::Test(_) => {}
+        }
+    }
+
+    pub(crate) fn cancel_title_generation(&mut self) {
+        if let Backend::Codex(session) = self {
+            session.cancel_title_generation();
         }
     }
 
