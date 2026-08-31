@@ -970,3 +970,179 @@ mod branch_point_targeting_tests {
         );
     }
 }
+
+/// Vertical space belongs to the boundary between two rows. A rank read off
+/// the upper row alone cannot hold a run of work off the prose on both sides
+/// of it: the run's last row reports the tight step rhythm it owes the run
+/// above it, and whatever follows the run inherits it.
+mod row_rhythm_tests {
+    use gpui::{AppContext as _, TestAppContext};
+    use nmt_agent_utils::chat::{Item as SessionItem, ReplayItem, ReplayTurn};
+    use nmt_config::agent::CollapseRows;
+
+    use crate::transcript::rows::RowGap;
+    use crate::transcript::{AgentKind, RowSpec, TranscriptView};
+
+    fn replay(items: Vec<ReplayItem>) -> ReplayTurn {
+        ReplayTurn {
+            items,
+            seconds: None,
+            output_tokens: None,
+            interrupted: false,
+        }
+    }
+
+    fn user(text: &str) -> ReplayItem {
+        ReplayItem {
+            item: SessionItem::UserMessage {
+                text: Some(text.to_string()),
+            },
+            at: None,
+        }
+    }
+
+    fn agent(text: &str) -> ReplayItem {
+        ReplayItem {
+            item: SessionItem::AgentMessage {
+                id: text.to_string(),
+                text: Some(text.to_string()),
+            },
+            at: None,
+        }
+    }
+
+    fn command(command: &str) -> ReplayItem {
+        ReplayItem {
+            item: SessionItem::CommandExecution {
+                id: command.to_string(),
+                command: command.to_string(),
+                purpose: None,
+                aggregated_output: None,
+                status: None,
+                exit_code: Some(0),
+            },
+            at: None,
+        }
+    }
+
+    /// Row kinds and the rank of the space each holds below it, in render
+    /// order.
+    fn rhythm(view: &TranscriptView) -> Vec<(&'static str, RowGap)> {
+        view.rows
+            .iter()
+            .map(|row| {
+                let kind = match row.spec {
+                    RowSpec::Entry { .. } => "entry",
+                    RowSpec::Work { .. } => "work",
+                    RowSpec::RunToggle { .. } => "run",
+                    RowSpec::TurnFold { .. } => "fold",
+                    RowSpec::TurnSummary { .. } => "summary",
+                    RowSpec::Interrupted { .. } => "interrupted",
+                    RowSpec::Working { .. } => "working",
+                };
+                (kind, row.gap)
+            })
+            .collect()
+    }
+
+    /// A settled turn that answers, runs two commands, then answers again.
+    /// "Only tool calls" reads the work inline, so the run collapses to its
+    /// toggle with no turn fold above it.
+    fn transcript_with_a_collapsed_run(cx: &mut gpui::App) -> gpui::Entity<TranscriptView> {
+        let view = cx.new(|_| TranscriptView::new(AgentKind::Codex, None));
+        view.update(cx, |view, cx| {
+            view.append_replay(
+                1,
+                replay(vec![
+                    user("ask"),
+                    agent("first"),
+                    command("ls"),
+                    command("cat"),
+                    agent("second"),
+                ]),
+                cx,
+            );
+        });
+        view
+    }
+
+    #[gpui::test]
+    fn a_collapsed_run_is_held_off_the_prose_on_both_sides(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+
+            view.update(cx, |view, _| {
+                let specs = view.build_row_specs(CollapseRows::ToolCalls);
+                view.sync_transcript_list(specs);
+
+                assert_eq!(
+                    rhythm(view),
+                    vec![
+                        ("entry", RowGap::Group),
+                        ("entry", RowGap::Group),
+                        ("run", RowGap::Group),
+                        ("entry", RowGap::Group),
+                    ]
+                );
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn an_expanded_run_keeps_its_steps_tight_and_its_edges_open(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+
+            view.update(cx, |view, _| {
+                view.expanded_groups.insert(2);
+                let specs = view.build_row_specs(CollapseRows::ToolCalls);
+                view.sync_transcript_list(specs);
+
+                assert_eq!(
+                    rhythm(view),
+                    vec![
+                        ("entry", RowGap::Group),
+                        ("entry", RowGap::Group),
+                        ("run", RowGap::Step),
+                        ("work", RowGap::Step),
+                        ("work", RowGap::Group),
+                        ("entry", RowGap::Group),
+                    ]
+                );
+            });
+        });
+    }
+
+    /// A row's height depends on the row under it, so a rank that changes has
+    /// to reach the list as a changed row; a diff that compared only what a
+    /// row says would leave the first step of a growing run measured at the
+    /// height it had while it was the last row of the transcript.
+    #[gpui::test]
+    fn a_row_whose_neighbour_changed_rank_is_remeasured(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = cx.new(|_| TranscriptView::new(AgentKind::Codex, None));
+
+            view.update(cx, |view, cx| {
+                view.push(1, user("ask").item, Vec::new(), cx);
+                view.push(1, command("ls").item, Vec::new(), cx);
+                let specs = view.build_row_specs(CollapseRows::Off);
+                view.sync_transcript_list(specs);
+                let before = view.rows.clone();
+                assert_eq!(
+                    rhythm(view),
+                    vec![("entry", RowGap::Group), ("work", RowGap::Group)]
+                );
+
+                view.push(1, command("cat").item, Vec::new(), cx);
+                let specs = view.build_row_specs(CollapseRows::Off);
+                view.sync_transcript_list(specs);
+
+                // The first step says exactly what it said before; what
+                // changed is that the run now continues under it.
+                assert_eq!(before[1].spec, view.rows[1].spec);
+                assert_ne!(before[1], view.rows[1]);
+                assert_eq!(view.rows[1].gap, RowGap::Step);
+            });
+        });
+    }
+}

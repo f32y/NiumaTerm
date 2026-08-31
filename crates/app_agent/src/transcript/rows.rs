@@ -24,7 +24,7 @@ pub(crate) struct Entry {
 /// render-time diff: kind + indices catch structural changes (fold, collapse,
 /// appended rows), the fingerprint catches in-place content changes that move
 /// a row's height (streamed text, status flips, detail expansion).
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum RowSpec {
     Entry {
         index: usize,
@@ -62,6 +62,63 @@ pub(crate) enum RowSpec {
     Working {
         compacting: bool,
     },
+}
+
+/// Whether a row belongs to a run of work steps, and so is drawn inside the
+/// run's grouping rule. The turn fold heads the whole turn rather than one
+/// run, so it stays outside.
+pub(crate) fn is_run_row(spec: &RowSpec) -> bool {
+    matches!(spec, RowSpec::Work { .. } | RowSpec::RunToggle { .. })
+}
+
+/// How much air a row holds below it, as a rank rather than a measurement.
+/// What the rhythm is follows from what the rows are, which is what this
+/// module decides; how many pixels a rank is worth belongs to the renderer
+/// that owns the transcript's geometry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RowGap {
+    /// Inside one block: between the steps of a run of work, and under the
+    /// disclosure that heads them.
+    Step,
+    /// Between blocks: a message, a run of work, a turn's closing line.
+    Group,
+}
+
+/// A transcript row together with the space held below it. The gap is part of
+/// the compared value because it is part of the row's height: a row whose
+/// neighbour changed rank has to be remeasured even though what the row
+/// itself says is unchanged.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TranscriptRow {
+    pub(crate) spec: RowSpec,
+    pub(crate) gap: RowGap,
+}
+
+/// The space at one boundary between rows. A gap is a property of the
+/// boundary rather than of either row: the same work row wants the tight step
+/// rhythm above the next step of its run and the full block gap above the
+/// prose that follows the run, and a rank read off the upper row alone cannot
+/// say both. The last row is spaced as though a block followed it, so gaining
+/// a row beneath it leaves its height alone.
+fn row_gap(above: &RowSpec, below: Option<&RowSpec>) -> RowGap {
+    let heads_work = is_run_row(above) || matches!(above, RowSpec::TurnFold { .. });
+
+    match below {
+        Some(below) if heads_work && is_run_row(below) => RowGap::Step,
+        _ => RowGap::Group,
+    }
+}
+
+/// Pair every row with its trailing gap, in render order.
+fn spaced_rows(specs: &[RowSpec]) -> Vec<TranscriptRow> {
+    specs
+        .iter()
+        .enumerate()
+        .map(|(ix, spec)| TranscriptRow {
+            spec: spec.clone(),
+            gap: row_gap(spec, specs.get(ix + 1)),
+        })
+        .collect()
 }
 
 /// Where the reader was before something else began moving the transcript for
@@ -447,23 +504,25 @@ impl TranscriptView {
     /// remeasuring, which preserves the scroll position exactly; a count
     /// change is a real splice.
     pub(crate) fn sync_transcript_list(&mut self, new: Vec<RowSpec>) {
-        if self.row_specs == new {
+        let new = spaced_rows(&new);
+
+        if self.rows == new {
             return;
         }
 
         let prefix = self
-            .row_specs
+            .rows
             .iter()
             .zip(&new)
             .take_while(|(a, b)| a == b)
             .count();
-        let suffix = self.row_specs[prefix..]
+        let suffix = self.rows[prefix..]
             .iter()
             .rev()
             .zip(new[prefix..].iter().rev())
             .take_while(|(a, b)| a == b)
             .count();
-        let old_mid = prefix..self.row_specs.len() - suffix;
+        let old_mid = prefix..self.rows.len() - suffix;
         let new_mid = new.len() - suffix - prefix;
 
         if old_mid.len() == new_mid {
@@ -472,7 +531,7 @@ impl TranscriptView {
             self.transcript_list.splice(old_mid, new_mid);
         }
 
-        self.row_specs = new;
+        self.rows = new;
     }
 }
 
@@ -525,9 +584,9 @@ impl TranscriptView {
             return None;
         }
 
-        self.row_specs
+        self.rows
             .iter()
-            .position(|spec| matches!(spec, RowSpec::Entry { index: row, .. } if *row == index))
+            .position(|row| matches!(row.spec, RowSpec::Entry { index: at, .. } if at == index))
     }
 
     /// Put the prompt a branch point names at the top of the transcript, so

@@ -2,6 +2,7 @@ use nmt_i18n::i18n;
 
 use crate::transcript::is_work_row;
 use crate::transcript::render::TRANSCRIPT_LINE_HEIGHT;
+use crate::transcript::rows::TranscriptRow;
 use crate::*;
 
 /// One agent conversation as the user reads it: the entry list, the row
@@ -17,10 +18,10 @@ use crate::*;
 pub struct TranscriptView {
     pub(crate) items: Vec<Entry>,
     /// Virtualized transcript: only visible rows build elements each frame.
-    /// `row_specs` mirrors the list's item count; render() diffs freshly built
-    /// specs against it and splices/remeasures just the changed range.
+    /// `rows` mirrors the list's item count; render() diffs freshly built
+    /// rows against it and splices/remeasures just the changed range.
     pub(crate) transcript_list: ListState,
-    pub(crate) row_specs: Vec<RowSpec>,
+    pub(crate) rows: Vec<TranscriptRow>,
     /// Row heights depend on the prose and technical-content fonts, which the
     /// specs can't see; the last-seen values trigger a full remeasure on change.
     transcript_font: (SharedString, f32, SharedString, f32),
@@ -115,7 +116,7 @@ impl TranscriptView {
                 state.set_follow_mode(FollowMode::Tail);
                 state
             },
-            row_specs: Vec::new(),
+            rows: Vec::new(),
             stashed_position: None,
             reserve_below: false,
             transcript_font: Default::default(),
