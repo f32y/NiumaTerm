@@ -11,6 +11,7 @@ use crate::transcript::disclosure_row::{
     agent_card,
 };
 use crate::transcript::format::{interrupted_status_label, worked_status_label};
+use crate::transcript::rows::{RowGap, TranscriptRow, is_run_row};
 use crate::transcript::{
     code_transcript_format, command_execution_detail, command_execution_heading,
     command_failure_reason, compact_token_count, compaction_accounting, compaction_label,
@@ -37,22 +38,21 @@ pub(crate) fn transcript_column_margin() -> f32 {
 /// message / work / message rather than as one undifferentiated stack.
 const TRANSCRIPT_GROUP_GAP: f32 = 24.0;
 const TRANSCRIPT_STEP_GAP: f32 = 8.0;
-/// The rule down the left of a run of work rows, and the space it holds off
-/// them. The steps carry no border of their own, so this is what marks where
-/// a run starts and ends and keeps its rows reading as one block.
+/// The rule down the left of a run of work rows. The steps carry no border of
+/// their own, so this is what marks where a run starts and ends and keeps its
+/// rows reading as one block. It holds the rows off nothing: a gap after it
+/// would indent the run's labels away from the column the conversation is
+/// read in, and the rule already separates them from it.
 const TRANSCRIPT_RUN_RULE: f32 = 2.0;
-const TRANSCRIPT_RUN_RULE_GAP: f32 = 12.0;
+/// Where the conversation's own text starts inside the reading column, which
+/// every prose row and status line sets on itself. The run rule stands on
+/// that edge rather than left of it, so a run reads as part of the column
+/// instead of hanging off it.
+const TRANSCRIPT_TEXT_INSET: f32 = 4.0;
 /// Leading for transcript text, as a multiple of the font size. Conversation
 /// prose is read in paragraphs rather than scanned line by line the way
 /// terminal output is, so it is set looser than the chrome around it.
 pub(super) const TRANSCRIPT_LINE_HEIGHT: f32 = 1.6;
-
-/// Whether a row belongs to a run of work steps, and so is drawn inside the
-/// run's grouping rule. The turn fold heads the whole turn rather than one
-/// run, so it stays outside.
-fn is_run_row(spec: &RowSpec) -> bool {
-    matches!(spec, RowSpec::Work { .. } | RowSpec::RunToggle { .. })
-}
 
 impl TranscriptView {
     /// Build the element for one visible row. Row indices come from the list
@@ -64,22 +64,21 @@ impl TranscriptView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(spec) = self.row_specs.get(ix).cloned() else {
+        let Some(TranscriptRow { spec, gap }) = self.rows.get(ix).cloned() else {
             return div().into_any_element();
         };
 
-        let gap = match &spec {
-            RowSpec::Work { .. } | RowSpec::RunToggle { .. } | RowSpec::TurnFold { .. } => {
-                TRANSCRIPT_STEP_GAP
-            }
-            _ => TRANSCRIPT_GROUP_GAP,
-        };
         // The list lays each row out on its own, so a run's grouping rule is
-        // drawn per row rather than around the run. Carrying the gap inside
-        // the rule while the next row is also part of the run is what makes
-        // the separate segments meet as one unbroken line.
+        // drawn per row rather than around the run. A segment has to carry
+        // the gap below it or consecutive segments meet with a break between
+        // them, and the boundaries that stay inside a run are exactly the
+        // step-ranked gaps on a row the rule covers.
         let in_run = is_run_row(&spec);
-        let run_continues = in_run && self.row_specs.get(ix + 1).is_some_and(is_run_row);
+        let rule_carries_gap = in_run && gap == RowGap::Step;
+        let gap = match gap {
+            RowGap::Step => TRANSCRIPT_STEP_GAP,
+            RowGap::Group => TRANSCRIPT_GROUP_GAP,
+        };
 
         let row = match spec {
             RowSpec::Entry { index, .. } => self.render_entry_row(index, window, cx),
@@ -110,21 +109,27 @@ impl TranscriptView {
         // box: an inner box is one more level for a width to resolve through,
         // and a row whose width goes indefinite wraps its text at the minimum
         // — one glyph per line for CJK prose.
+        let body = div()
+            .w_full()
+            .when(in_run, |this| {
+                this.border_l(px(TRANSCRIPT_RUN_RULE))
+                    .border_color(cx.theme().border)
+            })
+            .when(rule_carries_gap, |this| this.pb(px(gap)))
+            .child(row);
+
         div()
             .w_full()
             .px(relative(transcript_column_margin()))
-            .when(!run_continues, |this| this.pb(px(gap)))
-            .child(
-                div()
-                    .w_full()
-                    .when(in_run, |this| {
-                        this.border_l(px(TRANSCRIPT_RUN_RULE))
-                            .border_color(cx.theme().border)
-                            .pl(px(TRANSCRIPT_RUN_RULE_GAP))
-                    })
-                    .when(run_continues, |this| this.pb(px(gap)))
-                    .child(row),
-            )
+            .when(!rule_carries_gap, |this| this.pb(px(gap)))
+            // A border is drawn at the element's own leading edge, outside any
+            // padding it carries, so the inset that puts the rule on the text
+            // column has to come from a level above it. Only a run needs one,
+            // and only a run pays for it.
+            .map(|this| match in_run {
+                true => this.child(div().w_full().pl(px(TRANSCRIPT_TEXT_INSET)).child(body)),
+                false => this.child(body),
+            })
             .into_any_element()
     }
 
@@ -145,7 +150,7 @@ impl TranscriptView {
 
             return h_flex()
                 .w_full()
-                .gap_2()
+                .gap_1()
                 .items_center()
                 .px_1()
                 .child(
@@ -155,27 +160,35 @@ impl TranscriptView {
                         .color(accent),
                 )
                 .child(
-                    div()
-                        .text_xs()
-                        .text_color(accent)
-                        .child(i18n("agent-transcript-compacting")),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground.opacity(0.55))
-                        .child(working_label(
-                            started,
-                            self.working_output_tokens,
-                            self.working_detail.as_deref(),
-                        )),
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(accent)
+                                .child(i18n("agent-transcript-compacting")),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground.opacity(0.55))
+                                .child(working_label(
+                                    started,
+                                    self.working_output_tokens,
+                                    self.working_detail.as_deref(),
+                                )),
+                        ),
                 )
                 .into_any_element();
         }
 
+        // The spinner marks the line rather than heading a column, so it is
+        // followed by the narrowest gap that keeps it off the label: a full
+        // one would start the label a glyph's width right of the reply above
+        // it, which is the one thing on screen it has to line up with.
         h_flex()
             .w_full()
-            .gap_2()
+            .gap_1()
             .items_center()
             .px_1()
             .child(
