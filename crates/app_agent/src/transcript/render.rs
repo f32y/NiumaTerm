@@ -5,10 +5,10 @@ use nmt_i18n::i18n;
 use crate::composer::attachments::MAX_ATTACHMENTS;
 use crate::composer::{annotation_count_label, parse_annotated_prompt};
 use crate::transcript::disclosure_row::{
-    AGENT_CARD_BODY_PADDING_Y, AGENT_CARD_DETAIL_SIZE, AGENT_CARD_PADDING_X,
-    AGENT_DISCLOSURE_DETAIL_INSET, AgentCardTone, AgentDisclosureRow, USER_BUBBLE_PADDING_X,
-    USER_BUBBLE_PADDING_Y, USER_BUBBLE_RADIUS, USER_BUBBLE_TAIL_RADIUS, USER_BUBBLE_WIDTH_FRACTION,
-    agent_card,
+    AGENT_CARD_BODY_PADDING_Y, AGENT_CARD_DETAIL_SIZE, AGENT_CARD_GAP, AGENT_CARD_ICON_BLOCK,
+    AGENT_CARD_PADDING_X, AGENT_DISCLOSURE_DETAIL_INSET, AgentCardTone, AgentDisclosureRow,
+    USER_BUBBLE_PADDING_X, USER_BUBBLE_PADDING_Y, USER_BUBBLE_RADIUS, USER_BUBBLE_TAIL_RADIUS,
+    USER_BUBBLE_WIDTH_FRACTION, agent_card,
 };
 use crate::transcript::format::{interrupted_status_label, worked_status_label};
 use crate::transcript::rows::{RowGap, TranscriptRow, is_run_row};
@@ -38,10 +38,13 @@ pub(crate) fn transcript_column_margin() -> f32 {
 /// line. Held in rems so it tracks the root size the rest of the UI scales
 /// with rather than pinning a physical width.
 const PROSE_MEASURE_REMS: f32 = 55.0;
-/// Space below one message group, and the tighter space between the steps
-/// inside a single run of work. Ranking the two is what makes a turn read as
-/// message / work / message rather than as one undifferentiated stack.
+/// Three ranks of space, which is what makes a turn read as message / work /
+/// message rather than as one undifferentiated stack. The widest marks where
+/// one exchange ends; the middle one holds a turn's work off the prose it is
+/// interleaved with, close enough that the two still read as one answer; the
+/// tightest keeps the steps of a single run together.
 const TRANSCRIPT_GROUP_GAP: f32 = 24.0;
+const TRANSCRIPT_WORK_TEXT_GAP: f32 = 12.0;
 const TRANSCRIPT_STEP_GAP: f32 = 8.0;
 /// The rule down the left of a run of work rows. The steps carry no border of
 /// their own, so this is what marks where a run starts and ends and keeps its
@@ -76,12 +79,14 @@ impl TranscriptView {
         // The list lays each row out on its own, so a run's grouping rule is
         // drawn per row rather than around the run. A segment has to carry
         // the gap below it or consecutive segments meet with a break between
-        // them, and the boundaries that stay inside a run are exactly the
-        // step-ranked gaps on a row the rule covers.
+        // them, and a run continues past a boundary exactly when that
+        // boundary is step-ranked. The wider ranks all end the run, so their
+        // space belongs below the rule rather than inside it.
         let in_run = is_run_row(&spec);
         let rule_carries_gap = in_run && gap == RowGap::Step;
         let gap = match gap {
             RowGap::Step => TRANSCRIPT_STEP_GAP,
+            RowGap::Work => TRANSCRIPT_WORK_TEXT_GAP,
             RowGap::Group => TRANSCRIPT_GROUP_GAP,
         };
 
@@ -155,14 +160,22 @@ impl TranscriptView {
 
             return h_flex()
                 .w_full()
-                .gap_1()
+                .gap(px(AGENT_CARD_GAP))
                 .items_center()
-                .px_1()
+                .px(px(AGENT_CARD_PADDING_X))
                 .child(
-                    Spinner::new()
-                        .icon(IconName::LoaderCircle)
-                        .with_size(px(12.))
-                        .color(accent),
+                    div()
+                        .size(px(AGENT_CARD_ICON_BLOCK))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            Spinner::new()
+                                .icon(IconName::LoaderCircle)
+                                .with_size(px(12.))
+                                .color(accent),
+                        ),
                 )
                 .child(
                     h_flex()
@@ -187,20 +200,28 @@ impl TranscriptView {
                 .into_any_element();
         }
 
-        // The spinner marks the line rather than heading a column, so it is
-        // followed by the narrowest gap that keeps it off the label: a full
-        // one would start the label a glyph's width right of the reply above
-        // it, which is the one thing on screen it has to line up with.
+        // The spinner stands in the slot a card gives its type icon, so the
+        // label starts on the column a tool call's title starts on and the
+        // live line reads as the next step of the work above it rather than
+        // as a stray line under it.
         h_flex()
             .w_full()
-            .gap_1()
+            .gap(px(AGENT_CARD_GAP))
             .items_center()
-            .px_1()
+            .px(px(AGENT_CARD_PADDING_X))
             .child(
-                Spinner::new()
-                    .icon(IconName::LoaderCircle)
-                    .with_size(px(12.))
-                    .color(cx.theme().warning),
+                div()
+                    .size(px(AGENT_CARD_ICON_BLOCK))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        Spinner::new()
+                            .icon(IconName::LoaderCircle)
+                            .with_size(px(12.))
+                            .color(cx.theme().warning),
+                    ),
             )
             .child(
                 div()

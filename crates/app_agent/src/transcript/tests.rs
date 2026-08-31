@@ -1066,6 +1066,9 @@ mod row_rhythm_tests {
         view
     }
 
+    /// The run and the two replies around it are one answer, so they are held
+    /// apart by the middle rank; only the prompt that opened the turn keeps
+    /// the full one.
     #[gpui::test]
     fn a_collapsed_run_is_held_off_the_prose_on_both_sides(cx: &mut TestAppContext) {
         cx.update(|cx| {
@@ -1079,8 +1082,8 @@ mod row_rhythm_tests {
                     rhythm(view),
                     vec![
                         ("entry", RowGap::Group),
-                        ("entry", RowGap::Group),
-                        ("run", RowGap::Group),
+                        ("entry", RowGap::Work),
+                        ("run", RowGap::Work),
                         ("entry", RowGap::Group),
                     ]
                 );
@@ -1102,10 +1105,10 @@ mod row_rhythm_tests {
                     rhythm(view),
                     vec![
                         ("entry", RowGap::Group),
-                        ("entry", RowGap::Group),
+                        ("entry", RowGap::Work),
                         ("run", RowGap::Step),
                         ("work", RowGap::Step),
-                        ("work", RowGap::Group),
+                        ("work", RowGap::Work),
                         ("entry", RowGap::Group),
                     ]
                 );
