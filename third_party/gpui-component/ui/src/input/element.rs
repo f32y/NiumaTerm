@@ -1681,6 +1681,7 @@ impl Element for TextElement {
                 thickness: px(1.),
                 color: Some(text_color),
                 wavy: false,
+                dashed: false,
             }),
             strikethrough: None,
         };
