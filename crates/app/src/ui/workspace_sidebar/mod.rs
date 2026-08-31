@@ -261,6 +261,12 @@ const TAB_ROW_TEXT: f32 = 13.0;
 /// above it, past that control's own button padding, so the window's leading
 /// chrome reads as one edge from the title bar down.
 const SIDEBAR_PADDING_X: f32 = 12.0;
+/// How far a row's fill reaches back into that inset on each side, and how
+/// much padding the row then puts back so its content still lands on the
+/// column's edge. Without it the highlight stops exactly where the first
+/// glyph starts and reads as clipped; the leading half of it is also the lane
+/// the selected-row mark stands in.
+const SIDEBAR_ROW_GUTTER: f32 = 6.0;
 const SIDEBAR_PADDING_TOP: f32 = 14.0;
 const SIDEBAR_GROUP_GAP: f32 = 14.0;
 /// The list heading. It names the column rather than competing with the
@@ -277,11 +283,9 @@ const WORKSPACE_PATH_TEXT: f32 = 10.5;
 const SIDEBAR_STATUS_PADDING_Y: f32 = 8.0;
 const SIDEBAR_STATUS_ROW_GAP: f32 = 2.0;
 
-/// Distance from the row box's leading edge. The row keeps no padding there,
-/// so the mark stands on that edge: an inset would push it into the status
-/// lane behind it. The row's corner radius is small enough, and the mark short
-/// enough, that its ends stay within the fill.
-const SELECTION_BAR_INSET: f32 = 0.0;
+/// Distance from the row box's leading edge. The row is a rounded rectangle,
+/// so a mark flush against that edge would sit outside the fill at the corners.
+const SELECTION_BAR_INSET: f32 = 2.0;
 
 /// The accent bar that marks the selected row. It is drawn out of the row's
 /// flow so it can sit in the gutter left of the row's own padding, and it
@@ -454,6 +458,11 @@ impl Sidebar {
                             .id("workspace-list")
                             .size_full()
                             .gap(px(SIDEBAR_GROUP_GAP))
+                            // Pulled back over the panel's inset so a row's
+                            // fill can reach into it. The list clips its own
+                            // children horizontally, so a row cannot overhang
+                            // this box; the box has to move instead.
+                            .ml(px(-SIDEBAR_ROW_GUTTER))
                             .pr_3()
                             .overflow_y_scroll()
                             .track_scroll(&self.scroll)
