@@ -77,6 +77,7 @@ pub(crate) fn terminal_text_runs(line: &TerminalLine, base: &TextRun) -> Vec<Tex
                     thickness: px(1.0),
                     color: None,
                     wavy: false,
+                    dashed: false,
                 });
             }
 
