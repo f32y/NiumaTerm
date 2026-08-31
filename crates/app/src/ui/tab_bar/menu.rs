@@ -1,19 +1,32 @@
-use gpui::{App, Entity};
+use gpui::{App, Entity, SharedString};
 use gpui_component::modern_menu::ModernMenu;
-use gpui_component::{Icon, IconName, Sizable as _};
+use gpui_component::{Icon, IconName, IconNamed, Sizable as _};
 use nmt_app_agent::AgentKind;
 use nmt_config::profile::Profile;
 use nmt_i18n::i18n;
 
 use crate::ui::{AppSettings, Shell};
 
+/// A shell tab's mark: the prompt itself, with no box drawn around it. At the
+/// size a tab strip and a menu row set their glyphs, a box spends most of the
+/// mark on its own outline and leaves the prompt inside it too small to read
+/// as one; the agent marks beside it carry no frame either, so a framed one
+/// would read as a different kind of entry rather than as a different tab.
+struct TerminalIcon;
+
+impl IconNamed for TerminalIcon {
+    fn path(self) -> SharedString {
+        "icons/terminal-prompt.svg".into()
+    }
+}
+
 /// The glyph a tab leads with: the agent's own mark on an agent tab, a gear on
-/// the settings tab, and a terminal mark otherwise.
+/// the settings tab, and a shell prompt otherwise.
 pub(in crate::ui) fn tab_icon(agent_kind: Option<AgentKind>, settings: bool) -> Icon {
     match agent_kind {
         Some(kind) => kind.icon(),
         None if settings => Icon::new(IconName::Settings),
-        None => Icon::new(IconName::SquareTerminal),
+        None => Icon::new(TerminalIcon),
     }
     .xsmall()
 }
