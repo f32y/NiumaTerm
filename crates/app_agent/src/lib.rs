@@ -458,6 +458,17 @@ mod git_branch_poll_tests {
     }
 }
 
+/// Eased position along a transition, for a parameter already clamped to
+/// `0..=1`. The ramp leaves and arrives at zero speed, so neither end of a
+/// transition built on it reads as the effect being switched on.
+///
+/// The transcript's disclosures and the composer's blur share this curve so
+/// two transitions the reader can trigger within a moment of each other move
+/// alike.
+fn smoothstep(t: f32) -> f32 {
+    t * t * (3.0 - 2.0 * t)
+}
+
 /// Ramp driving the transcript blur behind the recent-session list: where it
 /// started, what it is heading for, and when it left. Reversing mid-ramp starts
 /// a fresh one from wherever the previous had reached, so a list dismissed
@@ -476,10 +487,8 @@ impl BlurFade {
     fn progress(&self, now: Instant) -> f32 {
         let elapsed = now.duration_since(self.start).as_secs_f32();
         let t = (elapsed / Self::DURATION.as_secs_f32()).clamp(0.0, 1.0);
-        // Smoothstep: the ramp leaves and arrives at zero speed, so neither end
-        // of the transition reads as the blur being switched on.
-        let eased = t * t * (3.0 - 2.0 * t);
-        self.from + (self.to - self.from) * eased
+
+        self.from + (self.to - self.from) * smoothstep(t)
     }
 
     fn settled(&self, now: Instant) -> bool {

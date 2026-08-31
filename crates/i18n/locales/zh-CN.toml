@@ -80,6 +80,8 @@
 "settings-appearance-scrolling-only-terminal" = "仅终端"
 "settings-appearance-scrolling-only-agent" = "仅智能体"
 "settings-appearance-smooth-scrolling-description" = "选择在哪些区域为传统鼠标滚轮启用滚动动画。"
+"settings-appearance-reduce-motion" = "减弱动效"
+"settings-appearance-reduce-motion-description" = "展开和收起的内容直接显示，不播放入场动画。"
 "settings-appearance-font" = "字体"
 "settings-appearance-ui-font" = "界面字体"
 "settings-appearance-ui-font-description" = "应用界面所用字体（标题栏、侧边栏、标签页和对话框）。"

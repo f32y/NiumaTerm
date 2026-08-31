@@ -32,6 +32,9 @@ pub struct AgentSettings {
     /// How the composer's model picker spells each model it offers.
     pub model_list_style: ModelListStyle,
     pub smooth_wheel: bool,
+    /// Put disclosed content on screen at once, skipping the entrance the
+    /// transcript otherwise plays for it.
+    pub reduce_motion: bool,
     /// Seconds between branch-label refreshes of the pane's working
     /// directory.
     pub git_status_refresh_interval: u64,
@@ -80,6 +83,7 @@ impl Default for AgentSettings {
             codex_skill_command_compat: false,
             model_list_style: ModelListStyle::default(),
             smooth_wheel: true,
+            reduce_motion: false,
             git_status_refresh_interval: 30,
             profiles: Vec::new(),
             background_opacity: 1.0,

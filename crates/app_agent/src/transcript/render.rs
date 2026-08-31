@@ -11,6 +11,7 @@ use crate::transcript::disclosure_row::{
     USER_BUBBLE_RADIUS, USER_BUBBLE_TAIL_RADIUS, USER_BUBBLE_WIDTH_FRACTION, agent_card,
 };
 use crate::transcript::format::{interrupted_status_label, worked_status_label};
+use crate::transcript::reveal::{RevealKey, revealed};
 use crate::transcript::rows::{RowGap, TranscriptRow, is_run_row};
 use crate::transcript::{
     code_transcript_format, command_execution_detail, command_execution_heading,
@@ -127,6 +128,18 @@ impl TranscriptView {
             })
             .when(rule_carries_gap, |this| this.pb(px(gap)))
             .child(row);
+
+        // A row a run toggle just spliced in arrives rather than appearing.
+        // Its slice of the run's grouping rule is inside the entrance, so a
+        // step and the rule beside it fade up together instead of the rule
+        // being drawn down to steps that are not there yet. The column margin
+        // stays outside it, so the rise moves the step and not the column.
+        let body = match self.revealed_by(ix) {
+            Some((key, ordinal)) => {
+                revealed(body, self.reveals.progress(key, ordinal, Instant::now()))
+            }
+            None => body,
+        };
 
         div()
             .w_full()
@@ -389,14 +402,19 @@ impl TranscriptView {
                 })
                 .id(("user-expand", index))
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    if !this.expanded_rows.insert(index) {
-                        this.expanded_rows.remove(&index);
-                    }
-                    cx.notify();
+                    this.toggle_disclosure(RevealKey::Row(index), cx)
                 }))
         });
 
         let annotations_expanded = self.expanded_annotations.contains(&index);
+        // The prompt fold above swaps the text inside one bubble rather than
+        // opening a block below it, so it takes no entrance of its own: fading
+        // it in would fade the half of the prompt that was already on screen.
+        // Its toggle still pins the reading position, which is what a paste
+        // long enough to fold actually needs.
+        let annotations_reveal =
+            self.reveals
+                .progress(RevealKey::Annotation(index), 0, Instant::now());
         let annotations = parsed.as_ref().and_then(|parsed| {
             (!parsed.annotations.is_empty()).then(|| {
                 let action_label = if annotations_expanded {
@@ -408,6 +426,7 @@ impl TranscriptView {
                     v_flex()
                         .w_full()
                         .gap_2()
+                        .map(|this| revealed(this, annotations_reveal))
                         // Closes the bubble the header opens, and takes the
                         // header's own edge inset so a quotation starts on the
                         // same column the header's label does.
@@ -494,10 +513,7 @@ impl TranscriptView {
                                 .xsmall(),
                             )
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                if !this.expanded_annotations.insert(index) {
-                                    this.expanded_annotations.remove(&index);
-                                }
-                                cx.notify();
+                                this.toggle_disclosure(RevealKey::Annotation(index), cx)
                             })),
                     )
                     .children(content)
@@ -788,6 +804,9 @@ impl TranscriptView {
 
         let expandable = detail.is_some();
         let expanded = expandable && self.expanded_rows.contains(&index);
+        let detail_reveal = self
+            .reveals
+            .progress(RevealKey::Row(index), 0, Instant::now());
         let status_label = match status.as_deref() {
             Some("failed") => i18n("agent-transcript-status-failed"),
             Some("declined") => i18n("agent-transcript-status-declined"),
@@ -835,17 +854,14 @@ impl TranscriptView {
             header = header.status(icon, color);
         }
         if expandable {
-            header = header.expanded(expanded);
+            header = header.expanded(expanded).opening(detail_reveal);
         }
-        let header = header.render(cx).when(expandable, |this| {
-            this.on_click(cx.listener(move |this, _, _, cx| {
-                if !this.expanded_rows.insert(index) {
-                    this.expanded_rows.remove(&index);
-                    this.virtual_transcripts.remove(&index);
-                }
-                cx.notify();
-            }))
-        });
+        let header =
+            header.render(cx).when(expandable, |this| {
+                this.on_click(cx.listener(move |this, _, _, cx| {
+                    this.toggle_disclosure(RevealKey::Row(index), cx)
+                }))
+            });
 
         // The block under the header carries the header's own fill, so a
         // failed step reads as one tinted shape rather than as a tinted
@@ -1050,7 +1066,7 @@ impl TranscriptView {
                         .border_color(cx.theme().border.opacity(0.6))
                         .px(px(AGENT_CARD_PADDING_X))
                         .py(px(AGENT_CARD_BODY_PADDING_Y))
-                        .relative()
+                        .map(|this| revealed(this, detail_reveal))
                         .child(body)
                 }))
         });
@@ -1085,7 +1101,11 @@ impl TranscriptView {
             .preview(preview.clone())
             .accent(accent);
         if expandable {
-            header_row = header_row.expanded(expanded);
+            header_row = header_row.expanded(expanded).opening(self.reveals.progress(
+                RevealKey::Row(index),
+                0,
+                Instant::now(),
+            ));
         }
         let accessible_label = if expandable {
             format!(
@@ -1101,12 +1121,10 @@ impl TranscriptView {
         };
         let mut header = header_row.accessible_label(accessible_label).render(cx);
         if expandable {
-            header = header.on_click(cx.listener(move |this, _, _, cx| {
-                if !this.expanded_rows.insert(index) {
-                    this.expanded_rows.remove(&index);
-                }
-                cx.notify();
-            }));
+            header =
+                header.on_click(cx.listener(move |this, _, _, cx| {
+                    this.toggle_disclosure(RevealKey::Row(index), cx)
+                }));
         }
 
         v_flex()
@@ -1170,6 +1188,13 @@ impl TranscriptView {
             .border_color(cx.theme().border.opacity(0.6))
             .px(px(AGENT_CARD_PADDING_X))
             .py(px(AGENT_CARD_BODY_PADDING_Y))
+            .map(|this| {
+                revealed(
+                    this,
+                    self.reveals
+                        .progress(RevealKey::Row(index), 0, Instant::now()),
+                )
+            })
             .gap_1()
             .text_xs()
             .children(accounting_rows.into_iter().filter_map(|(name, value)| {
@@ -1348,6 +1373,10 @@ impl TranscriptView {
                 // being one, and its own chevron already says what it does.
                 AgentDisclosureRow::new(("wl-run", run_start), label.clone())
                     .expanded(expanded)
+                    .opening(
+                        self.reveals
+                            .progress(RevealKey::Group(run_start), 0, Instant::now()),
+                    )
                     .accessible_label(format!(
                         "{label}. {}",
                         if expanded {
@@ -1358,10 +1387,7 @@ impl TranscriptView {
                     ))
                     .render(cx)
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        if !this.expanded_groups.insert(run_start) {
-                            this.expanded_groups.remove(&run_start);
-                        }
-                        cx.notify();
+                        this.toggle_disclosure(RevealKey::Group(run_start), cx)
                     })),
             )
             .into_any_element()

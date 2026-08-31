@@ -398,6 +398,18 @@ fn smooth_scrolling_maps_to_saved_appearance() {
     }
 }
 
+/// Motion is on for a fresh configuration, and turning it down is what gets
+/// written to disk rather than being forgotten at the next launch.
+#[test]
+fn reduce_motion_is_off_by_default_and_is_saved_when_turned_on() {
+    let mut settings = AppSettings::default();
+    assert!(!settings.reduce_motion);
+    assert!(!settings.appearance_config().reduce_motion);
+
+    settings.reduce_motion = true;
+    assert!(settings.appearance_config().reduce_motion);
+}
+
 fn list_pixel_position(state: &ListState) -> f32 {
     let offset = state.logical_scroll_top();
     offset.item_ix as f32 * 20. + offset.offset_in_item.as_f32()

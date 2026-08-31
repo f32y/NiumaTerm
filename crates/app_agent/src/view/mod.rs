@@ -169,10 +169,18 @@ impl Render for AgentPane {
                 start: now,
             };
         }
-        let blur = self.history_ui.transcript_blur.progress(now);
-        if !self.history_ui.transcript_blur.settled(now) {
-            window.request_animation_frame();
-        }
+        // Under reduced motion the ramp is still retargeted, so a list opened
+        // while it is on and closed after it is off resumes from the blur
+        // actually on screen; only the travel to the target is skipped.
+        let blur = if cx.global::<AgentSettings>().reduce_motion {
+            blur_target
+        } else {
+            if !self.history_ui.transcript_blur.settled(now) {
+                window.request_animation_frame();
+            }
+
+            self.history_ui.transcript_blur.progress(now)
+        };
 
         v_flex()
             .size_full()

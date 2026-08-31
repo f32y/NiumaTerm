@@ -47,6 +47,7 @@ fn agent_snapshot(cx: &App) -> AgentSettings {
         codex_skill_command_compat: settings.codex_skill_command_compat,
         model_list_style: settings.model_list_style,
         smooth_wheel: settings.smooth_scrolling.agent_enabled(),
+        reduce_motion: settings.reduce_motion,
         git_status_refresh_interval: settings.git_status_refresh_interval,
         profiles: settings.agent_profiles.clone(),
         background_opacity: main_view_background_opacity(cx),

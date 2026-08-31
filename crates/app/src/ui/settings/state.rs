@@ -96,6 +96,9 @@ pub struct AppSettings {
     pub transparent_main_view: bool,
     /// Select which scrolling views animate line-based mouse-wheel input.
     pub smooth_scrolling: SmoothScrollingMode,
+    /// Put disclosed content on screen at once, skipping the entrance the
+    /// agent transcript otherwise plays for it.
+    pub reduce_motion: bool,
     /// Whole-window background opacity (0.2..=1.0) while transparency is enabled.
     pub background_opacity: f64,
     /// Local image drawn behind all window content.
@@ -188,6 +191,7 @@ impl Default for AppSettings {
             window_backdrop: WindowBackdrop::Acrylic,
             transparent_main_view: true,
             smooth_scrolling: SmoothScrollingMode::All,
+            reduce_motion: false,
             background_opacity: 1.0,
             background_image: None,
             background_image_opacity: DEFAULT_BACKGROUND_IMAGE_OPACITY,
@@ -474,6 +478,7 @@ impl AppSettings {
             window_backdrop: appearance.window_backdrop,
             transparent_main_view: appearance.transparent_main_view,
             smooth_scrolling: appearance.smooth_scrolling,
+            reduce_motion: appearance.reduce_motion,
             background_opacity: clamp_background_opacity(appearance.background_opacity),
             background_image: appearance
                 .background_image
@@ -692,6 +697,7 @@ impl AppSettings {
             window_backdrop: self.window_backdrop,
             transparent_main_view: self.transparent_main_view,
             smooth_scrolling: self.smooth_scrolling,
+            reduce_motion: self.reduce_motion,
             background_opacity: self.background_opacity,
             background_image: self.background_image.clone(),
             background_image_opacity: self.background_image_opacity,
