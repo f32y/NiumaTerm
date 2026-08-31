@@ -5,6 +5,7 @@ mod reveal;
 mod rows;
 mod view;
 mod virtual_code;
+mod working_indicator;
 
 #[cfg(test)]
 use crate::transcript::disclosure_row::{

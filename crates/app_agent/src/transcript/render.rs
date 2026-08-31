@@ -13,6 +13,7 @@ use crate::transcript::disclosure_row::{
 use crate::transcript::format::{interrupted_status_label, worked_status_label};
 use crate::transcript::reveal::{RevealKey, revealed};
 use crate::transcript::rows::{RowGap, TranscriptRow, is_run_row};
+use crate::transcript::working_indicator::WorkingIndicator;
 use crate::transcript::{
     code_transcript_format, command_execution_detail, command_execution_heading,
     command_failure_reason, compact_token_count, compaction_accounting, compaction_label,
@@ -213,10 +214,11 @@ impl TranscriptView {
                 .into_any_element();
         }
 
-        // The spinner stands in the slot a card gives its type icon, so the
-        // label starts on the column a tool call's title starts on and the
-        // live line reads as the next step of the work above it rather than
-        // as a stray line under it.
+        // The dots stand in the slot a card gives its type icon, so the label
+        // starts on the column a tool call's title starts on and the live line
+        // reads as the next step of the work above it rather than as a stray
+        // line under it. A ring turning in that slot reads as one more step
+        // with an icon; a travelling swell reads as the pane waiting.
         h_flex()
             .w_full()
             .gap(px(AGENT_CARD_GAP))
@@ -229,12 +231,7 @@ impl TranscriptView {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(
-                        Spinner::new()
-                            .icon(IconName::LoaderCircle)
-                            .with_size(px(12.))
-                            .color(cx.theme().warning),
-                    ),
+                    .child(WorkingIndicator::new(cx.theme().warning)),
             )
             .child(
                 div()
