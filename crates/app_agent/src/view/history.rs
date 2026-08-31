@@ -83,7 +83,11 @@ impl AgentPane {
     /// skeleton rows at the final height, so the composer doesn't jump when
     /// the real rows land; rows render through a virtual list, so hundreds
     /// of persisted sessions cost only the visible ten.
-    pub(super) fn render_history(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    pub(super) fn render_history(
+        &self,
+        pane_background: Hsla,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
         let rows = self
             .history_ui
             .pending
@@ -184,7 +188,14 @@ impl AgentPane {
                     .border_1()
                     .border_b_0()
                     .border_color(cx.theme().border.opacity(0.6))
-                    .bg(cx.theme().muted.alpha(1.0))
+                    // Composited over the pane rather than taken at full
+                    // alpha: Fluent's `muted` is a translucent overlay tint
+                    // (#00000006), so forcing its alpha to 1 would paint the
+                    // strip in the tint's bare RGB - solid black in the light
+                    // theme, solid white in the dark one. Blending yields the
+                    // intended slightly deeper surface under either idiom,
+                    // and is a no-op for themes whose `muted` is opaque.
+                    .bg(pane_background.blend(cx.theme().muted))
                     .pb(px(20.))
                     .child(
                         h_flex()
@@ -234,7 +245,11 @@ impl AgentPane {
         let Some(session) = self.history_ui.sessions.get(index) else {
             return div().into_any_element();
         };
-        let hover_bg = cx.theme().muted.opacity(0.4);
+        // The strip's own surface is the muted tint, so a row state derived
+        // from `muted` again lands on the color it sits on and disappears.
+        // The list tokens are the per-theme fills meant to read against a
+        // surface, translucent in Fluent and in the Modern themes alike.
+        let hover_bg = cx.theme().list_hover;
         let selected = self.history_ui.selected == index
             && matches!(
                 self.history_ui.mode,
@@ -251,7 +266,7 @@ impl AgentPane {
             .items_center()
             .rounded(UI_RADIUS)
             .cursor_pointer()
-            .when(selected, |this| this.bg(cx.theme().muted.opacity(0.7)))
+            .when(selected, |this| this.bg(cx.theme().list_active))
             .hover(move |style| style.bg(hover_bg))
             .on_click(cx.listener(move |this, _, _, cx| this.resume_session(index, cx)))
             .child(

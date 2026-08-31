@@ -150,7 +150,7 @@ impl Render for AgentPane {
             .history_ui
             .mode
             .is_visible(transcript_empty, history_rows)
-            .then(|| self.render_history(cx));
+            .then(|| self.render_history(background, cx));
         // A list opened over a live conversation is a picker, and the
         // transcript behind it is not what the next click should reach. Blur
         // pushes it back a layer while keeping the tab recognizable as that
