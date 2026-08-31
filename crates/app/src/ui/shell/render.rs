@@ -35,10 +35,6 @@ const TITLE_BAR_CHIP_RADIUS: f32 = 6.0;
 const TITLE_BAR_CHIP_PADDING_X: f32 = 8.0;
 const TITLE_BAR_CHIP_PADDING_Y: f32 = 2.0;
 const TITLE_BAR_CHIP_ICON: f32 = 11.0;
-/// The mark on the busy-session control. The control itself is always drawn,
-/// so the dot is what says work is in flight before the arrow is read as
-/// navigation rather than as decoration.
-const TITLE_BAR_BADGE: f32 = 6.0;
 
 impl Shell {
     fn bind_actions(element: Div, cx: &mut Context<Self>) -> Div {
@@ -163,41 +159,22 @@ impl Shell {
                         ),
                     )
                     .child(
-                        div()
-                            .flex_none()
-                            .occlude()
-                            .relative()
-                            .child(
-                                Button::new("next-busy-tab")
-                                    .ghost()
-                                    .size(px(TITLE_BAR_BUTTON))
-                                    .icon(NextBusyTabIcon)
-                                    .tooltip(i18n("shell-next-busy-tab"))
-                                    .disabled(self.next_busy_tab(cx).is_none())
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        let Some((workspace_index, tab_index)) =
-                                            this.next_busy_tab(cx)
-                                        else {
-                                            return;
-                                        };
+                        div().flex_none().occlude().child(
+                            Button::new("next-busy-tab")
+                                .ghost()
+                                .size(px(TITLE_BAR_BUTTON))
+                                .icon(NextBusyTabIcon)
+                                .tooltip(i18n("shell-next-busy-tab"))
+                                .disabled(self.next_busy_tab(cx).is_none())
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    let Some((workspace_index, tab_index)) = this.next_busy_tab(cx)
+                                    else {
+                                        return;
+                                    };
 
-                                        this.jump_to_tab(workspace_index, tab_index, window, cx);
-                                    })),
-                            )
-                            // Ringed in the bar's own background so the mark
-                            // stays legible over whatever the icon under it
-                            // happens to be.
-                            .children(self.next_busy_tab(cx).is_some().then(|| {
-                                div()
-                                    .absolute()
-                                    .top(px(2.))
-                                    .right(px(2.))
-                                    .size(px(TITLE_BAR_BADGE))
-                                    .rounded_full()
-                                    .border_1()
-                                    .border_color(cx.theme().title_bar)
-                                    .bg(cx.theme().warning)
-                            })),
+                                    this.jump_to_tab(workspace_index, tab_index, window, cx);
+                                })),
+                        ),
                     )
                     // Absorbs the leftover width so the controls stay packed
                     // against the leading edge.
