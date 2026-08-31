@@ -245,10 +245,7 @@ const TAB_ROW_HEIGHT: f32 = 28.0;
 /// which keeps the two tiers apart at a glance.
 const TAB_ROW_DOT: f32 = 7.0;
 
-/// How far a tab row is indented under the workspace it belongs to, and the
-/// spacing inside the row itself.
-const TAB_ROW_INDENT: f32 = 6.0;
-const TAB_ROW_PADDING_X: f32 = 6.0;
+/// Spacing inside a tab row, between its glyph and its label.
 const TAB_ROW_GAP: f32 = 6.0;
 /// Edge of a tab row's type icon, and the size its label is set at.
 const TAB_ROW_ICON: f32 = 14.0;
