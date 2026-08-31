@@ -90,14 +90,17 @@ impl Render for WorkspaceDragPreview {
             .bg(background)
             .text_color(cx.theme().sidebar_accent_foreground)
             .child(indicator)
+            // Laid out like the row it was lifted from, so the ghost stays the
+            // same height as the gap it will drop into.
             .child(
-                v_flex()
+                h_flex()
                     .flex_1()
+                    .gap_1p5()
                     .overflow_hidden()
-                    .items_start()
+                    .items_baseline()
                     .child(
                         div()
-                            .w_full()
+                            .min_w_0()
                             .text_left()
                             .text_sm()
                             .truncate()
@@ -105,7 +108,8 @@ impl Render for WorkspaceDragPreview {
                     )
                     .child(
                         div()
-                            .w_full()
+                            .flex_1()
+                            .min_w_0()
                             .text_left()
                             .text_xs()
                             .truncate()
