@@ -286,7 +286,7 @@ impl AgentPane {
                 epoch: 0,
                 status: Status::Starting,
                 start_failure: None,
-                start_overlay_visible: false,
+                start_overlay_due: false,
                 update_suspension: None,
                 last_recovery_snapshot: None,
             },
@@ -578,6 +578,21 @@ impl AgentPane {
         matches!(self.kind, AgentKind::Codex | AgentKind::DeepSeek)
     }
 
+    /// Whether the cover is on screen right now.
+    ///
+    /// Read from the start's own state rather than latched on and off around
+    /// it. A harness's process exists well before the harness answers: Codex
+    /// spawns in a moment and then reads its configuration and catalogs, and
+    /// the pane stays in `Status::Starting` until the thread-ready message
+    /// arrives. Tying the cover to the spawn instead put it on screen after
+    /// the process was already up and left it there once the harness was
+    /// ready.
+    pub(super) fn shows_start_overlay(&self) -> bool {
+        self.wears_start_overlay()
+            && self.runtime.start_overlay_due
+            && self.runtime.status == Status::Starting
+    }
+
     pub(super) fn start_session(&mut self, resume: Option<String>, cx: &mut Context<Self>) {
         self.start_session_with_options(
             resume.map(|id| RecoveryIdentity::new(AgentKind::Claude, id)),
@@ -711,16 +726,16 @@ impl AgentPane {
         // to a background thread and the result arrives in a later update.
         self.runtime.status = Status::Starting;
         // A host that is already running answers within a frame or two, so the
-        // overlay is held back rather than shown and pulled away as a flicker.
+        // cover is held back rather than shown and pulled away as a flicker.
         // Nothing repaints while the start runs, so the hold has to wake the
         // pane itself instead of being read from a clock at render time.
-        self.runtime.start_overlay_visible = false;
+        self.runtime.start_overlay_due = false;
         if self.wears_start_overlay() {
             cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(START_OVERLAY_DELAY).await;
                 let _ = this.update(cx, |this, cx| {
                     if this.runtime.status == Status::Starting {
-                        this.runtime.start_overlay_visible = true;
+                        this.runtime.start_overlay_due = true;
                         cx.notify();
                     }
                 });
@@ -853,7 +868,6 @@ impl AgentPane {
             return None;
         }
 
-        self.runtime.start_overlay_visible = false;
         Some(match spawned {
             Ok(session) => {
                 self.runtime.backend = Some(session);

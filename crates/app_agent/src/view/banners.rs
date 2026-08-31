@@ -441,7 +441,7 @@ impl AgentPane {
         }
 
         let failure = self.runtime.start_failure.clone();
-        if failure.is_none() && !self.runtime.start_overlay_visible {
+        if failure.is_none() && !self.shows_start_overlay() {
             return None;
         }
 
