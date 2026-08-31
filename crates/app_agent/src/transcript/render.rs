@@ -1,4 +1,4 @@
-use gpui::{Font, ObjectFit, img};
+use gpui::{Font, ObjectFit, img, rems};
 use gpui_component::modern_menu::{ModernMenu, ModernMenuExt as _};
 use nmt_i18n::i18n;
 
@@ -33,6 +33,11 @@ pub(crate) const TRANSCRIPT_COLUMN_FRACTION: f32 = 0.8;
 pub(crate) fn transcript_column_margin() -> f32 {
     (1.0 - TRANSCRIPT_COLUMN_FRACTION) / 2.0
 }
+/// The measure assistant prose wraps at, inside that column: 880px at the
+/// default root size, which is around 90 latin characters or 45 CJK ones a
+/// line. Held in rems so it tracks the root size the rest of the UI scales
+/// with rather than pinning a physical width.
+const PROSE_MEASURE_REMS: f32 = 55.0;
 /// Space below one message group, and the tighter space between the steps
 /// inside a single run of work. Ranking the two is what makes a turn read as
 /// message / work / message rather than as one undifferentiated stack.
@@ -539,13 +544,8 @@ impl TranscriptView {
         )
     }
 
-    /// Assistant reply: full-width bare markdown — no bubble, no border;
-    /// alignment and surface carry the distinction.
-    /// Presentation for assistant Markdown. Prose wraps at the reading
-    /// measure, and the blocks that paint their own surface are held to the
-    /// same width: a code block or table left full-width would run its
-    /// background past the text above it, so the tint would mark a column the
-    /// reader is not reading along.
+    /// Assistant reply: bare markdown — no bubble, no border; alignment and
+    /// surface carry the distinction.
     pub(super) fn transcript_code_block_style(font: Font, font_size: f32) -> StyleRefinement {
         StyleRefinement::default()
             .font(font)
@@ -559,11 +559,15 @@ impl TranscriptView {
     }
 
     fn agent_text_style(cx: &App) -> TextViewStyle {
-        // Assistant output takes the full transcript column: prose, code
-        // blocks, and tables all reflow with the pane, so a wide window shows
-        // long lines and wide tables without an inner scroll or a wrap the
-        // reader has to undo mentally.
-        TextViewStyle::default().code_block(Self::configured_transcript_code_block_style(cx))
+        // Prose stops at a reading measure. On a maximised window the pane is
+        // wide enough for well over a hundred characters a line, and the eye
+        // loses the start of the next line on the return sweep. Code blocks
+        // and tables stay full-width: their content is scanned column-wise
+        // rather than read across, and narrowing them only forces an inner
+        // scroll or a wrap that hides structure.
+        TextViewStyle::default()
+            .prose_max_width(rems(PROSE_MEASURE_REMS))
+            .code_block(Self::configured_transcript_code_block_style(cx))
     }
 
     fn work_detail_text_style(cx: &App) -> TextViewStyle {
