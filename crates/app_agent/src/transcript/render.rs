@@ -171,7 +171,7 @@ impl TranscriptView {
                         .child(
                             div()
                                 .text_xs()
-                                .text_color(cx.theme().muted_foreground.opacity(0.55))
+                                .text_color(cx.theme().muted_foreground)
                                 .child(working_label(
                                     started,
                                     self.working_output_tokens,
@@ -753,7 +753,7 @@ impl TranscriptView {
         let status_icon = status.as_deref().map(|state| match state {
             "failed" | "declined" => (IconName::CircleX, cx.theme().danger),
             "completed" => (IconName::Check, cx.theme().success),
-            _ => (IconName::Minus, cx.theme().muted_foreground.opacity(0.6)),
+            _ => (IconName::Minus, cx.theme().muted_foreground),
         });
 
         let accessible_label = format!(
@@ -1112,7 +1112,7 @@ impl TranscriptView {
                             div()
                                 .flex_none()
                                 .w(px(148.))
-                                .text_color(cx.theme().muted_foreground.opacity(0.6))
+                                .text_color(cx.theme().muted_foreground.opacity(0.75))
                                 .child(name),
                         )
                         .child(
