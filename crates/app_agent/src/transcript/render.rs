@@ -6,9 +6,9 @@ use crate::composer::attachments::MAX_ATTACHMENTS;
 use crate::composer::{annotation_count_label, parse_annotated_prompt};
 use crate::transcript::disclosure_row::{
     AGENT_CARD_BODY_PADDING_Y, AGENT_CARD_DETAIL_SIZE, AGENT_CARD_GAP, AGENT_CARD_ICON_BLOCK,
-    AGENT_CARD_PADDING_X, AGENT_DISCLOSURE_DETAIL_INSET, AgentCardTone, AgentDisclosureRow,
-    USER_BUBBLE_PADDING_X, USER_BUBBLE_PADDING_Y, USER_BUBBLE_RADIUS, USER_BUBBLE_TAIL_RADIUS,
-    USER_BUBBLE_WIDTH_FRACTION, agent_card,
+    AGENT_CARD_PADDING_X, AGENT_CARD_RADIUS, AGENT_DISCLOSURE_DETAIL_INSET, AgentCardTone,
+    AgentDisclosureRow, USER_BUBBLE_PADDING_X, USER_BUBBLE_PADDING_Y, USER_BUBBLE_RADIUS,
+    USER_BUBBLE_TAIL_RADIUS, USER_BUBBLE_WIDTH_FRACTION, agent_card,
 };
 use crate::transcript::format::{interrupted_status_label, worked_status_label};
 use crate::transcript::rows::{RowGap, TranscriptRow, is_run_row};
@@ -795,9 +795,13 @@ impl TranscriptView {
                 ""
             }
         );
+        // A failure reason shows whether or not the step is expanded, so a
+        // failed row usually heads a block even while its output is hidden.
+        let heads_body = reason.is_some() || expanded;
         let mut header = AgentDisclosureRow::new(("wl-head", index), heading)
             .type_icon(icon)
             .tone(tone)
+            .heads_body(heads_body)
             .accessible_label(accessible_label);
         if let Some((icon, color)) = status_icon {
             header = header.status(icon, color);
@@ -815,200 +819,219 @@ impl TranscriptView {
             }))
         });
 
+        // The block under the header carries the header's own fill, so a
+        // failed step reads as one tinted shape rather than as a tinted
+        // heading with untinted output hanging off it.
+        let card_body = heads_body.then(|| {
+            div()
+                .w_full()
+                .bg(tone.colors(cx).background)
+                .rounded_b(px(AGENT_CARD_RADIUS))
+                // Why a step failed belongs on the card rather than behind the
+                // disclosure: it is what the reader decides their next move from,
+                // and the full transcript below it is usually a stack trace.
+                .children(reason.map(|reason| {
+                    div()
+                        .w_full()
+                        .pl(px(AGENT_DISCLOSURE_DETAIL_INSET))
+                        .pr(px(AGENT_CARD_PADDING_X))
+                        .pb(px(AGENT_CARD_BODY_PADDING_Y))
+                        .text_size(px(AGENT_CARD_DETAIL_SIZE))
+                        .text_color(cx.theme().danger.opacity(0.85))
+                        .child(reason)
+                }))
+                .children(detail.as_deref().filter(|_| expanded).map(|detail| {
+                    let code_format = code_transcript_format(&self.items[index].item, detail);
+                    let virtualized = should_virtualize_transcript(code_format.is_some(), detail);
+
+                    let body = if virtualized {
+                        let (_, strip_gutter) = code_format.as_ref().expect("code format");
+                        let (source, segments, widest_segment, scroll) = {
+                            let state =
+                                self.virtual_transcripts.entry(index).or_insert_with(|| {
+                                    VirtualTranscriptState::new(detail, *strip_gutter)
+                                });
+                            state.sync(detail, *strip_gutter);
+                            (
+                                state.source.clone(),
+                                state.segments.clone(),
+                                state.widest_segment,
+                                state.scroll.clone(),
+                            )
+                        };
+                        let segment_count = segments.len();
+                        let settings = cx.global::<AgentSettings>();
+                        let transcript_font = settings.transcript_font();
+                        let transcript_font_size = px(settings.transcript_font_size);
+                        let line_height = transcript_font_size * TRANSCRIPT_LINE_HEIGHT;
+                        let text_color = cx.theme().muted_foreground;
+                        let list_source = source.clone();
+                        let list_segments = segments.clone();
+
+                        div()
+                            .id(("wl-out", index))
+                            .w_full()
+                            .h(px(256.))
+                            .relative()
+                            .overflow_hidden()
+                            .rounded(UI_RADIUS)
+                            .bg(cx.theme().tokens.muted)
+                            .font(transcript_font)
+                            .text_size(transcript_font_size)
+                            // The outer transcript list is behind this viewport in
+                            // hit-test order. Occlusion prevents wheel input at the
+                            // virtual list's limits from moving the conversation.
+                            .occlude()
+                            .modern_context_menu(Self::copy_menu(cx.entity().downgrade(), index))
+                            .child(
+                                uniform_list(
+                                    SharedString::from(format!("wl-virtual-{index}")),
+                                    segment_count,
+                                    move |range, _, _| {
+                                        range
+                                            .filter_map(|segment_index| {
+                                                let range =
+                                                    list_segments.get(segment_index)?.clone();
+                                                Some(
+                                                    div()
+                                                        .h(line_height)
+                                                        .flex_none()
+                                                        .line_height(line_height)
+                                                        .whitespace_nowrap()
+                                                        .text_color(text_color)
+                                                        .child(list_source[range].to_string()),
+                                                )
+                                            })
+                                            .collect::<Vec<_>>()
+                                    },
+                                )
+                                .with_width_from_item(Some(widest_segment))
+                                .with_horizontal_sizing_behavior(
+                                    ListHorizontalSizingBehavior::Unconstrained,
+                                )
+                                .track_scroll(&scroll)
+                                .size_full()
+                                .p_3(),
+                            )
+                            .child(
+                                div()
+                                    .absolute()
+                                    .top_0()
+                                    .right_0()
+                                    .bottom_0()
+                                    .w(px(16.0))
+                                    .child(
+                                        Scrollbar::vertical(&scroll)
+                                            .id(("wl-virtual-v-scrollbar", index)),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .absolute()
+                                    .left_0()
+                                    .right_0()
+                                    .bottom_0()
+                                    .h(px(16.0))
+                                    .child(
+                                        Scrollbar::horizontal(&scroll)
+                                            .id(("wl-virtual-h-scrollbar", index)),
+                                    ),
+                            )
+                            .into_any_element()
+                    } else {
+                        self.virtual_transcripts.remove(&index);
+
+                        // Small technical transcripts retain syntax highlighting;
+                        // Markdown-native tool output and reasoning retain their
+                        // rich formatting. The expensive fence and gutter copy are
+                        // therefore bounded by the virtualization thresholds.
+                        let markdown = match code_format {
+                            Some((language, strip_gutter)) => {
+                                let normalized = if strip_gutter {
+                                    strip_read_gutter(detail)
+                                        .map(Cow::Owned)
+                                        .unwrap_or(Cow::Borrowed(detail))
+                                } else {
+                                    Cow::Borrowed(detail)
+                                };
+                                fenced_code_block_as(&normalized, language.as_ref())
+                            }
+                            None => detail.to_owned(),
+                        };
+                        let detail_scroll = window
+                            .use_keyed_state(("wl-scroll", index), cx, |_, _| {
+                                ScrollHandle::default()
+                            })
+                            .read(cx)
+                            .clone();
+
+                        div()
+                            .w_full()
+                            .relative()
+                            .child(
+                                div()
+                                    .id(("wl-out", index))
+                                    .w_full()
+                                    .max_h(px(256.))
+                                    .overflow_y_scroll()
+                                    .track_scroll(&detail_scroll)
+                                    // The virtual conversation list handles wheel input
+                                    // before child bubble listeners run. Occluding its
+                                    // earlier hitbox makes this viewport the only scroll
+                                    // target under the pointer, even at either limit.
+                                    .occlude()
+                                    .modern_context_menu(Self::copy_menu(
+                                        cx.entity().downgrade(),
+                                        index,
+                                    ))
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(
+                                        Self::markdown_view(
+                                            ("wl-md", index),
+                                            markdown,
+                                            cwd.clone(),
+                                        )
+                                        .style(Self::work_detail_text_style(cx))
+                                        .selectable(true),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .absolute()
+                                    .top_0()
+                                    .right_0()
+                                    .bottom_0()
+                                    .w(px(16.0))
+                                    .child(
+                                        Scrollbar::vertical(&detail_scroll)
+                                            .id(("wl-scrollbar", index)),
+                                    ),
+                            )
+                            .into_any_element()
+                    };
+
+                    div()
+                        // Expanded content takes the card's own inset on both
+                        // sides. The rule above it already says the detail belongs
+                        // to the header, so indenting it as well would spend a
+                        // third of a narrow card on saying it twice — and command
+                        // output is exactly the content that needs the width.
+                        .w_full()
+                        .border_t_1()
+                        .border_color(cx.theme().border.opacity(0.6))
+                        .px(px(AGENT_CARD_PADDING_X))
+                        .py(px(AGENT_CARD_BODY_PADDING_Y))
+                        .relative()
+                        .child(body)
+                }))
+        });
+
         agent_card()
             .id(("entry", index))
             .modern_context_menu(Self::copy_menu(cx.entity().downgrade(), index))
             .child(header)
-            // Why a step failed belongs on the card rather than behind the
-            // disclosure: it is what the reader decides their next move from,
-            // and the full transcript below it is usually a stack trace.
-            .children(reason.map(|reason| {
-                div()
-                    .w_full()
-                    .pl(px(AGENT_DISCLOSURE_DETAIL_INSET))
-                    .pr(px(AGENT_CARD_PADDING_X))
-                    .pb(px(AGENT_CARD_BODY_PADDING_Y))
-                    .text_size(px(AGENT_CARD_DETAIL_SIZE))
-                    .text_color(cx.theme().danger.opacity(0.85))
-                    .child(reason)
-            }))
-            .children(detail.as_deref().filter(|_| expanded).map(|detail| {
-                let code_format = code_transcript_format(&self.items[index].item, detail);
-                let virtualized = should_virtualize_transcript(code_format.is_some(), detail);
-
-                let body = if virtualized {
-                    let (_, strip_gutter) = code_format.as_ref().expect("code format");
-                    let (source, segments, widest_segment, scroll) = {
-                        let state = self
-                            .virtual_transcripts
-                            .entry(index)
-                            .or_insert_with(|| VirtualTranscriptState::new(detail, *strip_gutter));
-                        state.sync(detail, *strip_gutter);
-                        (
-                            state.source.clone(),
-                            state.segments.clone(),
-                            state.widest_segment,
-                            state.scroll.clone(),
-                        )
-                    };
-                    let segment_count = segments.len();
-                    let settings = cx.global::<AgentSettings>();
-                    let transcript_font = settings.transcript_font();
-                    let transcript_font_size = px(settings.transcript_font_size);
-                    let line_height = transcript_font_size * TRANSCRIPT_LINE_HEIGHT;
-                    let text_color = cx.theme().muted_foreground;
-                    let list_source = source.clone();
-                    let list_segments = segments.clone();
-
-                    div()
-                        .id(("wl-out", index))
-                        .w_full()
-                        .h(px(256.))
-                        .relative()
-                        .overflow_hidden()
-                        .rounded(UI_RADIUS)
-                        .bg(cx.theme().tokens.muted)
-                        .font(transcript_font)
-                        .text_size(transcript_font_size)
-                        // The outer transcript list is behind this viewport in
-                        // hit-test order. Occlusion prevents wheel input at the
-                        // virtual list's limits from moving the conversation.
-                        .occlude()
-                        .modern_context_menu(Self::copy_menu(cx.entity().downgrade(), index))
-                        .child(
-                            uniform_list(
-                                SharedString::from(format!("wl-virtual-{index}")),
-                                segment_count,
-                                move |range, _, _| {
-                                    range
-                                        .filter_map(|segment_index| {
-                                            let range = list_segments.get(segment_index)?.clone();
-                                            Some(
-                                                div()
-                                                    .h(line_height)
-                                                    .flex_none()
-                                                    .line_height(line_height)
-                                                    .whitespace_nowrap()
-                                                    .text_color(text_color)
-                                                    .child(list_source[range].to_string()),
-                                            )
-                                        })
-                                        .collect::<Vec<_>>()
-                                },
-                            )
-                            .with_width_from_item(Some(widest_segment))
-                            .with_horizontal_sizing_behavior(
-                                ListHorizontalSizingBehavior::Unconstrained,
-                            )
-                            .track_scroll(&scroll)
-                            .size_full()
-                            .p_3(),
-                        )
-                        .child(
-                            div()
-                                .absolute()
-                                .top_0()
-                                .right_0()
-                                .bottom_0()
-                                .w(px(16.0))
-                                .child(
-                                    Scrollbar::vertical(&scroll)
-                                        .id(("wl-virtual-v-scrollbar", index)),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .absolute()
-                                .left_0()
-                                .right_0()
-                                .bottom_0()
-                                .h(px(16.0))
-                                .child(
-                                    Scrollbar::horizontal(&scroll)
-                                        .id(("wl-virtual-h-scrollbar", index)),
-                                ),
-                        )
-                        .into_any_element()
-                } else {
-                    self.virtual_transcripts.remove(&index);
-
-                    // Small technical transcripts retain syntax highlighting;
-                    // Markdown-native tool output and reasoning retain their
-                    // rich formatting. The expensive fence and gutter copy are
-                    // therefore bounded by the virtualization thresholds.
-                    let markdown = match code_format {
-                        Some((language, strip_gutter)) => {
-                            let normalized = if strip_gutter {
-                                strip_read_gutter(detail)
-                                    .map(Cow::Owned)
-                                    .unwrap_or(Cow::Borrowed(detail))
-                            } else {
-                                Cow::Borrowed(detail)
-                            };
-                            fenced_code_block_as(&normalized, language.as_ref())
-                        }
-                        None => detail.to_owned(),
-                    };
-                    let detail_scroll = window
-                        .use_keyed_state(("wl-scroll", index), cx, |_, _| ScrollHandle::default())
-                        .read(cx)
-                        .clone();
-
-                    div()
-                        .w_full()
-                        .relative()
-                        .child(
-                            div()
-                                .id(("wl-out", index))
-                                .w_full()
-                                .max_h(px(256.))
-                                .overflow_y_scroll()
-                                .track_scroll(&detail_scroll)
-                                // The virtual conversation list handles wheel input
-                                // before child bubble listeners run. Occluding its
-                                // earlier hitbox makes this viewport the only scroll
-                                // target under the pointer, even at either limit.
-                                .occlude()
-                                .modern_context_menu(Self::copy_menu(
-                                    cx.entity().downgrade(),
-                                    index,
-                                ))
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(
-                                    Self::markdown_view(("wl-md", index), markdown, cwd.clone())
-                                        .style(Self::work_detail_text_style(cx))
-                                        .selectable(true),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .absolute()
-                                .top_0()
-                                .right_0()
-                                .bottom_0()
-                                .w(px(16.0))
-                                .child(
-                                    Scrollbar::vertical(&detail_scroll).id(("wl-scrollbar", index)),
-                                ),
-                        )
-                        .into_any_element()
-                };
-
-                div()
-                    // Expanded content takes the card's own inset on both
-                    // sides. The rule above it already says the detail belongs
-                    // to the header, so indenting it as well would spend a
-                    // third of a narrow card on saying it twice — and command
-                    // output is exactly the content that needs the width.
-                    .w_full()
-                    .border_t_1()
-                    .border_color(cx.theme().border.opacity(0.6))
-                    .px(px(AGENT_CARD_PADDING_X))
-                    .py(px(AGENT_CARD_BODY_PADDING_Y))
-                    .relative()
-                    .child(body)
-            }))
+            .children(card_body)
             .into_any_element()
     }
 
