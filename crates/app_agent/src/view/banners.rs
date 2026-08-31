@@ -428,12 +428,9 @@ impl AgentPane {
         Some(BlockingOverlay::new(body).into_any_element())
     }
 
-    /// The harness's start, over the tab it is starting in.
-    ///
-    /// Only the DeepSeek pane wears one: its host is a Node process that may
-    /// still be fetching its package, so the gap is long enough that an
-    /// unexplained dead tab is the alternative. The CLI backends are running
-    /// within a frame or two, where an overlay would only flash.
+    /// The harness's start, over the tab it is starting in. Which panes wear
+    /// one, and how long a start runs before they do, is the session's own
+    /// call.
     ///
     /// A start that failed keeps the overlay and answers with the two things
     /// left to do, because the pane behind it has no conversation to return
