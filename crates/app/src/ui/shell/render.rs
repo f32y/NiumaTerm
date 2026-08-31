@@ -20,6 +20,11 @@ const TITLE_BAR_HEIGHT: f32 = 44.0;
 /// reads as one cluster rather than as separate buttons.
 const TITLE_BAR_BUTTON: f32 = 26.0;
 const TITLE_BAR_BUTTON_GAP: f32 = 4.0;
+/// A hairline between the application menu and the layout controls beside it.
+/// At 26px the two icon clusters would otherwise read as one undifferentiated
+/// row, and the menu opens application-wide commands while its neighbours only
+/// move the view around.
+const TITLE_BAR_DIVIDER_HEIGHT: f32 = 18.0;
 /// The session heading in the middle of the bar, and the branch chip beside
 /// it. The chip is set smaller than the title because it qualifies the title
 /// rather than competing with it.
@@ -105,6 +110,13 @@ impl Shell {
                             .flex_none()
                             .occlude()
                             .child(self.render_app_menu_button(cx)),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(1.))
+                            .h(px(TITLE_BAR_DIVIDER_HEIGHT))
+                            .bg(cx.theme().border),
                     )
                     .child(
                         div().flex_none().occlude().child(
