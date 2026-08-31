@@ -10,6 +10,7 @@ use crate::view::banners::{
     UpdateOverlayPhase, composer_stats_label, multi_root_notice, update_overlay_phase,
 };
 use crate::view::history::queued_message_label;
+use crate::view::last_response::{LastResponseTone, last_response_tone};
 use crate::view::settings_row::effort_gauge_step;
 use crate::view::{ComposerEnterBehavior, composer_enter_behavior};
 use crate::{AgentKind, UpdateSuspension};
@@ -163,4 +164,24 @@ fn the_effort_gauge_spans_whichever_ladder_it_is_given() {
 
     assert_eq!(effort_gauge_step(Some(0), 5), 1);
     assert_eq!(effort_gauge_step(Some(4), 5), 6);
+}
+
+/// The composer says nothing about a conversation picked up soon enough that
+/// it costs what it would have cost immediately, warns once it has drifted
+/// half the window, and raises that to the danger colour near the end of it.
+/// Past the window the answer stops changing, so it stays at danger.
+#[test]
+fn the_last_response_mark_tracks_how_far_the_window_has_run() {
+    assert_eq!(last_response_tone(0), None);
+    assert_eq!(last_response_tone(29 * 60), None);
+
+    assert_eq!(last_response_tone(30 * 60), Some(LastResponseTone::Warning));
+    assert_eq!(last_response_tone(53 * 60), Some(LastResponseTone::Warning));
+
+    assert_eq!(last_response_tone(54 * 60), Some(LastResponseTone::Danger));
+    assert_eq!(last_response_tone(60 * 60), Some(LastResponseTone::Danger));
+    assert_eq!(
+        last_response_tone(9 * 60 * 60),
+        Some(LastResponseTone::Danger)
+    );
 }
