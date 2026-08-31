@@ -20,8 +20,6 @@ impl Sidebar {
         // In the vertical tab-bar style every tab of this workspace is on
         // screen as its own row carrying its own status mark and progress, so
         // the workspace's aggregate of them would say the same thing twice.
-        // The status column keeps its width either way: the tab rows place
-        // their marks in that lane.
         let vertical_tabs = cx.global::<AppSettings>().tab_bar_style == TabBarStyle::Vertical;
         let highlight_active = ws.active && !vertical_tabs;
         let (glyphs, status_label) = workspace_status_glyphs(
@@ -31,21 +29,25 @@ impl Sidebar {
             cx,
         );
 
-        let indicator = v_flex()
-            .id(("workspace-status", idx))
-            // The column's width is fixed so an idle workspace can suppress its
-            // glyphs without shifting its name relative to active neighbours;
-            // the height follows its contents so a stacked pair centers as a
-            // group and a lone glyph centers on its own.
-            .w_4()
-            .flex_none()
-            .gap_0p5()
-            .items_center()
-            .justify_center()
-            .when(!vertical_tabs, |this| {
-                this.aria_label(status_label.clone()).children(glyphs)
-            })
-            .into_any_element();
+        // With the aggregate suppressed the lane would be empty on every row,
+        // and holding it open would only push the name off the leading edge
+        // the list heading starts at, so the row drops it instead.
+        let indicator = (!vertical_tabs).then(|| {
+            v_flex()
+                .id(("workspace-status", idx))
+                // The column's width is fixed so an idle workspace can suppress
+                // its glyphs without shifting its name relative to active
+                // neighbours; the height follows its contents so a stacked pair
+                // centers as a group and a lone glyph centers on its own.
+                .w_4()
+                .flex_none()
+                .gap_0p5()
+                .items_center()
+                .justify_center()
+                .aria_label(status_label.clone())
+                .children(glyphs)
+                .into_any_element()
+        });
 
         let ws_id = ws.id;
 
@@ -284,7 +286,7 @@ impl Sidebar {
                     .w_full()
                     .gap_1p5()
                     .items_center()
-                    .child(indicator)
+                    .children(indicator)
                     .child(div().flex_1().min_w_0().overflow_hidden().child(name))
                     .child(suffix),
             )
