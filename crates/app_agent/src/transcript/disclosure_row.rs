@@ -103,9 +103,9 @@ impl AgentCardTone {
 
 /// The container a disclosure row and its expanded body share, so the header,
 /// the failure reason and the detail surface stack as one block. It carries
-/// no fill of its own in either tone: the row's own header is what shows the
-/// tone, and it sizes to its content, while the body below it spans the
-/// column.
+/// no fill of its own in either tone: the header and the block under it each
+/// paint the tone themselves, which is what lets a row with nothing under it
+/// size its fill to its own words.
 pub(super) fn agent_card() -> Div {
     v_flex()
         .w_full()
@@ -127,6 +127,10 @@ pub(crate) struct AgentDisclosureRow {
     status: Option<(IconName, Hsla)>,
     accessible_label: String,
     tone: AgentCardTone,
+    /// Whether a block of the row's own content follows it inside the same
+    /// card. It shares the header's fill, so the header spans the column and
+    /// closes only its top corners; the block below closes the bottom ones.
+    heads_body: bool,
     /// Tint for the label and type icon, replacing the quiet work-log default.
     /// The row sets its own text colors per slot, so a caller cannot override
     /// them from the outside.
@@ -145,6 +149,7 @@ impl AgentDisclosureRow {
             preview: None,
             status: None,
             tone: AgentCardTone::Neutral,
+            heads_body: false,
             accent: None,
         }
     }
@@ -157,6 +162,11 @@ impl AgentDisclosureRow {
 
     pub(super) fn tone(mut self, tone: AgentCardTone) -> Self {
         self.tone = tone;
+        self
+    }
+
+    pub(super) fn heads_body(mut self, heads_body: bool) -> Self {
+        self.heads_body = heads_body;
         self
     }
 
@@ -214,14 +224,20 @@ impl AgentDisclosureRow {
             // wraps the words instead of running the width of the column.
             // A failed step follows the same rule: its wash then clears the
             // rule down the run's left edge instead of butting against it.
-            .self_start()
-            .max_w_full()
+            // A row with a block under it is the top of that block instead,
+            // and squares off where the two meet.
+            .map(|this| match self.heads_body {
+                true => this.w_full().rounded_t(px(AGENT_CARD_RADIUS)),
+                false => this
+                    .self_start()
+                    .max_w_full()
+                    .rounded(px(AGENT_CARD_RADIUS)),
+            })
             .gap(px(AGENT_CARD_GAP))
             .items_center()
             // The fill is the row's only resting edge, so it carries the card
-            // radius here rather than inheriting it from a container that
+            // radius itself rather than inheriting it from a container that
             // draws nothing.
-            .rounded(px(AGENT_CARD_RADIUS))
             .bg(colors.background)
             .min_h(px(AGENT_CARD_HEADER_HEIGHT))
             .px(px(AGENT_CARD_PADDING_X))
