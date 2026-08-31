@@ -414,86 +414,84 @@ impl AgentPane {
         let pane = cx.entity();
         let name = i18n("agent-settings-folded");
 
-        Some(
-            Self::settings_pill(Button::new("agent-folded-settings"), cx)
-                .tooltip(name)
-                .aria_label(name)
-                .child(
-                    h_flex()
-                        .gap_1p5()
-                        .items_center()
-                        .child(
-                            Icon::new(IconName::Ellipsis)
-                                .size(px(SETTINGS_PILL_ICON))
-                                .text_color(cx.theme().muted_foreground.opacity(0.8)),
-                        )
-                        .child(
-                            Icon::new(IconName::ChevronDown)
-                                .size(px(SETTINGS_PILL_CHEVRON))
-                                .text_color(cx.theme().muted_foreground.opacity(0.7)),
-                        ),
-                )
-                // Anchored bottom-left so the menu opens upward — the row sits
-                // at the bottom edge of the pane.
-                .dropdown_menu_with_anchor(gpui::Anchor::BottomLeft, move |menu, window, cx| {
-                    let mut menu = menu;
+        let pill = Self::settings_pill(Button::new("agent-folded-settings"))
+            .tooltip(name)
+            .aria_label(name)
+            .child(
+                h_flex()
+                    .gap_1p5()
+                    .items_center()
+                    .child(
+                        Icon::new(IconName::Ellipsis)
+                            .size(px(SETTINGS_PILL_ICON))
+                            .text_color(cx.theme().muted_foreground.opacity(0.8)),
+                    )
+                    .child(
+                        Icon::new(IconName::ChevronDown)
+                            .size(px(SETTINGS_PILL_CHEVRON))
+                            .text_color(cx.theme().muted_foreground.opacity(0.7)),
+                    ),
+            )
+            // Anchored bottom-left so the menu opens upward — the row sits
+            // at the bottom edge of the pane.
+            .dropdown_menu_with_anchor(gpui::Anchor::BottomLeft, move |menu, window, cx| {
+                let mut menu = menu;
 
-                    for setting in settings.clone() {
-                        // The entry states the value as well as the name, so
-                        // what the row used to show on its surface is still
-                        // read without opening anything further.
-                        let value = setting
-                            .current
-                            .as_ref()
-                            .map(|value| {
-                                setting
-                                    .options
-                                    .iter()
-                                    .find(|(option, _)| option == value)
-                                    .map(|(_, label)| label.clone())
-                                    .unwrap_or_else(|| setting_value_label(value))
-                            })
-                            .unwrap_or_else(|| "—".to_string());
-                        let label = i18n("agent-settings-folded-entry")
-                            .replace("{name}", setting.name)
-                            .replace("{value}", &value);
-                        let pane = pane.clone();
+                for setting in settings.clone() {
+                    // The entry states the value as well as the name, so
+                    // what the row used to show on its surface is still
+                    // read without opening anything further.
+                    let value = setting
+                        .current
+                        .as_ref()
+                        .map(|value| {
+                            setting
+                                .options
+                                .iter()
+                                .find(|(option, _)| option == value)
+                                .map(|(_, label)| label.clone())
+                                .unwrap_or_else(|| setting_value_label(value))
+                        })
+                        .unwrap_or_else(|| "—".to_string());
+                    let label = i18n("agent-settings-folded-entry")
+                        .replace("{name}", setting.name)
+                        .replace("{value}", &value);
+                    let pane = pane.clone();
 
-                        menu = menu.submenu_with_icon(
-                            Some(Icon::new(setting.icon)),
-                            label,
-                            window,
-                            cx,
-                            move |submenu, _, _| {
-                                let mut submenu = submenu;
-                                let set = setting.set;
+                    menu = menu.submenu_with_icon(
+                        Some(Icon::new(setting.icon)),
+                        label,
+                        window,
+                        cx,
+                        move |submenu, _, _| {
+                            let mut submenu = submenu;
+                            let set = setting.set;
 
-                                for (value, label) in setting.options.clone() {
-                                    let pane = pane.clone();
-                                    let checked =
-                                        setting.current.as_deref() == Some(value.as_str());
+                            for (value, label) in setting.options.clone() {
+                                let pane = pane.clone();
+                                let checked = setting.current.as_deref() == Some(value.as_str());
 
-                                    submenu = submenu.item(
-                                        PopupMenuItem::new(label).checked(checked).on_click(
-                                            move |_, _, cx| {
-                                                pane.update(cx, |this, cx| {
-                                                    set(this, value.clone(), cx);
-                                                    cx.notify();
-                                                });
-                                            },
-                                        ),
-                                    );
-                                }
+                                submenu = submenu.item(
+                                    PopupMenuItem::new(label).checked(checked).on_click(
+                                        move |_, _, cx| {
+                                            pane.update(cx, |this, cx| {
+                                                set(this, value.clone(), cx);
+                                                cx.notify();
+                                            });
+                                        },
+                                    ),
+                                );
+                            }
 
-                                submenu
-                            },
-                        );
-                    }
+                            submenu
+                        },
+                    );
+                }
 
-                    menu
-                })
-                .into_any_element(),
-        )
+                menu
+            });
+
+        Some(Self::settings_pill_frame(pill, cx).into_any_element())
     }
 
     /// The pills that belong to one aspect of the thread, named for assistive
@@ -508,15 +506,35 @@ impl AgentPane {
             .children(controls)
     }
 
-    /// The outline, corner and inner spacing every composer pill shares.
-    fn settings_pill(button: Button, cx: &App) -> Button {
+    /// The corner and inner spacing every composer pill shares.
+    fn settings_pill(button: Button) -> Button {
         button
             .ghost()
             .small()
             .rounded(px(SETTINGS_PILL_RADIUS))
-            .border_1()
-            .border_color(cx.theme().border)
             .px(px(SETTINGS_PILL_PADDING_X))
+    }
+
+    /// The box a pill's outline is drawn on, which shows it only under the
+    /// pointer. At rest the row reads as a line of values rather than a line
+    /// of boxes, which keeps it quieter than the prompt above it; the outline
+    /// appears where the pointer is, to say the value under it opens.
+    ///
+    /// It has to be a box around the pill rather than the pill itself. A
+    /// Button sets a hover style of its own while it renders, gpui keeps one
+    /// per element, and that one resolves a ghost button's border to
+    /// transparent — so an outline hung on the pill's own hover is the outline
+    /// the Button then paints away.
+    fn settings_pill_frame(pill: impl IntoElement, cx: &App) -> Div {
+        let border = cx.theme().border;
+
+        div()
+            .flex_none()
+            .rounded(px(SETTINGS_PILL_RADIUS))
+            .border_1()
+            .border_color(cx.theme().transparent)
+            .hover(move |style| style.border_color(border))
+            .child(pill)
     }
 
     /// Height of the effort track, and the inset its thumb keeps from the
@@ -559,7 +577,7 @@ impl AgentPane {
             .as_ref()
             .and_then(|value| options.iter().position(|(option, _)| option == value));
 
-        let trigger = Self::settings_pill(Button::new("agent-effort"), cx)
+        let trigger = Self::settings_pill(Button::new("agent-effort"))
             .tooltip(name)
             .aria_label(format!("{name}: {current_label}"))
             .child(
@@ -583,7 +601,7 @@ impl AgentPane {
                     ),
             );
 
-        Popover::new("agent-effort-panel")
+        let panel = Popover::new("agent-effort-panel")
             // The row sits at the bottom edge of the pane, so the panel opens
             // upward from it.
             .anchor(gpui::Anchor::BottomLeft)
@@ -735,7 +753,9 @@ impl AgentPane {
                                 }),
                             )),
                     )
-            })
+            });
+
+        Self::settings_pill_frame(panel, cx)
     }
 
     /// One dropdown showing `icon · current value · chevron`. The model is the
@@ -765,7 +785,7 @@ impl AgentPane {
             })
             .unwrap_or_else(|| "—".to_string());
 
-        Self::settings_pill(Button::new(id), cx)
+        let pill = Self::settings_pill(Button::new(id))
             .min_w(px(120.))
             .tooltip(name)
             .aria_label(format!("{name}: {current_label}"))
@@ -805,6 +825,8 @@ impl AgentPane {
                 }
 
                 menu
-            })
+            });
+
+        Self::settings_pill_frame(pill, cx)
     }
 }
