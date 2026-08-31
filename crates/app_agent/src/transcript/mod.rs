@@ -1,6 +1,7 @@
 mod disclosure_row;
 mod format;
 mod render;
+mod reveal;
 mod rows;
 mod view;
 mod virtual_code;

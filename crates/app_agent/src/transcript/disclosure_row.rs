@@ -1,4 +1,6 @@
-use gpui::transparent_black;
+use std::f32::consts::FRAC_PI_2;
+
+use gpui::{radians, transparent_black};
 
 use crate::transcript::view::TranscriptView;
 use crate::*;
@@ -124,6 +126,10 @@ pub(super) fn agent_card() -> Div {
 pub(crate) struct AgentDisclosureRow {
     id: ElementId,
     expanded: Option<bool>,
+    /// How far the disclosure has turned, from 0 shut to 1 open. A row whose
+    /// content is not arriving passes the resting value, so the chevron is
+    /// simply drawn where its state says.
+    opening: f32,
     type_icon: Option<IconName>,
     label: String,
     preview: Option<String>,
@@ -147,6 +153,7 @@ impl AgentDisclosureRow {
         Self {
             id: id.into(),
             expanded: None,
+            opening: 1.0,
             type_icon: None,
             accessible_label: label.clone(),
             label,
@@ -179,6 +186,13 @@ impl AgentDisclosureRow {
         self
     }
 
+    /// How far through its entrance the row's content is, which is how far
+    /// the chevron has turned towards open.
+    pub(super) fn opening(mut self, progress: f32) -> Self {
+        self.opening = progress;
+        self
+    }
+
     pub(super) fn type_icon(mut self, icon: IconName) -> Self {
         self.type_icon = Some(icon);
         self
@@ -205,13 +219,19 @@ impl AgentDisclosureRow {
         // The chevron alone: what it means is already carried by the card it
         // heads, and a word beside it repeats that in the widest slot of the
         // row. The state assistive technology reads stays in the row label.
+        //
+        // One glyph turned rather than two swapped, because the turn is what
+        // says which way the content went; swapping glyphs mid-entrance would
+        // put the open mark above content still arriving. It turns clockwise
+        // to point at the block it opens, and snaps back on collapse, where
+        // there is no arrival left to keep pace with.
         let chevron = self.expanded.map(|expanded| {
-            Icon::new(match expanded {
-                true => IconName::ChevronDown,
-                false => IconName::ChevronRight,
-            })
-            .size(px(AGENT_CARD_HINT_SIZE))
-            .text_color(cx.theme().muted_foreground.opacity(0.8))
+            let turned = if expanded { self.opening } else { 0.0 };
+
+            Icon::new(IconName::ChevronRight)
+                .rotate(radians(turned * FRAC_PI_2))
+                .size(px(AGENT_CARD_HINT_SIZE))
+                .text_color(cx.theme().muted_foreground.opacity(0.8))
         });
         let icon_color = self.accent.unwrap_or(colors.icon);
         let label_color = self

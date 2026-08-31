@@ -81,6 +81,8 @@
 "settings-appearance-scrolling-only-terminal" = "Only Terminal"
 "settings-appearance-scrolling-only-agent" = "Only Agent"
 "settings-appearance-smooth-scrolling-description" = "Choose where traditional mouse-wheel scrolling is animated."
+"settings-appearance-reduce-motion" = "Reduce Motion"
+"settings-appearance-reduce-motion-description" = "Show expanded and collapsed content immediately instead of animating it in."
 "settings-appearance-font" = "Font"
 "settings-appearance-ui-font" = "UI Font"
 "settings-appearance-ui-font-description" = "Font for the app chrome (titlebar, sidebar, tabs, dialogs)."

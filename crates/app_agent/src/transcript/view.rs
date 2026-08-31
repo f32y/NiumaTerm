@@ -2,6 +2,7 @@ use nmt_i18n::i18n;
 
 use crate::transcript::is_work_row;
 use crate::transcript::render::TRANSCRIPT_LINE_HEIGHT;
+use crate::transcript::reveal::Reveals;
 use crate::transcript::rows::TranscriptRow;
 use crate::*;
 
@@ -56,6 +57,9 @@ pub struct TranscriptView {
     pub(crate) expanded_rows: HashSet<usize>,
     /// User-message annotation cards expanded to show their complete text.
     pub(crate) expanded_annotations: HashSet<usize>,
+    /// When each open disclosure started opening, which is what the rows it
+    /// discloses fade in against.
+    pub(crate) reveals: Reveals,
     /// Long expanded code transcripts retain their segmented source and
     /// independent uniform-list position while visible. Collapsing a row drops
     /// the duplicate source so large outputs do not stay resident twice.
@@ -127,6 +131,7 @@ impl TranscriptView {
             collapse_mode: CollapseRows::default(),
             expanded_rows: HashSet::new(),
             expanded_annotations: HashSet::new(),
+            reveals: Reveals::default(),
             virtual_transcripts: HashMap::new(),
             settled_turns: HashSet::new(),
             completed_turn_seconds: HashMap::new(),
@@ -194,6 +199,7 @@ impl TranscriptView {
         self.toggled_turns.clear();
         self.expanded_rows.clear();
         self.expanded_annotations.clear();
+        self.reveals.clear();
         self.settled_turns.clear();
         self.completed_turn_seconds.clear();
         self.completed_turn_output_tokens.clear();
@@ -407,7 +413,16 @@ fn picker_reserve(viewport: Pixels) -> Pixels {
 }
 
 impl Render for TranscriptView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // A disclosure opens from a click, which wakes the frame pump once.
+        // Keeping it awake for the rest of the entrance is this view's own
+        // job: without the request the remaining frames arrive only when
+        // something unrelated repaints, so a conversation nobody is typing
+        // into would show the first frame of the entrance and stop there.
+        if !self.reveals.settled(Instant::now()) {
+            window.request_animation_frame();
+        }
+
         let settings = cx.global::<AgentSettings>();
         let collapse = settings.collapse_tool_calls;
         let smooth_wheel = settings.smooth_wheel;
@@ -428,6 +443,7 @@ impl Render for TranscriptView {
             self.collapse_mode = collapse;
             self.toggled_turns.clear();
             self.expanded_groups.clear();
+            self.reveals.clear();
         }
         self.transcript_list.set_smooth_wheel_enabled(smooth_wheel);
 

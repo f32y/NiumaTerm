@@ -54,6 +54,7 @@ background-image-opacity = 0.3
 language = "en"
 agent-transcript-font-family = "Consolas"
 agent-transcript-font-size = 13.0
+reduce-motion = false
 
 [profiles]
 default = ""

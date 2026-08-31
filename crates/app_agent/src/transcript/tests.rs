@@ -976,10 +976,14 @@ mod branch_point_targeting_tests {
 /// of it: the run's last row reports the tight step rhythm it owes the run
 /// above it, and whatever follows the run inherits it.
 mod row_rhythm_tests {
-    use gpui::{AppContext as _, TestAppContext};
+    use std::time::Instant;
+
+    use gpui::{AppContext as _, ListOffset, TestAppContext, px};
     use nmt_agent_utils::chat::{Item as SessionItem, ReplayItem, ReplayTurn};
     use nmt_config::agent::CollapseRows;
 
+    use crate::settings::AgentSettings;
+    use crate::transcript::reveal::RevealKey;
     use crate::transcript::rows::RowGap;
     use crate::transcript::{AgentKind, RowSpec, TranscriptView};
 
@@ -1049,6 +1053,10 @@ mod row_rhythm_tests {
     /// "Only tool calls" reads the work inline, so the run collapses to its
     /// toggle with no turn fold above it.
     fn transcript_with_a_collapsed_run(cx: &mut gpui::App) -> gpui::Entity<TranscriptView> {
+        // A pane always renders against installed settings; a bare test app
+        // has none, and the disclosures read the reduced-motion switch.
+        cx.set_global(AgentSettings::default());
+
         let view = cx.new(|_| TranscriptView::new(AgentKind::Codex, None));
         view.update(cx, |view, cx| {
             view.append_replay(
@@ -1087,6 +1095,94 @@ mod row_rhythm_tests {
                         ("entry", RowGap::Group),
                     ]
                 );
+            });
+        });
+    }
+
+    /// The steps of an expanded run report the toggle that opened them and
+    /// their place under it, which is what staggers their entrance. The toggle
+    /// itself and the prose around the run report nothing, because neither
+    /// arrived when the run opened.
+    #[gpui::test]
+    fn an_expanded_runs_steps_report_their_place_under_its_toggle(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+
+            view.update(cx, |view, cx| {
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+                let specs = view.build_row_specs(CollapseRows::ToolCalls);
+                view.sync_transcript_list(specs);
+
+                assert_eq!(
+                    rhythm(view)
+                        .iter()
+                        .map(|(kind, _)| *kind)
+                        .collect::<Vec<_>>(),
+                    vec!["entry", "entry", "run", "work", "work", "entry"]
+                );
+                assert_eq!(view.revealed_by(2), None, "the toggle was already there");
+                assert_eq!(view.revealed_by(3), Some((RevealKey::Group(2), 0)));
+                assert_eq!(view.revealed_by(4), Some((RevealKey::Group(2), 1)));
+                assert_eq!(view.revealed_by(5), None, "the reply was already there");
+            });
+        });
+    }
+
+    /// A bottom-aligned list stores its live end as a sentinel meaning
+    /// "wherever the end now is", so rows appearing above it would carry the
+    /// view down and take the row the reader clicked off their screen. Opening
+    /// a disclosure names the position first. A reader sitting at the live end
+    /// keeps following it, because a conversation growing under an open
+    /// disclosure should still scroll itself.
+    #[gpui::test]
+    fn opening_a_disclosure_holds_the_readers_place(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+
+            view.update(cx, |view, cx| {
+                let specs = view.build_row_specs(CollapseRows::ToolCalls);
+                view.sync_transcript_list(specs);
+
+                assert!(view.transcript_list.is_following_tail());
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+                assert!(
+                    view.transcript_list.is_following_tail(),
+                    "a view at the live end keeps following it"
+                );
+
+                view.transcript_list.scroll_to(ListOffset {
+                    item_ix: 1,
+                    offset_in_item: px(0.),
+                });
+                view.toggle_disclosure(RevealKey::Row(3), cx);
+                assert!(
+                    !view.transcript_list.is_following_tail(),
+                    "a view reading an earlier turn is pinned where it sits"
+                );
+            });
+        });
+    }
+
+    /// Reduced motion is read where a disclosure opens rather than where its
+    /// progress is reported, so nothing is ever in flight: the content is on
+    /// screen at once and the transcript asks for no frames of its own.
+    #[gpui::test]
+    fn reduced_motion_opens_a_disclosure_with_nothing_in_flight(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+            cx.global_mut::<AgentSettings>().reduce_motion = true;
+
+            view.update(cx, |view, cx| {
+                let specs = view.build_row_specs(CollapseRows::ToolCalls);
+                view.sync_transcript_list(specs);
+
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+                let now = Instant::now();
+
+                assert!(view.expanded_groups.contains(&2), "the run still opens");
+                assert!(view.reveals.settled(now));
+                assert_eq!(view.reveals.progress(RevealKey::Group(2), 0, now), 1.0);
+                assert_eq!(view.reveals.progress(RevealKey::Group(2), 40, now), 1.0);
             });
         });
     }

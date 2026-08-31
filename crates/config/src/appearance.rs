@@ -401,6 +401,10 @@ pub struct AppearanceConfig {
         rename = "agent-transcript-font-size"
     )]
     pub agent_transcript_font_size: f64,
+    /// Put disclosed content on screen at once, skipping the entrance the
+    /// transcript otherwise plays for it.
+    #[serde(default, rename = "reduce-motion")]
+    pub reduce_motion: bool,
 }
 
 fn default_command_blocks() -> bool {
@@ -440,6 +444,7 @@ impl Default for AppearanceConfig {
             language: Language::default(),
             agent_transcript_font_family: default_agent_transcript_font_family(),
             agent_transcript_font_size: default_agent_transcript_font_size(),
+            reduce_motion: false,
         }
     }
 }

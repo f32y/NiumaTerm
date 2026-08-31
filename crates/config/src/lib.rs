@@ -511,6 +511,7 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) -> 
     doc["appearance"]["agent-transcript-font-family"] =
         value(&appearance.agent_transcript_font_family);
     doc["appearance"]["agent-transcript-font-size"] = value(appearance.agent_transcript_font_size);
+    doc["appearance"]["reduce-motion"] = value(appearance.reduce_motion);
 
     ensure_explicit_table(doc, "cursor");
     doc["cursor"]["shape"] = value(cursor_shape.as_str());

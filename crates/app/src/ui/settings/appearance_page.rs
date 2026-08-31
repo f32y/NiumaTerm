@@ -147,6 +147,15 @@ pub(super) fn appearance_page(
                         },
                     )
                     .default_value(SharedString::from("all")),
+                ))
+                .item(SettingItem::new(
+                    i18n("settings-appearance-reduce-motion"),
+                    SettingField::switch(
+                        |cx| cx.global::<AppSettings>().reduce_motion,
+                        |value, cx| {
+                            cx.global_mut::<AppSettings>().reduce_motion = value;
+                        },
+                    ),
                 )),
         )
         .group(
