@@ -42,8 +42,8 @@ impl Drop for AgentPane {
 
 /// How long a start is allowed to run before the tab is covered. Long enough
 /// that a reused host, which answers in a frame or two, never shows an overlay
-/// at all; short enough that a cold Node start is explained rather than looking
-/// like a dead tab.
+/// at all; short enough that a cold start is explained rather than looking like
+/// a dead tab.
 const START_OVERLAY_DELAY: Duration = Duration::from_millis(400);
 
 /// How long the composer's "last response" reading stays accurate, given how
@@ -564,12 +564,18 @@ impl AgentPane {
     /// the EOF signal (the sender is owned by the reader thread). Returns
     /// before the process exists; the pane sits in `Status::Starting` until it
     /// does. The calling stack sees no repaint — the arrival notifies.
-    /// Whether this pane covers its own start at all. Only the harness's host
-    /// is slow enough to be worth it: it is a Node process that may still be
-    /// fetching its package, while the CLI backends are running within a frame
-    /// or two, where an overlay would read as a flicker.
+    /// Whether this pane covers its own start at all.
+    ///
+    /// The two harnesses that take long enough to be worth explaining: the
+    /// DeepSeek host is a Node process that may still be fetching its package,
+    /// and the Codex app server reads its own configuration and catalogs
+    /// before it answers. Claude's CLI is up within a frame or two, where an
+    /// overlay would read as a flicker.
+    ///
+    /// Every pane holds the cover back for a moment either way, so a start
+    /// that lands quickly is never covered whichever harness it is.
     pub(crate) fn wears_start_overlay(&self) -> bool {
-        self.kind == AgentKind::DeepSeek
+        matches!(self.kind, AgentKind::Codex | AgentKind::DeepSeek)
     }
 
     pub(super) fn start_session(&mut self, resume: Option<String>, cx: &mut Context<Self>) {
