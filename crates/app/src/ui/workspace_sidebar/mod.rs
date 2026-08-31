@@ -259,14 +259,15 @@ const TAB_ROW_TEXT: f32 = 13.0;
 /// read as one block rather than as a flat list.
 const SIDEBAR_PADDING_X: f32 = 8.0;
 const SIDEBAR_PADDING_TOP: f32 = 14.0;
-const SIDEBAR_GROUP_GAP: f32 = 10.0;
+const SIDEBAR_GROUP_GAP: f32 = 14.0;
 /// The list heading. It names the column rather than competing with the
 /// workspaces under it, so it is the smallest run of text in the panel.
-const SIDEBAR_SECTION_TEXT: f32 = 11.0;
+const SIDEBAR_SECTION_TEXT: f32 = 10.5;
 const SIDEBAR_SECTION_BUTTON: f32 = 20.0;
-/// A workspace heading: its name, and the path line under it.
+/// A workspace heading: its name, and the path that trails it on the same
+/// line. The path is set small enough to read as an annotation on the name.
 const WORKSPACE_NAME_TEXT: f32 = 13.0;
-const WORKSPACE_PATH_TEXT: f32 = 11.0;
+const WORKSPACE_PATH_TEXT: f32 = 10.5;
 /// The status cluster along the bottom edge: today's spend over the
 /// subscription gauges. Both report what the agents have consumed, so they
 /// stack as one block under a single rule rather than each carrying an edge.
@@ -399,8 +400,12 @@ impl Sidebar {
                         div()
                             .text_size(px(SIDEBAR_SECTION_TEXT))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(cx.theme().sidebar_foreground.opacity(0.65))
-                            .child(i18n("sidebar-workspaces-title")),
+                            .text_color(cx.theme().sidebar_foreground.opacity(0.5))
+                            // Set as a caps label so the heading is told apart
+                            // from the workspace names by case rather than by
+                            // weight, which the names now use to mark the
+                            // active one. Scripts without case are unchanged.
+                            .child(i18n("sidebar-workspaces-title").to_uppercase()),
                     )
                     .child(
                         h_flex()

@@ -137,8 +137,18 @@ impl Sidebar {
             .child(controls);
 
         let full_path = ws.cwd.clone();
+        // A temporary workspace wears the same `*` an unsaved document does,
+        // so its absence from the next session is visible before the user
+        // closes the window.
+        let display_label = match ws.temporary {
+            true => format!("* {}", workspace_display_label(&ws.name, &ws.cwd)),
+            false => workspace_display_label(&ws.name, &ws.cwd),
+        };
         // The `+N` token holds a fixed lane beside the path, so the path's own
-        // budget shrinks by its width instead of pushing it off the row.
+        // budget shrinks by its width instead of pushing it off the row. The
+        // name now shares that line and is charged against the same budget; a
+        // name long enough to exhaust it leaves the path at its floor, where
+        // the tail still names the leaf directory.
         let additional_count = ws.additional_cwds.len();
         let additional_summary = (additional_count > 0).then(|| {
             i18n("sidebar-workspace-additional-count")
@@ -146,6 +156,7 @@ impl Sidebar {
         });
         let path_budget = (self.width
             - 80.0
+            - 8.0 * display_label.chars().count() as f32
             - additional_summary
                 .as_ref()
                 .map_or(0.0, |token| 8.0 + 7.0 * token.chars().count() as f32))
@@ -157,22 +168,25 @@ impl Sidebar {
         // Tooltip and assistive technology get every directory in order; the
         // row itself only has room for the primary path.
         let dirs_description = workspace_dirs_description(&ws.cwd, &ws.additional_cwds);
-        // A temporary workspace wears the same `*` an unsaved document does,
-        // so its absence from the next session is visible before the user
-        // closes the window.
-        let display_label = match ws.temporary {
-            true => format!("* {}", workspace_display_label(&ws.name, &ws.cwd)),
-            false => workspace_display_label(&ws.name, &ws.cwd),
-        };
         let name = div()
             .id(("workspace-secondary", idx))
             .aria_label(display_label.clone())
-            .w_full()
+            .min_w_0()
             .text_left()
             .text_size(px(WORKSPACE_NAME_TEXT))
-            .font_weight(FontWeight::MEDIUM)
+            // Only the workspace the user is in takes the heavier weight. With
+            // every name at medium the column reads as one solid block, and CJK
+            // glyphs carry that weight more heavily than latin ones do.
+            .font_weight(if ws.active {
+                FontWeight::MEDIUM
+            } else {
+                FontWeight::NORMAL
+            })
             .truncate();
 
+        // Name and path share one line: consecutive rows repeat most of the
+        // path prefix, so it earns a trailing lane rather than a line of its
+        // own, and the column fits about twice as many workspaces on screen.
         let name: AnyElement = if let Some(input) = renaming {
             let rename_shell = cx.entity();
             InlineRename::new(
@@ -188,7 +202,39 @@ impl Sidebar {
             )
             .into_any_element()
         } else {
-            name.child(display_label.clone()).into_any_element()
+            h_flex()
+                .w_full()
+                .gap_1p5()
+                .items_baseline()
+                .child(name.child(display_label.clone()))
+                // The settings entry has no working directory, so its row
+                // carries the name alone.
+                .children((!settings_entry).then(|| {
+                    div()
+                        .id(("workspace-path", idx))
+                        .flex_1()
+                        .min_w_0()
+                        .text_left()
+                        .text_size(px(WORKSPACE_PATH_TEXT))
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .aria_label(dirs_description.clone())
+                        .text_color(cx.theme().sidebar_foreground.opacity(0.4))
+                        .child(SharedString::from(display_path.clone()))
+                }))
+                .children(additional_summary.map(|token| {
+                    div()
+                        .id(("workspace-additional-dirs", idx))
+                        .flex_none()
+                        .text_size(px(WORKSPACE_PATH_TEXT))
+                        .aria_label(
+                            i18n("sidebar-workspace-additional-label")
+                                .replace("{count}", &additional_count.to_string()),
+                        )
+                        .text_color(cx.theme().sidebar_foreground.opacity(0.4))
+                        .child(token)
+                }))
+                .into_any_element()
         };
 
         let drag_name: SharedString = display_label.clone().into();
@@ -236,55 +282,7 @@ impl Sidebar {
                     .gap_1p5()
                     .items_center()
                     .child(indicator)
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .overflow_hidden()
-                            .items_start()
-                            .child(name)
-                            .child(
-                                h_flex()
-                                    .w_full()
-                                    .gap_1()
-                                    .items_center()
-                                    .child(
-                                        div()
-                                            .id(("workspace-path", idx))
-                                            .flex_1()
-                                            .text_left()
-                                            .text_size(px(WORKSPACE_PATH_TEXT))
-                                            .overflow_hidden()
-                                            .whitespace_nowrap()
-                                            .when(!settings_entry, |this| {
-                                                this.aria_label(dirs_description.clone())
-                                            })
-                                            .text_color(cx.theme().sidebar_foreground.opacity(0.6))
-                                            // The settings entry has no working
-                                            // directory. A blank run still forms a line
-                                            // box, so its row stands as tall as the
-                                            // workspaces around it.
-                                            .child(if settings_entry {
-                                                SharedString::new_static(" ")
-                                            } else {
-                                                display_path.into()
-                                            }),
-                                    )
-                                    .children(additional_summary.map(|token| {
-                                        div()
-                                            .id(("workspace-additional-dirs", idx))
-                                            .flex_none()
-                                            .text_size(px(WORKSPACE_PATH_TEXT))
-                                            .aria_label(
-                                                i18n("sidebar-workspace-additional-label").replace(
-                                                    "{count}",
-                                                    &additional_count.to_string(),
-                                                ),
-                                            )
-                                            .text_color(cx.theme().sidebar_foreground.opacity(0.6))
-                                            .child(token)
-                                    })),
-                            ),
-                    )
+                    .child(div().flex_1().min_w_0().overflow_hidden().child(name))
                     .child(suffix),
             )
             .on_click(cx.listener(move |this, _, window, cx| {
