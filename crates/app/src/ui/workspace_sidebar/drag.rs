@@ -63,16 +63,19 @@ impl Render for WorkspaceDragPreview {
             cx,
         );
         let vertical_tabs = cx.global::<AppSettings>().tab_bar_style == TabBarStyle::Vertical;
-        let indicator = v_flex()
-            .id("workspace-drag-status")
-            .w_4()
-            .flex_none()
-            .gap_0p5()
-            .items_center()
-            .justify_center()
-            .when(!vertical_tabs, |this| {
-                this.aria_label(status_label).children(glyphs)
-            });
+        // Dropped along with the lane on the row itself, so the ghost keeps
+        // its name on the same leading edge as the list it came out of.
+        let indicator = (!vertical_tabs).then(|| {
+            v_flex()
+                .id("workspace-drag-status")
+                .w_4()
+                .flex_none()
+                .gap_0p5()
+                .items_center()
+                .justify_center()
+                .aria_label(status_label)
+                .children(glyphs)
+        });
         let background = cx
             .theme()
             .background
@@ -89,7 +92,7 @@ impl Render for WorkspaceDragPreview {
             .overflow_hidden()
             .bg(background)
             .text_color(cx.theme().sidebar_accent_foreground)
-            .child(indicator)
+            .children(indicator)
             // Laid out like the row it was lifted from, so the ghost stays the
             // same height as the gap it will drop into.
             .child(
