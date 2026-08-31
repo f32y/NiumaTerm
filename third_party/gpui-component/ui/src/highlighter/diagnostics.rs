@@ -146,6 +146,7 @@ impl DiagnosticSeverity {
             color: color,
             thickness: px(1.),
             wavy: true,
+            dashed: false,
         });
 
         style

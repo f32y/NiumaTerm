@@ -9,7 +9,7 @@ use gpui::{
     App, BorderStyle, Bounds, CursorStyle, Edges, Element, ElementId, GlobalElementId, Half,
     HighlightStyle, Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, StyledText,
-    TextLayout, Window, point, px, quad,
+    TextLayout, UnderlineStyle, Window, point, px, quad,
 };
 
 use crate::{
@@ -399,13 +399,46 @@ impl Element for Inline {
     ) -> (LayoutId, Self::RequestLayoutState) {
         let text_style = window.text_style();
 
+        // A link is coloured at rest and ruled only while the pointer is on
+        // it, so the rule marks the one target under the cursor instead of
+        // every link on the page. It is dashed because the run is already
+        // coloured; a solid rule under coloured text reads as two marks for
+        // one thing.
+        let hovered = self
+            .state
+            .lock()
+            .ok()
+            .and_then(|state| state.hovered_link.clone());
+        let hovered: Vec<Range<usize>> = hovered
+            .map(|url| {
+                self.links
+                    .iter()
+                    .filter(|(_, link)| link.url == url)
+                    .map(|(range, _)| range.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+
         let mut runs = Vec::new();
         let mut ix = 0;
         for (range, highlight) in self.highlights.iter() {
             if ix < range.start {
                 runs.push(text_style.clone().to_run(range.start - ix));
             }
-            runs.push(text_style.clone().highlight(*highlight).to_run(range.len()));
+
+            let mut highlight = *highlight;
+            if hovered
+                .iter()
+                .any(|link| link.start <= range.start && range.end <= link.end)
+            {
+                highlight.underline = Some(UnderlineStyle {
+                    thickness: px(1.),
+                    dashed: true,
+                    ..Default::default()
+                });
+            }
+
+            runs.push(text_style.clone().highlight(highlight).to_run(range.len()));
             ix = range.end;
         }
         if ix < self.text.len() {
@@ -563,6 +596,12 @@ impl Element for Inline {
                     }
                     std::mem::replace(&mut state.hovered_link, hovered_link.clone())
                 };
+
+                // The rule under the link is drawn from this state, and a
+                // pointer move is outside the frame loop, so the change has to
+                // wake the pump itself or it would only show on whatever
+                // repaint happened along next.
+                cx.notify(current_view);
 
                 let Some(overlay) = crate::Root::tooltip_overlay(window, cx) else {
                     return;

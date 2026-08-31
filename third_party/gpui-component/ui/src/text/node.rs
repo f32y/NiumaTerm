@@ -932,11 +932,11 @@ impl Paragraph {
                     }
 
                     if let Some(mut link_mark) = style.link.clone() {
+                        // Colour alone at rest. The rule is added under the
+                        // pointer instead, because a paragraph naming a dozen
+                        // files is otherwise read through a row of rules that
+                        // say the same thing about every one of them.
                         highlight.color = Some(cx.theme().link);
-                        highlight.underline = Some(gpui::UnderlineStyle {
-                            thickness: gpui::px(1.),
-                            ..Default::default()
-                        });
 
                         // convert link references, replace link
                         if let Some(identifier) = link_mark.identifier.as_ref() {
