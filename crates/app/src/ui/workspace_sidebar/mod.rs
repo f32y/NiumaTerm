@@ -274,9 +274,11 @@ const WORKSPACE_PATH_TEXT: f32 = 10.5;
 const SIDEBAR_STATUS_PADDING_Y: f32 = 8.0;
 const SIDEBAR_STATUS_ROW_GAP: f32 = 2.0;
 
-/// Distance from the row box's leading edge. The row is a rounded rectangle,
-/// so a mark flush against that edge would sit outside the fill at the corners.
-const SELECTION_BAR_INSET: f32 = 2.0;
+/// Distance from the row box's leading edge. The row keeps no padding there,
+/// so the mark stands on that edge: an inset would push it into the status
+/// lane behind it. The row's corner radius is small enough, and the mark short
+/// enough, that its ends stay within the fill.
+const SELECTION_BAR_INSET: f32 = 0.0;
 
 /// The accent bar that marks the selected row. It is drawn out of the row's
 /// flow so it can sit in the gutter left of the row's own padding, and it

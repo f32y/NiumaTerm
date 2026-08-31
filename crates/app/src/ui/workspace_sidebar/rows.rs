@@ -273,7 +273,10 @@ impl Sidebar {
             })
             .w_full()
             .h_auto()
-            .px(px(TAB_ROW_INDENT))
+            // No horizontal inset of its own: the status lane starts at the
+            // list's own edge, which is where the list heading above it starts
+            // too, so the column has one leading edge rather than two.
+            .px_0()
             .py_0p5()
             .group("ws-item")
             .child(
