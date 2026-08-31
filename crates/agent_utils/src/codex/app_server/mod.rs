@@ -34,6 +34,7 @@ mod host;
 mod options;
 mod protocol;
 mod skills;
+mod title_generation;
 
 use crate::codex::app_server::background_tasks::{CodexTasks, ThreadScope, notification_thread_id};
 use crate::codex::app_server::compaction::{
@@ -55,6 +56,10 @@ use crate::codex::app_server::protocol::{
 #[cfg(test)]
 use crate::codex::app_server::skills::parse_skill_catalog;
 use crate::codex::app_server::skills::{SkillRefreshState, skill_catalog_from_response};
+pub use crate::codex::app_server::title_generation::provisional_title_from_prompt;
+use crate::codex::app_server::title_generation::{
+    TITLE_GENERATION_RESULT_METHOD, TitleGenerationHandle,
+};
 
 /// JSON-RPC ids for the fixed handshake requests; turn requests count up from
 /// `FIRST_TURN_RPC_ID` so response routing can tell the phases apart.
@@ -135,14 +140,18 @@ impl TurnOutputUsage {
 
 struct PendingThreadName {
     thread_id: String,
-    name: String,
 }
+
+type SessionDelivery = Arc<dyn Fn(Value) + Send + Sync>;
 
 pub struct Session {
     host: Option<Arc<CodexHost>>,
     registration_id: RegistrationId,
+    deliver: SessionDelivery,
     detached: bool,
     next_rpc_id: u64,
+    next_title_generation_id: u64,
+    title_generation: Option<TitleGenerationHandle>,
     thread_id: Option<String>,
     current_turn: Option<String>,
     /// JSON-RPC id of the server→client approval request awaiting an answer.
@@ -268,13 +277,18 @@ impl Session {
     ) -> Result<Self, String> {
         let thread_profile = ThreadProfile::from(launch);
         let host = CodexHost::acquire(launch, host_catalog, on_stderr)?;
-        let registration_id = host.register(deliver);
+        let deliver: SessionDelivery = Arc::new(deliver);
+        let root_delivery = Arc::clone(&deliver);
+        let registration_id = host.register(move |message| root_delivery(message));
 
         let mut session = Self {
             host: Some(host),
             registration_id,
+            deliver,
             detached: false,
             next_rpc_id: FIRST_TURN_RPC_ID,
+            next_title_generation_id: 0,
+            title_generation: None,
             thread_id: None,
             current_turn: None,
             pending_approval: None,
@@ -327,6 +341,7 @@ impl Session {
         if self.detached {
             return Ok(());
         }
+        self.cancel_title_generation();
         if let (Some(thread_id), Some(turn_id)) =
             (self.thread_id.clone(), self.current_turn.clone())
         {
@@ -371,6 +386,10 @@ impl Session {
     pub fn process(&mut self, message: Value) -> Vec<Event> {
         let id = message["id"].as_u64();
         let method = message["method"].as_str().map(str::to_owned);
+
+        if method.as_deref() == Some(TITLE_GENERATION_RESULT_METHOD) {
+            return self.apply_title_generation_result(&message["params"]);
+        }
 
         let events = match (id, method.as_deref()) {
             (Some(rpc_id), Some(method)) => self.process_server_request(rpc_id, method, &message),
@@ -436,19 +455,21 @@ impl Session {
         SendOutcome::StartedTurn
     }
 
-    /// Store the first conversation name before submitting its first turn.
-    /// Codex serializes both requests per thread, while accepting `turn/start`
-    /// does not wait for the rollout's initial metadata to reach disk.
-    pub fn send_user_message_with_thread_name(
+    /// Submit the first primary prompt and start its isolated title request
+    /// only after the primary thread accepts the prompt.
+    pub fn send_user_message_with_generated_title(
         &mut self,
         text: &str,
         settings: &ThreadSettings,
         skill: Option<&SkillReference>,
         images: &[PathBuf],
-        thread_name: &str,
+        provisional_title: &str,
     ) -> SendOutcome {
-        self.set_thread_name(thread_name);
-        self.send_user_message_with_skill(text, settings, skill, images)
+        let outcome = self.send_user_message_with_skill(text, settings, skill, images);
+        if matches!(outcome, SendOutcome::StartedTurn | SendOutcome::Steered) {
+            self.begin_title_generation(text, provisional_title);
+        }
+        outcome
     }
 
     /// Execute Codex operations that map directly to dedicated app-server
@@ -508,6 +529,7 @@ impl Session {
     /// `turn/start` calls append to the resumed thread. On failure the
     /// session keeps the thread it started with, so the tab stays usable.
     pub fn resume_thread(&mut self, thread_id: &str) {
+        self.cancel_title_generation();
         self.compaction.reset_thread();
         let params = thread_resume_params(thread_id, &self.thread_profile);
         self.send(json!({
@@ -551,6 +573,7 @@ impl Session {
         let Some(thread_id) = self.thread_id.clone() else {
             return Err("this conversation has no thread to branch".to_string());
         };
+        self.cancel_title_generation();
 
         self.compaction.reset_thread();
         let mut params = thread_resume_params(&thread_id, &self.thread_profile);
@@ -562,39 +585,6 @@ impl Session {
             "params": params,
         }));
         Ok(())
-    }
-
-    /// Name this thread. The server has no naming of its own — it stores what
-    /// a client tells it and echoes the change to other clients — so the name
-    /// comes from the caller. Fire and forget: the response says only whether
-    /// the name was stored, which changes nothing this side shows.
-    pub fn set_thread_name(&mut self, name: &str) {
-        let Some(thread_id) = self.thread_id.clone() else {
-            return;
-        };
-        if self
-            .pending_thread_names
-            .values()
-            .any(|pending| pending.thread_id == thread_id)
-        {
-            return;
-        }
-
-        let rpc_id = self.alloc_rpc_id();
-        self.pending_thread_names.insert(
-            rpc_id,
-            PendingThreadName {
-                thread_id: thread_id.clone(),
-                name: name.to_string(),
-            },
-        );
-
-        self.send(json!({
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "method": "thread/name/set",
-            "params": {"threadId": thread_id, "name": name},
-        }));
     }
 
     /// Ask for the first page of session history over `scope`. Replaces
@@ -778,13 +768,7 @@ impl Session {
             if self.thread_id.as_deref() != Some(pending.thread_id.as_str()) {
                 return Vec::new();
             }
-            if let Some(error) = message["error"]["message"].as_str() {
-                return vec![Event::Error {
-                    message: error.to_string(),
-                    fatal: false,
-                }];
-            }
-            return vec![Event::TitleUpdated(pending.name)];
+            return Vec::new();
         }
 
         if self.skill_refresh.in_flight == Some(rpc_id) {
@@ -967,6 +951,7 @@ impl Session {
 
     fn process_notification(&mut self, method: &str, params: &Value) -> Vec<Event> {
         if method == HOST_EXIT_METHOD {
+            self.cancel_title_generation();
             self.current_turn = None;
             self.pending_approval = None;
             self.pending_commands.clear();

@@ -454,6 +454,7 @@ fn in_place_resume_suppresses_transcript_replay_but_still_becomes_ready() {
     let result = json!({
         "thread": {
             "id": "thr_retained",
+            "name": "Stored conversation title",
             "turns": [{"items": [{"type": "userMessage", "content": [{"type": "text", "text": "already visible"}]}]}]
         },
         "model": "gpt-5",
@@ -462,16 +463,22 @@ fn in_place_resume_suppresses_transcript_replay_but_still_becomes_ready() {
     let suppressed = resumed_thread_events(&result, true);
     assert_eq!(
         suppressed,
-        vec![Event::Ready(ThreadSettings {
-            model: Some("gpt-5".into()),
-            approvals_reviewer: Some("auto_review".into()),
-            ..ThreadSettings::default()
-        })]
+        vec![
+            Event::TitleUpdated("Stored conversation title".into()),
+            Event::Ready(ThreadSettings {
+                model: Some("gpt-5".into()),
+                approvals_reviewer: Some("auto_review".into()),
+                ..ThreadSettings::default()
+            })
+        ]
     );
 
     let normal = resumed_thread_events(&result, false);
     assert!(matches!(&normal[0], Event::Replay(_)));
-    assert!(matches!(&normal[1], Event::Ready(_)));
+    assert!(
+        matches!(&normal[1], Event::TitleUpdated(title) if title == "Stored conversation title")
+    );
+    assert!(matches!(&normal[2], Event::Ready(_)));
 }
 
 #[test]

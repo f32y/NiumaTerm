@@ -67,6 +67,15 @@ pub(super) fn codex_command_request(rpc_id: u64, thread_id: &str, name: &str) ->
     }
 }
 
+pub(super) fn thread_name_request(rpc_id: u64, thread_id: &str, name: &str) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": rpc_id,
+        "method": "thread/name/set",
+        "params": {"threadId": thread_id, "name": name},
+    })
+}
+
 pub(super) fn skills_list_request(
     rpc_id: u64,
     force_reload: bool,
@@ -309,6 +318,13 @@ pub(super) fn resumed_thread_events(result: &Value, suppress_replay: bool) -> Ve
     let mut events = Vec::new();
     if !suppress_replay {
         events.push(Event::Replay(parse_replay(&result["thread"]["turns"])));
+    }
+    if let Some(title) = result["thread"]["name"]
+        .as_str()
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+    {
+        events.push(Event::TitleUpdated(title.to_string()));
     }
     // Resume restores the thread's persisted model/effort; Ready re-seeds the
     // pickers even when replay is suppressed for a retained transcript.

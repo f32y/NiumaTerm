@@ -600,6 +600,9 @@ pub struct AgentPane {
     /// same subject, and renaming on every send would make the tab strip
     /// churn under a working agent.
     conversation_named: bool,
+    /// A user rename committed before the provider published its conversation
+    /// identity. Ready applies it once the backend can address the thread.
+    pending_conversation_rename: Option<String>,
     /// The conversation as the user reads it. Presentation lives in its own
     /// view so a child agent's conversation renders through the same code.
     transcript: Entity<TranscriptView>,

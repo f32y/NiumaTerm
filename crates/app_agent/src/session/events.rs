@@ -346,6 +346,11 @@ impl AgentPane {
         if self.kind.caps().model_selection_is_a_request {
             self.apply_model_selection(cx);
         }
+        if let Some(title) = self.pending_conversation_rename.take()
+            && let Some(session) = self.runtime.backend.as_mut()
+        {
+            session.rename_session(&title);
+        }
         info!(
             "agent thread ready: profile=\"{}\", model={:?}, profile_model={:?}",
             self.profile.name,
