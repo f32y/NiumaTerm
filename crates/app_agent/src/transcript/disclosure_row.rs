@@ -64,9 +64,8 @@ pub(super) enum AgentCardTone {
     Failed,
 }
 
-/// Border, fill and icon-block colors for one tone.
+/// Fill and icon-block colors for one tone.
 pub(super) struct AgentCardColors {
-    pub(super) border: Hsla,
     pub(super) background: Hsla,
     pub(super) icon_block: Hsla,
     pub(super) icon: Hsla,
@@ -76,21 +75,24 @@ pub(super) struct AgentCardColors {
 impl AgentCardTone {
     pub(super) fn colors(self, cx: &App) -> AgentCardColors {
         match self {
-            // Drawn with no border, fill or icon plate at rest. A run of
-            // steps is process metadata around the conversation, and a stack
-            // of outlined boxes competes with the prose it documents for the
-            // reader's attention; the run is grouped by the rule down its
-            // left edge instead, and only the pointed-at row takes a fill.
+            // Drawn with no fill or icon plate at rest. A run of steps is
+            // process metadata around the conversation, and a stack of filled
+            // boxes competes with the prose it documents for the reader's
+            // attention; the run is grouped by the rule down its left edge
+            // instead, and only the pointed-at row takes a fill.
             Self::Neutral => AgentCardColors {
-                border: transparent_black(),
                 background: transparent_black(),
                 icon_block: transparent_black(),
                 icon: cx.theme().muted_foreground,
                 hover: cx.theme().list_hover,
             },
+            // A wash rather than an outline: an outlined box would be the one
+            // bordered thing in the transcript, and it would be drawn hard
+            // against the rule that groups the run it sits in. The wash is
+            // carried a step further than the outlined version needed, since
+            // it is now the whole of the row's resting edge.
             Self::Failed => AgentCardColors {
-                border: cx.theme().danger.opacity(0.3),
-                background: cx.theme().danger.opacity(0.05),
+                background: cx.theme().danger.opacity(0.06),
                 icon_block: cx.theme().danger.opacity(0.1),
                 icon: cx.theme().danger,
                 hover: cx.theme().danger.opacity(0.09),
@@ -99,25 +101,16 @@ impl AgentCardTone {
     }
 }
 
-/// The card a disclosure row and its expanded body share. Returned empty so
-/// the caller can hang the header, the failure reason and the detail surface
-/// off one container without each of them re-deriving the tone.
-pub(super) fn agent_card(tone: AgentCardTone, cx: &App) -> Div {
-    let colors = tone.colors(cx);
-
+/// The container a disclosure row and its expanded body share, so the header,
+/// the failure reason and the detail surface stack as one block. It carries
+/// no fill of its own in either tone: the row's own header is what shows the
+/// tone, and it sizes to its content, while the body below it spans the
+/// column.
+pub(super) fn agent_card() -> Div {
     v_flex()
         .w_full()
         .overflow_hidden()
         .rounded(px(AGENT_CARD_RADIUS))
-        // Only a failed step is drawn as a card. Giving the neutral tone a
-        // transparent border instead would still inset its contents by a
-        // pixel on every side, which shows up as a break in the rule that
-        // groups a run.
-        .when(tone == AgentCardTone::Failed, |this| {
-            this.border_1()
-                .border_color(colors.border)
-                .bg(colors.background)
-        })
 }
 
 /// Shared header for the transcript's expandable rows: icon block, title, and
@@ -217,19 +210,19 @@ impl AgentDisclosureRow {
         });
         h_flex()
             .id(self.id)
-            // A work-log row is only as wide as what it says, so the hover
-            // fill wraps the words instead of running the width of the
-            // column. A failed step keeps the full width its card needs.
-            .map(|this| match self.tone {
-                AgentCardTone::Failed => this.w_full(),
-                AgentCardTone::Neutral => this.self_start().max_w_full(),
-            })
+            // A work-log row is only as wide as what it says, so its fill
+            // wraps the words instead of running the width of the column.
+            // A failed step follows the same rule: its wash then clears the
+            // rule down the run's left edge instead of butting against it.
+            .self_start()
+            .max_w_full()
             .gap(px(AGENT_CARD_GAP))
             .items_center()
-            // The hover fill is the row's only resting edge, so it carries
-            // the card radius here rather than inheriting it from a border
-            // the neutral tone no longer draws.
+            // The fill is the row's only resting edge, so it carries the card
+            // radius here rather than inheriting it from a container that
+            // draws nothing.
             .rounded(px(AGENT_CARD_RADIUS))
+            .bg(colors.background)
             .min_h(px(AGENT_CARD_HEADER_HEIGHT))
             .px(px(AGENT_CARD_PADDING_X))
             .py(px(AGENT_CARD_PADDING_Y))
