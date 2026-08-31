@@ -10,6 +10,7 @@ use crate::view::banners::{
     UpdateOverlayPhase, composer_stats_label, multi_root_notice, update_overlay_phase,
 };
 use crate::view::history::queued_message_label;
+use crate::view::settings_row::effort_gauge_step;
 use crate::view::{ComposerEnterBehavior, composer_enter_behavior};
 use crate::{AgentKind, UpdateSuspension};
 
@@ -148,4 +149,18 @@ fn a_primary_only_harness_names_the_directories_it_cannot_reach() {
 
     assert!(notice.contains("C:/A"));
     assert!(notice.contains('2'));
+}
+
+/// The gauge keeps its empty face for a session that has not reported a
+/// level, so the cheapest level of a ladder still moves the needle off it and
+/// the dearest fills the arc — whichever length that ladder happens to be.
+#[test]
+fn the_effort_gauge_spans_whichever_ladder_it_is_given() {
+    assert_eq!(effort_gauge_step(None, 6), 0);
+
+    assert_eq!(effort_gauge_step(Some(0), 6), 1);
+    assert_eq!(effort_gauge_step(Some(5), 6), 6);
+
+    assert_eq!(effort_gauge_step(Some(0), 5), 1);
+    assert_eq!(effort_gauge_step(Some(4), 5), 6);
 }

@@ -16,6 +16,34 @@ const SETTINGS_PILL_ICON: f32 = 12.0;
 /// be changed, while the value itself is what the user came to read.
 const SETTINGS_PILL_CHEVRON: f32 = 10.0;
 
+/// Faces the effort gauge is drawn with, past the empty one. Six is what the
+/// longest ladder any harness offers needs, so every level of every ladder
+/// lands on a face of its own.
+const EFFORT_GAUGE_STEPS: usize = 6;
+
+/// The effort pill's gauge, at the level the session stands on. The pill names
+/// that level in words already; the gauge is what makes where it stands on the
+/// ladder readable without reading them.
+struct EffortGaugeIcon(usize);
+
+impl IconNamed for EffortGaugeIcon {
+    fn path(self) -> SharedString {
+        format!("icons/effort-gauge-{}.svg", self.0.min(EFFORT_GAUGE_STEPS)).into()
+    }
+}
+
+/// Which face a level is drawn on. Levels are counted from one, so the
+/// cheapest still moves the needle off the empty face — that face is reserved
+/// for a session whose level has not been reported, which Claude never does
+/// until the user picks one.
+pub(super) fn effort_gauge_step(level: Option<usize>, stops: usize) -> usize {
+    let Some(level) = level.filter(|_| stops > 0) else {
+        return 0;
+    };
+
+    (((level + 1) * EFFORT_GAUGE_STEPS + stops / 2) / stops).min(EFFORT_GAUGE_STEPS)
+}
+
 /// One setting the composer row keeps off its surface, as the menu behind the
 /// row needs it: what it is called, what it stands at, what it could stand at,
 /// and how to move it.
@@ -585,7 +613,7 @@ impl AgentPane {
                     .gap_1p5()
                     .items_center()
                     .child(
-                        Icon::new(IconName::Gauge)
+                        Icon::new(EffortGaugeIcon(effort_gauge_step(selected, options.len())))
                             .size(px(SETTINGS_PILL_ICON))
                             .text_color(cx.theme().muted_foreground.opacity(0.8)),
                     )
