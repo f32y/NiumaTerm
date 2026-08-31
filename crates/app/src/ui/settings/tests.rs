@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 use gpui::{
@@ -501,6 +502,47 @@ fn built_in_ui_themes_parse_into_component_config() {
 
         assert_eq!(config.name, ui.name);
         assert!(config.colors.background.is_some());
+    }
+}
+
+/// Color names a theme file states under `[colors.ui]`. The corner radii share
+/// that section in the file format while being a separate choice a theme may
+/// leave to the application, so they are not part of color coverage.
+fn ui_color_names(name: &str) -> BTreeSet<String> {
+    let theme: ConfigTheme = toml::from_str(builtin_theme_source(name).unwrap()).unwrap();
+
+    theme
+        .ui_theme()
+        .unwrap()
+        .colors
+        .as_table()
+        .unwrap()
+        .keys()
+        .filter(|key| !matches!(key.as_str(), "radius" | "radius.lg" | "shadow"))
+        .map(ToString::to_string)
+        .collect()
+}
+
+/// An unstated color is filled from the component library's own light or dark
+/// palette, so a control the theme forgot renders in a foreign hue. Every
+/// built-in names every color the library reads; comparing them against one
+/// another is what catches a color added to one of them and missed on the
+/// others, including after the library gains a new one.
+#[test]
+fn built_in_themes_state_the_same_colors() {
+    let reference = ui_color_names("fluent_light");
+    assert!(reference.len() > 100);
+
+    for builtin in BUILTIN_THEMES {
+        let name = builtin.name;
+        let names = ui_color_names(name);
+        let missing: Vec<_> = reference.difference(&names).collect();
+        let extra: Vec<_> = names.difference(&reference).collect();
+
+        assert!(
+            missing.is_empty() && extra.is_empty(),
+            "{name} misses {missing:?} and adds {extra:?}"
+        );
     }
 }
 
