@@ -761,6 +761,8 @@
 "agent-setting-approval-reviewer" = "审批审核者"
 "agent-setting-tier" = "服务级别"
 "agent-setting-loading" = "正在加载…"
+"agent-settings-folded" = "更多设置"
+"agent-settings-folded-entry" = "{name}：{value}"
 "agent-setting-value-default" = "默认"
 "agent-setting-value-auto" = "自动"
 "agent-setting-value-accept-edits" = "接受编辑"
