@@ -27,6 +27,11 @@ use crate::*;
 const COMPOSER_RADIUS: f32 = 16.0;
 /// Diameter of the send/stop control that closes the input line.
 const COMPOSER_SEND_BUTTON: f32 = 32.0;
+/// Where the card's content starts. The prompt and the settings row under it
+/// are the two things read down the card's leading edge, so they stand on the
+/// same one: the first glyph of the prompt lines up with the outline of the
+/// first pill.
+const COMPOSER_EDGE_INSET: f32 = 10.0;
 /// The status footer along the bottom edge of the composer card. It reports
 /// rather than invites input, so it is set below the chrome size to keep the
 /// prompt above it the loudest thing on the card.
@@ -294,7 +299,7 @@ impl Render for AgentPane {
                                             .w_full()
                                             .items_end()
                                             .gap_3()
-                                            .pl_4()
+                                            .pl(px(COMPOSER_EDGE_INSET))
                                             .pr_3()
                                             .pt_3()
                                             .pb_1()
@@ -430,7 +435,7 @@ impl Render for AgentPane {
                                     .child(
                                         h_flex()
                                             .w_full()
-                                            .px_2p5()
+                                            .px(px(COMPOSER_EDGE_INSET))
                                             .pb_2()
                                             .pt_0p5()
                                             .items_center()
