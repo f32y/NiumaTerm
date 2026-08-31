@@ -1,7 +1,7 @@
 use crate::{
-    App, Bounds, DevicePixels, Half, Hsla, LineLayout, Pixels, Point, RenderGlyphParams, Result,
-    ShapedGlyph, ShapedRun, SharedString, StrikethroughStyle, TextAlign, UnderlineStyle, Window,
-    WrapBoundary, WrappedLineLayout, black, fill, point, px, size,
+    App, Bounds, DevicePixels, Half, Hsla, LineLayout, PaintQuad, Pixels, Point, RenderGlyphParams,
+    Result, ShapedGlyph, ShapedRun, SharedString, StrikethroughStyle, TextAlign, UnderlineStyle,
+    Window, WrapBoundary, WrappedLineLayout, black, fill, point, px, size,
 };
 use derive_more::{Deref, DerefMut};
 use smallvec::SmallVec;
@@ -627,11 +627,10 @@ fn paint_line_background(
                         if glyph_origin.x == background_origin.x {
                             background_origin.x -= max_glyph_size.width.half()
                         }
-                        window.paint_quad(fill(
-                            Bounds {
-                                origin: *background_origin,
-                                size: size(glyph_origin.x - background_origin.x, line_height),
-                            },
+                        window.paint_quad(run_background(
+                            *background_origin,
+                            glyph_origin.x - background_origin.x,
+                            line_height,
                             *background_color,
                         ));
                         if glyph.index < run_end {
@@ -691,11 +690,10 @@ fn paint_line_background(
                     if background_origin.x == glyph_origin.x {
                         background_origin.x -= max_glyph_size.width.half();
                     };
-                    window.paint_quad(fill(
-                        Bounds {
-                            origin: background_origin,
-                            size: size(width, line_height),
-                        },
+                    window.paint_quad(run_background(
+                        background_origin,
+                        width,
+                        line_height,
                         background_color,
                     ));
                 }
@@ -713,17 +711,47 @@ fn paint_line_background(
             if last_line_end_x == background_origin.x {
                 background_origin.x -= max_glyph_size.width.half()
             };
-            window.paint_quad(fill(
-                Bounds {
-                    origin: background_origin,
-                    size: size(last_line_end_x - background_origin.x, line_height),
-                },
+            window.paint_quad(run_background(
+                background_origin,
+                last_line_end_x - background_origin.x,
+                line_height,
                 background_color,
             ));
         }
 
         Ok(())
     })
+}
+
+/// Share of the line box a run's background fills, the radius of its corners,
+/// and how far it reaches past the glyphs on each side.
+const RUN_BACKGROUND_HEIGHT: f32 = 0.9;
+const RUN_BACKGROUND_RADIUS: f32 = 4.0;
+const RUN_BACKGROUND_PADDING_X: f32 = 3.0;
+
+/// The plate behind a run of highlighted text. Drawn shorter than the line box
+/// and rounded, so that a marked span reads as a chip sitting on the text
+/// rather than as a band: a full-height fill closes the space between one line
+/// of a paragraph and the next, which sets the surrounding prose as if it were
+/// ruled. It also reaches a little past the glyphs on each side, because a
+/// fill that starts on the first stem and ends on the last reads as clipped.
+fn run_background(
+    origin: Point<Pixels>,
+    width: Pixels,
+    line_height: Pixels,
+    color: Hsla,
+) -> PaintQuad {
+    let height = line_height * RUN_BACKGROUND_HEIGHT;
+    let padding = px(RUN_BACKGROUND_PADDING_X);
+
+    fill(
+        Bounds {
+            origin: point(origin.x - padding, origin.y + (line_height - height).half()),
+            size: size(width + padding * 2., height),
+        },
+        color,
+    )
+    .corner_radii(px(RUN_BACKGROUND_RADIUS))
 }
 
 fn aligned_origin_x(
