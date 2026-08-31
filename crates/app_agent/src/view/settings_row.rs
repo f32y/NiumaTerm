@@ -12,11 +12,6 @@ const SETTINGS_PILL_PADDING_X: f32 = 9.0;
 const SETTINGS_PILL_GAP: f32 = 6.0;
 const SETTINGS_PILL_TEXT: f32 = 13.0;
 const SETTINGS_PILL_ICON: f32 = 12.0;
-/// The caption over a pill, naming the setting the pill changes. Set small
-/// and close to the pill so the pair reads as one control rather than as a
-/// caption and a separate button.
-const SETTINGS_PILL_LABEL_TEXT: f32 = 10.0;
-const SETTINGS_PILL_LABEL_GAP: f32 = 2.0;
 /// The disclosure mark is the quietest thing on a pill: it says the value can
 /// be changed, while the value itself is what the user came to read.
 const SETTINGS_PILL_CHEVRON: f32 = 10.0;
@@ -445,16 +440,6 @@ impl AgentPane {
             .children(controls)
     }
 
-    /// A pill under the name of the setting it changes. On its own a value
-    /// like "auto" or "high" states a level without naming the axis it is a
-    /// level of, which only a user who already knows the control can supply.
-    fn labeled_pill(name: &'static str, pill: AnyElement) -> Div {
-        v_flex()
-            .gap(px(SETTINGS_PILL_LABEL_GAP))
-            .child(div().text_size(px(SETTINGS_PILL_LABEL_TEXT)).child(name))
-            .child(pill)
-    }
-
     /// The outline, corner and inner spacing every composer pill shares.
     fn settings_pill(button: Button, cx: &App) -> Button {
         button
@@ -507,6 +492,7 @@ impl AgentPane {
             .and_then(|value| options.iter().position(|(option, _)| option == value));
 
         let trigger = Self::settings_pill(Button::new("agent-effort"), cx)
+            .tooltip(name)
             .aria_label(format!("{name}: {current_label}"))
             .child(
                 h_flex()
@@ -520,10 +506,6 @@ impl AgentPane {
                     .child(
                         div()
                             .text_size(px(SETTINGS_PILL_TEXT))
-                            // Brighter than the caption above it: the value is
-                            // what the row is read for, the caption only says
-                            // what it is a value of.
-                            .text_color(cx.theme().foreground)
                             .child(current_label.clone()),
                     )
                     .child(
@@ -533,7 +515,7 @@ impl AgentPane {
                     ),
             );
 
-        let panel = Popover::new("agent-effort-panel")
+        Popover::new("agent-effort-panel")
             // The row sits at the bottom edge of the pane, so the panel opens
             // upward from it.
             .anchor(gpui::Anchor::BottomLeft)
@@ -685,9 +667,7 @@ impl AgentPane {
                                 }),
                             )),
                     )
-            });
-
-        Self::labeled_pill(name, panel.into_any_element())
+            })
     }
 
     /// One dropdown showing `icon · current value · chevron`. Every picker uses
@@ -718,8 +698,9 @@ impl AgentPane {
             })
             .unwrap_or_else(|| "—".to_string());
 
-        let pill = Self::settings_pill(Button::new(id), cx)
+        Self::settings_pill(Button::new(id), cx)
             .when(is_model, |this| this.min_w(px(120.)))
+            .tooltip(name)
             .aria_label(format!("{name}: {current_label}"))
             .child(
                 h_flex()
@@ -730,15 +711,7 @@ impl AgentPane {
                             .size(px(SETTINGS_PILL_ICON))
                             .text_color(cx.theme().muted_foreground.opacity(0.8)),
                     )
-                    .child(
-                        div()
-                            .text_size(px(SETTINGS_PILL_TEXT))
-                            // Brighter than the caption above it: the value is
-                            // what the row is read for, the caption only says
-                            // what it is a value of.
-                            .text_color(cx.theme().foreground)
-                            .child(current_label),
-                    )
+                    .child(div().text_size(px(SETTINGS_PILL_TEXT)).child(current_label))
                     .child(
                         Icon::new(IconName::ChevronDown)
                             .size(px(SETTINGS_PILL_CHEVRON))
@@ -765,8 +738,6 @@ impl AgentPane {
                 }
 
                 menu
-            });
-
-        Self::labeled_pill(name, pill.into_any_element())
+            })
     }
 }
