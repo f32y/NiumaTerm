@@ -254,7 +254,13 @@ const TAB_ROW_TEXT: f32 = 13.0;
 /// Insets and rhythm of the workspace list. Groups are spaced further apart
 /// than the rows inside them, which is what makes a workspace and its tabs
 /// read as one block rather than as a flat list.
-const SIDEBAR_PADDING_X: f32 = 8.0;
+///
+/// The horizontal inset is the panel's alone: the rows inside carry none, so
+/// it is what every glyph and every run of text in the column stands on. It
+/// is set to land that edge under the glyph of the titlebar control directly
+/// above it, past that control's own button padding, so the window's leading
+/// chrome reads as one edge from the title bar down.
+const SIDEBAR_PADDING_X: f32 = 12.0;
 const SIDEBAR_PADDING_TOP: f32 = 14.0;
 const SIDEBAR_GROUP_GAP: f32 = 14.0;
 /// The list heading. It names the column rather than competing with the
