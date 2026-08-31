@@ -54,6 +54,10 @@ pub(super) const USER_BUBBLE_RADIUS: f32 = 18.0;
 pub(super) const USER_BUBBLE_TAIL_RADIUS: f32 = 4.0;
 pub(super) const USER_BUBBLE_PADDING_X: f32 = 15.0;
 pub(super) const USER_BUBBLE_PADDING_Y: f32 = 9.0;
+/// The annotation bubble's header is one line of label rather than a block of
+/// prose, so it is set shallower than the prompt beside it while keeping the
+/// same edge inset.
+pub(super) const USER_ANNOTATION_PADDING_Y: f32 = 6.0;
 
 /// How a card is tinted. A failed step is the one thing in a conversation the
 /// reader has to act on, so it carries the tint across the whole card rather

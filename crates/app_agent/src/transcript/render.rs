@@ -7,8 +7,8 @@ use crate::composer::{annotation_count_label, parse_annotated_prompt};
 use crate::transcript::disclosure_row::{
     AGENT_CARD_BODY_PADDING_Y, AGENT_CARD_DETAIL_SIZE, AGENT_CARD_GAP, AGENT_CARD_ICON_BLOCK,
     AGENT_CARD_PADDING_X, AGENT_CARD_RADIUS, AGENT_DISCLOSURE_DETAIL_INSET, AgentCardTone,
-    AgentDisclosureRow, USER_BUBBLE_PADDING_X, USER_BUBBLE_PADDING_Y, USER_BUBBLE_RADIUS,
-    USER_BUBBLE_TAIL_RADIUS, USER_BUBBLE_WIDTH_FRACTION, agent_card,
+    AgentDisclosureRow, USER_ANNOTATION_PADDING_Y, USER_BUBBLE_PADDING_X, USER_BUBBLE_PADDING_Y,
+    USER_BUBBLE_RADIUS, USER_BUBBLE_TAIL_RADIUS, USER_BUBBLE_WIDTH_FRACTION, agent_card,
 };
 use crate::transcript::format::{interrupted_status_label, worked_status_label};
 use crate::transcript::rows::{RowGap, TranscriptRow, is_run_row};
@@ -401,10 +401,15 @@ impl TranscriptView {
                     v_flex()
                         .w_full()
                         .gap_2()
+                        // Closes the bubble the header opens, and takes the
+                        // header's own edge inset so a quotation starts on the
+                        // same column the header's label does.
+                        .rounded_b(px(USER_BUBBLE_RADIUS))
+                        .bg(cx.theme().muted)
                         .border_t_1()
                         .border_color(cx.theme().border)
-                        .px_2()
-                        .py_2()
+                        .px(px(USER_BUBBLE_PADDING_X))
+                        .py(px(USER_BUBBLE_PADDING_Y))
                         .children(parsed.annotations.iter().enumerate().map(
                             |(position, annotation)| {
                                 h_flex()
@@ -434,28 +439,34 @@ impl TranscriptView {
                 });
 
                 v_flex()
-                    // The bubble fills the column it shares with the prompt,
-                    // which the column itself holds to the prompt measure.
-                    .w_full()
-                    .overflow_hidden()
-                    .rounded(UI_RADIUS)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .bg(cx.theme().muted)
+                    // Sized to what it says, like the prompt below it, and
+                    // right-aligned with it by the column both sit in. The
+                    // quotations are the wider of the two, so opening them is
+                    // what grows the bubble.
+                    .min_w_0()
                     .child(
-                        // The header is the whole bubble while it is collapsed,
-                        // so it is built from the prompt bubble's own padding
-                        // and inherited text size rather than a button size:
-                        // the transcript's text size is a setting, and a
-                        // control with a fixed height would stop matching the
-                        // bubble below it as soon as that setting moves.
+                        // A second bubble in the prompt's own language: same
+                        // fill, same corner, same edge inset, quieter text.
+                        // Its padding and inherited text size come from the
+                        // bubble rather than from a button size, because the
+                        // transcript's text size is a setting and a control
+                        // with a fixed height would stop matching the bubble
+                        // below it as soon as that setting moves.
                         h_flex()
                             .id(("entry-response-annotations", index))
                             .role(gpui::Role::Button)
                             .aria_label(action_label)
                             .w_full()
-                            .px_3()
-                            .py_2()
+                            .px(px(USER_BUBBLE_PADDING_X))
+                            .py(px(USER_ANNOTATION_PADDING_Y))
+                            .bg(cx.theme().muted)
+                            .text_color(cx.theme().muted_foreground)
+                            // Squares off where the quotations meet it, and is
+                            // a closed capsule while they are hidden.
+                            .map(|this| match annotations_expanded {
+                                true => this.rounded_t(px(USER_BUBBLE_RADIUS)),
+                                false => this.rounded(px(USER_BUBBLE_RADIUS)),
+                            })
                             .gap_2()
                             .items_center()
                             .cursor_pointer()
@@ -517,11 +528,11 @@ impl TranscriptView {
             .child(self.hover_stamp(index, cx))
             .child(
                 v_flex()
-                    // The annotation bubble is as wide as the prompt bubble
-                    // because both fill this column, so the cap that keeps the
-                    // prompt off the full width lives here rather than on
-                    // either. The row above is `w_full`, so the fraction has a
-                    // definite width to resolve against and tracks the pane.
+                    // Both bubbles size to their own content and end on this
+                    // column's trailing edge, so the cap that keeps a prompt
+                    // off the full width lives here rather than on either. The
+                    // row above is `w_full`, so the fraction has a definite
+                    // width to resolve against and tracks the pane.
                     .max_w(relative(USER_BUBBLE_WIDTH_FRACTION))
                     .min_w_0()
                     .items_end()
