@@ -275,10 +275,10 @@ impl Sidebar {
             })
             .w_full()
             .h_auto()
-            // No horizontal inset of its own: the status lane starts at the
-            // list's own edge, which is where the list heading above it starts
-            // too, so the column has one leading edge rather than two.
-            .px_0()
+            // The list is pulled back over the panel's inset by exactly this
+            // much, so the fill reaches into it while the content still lands
+            // on the same edge as the list heading above.
+            .px(px(SIDEBAR_ROW_GUTTER))
             .py_0p5()
             .group("ws-item")
             .child(
@@ -551,11 +551,11 @@ impl Sidebar {
             .relative()
             .w_full()
             .h(px(TAB_ROW_HEIGHT))
-            // No leading inset, so the glyph column stands on the same edge
-            // as the workspace names above it and the list heading above
-            // those. A tab is tied to its workspace by the gap that separates
-            // one such block from the next rather than by an indent.
-            .px_0()
+            // The same inset the workspace rows take, so the glyph column
+            // stands on the same edge as the workspace names above it. A tab
+            // is tied to its workspace by the gap that separates one such
+            // block from the next rather than by an indent.
+            .px(px(SIDEBAR_ROW_GUTTER))
             .gap(px(TAB_ROW_GAP))
             .items_center()
             .rounded(UI_RADIUS)
