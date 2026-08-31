@@ -80,7 +80,14 @@ pub(crate) enum RowGap {
     /// Inside one block: between the steps of a run of work, and under the
     /// disclosure that heads them.
     Step,
-    /// Between blocks: a message, a run of work, a turn's closing line.
+    /// Between a turn's work and the prose it is interleaved with. The two
+    /// are one answer being assembled, so they are held apart enough to tell
+    /// which is which and no further; a reply that alternates a sentence with
+    /// a tool call otherwise spends more of the column on air than on text.
+    Work,
+    /// Between turns: around the prompt that opens one and the line that
+    /// closes one. This is the boundary a reader scans for to find where one
+    /// exchange ends, so it stays the widest thing in the transcript.
     Group,
 }
 
@@ -94,29 +101,59 @@ pub(crate) struct TranscriptRow {
     pub(crate) gap: RowGap,
 }
 
-/// The space at one boundary between rows. A gap is a property of the
-/// boundary rather than of either row: the same work row wants the tight step
-/// rhythm above the next step of its run and the full block gap above the
-/// prose that follows the run, and a rank read off the upper row alone cannot
-/// say both. The last row is spaced as though a block followed it, so gaining
-/// a row beneath it leaves its height alone.
-fn row_gap(above: &RowSpec, below: Option<&RowSpec>) -> RowGap {
-    let heads_work = is_run_row(above) || matches!(above, RowSpec::TurnFold { .. });
+/// Whether a row reports on how the turn was worked rather than on what it
+/// said: the steps themselves, the toggle that collapses a run of them, and
+/// the disclosure that heads a whole turn's work.
+fn is_work_block(spec: &RowSpec) -> bool {
+    is_run_row(spec) || matches!(spec, RowSpec::TurnFold { .. })
+}
 
-    match below {
-        Some(below) if heads_work && is_run_row(below) => RowGap::Step,
-        _ => RowGap::Group,
+/// Whether a row stands at the edge of a turn. A prompt opens one and the
+/// closing line ends one; everything between them is a single answer, however
+/// many times it alternates between saying something and doing something.
+fn is_turn_edge(items: &[Entry], spec: &RowSpec) -> bool {
+    match spec {
+        RowSpec::Entry { index, .. } => items
+            .get(*index)
+            .is_some_and(|entry| matches!(entry.item, SessionItem::UserMessage { .. })),
+        RowSpec::TurnSummary { .. } | RowSpec::Interrupted { .. } => true,
+        _ => false,
     }
 }
 
+/// The space at one boundary between rows. A gap is a property of the
+/// boundary rather than of either row: the same work row wants the tight step
+/// rhythm above the next step of its run and a wider one above the prose that
+/// follows the run, and a rank read off the upper row alone cannot say both.
+/// The last row is spaced as though a turn followed it, so gaining a row
+/// beneath it leaves its height alone.
+fn row_gap(items: &[Entry], above: &RowSpec, below: Option<&RowSpec>) -> RowGap {
+    let Some(below) = below else {
+        return RowGap::Group;
+    };
+
+    if is_work_block(above) && is_run_row(below) {
+        return RowGap::Step;
+    }
+
+    if (is_work_block(above) || is_work_block(below))
+        && !is_turn_edge(items, above)
+        && !is_turn_edge(items, below)
+    {
+        return RowGap::Work;
+    }
+
+    RowGap::Group
+}
+
 /// Pair every row with its trailing gap, in render order.
-fn spaced_rows(specs: &[RowSpec]) -> Vec<TranscriptRow> {
+fn spaced_rows(items: &[Entry], specs: &[RowSpec]) -> Vec<TranscriptRow> {
     specs
         .iter()
         .enumerate()
         .map(|(ix, spec)| TranscriptRow {
             spec: spec.clone(),
-            gap: row_gap(spec, specs.get(ix + 1)),
+            gap: row_gap(items, spec, specs.get(ix + 1)),
         })
         .collect()
 }
@@ -504,7 +541,7 @@ impl TranscriptView {
     /// remeasuring, which preserves the scroll position exactly; a count
     /// change is a real splice.
     pub(crate) fn sync_transcript_list(&mut self, new: Vec<RowSpec>) {
-        let new = spaced_rows(&new);
+        let new = spaced_rows(&self.items, &new);
 
         if self.rows == new {
             return;
