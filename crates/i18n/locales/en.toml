@@ -762,6 +762,8 @@
 "agent-setting-approval-reviewer" = "Approval reviewer"
 "agent-setting-tier" = "Tier"
 "agent-setting-loading" = "loading…"
+"agent-settings-folded" = "More settings"
+"agent-settings-folded-entry" = "{name}: {value}"
 "agent-setting-value-default" = "Default"
 "agent-setting-value-auto" = "Auto"
 "agent-setting-value-accept-edits" = "Accept edits"

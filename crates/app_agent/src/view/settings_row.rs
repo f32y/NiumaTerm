@@ -16,6 +16,22 @@ const SETTINGS_PILL_ICON: f32 = 12.0;
 /// be changed, while the value itself is what the user came to read.
 const SETTINGS_PILL_CHEVRON: f32 = 10.0;
 
+/// One setting the composer row keeps off its surface, as the menu behind the
+/// row needs it: what it is called, what it stands at, what it could stand at,
+/// and how to move it.
+///
+/// The model and the effort are what a user changes between one message and
+/// the next. The rest are a deployment's standing choices, read once and left
+/// alone, and a pill each for them crowds the two that are actually read.
+#[derive(Clone)]
+struct FoldedSetting {
+    name: &'static str,
+    icon: IconName,
+    current: Option<String>,
+    options: Vec<(String, String)>,
+    set: fn(&mut AgentPane, String, &mut Context<AgentPane>),
+}
+
 impl AgentPane {
     /// The dropdown row under the input, per agent kind.
     pub(super) fn render_settings_row(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -94,27 +110,22 @@ impl AgentPane {
             IconName::Cpu,
             self.controls.settings.model.clone(),
             model_options,
-            true,
             |this, value, cx| {
                 this.controls.settings.model = Some(value);
                 this.remember_thread_defaults(cx);
             },
         )
         .into_any_element();
-        let permission = Self::setting_picker(
-            cx,
-            "agent-permission",
-            i18n("agent-setting-permissions"),
-            permission_icon(self.controls.settings.approval.as_deref()),
-            self.controls.settings.approval.clone(),
-            permission_options,
-            false,
-            |this, value, cx| {
+        let folded = vec![FoldedSetting {
+            name: i18n("agent-setting-permissions"),
+            icon: permission_icon(self.controls.settings.approval.as_deref()),
+            current: self.controls.settings.approval.clone(),
+            options: permission_options,
+            set: |this, value, cx| {
                 this.controls.settings.approval = Some(value);
                 this.remember_thread_defaults(cx);
             },
-        )
-        .into_any_element();
+        }];
 
         let mut row = h_flex()
             .w_full()
@@ -124,10 +135,6 @@ impl AgentPane {
             .child(Self::settings_group(
                 i18n("agent-settings-model"),
                 vec![model],
-            ))
-            .child(Self::settings_group(
-                i18n("agent-settings-execution-policy"),
-                vec![permission],
             ));
 
         if supports_effort {
@@ -154,7 +161,7 @@ impl AgentPane {
             ));
         }
 
-        row
+        row.children(Self::folded_settings_pill(cx, folded))
     }
 
     /// DeepSeek settings: model, reasoning effort, and permission preset. Each
@@ -184,7 +191,6 @@ impl AgentPane {
             IconName::Cpu,
             self.controls.settings.model.clone(),
             model_options,
-            true,
             |this, value, cx| {
                 this.controls.settings.model = Some(value);
                 this.remember_thread_defaults(cx);
@@ -192,6 +198,45 @@ impl AgentPane {
             },
         )
         .into_any_element();
+
+        let mut folded = Vec::new();
+
+        // A deployment that composes no presets has one composition for every
+        // conversation, so the control would offer a choice that does not exist.
+        if !self.controls.agent_presets.is_empty() {
+            folded.push(FoldedSetting {
+                name: i18n("agent-setting-agent-preset"),
+                icon: IconName::Bot,
+                current: self.controls.agent_preset.clone(),
+                options: self
+                    .controls
+                    .agent_presets
+                    .iter()
+                    .map(|preset| (preset.value.clone(), preset.label.clone()))
+                    .collect(),
+                set: |this, value, cx| this.apply_agent_preset(value, cx),
+            });
+        }
+
+        if !self.controls.approval_presets.is_empty() {
+            folded.push(FoldedSetting {
+                name: i18n("agent-setting-permissions"),
+                icon: permission_icon(self.controls.settings.approval.as_deref()),
+                current: self.controls.settings.approval.clone(),
+                options: self
+                    .controls
+                    .approval_presets
+                    .iter()
+                    .map(|preset| (preset.value.clone(), preset.label.clone()))
+                    .collect(),
+                set: |this, value, cx| {
+                    // The harness owns the switch, and its own command is what
+                    // performs it; the projection that follows is what moves
+                    // the row, so nothing is recorded here in advance.
+                    this.execute_backend_command(PendingSlashCommand::new("permission", value), cx);
+                },
+            });
+        }
 
         let mut row = h_flex()
             .w_full()
@@ -202,65 +247,6 @@ impl AgentPane {
                 i18n("agent-settings-model"),
                 vec![model],
             ));
-
-        // A deployment that composes no presets has one composition for every
-        // conversation, so the control would offer a choice that does not exist.
-        if !self.controls.agent_presets.is_empty() {
-            let composition_options: Vec<(String, String)> = self
-                .controls
-                .agent_presets
-                .iter()
-                .map(|preset| (preset.value.clone(), preset.label.clone()))
-                .collect();
-
-            let composition = Self::setting_picker(
-                cx,
-                "agent-composition",
-                i18n("agent-setting-agent-preset"),
-                IconName::Bot,
-                self.controls.agent_preset.clone(),
-                composition_options,
-                false,
-                |this, value, cx| this.apply_agent_preset(value, cx),
-            )
-            .into_any_element();
-
-            row = row.child(Self::settings_group(
-                i18n("agent-settings-agent-preset"),
-                vec![composition],
-            ));
-        }
-
-        if !self.controls.approval_presets.is_empty() {
-            let preset_options: Vec<(String, String)> = self
-                .controls
-                .approval_presets
-                .iter()
-                .map(|preset| (preset.value.clone(), preset.label.clone()))
-                .collect();
-
-            let permission = Self::setting_picker(
-                cx,
-                "agent-permission",
-                i18n("agent-setting-permissions"),
-                permission_icon(self.controls.settings.approval.as_deref()),
-                self.controls.settings.approval.clone(),
-                preset_options,
-                false,
-                |this, value, cx| {
-                    // The harness owns the switch, and its own command is what
-                    // performs it; the projection that follows is what moves
-                    // the row, so nothing is recorded here in advance.
-                    this.execute_backend_command(PendingSlashCommand::new("permission", value), cx);
-                },
-            )
-            .into_any_element();
-
-            row = row.child(Self::settings_group(
-                i18n("agent-settings-execution-policy"),
-                vec![permission],
-            ));
-        }
 
         if supports_effort {
             let effort = Self::effort_panel(
@@ -281,7 +267,7 @@ impl AgentPane {
             ));
         }
 
-        row
+        row.children(Self::folded_settings_pill(cx, folded))
     }
 
     /// Codex settings: model, approval policy, approval reviewer, sandbox,
@@ -323,7 +309,6 @@ impl AgentPane {
             IconName::Cpu,
             self.controls.settings.model.clone(),
             model_options,
-            true,
             |this, value, cx| {
                 // A tier the new model doesn't offer falls back to that
                 // model's default tier instead of erroring the next turn.
@@ -342,68 +327,54 @@ impl AgentPane {
             },
         )
         .into_any_element();
-        let approval = Self::setting_picker(
-            cx,
-            "agent-approval",
-            i18n("agent-setting-approval"),
-            permission_icon(self.controls.settings.approval.as_deref()),
-            self.controls.settings.approval.clone(),
-            approval_options,
-            false,
-            |this, value, cx| {
-                this.controls.settings.approval = Some(value);
-                this.remember_thread_defaults(cx);
+        let folded = vec![
+            FoldedSetting {
+                name: i18n("agent-setting-approval"),
+                icon: permission_icon(self.controls.settings.approval.as_deref()),
+                current: self.controls.settings.approval.clone(),
+                options: approval_options,
+                set: |this, value, cx| {
+                    this.controls.settings.approval = Some(value);
+                    this.remember_thread_defaults(cx);
+                },
             },
-        )
-        .into_any_element();
-        let sandbox = Self::setting_picker(
-            cx,
-            "agent-sandbox",
-            i18n("agent-setting-sandbox"),
-            IconName::Shield,
-            self.controls.settings.sandbox.clone(),
-            sandbox_options,
-            false,
-            |this, value, cx| {
-                this.controls.settings.sandbox = Some(value);
-                this.remember_thread_defaults(cx);
+            FoldedSetting {
+                name: i18n("agent-setting-approval-reviewer"),
+                icon: IconName::User,
+                current: self.controls.settings.approvals_reviewer.clone(),
+                options: reviewer_options,
+                set: |this, value, cx| {
+                    this.controls.settings.approvals_reviewer = Some(value);
+                    this.remember_thread_defaults(cx);
+                },
             },
-        )
-        .into_any_element();
-        let reviewer = Self::setting_picker(
-            cx,
-            "agent-approval-reviewer",
-            i18n("agent-setting-approval-reviewer"),
-            IconName::User,
-            self.controls.settings.approvals_reviewer.clone(),
-            reviewer_options,
-            false,
-            |this, value, cx| {
-                this.controls.settings.approvals_reviewer = Some(value);
-                this.remember_thread_defaults(cx);
+            FoldedSetting {
+                name: i18n("agent-setting-sandbox"),
+                icon: IconName::Shield,
+                current: self.controls.settings.sandbox.clone(),
+                options: sandbox_options,
+                set: |this, value, cx| {
+                    this.controls.settings.sandbox = Some(value);
+                    this.remember_thread_defaults(cx);
+                },
             },
-        )
-        .into_any_element();
+            FoldedSetting {
+                name: i18n("agent-setting-tier"),
+                icon: IconName::Zap,
+                current: Some(self.controls.settings.tier.clone().unwrap_or_default()),
+                options: tier_options,
+                set: |this, value, cx| {
+                    this.controls.settings.tier = (!value.is_empty()).then_some(value);
+                    this.remember_thread_defaults(cx);
+                },
+            },
+        ];
         let effort = Self::effort_panel(
             cx,
             self.controls.settings.effort.clone(),
             Self::effort_levels(self.kind),
             |this, value, cx| {
                 this.controls.settings.effort = Some(value);
-                this.remember_thread_defaults(cx);
-            },
-        )
-        .into_any_element();
-        let tier = Self::setting_picker(
-            cx,
-            "agent-tier",
-            i18n("agent-setting-tier"),
-            IconName::Zap,
-            Some(self.controls.settings.tier.clone().unwrap_or_default()),
-            tier_options,
-            false,
-            |this, value, cx| {
-                this.controls.settings.tier = (!value.is_empty()).then_some(value);
                 this.remember_thread_defaults(cx);
             },
         )
@@ -419,13 +390,110 @@ impl AgentPane {
                 vec![model],
             ))
             .child(Self::settings_group(
-                i18n("agent-settings-execution-policy"),
-                vec![approval, reviewer, sandbox],
-            ))
-            .child(Self::settings_group(
                 i18n("agent-settings-quality-cost"),
-                vec![effort, tier],
+                vec![effort],
             ))
+            .children(Self::folded_settings_pill(cx, folded))
+    }
+
+    /// The control the folded settings live behind: one menu listing them by
+    /// name and by the value each stands at, with a submenu per setting for
+    /// the values it could stand at instead.
+    ///
+    /// Nothing to fold means no control, so a harness offering only a model
+    /// and an effort keeps a row of two rather than one that ends in an empty
+    /// menu.
+    fn folded_settings_pill(
+        cx: &mut Context<Self>,
+        settings: Vec<FoldedSetting>,
+    ) -> Option<AnyElement> {
+        if settings.is_empty() {
+            return None;
+        }
+
+        let pane = cx.entity();
+        let name = i18n("agent-settings-folded");
+
+        Some(
+            Self::settings_pill(Button::new("agent-folded-settings"), cx)
+                .tooltip(name)
+                .aria_label(name)
+                .child(
+                    h_flex()
+                        .gap_1p5()
+                        .items_center()
+                        .child(
+                            Icon::new(IconName::Ellipsis)
+                                .size(px(SETTINGS_PILL_ICON))
+                                .text_color(cx.theme().muted_foreground.opacity(0.8)),
+                        )
+                        .child(
+                            Icon::new(IconName::ChevronDown)
+                                .size(px(SETTINGS_PILL_CHEVRON))
+                                .text_color(cx.theme().muted_foreground.opacity(0.7)),
+                        ),
+                )
+                // Anchored bottom-left so the menu opens upward — the row sits
+                // at the bottom edge of the pane.
+                .dropdown_menu_with_anchor(gpui::Anchor::BottomLeft, move |menu, window, cx| {
+                    let mut menu = menu;
+
+                    for setting in settings.clone() {
+                        // The entry states the value as well as the name, so
+                        // what the row used to show on its surface is still
+                        // read without opening anything further.
+                        let value = setting
+                            .current
+                            .as_ref()
+                            .map(|value| {
+                                setting
+                                    .options
+                                    .iter()
+                                    .find(|(option, _)| option == value)
+                                    .map(|(_, label)| label.clone())
+                                    .unwrap_or_else(|| setting_value_label(value))
+                            })
+                            .unwrap_or_else(|| "—".to_string());
+                        let label = i18n("agent-settings-folded-entry")
+                            .replace("{name}", setting.name)
+                            .replace("{value}", &value);
+                        let pane = pane.clone();
+
+                        menu = menu.submenu_with_icon(
+                            Some(Icon::new(setting.icon)),
+                            label,
+                            window,
+                            cx,
+                            move |submenu, _, _| {
+                                let mut submenu = submenu;
+                                let set = setting.set;
+
+                                for (value, label) in setting.options.clone() {
+                                    let pane = pane.clone();
+                                    let checked =
+                                        setting.current.as_deref() == Some(value.as_str());
+
+                                    submenu = submenu.item(
+                                        PopupMenuItem::new(label).checked(checked).on_click(
+                                            move |_, _, cx| {
+                                                pane.update(cx, |this, cx| {
+                                                    set(this, value.clone(), cx);
+                                                    cx.notify();
+                                                });
+                                            },
+                                        ),
+                                    );
+                                }
+
+                                submenu
+                            },
+                        );
+                    }
+
+                    menu
+                })
+                .into_any_element(),
+        )
     }
 
     /// The pills that belong to one aspect of the thread, named for assistive
@@ -670,10 +738,10 @@ impl AgentPane {
             })
     }
 
-    /// One dropdown showing `icon · current value · chevron`. Every picker uses
-    /// the same quiet color treatment; the model remains wider so its value is
-    /// easier to scan. Menus keep the existing protocol values and setters.
-    #[allow(clippy::too_many_arguments)]
+    /// One dropdown showing `icon · current value · chevron`. The model is the
+    /// only setting still shown this way, so the picker carries the floor that
+    /// keeps a route id readable rather than taking it as an argument. Menus
+    /// keep the existing protocol values and setters.
     fn setting_picker(
         cx: &mut Context<Self>,
         id: &'static str,
@@ -681,7 +749,6 @@ impl AgentPane {
         icon: IconName,
         current: Option<String>,
         options: Vec<(String, String)>,
-        is_model: bool,
         set: fn(&mut Self, String, &mut Context<Self>),
     ) -> impl IntoElement + use<> {
         let pane = cx.entity();
@@ -699,7 +766,7 @@ impl AgentPane {
             .unwrap_or_else(|| "—".to_string());
 
         Self::settings_pill(Button::new(id), cx)
-            .when(is_model, |this| this.min_w(px(120.)))
+            .min_w(px(120.))
             .tooltip(name)
             .aria_label(format!("{name}: {current_label}"))
             .child(
