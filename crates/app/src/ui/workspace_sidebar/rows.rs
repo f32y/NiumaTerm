@@ -551,10 +551,11 @@ impl Sidebar {
             .relative()
             .w_full()
             .h(px(TAB_ROW_HEIGHT))
-            // Indented under the workspace it belongs to, which is what makes
-            // a workspace and its tabs read as one block.
-            .ml(px(TAB_ROW_INDENT))
-            .px(px(TAB_ROW_PADDING_X))
+            // No leading inset, so the glyph column stands on the same edge
+            // as the workspace names above it and the list heading above
+            // those. A tab is tied to its workspace by the gap that separates
+            // one such block from the next rather than by an indent.
+            .px_0()
             .gap(px(TAB_ROW_GAP))
             .items_center()
             .rounded(UI_RADIUS)
