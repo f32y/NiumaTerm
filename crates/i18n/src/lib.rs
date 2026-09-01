@@ -46,9 +46,21 @@ pub fn set_language(locale: &str) {
     ACTIVE.store(language_index(locale), Ordering::Relaxed);
 }
 
+/// Which catalog [`i18n`] is currently answering from. A caller that memoizes
+/// translated text keys its cache on this so a live language switch cannot
+/// leave the previous language's strings on screen.
+pub fn active_language() -> u8 {
+    ACTIVE.load(Ordering::Relaxed)
+}
+
 /// Returns the active-language text for `key`, or `key` itself when it has no
 /// catalog entry, so a typo'd key shows up on screen instead of crashing.
-pub fn i18n(key: &str) -> &str {
+///
+/// The result borrows for the whole program: both catalogs are parsed once
+/// into maps that are never dropped or replaced, and a `'static` key covers the
+/// miss case. Callers can therefore hold the text, or hand it to a type that
+/// wraps a `&'static str`, without copying it onto the heap.
+pub fn i18n(key: &'static str) -> &'static str {
     // Helper binaries and unit tests can render labels without running the app
     // startup path. Loading the immutable catalogs here preserves the English
     // default while the main app still selects its configured language first.

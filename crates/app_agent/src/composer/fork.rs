@@ -146,7 +146,7 @@ impl AgentPane {
     /// the conversation shows what the cut would keep and what it would drop.
     /// Following the smooth-scrolling setting keeps the jump between two
     /// distant prompts readable where the user asked for animated scrolling.
-    pub(crate) fn follow_branch_selection(&self, cx: &mut Context<Self>) {
+    pub(crate) fn follow_branch_selection(&mut self, cx: &mut Context<Self>) {
         let selected = self.palette.selected;
         let Some(target) = self
             .palette_model(cx)
@@ -209,7 +209,7 @@ impl AgentPane {
         if self.runtime.status != Status::Idle || self.is_command_busy() {
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
-                i18n("agent-fork-idle-only").to_string(),
+                translated("agent-fork-idle-only"),
                 cx,
             );
             return false;
@@ -234,7 +234,7 @@ impl AgentPane {
         self.palette.dismissed = false;
         self.set_command_feedback(
             CommandFeedbackKind::Status,
-            i18n("agent-fork-loading-checkpoints").to_string(),
+            translated("agent-fork-loading-checkpoints"),
             cx,
         );
         true
@@ -258,7 +258,7 @@ impl AgentPane {
             Ok(checkpoints) if checkpoints.is_empty() => {
                 self.set_command_feedback(
                     CommandFeedbackKind::Error,
-                    i18n("agent-fork-no-prompts").to_string(),
+                    translated("agent-fork-no-prompts"),
                     cx,
                 );
             }
@@ -281,7 +281,7 @@ impl AgentPane {
                         if target.is_some() {
                             self.set_command_feedback(
                                 CommandFeedbackKind::Error,
-                                i18n("agent-fork-prompt-not-a-branch-point").to_string(),
+                                translated("agent-fork-prompt-not-a-branch-point"),
                                 cx,
                             );
                         }
@@ -317,16 +317,17 @@ impl AgentPane {
         match state {
             ForkState::Loading(_) => Some(PaletteModel {
                 rows: vec![cancel_row()],
-                note: Some(i18n("agent-fork-loading-checkpoints").to_string()),
+                note: Some(translated("agent-fork-loading-checkpoints")),
             }),
             ForkState::Selecting(checkpoints) => {
                 let mut rows = checkpoints
                     .iter()
                     .cloned()
                     .map(|checkpoint| PaletteRow {
-                        label: rewind_prompt_label(&checkpoint.prompt),
-                        description: i18n("agent-fork-branch-before-prompt").to_string(),
-                        hint: rewind_timestamp(checkpoint.timestamp.as_deref()),
+                        label: rewind_prompt_label(&checkpoint.prompt).into(),
+                        description: translated("agent-fork-branch-before-prompt"),
+                        hint: rewind_timestamp(checkpoint.timestamp.as_deref())
+                            .map(SharedString::from),
                         disabled_reason: None,
                         action: PaletteAction::ForkCheckpoint(checkpoint),
                     })
@@ -335,7 +336,7 @@ impl AgentPane {
 
                 Some(PaletteModel {
                     rows,
-                    note: Some(i18n("agent-fork-choose-prompt").to_string()),
+                    note: Some(translated("agent-fork-choose-prompt")),
                 })
             }
             ForkState::Branching => None,
@@ -384,7 +385,7 @@ impl AgentPane {
 
         self.set_command_feedback(
             CommandFeedbackKind::Notice,
-            i18n("agent-session-forking").to_string(),
+            translated("agent-session-forking"),
             cx,
         );
         cx.notify();
@@ -398,7 +399,7 @@ impl AgentPane {
             self.fork.state = None;
             self.set_command_feedback(
                 CommandFeedbackKind::Notice,
-                i18n("agent-fork-complete").to_string(),
+                translated("agent-fork-complete"),
                 cx,
             );
         }
@@ -431,8 +432,8 @@ impl AgentPane {
 
 fn cancel_row() -> PaletteRow {
     PaletteRow {
-        label: i18n("agent-fork-cancel").to_string(),
-        description: i18n("agent-fork-cancel-description").to_string(),
+        label: translated("agent-fork-cancel"),
+        description: translated("agent-fork-cancel-description"),
         hint: None,
         disabled_reason: None,
         action: PaletteAction::ForkCancel,

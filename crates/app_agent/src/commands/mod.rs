@@ -169,24 +169,53 @@ pub(super) fn merge_catalog(
         .collect()
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum PaletteCatalogEntry {
-    Command(SlashCommandInfo),
-    Skill(SkillInfo),
+/// One ranked palette hit, borrowed from the catalog it was ranked out of.
+/// Ranking runs again on every keystroke and again on every frame the palette
+/// paints, so the rows carry references and only the entry the user acts on is
+/// ever copied.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum PaletteCatalogEntry<'a> {
+    Command(&'a SlashCommandInfo),
+    Skill(&'a SkillInfo),
+}
+
+/// Case-insensitive `starts_with` over ASCII, without lowercasing either side
+/// into a fresh `String`. UTF-8 is self-synchronizing, so comparing raw bytes
+/// can only match on a character boundary.
+fn starts_with_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    haystack
+        .as_bytes()
+        .get(..needle.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
+/// Case-insensitive `contains` over ASCII, on the same terms as
+/// [`starts_with_ignore_ascii_case`]. An empty needle is contained by
+/// everything, which also keeps `windows` away from a zero width.
+fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    needle.is_empty()
+        || haystack
+            .as_bytes()
+            .windows(needle.len())
+            .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
 }
 
 fn text_match_rank<'a>(fields: impl IntoIterator<Item = &'a str>, query: &str) -> Option<usize> {
-    let query = query.to_ascii_lowercase();
-    let fields = fields
-        .into_iter()
-        .map(str::to_ascii_lowercase)
-        .collect::<Vec<_>>();
+    // Each field is read three times at most and the ranks are ordered, so the
+    // fields are collected once rather than re-walking the iterator per rank.
+    let fields = fields.into_iter().collect::<Vec<_>>();
 
-    if fields.iter().any(|field| field == &query) {
+    if fields.iter().any(|field| field.eq_ignore_ascii_case(query)) {
         Some(0)
-    } else if fields.iter().any(|field| field.starts_with(&query)) {
+    } else if fields
+        .iter()
+        .any(|field| starts_with_ignore_ascii_case(field, query))
+    {
         Some(1)
-    } else if fields.iter().any(|field| field.contains(&query)) {
+    } else if fields
+        .iter()
+        .any(|field| contains_ignore_ascii_case(field, query))
+    {
         Some(2)
     } else {
         None
@@ -213,21 +242,21 @@ fn skill_match_rank(skill: &SkillInfo, query: &str) -> Option<usize> {
 /// Merge commands and skills into one ranked result without erasing their
 /// different activation semantics. Within each rank, command catalog order
 /// is stable and is followed by provider skill order.
-pub(super) fn filter_palette_catalog(
-    commands: &[SlashCommandInfo],
-    skills: &[SkillInfo],
+pub(super) fn filter_palette_catalog<'a>(
+    commands: &'a [SlashCommandInfo],
+    skills: &'a [SkillInfo],
     query: &str,
-) -> Vec<PaletteCatalogEntry> {
+) -> Vec<PaletteCatalogEntry<'a>> {
     let mut buckets = [Vec::new(), Vec::new(), Vec::new()];
 
     for command in commands {
         if let Some(rank) = command_match_rank(command, query) {
-            buckets[rank].push(PaletteCatalogEntry::Command(command.clone()));
+            buckets[rank].push(PaletteCatalogEntry::Command(command));
         }
     }
     for skill in skills {
         if let Some(rank) = skill_match_rank(skill, query) {
-            buckets[rank].push(PaletteCatalogEntry::Skill(skill.clone()));
+            buckets[rank].push(PaletteCatalogEntry::Skill(skill));
         }
     }
 

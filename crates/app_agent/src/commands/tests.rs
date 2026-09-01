@@ -93,13 +93,40 @@ fn filter_orders_exact_prefix_then_substring_stably() {
     let names: Vec<String> = filter_palette_catalog(&catalog, &[], "review")
         .into_iter()
         .filter_map(|entry| match entry {
-            PaletteCatalogEntry::Command(command) => Some(command.name),
+            PaletteCatalogEntry::Command(command) => Some(command.name.clone()),
             PaletteCatalogEntry::Skill(_) => None,
         })
         .collect();
 
     assert_eq!(names, vec!["review", "review-file", "preview"]);
     assert!(filter_palette_catalog(&catalog, &[], "missing").is_empty());
+}
+
+/// Ranking compares raw bytes with ASCII case folding rather than lowercasing
+/// both sides into fresh strings, so an uppercase query must still reach every
+/// rank. Getting this wrong would leave a typed `/Review` matching nothing.
+#[test]
+fn filter_ranks_ignore_case_on_both_sides() {
+    let catalog = vec![
+        info("preview", SlashCommandSource::Provider),
+        info("review", SlashCommandSource::Provider),
+        info("review-file", SlashCommandSource::Provider),
+    ];
+    let mut mixed = skill("Browser:Control", "C:\\p\\SKILL.md", "system", true);
+    mixed.description = "Drives a REVIEW browser".into();
+
+    let names: Vec<String> = filter_palette_catalog(&catalog, &[mixed], "ReViEw")
+        .into_iter()
+        .map(|entry| match entry {
+            PaletteCatalogEntry::Command(command) => command.name.clone(),
+            PaletteCatalogEntry::Skill(skill) => skill.name.clone(),
+        })
+        .collect();
+
+    assert_eq!(
+        names,
+        vec!["review", "review-file", "preview", "Browser:Control"]
+    );
 }
 
 #[test]
