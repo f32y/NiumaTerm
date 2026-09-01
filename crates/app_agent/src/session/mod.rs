@@ -98,8 +98,8 @@ pub(crate) fn directories_match(left: Option<&str>, right: Option<&str>) -> bool
 /// path that is mostly shared prefix.
 /// The pane's branch label: a detached `HEAD` shows its short commit,
 /// matching the git footer's presentation of the same state.
-fn branch_label(cwd: &str) -> Option<String> {
-    Some(match git::current_branch(cwd)? {
+fn branch_label(cwd: &str, max_age: Duration) -> Option<String> {
+    Some(match git::current_branch(cwd, max_age)? {
         git::CheckedOut::Branch(branch) => branch,
         git::CheckedOut::Detached(commit) => {
             i18n("git-status-detached").replace("{commit}", &commit)
@@ -517,9 +517,16 @@ impl AgentPane {
             return;
         };
 
+        // Every tab open on this directory asks the same question on the same
+        // interval, so an answer read within one is theirs to share.
+        let max_age = Duration::from_secs(
+            cx.global::<AgentSettings>()
+                .git_status_refresh_interval
+                .max(1),
+        );
         let fetch = cx
             .background_executor()
-            .spawn(async move { branch_label(&cwd) });
+            .spawn(async move { branch_label(&cwd, max_age) });
 
         cx.spawn(async move |this, cx| {
             let branch = fetch.await;
