@@ -1255,12 +1255,12 @@ fn title_poll_reports_change_once() {
     assert_eq!(terminal.poll_title(), None);
 }
 
-/// The `PWD` getter is populated by both the manual `PWD` setter and
-/// by **OSC 7**. Upstream libghostty-vt dropped OSC 7 (an apprt action with no
-/// apprt in headless builds); the vendored patch
-/// `0003-pwd-store-osc7-headless.patch` routes `report_pwd` to
-/// `Terminal.setPwd`, mirroring `.window_title` so direct setters and OSC 7
-/// share the same observable state.
+/// The `PWD` getter is populated by both the manual `PWD` setter and by
+/// **OSC 7**. Upstream libghostty-vt reports OSC 7 as an application-runtime
+/// action, which a headless build has no runtime to receive, so the sequence
+/// left the getter empty. The vendored engine routes `report_pwd` into
+/// `Terminal.setPwd` the way it already does for the window title, which is
+/// what lets a caller read one working directory whichever way it was set.
 #[test]
 fn pwd_set_via_setter_and_osc7() {
     // Setter → getter roundtrip works (the getter itself is fine).
