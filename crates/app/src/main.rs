@@ -542,31 +542,16 @@ fn foreground_last_active(cx: &mut App) {
 /// best-matching workspace, or create a new window. Invalid targets only bring
 /// the app forward.
 fn dispatch_cli_action(action: CliAction, cx: &mut App) {
-    if let CliAction::FocusNotification {
-        route,
-        notification_id,
-    } = action
-    {
-        dispatch_focus_notification(&route, &notification_id, cx);
-        return;
-    }
-    let path = match &action {
-        CliAction::Activate => {
-            foreground_last_active(cx);
-            return;
-        }
-        CliAction::NewTab { path } | CliAction::NewWindow { path } => {
-            if !path.is_dir() {
-                warn!("nmt:// target is not a directory: {}", path.display());
-                foreground_last_active(cx);
-                return;
-            }
-            path.clone()
-        }
-        CliAction::FocusNotification { .. } => unreachable!("handled above"),
-    };
     match action {
-        CliAction::NewTab { .. } => {
+        CliAction::FocusNotification {
+            route,
+            notification_id,
+        } => dispatch_focus_notification(&route, &notification_id, cx),
+        CliAction::Activate => foreground_last_active(cx),
+        CliAction::NewTab { path } => {
+            let Some(path) = openable_directory(path, cx) else {
+                return;
+            };
             // Prefer an exact-path workspace across all windows. The most
             // recently active window wins when duplicates already exist;
             // remaining windows are checked newest first.
@@ -632,10 +617,27 @@ fn dispatch_cli_action(action: CliAction, cx: &mut App) {
                 open_window_at(&path, cx);
             }
         }
-        CliAction::NewWindow { .. } => open_window_at(&path, cx),
-        CliAction::Activate => unreachable!("handled above"),
-        CliAction::FocusNotification { .. } => unreachable!("handled above"),
+        CliAction::NewWindow { path } => {
+            let Some(path) = openable_directory(path, cx) else {
+                return;
+            };
+
+            open_window_at(&path, cx);
+        }
     }
+}
+
+/// The target of an open request, when there is something to open. A path that
+/// is not a directory only brings the app forward: a tab or window over it
+/// would have no working directory to run in.
+fn openable_directory(path: path::PathBuf, cx: &mut App) -> Option<path::PathBuf> {
+    if path.is_dir() {
+        return Some(path);
+    }
+
+    warn!("nmt:// target is not a directory: {}", path.display());
+    foreground_last_active(cx);
+    None
 }
 
 fn dispatch_focus_notification(route: &AgentRoute, notification_id: &str, cx: &mut App) {
