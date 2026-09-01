@@ -139,7 +139,7 @@ impl AgentPane {
         if self.runtime.status != Status::Idle || self.is_command_busy() {
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
-                i18n("agent-rewind-idle-only").to_string(),
+                translated("agent-rewind-idle-only"),
                 cx,
             );
             return false;
@@ -154,7 +154,7 @@ impl AgentPane {
         else {
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
-                i18n("agent-rewind-no-session-id").to_string(),
+                translated("agent-rewind-no-session-id"),
                 cx,
             );
             return false;
@@ -167,7 +167,7 @@ impl AgentPane {
         self.palette.dismissed = false;
         self.set_command_feedback(
             CommandFeedbackKind::Status,
-            i18n("agent-rewind-loading-checkpoints").to_string(),
+            translated("agent-rewind-loading-checkpoints"),
             cx,
         );
 
@@ -194,7 +194,7 @@ impl AgentPane {
                         this.rewind.state = None;
                         this.set_command_feedback(
                             CommandFeedbackKind::Error,
-                            i18n("agent-rewind-no-prompts").to_string(),
+                            translated("agent-rewind-no-prompts"),
                             cx,
                         );
                     }
@@ -222,7 +222,7 @@ impl AgentPane {
                         if unresolved {
                             this.set_command_feedback(
                                 CommandFeedbackKind::Error,
-                                i18n("agent-rewind-prompt-not-a-checkpoint").to_string(),
+                                translated("agent-rewind-prompt-not-a-checkpoint"),
                                 cx,
                             );
                         } else {
@@ -271,29 +271,30 @@ impl AgentPane {
         match state {
             RewindState::Loading { .. } => Some(PaletteModel {
                 rows: vec![PaletteRow {
-                    label: i18n("agent-rewind-cancel").to_string(),
-                    description: i18n("agent-rewind-cancel-description").to_string(),
+                    label: translated("agent-rewind-cancel"),
+                    description: translated("agent-rewind-cancel-description"),
                     hint: None,
                     disabled_reason: None,
                     action: PaletteAction::RewindAction(RewindAction::Cancel),
                 }],
-                note: Some(i18n("agent-rewind-loading-active-branch").to_string()),
+                note: Some(translated("agent-rewind-loading-active-branch")),
             }),
             RewindState::SelectingCheckpoint { checkpoints, .. } => {
                 let mut rows = checkpoints
                     .iter()
                     .cloned()
                     .map(|checkpoint| PaletteRow {
-                        label: rewind_prompt_label(&checkpoint.prompt),
-                        description: i18n("agent-rewind-return-before-prompt").to_string(),
-                        hint: rewind_timestamp(checkpoint.timestamp.as_deref()),
+                        label: rewind_prompt_label(&checkpoint.prompt).into(),
+                        description: translated("agent-rewind-return-before-prompt"),
+                        hint: rewind_timestamp(checkpoint.timestamp.as_deref())
+                            .map(SharedString::from),
                         disabled_reason: None,
                         action: PaletteAction::RewindCheckpoint(checkpoint),
                     })
                     .collect::<Vec<_>>();
                 rows.push(PaletteRow {
-                    label: i18n("agent-rewind-cancel").to_string(),
-                    description: i18n("agent-rewind-cancel-description").to_string(),
+                    label: translated("agent-rewind-cancel"),
+                    description: translated("agent-rewind-cancel-description"),
                     hint: None,
                     disabled_reason: None,
                     action: PaletteAction::RewindAction(RewindAction::Cancel),
@@ -301,13 +302,13 @@ impl AgentPane {
 
                 Some(PaletteModel {
                     rows,
-                    note: Some(i18n("agent-rewind-choose-prompt").to_string()),
+                    note: Some(translated("agent-rewind-choose-prompt")),
                 })
             }
             RewindState::SelectingAction { checkpoint, .. } => {
                 let file_disabled = match checkpoint.file_restore_availability {
                     sessions::FileRestoreAvailability::Unavailable => {
-                        Some(i18n("agent-rewind-file-checkpoint-unavailable").to_string())
+                        Some(translated("agent-rewind-file-checkpoint-unavailable"))
                     }
                     _ => None,
                 };
@@ -326,29 +327,29 @@ impl AgentPane {
                 Some(PaletteModel {
                     rows: vec![
                         PaletteRow {
-                            label: i18n("agent-rewind-restore-files").to_string(),
-                            description: file_description.to_string(),
-                            hint: Some(i18n("agent-rewind-files-only").to_string()),
+                            label: translated("agent-rewind-restore-files"),
+                            description: SharedString::new_static(file_description),
+                            hint: Some(translated("agent-rewind-files-only")),
                             disabled_reason: file_disabled.clone(),
                             action: PaletteAction::RewindAction(RewindAction::Files),
                         },
                         PaletteRow {
-                            label: i18n("agent-rewind-restore-conversation").to_string(),
-                            description: i18n("agent-rewind-conversation-description").to_string(),
-                            hint: Some(i18n("agent-rewind-conversation-only").to_string()),
+                            label: translated("agent-rewind-restore-conversation"),
+                            description: translated("agent-rewind-conversation-description"),
+                            hint: Some(translated("agent-rewind-conversation-only")),
                             disabled_reason: None,
                             action: PaletteAction::RewindAction(RewindAction::Conversation),
                         },
                         PaletteRow {
-                            label: i18n("agent-rewind-restore-files-conversation").to_string(),
-                            description: i18n("agent-rewind-combined-description").to_string(),
-                            hint: Some(i18n("agent-rewind-combined").to_string()),
+                            label: translated("agent-rewind-restore-files-conversation"),
+                            description: translated("agent-rewind-combined-description"),
+                            hint: Some(translated("agent-rewind-combined")),
                             disabled_reason: file_disabled,
                             action: PaletteAction::RewindAction(RewindAction::FilesAndConversation),
                         },
                         PaletteRow {
-                            label: i18n("agent-rewind-cancel").to_string(),
-                            description: i18n("agent-rewind-cancel-description").to_string(),
+                            label: translated("agent-rewind-cancel"),
+                            description: translated("agent-rewind-cancel-description"),
                             hint: None,
                             disabled_reason: None,
                             action: PaletteAction::RewindAction(RewindAction::Cancel),
@@ -356,7 +357,8 @@ impl AgentPane {
                     ],
                     note: Some(
                         i18n("agent-rewind-selected")
-                            .replace("{prompt}", &rewind_prompt_label(&checkpoint.prompt)),
+                            .replace("{prompt}", &rewind_prompt_label(&checkpoint.prompt))
+                            .into(),
                     ),
                 })
             }
@@ -425,7 +427,7 @@ impl AgentPane {
             SlashCommandOutcome::NotReady => {
                 self.set_command_feedback(
                     CommandFeedbackKind::Error,
-                    i18n("agent-rewind-files-not-ready").to_string(),
+                    translated("agent-rewind-files-not-ready"),
                     cx,
                 );
                 return;
@@ -446,9 +448,9 @@ impl AgentPane {
         self.set_command_feedback(
             CommandFeedbackKind::Status,
             if continue_with_fork {
-                i18n("agent-rewind-restoring-before-fork").to_string()
+                translated("agent-rewind-restoring-before-fork")
             } else {
-                i18n("agent-rewind-restoring-files").to_string()
+                translated("agent-rewind-restoring-files")
             },
             cx,
         );
@@ -475,7 +477,7 @@ impl AgentPane {
                         this.rewind.state = None;
                         this.set_command_feedback(
                             CommandFeedbackKind::Notice,
-                            i18n("agent-rewind-files-restored").to_string(),
+                            translated("agent-rewind-files-restored"),
                             cx,
                         );
                     }
@@ -524,9 +526,9 @@ impl AgentPane {
             self.set_command_feedback(
                 CommandFeedbackKind::Error,
                 if files_restored {
-                    i18n("agent-rewind-source-id-missing-after-files").to_string()
+                    translated("agent-rewind-source-id-missing-after-files")
                 } else {
-                    i18n("agent-rewind-source-id-missing").to_string()
+                    translated("agent-rewind-source-id-missing")
                 },
                 cx,
             );
@@ -538,7 +540,7 @@ impl AgentPane {
         self.rewind.state = Some(RewindState::ForkingConversation { operation_id });
         self.set_command_feedback(
             CommandFeedbackKind::Status,
-            i18n("agent-rewind-creating-prefix").to_string(),
+            translated("agent-rewind-creating-prefix"),
             cx,
         );
 
@@ -607,6 +609,7 @@ impl AgentPane {
             &mut self.palette.selected,
             &mut self.palette.dismissed,
         );
+        self.palette.catalog = None;
         self.history_ui.mode = RecentSessionsMode::Hidden;
 
         self.apply_replay(fork.replay, cx);
@@ -626,13 +629,13 @@ impl AgentPane {
                         CommandFeedbackKind::Error
                     },
                     if !started && files_restored {
-                        i18n("agent-rewind-start-failed-after-files").to_string()
+                        translated("agent-rewind-start-failed-after-files")
                     } else if !started {
-                        i18n("agent-rewind-start-failed").to_string()
+                        translated("agent-rewind-start-failed")
                     } else if files_restored {
-                        i18n("agent-rewind-complete-with-files").to_string()
+                        translated("agent-rewind-complete-with-files")
                     } else {
-                        i18n("agent-rewind-complete").to_string()
+                        translated("agent-rewind-complete")
                     },
                     cx,
                 );

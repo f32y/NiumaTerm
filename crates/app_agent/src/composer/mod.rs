@@ -89,7 +89,10 @@ fn feedback_is_transient(kind: CommandFeedbackKind) -> bool {
 #[derive(Clone)]
 pub(super) struct CommandFeedback {
     pub(super) kind: CommandFeedbackKind,
-    pub(super) message: String,
+    /// Redrawn on every frame the composer paints while the message is up, so
+    /// it is stored in the form the view hands to `child` rather than copied
+    /// into one each time.
+    pub(super) message: SharedString,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -279,11 +282,13 @@ impl AgentPane {
             return false;
         }
 
-        let Some(command) = self
-            .command_catalog()
-            .into_iter()
+        let catalog = self.command_catalog();
+        let matched = catalog
+            .iter()
             .find(|command| command.name == parsed.name)
-        else {
+            .cloned();
+
+        let Some(command) = matched else {
             // Where a skill is invoked by writing its name into the prompt, a
             // slash line naming one is a message the harness expands, so
             // refusing it as an unknown command would block the only way to
@@ -582,12 +587,15 @@ impl AgentPane {
     pub(super) fn set_command_feedback(
         &mut self,
         kind: CommandFeedbackKind,
-        message: String,
+        message: impl Into<SharedString>,
         cx: &mut Context<Self>,
     ) {
         self.palette.feedback_seq += 1;
         let seq = self.palette.feedback_seq;
-        self.palette.feedback = Some(CommandFeedback { kind, message });
+        self.palette.feedback = Some(CommandFeedback {
+            kind,
+            message: message.into(),
+        });
         cx.notify();
 
         if !feedback_is_transient(kind) {
@@ -624,21 +632,32 @@ impl AgentPane {
             || self.branch_flow_holds_composer()
     }
 
-    pub(super) fn skill_disabled_reason(&self, skill: &SkillInfo) -> Option<String> {
+    pub(super) fn skill_disabled_reason(&self, skill: &SkillInfo) -> Option<SharedString> {
         if !skill.enabled {
-            Some(i18n("agent-composer-disabled-by-codex").to_string())
-        } else if matches!(self.runtime.status, Status::Starting | Status::Exited) {
-            Some(match self.runtime.status {
-                Status::Starting => i18n("agent-composer-agent-starting").to_string(),
-                Status::Exited => i18n("agent-composer-agent-exited").to_string(),
-                _ => unreachable!(),
-            })
+            Some(translated("agent-composer-disabled-by-codex"))
         } else {
-            None
+            // A skill is invoked through the harness, so it needs a session
+            // that has finished starting and has not ended.
+            match self.runtime.status {
+                Status::Starting => Some(translated("agent-composer-agent-starting")),
+                Status::Exited => Some(translated("agent-composer-agent-exited")),
+                _ => None,
+            }
         }
     }
 
-    pub(super) fn command_catalog(&self) -> Vec<SlashCommandInfo> {
+    pub(super) fn command_catalog(&mut self) -> Rc<[SlashCommandInfo]> {
+        let language = nmt_i18n::active_language();
+
+        if let Some(cached) = self
+            .palette
+            .catalog
+            .as_ref()
+            .filter(|cached| cached.language == language)
+        {
+            return cached.commands.clone();
+        }
+
         let adapter = self
             .runtime
             .backend
@@ -650,11 +669,19 @@ impl AgentPane {
                 AgentKind::DeepSeek => deepseek::Session::adapter_commands(),
             });
 
-        merge_catalog(
+        let commands: Rc<[SlashCommandInfo]> = merge_catalog(
             local_commands(),
             adapter,
             self.palette.provider_commands.clone(),
         )
+        .into();
+
+        self.palette.catalog = Some(CachedCatalog {
+            language,
+            commands: commands.clone(),
+        });
+
+        commands
     }
 
     pub(super) fn command_choices(&self, command: &str) -> Vec<(String, String)> {

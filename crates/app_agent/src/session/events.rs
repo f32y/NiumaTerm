@@ -78,6 +78,7 @@ impl AgentPane {
             }
             SessionEvent::Commands(commands) => {
                 self.palette.provider_commands = commands;
+                self.palette.catalog = None;
                 self.palette.provider_commands_ready = true;
                 self.palette.selected = 0;
                 cx.notify();

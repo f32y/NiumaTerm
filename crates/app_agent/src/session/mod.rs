@@ -1280,6 +1280,7 @@ impl AgentPane {
             &mut self.palette.selected,
             &mut self.palette.dismissed,
         );
+        self.palette.catalog = None;
         self.palette.feedback = None;
         self.history_ui.mode = RecentSessionsMode::Hidden;
         // The discarded conversation's subject no longer describes this tab,

@@ -742,3 +742,98 @@ fn a_replayed_answer_is_read_as_old_as_the_provider_recorded_it() {
         "a clock the provider ran ahead of never reads as a future answer"
     );
 }
+
+/// The merged `/` catalog is held between frames rather than rebuilt on each
+/// one, so the two ways of getting it wrong are keeping a command the harness
+/// has withdrawn and never showing one it has just published.
+mod command_catalog_cache_tests {
+    use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext, WindowHandle};
+    use nmt_agent_utils::AgentWorkspace;
+    use nmt_agent_utils::chat::{
+        Event as SessionEvent, SendOutcome, SlashCommandArguments, SlashCommandInfo,
+        SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource,
+    };
+    use nmt_config::profile::{AgentProfile, AgentProfileKind};
+
+    use crate::session::{Backend, TestBackend};
+    use crate::settings::AgentSettings;
+    use crate::{AgentPane, AgentThreadDefaults};
+
+    fn open_pane(
+        cx: &mut TestAppContext,
+    ) -> (Entity<AgentPane>, WindowHandle<gpui_component::Root>) {
+        let profile = AgentProfile {
+            name: "Catalog Cache Test".into(),
+            kind: AgentProfileKind::Codex,
+            // Never spawned: the test publishes discovery results by hand.
+            executable: "missing-agent.exe".into(),
+            ..AgentProfile::default()
+        };
+        let mut pane = None;
+        let window = cx.update(|cx| {
+            gpui_component::init(cx);
+            cx.set_global(AgentSettings::default());
+            cx.set_global(AgentThreadDefaults::default());
+            cx.open_window(Default::default(), |window, cx| {
+                let agent =
+                    cx.new(|cx| AgentPane::new(profile, AgentWorkspace::default(), window, cx));
+                pane = Some(agent.clone());
+                cx.new(|cx| gpui_component::Root::new(agent, window, cx))
+            })
+            .expect("open Agent test window")
+        });
+        (pane.expect("create Agent pane"), window)
+    }
+
+    fn discovered(name: &str) -> SlashCommandInfo {
+        SlashCommandInfo {
+            name: name.into(),
+            description: name.into(),
+            argument_hint: None,
+            source: SlashCommandSource::Provider,
+            arguments: SlashCommandArguments::None,
+            run_policy: SlashCommandRunPolicy::Immediate,
+        }
+    }
+
+    fn offers(pane: &mut AgentPane, name: &str) -> bool {
+        pane.command_catalog()
+            .iter()
+            .any(|command| command.name == name)
+    }
+
+    #[gpui::test]
+    fn discovery_replacements_reach_the_palette(cx: &mut TestAppContext) {
+        let (pane, window) = open_pane(cx);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+        // Replaces the launch the pane started for itself, which has no
+        // executable to reach, and lets that failure settle before the
+        // assertions run.
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, _| {
+                pane.runtime.backend = Some(Backend::Test(TestBackend::new(
+                    [SendOutcome::StartedTurn],
+                    SlashCommandOutcome::NotReady,
+                    Vec::new(),
+                )));
+            });
+        });
+        cx.run_until_parked();
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
+                assert!(!offers(pane, "deploy"), "nothing published this yet");
+
+                pane.apply_event(SessionEvent::Commands(vec![discovered("deploy")]), cx);
+                assert!(offers(pane, "deploy"), "a published command must show up");
+
+                // Discovery is a replacement snapshot, so a later one that
+                // omits the command withdraws it.
+                pane.apply_event(SessionEvent::Commands(vec![discovered("status")]), cx);
+                assert!(!offers(pane, "deploy"), "a withdrawn command must go");
+            });
+        });
+        cx.run_until_parked();
+    }
+}

@@ -560,6 +560,23 @@ impl Default for SessionHistoryUi {
     }
 }
 
+/// Translated text as a `SharedString` that borrows rather than copies. Both
+/// catalogs are parsed once into maps that are never dropped, so the text stays
+/// valid for the life of the process and a view rebuilt every frame pays
+/// nothing per label.
+pub(crate) fn translated(key: &'static str) -> SharedString {
+    SharedString::new_static(i18n(key))
+}
+
+/// The merged `/` catalog, held so it is not rebuilt from the local, adapter,
+/// and provider lists on every frame the palette paints. `language` is part of
+/// the key because local entries carry translated descriptions and the user can
+/// switch language while a pane is open.
+struct CachedCatalog {
+    language: u8,
+    commands: Rc<[SlashCommandInfo]>,
+}
+
 /// Slash-command palette, skill picker, and pending-command state.
 #[derive(Default)]
 struct SlashPalette {
@@ -567,6 +584,9 @@ struct SlashPalette {
     /// remain available independently of whether discovery has arrived.
     provider_commands: Vec<SlashCommandInfo>,
     provider_commands_ready: bool,
+    /// Derived from `provider_commands`; every write to that list must drop
+    /// this, or the palette keeps offering commands the harness has withdrawn.
+    catalog: Option<CachedCatalog>,
     /// `None` means Codex discovery is still loading. A populated catalog can
     /// contain both usable skills and non-fatal per-file errors.
     skill_catalog: Option<SkillCatalog>,
