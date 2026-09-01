@@ -1,3 +1,4 @@
+use gpui::MouseMoveEvent;
 use nmt_i18n::i18n;
 
 use crate::composer::visible_prompt;
@@ -14,6 +15,32 @@ pub(super) fn queued_message_label(prompt: &QueuedPrompt) -> String {
         .join(" ");
 
     i18n("agent-history-queued-message").replace("{text}", &text)
+}
+
+impl SessionHistoryUi {
+    /// Hand the highlight to the row under the pointer, reporting whether the
+    /// highlight moved.
+    ///
+    /// Guarded on the pointer having actually moved. Keyboard navigation
+    /// scrolls the list to keep its row in view, which slides a different row
+    /// under a pointer resting over the strip; letting that count as pointing
+    /// would take the highlight straight back off the arrow keys. Real
+    /// movement takes it back unconditionally, because a reader who has picked
+    /// the pointer up again is looking at where the pointer is.
+    pub(super) fn point_at(&mut self, index: usize, position: Point<Pixels>) -> bool {
+        if self.pointer == Some(position) {
+            return false;
+        }
+
+        self.pointer = Some(position);
+
+        if self.selected == index {
+            return false;
+        }
+
+        self.selected = index;
+        true
+    }
 }
 
 impl AgentPane {
@@ -123,12 +150,29 @@ impl AgentPane {
             let row_sizes = Rc::new(vec![size(px(0.), px(Self::HISTORY_ROW_HEIGHT)); rows]);
 
             div()
+                .id("agent-history-rows")
                 .relative()
                 .w_full()
                 .h(body_height)
                 .flex_none()
                 .overflow_hidden()
                 .px_2()
+                // The highlight is drawn for a pointer over the strip even
+                // while a search is being typed, where the arrow keys belong
+                // to the input and the keyboard has no highlight of its own.
+                // The last pointer position goes with it: a pointer that left
+                // and came back to the same place has moved.
+                .on_hover(cx.listener(|this, inside: &bool, _, cx| {
+                    if this.history_ui.pointer_inside == *inside {
+                        return;
+                    }
+
+                    this.history_ui.pointer_inside = *inside;
+                    if !*inside {
+                        this.history_ui.pointer = None;
+                    }
+                    cx.notify();
+                }))
                 .child(
                     v_virtual_list(
                         cx.entity(),
@@ -249,13 +293,16 @@ impl AgentPane {
         // from `muted` again lands on the color it sits on and disappears.
         // The list tokens are the per-theme fills meant to read against a
         // surface, translucent in Fluent and in the Modern themes alike.
-        let hover_bg = cx.theme().list_hover;
+        //
+        // One fill, for the one current row. The pointer and the arrow keys
+        // move the same highlight, so a hover tint on top of it would be a
+        // second mark for a state the list only has one of.
         let selected = self.history_ui.selected == index
             && matches!(
                 self.history_ui.mode,
                 RecentSessionsMode::Automatic | RecentSessionsMode::Open
             )
-            && self.input.read(cx).text().len() == 0;
+            && (self.history_ui.pointer_inside || self.input.read(cx).text().len() == 0);
 
         h_flex()
             .id(("history-row", index))
@@ -267,7 +314,11 @@ impl AgentPane {
             .rounded(UI_RADIUS)
             .cursor_pointer()
             .when(selected, |this| this.bg(cx.theme().list_active))
-            .hover(move |style| style.bg(hover_bg))
+            .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
+                if this.history_ui.point_at(index, event.position) {
+                    cx.notify();
+                }
+            }))
             .on_click(cx.listener(move |this, _, _, cx| this.resume_session(index, cx)))
             .child(
                 h_flex()
