@@ -179,6 +179,18 @@ impl BackgroundTaskState {
     }
 }
 
+/// What kind of work a row represents. A child agent holds a conversation and
+/// reports progress through it; a background shell is one command whose output
+/// file is the only thing to read. The two need different labels and different
+/// detail content, so the row states which it is instead of the view guessing
+/// from the identifiers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum BackgroundTaskKind {
+    #[default]
+    Agent,
+    Shell,
+}
+
 /// How far provider-specific restoration has progressed. Kept beside the rows
 /// rather than encoded into them so a failed refresh can leave known rows
 /// visible while still reporting the failure.
@@ -200,6 +212,7 @@ pub struct BackgroundTaskSummary {
     pub key: BackgroundTaskKey,
     pub parent_session: BackgroundTaskKey,
     pub refs: BackgroundTaskRefs,
+    pub kind: BackgroundTaskKind,
     pub display_name: Option<String>,
     pub agent_type: Option<String>,
     /// What the child was asked to do, from the launch payload.
@@ -238,7 +251,11 @@ impl BackgroundTaskSummary {
         let tail = id.rsplit(['-', '_', ':']).next().unwrap_or(id);
         let tail = if tail.len() >= 4 { tail } else { id };
         let start = tail.len().saturating_sub(8);
-        format!("Agent {}", &tail[start..])
+        let noun = match self.kind {
+            BackgroundTaskKind::Agent => "Agent",
+            BackgroundTaskKind::Shell => "Shell",
+        };
+        format!("{noun} {}", &tail[start..])
     }
 }
 
@@ -247,6 +264,7 @@ impl BackgroundTaskSummary {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct BackgroundTaskUpdate {
     pub refs: Option<BackgroundTaskRefs>,
+    pub kind: Option<BackgroundTaskKind>,
     pub state: Option<BackgroundTaskState>,
     pub display_name: Option<String>,
     pub agent_type: Option<String>,
@@ -383,6 +401,7 @@ impl BackgroundTaskRegistry {
                     key: key.clone(),
                     parent_session,
                     refs,
+                    kind: BackgroundTaskKind::default(),
                     display_name: None,
                     agent_type: None,
                     objective: None,
@@ -491,6 +510,12 @@ fn merge_update(
             summary.refs = merged;
             changed = true;
         }
+    }
+    if let Some(kind) = update.kind
+        && summary.kind != kind
+    {
+        summary.kind = kind;
+        changed = true;
     }
     if let Some(state) = update.state
         && summary.state != state
