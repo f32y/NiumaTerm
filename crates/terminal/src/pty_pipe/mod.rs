@@ -206,9 +206,6 @@ fn publish_render_buffer(
     true
 }
 
-/// Convert an OSC 7 working-directory value to a path. Strips a `file://host`
-/// prefix when present (`file://host/path` → `/path`); otherwise uses the
-/// value verbatim.
 /// Convert `scrollback-history-limit` (in **lines**) to the engine's
 /// scrollback byte budget. The engine stores rows in byte-bounded pages
 /// (~14 B/cell observed), so we size for `cols × 16 B/cell` — 16 is an upper bound,
