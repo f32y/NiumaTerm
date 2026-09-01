@@ -70,6 +70,11 @@ impl AgentPane {
 
         self.history_ui.mode = RecentSessionsMode::Open;
         self.history_ui.selected = 0;
+        // A list opened from a command was opened without the pointer, and a
+        // strip that was on screen the last time the pointer crossed it has
+        // no way to report that the pointer has since left.
+        self.history_ui.pointer_inside = false;
+        self.history_ui.pointer = None;
         self.palette.feedback = None;
         cx.notify();
         true

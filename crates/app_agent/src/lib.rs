@@ -38,7 +38,7 @@ use gpui::prelude::*;
 use gpui::{
     AnyElement, App, ClipboardItem, Context, Div, ElementId, Entity, FocusHandle, FollowMode,
     FontWeight, Hsla, ListAlignment, ListHorizontalSizingBehavior, ListOffset, ListSizingBehavior,
-    ListState, MouseButton, Pixels, ScrollHandle, ScrollStrategy, SharedString, Stateful,
+    ListState, MouseButton, Pixels, Point, ScrollHandle, ScrollStrategy, SharedString, Stateful,
     StyleRefinement, Task, UniformListScrollHandle, Window, div, list, px, relative, size,
     uniform_list,
 };
@@ -518,7 +518,19 @@ struct SessionHistoryUi {
     /// accumulate, so without this the next page would be appended to the
     /// matches and the strip would mix two different questions' answers.
     showing_search: bool,
+    /// The one highlighted row, whether the pointer or the arrow keys put it
+    /// there. A list has a single current row: what a click opens and what
+    /// Enter opens are the same row, and only one thing on screen says so.
     selected: usize,
+    /// Whether the pointer is over the list. A search narrows the rows while
+    /// the arrow keys still belong to the input, so the keyboard's highlight
+    /// is not drawn then; a pointer over the list is reason enough to draw it,
+    /// because the row under the pointer is what a click would open.
+    pointer_inside: bool,
+    /// Where the pointer last was over the list, so a row sliding under a
+    /// pointer that has not moved cannot take the highlight back. Keyboard
+    /// navigation scrolls the list, which does exactly that.
+    pointer: Option<Point<Pixels>>,
     /// Claude replay is loaded before process replacement and published only
     /// after the resumed process confirms readiness.
     pending_resume_replay: Option<Vec<ReplayTurn>>,
@@ -538,6 +550,8 @@ impl Default for SessionHistoryUi {
             mode: RecentSessionsMode::Automatic,
             showing_search: false,
             selected: 0,
+            pointer_inside: false,
+            pointer: None,
             pending_resume_replay: None,
             scope: SessionScope::default(),
             scroll: VirtualListScrollHandle::new(),

@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use gpui::{point, px};
 use gpui_component::input::Enter;
 use nmt_agent_utils::chat::QueuedPrompt;
 use nmt_agent_utils::{AgentWorkspace, MultiRootAccess};
@@ -13,7 +14,7 @@ use crate::view::history::queued_message_label;
 use crate::view::last_response::{LastResponseTone, last_response_tone};
 use crate::view::settings_row::effort_gauge_step;
 use crate::view::{ComposerEnterBehavior, composer_enter_behavior};
-use crate::{AgentKind, UpdateSuspension};
+use crate::{AgentKind, SessionHistoryUi, UpdateSuspension};
 
 #[test]
 fn queued_message_label_flattens_a_multi_line_prompt() {
@@ -183,5 +184,34 @@ fn the_last_response_mark_tracks_how_far_the_window_has_run() {
     assert_eq!(
         last_response_tone(9 * 60 * 60),
         Some(LastResponseTone::Danger)
+    );
+}
+
+/// The pointer and the arrow keys move one highlight between them, and the
+/// pointer takes it whenever it moves. What it must not take is a highlight
+/// the arrow keys just moved: navigating scrolls the list, which slides a
+/// different row under a pointer that is standing still, and that is not the
+/// reader pointing at anything.
+#[test]
+fn a_still_pointer_does_not_take_the_highlight_back() {
+    let mut history = SessionHistoryUi::default();
+    let resting = point(px(40.), px(60.));
+
+    assert!(history.point_at(1, resting), "the pointer arrived at a row");
+    assert_eq!(history.selected, 1);
+
+    history.selected = 3;
+    assert!(
+        !history.point_at(2, resting),
+        "a row slid under the pointer while the arrow keys drove"
+    );
+    assert_eq!(history.selected, 3);
+
+    assert!(history.point_at(2, point(px(40.), px(61.))));
+    assert_eq!(history.selected, 2, "movement takes it back");
+
+    assert!(
+        !history.point_at(2, point(px(41.), px(61.))),
+        "moving within the highlighted row changes nothing"
     );
 }
