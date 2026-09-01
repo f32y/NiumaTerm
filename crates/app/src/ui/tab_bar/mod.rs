@@ -19,7 +19,7 @@ use crate::ui::composition::{
     HoverActionLayout, HoverActionVisibility, StatusMark, StatusMarkTone, hover_action,
 };
 use crate::ui::shell::{InlineRename, InlineRenameStyle, TabSurface, pending_tab_icon};
-use crate::ui::terminal_status::{terminal_dot, terminal_presentation};
+use crate::ui::terminal_status::{TerminalVisual, terminal_dot, terminal_presentation};
 use crate::ui::{AppSettings, Shell, UI_RADIUS, modern_dropdown};
 use crate::workspace::TerminalActivity;
 
@@ -598,7 +598,24 @@ impl TabStrip {
                                                 .flex()
                                                 .items_center()
                                                 .justify_center()
-                                                .child(terminal_dot(visual, TAB_DOT, cx)),
+                                                // A running command gets the
+                                                // same spinner an agent tab
+                                                // shows mid-turn: in the strip
+                                                // both mean "this tab is still
+                                                // working", and a static dot
+                                                // there read as one more
+                                                // colored state rather than as
+                                                // motion. A finished command
+                                                // keeps its graded dot, since
+                                                // that state no longer moves.
+                                                .child(match visual {
+                                                    TerminalVisual::Running => StatusMark::busy((
+                                                        "tab-terminal-busy-spinner",
+                                                        id as usize,
+                                                    ))
+                                                    .into_any_element(),
+                                                    _ => terminal_dot(visual, TAB_DOT, cx),
+                                                }),
                                         )
                                     },
                                 ),
