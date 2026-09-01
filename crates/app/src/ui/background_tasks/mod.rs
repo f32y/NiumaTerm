@@ -1,8 +1,9 @@
-//! `Background Tasks` view: the child agents a Codex or Claude Code parent
-//! session spawned. Provider adapters own child lifecycle, so this component
+//! `Background Tasks` view: the work a Codex or Claude Code parent session
+//! started and left running — child agents, and the commands Claude Code runs
+//! in the background. Provider adapters own that lifecycle, so this component
 //! reads the latest snapshot from the active Agent pane and dispatches nothing
-//! to a child beyond the one operation a snapshot reports as available — a row
-//! offers Stop only while its adapter says that child can be stopped.
+//! to a row beyond the one operation a snapshot reports as available — a row
+//! offers Stop only while its adapter says that task can be stopped.
 
 use std::cmp::Ordering;
 use std::time::{Duration, SystemTime};
@@ -17,8 +18,8 @@ use gpui_component::{
     ActiveTheme as _, IconName, IconNamed, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
 use nmt_agent_utils::background_task::{
-    BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskState,
-    BackgroundTaskSummary, BackgroundTaskTranscriptState,
+    BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskKind, BackgroundTaskSnapshot,
+    BackgroundTaskState, BackgroundTaskSummary, BackgroundTaskTranscriptState,
 };
 use nmt_app_agent::AgentPane;
 use nmt_app_agent::transcript::TranscriptView;
@@ -330,6 +331,11 @@ impl BackgroundTasksView {
                     .text_xs()
                     .text_color(theme.muted_foreground)
                     .child(div().flex_none().child(task.key.provider.label()))
+                    .child(
+                        div()
+                            .flex_none()
+                            .child(background_task_kind_label(task.kind)),
+                    )
                     .child(div().flex_1().truncate().child(row_detail(task)))
                     .children(row_timing(task, now).map(|timing| div().flex_none().child(timing))),
             );
@@ -446,8 +452,9 @@ fn render_row(
     // announces the row as a whole, so it needs the parts the layout separates
     // into two lines plus the child id, which is not rendered anywhere.
     let description: SharedString = format!(
-        "{} · {} · {}\n{}",
+        "{} · {} · {} · {}\n{}",
         task.key.provider.label(),
+        background_task_kind_label(task.kind),
         task.key.id,
         state_label,
         detail
@@ -513,6 +520,11 @@ fn render_row(
                         .text_xs()
                         .text_color(theme.muted_foreground)
                         .child(div().flex_none().child(task.key.provider.label()))
+                        .child(
+                            div()
+                                .flex_none()
+                                .child(background_task_kind_label(task.kind)),
+                        )
                         .child(div().flex_1().truncate().child(detail))
                         .children(timing.map(|timing| div().flex_none().child(timing))),
                 ),
@@ -565,6 +577,16 @@ fn duration_label(now: SystemTime, past: SystemTime) -> String {
             .replace("{count}", &(seconds / 3600).to_string()),
         _ => i18n("tasks-background-duration-days")
             .replace("{count}", &(seconds / 86400).to_string()),
+    }
+}
+
+/// What kind of work a row is. Shown beside the provider because a child agent
+/// and a background command differ in what the row's detail and its output
+/// mean, which the description text alone does not say.
+fn background_task_kind_label(kind: BackgroundTaskKind) -> &'static str {
+    match kind {
+        BackgroundTaskKind::Agent => i18n("tasks-background-kind-agent"),
+        BackgroundTaskKind::Shell => i18n("tasks-background-kind-shell"),
     }
 }
 

@@ -342,8 +342,8 @@ impl Shell {
     }
 
     /// Upper-right `Background Tasks` control, revealed once a tab has spawned
-    /// a child agent. It carries the number of child agents running right now;
-    /// a session with none in flight shows the icon alone rather than a zero.
+    /// background work. It carries the number of tasks running right now; a
+    /// session with none in flight shows the icon alone rather than a zero.
     /// The `ToggleBackgroundTasks` action still reaches the view while the
     /// control is hidden.
     fn render_background_tasks_button(
@@ -353,7 +353,7 @@ impl Shell {
     ) -> impl IntoElement {
         let label = match running {
             0 => i18n("tasks-background-title").to_string(),
-            _ => i18n("tasks-background-running-agents").replace("{count}", &running.to_string()),
+            _ => i18n("tasks-background-running-count").replace("{count}", &running.to_string()),
         };
 
         Toggle::new("toggle-background-tasks")

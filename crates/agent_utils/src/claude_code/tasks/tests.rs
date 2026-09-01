@@ -1,6 +1,8 @@
 use serde_json::{Value, json};
 
-use crate::background_task::{BackgroundTaskKey, BackgroundTaskRefs, BackgroundTaskState};
+use crate::background_task::{
+    BackgroundTaskKey, BackgroundTaskKind, BackgroundTaskRefs, BackgroundTaskState,
+};
 use crate::chat::Item;
 use crate::claude_code::tasks::ClaudeTasks;
 
@@ -240,9 +242,11 @@ fn a_child_is_stoppable_once_a_lifecycle_record_names_its_task() {
 }
 
 #[test]
-fn only_agent_work_becomes_a_row() {
-    // Background shells, monitors, and workflows travel through the same
-    // lifecycle records and must stay out of a child-agent view.
+fn only_admitted_work_becomes_a_row() {
+    // Monitors, workflows, and teammates travel through the same lifecycle
+    // records and belong to other views. A shell is registered by every `Bash`
+    // call, so one that has not said it is backgrounded is the foreground
+    // command the parent transcript already shows.
     for task_type in [
         "local_bash",
         "local_workflow",
@@ -665,4 +669,224 @@ fn switching_sessions_drops_pending_child_conversations() {
     tasks.observe(&json!({"type": "system", "subtype": "init", "session_id": "sess-2"}));
 
     assert!(tasks.take_transcripts().is_empty());
+}
+
+/// The assistant block a `Bash` call arrives in. The command lives only here;
+/// every later record names the shell by description.
+fn bash_launch(tool_use_id: &str, command: &str) -> Value {
+    json!({
+        "type": "assistant",
+        "session_id": SESSION,
+        "parent_tool_use_id": null,
+        "message": {"content": [{
+            "type": "tool_use",
+            "id": tool_use_id,
+            "name": "Bash",
+            "input": {
+                "command": command,
+                "description": "Build the app",
+                "run_in_background": true,
+            },
+        }]},
+    })
+}
+
+fn shell_started(is_backgrounded: bool) -> Value {
+    json!({
+        "type": "system",
+        "subtype": "task_started",
+        "session_id": SESSION,
+        "task_id": "b8vo1ylgc",
+        "tool_use_id": "toolu_1",
+        "description": "Build the app",
+        "task_type": "local_bash",
+        "is_backgrounded": is_backgrounded,
+    })
+}
+
+fn live_shell_set() -> Value {
+    json!({
+        "type": "system",
+        "subtype": "background_tasks_changed",
+        "session_id": SESSION,
+        "tasks": [{
+            "task_id": "b8vo1ylgc",
+            "task_type": "local_bash",
+            "description": "Build the app",
+        }],
+    })
+}
+
+#[test]
+fn a_backgrounded_command_becomes_a_stoppable_shell_row() {
+    let mut tasks = reducer();
+    tasks.observe(&bash_launch("toolu_1", "cargo build"));
+    assert!(tasks.observe(&shell_started(true)));
+
+    let snapshot = tasks.snapshot().expect("session is known");
+    assert_eq!(snapshot.tasks.len(), 1);
+    let task = &snapshot.tasks[0];
+    assert_eq!(task.key, BackgroundTaskKey::claude_code("b8vo1ylgc"));
+    assert_eq!(task.kind, BackgroundTaskKind::Shell);
+    assert_eq!(task.state, BackgroundTaskState::Working);
+    assert_eq!(task.display_name.as_deref(), Some("Build the app"));
+    // The command is what the row is about, so it reads as the row detail.
+    assert_eq!(task.objective.as_deref(), Some("cargo build"));
+    // A shell has no agent type; naming its protocol type there would only
+    // describe the row as the stream spells it.
+    assert_eq!(task.agent_type, None);
+    assert!(task.can_stop);
+}
+
+#[test]
+fn a_foreground_command_becomes_a_row_only_once_it_is_backgrounded() {
+    let mut tasks = reducer();
+    tasks.observe(&bash_launch("toolu_1", "cargo build"));
+
+    // Every `Bash` call registers a task; a foreground one is already visible
+    // as the tool row that started it.
+    assert!(!tasks.observe(&shell_started(false)));
+    assert!(tasks.snapshot().expect("session is known").tasks.is_empty());
+
+    // The live set is the only record stating that a command already under way
+    // has moved to the background.
+    assert!(tasks.observe(&live_shell_set()));
+    let snapshot = tasks.snapshot().expect("session is known");
+    let task = &snapshot.tasks[0];
+    assert_eq!(task.kind, BackgroundTaskKind::Shell);
+    assert_eq!(task.state, BackgroundTaskState::Working);
+    // The rejected `task_started` still supplied what the live set omits.
+    assert_eq!(task.objective.as_deref(), Some("cargo build"));
+    assert_eq!(
+        task.refs,
+        BackgroundTaskRefs::ClaudeCode {
+            task_id: Some("b8vo1ylgc".into()),
+            tool_use_id: Some("toolu_1".into()),
+            agent_id: None,
+        }
+    );
+}
+
+#[test]
+fn a_backgrounded_commands_tool_result_is_not_its_outcome() {
+    let mut tasks = reducer();
+    tasks.observe(&bash_launch("toolu_1", "cargo build"));
+    tasks.observe(&shell_started(true));
+
+    // The `Bash` call is answered the moment the command is handed off, with
+    // the id it was backgrounded under rather than with what it did.
+    tasks.observe(&json!({
+        "type": "user",
+        "session_id": SESSION,
+        "parent_tool_use_id": null,
+        "message": {"content": [{
+            "type": "tool_result",
+            "tool_use_id": "toolu_1",
+            "content": "Command running in background with ID: b8vo1ylgc.",
+        }]},
+    }));
+
+    assert_eq!(
+        state_of(&tasks, "b8vo1ylgc"),
+        Some(BackgroundTaskState::Working)
+    );
+}
+
+#[test]
+fn the_handoff_result_names_the_output_file_a_running_command_writes_to() {
+    let mut tasks = reducer();
+    tasks.observe(&bash_launch("toolu_1", "cargo build"));
+    tasks.observe(&shell_started(true));
+    tasks.observe(&json!({
+        "type": "user",
+        "session_id": SESSION,
+        "parent_tool_use_id": null,
+        "message": {"content": [{
+            "type": "tool_result",
+            "tool_use_id": "toolu_1",
+            // A real handoff result is longer than the preview bound a row's
+            // status line is condensed to, and a directory containing spaces
+            // still has to survive the read.
+            "content": "Command running in background with ID: b8vo1ylgc. \
+                Output is being written to: \
+                C:\\Users\\Ada Lovelace\\AppData\\Local\\Temp\\claude\\C--Workspace-NiumaTerm\\\
+                217943eb-a012-4714-9220-ce76bcc960a2\\tasks\\b8vo1ylgc.output. \
+                You will be notified when it completes. To check interim output, \
+                use Read on that file path.",
+        }]},
+    }));
+
+    let detail = tasks.shell_detail("b8vo1ylgc").expect("row is a shell");
+    assert_eq!(
+        detail.output_file.as_deref(),
+        Some(
+            "C:\\Users\\Ada Lovelace\\AppData\\Local\\Temp\\claude\\C--Workspace-NiumaTerm\\\
+             217943eb-a012-4714-9220-ce76bcc960a2\\tasks\\b8vo1ylgc.output"
+        )
+    );
+    // The command is still running, so the card it renders says so.
+    assert_eq!(detail.state, BackgroundTaskState::Working);
+}
+
+#[test]
+fn a_completion_notification_settles_a_shell_and_names_its_output_file() {
+    let mut tasks = reducer();
+    tasks.observe(&bash_launch("toolu_1", "cargo build"));
+    tasks.observe(&shell_started(true));
+
+    assert!(tasks.observe(&json!({
+        "type": "system",
+        "subtype": "task_notification",
+        "session_id": SESSION,
+        "task_id": "b8vo1ylgc",
+        "tool_use_id": "toolu_1",
+        "status": "completed",
+        "output_file": "/tmp/b8vo1ylgc.output",
+        "summary": "Background command \"Build the app\" completed (exit code 0)",
+    })));
+
+    assert_eq!(
+        state_of(&tasks, "b8vo1ylgc"),
+        Some(BackgroundTaskState::Done)
+    );
+    let detail = tasks.shell_detail("b8vo1ylgc").expect("row is a shell");
+    assert_eq!(detail.id, "b8vo1ylgc");
+    assert_eq!(detail.command.as_deref(), Some("cargo build"));
+    assert_eq!(detail.output_file.as_deref(), Some("/tmp/b8vo1ylgc.output"));
+    assert_eq!(detail.state, BackgroundTaskState::Done);
+
+    // The tool-use id names the same row, so opening it from either identifier
+    // reads the same command.
+    assert!(tasks.shell_detail("toolu_1").is_some());
+}
+
+#[test]
+fn the_live_set_does_not_revive_a_shell_that_already_reported_its_outcome() {
+    let mut tasks = reducer();
+    tasks.observe(&bash_launch("toolu_1", "cargo build"));
+    tasks.observe(&shell_started(true));
+    tasks.observe(&json!({
+        "type": "system",
+        "subtype": "task_notification",
+        "session_id": SESSION,
+        "task_id": "b8vo1ylgc",
+        "status": "completed",
+    }));
+
+    // The CLI publishes the live set before the terminal record, so a snapshot
+    // can still list a command that has just finished.
+    tasks.observe(&live_shell_set());
+
+    assert_eq!(
+        state_of(&tasks, "b8vo1ylgc"),
+        Some(BackgroundTaskState::Done)
+    );
+}
+
+#[test]
+fn a_child_agent_has_no_shell_detail_to_read() {
+    let mut tasks = reducer();
+    tasks.observe(&launch("toolu_1"));
+
+    assert!(tasks.shell_detail("toolu_1").is_none());
 }

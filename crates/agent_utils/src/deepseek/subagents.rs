@@ -7,8 +7,8 @@
 use serde_json::Value;
 
 use crate::background_task::{
-    BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskRefs, BackgroundTaskSnapshot,
-    BackgroundTaskState, BackgroundTaskSummary,
+    BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskKind, BackgroundTaskRefs,
+    BackgroundTaskSnapshot, BackgroundTaskState, BackgroundTaskSummary,
 };
 
 /// Read a `subagent.list` result into the snapshot the panel renders.
@@ -42,6 +42,7 @@ pub(crate) fn snapshot(
                     parent_session_id: parent_session_id.to_string(),
                     continuable,
                 },
+                kind: BackgroundTaskKind::Agent,
                 display_name: entry["label"].as_str().map(str::to_string),
                 agent_type: None,
                 objective: None,

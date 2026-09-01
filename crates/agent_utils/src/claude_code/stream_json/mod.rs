@@ -52,6 +52,7 @@ use crate::chat::{
     SlashCommandSource, ThreadSettings, TokenUsageBreakdown,
 };
 use crate::claude_code::sessions::{RestoredTask, load_child_transcript};
+use crate::claude_code::shell_output::shell_items;
 use crate::claude_code::tasks::ClaudeTasks;
 use crate::claude_code::workflows::{
     ClaudeWorkflows, RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult,
@@ -666,6 +667,16 @@ impl Session {
         tool_use_id: &str,
         cwd: Option<&str>,
     ) -> Vec<Event> {
+        // A background shell keeps its content in an output file rather than
+        // in a child session, so it answers from the reducer and never looks
+        // for a transcript that does not exist.
+        if let Some(detail) = self.tasks.shell_detail(tool_use_id) {
+            return vec![Event::BackgroundTaskTranscript {
+                key: BackgroundTaskKey::claude_code(tool_use_id),
+                update: BackgroundTaskTranscriptUpdate::loaded(shell_items(&detail)),
+            }];
+        }
+
         let Some(session_id) = self.session_id.as_deref() else {
             return Vec::new();
         };
