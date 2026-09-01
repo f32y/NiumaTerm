@@ -2,7 +2,7 @@ use nmt_i18n::i18n;
 
 use crate::transcript::is_work_row;
 use crate::transcript::render::TRANSCRIPT_LINE_HEIGHT;
-use crate::transcript::reveal::Reveals;
+use crate::transcript::reveal::{RevealedPart, Reveals};
 use crate::transcript::rows::TranscriptRow;
 use crate::*;
 
@@ -57,9 +57,14 @@ pub struct TranscriptView {
     pub(crate) expanded_rows: HashSet<usize>,
     /// User-message annotation cards expanded to show their complete text.
     pub(crate) expanded_annotations: HashSet<usize>,
-    /// When each open disclosure started opening, which is what the rows it
-    /// discloses fade in against.
+    /// When each moving disclosure started, and which way it is going. This
+    /// is what the content it discloses fades and grows against.
     pub(crate) reveals: Reveals,
+    /// Full height of each piece of the transcript a disclosure opens,
+    /// measured while that piece is on screen. A piece being opened or shut is
+    /// drawn inside a box ramped towards this, so the height comes from what
+    /// the content actually lays out to rather than being guessed at.
+    pub(crate) revealed_heights: HashMap<RevealedPart, Pixels>,
     /// Long expanded code transcripts retain their segmented source and
     /// independent uniform-list position while visible. Collapsing a row drops
     /// the duplicate source so large outputs do not stay resident twice.
@@ -132,6 +137,7 @@ impl TranscriptView {
             expanded_rows: HashSet::new(),
             expanded_annotations: HashSet::new(),
             reveals: Reveals::default(),
+            revealed_heights: HashMap::new(),
             virtual_transcripts: HashMap::new(),
             settled_turns: HashSet::new(),
             completed_turn_seconds: HashMap::new(),
@@ -200,6 +206,7 @@ impl TranscriptView {
         self.expanded_rows.clear();
         self.expanded_annotations.clear();
         self.reveals.clear();
+        self.revealed_heights.clear();
         self.settled_turns.clear();
         self.completed_turn_seconds.clear();
         self.completed_turn_output_tokens.clear();
@@ -414,12 +421,18 @@ fn picker_reserve(viewport: Pixels) -> Pixels {
 
 impl Render for TranscriptView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // A disclosure opens from a click, which wakes the frame pump once.
-        // Keeping it awake for the rest of the entrance is this view's own
-        // job: without the request the remaining frames arrive only when
-        // something unrelated repaints, so a conversation nobody is typing
-        // into would show the first frame of the entrance and stop there.
-        if !self.reveals.settled(Instant::now()) {
+        // Content whose exit has finished leaves the transcript before the
+        // rows are built, so the removal and the specs it changes land in one
+        // pass rather than a frame apart.
+        let now = Instant::now();
+        self.settle_shut_disclosures(now);
+
+        // A disclosure moves from a click, which wakes the frame pump once.
+        // Keeping it awake for the rest of the motion is this view's own job:
+        // without the request the remaining frames arrive only when something
+        // unrelated repaints, so a conversation nobody is typing into would
+        // show the first frame of the motion and stop there.
+        if !self.reveals.settled(now) {
             window.request_animation_frame();
         }
 
@@ -443,7 +456,14 @@ impl Render for TranscriptView {
             self.collapse_mode = collapse;
             self.toggled_turns.clear();
             self.expanded_groups.clear();
+            // Anything mid-exit goes with its own state: dropping the reveal
+            // alone would strand the disclosure open with nothing left to
+            // finish shutting it.
+            for key in self.reveals.closing() {
+                self.take_down_disclosure(key);
+            }
             self.reveals.clear();
+            self.revealed_heights.clear();
         }
         self.transcript_list.set_smooth_wheel_enabled(smooth_wheel);
 

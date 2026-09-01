@@ -11,7 +11,7 @@ use crate::transcript::disclosure_row::{
     USER_BUBBLE_RADIUS, USER_BUBBLE_TAIL_RADIUS, USER_BUBBLE_WIDTH_FRACTION, agent_card,
 };
 use crate::transcript::format::{interrupted_status_label, worked_status_label};
-use crate::transcript::reveal::{RevealKey, revealed};
+use crate::transcript::reveal::{RevealKey, RevealedPart, revealed, revealed_block};
 use crate::transcript::rows::{RowGap, TranscriptRow, is_run_row};
 use crate::transcript::working_indicator::WorkingIndicator;
 use crate::transcript::{
@@ -92,6 +92,13 @@ impl TranscriptView {
             RowGap::Group => TRANSCRIPT_GROUP_GAP,
         };
 
+        // A run's steps open and shut as list rows of their own, so each one
+        // ramps its own height and needs a height of its own to ramp towards.
+        let step = match &spec {
+            RowSpec::Work { index, .. } => Some(RevealedPart::Step(*index)),
+            _ => None,
+        };
+
         let row = match spec {
             RowSpec::Entry { index, .. } => self.render_entry_row(index, window, cx),
             RowSpec::Work { index, .. } => self.render_work_row(index, window, cx),
@@ -130,19 +137,7 @@ impl TranscriptView {
             .when(rule_carries_gap, |this| this.pb(px(gap)))
             .child(row);
 
-        // A row a run toggle just spliced in arrives rather than appearing.
-        // Its slice of the run's grouping rule is inside the entrance, so a
-        // step and the rule beside it fade up together instead of the rule
-        // being drawn down to steps that are not there yet. The column margin
-        // stays outside it, so the rise moves the step and not the column.
-        let body = match self.revealed_by(ix) {
-            Some((key, ordinal)) => {
-                revealed(body, self.reveals.progress(key, ordinal, Instant::now()))
-            }
-            None => body,
-        };
-
-        div()
+        let row = div()
             .w_full()
             .px(relative(transcript_column_margin()))
             .when(!rule_carries_gap, |this| this.pb(px(gap)))
@@ -153,8 +148,33 @@ impl TranscriptView {
             .map(|this| match in_run {
                 true => this.child(div().w_full().pl(px(TRANSCRIPT_TEXT_INSET)).child(body)),
                 false => this.child(body),
-            })
-            .into_any_element()
+            });
+
+        // A row a run toggle spliced in grows and shrinks rather than
+        // appearing and vanishing, so the conversation below the run travels
+        // with it the whole way instead of catching up in one jump at the end.
+        // The ramp wraps the row entire — its slice of the grouping rule and
+        // the space it owes the row below it — because a rule drawn down to a
+        // step of no height, or a gap left where a step used to be, is the
+        // part that would still jump.
+        match (step, self.revealed_by(ix)) {
+            (Some(part), Some((key, ordinal))) => revealed_block(
+                row,
+                part,
+                self.reveals.progress(key, ordinal, Instant::now()),
+                self.revealed_heights.get(&part).copied(),
+                // The space under a run's last step is the space its toggle
+                // takes over the moment the run leaves: both boundaries are
+                // read off the same pair of rows, so both are worth the same
+                // rank. Holding that much back makes the two changes cancel.
+                // Every step above the last owes nothing, because the step
+                // rhythm it carries is the one the toggle already sits on.
+                px(gap - TRANSCRIPT_STEP_GAP),
+                cx.entity().downgrade(),
+            )
+            .into_any_element(),
+            _ => row.into_any_element(),
+        }
     }
 
     /// The live progress line. While the backend is compacting it names that
@@ -403,7 +423,6 @@ impl TranscriptView {
                 }))
         });
 
-        let annotations_expanded = self.expanded_annotations.contains(&index);
         // The prompt fold above swaps the text inside one bubble rather than
         // opening a block below it, so it takes no entrance of its own: fading
         // it in would fade the half of the prompt that was already on screen.
@@ -412,14 +431,22 @@ impl TranscriptView {
         let annotations_reveal =
             self.reveals
                 .progress(RevealKey::Annotation(index), 0, Instant::now());
+        // The quotations open a rounded bubble, and a clip box is a rectangle,
+        // so they fade in place rather than growing by height: squaring off
+        // the corner the bubble is known by would cost more than the height
+        // ramp buys on a block this size. The card is shaped for as long as
+        // they are on screen and the wording answers the click at once.
+        let annotations_shown =
+            self.expanded_annotations.contains(&index) && annotations_reveal > 0.0;
+        let annotations_disclosing = self.is_disclosing(RevealKey::Annotation(index));
         let annotations = parsed.as_ref().and_then(|parsed| {
             (!parsed.annotations.is_empty()).then(|| {
-                let action_label = if annotations_expanded {
+                let action_label = if annotations_disclosing {
                     i18n("agent-transcript-annotations-collapse")
                 } else {
                     i18n("agent-transcript-annotations-expand")
                 };
-                let content = annotations_expanded.then(|| {
+                let content = annotations_shown.then(|| {
                     v_flex()
                         .w_full()
                         .gap_2()
@@ -486,7 +513,7 @@ impl TranscriptView {
                             .text_color(cx.theme().muted_foreground)
                             // Squares off where the quotations meet it, and is
                             // a closed capsule while they are hidden.
-                            .map(|this| match annotations_expanded {
+                            .map(|this| match annotations_shown {
                                 true => this.rounded_t(px(USER_BUBBLE_RADIUS)),
                                 false => this.rounded(px(USER_BUBBLE_RADIUS)),
                             })
@@ -502,7 +529,7 @@ impl TranscriptView {
                                     .child(annotation_count_label(parsed.annotations.len())),
                             )
                             .child(
-                                Icon::new(if annotations_expanded {
+                                Icon::new(if annotations_disclosing {
                                     IconName::ChevronUp
                                 } else {
                                     IconName::ChevronDown
@@ -804,6 +831,9 @@ impl TranscriptView {
         let detail_reveal = self
             .reveals
             .progress(RevealKey::Row(index), 0, Instant::now());
+        let detail_part = RevealedPart::Block(RevealKey::Row(index));
+        let detail_height = self.revealed_heights.get(&detail_part).copied();
+        let detail_view = cx.entity().downgrade();
         let status_label = match status.as_deref() {
             Some("failed") => i18n("agent-transcript-status-failed"),
             Some("declined") => i18n("agent-transcript-status-declined"),
@@ -830,7 +860,7 @@ impl TranscriptView {
             heading,
             status_label,
             if expandable {
-                if expanded {
+                if self.is_disclosing(RevealKey::Row(index)) {
                     i18n("agent-transcript-accessibility-expanded")
                 } else {
                     i18n("agent-transcript-accessibility-collapsed")
@@ -841,7 +871,10 @@ impl TranscriptView {
         );
         // A failure reason shows whether or not the step is expanded, so a
         // failed row usually heads a block even while its output is hidden.
-        let heads_body = reason.is_some() || expanded;
+        // Otherwise the header heads a block for exactly as long as there is
+        // one: it squares off with the detail's arrival and returns to a pill
+        // the moment the detail has finished shrinking away.
+        let heads_body = reason.is_some() || (expanded && detail_reveal > 0.0);
         let mut header = AgentDisclosureRow::new(("wl-head", index), heading)
             .type_icon(icon)
             .tone(tone)
@@ -1052,7 +1085,7 @@ impl TranscriptView {
                             .into_any_element()
                     };
 
-                    div()
+                    let block = div()
                         // Expanded content takes the card's own inset on both
                         // sides. The rule above it already says the detail belongs
                         // to the header, so indenting it as well would spend a
@@ -1063,8 +1096,16 @@ impl TranscriptView {
                         .border_color(cx.theme().border.opacity(0.6))
                         .px(px(AGENT_CARD_PADDING_X))
                         .py(px(AGENT_CARD_BODY_PADDING_Y))
-                        .map(|this| revealed(this, detail_reveal))
-                        .child(body)
+                        .child(body);
+
+                    revealed_block(
+                        block,
+                        detail_part,
+                        detail_reveal,
+                        detail_height,
+                        px(0.),
+                        detail_view,
+                    )
                 }))
         });
 
@@ -1107,7 +1148,7 @@ impl TranscriptView {
         let accessible_label = if expandable {
             format!(
                 "{label}. {preview}. {}",
-                if expanded {
+                if self.is_disclosing(RevealKey::Row(index)) {
                     i18n("agent-transcript-expanded")
                 } else {
                     i18n("agent-transcript-collapsed")
@@ -1179,19 +1220,12 @@ impl TranscriptView {
             .read(cx)
             .clone();
 
-        v_flex()
+        let block = v_flex()
             .w_full()
             .border_t_1()
             .border_color(cx.theme().border.opacity(0.6))
             .px(px(AGENT_CARD_PADDING_X))
             .py(px(AGENT_CARD_BODY_PADDING_Y))
-            .map(|this| {
-                revealed(
-                    this,
-                    self.reveals
-                        .progress(RevealKey::Row(index), 0, Instant::now()),
-                )
-            })
             .gap_1()
             .text_xs()
             .children(accounting_rows.into_iter().filter_map(|(name, value)| {
@@ -1262,8 +1296,20 @@ impl TranscriptView {
                                     .id(("compaction-scrollbar", index)),
                             ),
                     )
-            }))
-            .into_any_element()
+            }));
+
+        let part = RevealedPart::Block(RevealKey::Row(index));
+
+        revealed_block(
+            block,
+            part,
+            self.reveals
+                .progress(RevealKey::Row(index), 0, Instant::now()),
+            self.revealed_heights.get(&part).copied(),
+            px(0.),
+            cx.entity().downgrade(),
+        )
+        .into_any_element()
     }
 
     /// The settled turn's work disclosure. It heads the rows it hides, so the
@@ -1358,7 +1404,11 @@ impl TranscriptView {
         expanded: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let label = if expanded {
+        // The wording answers the click while the steps under it may still be
+        // leaving: a toggle reading "show fewer" through the exit it started
+        // would be offering to do again what it is in the middle of doing.
+        let disclosing = self.is_disclosing(RevealKey::Group(run_start));
+        let label = if disclosing {
             i18n("agent-transcript-show-fewer-tool-calls").to_string()
         } else {
             i18n("agent-transcript-tool-calls").replace("{count}", &tool_count.to_string())
@@ -1376,7 +1426,7 @@ impl TranscriptView {
                     )
                     .accessible_label(format!(
                         "{label}. {}",
-                        if expanded {
+                        if disclosing {
                             i18n("agent-transcript-expanded")
                         } else {
                             i18n("agent-transcript-collapsed")
