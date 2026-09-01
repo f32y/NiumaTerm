@@ -47,6 +47,20 @@ pub(crate) enum PaletteControl {
     Dismiss,
 }
 
+impl PaletteControl {
+    /// Which way this control moves a highlighted row, or `None` where it moves
+    /// none. Several lists take the same keys — the command palette, the recent
+    /// conversations, the rewind and fork pickers — so the reading lives here
+    /// rather than beside each list that acts on it.
+    fn direction(self) -> Option<PaletteDirection> {
+        match self {
+            PaletteControl::Previous => Some(PaletteDirection::Previous),
+            PaletteControl::Next => Some(PaletteDirection::Next),
+            PaletteControl::Activate | PaletteControl::Complete | PaletteControl::Dismiss => None,
+        }
+    }
+}
+
 impl AgentPane {
     pub(crate) fn open_recent_sessions(&mut self, cx: &mut Context<Self>) -> bool {
         if self.is_command_busy() {
@@ -342,14 +356,9 @@ impl AgentPane {
 
         match control {
             PaletteControl::Previous | PaletteControl::Next => {
-                let direction = match control {
-                    PaletteControl::Previous => PaletteDirection::Previous,
-                    PaletteControl::Next => PaletteDirection::Next,
-                    _ => unreachable!(),
-                };
-
-                if let Some(selected) =
-                    move_palette_selection(self.palette.selected, model.rows.len(), direction)
+                if let Some(direction) = control.direction()
+                    && let Some(selected) =
+                        move_palette_selection(self.palette.selected, model.rows.len(), direction)
                 {
                     self.palette.selected = selected;
                     self.palette.scroll.scroll_to_item(self.palette.selected);
@@ -414,17 +423,13 @@ impl AgentPane {
 
         match control {
             PaletteControl::Previous | PaletteControl::Next => {
-                let direction = match control {
-                    PaletteControl::Previous => PaletteDirection::Previous,
-                    PaletteControl::Next => PaletteDirection::Next,
-                    _ => unreachable!(),
-                };
-
-                if let Some(selected) = move_palette_selection(
-                    self.history_ui.selected,
-                    self.history_ui.sessions.len(),
-                    direction,
-                ) {
+                if let Some(direction) = control.direction()
+                    && let Some(selected) = move_palette_selection(
+                        self.history_ui.selected,
+                        self.history_ui.sessions.len(),
+                        direction,
+                    )
+                {
                     self.history_ui.selected = selected;
                     self.history_ui
                         .scroll
@@ -439,7 +444,10 @@ impl AgentPane {
                 self.history_ui.mode = RecentSessionsMode::Hidden;
                 cx.notify();
             }
-            PaletteControl::Complete => unreachable!(),
+            // Completion belongs to the command palette. The guard above hands
+            // it back before the list claims the keys, so there is nothing left
+            // for it to do here.
+            PaletteControl::Complete => {}
         }
 
         true

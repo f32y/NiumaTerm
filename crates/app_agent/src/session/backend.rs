@@ -351,6 +351,21 @@ impl Backend {
         }
     }
 
+    /// Whether `key` names a task this backend published. A key carries the
+    /// provider that minted it, and one harness's task ids mean nothing to
+    /// another, so a key from elsewhere reaches no session at all.
+    fn owns_task(&self, key: &BackgroundTaskKey) -> bool {
+        let provider = match self {
+            Backend::Codex(_) => BackgroundTaskProvider::Codex,
+            Backend::Claude(_) => BackgroundTaskProvider::ClaudeCode,
+            Backend::DeepSeek(_) => BackgroundTaskProvider::DeepSeek,
+            #[cfg(test)]
+            Backend::Test(_) => return false,
+        };
+
+        provider == key.provider
+    }
+
     /// Ask the provider for one child's conversation. Codex reads the stored
     /// descendant thread; Claude Code reads the file the CLI wrote for that
     /// child, which is where a child's own turns live.
@@ -359,25 +374,17 @@ impl Backend {
         key: &BackgroundTaskKey,
         cwd: Option<&str>,
     ) -> Vec<SessionEvent> {
-        // A key names the provider that published the task, so a key belonging
-        // to another harness reaches no session: its ids mean nothing here.
+        if !self.owns_task(key) {
+            return Vec::new();
+        }
+
         match self {
-            Backend::Codex(session) => match key.provider {
-                BackgroundTaskProvider::Codex => session.load_background_task_transcript(&key.id),
-                BackgroundTaskProvider::ClaudeCode | BackgroundTaskProvider::DeepSeek => Vec::new(),
-            },
-            Backend::Claude(session) => match key.provider {
-                BackgroundTaskProvider::ClaudeCode => {
-                    session.load_background_task_transcript(&key.id, cwd)
-                }
-                BackgroundTaskProvider::Codex | BackgroundTaskProvider::DeepSeek => Vec::new(),
-            },
+            Backend::Codex(session) => session.load_background_task_transcript(&key.id),
+            Backend::Claude(session) => session.load_background_task_transcript(&key.id, cwd),
             // The harness answers this one asynchronously, so the read starts
             // here and its result reaches the pane as an ordinary event.
             Backend::DeepSeek(session) => {
-                if key.provider == BackgroundTaskProvider::DeepSeek {
-                    session.load_background_task_transcript(&key.id);
-                }
+                session.load_background_task_transcript(&key.id);
                 Vec::new()
             }
             #[cfg(test)]
@@ -390,22 +397,16 @@ impl Backend {
     /// takes a thread-scoped `turn/interrupt`, while Claude Code registers each
     /// delegated agent under a task id that `stop_task` names.
     ///
-    /// Returns whether the request went out. A key belonging to another harness
-    /// reaches no session, because its ids mean nothing there.
+    /// Returns whether the request went out.
     pub(crate) fn interrupt_background_task(&mut self, key: &BackgroundTaskKey) -> bool {
+        if !self.owns_task(key) {
+            return false;
+        }
+
         match self {
-            Backend::Codex(session) => match key.provider {
-                BackgroundTaskProvider::Codex => session.interrupt_background_task(&key.id),
-                BackgroundTaskProvider::ClaudeCode | BackgroundTaskProvider::DeepSeek => false,
-            },
-            Backend::Claude(session) => match key.provider {
-                BackgroundTaskProvider::ClaudeCode => session.interrupt_background_task(key),
-                BackgroundTaskProvider::Codex | BackgroundTaskProvider::DeepSeek => false,
-            },
-            Backend::DeepSeek(session) => match key.provider {
-                BackgroundTaskProvider::DeepSeek => session.interrupt_background_task(&key.id),
-                BackgroundTaskProvider::Codex | BackgroundTaskProvider::ClaudeCode => false,
-            },
+            Backend::Codex(session) => session.interrupt_background_task(&key.id),
+            Backend::Claude(session) => session.interrupt_background_task(key),
+            Backend::DeepSeek(session) => session.interrupt_background_task(&key.id),
             #[cfg(test)]
             Backend::Test(_) => false,
         }
