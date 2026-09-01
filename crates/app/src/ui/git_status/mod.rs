@@ -62,7 +62,7 @@ pub(crate) fn resolve_repo_root(cwd: &str) -> Option<String> {
 
 /// Full status snapshot for `root`: porcelain file list joined with summed
 /// unstaged + staged numstat counts; untracked files counted as all-added.
-pub(crate) fn fetch_snapshot(root: &str) -> Result<GitSnapshot, String> {
+pub(crate) fn fetch_snapshot(root: &str, branch_max_age: Duration) -> Result<GitSnapshot, String> {
     let status = run_git(
         root,
         &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
@@ -107,7 +107,7 @@ pub(crate) fn fetch_snapshot(root: &str) -> Result<GitSnapshot, String> {
 
     Ok(GitSnapshot {
         repo_root: root.to_string(),
-        branch: current_branch(root).map(|checked_out| match checked_out {
+        branch: current_branch(root, branch_max_age).map(|checked_out| match checked_out {
             CheckedOut::Branch(branch) => branch,
             CheckedOut::Detached(commit) => commit,
         }),
@@ -402,6 +402,15 @@ impl GitStatusModel {
 
         cx.notify();
 
+        // The conversation tabs watch the branch of their own directories on
+        // this same interval, so an answer read within one is shared with them
+        // rather than read again here.
+        let branch_max_age = Duration::from_secs(
+            cx.global::<AppSettings>()
+                .git_status_refresh_interval
+                .max(1),
+        );
+
         cx.spawn(async move |this, cx| {
             let root = cx
                 .background_executor()
@@ -448,7 +457,7 @@ impl GitStatusModel {
 
             let snapshot = cx
                 .background_executor()
-                .spawn(async move { fetch_snapshot(&root) })
+                .spawn(async move { fetch_snapshot(&root, branch_max_age) })
                 .await;
 
             this.update(cx, |this, cx| {
