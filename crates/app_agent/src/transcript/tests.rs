@@ -976,14 +976,14 @@ mod branch_point_targeting_tests {
 /// of it: the run's last row reports the tight step rhythm it owes the run
 /// above it, and whatever follows the run inherits it.
 mod row_rhythm_tests {
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
 
     use gpui::{AppContext as _, ListOffset, TestAppContext, px};
     use nmt_agent_utils::chat::{Item as SessionItem, ReplayItem, ReplayTurn};
     use nmt_config::agent::CollapseRows;
 
     use crate::settings::AgentSettings;
-    use crate::transcript::reveal::RevealKey;
+    use crate::transcript::reveal::{RevealKey, RevealedPart};
     use crate::transcript::rows::RowGap;
     use crate::transcript::{AgentKind, RowSpec, TranscriptView};
 
@@ -1183,6 +1183,152 @@ mod row_rhythm_tests {
                 assert!(view.reveals.settled(now));
                 assert_eq!(view.reveals.progress(RevealKey::Group(2), 0, now), 1.0);
                 assert_eq!(view.reveals.progress(RevealKey::Group(2), 40, now), 1.0);
+            });
+        });
+    }
+
+    /// Shutting a disclosure starts an exit rather than finishing one: the
+    /// steps stay on the list while they leave, and only come off it once
+    /// there is nothing left on screen to lose.
+    #[gpui::test]
+    fn a_shutting_run_keeps_its_steps_until_the_exit_finishes(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+
+            view.update(cx, |view, cx| {
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+
+                let specs = view.build_row_specs(CollapseRows::ToolCalls);
+                view.sync_transcript_list(specs);
+                assert!(
+                    view.expanded_groups.contains(&2),
+                    "the run is still on its way out"
+                );
+                assert_eq!(
+                    rhythm(view)
+                        .iter()
+                        .map(|(kind, _)| *kind)
+                        .collect::<Vec<_>>(),
+                    vec!["entry", "entry", "run", "work", "work", "entry"]
+                );
+
+                view.settle_shut_disclosures(Instant::now() + Duration::from_secs(1));
+                let specs = view.build_row_specs(CollapseRows::ToolCalls);
+                view.sync_transcript_list(specs);
+
+                assert!(view.expanded_groups.is_empty());
+                assert_eq!(
+                    rhythm(view)
+                        .iter()
+                        .map(|(kind, _)| *kind)
+                        .collect::<Vec<_>>(),
+                    vec!["entry", "entry", "run", "entry"]
+                );
+            });
+        });
+    }
+
+    /// The space under a run's last step and the space under the toggle once
+    /// the run is gone are the same boundary read off the same pair of rows,
+    /// so they are worth the same rank. The exit leans on that: it holds back
+    /// exactly the difference between that rank and the step rhythm the
+    /// toggle sits on while the run is open, which is what makes the run's
+    /// removal move nothing.
+    #[gpui::test]
+    fn a_run_leaves_behind_the_space_its_toggle_takes_over(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+
+            view.update(cx, |view, cx| {
+                view.expanded_groups.insert(2);
+                let specs = view.build_row_specs(CollapseRows::ToolCalls);
+                view.sync_transcript_list(specs);
+
+                let open = rhythm(view);
+                assert_eq!(open[2].0, "run");
+                assert_eq!(open[2].1, RowGap::Step, "the toggle heads its steps");
+                let last_step = open[4];
+                assert_eq!(last_step.0, "work");
+
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+                view.settle_shut_disclosures(Instant::now() + Duration::from_secs(1));
+                let specs = view.build_row_specs(CollapseRows::ToolCalls);
+                view.sync_transcript_list(specs);
+
+                let shut = rhythm(view);
+                assert_eq!(shut[2].0, "run");
+                assert_eq!(shut[2].1, last_step.1);
+            });
+        });
+    }
+
+    /// A run's steps each ramp their own height, so each carries a measured
+    /// height of its own. Those measurements leave with the rows they were
+    /// taken from; a disclosure the run has nothing to do with keeps its own.
+    #[gpui::test]
+    fn a_shut_run_drops_the_heights_measured_for_its_steps(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+
+            view.update(cx, |view, cx| {
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+                let specs = view.build_row_specs(CollapseRows::ToolCalls);
+                view.sync_transcript_list(specs);
+
+                let elsewhere = RevealedPart::Block(RevealKey::Row(0));
+                view.revealed_heights.insert(RevealedPart::Step(2), px(40.));
+                view.revealed_heights.insert(RevealedPart::Step(3), px(40.));
+                view.revealed_heights.insert(elsewhere, px(80.));
+
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+                view.settle_shut_disclosures(Instant::now() + Duration::from_secs(1));
+
+                assert_eq!(
+                    view.revealed_heights.keys().copied().collect::<Vec<_>>(),
+                    vec![elsewhere]
+                );
+            });
+        });
+    }
+
+    /// A click landing part-way through an exit asks for the content back.
+    /// Reading the click against the expanded state alone would restart the
+    /// exit instead, so the block would go on shutting under a second click
+    /// meant to stop it.
+    #[gpui::test]
+    fn clicking_a_shutting_disclosure_brings_it_back(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+
+            view.update(cx, |view, cx| {
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+
+                view.settle_shut_disclosures(Instant::now() + Duration::from_secs(1));
+                assert!(
+                    view.expanded_groups.contains(&2),
+                    "the run stayed open rather than finishing the exit"
+                );
+            });
+        });
+    }
+
+    /// Reduced motion takes the same path in both directions: with nothing in
+    /// flight there is no exit to wait out, so the content goes at the click.
+    #[gpui::test]
+    fn reduced_motion_shuts_a_disclosure_at_the_click(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+            cx.global_mut::<AgentSettings>().reduce_motion = true;
+
+            view.update(cx, |view, cx| {
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+
+                assert!(view.expanded_groups.is_empty());
+                assert!(view.reveals.settled(Instant::now()));
             });
         });
     }

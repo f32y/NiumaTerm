@@ -461,10 +461,6 @@ mod git_branch_poll_tests {
 /// Eased position along a transition, for a parameter already clamped to
 /// `0..=1`. The ramp leaves and arrives at zero speed, so neither end of a
 /// transition built on it reads as the effect being switched on.
-///
-/// The transcript's disclosures and the composer's blur share this curve so
-/// two transitions the reader can trigger within a moment of each other move
-/// alike.
 fn smoothstep(t: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
