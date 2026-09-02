@@ -1302,7 +1302,7 @@ fn osc133_marks_tag_prompt_rows_headless() {
     // Row 0: prompt + echoed command. Row 1: command output. BEL-terminated,
     // matching the shipped pwsh integration.
     t.write_vt(b"\x1b]133;A\x07PS> \x1b]133;B\x07echo hi\r\n\x1b]133;C\x07hi\r\n\x1b]133;D;0\x07");
-    let tags = t.row_semantic_prompts().unwrap();
+    let tags = t.semantic_prompt_tags().unwrap();
     assert_eq!(
         tags[0],
         VtRowSemanticPrompt::PROMPT,
