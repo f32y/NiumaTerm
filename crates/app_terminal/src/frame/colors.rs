@@ -6,7 +6,7 @@ use nmt_terminal::render_buffer::RenderBuffer;
 use nmt_terminal::terminal::square::{ContentTag, Square};
 use nmt_terminal::terminal::style::{Style, StyleFlags};
 
-use super::TerminalColor;
+use crate::frame::TerminalColor;
 
 pub(super) struct BackgroundColors {
     colors: List,

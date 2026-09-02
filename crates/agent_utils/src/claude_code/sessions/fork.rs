@@ -8,11 +8,11 @@ use serde_json::Value;
 use tracing::warn;
 use uuid::Uuid;
 
-use super::index::TranscriptIndex;
-use super::paths::session_path;
-use super::replay::parse_replay;
-use super::titles::{title_line, user_prompt_text};
 use crate::chat::ReplayTurn;
+use crate::claude_code::sessions::index::TranscriptIndex;
+use crate::claude_code::sessions::paths::session_path;
+use crate::claude_code::sessions::replay::parse_replay;
+use crate::claude_code::sessions::titles::{title_line, user_prompt_text};
 
 /// A conversation rewind either starts a fresh process before the first
 /// prompt or resumes an immutable prefix copied into a new Claude session.

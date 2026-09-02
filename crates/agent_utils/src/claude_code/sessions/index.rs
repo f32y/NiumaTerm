@@ -3,8 +3,8 @@ use std::io::BufRead;
 
 use serde_json::Value;
 
-use super::titles::{clean_prompt, user_prompt_text};
-use super::{ClaudeCheckpoint, FileRestoreAvailability};
+use crate::claude_code::sessions::titles::{clean_prompt, user_prompt_text};
+use crate::claude_code::sessions::{ClaudeCheckpoint, FileRestoreAvailability};
 
 const TRANSCRIPT_ENTRY_TYPES: [&str; 5] = ["user", "assistant", "progress", "system", "attachment"];
 

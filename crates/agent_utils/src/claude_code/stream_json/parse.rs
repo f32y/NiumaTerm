@@ -3,12 +3,12 @@ use std::iter::once;
 
 use serde_json::Value;
 
-use super::super::tool_items::tool_title;
 use crate::chat::{
     ContextUsageScope, ContextWindowUsage, Event, ModelInfo, ScopedTokenUsage,
     SlashCommandArguments, SlashCommandInfo, SlashCommandRunPolicy, SlashCommandSource,
     TokenUsageBreakdown,
 };
+use crate::claude_code::tool_items::tool_title;
 
 pub(super) fn parse_claude_usage(usage: &Value) -> Option<TokenUsageBreakdown> {
     let direct_input = usage["input_tokens"].as_u64();

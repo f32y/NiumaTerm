@@ -8,7 +8,7 @@ use gpui_component::ActiveTheme;
 use gpui_component::scroll::{SCROLLBAR_AUTO_HIDE_DELAY, SCROLLBAR_FADE_OUT_DURATION};
 use nmt_terminal::ghostty::ScrollbarInfo;
 
-use super::view::TerminalPane;
+use crate::view::TerminalPane;
 
 struct ScrollbarDrag;
 

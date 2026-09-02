@@ -11,7 +11,7 @@ use nmt_agent_utils::chat::{
 };
 use nmt_i18n::i18n;
 
-use super::transcript::compact_token_count;
+use crate::transcript::compact_token_count;
 
 #[derive(IntoElement)]
 pub(super) struct ContextUsageIndicator {

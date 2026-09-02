@@ -19,7 +19,7 @@ use std::{path, thread};
 
 use nmt_terminal::ghostty::BlockHandle;
 
-use super::session::{HostEvent, TerminalSession, TerminalSessionConfig};
+use crate::session::{HostEvent, TerminalSession, TerminalSessionConfig};
 
 fn integration_config() -> TerminalSessionConfig {
     // The test binary has no exe-relative assets dir; point at the repo script.

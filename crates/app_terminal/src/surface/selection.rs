@@ -4,8 +4,8 @@ use nmt_terminal::render_buffer::RenderBuffer;
 use nmt_terminal::selection::{Selection, SelectionRange, SelectionType, WORD_DELIMITERS};
 use nmt_terminal::terminal::pos::{Column, Line, Pos, Side};
 
-use super::TerminalSurface;
-use super::mouse::{SurfaceCellSide, SurfaceMouseEventKind, SurfaceScreenCell};
+use crate::surface::TerminalSurface;
+use crate::surface::mouse::{SurfaceCellSide, SurfaceMouseEventKind, SurfaceScreenCell};
 
 impl TerminalSurface {
     /// Apply a selection gesture to an absolute SCREEN cell. The block-list

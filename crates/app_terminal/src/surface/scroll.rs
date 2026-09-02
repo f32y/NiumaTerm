@@ -2,8 +2,8 @@ use std::mem;
 
 use nmt_input::keyboard::ModifiersState;
 
-use super::TerminalSurface;
-use super::mouse::SurfaceCell;
+use crate::surface::TerminalSurface;
+use crate::surface::mouse::SurfaceCell;
 
 impl TerminalSurface {
     pub(crate) fn apply_scroll(

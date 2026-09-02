@@ -340,7 +340,7 @@ impl GitBranchPoll {
 mod question_prompt_tests {
     use nmt_agent_utils::chat::{Question, QuestionOption};
 
-    use super::QuestionPrompt;
+    use crate::QuestionPrompt;
 
     fn question(text: &str, multi_select: bool, labels: &[&str]) -> Question {
         Question {
@@ -439,7 +439,7 @@ mod question_prompt_tests {
 
 #[cfg(test)]
 mod git_branch_poll_tests {
-    use super::GitBranchPoll;
+    use crate::GitBranchPoll;
 
     #[test]
     fn refresh_state_coalesces_requests_and_updates_presentation() {

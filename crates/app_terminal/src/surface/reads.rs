@@ -5,7 +5,7 @@ use nmt_terminal::block_store::BlockStore;
 use nmt_terminal::ghostty::{AcquiredBlock, BlockHandle, BlockRef, ScreenRowMeta};
 use parking_lot::Mutex;
 
-use super::TerminalSurface;
+use crate::surface::TerminalSurface;
 use crate::{block_list, frame, graphics};
 
 /// One row read for pointer URL hit-testing: plain text padded to the grid

@@ -8,11 +8,11 @@ use nmt_terminal::selection::SelectionRange;
 use nmt_terminal::terminal::square::{ContentTag, Wide};
 use nmt_terminal::terminal::style::StyleFlags;
 
-use super::cache::GenerationMap;
-use super::colors::{BackgroundColors, cell_is_selected};
-use super::images::{empty_images, extract_frame_images};
-use super::line::{LineBuilder, StyleRun, TerminalCell, TerminalLine, display_char};
-use super::{TerminalCursor, TerminalFrame};
+use crate::frame::cache::GenerationMap;
+use crate::frame::colors::{BackgroundColors, cell_is_selected};
+use crate::frame::images::{empty_images, extract_frame_images};
+use crate::frame::line::{LineBuilder, StyleRun, TerminalCell, TerminalLine, display_char};
+use crate::frame::{TerminalCursor, TerminalFrame};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct TerminalLineState {

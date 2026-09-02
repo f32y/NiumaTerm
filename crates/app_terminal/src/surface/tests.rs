@@ -6,12 +6,12 @@ use nmt_terminal::selection::{Selection, SelectionType};
 use nmt_terminal::terminal::Mode;
 use nmt_terminal::terminal::pos::{Column, Line, Pos, Side};
 
-use super::{
+use crate::session::TerminalSessionConfig;
+use crate::surface::{
     SurfaceMouseButton, TerminalSurface, block_selection_range, mouse_button_code,
     mouse_motion_code, mouse_report_mods, paste_payload, selection_screen_range,
     tab_state_with_cwd,
 };
-use crate::session::TerminalSessionConfig;
 
 #[test]
 fn bad_shell_returns_error() {
@@ -69,7 +69,7 @@ fn screen_word_selection_searches_the_visible_row_before_rebasing() {
 
 #[test]
 fn osc7_pwd_normalizes_to_filesystem_path() {
-    use super::normalize_osc7_pwd;
+    use crate::surface::normalize_osc7_pwd;
     assert_eq!(
         normalize_osc7_pwd("file:///C:/Projects/example"),
         "C:/Projects/example"

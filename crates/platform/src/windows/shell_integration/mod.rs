@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Error, Result};
 use windows_registry::CURRENT_USER;
 
-use super::notifier;
+use crate::windows::notifier;
 
 const CLSID_NEW_TAB: &str = "{f1d94feb-1aa5-4b27-9440-c3bc16247c61}";
 
