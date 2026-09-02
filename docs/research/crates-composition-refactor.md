@@ -242,7 +242,18 @@ Commit: `refactor(agent): move command feedback onto the slash palette`
 
 #### A2. Consolidate thread controls: rendering and defaults on `ThreadControls`
 
-Status: pending
+Status: done 1ce5d202
+
+Note: the pill chrome (`settings_pill`, `settings_pill_frame`,
+`settings_group`, `setting_picker`, `folded_settings_pill`, `effort_panel`,
+`effort_levels`) reads no state, so it became free functions instead of
+associated ones. `profile_effort` was renamed `launch_effort` because
+`crate::profile` already exports a `profile_effort` free function meaning the
+same thing. `apply_model_selection` and `apply_agent_preset` stayed on
+`AgentPane`: both send to the backend and report a refusal through the palette.
+Manual check: change model, permission mode and effort from the row under the
+composer on a Claude, a Codex and a DeepSeek tab; each pick applies, the pill
+shows it, and reopening a tab from the same profile starts on the last pick.
 
 Four files implement one unit of behaviour over `ThreadControls` (defined at
 `pane_state.rs:46`, nine fields: `settings`, `seed_thread_defaults`,
@@ -933,3 +944,4 @@ left under the order.
 | B4 | done `3c2b569d` |
 | B5 | done `30c5f10c` |
 | E1 | done `2cb20434` |
+| A2 | done `1ce5d202` |
