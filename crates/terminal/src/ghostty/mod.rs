@@ -8,17 +8,15 @@ pub use libghostty_vt_sys::BlockHandle;
 use libghostty_vt_sys::{
     ColorRgb as VtColorRgb, GridRef as VtGridRef, KITTY_KEY_DISAMBIGUATE, KITTY_KEY_REPORT_ALL,
     KITTY_KEY_REPORT_ALTERNATES, KITTY_KEY_REPORT_ASSOCIATED, KITTY_KEY_REPORT_EVENTS,
-    KittyGraphics as VtKittyGraphics,
-    KittyGraphicsPlacementIterator as VtKittyGraphicsPlacementIterator,
-    PointCoordinate as VtPointCoordinate, PointTag as VtPointTag, Result as VtResult,
-    String as VtString, Terminal as VtTerminal, TerminalCursorStyle as VtTerminalCursorStyle,
-    TerminalData as VtTerminalData, TerminalOption as VtTerminalOption,
-    TerminalOptions as VtTerminalOptions, TerminalScrollViewport as VtTerminalScrollViewport,
+    KittyGraphics as VtKittyGraphics, PointCoordinate as VtPointCoordinate, PointTag as VtPointTag,
+    Result as VtResult, String as VtString, Terminal as VtTerminal,
+    TerminalCursorStyle as VtTerminalCursorStyle, TerminalData as VtTerminalData,
+    TerminalOption as VtTerminalOption, TerminalOptions as VtTerminalOptions,
+    TerminalScrollViewport as VtTerminalScrollViewport,
     TerminalScrollViewportTag as VtTerminalScrollViewportTag,
     TerminalScrollViewportValue as VtTerminalScrollViewportValue,
-    TerminalScrollbar as VtTerminalScrollbar, ghostty_kitty_graphics_image,
-    ghostty_kitty_graphics_placement_iterator_free, ghostty_kitty_graphics_placement_iterator_new,
-    ghostty_terminal_free, ghostty_terminal_get, ghostty_terminal_mode_get, ghostty_terminal_new,
+    TerminalScrollbar as VtTerminalScrollbar, ghostty_kitty_graphics_image, ghostty_terminal_free,
+    ghostty_terminal_get, ghostty_terminal_mode_get, ghostty_terminal_new,
     ghostty_terminal_point_from_grid_ref, ghostty_terminal_resize,
     ghostty_terminal_scroll_viewport, ghostty_terminal_set, ghostty_terminal_vt_write,
 };
@@ -29,7 +27,6 @@ use libghostty_vt_sys::{
 #[cfg(test)]
 use nmt_config::colors::ColorRgb;
 use nmt_config::colors::Colors;
-use rustc_hash::FxHashMap;
 
 #[cfg(test)]
 use crate::graphics;
@@ -46,6 +43,7 @@ mod grid_read;
 mod kitty;
 mod render_state;
 
+use crate::ghostty::kitty::KittyState;
 use crate::ghostty::render_state::RenderStateReader;
 mod types;
 
@@ -71,10 +69,7 @@ pub mod mode;
 pub struct GhosttyTerminal {
     terminal: VtTerminal,
     render: RenderStateReader,
-    /// Reused each `snapshot()` to walk kitty placements. Allocated once;
-    /// `ghostty_kitty_graphics_get(PLACEMENT_ITERATOR)` re-points it at the live
-    /// storage with no allocation, so a no-graphics batch costs ~3 FFI calls.
-    placement_iter: VtKittyGraphicsPlacementIterator,
+    kitty: KittyState,
     cols: u16,
     rows: u16,
     /// Boxed so its heap address stays fixed across `GhosttyTerminal` moves;
@@ -82,11 +77,6 @@ pub struct GhosttyTerminal {
     callbacks: Box<Callbacks>,
     last_title: String,
     last_pwd: String,
-    /// Kitty image-delta cache: `image_id → (width, height, data_len)`
-    /// of every image already shipped to the frontend. Owned by the PTY reader
-    /// thread (only `take_image_deltas` mutates it). A key change (re-transmit with
-    /// new size/length) re-ships the pixels; a vanished id is removed.
-    shipped_images: FxHashMap<u32, (u32, u32, usize)>,
     scrollbar_override: Option<ScrollbarInfo>,
 }
 
@@ -122,13 +112,13 @@ impl GhosttyTerminal {
             }
         };
 
-        let mut placement_iter = ptr::null_mut();
-        if let Err(err) = Error::from_code(unsafe {
-            ghostty_kitty_graphics_placement_iterator_new(ptr::null(), &mut placement_iter)
-        }) {
-            unsafe { ghostty_terminal_free(terminal) };
-            return Err(err);
-        }
+        let kitty = match KittyState::new() {
+            Ok(kitty) => kitty,
+            Err(err) => {
+                unsafe { ghostty_terminal_free(terminal) };
+                return Err(err);
+            }
+        };
 
         // Register the process-global PNG decoder once for Kitty `f=100` payloads.
         register_png_decoder();
@@ -183,13 +173,12 @@ impl GhosttyTerminal {
         Ok(Self {
             terminal,
             render,
-            placement_iter,
+            kitty,
             cols,
             rows,
             callbacks,
             last_title: String::new(),
             last_pwd: String::new(),
-            shipped_images: FxHashMap::default(),
             scrollbar_override: None,
         })
     }
@@ -689,10 +678,7 @@ impl GhosttyTerminal {
 
 impl Drop for GhosttyTerminal {
     fn drop(&mut self) {
-        unsafe {
-            ghostty_kitty_graphics_placement_iterator_free(self.placement_iter);
-            ghostty_terminal_free(self.terminal);
-        }
+        unsafe { ghostty_terminal_free(self.terminal) };
     }
 }
 
