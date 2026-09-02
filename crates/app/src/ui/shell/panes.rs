@@ -1,4 +1,5 @@
 use crate::ui::main_view_background_opacity;
+use crate::ui::persistence::spawn_default_pane;
 use crate::ui::shell::*;
 
 const PANE_RESIZE_STEP: Pixels = px(30.0);
@@ -68,7 +69,7 @@ impl Shell {
         let id = Self::alloc_id(&mut self.next_id);
         let default_profile = Self::default_profile(cx);
 
-        let pane = Self::spawn_default_pane(cx, id, default_profile, cwd);
+        let pane = spawn_default_pane(cx, id, default_profile, cwd);
 
         self.register_agent_pane(&pane, cx);
 

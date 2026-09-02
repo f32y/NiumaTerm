@@ -162,477 +162,483 @@ fn pane_node_state(
     }
 }
 
-impl Shell {
-    /// The starting workspace set for a window without a restored session:
-    /// one workspace, one tab. With `initial_cwd` (a CLI `new_window` target)
-    /// the workspace is rooted there; otherwise it uses the home directory.
-    pub(super) fn default_session(
-        initial_cwd: Option<String>,
-        default_profile: (Option<String>, Vec<String>),
-        next_id: &mut u64,
-        cx: &mut Context<Self>,
-    ) -> WorkspaceManager {
-        // The default (no-CLI) branch keeps spawning with no cwd — the shell
-        // then starts in its own default directory, as before.
-        let (cwd, spawn_cwd) = match initial_cwd {
-            Some(dir) => (dir.clone(), Some(dir)),
-            None => (
-                home_dir()
-                    .map(|home| home.display().to_string())
-                    .unwrap_or_else(|| ".".to_string()),
-                None,
-            ),
-        };
+/// The starting workspace set for a window without a restored session:
+/// one workspace, one tab. With `initial_cwd` (a CLI `new_window` target)
+/// the workspace is rooted there; otherwise it uses the home directory.
+pub(super) fn default_session(
+    initial_cwd: Option<String>,
+    default_profile: (Option<String>, Vec<String>),
+    next_id: &mut u64,
+    cx: &mut Context<Shell>,
+) -> WorkspaceManager {
+    // The default (no-CLI) branch keeps spawning with no cwd — the shell
+    // then starts in its own default directory, as before.
+    let (cwd, spawn_cwd) = match initial_cwd {
+        Some(dir) => (dir.clone(), Some(dir)),
+        None => (
+            home_dir()
+                .map(|home| home.display().to_string())
+                .unwrap_or_else(|| ".".to_string()),
+            None,
+        ),
+    };
 
-        let surface_id = Self::alloc_id(next_id);
-        let pane = Self::spawn_default_pane(cx, surface_id, default_profile, spawn_cwd);
-        let title = pane.read(cx).profile_name().to_string();
-        let tabs = TabManager::new(
-            TabSurface::Live(PaneTree::new_leaf(PaneId(surface_id), pane)),
-            TabId(surface_id),
-            title,
-        );
-        let workspace_id = Self::alloc_id(next_id);
+    let surface_id = Shell::alloc_id(next_id);
+    let pane = spawn_default_pane(cx, surface_id, default_profile, spawn_cwd);
+    let title = pane.read(cx).profile_name().to_string();
+    let tabs = TabManager::new(
+        TabSurface::Live(PaneTree::new_leaf(PaneId(surface_id), pane)),
+        TabId(surface_id),
+        title,
+    );
+    let workspace_id = Shell::alloc_id(next_id);
 
-        WorkspaceManager::new(
+    WorkspaceManager::new(
+        tabs,
+        WorkspaceId(workspace_id),
+        default_workspace_name().into(),
+        WorkspaceRoots::single(cwd),
+    )
+}
+
+pub(super) fn restore_session(
+    session: Option<SessionState>,
+    next_id: &mut u64,
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) -> Option<WorkspaceManager> {
+    let session = session?;
+    let saved_active = session.active_workspace;
+
+    let mut workspaces: Option<WorkspaceManager> = None;
+    let mut restored_count = 0usize;
+
+    for workspace in session.workspaces {
+        let WorkspaceState {
+            name,
+            cwd,
+            additional_cwds,
+            pinned,
+            active_tab,
             tabs,
-            WorkspaceId(workspace_id),
-            default_workspace_name().into(),
-            WorkspaceRoots::single(cwd),
-        )
-    }
+        } = workspace;
 
-    pub(super) fn restore_session(
-        session: Option<SessionState>,
-        next_id: &mut u64,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Option<WorkspaceManager> {
-        let session = session?;
-        let saved_active = session.active_workspace;
+        let Some(tab_manager) = restore_tabs(tabs, active_tab, next_id, cx) else {
+            continue;
+        };
 
-        let mut workspaces: Option<WorkspaceManager> = None;
-        let mut restored_count = 0usize;
+        restored_count += 1;
 
-        for workspace in session.workspaces {
-            let WorkspaceState {
-                name,
-                cwd,
-                additional_cwds,
-                pinned,
-                active_tab,
-                tabs,
-            } = workspace;
-
-            let Some(tab_manager) = Self::restore_tabs(tabs, active_tab, next_id, cx) else {
-                continue;
-            };
-
-            restored_count += 1;
-
-            let workspace_id = WorkspaceId(Self::alloc_id(next_id));
-            let name = if name.trim().is_empty() {
-                i18n("workspace-restored-default-name")
-                    .replace("{count}", &restored_count.to_string())
-            } else {
-                name
-            };
-            let cwd = cwd
+        let workspace_id = WorkspaceId(Shell::alloc_id(next_id));
+        let name = if name.trim().is_empty() {
+            i18n("workspace-restored-default-name").replace("{count}", &restored_count.to_string())
+        } else {
+            name
+        };
+        let cwd = cwd
+            .filter(|cwd| !cwd.trim().is_empty())
+            .unwrap_or_else(|| ".".to_string());
+        // A saved directory restores whether or not it currently resolves:
+        // a disconnected drive or a temporarily missing tree would
+        // otherwise silently drop the workspace's own tabs and layout. The
+        // sidebar marks what it cannot reach.
+        let roots = WorkspaceRoots::new(
+            cwd,
+            additional_cwds
+                .into_iter()
                 .filter(|cwd| !cwd.trim().is_empty())
-                .unwrap_or_else(|| ".".to_string());
-            // A saved directory restores whether or not it currently resolves:
-            // a disconnected drive or a temporarily missing tree would
-            // otherwise silently drop the workspace's own tabs and layout. The
-            // sidebar marks what it cannot reach.
-            let roots = WorkspaceRoots::new(
-                cwd,
-                additional_cwds
-                    .into_iter()
-                    .filter(|cwd| !cwd.trim().is_empty())
-                    .collect(),
-            );
+                .collect(),
+        );
 
-            if let Some(manager) = &mut workspaces {
-                manager.new_workspace_with_pinned(tab_manager, workspace_id, name, roots, pinned);
-            } else {
-                workspaces = Some(WorkspaceManager::new(
-                    tab_manager,
-                    workspace_id,
-                    name,
-                    roots,
-                ));
-                workspaces
-                    .as_mut()
-                    .expect("workspace manager was just created")
-                    .set_pinned(workspace_id, pinned);
-            }
-        }
-
-        let mut workspaces = workspaces?;
-
-        workspaces.activate(saved_active.min(workspaces.len() - 1));
-
-        // The initially visible tab spawns right away; everything else stays
-        // pending, so this window's other `active_pane` readers (activation
-        // observers, notification pumps) never see a pending active tab.
-        Self::materialize_active_tab(&mut workspaces, next_id, window, cx);
-
-        Some(workspaces)
-    }
-
-    /// Spawn the shells of a still-pending active tab and swap its surface to
-    /// `Live`. Returns whether a materialization happened. A saved pane layout
-    /// rebuilds the split tree (one fresh shell per leaf); an unusable layout
-    /// or failed spawn degrades to a single default-profile pane so the tab
-    /// the user just activated never vanishes. A tab saved with an agent kind
-    /// reopens as a fresh agent conversation instead (nothing to restore —
-    /// the Codex process died with the previous app instance).
-    pub(super) fn materialize_active_tab(
-        workspaces: &mut WorkspaceManager,
-        next_id: &mut u64,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let state = match workspaces.active_tabs().active() {
-            TabSurface::Pending(state) => (**state).clone(),
-            TabSurface::Live(_) | TabSurface::Agent(_) | TabSurface::Settings => return false,
-        };
-
-        // An unknown agent kind (a newer snapshot) degrades to the terminal
-        // path below rather than losing the tab.
-        if let Some(kind) = state.agent.as_deref().and_then(AgentKind::from_id) {
-            let workspace = agent_workspace(workspaces.active_roots());
-            let profile = restored_agent_profile(
-                state.agent_profile.as_deref(),
-                kind,
-                cx.global::<AppSettings>(),
-            );
-            let pane = cx.new(|cx| AgentPane::new(profile, workspace, window, cx));
-
-            Self::watch_agent_tab(&pane, cx);
-
-            *workspaces.active_tabs_mut().active_mut() = TabSurface::Agent(pane);
-
-            return true;
-        }
-
-        let tree = state
-            .panes
-            .as_ref()
-            .and_then(|panes| Self::restore_pane_node(panes, next_id, cx))
-            .map(PaneTree::from_root)
-            .unwrap_or_else(|| {
-                let surface_id = Self::alloc_id(next_id);
-                let default_profile = cx.global::<AppSettings>().default_profile_command();
-
-                let (launch, profile_name) =
-                    launch_with_profile(Some(state), default_profile.clone(), cx);
-                let pane = match TerminalPane::spawn(cx, surface_id, launch, profile_name) {
-                    Ok(pane) => {
-                        Self::watch_pane(&pane, cx);
-                        pane
-                    }
-                    Err(error) => {
-                        warn!("failed to restore tab {surface_id} lazily: {error}");
-                        Self::spawn_default_pane(cx, surface_id, default_profile, None)
-                    }
-                };
-
-                PaneTree::new_leaf(PaneId(surface_id), pane)
-            });
-
-        *workspaces.active_tabs_mut().active_mut() = TabSurface::Live(tree);
-
-        true
-    }
-
-    /// Rebuild a workspace's tabs as pending surfaces: the saved snapshot is
-    /// kept per tab and no shell spawns here — `materialize_active_tab` turns
-    /// a tab live the first time it is activated.
-    fn restore_tabs(
-        tabs: Vec<TabState>,
-        active_tab: usize,
-        next_id: &mut u64,
-        cx: &mut Context<Self>,
-    ) -> Option<TabManager<TabSurface>> {
-        let mut restored = Vec::new();
-
-        for mut tab_state in tabs {
-            // Agent tabs carry no launch command; profile resolution only
-            // applies to terminal tabs.
-            if tab_state.agent.is_none() {
-                resolve_restored_launch(&mut tab_state, cx.global::<AppSettings>());
-            }
-
-            let name = tab_state
-                .name
-                .clone()
-                .filter(|n| !n.trim().is_empty())
-                .filter(|n| tab_state.user_named || !legacy_generated_tab_title(n));
-
-            // The profile-derived title a live pane would report, so pending
-            // tabs label identically to spawned ones. Unknown agent kinds
-            // materialize as terminals, so they take the profile title too.
-            let default_title = match tab_state.agent.as_deref().and_then(AgentKind::from_id) {
-                Some(kind) => {
-                    let name = restored_agent_profile(
-                        tab_state.agent_profile.as_deref(),
-                        kind,
-                        cx.global::<AppSettings>(),
-                    )
-                    .name;
-
-                    if name.trim().is_empty() {
-                        kind.display().to_string()
-                    } else {
-                        name
-                    }
-                }
-                None => cx
-                    .global::<AppSettings>()
-                    .profile_name_for_command(tab_state.shell.as_deref(), &tab_state.args),
-            };
-
-            restored.push((
-                TabSurface::Pending(Box::new(tab_state)),
-                TabId(Self::alloc_id(next_id)),
+        if let Some(manager) = &mut workspaces {
+            manager.new_workspace_with_pinned(tab_manager, workspace_id, name, roots, pinned);
+        } else {
+            workspaces = Some(WorkspaceManager::new(
+                tab_manager,
+                workspace_id,
                 name,
-                default_title,
+                roots,
             ));
-        }
-
-        let mut restored = restored.into_iter();
-
-        let (first_pane, first_id, first_name, first_default_title) = restored.next()?;
-
-        let mut tab_manager = TabManager::new(first_pane, first_id, first_default_title);
-
-        if let Some(name) = first_name {
-            tab_manager.rename(first_id, name);
-        }
-
-        for (pane, id, name, default_title) in restored {
-            tab_manager.new_tab(pane, id, default_title);
-            if let Some(name) = name {
-                tab_manager.rename(id, name);
-            }
-        }
-
-        tab_manager.activate(active_tab.min(tab_manager.len() - 1));
-
-        Some(tab_manager)
-    }
-
-    /// Rebuild one node of a saved pane layout, spawning a fresh shell per
-    /// leaf. An unspawnable leaf is skipped and its split collapses around it
-    /// (a split left with one child becomes that child); `None` when no leaf
-    /// of the subtree could spawn.
-    fn restore_pane_node(
-        node: &PaneNodeState,
-        next_id: &mut u64,
-        cx: &mut Context<Self>,
-    ) -> Option<PaneNode<Entity<TerminalPane>, Entity<ResizableState>>> {
-        match node {
-            PaneNodeState::Leaf { shell, args, cwd } => {
-                let surface_id = Self::alloc_id(next_id);
-
-                let mut launch = TabState {
-                    name: None,
-                    user_named: false,
-                    shell: shell.clone(),
-                    args: args.clone(),
-                    cwd: cwd.clone(),
-                    agent: None,
-                    agent_profile: None,
-                    panes: None,
-                };
-
-                resolve_restored_launch(&mut launch, cx.global::<AppSettings>());
-
-                // Spawn retries without the saved cwd internally.
-                let (launch, profile_name) =
-                    launch_with_profile(Some(launch), (None, Vec::new()), cx);
-                match TerminalPane::spawn(cx, surface_id, launch, profile_name) {
-                    Ok(pane) => {
-                        Self::watch_pane(&pane, cx);
-                        Some(PaneTree::restored_leaf(PaneId(surface_id), pane))
-                    }
-                    Err(error) => {
-                        warn!("failed to restore pane {surface_id}: {error}");
-                        None
-                    }
-                }
-            }
-            PaneNodeState::Split {
-                axis,
-                ratios,
-                children,
-            } => {
-                let built: Vec<_> = children
-                    .iter()
-                    .filter_map(|child| Self::restore_pane_node(child, next_id, cx))
-                    .collect();
-
-                match built.len() {
-                    0 => None,
-                    1 => built.into_iter().next(),
-                    _ => {
-                        let state = cx.new(|_| ResizableState::default());
-                        // `restored_split` drops the ratios when their length
-                        // no longer matches (a leaf was skipped).
-                        Some(PaneTree::restored_split(
-                            axis_from_state(*axis),
-                            built,
-                            state,
-                            Some(ratios.clone()),
-                        ))
-                    }
-                }
-            }
+            workspaces
+                .as_mut()
+                .expect("workspace manager was just created")
+                .set_pinned(workspace_id, pinned);
         }
     }
 
-    /// Spawn a pane on the default profile, starting the shell in `cwd` when
-    /// given. Falls back in layers: an unusable cwd retries without it, a
-    /// broken profile retries the built-in shell.
-    pub(super) fn spawn_default_pane(
-        cx: &mut Context<Self>,
-        surface_id: u64,
-        default_profile: (Option<String>, Vec<String>),
-        cwd: Option<String>,
-    ) -> Entity<TerminalPane> {
-        let launch = cwd.map(|cwd| TabState {
-            shell: default_profile.0.clone(),
-            args: default_profile.1.clone(),
-            cwd: Some(cwd),
-            agent: None,
-            ..TabState::default()
-        });
+    let mut workspaces = workspaces?;
 
-        let (launch, profile_name) = launch_with_profile(launch, default_profile.clone(), cx);
-        let spawned = TerminalPane::spawn(cx, surface_id, launch, profile_name).or_else(|error| {
-            warn!("spawn with workspace cwd/profile failed, retrying default: {error}");
-            let (launch, profile_name) = launch_with_profile(None, default_profile, cx);
-            TerminalPane::spawn(cx, surface_id, launch, profile_name)
-        });
+    workspaces.activate(saved_active.min(workspaces.len() - 1));
 
-        let pane = match spawned {
-            Ok(pane) => pane,
-            Err(error) => {
-                warn!("default profile failed, retrying built-in shell: {error}");
-                let (launch, profile_name) = launch_with_profile(None, (None, Vec::new()), cx);
-                match TerminalPane::spawn(cx, surface_id, launch, profile_name) {
-                    Ok(pane) => pane,
-                    Err(error) => {
-                        // Even the built-in shell cannot spawn (e.g. ConPTY
-                        // unavailable) — no terminal can ever open, so tell
-                        // the user why before exiting instead of dying with
-                        // an invisible panic.
-                        crate::show_startup_error_dialog(
-                            &i18n("startup-terminal-spawn-error")
-                                .replace("{error}", &error.to_string()),
-                        );
-                        process::exit(1);
-                    }
-                }
-            }
-        };
+    // The initially visible tab spawns right away; everything else stays
+    // pending, so this window's other `active_pane` readers (activation
+    // observers, notification pumps) never see a pending active tab.
+    materialize_active_tab(&mut workspaces, next_id, window, cx);
 
-        Self::watch_pane(&pane, cx);
+    Some(workspaces)
+}
 
-        pane
+/// Spawn the shells of a still-pending active tab and swap its surface to
+/// `Live`. Returns whether a materialization happened. A saved pane layout
+/// rebuilds the split tree (one fresh shell per leaf); an unusable layout
+/// or failed spawn degrades to a single default-profile pane so the tab
+/// the user just activated never vanishes. A tab saved with an agent kind
+/// reopens as a fresh agent conversation instead (nothing to restore —
+/// the Codex process died with the previous app instance).
+pub(super) fn materialize_active_tab(
+    workspaces: &mut WorkspaceManager,
+    next_id: &mut u64,
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) -> bool {
+    let state = match workspaces.active_tabs().active() {
+        TabSurface::Pending(state) => (**state).clone(),
+        TabSurface::Live(_) | TabSurface::Agent(_) | TabSurface::Settings => return false,
+    };
+
+    // An unknown agent kind (a newer snapshot) degrades to the terminal
+    // path below rather than losing the tab.
+    if let Some(kind) = state.agent.as_deref().and_then(AgentKind::from_id) {
+        let workspace = agent_workspace(workspaces.active_roots());
+        let profile = restored_agent_profile(
+            state.agent_profile.as_deref(),
+            kind,
+            cx.global::<AppSettings>(),
+        );
+        let pane = cx.new(|cx| AgentPane::new(profile, workspace, window, cx));
+
+        Shell::watch_agent_tab(&pane, cx);
+
+        *workspaces.active_tabs_mut().active_mut() = TabSurface::Agent(pane);
+
+        return true;
     }
 
-    fn session_state(&self, cx: &App) -> SessionState {
-        // A doomed workspace (user asked to close the last one) is skipped, so
-        // it never reaches local_state; the active index is recomputed over
-        // the kept workspaces.
-        let mut active_workspace = 0usize;
-        let mut workspaces = Vec::new();
+    let tree = state
+        .panes
+        .as_ref()
+        .and_then(|panes| restore_pane_node(panes, next_id, cx))
+        .map(PaneTree::from_root)
+        .unwrap_or_else(|| {
+            let surface_id = Shell::alloc_id(next_id);
+            let default_profile = cx.global::<AppSettings>().default_profile_command();
 
-        let default_profile = cx.global::<AppSettings>().default_profile_command();
-
-        for workspace in self.workspaces.summaries() {
-            if Some(workspace.id) == self.doomed_workspace {
-                continue;
-            }
-
-            // The settings entry is a view of the configuration file, not
-            // work to come back to, so it is never restored.
-            if workspace.kind == WorkspaceKind::Settings {
-                continue;
-            }
-
-            // A temporary workspace is scratch space the user has not adopted;
-            // its tabs go with it, while tabs opened in an adopted workspace
-            // are saved below like any other.
-            if workspace.temporary {
-                continue;
-            }
-
-            let Some(tabs) = self.workspaces.tabs_of(workspace.id) else {
-                continue;
+            let (launch, profile_name) =
+                launch_with_profile(Some(state), default_profile.clone(), cx);
+            let pane = match TerminalPane::spawn(cx, surface_id, launch, profile_name) {
+                Ok(pane) => {
+                    Shell::watch_pane(&pane, cx);
+                    pane
+                }
+                Err(error) => {
+                    warn!("failed to restore tab {surface_id} lazily: {error}");
+                    spawn_default_pane(cx, surface_id, default_profile, None)
+                }
             };
 
-            if workspace.active {
-                active_workspace = workspaces.len();
-            }
+            PaneTree::new_leaf(PaneId(surface_id), pane)
+        });
 
-            workspaces.push(WorkspaceState {
-                name: workspace.name,
-                cwd: (!workspace.cwd.is_empty()).then_some(workspace.cwd),
-                additional_cwds: workspace.additional_cwds,
-                pinned: workspace.pinned,
-                active_tab: tabs.active_index(),
-                tabs: tabs
-                    .tabs()
-                    .iter()
-                    .map(|tab| {
-                        let mut state = match tab.surface() {
-                            // A tab that never went live re-saves its restored
-                            // snapshot unchanged — its shells never ran, so the
-                            // saved launch state is still the truth.
-                            TabSurface::Pending(state) => (**state).clone(),
-                            // Flat fields always mirror the focused pane, so a
-                            // snapshot without splits stays in the old format
-                            // and an old build restores something sensible
-                            // from a split one.
-                            TabSurface::Live(tree) => {
-                                let mut state = tree.focused_pane().read(cx).tab_state();
-                                state.panes = (!tree.is_single_leaf())
-                                    .then(|| pane_node_state(tree.root(), &default_profile, cx));
-                                state
-                            }
-                            // Agent conversations are not persisted (the
-                            // agent process and its thread die with the app);
-                            // the saved kind reopens a fresh agent tab.
-                            TabSurface::Agent(pane) => TabState {
-                                agent: Some(pane.read(cx).kind().id().to_string()),
-                                agent_profile: Some(pane.read(cx).profile_name().to_string()),
-                                ..TabState::default()
-                            },
-                            // Only the settings workspace holds this surface,
-                            // and that workspace is skipped above; the arm
-                            // exists so the match stays exhaustive.
-                            TabSurface::Settings => TabState::default(),
-                        };
-                        normalize_saved_launch(&mut state, &default_profile);
-                        state.name = tab.user_title().map(str::to_owned);
-                        state.user_named = state.name.is_some();
-                        state
-                    })
-                    .collect(),
-            });
+    *workspaces.active_tabs_mut().active_mut() = TabSurface::Live(tree);
+
+    true
+}
+
+/// Rebuild a workspace's tabs as pending surfaces: the saved snapshot is
+/// kept per tab and no shell spawns here — `materialize_active_tab` turns
+/// a tab live the first time it is activated.
+fn restore_tabs(
+    tabs: Vec<TabState>,
+    active_tab: usize,
+    next_id: &mut u64,
+    cx: &mut Context<Shell>,
+) -> Option<TabManager<TabSurface>> {
+    let mut restored = Vec::new();
+
+    for mut tab_state in tabs {
+        // Agent tabs carry no launch command; profile resolution only
+        // applies to terminal tabs.
+        if tab_state.agent.is_none() {
+            resolve_restored_launch(&mut tab_state, cx.global::<AppSettings>());
         }
 
-        SessionState {
-            active_workspace,
-            workspaces,
+        let name = tab_state
+            .name
+            .clone()
+            .filter(|n| !n.trim().is_empty())
+            .filter(|n| tab_state.user_named || !legacy_generated_tab_title(n));
+
+        // The profile-derived title a live pane would report, so pending
+        // tabs label identically to spawned ones. Unknown agent kinds
+        // materialize as terminals, so they take the profile title too.
+        let default_title = match tab_state.agent.as_deref().and_then(AgentKind::from_id) {
+            Some(kind) => {
+                let name = restored_agent_profile(
+                    tab_state.agent_profile.as_deref(),
+                    kind,
+                    cx.global::<AppSettings>(),
+                )
+                .name;
+
+                if name.trim().is_empty() {
+                    kind.display().to_string()
+                } else {
+                    name
+                }
+            }
+            None => cx
+                .global::<AppSettings>()
+                .profile_name_for_command(tab_state.shell.as_deref(), &tab_state.args),
+        };
+
+        restored.push((
+            TabSurface::Pending(Box::new(tab_state)),
+            TabId(Shell::alloc_id(next_id)),
+            name,
+            default_title,
+        ));
+    }
+
+    let mut restored = restored.into_iter();
+
+    let (first_pane, first_id, first_name, first_default_title) = restored.next()?;
+
+    let mut tab_manager = TabManager::new(first_pane, first_id, first_default_title);
+
+    if let Some(name) = first_name {
+        tab_manager.rename(first_id, name);
+    }
+
+    for (pane, id, name, default_title) in restored {
+        tab_manager.new_tab(pane, id, default_title);
+        if let Some(name) = name {
+            tab_manager.rename(id, name);
         }
     }
 
-    pub(super) fn sync_session_memory(&self, cx: &mut Context<Self>) {
-        let session = self.session_state(cx);
+    tab_manager.activate(active_tab.min(tab_manager.len() - 1));
+
+    Some(tab_manager)
+}
+
+/// Rebuild one node of a saved pane layout, spawning a fresh shell per
+/// leaf. An unspawnable leaf is skipped and its split collapses around it
+/// (a split left with one child becomes that child); `None` when no leaf
+/// of the subtree could spawn.
+fn restore_pane_node(
+    node: &PaneNodeState,
+    next_id: &mut u64,
+    cx: &mut Context<Shell>,
+) -> Option<PaneNode<Entity<TerminalPane>, Entity<ResizableState>>> {
+    match node {
+        PaneNodeState::Leaf { shell, args, cwd } => {
+            let surface_id = Shell::alloc_id(next_id);
+
+            let mut launch = TabState {
+                name: None,
+                user_named: false,
+                shell: shell.clone(),
+                args: args.clone(),
+                cwd: cwd.clone(),
+                agent: None,
+                agent_profile: None,
+                panes: None,
+            };
+
+            resolve_restored_launch(&mut launch, cx.global::<AppSettings>());
+
+            // Spawn retries without the saved cwd internally.
+            let (launch, profile_name) = launch_with_profile(Some(launch), (None, Vec::new()), cx);
+            match TerminalPane::spawn(cx, surface_id, launch, profile_name) {
+                Ok(pane) => {
+                    Shell::watch_pane(&pane, cx);
+                    Some(PaneTree::restored_leaf(PaneId(surface_id), pane))
+                }
+                Err(error) => {
+                    warn!("failed to restore pane {surface_id}: {error}");
+                    None
+                }
+            }
+        }
+        PaneNodeState::Split {
+            axis,
+            ratios,
+            children,
+        } => {
+            let built: Vec<_> = children
+                .iter()
+                .filter_map(|child| restore_pane_node(child, next_id, cx))
+                .collect();
+
+            match built.len() {
+                0 => None,
+                1 => built.into_iter().next(),
+                _ => {
+                    let state = cx.new(|_| ResizableState::default());
+                    // `restored_split` drops the ratios when their length
+                    // no longer matches (a leaf was skipped).
+                    Some(PaneTree::restored_split(
+                        axis_from_state(*axis),
+                        built,
+                        state,
+                        Some(ratios.clone()),
+                    ))
+                }
+            }
+        }
+    }
+}
+
+/// Spawn a pane on the default profile, starting the shell in `cwd` when
+/// given. Falls back in layers: an unusable cwd retries without it, a
+/// broken profile retries the built-in shell.
+pub(super) fn spawn_default_pane(
+    cx: &mut Context<Shell>,
+    surface_id: u64,
+    default_profile: (Option<String>, Vec<String>),
+    cwd: Option<String>,
+) -> Entity<TerminalPane> {
+    let launch = cwd.map(|cwd| TabState {
+        shell: default_profile.0.clone(),
+        args: default_profile.1.clone(),
+        cwd: Some(cwd),
+        agent: None,
+        ..TabState::default()
+    });
+
+    let (launch, profile_name) = launch_with_profile(launch, default_profile.clone(), cx);
+    let spawned = TerminalPane::spawn(cx, surface_id, launch, profile_name).or_else(|error| {
+        warn!("spawn with workspace cwd/profile failed, retrying default: {error}");
+        let (launch, profile_name) = launch_with_profile(None, default_profile, cx);
+        TerminalPane::spawn(cx, surface_id, launch, profile_name)
+    });
+
+    let pane = match spawned {
+        Ok(pane) => pane,
+        Err(error) => {
+            warn!("default profile failed, retrying built-in shell: {error}");
+            let (launch, profile_name) = launch_with_profile(None, (None, Vec::new()), cx);
+            match TerminalPane::spawn(cx, surface_id, launch, profile_name) {
+                Ok(pane) => pane,
+                Err(error) => {
+                    // Even the built-in shell cannot spawn (e.g. ConPTY
+                    // unavailable) — no terminal can ever open, so tell
+                    // the user why before exiting instead of dying with
+                    // an invisible panic.
+                    crate::show_startup_error_dialog(
+                        &i18n("startup-terminal-spawn-error")
+                            .replace("{error}", &error.to_string()),
+                    );
+                    process::exit(1);
+                }
+            }
+        }
+    };
+
+    Shell::watch_pane(&pane, cx);
+
+    pane
+}
+
+/// The window's workspaces and tabs in the shape `local_state` stores.
+fn session_state(
+    workspaces: &WorkspaceManager,
+    doomed: Option<WorkspaceId>,
+    cx: &App,
+) -> SessionState {
+    // A doomed workspace (user asked to close the last one) is skipped, so
+    // it never reaches local_state; the active index is recomputed over
+    // the kept workspaces.
+    let mut active_workspace = 0usize;
+    let mut saved = Vec::new();
+
+    let default_profile = cx.global::<AppSettings>().default_profile_command();
+
+    for workspace in workspaces.summaries() {
+        if Some(workspace.id) == doomed {
+            continue;
+        }
+
+        // The settings entry is a view of the configuration file, not
+        // work to come back to, so it is never restored.
+        if workspace.kind == WorkspaceKind::Settings {
+            continue;
+        }
+
+        // A temporary workspace is scratch space the user has not adopted;
+        // its tabs go with it, while tabs opened in an adopted workspace
+        // are saved below like any other.
+        if workspace.temporary {
+            continue;
+        }
+
+        let Some(tabs) = workspaces.tabs_of(workspace.id) else {
+            continue;
+        };
+
+        if workspace.active {
+            active_workspace = saved.len();
+        }
+
+        saved.push(WorkspaceState {
+            name: workspace.name,
+            cwd: (!workspace.cwd.is_empty()).then_some(workspace.cwd),
+            additional_cwds: workspace.additional_cwds,
+            pinned: workspace.pinned,
+            active_tab: tabs.active_index(),
+            tabs: tabs
+                .tabs()
+                .iter()
+                .map(|tab| {
+                    let mut state = match tab.surface() {
+                        // A tab that never went live re-saves its restored
+                        // snapshot unchanged — its shells never ran, so the
+                        // saved launch state is still the truth.
+                        TabSurface::Pending(state) => (**state).clone(),
+                        // Flat fields always mirror the focused pane, so a
+                        // snapshot without splits stays in the old format
+                        // and an old build restores something sensible
+                        // from a split one.
+                        TabSurface::Live(tree) => {
+                            let mut state = tree.focused_pane().read(cx).tab_state();
+                            state.panes = (!tree.is_single_leaf())
+                                .then(|| pane_node_state(tree.root(), &default_profile, cx));
+                            state
+                        }
+                        // Agent conversations are not persisted (the
+                        // agent process and its thread die with the app);
+                        // the saved kind reopens a fresh agent tab.
+                        TabSurface::Agent(pane) => TabState {
+                            agent: Some(pane.read(cx).kind().id().to_string()),
+                            agent_profile: Some(pane.read(cx).profile_name().to_string()),
+                            ..TabState::default()
+                        },
+                        // Only the settings workspace holds this surface,
+                        // and that workspace is skipped above; the arm
+                        // exists so the match stays exhaustive.
+                        TabSurface::Settings => TabState::default(),
+                    };
+                    normalize_saved_launch(&mut state, &default_profile);
+                    state.name = tab.user_title().map(str::to_owned);
+                    state.user_named = state.name.is_some();
+                    state
+                })
+                .collect(),
+        });
+    }
+
+    SessionState {
+        active_workspace,
+        workspaces: saved,
+    }
+}
+
+impl Shell {
+    /// Publish this window's session to the registry the app writes out on
+    /// quit. Called from every path that changes what a restore would rebuild.
+    pub(super) fn sync_session_memory(&self, cx: &mut Context<Shell>) {
+        let session = session_state(&self.workspaces, self.doomed_workspace, cx);
+
         if let Some(entry) = cx.global_mut::<WindowRegistry>().get_mut(self.window_id) {
             entry.session = Some(session);
         }

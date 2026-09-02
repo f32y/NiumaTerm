@@ -1,5 +1,6 @@
 use nmt_i18n::i18n;
 
+use crate::ui::persistence::spawn_default_pane;
 use crate::ui::shell::*;
 
 impl Shell {
@@ -270,7 +271,7 @@ impl Shell {
         let cwd = explicit_cwd(roots.primary());
         let surface_id = Self::alloc_id(&mut self.next_id);
         let default_profile = Self::default_profile(cx);
-        let pane = Self::spawn_default_pane(cx, surface_id, default_profile, cwd.clone());
+        let pane = spawn_default_pane(cx, surface_id, default_profile, cwd.clone());
 
         self.register_agent_pane(&pane, cx);
 

@@ -68,6 +68,7 @@ use crate::ui::background_tasks::BackgroundTasksView;
 use crate::ui::floating_surface;
 use crate::ui::git_sidebar::GitSidebar;
 use crate::ui::git_status::{GitStatusModel, GitStatusView};
+use crate::ui::persistence::{default_session, materialize_active_tab, restore_session};
 use crate::ui::right_panel::{RightPanel, RightPanelKind};
 use crate::ui::settings::{AgentProfile, AppSettings, TabBarStyle};
 pub(crate) use crate::ui::shell::actions::{
@@ -284,13 +285,13 @@ impl Shell {
 
         let mut restore_next_id = 1;
 
-        let restored = Self::restore_session(remembered_session, &mut restore_next_id, window, cx);
+        let restored = restore_session(remembered_session, &mut restore_next_id, window, cx);
 
         let (workspaces, next_id) = if let Some(workspaces) = restored {
             (workspaces, restore_next_id)
         } else {
             let mut next_id = 1;
-            let workspaces = Self::default_session(initial_cwd, default_profile, &mut next_id, cx);
+            let workspaces = default_session(initial_cwd, default_profile, &mut next_id, cx);
             (workspaces, next_id)
         };
 
@@ -396,7 +397,7 @@ impl Shell {
     /// panes' agent routes — the startup registration sweep only saw tabs that
     /// were live at window creation.
     fn ensure_active_tab_live(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !Self::materialize_active_tab(&mut self.workspaces, &mut self.next_id, window, cx) {
+        if !materialize_active_tab(&mut self.workspaces, &mut self.next_id, window, cx) {
             return;
         }
 
