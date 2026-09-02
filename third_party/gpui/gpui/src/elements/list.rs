@@ -25,6 +25,12 @@ use sum_tree::{Bias, Dimensions, SumTree};
 /// of a row height.
 const SMOOTH_WHEEL_LINE_PIXELS: f32 = 100. / 3.;
 
+/// How much of the viewport a jump to the end slides through. The wheel's
+/// easing carries a long distance in barely more time than a short one, so a
+/// full screen of travel arrives as a blur; half a screen stays readable
+/// while it settles and still feels immediate.
+const JUMP_TO_END_RUNWAY: f32 = 0.5;
+
 type RenderItemFn = dyn FnMut(usize, &mut Window, &mut App) -> AnyElement + 'static;
 
 /// Construct a new list element
@@ -82,10 +88,23 @@ struct StateInner {
     follow_state: FollowState,
     smooth_wheel_enabled: bool,
     smooth_wheel_motion: Option<SmoothWheelMotion>,
-    /// An offset asked for with the wheel's own easing rather than a jump.
+    /// A position asked for with the wheel's own easing rather than a jump.
     /// Held until the next layout, because turning it into a distance needs
     /// the viewport height, which only a laid-out list knows.
-    pending_smooth_scroll: Option<ListOffset>,
+    pending_smooth_scroll: Option<PendingSmoothScroll>,
+    /// Set while a motion aimed at the end is in flight, so tail following
+    /// resumes at the moment it lands. Content that arrived while it was
+    /// travelling would otherwise leave it stranded short of the live end,
+    /// with no later frame able to tell that it was heading there.
+    resume_tail_on_arrival: bool,
+}
+
+/// A position the application asked the list to ease towards.
+enum PendingSmoothScroll {
+    /// Ease to a named offset.
+    To(ListOffset),
+    /// Ease to the very end of the content and follow the tail from there.
+    ToEnd,
 }
 
 /// Deferred scroll adjustment applied after the scroll-top item has been remeasured.
@@ -341,6 +360,7 @@ impl ListState {
             smooth_wheel_enabled: false,
             smooth_wheel_motion: None,
             pending_smooth_scroll: None,
+            resume_tail_on_arrival: false,
         })));
         this.splice(0..0, item_count);
         this
@@ -684,7 +704,24 @@ impl ListState {
     /// handler, a timer — must notify their view, because a demand-driven
     /// frame pump does not wake for a request parked here.
     pub fn scroll_to_smooth(&self, scroll_top: ListOffset) {
-        self.0.borrow_mut().pending_smooth_scroll = Some(scroll_top);
+        self.0.borrow_mut().pending_smooth_scroll = Some(PendingSmoothScroll::To(scroll_top));
+    }
+
+    /// Ease the list down to the very end, taking up tail following again
+    /// once it arrives, so content that lands while it travels does not stop
+    /// short of the live end.
+    ///
+    /// Travel is capped at a fraction of the viewport. From further up, the
+    /// whole content between here and the end would sweep past within the
+    /// same fraction of a second and read as a flicker; covering a bounded
+    /// distance shows the reader which way the view moved however far back
+    /// they were.
+    ///
+    /// Like [`scroll_to_smooth`](Self::scroll_to_smooth) the motion begins on
+    /// the next layout, so a caller reaching this from outside a frame must
+    /// notify their view.
+    pub fn scroll_to_end_smooth(&self) {
+        self.0.borrow_mut().pending_smooth_scroll = Some(PendingSmoothScroll::ToEnd);
     }
 
     /// Name the position the list is currently showing, so a change to the
@@ -895,6 +932,9 @@ impl StateInner {
         // earlier: left behind, it would drag the content off the position
         // that cancelled it.
         self.pending_smooth_scroll = None;
+        // The position that cancelled the motion is the one to hold, so the
+        // tail is no longer owed a resumption.
+        self.resume_tail_on_arrival = false;
     }
 
     /// Re-anchor a pending scroll adjustment from a remeasure onto a newly set
@@ -1098,7 +1138,12 @@ impl StateInner {
         );
         self.set_pixel_scroll_top(px(step.position), height, current_view, window, cx);
 
-        if !step.finished {
+        if step.finished {
+            if self.resume_tail_on_arrival {
+                self.resume_tail_on_arrival = false;
+                self.follow_state.start_following();
+            }
+        } else {
             self.smooth_wheel_motion = Some(motion);
             window.on_next_frame(move |_, cx| cx.notify(current_view));
         }
@@ -1116,6 +1161,8 @@ impl StateInner {
         window: &mut Window,
         cx: &mut App,
     ) {
+        self.resume_tail_on_arrival = false;
+
         let mut cursor = self.items.cursor::<ListItemSummary>(());
         cursor.seek(&Count(scroll_top.item_ix), Bias::Right);
         let destination = cursor.start().height + scroll_top.offset_in_item;
@@ -1143,6 +1190,49 @@ impl StateInner {
         }
     }
 
+    /// Ease the content down to the live end and follow the tail from there.
+    ///
+    /// Following stops for the duration of the motion: a list still snapping
+    /// to the end on every layout would overrun the travel on its first
+    /// frame, leaving nothing to see.
+    fn start_smooth_scroll_to_end(
+        &mut self,
+        now: Instant,
+        height: Pixels,
+        current_view: EntityId,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.follow_state.stop_following();
+
+        let scroll_max = self.scroll_max_for_height(height).0;
+        // The motion has to start from where the content actually stands, so
+        // the runway is taken by moving the content there first rather than
+        // by aiming the curve at a position the list is not showing.
+        let runway = self
+            .pixel_scroll_top(height)
+            .0
+            .max(scroll_max - height.0 * JUMP_TO_END_RUNWAY);
+        self.set_pixel_scroll_top(px(runway), height, current_view, window, cx);
+
+        match SmoothWheelMotion::start(now, runway, scroll_max, 0., scroll_max) {
+            SmoothWheel::Motion(motion) => {
+                self.smooth_wheel_motion = Some(motion);
+                self.resume_tail_on_arrival = true;
+                window.on_next_frame(move |_, cx| cx.notify(current_view));
+            }
+            SmoothWheel::Jump(destination) => {
+                self.smooth_wheel_motion = None;
+                self.set_pixel_scroll_top(px(destination), height, current_view, window, cx);
+                self.follow_state.start_following();
+            }
+            SmoothWheel::Settled => {
+                self.smooth_wheel_motion = None;
+                self.follow_state.start_following();
+            }
+        }
+    }
+
     fn start_smooth_wheel(
         &mut self,
         lines: Point<f32>,
@@ -1155,6 +1245,9 @@ impl StateInner {
         if lines.y == 0. {
             return;
         }
+        // The reader steering by hand owns where the content ends up, so a
+        // motion aimed at the end no longer takes the tail with it.
+        self.resume_tail_on_arrival = false;
         if lines.y > 0. {
             self.follow_state.stop_following();
         }
@@ -1785,15 +1878,23 @@ impl Element for List {
         // the content used to end.
         state.last_padding = Some(padding);
 
-        if let Some(scroll_top) = state.pending_smooth_scroll.take() {
-            state.start_smooth_scroll(
+        match state.pending_smooth_scroll.take() {
+            Some(PendingSmoothScroll::To(scroll_top)) => state.start_smooth_scroll(
                 scroll_top,
                 cx.background_executor().now(),
                 bounds.size.height,
                 window.current_view(),
                 window,
                 cx,
-            );
+            ),
+            Some(PendingSmoothScroll::ToEnd) => state.start_smooth_scroll_to_end(
+                cx.background_executor().now(),
+                bounds.size.height,
+                window.current_view(),
+                window,
+                cx,
+            ),
+            None => {}
         }
 
         if state.smooth_wheel_motion.is_some() {
@@ -2230,6 +2331,44 @@ mod test {
         cx.executor().advance_clock(Duration::from_millis(200));
         draw_test_list(cx, &state, 100.);
         assert_eq!(test_scroll_position(&state, 100.), 200.);
+    }
+
+    /// A jump to the end starts from a bounded distance above it, so however
+    /// far back the reader was the arrival covers the same ground, and the
+    /// list follows the tail again the moment it lands.
+    #[gpui::test]
+    fn test_smooth_scroll_to_end_slides_in_and_resumes_the_tail(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        // 50 items of 20px in a 100px viewport: 1000px of content, so the end
+        // sits at an offset of 900px.
+        let state = ListState::new(50, crate::ListAlignment::Bottom, px(10.)).measure_all();
+        state.set_follow_mode(FollowMode::Tail);
+        draw_test_list(cx, &state, 100.);
+        assert!(state.is_following_tail());
+
+        state.scroll_to(gpui::ListOffset {
+            item_ix: 10,
+            offset_in_item: px(0.),
+        });
+        draw_test_list(cx, &state, 100.);
+        assert_eq!(test_scroll_position(&state, 100.), 200.);
+        assert!(!state.is_following_tail());
+
+        state.scroll_to_end_smooth();
+        draw_test_list(cx, &state, 100.);
+        assert!(
+            (test_scroll_position(&state, 100.) - 850.).abs() < 0.1,
+            "the slide starts half a viewport above the end rather than 700px above it"
+        );
+        assert!(
+            !state.is_following_tail(),
+            "following while the slide runs would snap it straight to the end"
+        );
+
+        cx.executor().advance_clock(Duration::from_millis(300));
+        draw_test_list(cx, &state, 100.);
+        assert_eq!(test_scroll_position(&state, 100.), 900.);
+        assert!(state.is_following_tail());
     }
 
     #[gpui::test]
