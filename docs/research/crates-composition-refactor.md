@@ -813,7 +813,13 @@ side indexes; the orders extract the three.
 
 #### E1. `ShellIndex`
 
-Status: pending
+Status: done 2cb20434
+
+Note: `MAX_SHELL_META` moved into `shells.rs` with the tables it bounds. The
+`observe.rs` direct read of `shell_meta` became a `meta()` accessor on the
+index, which is also what `shell_detail` uses.
+Manual check: run a backgrounded shell command from an agent tab; the
+Background Tasks row shows its command line and its output file.
 
 `shells.rs` (150) owns `shell_meta`, `shell_meta_order`, `bash_commands`,
 `bash_command_order` (with `MAX_SHELL_META` and the LRU bound). Methods
@@ -926,3 +932,4 @@ left under the order.
 | B3 | done `78e8e74a` |
 | B4 | done `3c2b569d` |
 | B5 | done `30c5f10c` |
+| E1 | done `2cb20434` |
