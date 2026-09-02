@@ -572,7 +572,7 @@ impl Render for Shell {
         // dialog overlay itself.
         let dialog_layer = Root::render_dialog_layer(window, cx);
         let notification_layer = Root::render_notification_layer(window, cx);
-        let update_notification_layer = self.render_update_notification_layer(cx);
+        let update_notification_layer = self.update_notifications.render(cx);
 
         // Scroll the newly active tab into view on any switch path.
         let active_id = self.workspaces.active_tabs().active_id();
