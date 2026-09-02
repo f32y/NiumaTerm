@@ -738,7 +738,16 @@ Commit: `refactor(terminal-view): move frozen gutter state beside its types`
 
 #### C6. `TranscriptView` disclosures
 
-Status: pending. Independent of C1 to C5.
+Status: done ec5e252b
+
+Note: `take_down` returns the collapsed row index so the view drops that
+row's segmented source, and the run steps are passed in because finding them
+reads the row specs. `forget_groups` covers the collapse-setting change.
+`Disclosures` has a `#[cfg(test)]` accessor block so the existing assertions
+about the three sets and the measured parts stayed as written.
+Manual check: expand a tool call, an annotation and a collapsed run, then
+collapse each; the content grows and fades both ways and the transcript does
+not jump under the cursor.
 
 `TranscriptView` (`transcript/view.rs:36`, 25 fields). `reveal/mod.rs` (495)
 holds `impl Reveals` (own struct, fine) and `impl TranscriptView` disclosure
@@ -758,7 +767,13 @@ Commit: `refactor(transcript): own disclosure state as one part`
 
 #### C7. `LiveTurn` and `TurnLedger` (`transcript/view.rs`)
 
-Status: pending. Do after C6.
+Status: done 8ac3ef86
+
+Note: the two structs went in a new `transcript/turns.rs`; `view.rs` is 527
+lines after the move. `TurnLedger` has one `#[cfg(test)]` helper for tests that
+need a settled turn without running one.
+Manual check: run a turn and let it finish; the elapsed line and token count
+appear. Stop one immediately; no elapsed row is left behind.
 
 `working_started`, `working_output_tokens`, `working_detail`, `compacting`
 change together on `start_working` / `settle_turn`; `settled_turns`,
@@ -1032,3 +1047,5 @@ left under the order.
 | A7 | done `c8f632d0` |
 | C4 | done `4cba1c9c` |
 | C5 | done `7aaf8331` |
+| C6 | done `ec5e252b` |
+| C7 | done `8ac3ef86` |
