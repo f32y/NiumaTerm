@@ -4,12 +4,19 @@
 //! is written to, so what is kept for it is the command line, that file, and
 //! whether the row is a shell at all.
 
+use std::collections::{HashMap, VecDeque};
+
 use serde_json::Value;
 
 use crate::background_task::{BackgroundTaskKey, BackgroundTaskKind};
 use crate::claude_code::tasks::records::result_content;
-use crate::claude_code::tasks::{ClaudeTasks, MAX_SHELL_META, ShellDetail};
+use crate::claude_code::tasks::{ClaudeTasks, ShellDetail, ShellMeta};
 use crate::json::text_field;
+
+/// Shell entries retained per session, applied to both the metadata table and
+/// the command table beside it. Each entry is a few short strings, so this only
+/// caps a stream that keeps registering commands.
+const MAX_SHELL_META: usize = 256;
 
 /// The output file named in a backgrounded command's handoff result. The file
 /// is `<task id>.output`, so that name locates it inside the sentence; the path
@@ -24,7 +31,39 @@ pub(super) fn handoff_output_file(text: &str, task_id: &str) -> Option<String> {
     (!path.is_empty()).then(|| path.to_owned())
 }
 
-impl ClaudeTasks {
+/// What the stream has said about each background shell, and the `Bash`
+/// commands the shell rows are built from. Both tables are bounded the same
+/// way and cleared together, because a command with no shell to attach to is
+/// dead weight and a shell with no command has nothing to show.
+#[derive(Default)]
+pub(super) struct ShellIndex {
+    /// Everything a shell row needs that its lifecycle records do not all
+    /// carry at once, keyed by task id. Recorded for every registered shell,
+    /// including foreground ones, because a command the CLI moves to the
+    /// background later announces only its task id when it does.
+    shell_meta: HashMap<String, ShellMeta>,
+    shell_meta_order: VecDeque<String>,
+    /// Command text of recent `Bash` tool calls, keyed by tool-use id. The
+    /// task records name the shell's description but never its command, so the
+    /// launching block is where a row's command comes from.
+    bash_commands: HashMap<String, String>,
+    bash_command_order: VecDeque<String>,
+}
+
+impl ShellIndex {
+    pub(super) fn clear(&mut self) {
+        self.shell_meta.clear();
+        self.shell_meta_order.clear();
+        self.bash_commands.clear();
+        self.bash_command_order.clear();
+    }
+
+    /// What one shell's records have said about it so far, for a caller that
+    /// needs more than the command line.
+    pub(super) fn meta(&self, canonical: &str) -> Option<&ShellMeta> {
+        self.shell_meta.get(canonical)
+    }
+
     /// Keep what a shell record carries whether or not the shell is
     /// backgrounded yet. `task_started` is the only record naming both the
     /// task and the `Bash` call behind it, so it is the one chance to tie a
@@ -118,7 +157,9 @@ impl ClaudeTasks {
     pub(super) fn shell_command(&self, canonical: &str) -> Option<String> {
         self.shell_meta.get(canonical)?.command.clone()
     }
+}
 
+impl ClaudeTasks {
     pub(super) fn is_shell(&self, canonical: &str) -> bool {
         self.registry
             .as_ref()
@@ -138,7 +179,7 @@ impl ClaudeTasks {
         if task.kind != BackgroundTaskKind::Shell {
             return None;
         }
-        let meta = self.shell_meta.get(&canonical);
+        let meta = self.shells.meta(&canonical);
         Some(ShellDetail {
             id: canonical.clone(),
             command: meta.and_then(|meta| meta.command.clone()),
