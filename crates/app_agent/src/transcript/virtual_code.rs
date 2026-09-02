@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::ops::Range;
 use std::rc::Rc;
 
@@ -79,6 +80,48 @@ pub(crate) fn transcript_segments(text: &str) -> Vec<Range<usize>> {
     }
 
     segments
+}
+
+/// Segmented sources for the expanded code transcripts currently on screen,
+/// keyed by transcript index.
+///
+/// A long expanded output is rendered through a uniform list, which needs the
+/// text split into line ranges and a scroll position that survives repaints.
+/// Both are derived from the row's own text, so an entry is only worth keeping
+/// while its row is expanded and long enough to virtualize; anything else
+/// would hold a second copy of a large output behind a row showing none of it.
+#[derive(Default)]
+pub(crate) struct VirtualTranscriptCache {
+    states: HashMap<usize, VirtualTranscriptState>,
+}
+
+impl VirtualTranscriptCache {
+    /// The segmented source for one row, building it on first sight and
+    /// re-deriving it when the text behind it has changed.
+    pub(crate) fn ensure(
+        &mut self,
+        index: usize,
+        text: &str,
+        strip_gutter: bool,
+    ) -> &VirtualTranscriptState {
+        let state = self
+            .states
+            .entry(index)
+            .or_insert_with(|| VirtualTranscriptState::new(text, strip_gutter));
+
+        state.sync(text, strip_gutter);
+
+        state
+    }
+
+    /// Drop the segmented source for a row that no longer needs one.
+    pub(crate) fn drop_row(&mut self, index: usize) {
+        self.states.remove(&index);
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.states.clear();
+    }
 }
 
 pub(crate) struct VirtualTranscriptState {

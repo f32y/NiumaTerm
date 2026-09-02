@@ -27,9 +27,8 @@ use crate::transcript::render::TRANSCRIPT_LINE_HEIGHT;
 use crate::transcript::render::text_style::{markdown_view, work_detail_text_style};
 use crate::transcript::reveal::{RevealKey, RevealedPart, revealed_block};
 use crate::transcript::{
-    TranscriptView, VirtualTranscriptState, code_transcript_format, command_execution_detail,
-    command_execution_heading, command_failure_reason, fenced_code_block_as,
-    should_virtualize_transcript, strip_read_gutter,
+    TranscriptView, code_transcript_format, command_execution_detail, command_execution_heading,
+    command_failure_reason, fenced_code_block_as, should_virtualize_transcript, strip_read_gutter,
 };
 
 impl TranscriptView {
@@ -221,10 +220,8 @@ impl TranscriptView {
                         let (_, strip_gutter) = code_format.as_ref().expect("code format");
                         let (source, segments, widest_segment, scroll) = {
                             let state =
-                                self.virtual_transcripts.entry(index).or_insert_with(|| {
-                                    VirtualTranscriptState::new(detail, *strip_gutter)
-                                });
-                            state.sync(detail, *strip_gutter);
+                                self.virtual_transcripts
+                                    .ensure(index, detail, *strip_gutter);
                             (
                                 state.source.clone(),
                                 state.segments.clone(),
@@ -312,7 +309,7 @@ impl TranscriptView {
                             )
                             .into_any_element()
                     } else {
-                        self.virtual_transcripts.remove(&index);
+                        self.virtual_transcripts.drop_row(index);
 
                         // Small technical transcripts retain syntax highlighting;
                         // Markdown-native tool output and reasoning retain their
