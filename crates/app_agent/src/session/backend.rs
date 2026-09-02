@@ -1,16 +1,31 @@
+#[cfg(test)]
+use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::Arc;
 #[cfg(test)]
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
-use nmt_agent_utils::chat::MessageImage;
+use nmt_agent_utils::background_task::{BackgroundTaskKey, BackgroundTaskProvider};
+use nmt_agent_utils::chat::{
+    Event as SessionEvent, ForkAnchor, MessageImage, SendOutcome, SessionScope, SkillReference,
+    SlashCommandInfo, SlashCommandOutcome, ThreadSettings,
+};
 use nmt_agent_utils::claude_code::sessions::RestoredTask;
+use nmt_agent_utils::claude_code::stream_json;
+use nmt_agent_utils::claude_code::workflows::{
+    RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult,
+};
+use nmt_agent_utils::codex::app_server;
+use nmt_agent_utils::{AgentWorkspace, LaunchConfig, deepseek};
 use nmt_i18n::i18n;
+use serde_json::Value;
+use tracing::trace;
 
 use crate::composer::attachments::PendingAttachments;
-use crate::*;
+use crate::profile::AgentKind;
 
 /// The conversation a restarted backend should continue, qualified by the
 /// harness that issued the id. Ids are only meaningful to the harness that

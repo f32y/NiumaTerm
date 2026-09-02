@@ -1,4 +1,6 @@
-use crate::*;
+use nmt_agent_utils::MultiRootAccess;
+
+use crate::AgentKind;
 
 /// What a backend does with a prompt submitted while a turn is running.
 #[derive(Clone, Copy, PartialEq, Eq)]

@@ -1,11 +1,22 @@
+use std::mem::take;
+
+use gpui::Context;
+use nmt_agent_utils::AgentEventKind;
+use nmt_agent_utils::background_task::BackgroundTaskSnapshot;
+use nmt_agent_utils::chat::{
+    Event as SessionEvent, Item as SessionItem, QueuedPrompt, ReplayTurn, SessionSummary,
+    SlashCommandOutcome, ThreadSettings, TurnActivity,
+};
 use nmt_i18n::i18n;
+use tracing::{info, warn};
 
 use crate::capabilities::QueuedPromptDelivery;
+use crate::commands::claim_command_turn_start;
 use crate::composer::CommandFeedbackKind;
 use crate::session::conversation::claimed_prompts;
-use crate::session::{Status, UpdateSuspension};
+use crate::session::{Backend, RecoverySnapshot, Status, UpdateSuspension};
 use crate::transcript::hidden;
-use crate::*;
+use crate::{AgentPane, AgentPaneEvent, QuestionPrompt, RecentSessionsMode};
 
 /// Fold the thread's reported settings together with what the pane
 /// remembered. `startup_model` and `startup_effort` come from the launch

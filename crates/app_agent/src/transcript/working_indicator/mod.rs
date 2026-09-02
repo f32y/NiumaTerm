@@ -1,9 +1,12 @@
 use std::time::Duration;
 
-use gpui::{Animation, AnimationExt as _, ElementId, RenderOnce, ease_in_out};
+use gpui::prelude::*;
+use gpui::{
+    Animation, AnimationExt as _, App, ElementId, Hsla, RenderOnce, Window, div, ease_in_out, px,
+};
+use gpui_component::h_flex;
 
 use crate::transcript::disclosure_row::AGENT_CARD_ICON_BLOCK;
-use crate::*;
 
 const DOT_COUNT: usize = 3;
 const CYCLE_DURATION: Duration = Duration::from_millis(1_100);

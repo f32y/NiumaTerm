@@ -1,6 +1,9 @@
+use gpui::prelude::*;
+use gpui::{Context, IntoElement, div};
+use gpui_component::{ActiveTheme as _, Icon, IconName, h_flex};
 use nmt_i18n::i18n;
 
-use crate::*;
+use crate::AgentPane;
 
 impl AgentPane {
     /// State that outlives the running turn, in one strip above the composer:

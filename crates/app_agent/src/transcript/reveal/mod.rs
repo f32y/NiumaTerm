@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use gpui::Bounds;
+use gpui::prelude::*;
+use gpui::{App, Bounds, Context, Div, Pixels, Window, div, px};
 
-use crate::*;
+use crate::settings::AgentSettings;
+use crate::transcript::{RowSpec, TranscriptView};
 
 /// One disclosure in the transcript, as the thing whose opening is animated.
 ///

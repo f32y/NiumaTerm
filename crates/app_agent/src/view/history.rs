@@ -1,10 +1,25 @@
-use gpui::MouseMoveEvent;
+use std::rc::Rc;
+
+use gpui::prelude::*;
+use gpui::{
+    AnyElement, Context, FontWeight, Hsla, IntoElement, ListSizingBehavior, MouseMoveEvent, Pixels,
+    Point, div, px, relative, size,
+};
+use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::checkbox::Checkbox;
+use gpui_component::scroll::Scrollbar;
+use gpui_component::skeleton::Skeleton;
+use gpui_component::{
+    ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex, v_virtual_list,
+};
+use nmt_agent_utils::chat::{QueuedPrompt, SessionScope, SessionSummary};
 use nmt_i18n::i18n;
 
 use crate::composer::visible_prompt;
 use crate::session::{directories_match, directory_label};
+use crate::settings::UI_RADIUS;
 use crate::transcript::relative_time;
-use crate::*;
+use crate::{AgentPane, RecentSessionsMode, SessionHistoryUi};
 
 /// One queued prompt on one line. A prompt spanning several lines is folded
 /// into one so every waiting row costs the composer the same height.

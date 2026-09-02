@@ -7,6 +7,7 @@ use nmt_agent_utils::{AgentWorkspace, MultiRootAccess};
 use nmt_config::system::NewlineShortcut;
 
 use crate::composer::prompt_with_response_annotations;
+use crate::session::UpdateSuspension;
 use crate::view::banners::{
     UpdateOverlayPhase, composer_stats_label, multi_root_notice, update_overlay_phase,
 };
@@ -14,7 +15,7 @@ use crate::view::history::queued_message_label;
 use crate::view::last_response::{LastResponseTone, last_response_tone};
 use crate::view::settings_row::effort_gauge_step;
 use crate::view::{ComposerEnterBehavior, composer_enter_behavior};
-use crate::{AgentKind, SessionHistoryUi, UpdateSuspension};
+use crate::{AgentKind, SessionHistoryUi};
 
 #[test]
 fn queued_message_label_flattens_a_multi_line_prompt() {

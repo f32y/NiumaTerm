@@ -1,8 +1,15 @@
+use std::time::Duration;
+
+use gpui::{App, Context, Task};
+use nmt_agent_utils::launcher::AgentCli;
+use nmt_agent_utils::update::InstallationKey;
 use nmt_i18n::i18n;
 
-use crate::composer::ForkState;
+use crate::commands::next_session_epoch;
+use crate::composer::{ForkState, RewindState};
+use crate::profile::agent_launch;
 use crate::session::{Backend, RecoveryIdentity, Status};
-use crate::*;
+use crate::{AgentPane, AgentPaneEvent};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RecoverySnapshot {

@@ -3,10 +3,12 @@ mod prompt_truncation_tests {
     use nmt_agent_utils::chat::{Compaction, CompactionTrigger, Item as SessionItem};
 
     use crate::composer::{ComposerAction, composer_action, prompt_with_response_annotations};
+    use crate::profile::AgentKind;
+    use crate::session::Status;
     use crate::settings::AgentSettings;
     use crate::transcript::{
         AGENT_CARD_GAP, AGENT_CARD_ICON_BLOCK, AGENT_CARD_PADDING_X, AGENT_DISCLOSURE_DETAIL_INSET,
-        AgentKind, Status, TranscriptView, TurnSummary, VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES,
+        TranscriptView, TurnSummary, VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES,
         command_execution_detail, command_execution_heading, compaction_accounting,
         compaction_label, compaction_row_is_expandable, elapsed_label, entry_copy_text,
         interrupted_status_label, is_work_row, last_response_label, should_show_jump_to_latest,
@@ -369,7 +371,8 @@ mod separate_view_state_tests {
     use nmt_agent_utils::chat::Item as SessionItem;
     use nmt_config::agent::CollapseRows;
 
-    use crate::transcript::{AgentKind, TranscriptView};
+    use crate::profile::AgentKind;
+    use crate::transcript::TranscriptView;
 
     fn message(id: &str, text: &str) -> SessionItem {
         SessionItem::AgentMessage {
@@ -472,7 +475,8 @@ mod steered_prompt_rows_tests {
     use nmt_agent_utils::chat::Item as SessionItem;
     use nmt_config::agent::CollapseRows;
 
-    use crate::transcript::{AgentKind, RowSpec, TranscriptView};
+    use crate::profile::AgentKind;
+    use crate::transcript::{RowSpec, TranscriptView};
 
     fn reply(id: &str) -> SessionItem {
         SessionItem::AgentMessage {
@@ -602,7 +606,8 @@ mod resumed_collapse_tests {
     use nmt_agent_utils::chat::{Item as SessionItem, ReplayItem, ReplayTurn};
     use nmt_config::agent::CollapseRows;
 
-    use crate::transcript::{AgentKind, RowSpec, TranscriptView};
+    use crate::profile::AgentKind;
+    use crate::transcript::{RowSpec, TranscriptView};
 
     fn replayed(items: Vec<SessionItem>) -> ReplayTurn {
         ReplayTurn {
@@ -688,7 +693,8 @@ mod branch_point_targeting_tests {
     use nmt_config::agent::CollapseRows;
 
     use crate::composer::{PromptTarget, checkpoint_at_depth};
-    use crate::transcript::{AgentKind, TranscriptView};
+    use crate::profile::AgentKind;
+    use crate::transcript::TranscriptView;
 
     fn user(text: &str) -> ReplayItem {
         ReplayItem {
@@ -982,10 +988,11 @@ mod row_rhythm_tests {
     use nmt_agent_utils::chat::{Item as SessionItem, ReplayItem, ReplayTurn};
     use nmt_config::agent::CollapseRows;
 
+    use crate::profile::AgentKind;
     use crate::settings::AgentSettings;
     use crate::transcript::reveal::{RevealKey, RevealedPart};
     use crate::transcript::rows::RowGap;
-    use crate::transcript::{AgentKind, RowSpec, TranscriptView};
+    use crate::transcript::{RowSpec, TranscriptView};
 
     fn replay(items: Vec<ReplayItem>) -> ReplayTurn {
         ReplayTurn {

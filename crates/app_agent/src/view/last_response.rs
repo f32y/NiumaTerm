@@ -1,7 +1,10 @@
+use gpui::prelude::*;
+use gpui::{AnyElement, Context, div, px};
 use gpui_component::tooltip::Tooltip;
+use gpui_component::{ActiveTheme as _, Icon, IconName};
 
+use crate::AgentPane;
 use crate::transcript::{LAST_RESPONSE_LIMIT, last_response_label};
-use crate::*;
 
 /// Edge of the mark. Set to the size of a settings pill's own glyph, so the
 /// row it stands in keeps one glyph size across its whole width.

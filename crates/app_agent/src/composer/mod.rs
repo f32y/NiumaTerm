@@ -1,3 +1,8 @@
+use gpui::prelude::*;
+use gpui_component::ActiveTheme as _;
+use gpui_component::button::ButtonVariants as _;
+
+use crate::CachedCatalog;
 pub(crate) mod attachments;
 mod fork;
 mod palette;
@@ -22,15 +27,30 @@ mod tests;
 
 use std::fs;
 use std::path::Path;
+use std::rc::Rc;
+use std::time::Duration;
 
-use gpui::{ClipboardEntry, Image, ImageFormat};
-use gpui_component::WindowExt;
+use gpui::{ClipboardEntry, Context, Image, ImageFormat, SharedString, Window};
+use gpui_component::button::Button;
 use gpui_component::dialog::{DIALOG_BUTTON_MIN_WIDTH, DialogClose, DialogFooter};
+use gpui_component::{WindowExt, v_flex};
+use nmt_agent_utils::chat::{
+    SkillInfo, SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy,
+};
+use nmt_agent_utils::claude_code::stream_json;
+use nmt_agent_utils::codex::app_server;
+use nmt_agent_utils::deepseek;
 use nmt_i18n::i18n;
 
+use crate::commands::{
+    local_commands, merge_catalog, parse_slash_command, reconcile_skill_binding, resolve_choice,
+    setting_value_label, validate_skill_binding,
+};
 use crate::composer::attachments::{AttachError, MAX_ATTACHMENTS};
+use crate::profile::AgentKind;
+use crate::session::{Backend, Status};
 use crate::transcript::last_response_label;
-use crate::*;
+use crate::{AgentPane, RecentSessionsMode, translated};
 
 #[derive(Clone)]
 pub(super) struct PendingSlashCommand {

@@ -1,3 +1,10 @@
+use futures::StreamExt as _;
+use gpui::prelude::*;
+use nmt_agent_utils::AgentEvent;
+use nmt_config::local_state;
+
+use crate::UnansweredPrompt;
+use crate::pane_state::{ChildAgents, SessionRuntime, ThreadControls, TurnState};
 mod backend;
 mod conversation;
 mod events;
@@ -5,20 +12,45 @@ mod events;
 mod tests;
 mod update_recovery;
 
-use std::fs;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+use std::{env, fs};
 
 use chrono::Utc;
-use gpui::Image;
-use nmt_agent_utils::git;
+use futures::channel::mpsc;
+use gpui::{App, Context, Image, Window};
+use gpui_component::input::{InputEvent, InputState};
+use nmt_agent_utils::background_task::{
+    BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscript,
+};
+use nmt_agent_utils::chat::{
+    Item as SessionItem, QueuedPrompt, SendOutcome, SessionScope, SessionSummary, SkillReference,
+    ThreadSettings,
+};
+use nmt_agent_utils::claude_code::sessions;
+use nmt_agent_utils::codex::app_server;
+use nmt_agent_utils::{
+    AgentEventKind, AgentRoute, AgentWorkspace, agent_process, git, normalize_body, normalize_title,
+};
+use nmt_config::profile::{AgentProfile, AgentProfileKind};
 use nmt_i18n::i18n;
+use serde_json::Value;
+use tracing::{info, warn};
 
 use crate::capabilities::QueuedPromptDelivery;
+use crate::commands::{
+    is_current_session_epoch, next_session_epoch, reconcile_skill_binding, reset_command_runtime,
+};
+use crate::composer::attachments::{PendingAttachments, scratch_dir};
 use crate::composer::{
-    CommandFeedbackKind, PaletteControl, prompt_with_response_annotations,
+    CommandFeedbackKind, ForkFlow, PaletteControl, prompt_with_response_annotations,
     restored_input_after_interruption,
 };
-use crate::profile::{ANTHROPIC_MODEL_ENV, launch_env_value};
+use crate::input_history::{InputHistoryNavigation, InputHistoryScope};
+use crate::profile::{
+    ANTHROPIC_MODEL_ENV, AgentKind, AgentThreadDefaults, agent_launch, launch_env_value,
+};
 pub(super) use crate::session::backend::Backend;
 use crate::session::backend::ConversationTitleRequest;
 pub use crate::session::backend::RecoveryIdentity;
@@ -28,8 +60,13 @@ pub(super) use crate::session::update_recovery::UpdateSuspension;
 pub use crate::session::update_recovery::{
     RecoveryReadiness, RecoverySnapshot, RestorationReadiness,
 };
-use crate::transcript::LAST_RESPONSE_LIMIT;
-use crate::*;
+use crate::settings::AgentSettings;
+use crate::transcript::{LAST_RESPONSE_LIMIT, TranscriptView};
+use crate::workflows::WorkflowUi;
+use crate::{
+    AgentPane, AgentPaneEvent, GitBranchPoll, RecentSessionsMode, RewindFlow, SessionHistoryUi,
+    SlashPalette,
+};
 
 /// A pane's attachment files live only as long as the pane: the harness that
 /// reads them has already read what it was sent, and nothing else refers to

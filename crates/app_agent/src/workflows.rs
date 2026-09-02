@@ -13,11 +13,16 @@
 
 use std::time::Duration;
 
+use gpui::{Context, Task};
+use nmt_agent_utils::chat::Item as SessionItem;
 use nmt_agent_utils::claude_code::workflows::{
     self, RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult,
 };
+use nmt_agent_utils::workflow::{WorkflowAgentState, WorkflowRun, WorkflowSnapshot};
 
-use crate::*;
+use crate::commands::is_current_session_epoch;
+use crate::session::Backend;
+use crate::{AgentPane, AgentPaneEvent};
 
 /// The agent conversation the user has open, and what has been read of it.
 #[derive(Default)]

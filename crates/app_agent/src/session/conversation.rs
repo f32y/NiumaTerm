@@ -2,10 +2,14 @@
 //! its title, its branches, the search over its siblings, and the prompts
 //! waiting behind the running turn.
 
+use std::collections::VecDeque;
+
+use gpui::Context;
+use nmt_agent_utils::chat::{QueuedPrompt, SessionSummary};
 use nmt_i18n::i18n;
 
 use crate::composer::CommandFeedbackKind;
-use crate::*;
+use crate::{AgentPane, RecentSessionsMode};
 
 /// Which of the prompts this side is holding a new pending-inbox snapshot no
 /// longer names.

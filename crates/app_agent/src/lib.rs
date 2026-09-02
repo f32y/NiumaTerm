@@ -22,92 +22,31 @@ pub mod transcript;
 mod view;
 mod workflows;
 
-use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-use std::env;
-use std::mem::take;
-use std::ops::Range;
-use std::path::Path;
+use std::collections::VecDeque;
 use std::rc::Rc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Local};
-use futures::StreamExt as _;
-use futures::channel::{mpsc, oneshot};
-use gpui::prelude::*;
-use gpui::{
-    AnyElement, App, ClipboardItem, Context, Div, ElementId, Entity, FocusHandle, FollowMode,
-    FontWeight, Hsla, ListAlignment, ListHorizontalSizingBehavior, ListOffset, ListSizingBehavior,
-    ListState, MouseButton, Pixels, Point, ScrollHandle, ScrollStrategy, SharedString, Stateful,
-    StyleRefinement, Task, UniformListScrollHandle, Window, div, list, px, relative, size,
-    uniform_list,
-};
-use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::checkbox::Checkbox;
-use gpui_component::input::{
-    Enter, Escape, IndentInline, Input, InputEvent, InputState, MoveDown, MoveUp,
-};
-use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
-use gpui_component::popover::Popover;
-use gpui_component::radio::Radio;
-use gpui_component::scroll::Scrollbar;
-use gpui_component::skeleton::Skeleton;
-use gpui_component::spinner::Spinner;
-use gpui_component::text::TextViewStyle;
-use gpui_component::{
-    ActiveTheme as _, Disableable as _, ElementExt as _, Icon, IconName, IconNamed, Sizable as _,
-    VirtualListScrollHandle, h_flex, text, v_flex, v_virtual_list,
-};
-use nmt_agent_utils::background_task::{
-    BackgroundTaskKey, BackgroundTaskProvider, BackgroundTaskSnapshot, BackgroundTaskTranscript,
-};
+use futures::channel::oneshot;
+use gpui::{Entity, FocusHandle, Pixels, Point, ScrollHandle, SharedString};
+use gpui_component::VirtualListScrollHandle;
+use gpui_component::input::InputState;
 use nmt_agent_utils::chat::{
-    Compaction, CompactionTrigger, ContextComposition, ContextWindowUsage, Event as SessionEvent,
-    ForkAnchor, ForkCheckpoint, GoalStatus, Item as SessionItem, Question, QuestionOption,
-    QueuedPrompt, ReplayTurn, SendOutcome, SessionScope, SessionStats, SessionSummary,
-    SkillCatalog, SkillInfo, SkillReference, SlashCommandArguments, SlashCommandInfo,
-    SlashCommandOutcome, SlashCommandRunPolicy, SlashCommandSource, ThreadSettings, TurnActivity,
+    ContextComposition, ContextWindowUsage, GoalStatus, Question, ReplayTurn, SessionScope,
+    SessionStats, SessionSummary, SkillCatalog, SkillReference, SlashCommandInfo,
 };
-use nmt_agent_utils::claude_code::workflows::{
-    RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult,
-};
-use nmt_agent_utils::claude_code::{sessions, stream_json};
-use nmt_agent_utils::codex::app_server;
-use nmt_agent_utils::launcher::AgentCli;
-use nmt_agent_utils::update::{InstallationKey, ProviderKind};
-use nmt_agent_utils::workflow::{WorkflowAgentState, WorkflowRun, WorkflowSnapshot};
-use nmt_agent_utils::{
-    AgentEvent, AgentEventKind, AgentRoute, AgentWorkspace, CodexProviderConfig, LaunchConfig,
-    MultiRootAccess, agent_process, deepseek, normalize_body, normalize_title,
-};
-use nmt_config::agent::CollapseRows;
-use nmt_config::local_state::{self, AgentDefaults as StoredAgentDefaults};
-use nmt_config::profile::{AgentProfile, AgentProfileKind, AgentProfileLauncher};
-use nmt_config::system::NewlineShortcut;
+use nmt_agent_utils::{AgentEvent, AgentRoute, AgentWorkspace};
+use nmt_config::profile::AgentProfile;
 use nmt_i18n::i18n;
-use serde_json::Value;
-use tracing::{info, trace, warn};
 
-use crate::commands::{
-    PaletteCatalogEntry, PaletteDirection, claim_command_turn_start, filter_palette_catalog,
-    filter_skill_catalog, is_current_session_epoch, local_commands, merge_catalog,
-    move_palette_selection, next_session_epoch, parse_skill_prefix, parse_slash_command,
-    prepare_skill_selection, reconcile_skill_binding, reset_command_runtime, resolve_choice,
-    setting_value_label, validate_skill_binding,
-};
-use crate::composer::attachments::{PendingAttachments, scratch_dir};
-use crate::composer::{
-    CommandFeedback, ForkFlow, PALETTE_MAX_HEIGHT, PendingSlashCommand, RewindState,
-};
+use crate::composer::attachments::PendingAttachments;
+use crate::composer::{CommandFeedback, ForkFlow, PendingSlashCommand, RewindState};
 use crate::input_history::{InputHistoryNavigation, InputHistoryScope};
 use crate::pane_state::{ChildAgents, SessionRuntime, ThreadControls, TurnState};
 pub use crate::profile::{AgentKind, AgentThreadDefaults, agent_launch};
-use crate::session::{Backend, Status, UpdateSuspension};
 pub use crate::session::{
     RecoveryIdentity, RecoveryReadiness, RecoverySnapshot, RestorationReadiness,
 };
-use crate::settings::{AgentSettings, UI_RADIUS};
-use crate::transcript::{Entry, ReadingPosition, RowSpec, TranscriptView, VirtualTranscriptState};
+use crate::transcript::TranscriptView;
 use crate::workflows::WorkflowUi;
 
 #[derive(Clone)]
