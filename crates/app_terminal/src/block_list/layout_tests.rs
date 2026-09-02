@@ -150,7 +150,8 @@ fn list_reconcile_covers_eviction_growth_and_resets() {
 
 #[test]
 fn remeasure_scope_tracks_layout_vs_content_changes() {
-    use crate::block_list::{BlockListMeasureKey, RemeasureScope, plan_remeasure};
+    use crate::block_list::reconcile::plan_remeasure;
+    use crate::block_list::{BlockListMeasureKey, RemeasureScope};
 
     let key = BlockListMeasureKey {
         layout: (80, 16.0, 1.0),

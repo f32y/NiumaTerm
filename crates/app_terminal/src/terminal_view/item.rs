@@ -276,7 +276,7 @@ impl Element for BlockListItem {
 
                     let active_top = item_top + tail_view.active_top;
 
-                    pane.frozen_hit.set_active_top(active_top);
+                    pane.frozen.set_active_top(active_top);
 
                     if let Some(mut chrome) = live_chrome {
                         chrome.bottom = tail_view.active_top

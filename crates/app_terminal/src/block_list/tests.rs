@@ -3,6 +3,7 @@ use nmt_terminal::ghostty::{BlockHandle, GhosttyTerminal};
 use nmt_terminal::selection::SelectionRange;
 use nmt_terminal::terminal::pos::{Column, Line, Pos};
 
+use crate::block_list::selection::FrozenHitInfo;
 use crate::block_list::*;
 use crate::frame::line_from_parts;
 use crate::theme;

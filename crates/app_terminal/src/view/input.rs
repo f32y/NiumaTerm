@@ -199,7 +199,7 @@ impl EntityInputHandler for TerminalPane {
 
         // Block list: the live grid starts at `active_top` in the list.
         if self.block_list_mode(cx) {
-            y_offset += self.frozen_hit.active_top;
+            y_offset += self.frozen.active_top();
         }
 
         Some(Bounds::new(
