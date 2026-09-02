@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::time::Instant;
 
 use chrono::{DateTime, Local};
@@ -22,7 +22,7 @@ use crate::transcript::render::TRANSCRIPT_LINE_HEIGHT;
 use crate::transcript::reveal::Disclosures;
 use crate::transcript::rows::TranscriptRow;
 use crate::transcript::turns::{LiveTurn, TurnLedger};
-use crate::transcript::{Entry, ReadingPosition, VirtualTranscriptState, is_work_row};
+use crate::transcript::{Entry, ReadingPosition, VirtualTranscriptCache, is_work_row};
 
 /// One agent conversation as the user reads it: the entry list, the row
 /// structure derived from it, and every piece of view state that structure
@@ -73,7 +73,7 @@ pub struct TranscriptView {
     /// Long expanded code transcripts retain their segmented source and
     /// independent uniform-list position while visible. Collapsing a row drops
     /// the duplicate source so large outputs do not stay resident twice.
-    pub(crate) virtual_transcripts: HashMap<usize, VirtualTranscriptState>,
+    pub(crate) virtual_transcripts: VirtualTranscriptCache,
     /// What each finished turn is remembered by: whether it settled, how long
     /// it took, what it produced, and whether the user stopped it.
     pub(crate) turn_ledger: TurnLedger,
@@ -116,7 +116,7 @@ impl TranscriptView {
             disclosures: Disclosures::default(),
             toggled_turns: HashSet::new(),
             collapse_mode: CollapseRows::default(),
-            virtual_transcripts: HashMap::new(),
+            virtual_transcripts: VirtualTranscriptCache::default(),
             turn_ledger: TurnLedger::default(),
             live_turn: LiveTurn::default(),
             cwd,

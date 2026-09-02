@@ -34,7 +34,7 @@ use crate::transcript::virtual_code::VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES;
 #[cfg(test)]
 pub(super) use crate::transcript::virtual_code::transcript_segments;
 pub(super) use crate::transcript::virtual_code::{
-    VirtualTranscriptState, code_transcript_format, should_virtualize_transcript,
+    VirtualTranscriptCache, code_transcript_format, should_virtualize_transcript,
 };
 #[cfg(test)]
 mod tests;
