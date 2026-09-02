@@ -411,7 +411,14 @@ Commit: `refactor(agent): unify rewind and fork under one branch flow`
 
 #### A7. Small closures
 
-Status: pending. Independent.
+Status: done c8f632d0
+
+Note: both bullets were done. `SessionStateBadge` was worth folding: the two
+values are set together by the event pump, cleared together on session
+replacement, and drawn in one strip.
+Manual check: recall a history entry that starts with a slash; the palette
+stays closed. Start a plan-mode turn and a goal; the strip above the composer
+shows both and clears when the session is replaced.
 
 - `input_history/mod.rs:291-337`: the two remaining `impl AgentPane` methods
   write `self.palette.skill_binding`, `.dismissed`, `.selected` directly.
@@ -688,7 +695,14 @@ Commit: `refactor(terminal-view): own link hover state`
 
 #### C4. `FrozenSelectionDrag` (`crates/app_terminal/src/view/mouse.rs`)
 
-Status: pending. Do after C2.
+Status: done 4cba1c9c
+
+Note: `extend` and `clear` report whether anything changed, which is what the
+two repaint decisions branch on. `commit` reports whether a drag was open,
+replacing the `take().is_some()` on the anchor.
+Manual check: drag a selection across frozen blocks and press the copy key;
+the highlight follows the pointer, clamps at the live region, and the copied
+text matches.
 
 `frozen_selection`, `frozen_select_anchor`, `selection_drag_origin` are
 written only in `mouse.rs` (anchor, move, commit) and cleared once in
@@ -702,7 +716,14 @@ Commit: `refactor(terminal-view): own the frozen selection drag`
 
 #### C5. `TerminalPane::blocks.rs` field ownership
 
-Status: pending. Do after C4.
+Status: done 7aaf8331
+
+Note: `plan_remeasure` stays a free function in `reconcile.rs` with its
+layout tests; `BlockListState::remeasure_scope` wraps it and records the key.
+`FrozenHitInfo` is no longer re-exported from `block_list`, because
+`FrozenGutterSelection` is what the pane holds.
+Manual check: click a block gutter row, scroll until blocks are evicted, and
+use the jump/copy/re-run actions; the highlight stays on the same command.
 
 Two moves, both into types that already exist under `block_list/`:
 
@@ -1008,3 +1029,6 @@ left under the order.
 | D3 | done `88ea465a` |
 | E2 | done `6197bcbb` |
 | E3 | done `5803ba0c` |
+| A7 | done `c8f632d0` |
+| C4 | done `4cba1c9c` |
+| C5 | done `7aaf8331` |
