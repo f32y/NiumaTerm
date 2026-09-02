@@ -79,6 +79,7 @@ pub(crate) use crate::ui::shell::actions::{
 #[cfg(test)]
 use crate::ui::shell::close::{should_confirm_close, should_confirm_tab_close};
 pub(super) use crate::ui::shell::inline_rename::{InlineRename, InlineRenameStyle};
+use crate::ui::shell::panels::RightPanelController;
 pub(super) use crate::ui::shell::tab_presentation::pending_tab_icon;
 pub(crate) use crate::ui::shell::tab_surface::TabSurface;
 use crate::ui::shell::updates_layer::UpdateNotificationLayer;
@@ -153,14 +154,6 @@ pub(crate) struct Shell {
     /// A tab whose agent asked to be closed, waiting for a render to close it.
     /// Closing a tab needs a window for the same reason opening one does.
     pending_agent_close: Option<TabId>,
-    /// Whether any tab has run a workflow. Sticky: the title-bar control
-    /// appears the first time one runs and stays, so a finished run remains
-    /// reachable after its rows have settled.
-    workflows_seen: bool,
-    /// Whether any tab has spawned a background task. Sticky for the same
-    /// reason as `workflows_seen`: a child that has finished is still worth
-    /// opening the view for.
-    background_tasks_seen: bool,
     /// Whether we've started observing the wrapping `Root` (so dialog open/close
     /// re-renders the shell, which draws the dialog layer). Set on first render.
     root_observed: bool,
@@ -186,13 +179,10 @@ pub(crate) struct Shell {
     token_usage: Entity<TokenUsageView>,
     /// Compact Codex and Claude rate limits, refreshed independently of terminals.
     agent_usage: Entity<AgentUsageView>,
-    /// Shared git status poller feeding the titlebar indicator and sidebar.
-    git_model: Entity<GitStatusModel>,
     /// Titlebar `+N -M` indicator (self-gating on its setting).
     git_status: Entity<GitStatusView>,
-    /// The single right-side area, shared by Git and `Background Tasks`;
-    /// always mounted so close can animate.
-    right_panel: Entity<RightPanel>,
+    /// The right-side area and what points it at the active tab.
+    panels: RightPanelController,
     /// Stable entities let each installation's card replace content in place
     /// without entering the transient Root notification lifecycle.
     /// On-screen provider-update notifications by key. Card entity, source
@@ -351,8 +341,6 @@ impl Shell {
             needs_focus: true,
             pending_agent_resume: None,
             pending_agent_close: None,
-            workflows_seen: false,
-            background_tasks_seen: false,
             root_observed: false,
             theme_watcher: None,
             settings_state: None,
@@ -362,13 +350,13 @@ impl Shell {
             token_usage: cx.new(TokenUsageView::new),
             agent_usage: cx.new(AgentUsageView::new),
             git_status: cx.new(|cx| GitStatusView::new(git_model.clone(), cx)),
-            right_panel: {
+            panels: {
                 let git = cx.new(|cx| GitSidebar::new(git_model.clone(), cx));
                 let tasks = cx.new(|_| BackgroundTasksView::new());
                 let workflows = cx.new(|_| WorkflowsView::new());
-                cx.new(|_| RightPanel::new(git, tasks, workflows))
+                let panel = cx.new(|_| RightPanel::new(git, tasks, workflows));
+                RightPanelController::new(panel, git_model)
             },
-            git_model,
             update_notifications: UpdateNotificationLayer::default(),
             unavailable_roots: collections::HashSet::new(),
             doomed_workspace: None,

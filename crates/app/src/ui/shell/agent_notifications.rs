@@ -323,7 +323,7 @@ impl Shell {
                     // Sticky: a finished run stays reachable, so the control
                     // never goes away once it has appeared. The running count
                     // is read at render time, so this only has to repaint.
-                    this.workflows_seen = true;
+                    this.panels.note_workflow_seen();
                     cx.notify();
                     return;
                 }
@@ -332,7 +332,8 @@ impl Shell {
                     // never goes away once it has appeared. The running count
                     // is read at render time, so this only has to repaint the
                     // title bar.
-                    this.background_tasks_seen |= pane.read(cx).background_task_count() > 0;
+                    this.panels
+                        .note_background_task_seen(pane.read(cx).background_task_count() > 0);
                     cx.notify();
                     return;
                 }

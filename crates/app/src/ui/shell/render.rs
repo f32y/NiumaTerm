@@ -216,7 +216,7 @@ impl Shell {
                                 div().occlude().child(
                                     Toggle::new("toggle-git-sidebar")
                                         .ghost()
-                                        .checked(self.right_panel_shows(RightPanelKind::Git, cx))
+                                        .checked(self.panels.shows(RightPanelKind::Git, cx))
                                         .icon(GitIcon)
                                         .on_click(cx.listener(|this, _: &bool, window, cx| {
                                             this.on_toggle_git_sidebar(
@@ -232,7 +232,7 @@ impl Shell {
                     // would stack them, because the wrapper is a column.
                     // The workflow control stays out of the chrome until a run
                     // exists to look at.
-                    .children(self.workflows_seen().then(|| {
+                    .children(self.panels.workflows_seen().then(|| {
                         // Scoped to the active tab, because activating the
                         // control opens that tab's runs.
                         let running = self
@@ -246,7 +246,7 @@ impl Shell {
                     }))
                     // The background-task control stays out of the chrome until
                     // a tab has spawned a child to look at.
-                    .children(if self.background_tasks_seen() {
+                    .children(if self.panels.background_tasks_seen() {
                         // The history flag is window-wide, so the active Agent
                         // gate keeps this Agent-only control off terminal tabs.
                         self.active_agent().map(|pane| {
@@ -286,7 +286,8 @@ impl Shell {
     /// on screen, and the branch its working directory is on.
     fn render_session_heading(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let branch = self
-            .git_model
+            .panels
+            .git_model()
             .read(cx)
             .snapshot
             .as_ref()
@@ -329,7 +330,7 @@ impl Shell {
 
         Toggle::new("toggle-workflows")
             .ghost()
-            .checked(self.right_panel_shows(RightPanelKind::Workflows, cx))
+            .checked(self.panels.shows(RightPanelKind::Workflows, cx))
             // Matches the gap a Button puts between its icon and label; the
             // toggle centres its children without one.
             .gap_2()
@@ -358,7 +359,7 @@ impl Shell {
 
         Toggle::new("toggle-background-tasks")
             .ghost()
-            .checked(self.right_panel_shows(RightPanelKind::BackgroundTasks, cx))
+            .checked(self.panels.shows(RightPanelKind::BackgroundTasks, cx))
             .gap_2()
             .icon(IconName::Bot)
             .when(running > 0, |toggle| toggle.label(running.to_string()))
@@ -498,7 +499,7 @@ impl Render for Shell {
         // Any workspace/tab switch re-renders the shell, so this render-time
         // compare-and-set catches every switch path.
         self.sync_git_target(cx);
-        self.sync_task_panel_target(cx);
+        self.panels.sync_task_target(self.active_agent(), cx);
 
         // The sidebar is always mounted so it can animate its width open/closed.
         let summaries = self.projected_workspace_summaries(cx);
@@ -678,7 +679,7 @@ impl Render for Shell {
                                     .children(notification_layer),
                             ),
                     )
-                    .child(self.right_panel.clone()),
+                    .child(self.panels.panel().clone()),
             )
             .children(update_notification_layer)
             .children(dialog_layer)
