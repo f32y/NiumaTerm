@@ -364,7 +364,20 @@ Commit: `refactor(agent): move workflow bookkeeping onto workflow ui`
 
 #### A5. `PendingPrompts`: approval and question cards
 
-Status: pending. Depends on A1.
+Status: done 0650d666
+
+Note: the two card renderers stayed in `view/banners.rs` on `AgentPane`. Both
+build listeners that route straight back through the pane to answer, so moving
+them would relocate the listeners without removing the round trip.
+`handle_control` returns a `QuestionControl` instead of a bool, so the parent
+decides between stopping propagation, repainting and toggling.
+`reset_command_runtime` lost its approval parameter, which drops it under the
+argument limit and removes its `too_many_arguments` allow. `note_response_settled`
+moved onto `TurnState` with the field; `start_working` and `finish_working`
+stayed on `AgentPane` because both drive the transcript entity too.
+Manual check: trigger a tool approval and an AskUserQuestion batch; arrow keys
+move the highlight, Enter picks, and submitting or declining takes the card
+down and unblocks the turn.
 
 `pending_approval: Option<String>` and `pending_questions: Option<QuestionPrompt>`
 are written by `session/events.rs`, answered by `session/turn.rs`
@@ -1049,3 +1062,4 @@ left under the order.
 | C5 | done `7aaf8331` |
 | C6 | done `ec5e252b` |
 | C7 | done `8ac3ef86` |
+| A5 | done `0650d666` |
