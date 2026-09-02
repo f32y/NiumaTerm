@@ -20,12 +20,12 @@
 //! therefore still admitted from their own `local_agent` records. Monitors and
 //! workflows appear in the snapshot too and stay out by task type.
 
+mod children;
 mod observe;
 mod records;
 mod shells;
 
 use std::collections::{HashMap, VecDeque};
-use std::mem::take;
 use std::time::SystemTime;
 
 use serde_json::Value;
@@ -35,8 +35,8 @@ use crate::background_task::{
     BackgroundTaskSnapshot, BackgroundTaskState, BackgroundTaskTranscriptUpdate,
     BackgroundTaskUpdate,
 };
-use crate::chat::Item;
 use crate::claude_code::sessions::RestoredTask;
+use crate::claude_code::tasks::children::ChildTranscripts;
 use crate::claude_code::tasks::records::{
     admits_new_row, lifecycle_state, record_identifiers, refs_from, stop_target,
 };
@@ -85,21 +85,8 @@ pub(crate) struct ClaudeTasks {
     created_epoch: HashMap<String, u64>,
     /// Advanced by each `init`, which the CLI emits once per process.
     epoch: u64,
-    /// Child conversation content observed since the caller last drained it.
-    /// The reducer forwards items rather than retaining them, so a child's
-    /// conversation is stored once, where it is read.
-    pending_transcripts: Vec<(BackgroundTaskKey, BackgroundTaskTranscriptUpdate)>,
-    /// Tool calls a child started, so its matching result completes the same
-    /// row instead of appearing as a second one.
-    open_child_tools: HashMap<String, Item>,
-    /// Launch instructions already published as a child's opening message, by
-    /// canonical id. Claude Code 2.1.2x keeps a child's conversation entirely
-    /// in its own file and streams only the child's assistant output, so the
-    /// launch block is the one place the live stream states what the child was
-    /// asked to do. Older versions also replay that text as a sidechain user
-    /// record, which this recognizes as the same instruction rather than a
-    /// second one.
-    launch_prompts: HashMap<String, String>,
+    /// The conversations of this session's child agents.
+    children: ChildTranscripts,
     /// Background shell metadata and the `Bash` commands behind it.
     shells: ShellIndex,
 }
@@ -198,10 +185,7 @@ impl ClaudeTasks {
                         // so it is offered as a restore: it fills a child
                         // nothing has been seen for and never replaces newer
                         // live content.
-                        self.pending_transcripts.push((
-                            key.clone(),
-                            BackgroundTaskTranscriptUpdate::restored(task.items),
-                        ));
+                        self.children.push_restored(key.clone(), task.items);
                     }
                     if let Some(registry) = self.registry.as_mut() {
                         changed |= registry.merge_restored(key, task.update, starting_sequence);
@@ -233,9 +217,7 @@ impl ClaudeTasks {
         self.aliases.clear();
         self.alias_order.clear();
         self.created_epoch.clear();
-        self.pending_transcripts.clear();
-        self.open_child_tools.clear();
-        self.launch_prompts.clear();
+        self.children.clear();
         self.shells.clear();
         true
     }
@@ -244,7 +226,7 @@ impl ClaudeTasks {
     pub(crate) fn take_transcripts(
         &mut self,
     ) -> Vec<(BackgroundTaskKey, BackgroundTaskTranscriptUpdate)> {
-        take(&mut self.pending_transcripts)
+        self.children.drain()
     }
 
     fn apply_lifecycle(&mut self, kind: &str, record: &Value) -> bool {

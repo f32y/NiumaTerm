@@ -9,8 +9,7 @@ use std::time::SystemTime;
 use serde_json::Value;
 
 use crate::background_task::{
-    BackgroundTaskKey, BackgroundTaskKind, BackgroundTaskRefs, BackgroundTaskState,
-    BackgroundTaskTranscriptUpdate, BackgroundTaskUpdate,
+    BackgroundTaskKind, BackgroundTaskRefs, BackgroundTaskState, BackgroundTaskUpdate,
 };
 use crate::chat::Item;
 use crate::claude_code::tasks::records::{result_text, sidechain_preview};
@@ -175,18 +174,7 @@ impl ClaudeTasks {
         let Some(prompt) = objective else {
             return false;
         };
-        if self.launch_prompts.contains_key(tool_use_id) {
-            return false;
-        }
-        self.launch_prompts
-            .insert(tool_use_id.to_owned(), prompt.clone());
-        self.pending_transcripts.push((
-            BackgroundTaskKey::claude_code(tool_use_id),
-            BackgroundTaskTranscriptUpdate::appended(vec![Item::UserMessage {
-                text: Some(prompt),
-            }]),
-        ));
-        true
+        self.children.open(tool_use_id, prompt)
     }
 
     /// Parent user messages carry tool results and, in some versions, task
@@ -250,12 +238,7 @@ impl ClaudeTasks {
         // The same content the parent transcript drops becomes the child's own
         // conversation; it still never reaches the parent.
         let items = self.child_items(&canonical, message);
-        if !items.is_empty() {
-            self.pending_transcripts.push((
-                BackgroundTaskKey::claude_code(&canonical),
-                BackgroundTaskTranscriptUpdate::appended(items),
-            ));
-        }
+        self.children.push(&canonical, items);
         // Linked child activity proves the task is doing work, but it cannot
         // revive one that already reported a terminal state.
         let state = self
@@ -287,10 +270,7 @@ impl ClaudeTasks {
                 .filter_map(|block| block["text"].as_str())
                 .collect::<Vec<_>>()
                 .join("\n");
-            let repeats_launch = self
-                .launch_prompts
-                .get(canonical)
-                .is_some_and(|prompt| prompt.trim() == text.trim());
+            let repeats_launch = self.children.repeats_launch(canonical, &text);
             if !text.trim().is_empty() && !repeats_launch {
                 items.push(Item::UserMessage { text: Some(text) });
             }
@@ -326,11 +306,11 @@ impl ClaudeTasks {
                         block["name"].as_str().unwrap_or("tool"),
                         &block["input"],
                     );
-                    self.open_child_tools.insert(id, item.clone());
+                    self.children.open_tool(id, item.clone());
                     items.push(item);
                 }
                 Some("tool_result") => {
-                    if let Some(started) = self.open_child_tools.remove(&id) {
+                    if let Some(started) = self.children.close_tool(&id) {
                         items.push(complete_tool_item(started, block));
                     }
                 }
