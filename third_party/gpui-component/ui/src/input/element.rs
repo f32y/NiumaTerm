@@ -1440,6 +1440,7 @@ pub(super) struct PrepaintState {
     search_match_paths: Vec<(Path<Pixels>, bool)>,
     document_color_paths: Vec<(Path<Pixels>, Hsla)>,
     hover_definition_hitbox: Option<Hitbox>,
+    link_hitboxes: Vec<Hitbox>,
     indent_guides_path: Option<Path<Pixels>>,
     bounds: Bounds<Pixels>,
     /// Fold icon layout data
@@ -1710,6 +1711,8 @@ impl Element for TextElement {
                 }));
 
                 runs.into_iter().filter(|run| run.len > 0).collect()
+            } else if !state.links.is_empty() && !state.masked {
+                link_runs(&state.links, &run, cx.theme().link, display_text.len())
             } else {
                 vec![run]
             }
@@ -1918,6 +1921,15 @@ impl Element for TextElement {
         };
 
         let hover_definition_hitbox = self.layout_hover_definition_hitbox(state, window, cx);
+        // A link reads as one only if the pointer says so. The bounds come
+        // from the previous frame's layout, which is the one the pointer has
+        // been over; a link that just moved is right again the frame after.
+        let link_hitboxes: Vec<Hitbox> = state
+            .links
+            .iter()
+            .filter_map(|link| state.range_to_bounds(link))
+            .map(|bounds| window.insert_hitbox(bounds, HitboxBehavior::Normal))
+            .collect();
         let indent_guides_path =
             self.layout_indent_guides(state, &bounds, &last_layout, &text_style, window);
         state
@@ -1944,6 +1956,7 @@ impl Element for TextElement {
             search_match_paths,
             hover_highlight_path,
             hover_definition_hitbox,
+            link_hitboxes,
             document_color_paths,
             indent_guides_path,
             fold_icon_layout,
@@ -2254,6 +2267,10 @@ impl Element for TextElement {
             window.set_cursor_style(gpui::CursorStyle::PointingHand, &hitbox);
         }
 
+        for hitbox in prepaint.link_hitboxes.iter() {
+            window.set_cursor_style(gpui::CursorStyle::PointingHand, hitbox);
+        }
+
         // Paint inline completion first line suffix (after cursor on same line)
         if focused {
             if let Some(first_line) = &prepaint.ghost_first_line {
@@ -2291,6 +2308,54 @@ impl Element for TextElement {
 
         self.paint_mouse_listeners(window, cx);
     }
+}
+
+/// Text runs that draw `links` as links and everything around them as the
+/// input's own text. Ranges outside the text and any that run backwards are
+/// dropped, so a set taken before an edit degrades to plain text rather than
+/// colouring an arbitrary span.
+fn link_runs(links: &[Range<usize>], text: &TextRun, color: Hsla, len: usize) -> Vec<TextRun> {
+    // Dashed, and left to take the run's own colour: this is the rule the
+    // conversation draws under a link, so a link reads the same in the message
+    // being written as in the ones already sent.
+    let underline = Some(UnderlineStyle {
+        thickness: px(1.),
+        dashed: true,
+        ..UnderlineStyle::default()
+    });
+
+    let mut runs = Vec::with_capacity(links.len() * 2 + 1);
+    let mut cursor = 0;
+    for link in links {
+        let start = link.start.min(len);
+        let end = link.end.min(len);
+        if start < cursor || end <= start {
+            continue;
+        }
+
+        if start > cursor {
+            runs.push(TextRun {
+                len: start - cursor,
+                ..text.clone()
+            });
+        }
+        runs.push(TextRun {
+            len: end - start,
+            color,
+            underline,
+            ..text.clone()
+        });
+        cursor = end;
+    }
+
+    if cursor < len {
+        runs.push(TextRun {
+            len: len - cursor,
+            ..text.clone()
+        });
+    }
+
+    runs
 }
 
 /// Split placeholder text into display lines and trim runs to each line.
