@@ -4,7 +4,7 @@
 //! tabs while it is up, which means it also has to be retired again and the
 //! previous workspace restored when the user leaves.
 
-use gpui::{Context, Window};
+use gpui::{Context, Entity, Task, Window};
 use gpui_component::setting::{SelectIndex, SettingsState};
 use nmt_i18n::i18n;
 
@@ -21,6 +21,67 @@ use crate::workspace::{WorkspaceId, WorkspaceKind};
 /// so a stale-language name cannot leak into local_state.
 pub(super) fn settings_title() -> &'static str {
     i18n("shell-workspace-settings-title")
+}
+
+/// Everything the settings surface owns while it is on screen: the page and
+/// search state that outlives a repaint, the themes-directory watcher that
+/// makes theme edits preview live, and whether the surface was the active tab
+/// last time focus moved.
+#[derive(Default)]
+pub(super) struct SettingsSurface {
+    /// Selected page and search query. The shell owns it so switching to
+    /// another workspace and back returns to the page the user left; the
+    /// element state the component keeps by default would be dropped the frame
+    /// the surface stops rendering.
+    state: Option<Entity<SettingsState>>,
+    /// Alive only while this shell's settings entry is open.
+    theme_watcher: Option<Task<()>>,
+    /// Whether the surface was the active tab at the last activation.
+    was_active: bool,
+}
+
+impl SettingsSurface {
+    pub(super) fn open(&mut self, window: &mut Window, cx: &mut Context<Shell>) {
+        // Live theme previews need the themes directory watched for as long as
+        // the settings surface is on screen.
+        self.theme_watcher = ui::watch_themes(cx);
+
+        // Nothing else repaints on a page click, because the state lives
+        // outside the element tree that would otherwise notify for it.
+        let state = SettingsState::owned(SelectIndex::default(), window, cx);
+
+        cx.observe(&state, |_, _, cx| cx.notify()).detach();
+
+        self.state = Some(state);
+    }
+
+    /// Drop the machinery the surface owns.
+    pub(super) fn retire(&mut self) {
+        // The surface is gone, so the next activation has nothing to flush.
+        self.was_active = false;
+
+        self.theme_watcher = None;
+        // Reopening starts on the first page, matching what the modal did.
+        self.state = None;
+    }
+
+    /// Record whether the surface is the active tab, reporting the activation
+    /// that leaves it. Settings edits only live in the global until something
+    /// writes them out, and switching to another workspace leaves the surface
+    /// on screen for an unbounded time, so the departure is the commit point
+    /// rather than the close.
+    pub(super) fn note_active(&mut self, active: bool) -> bool {
+        let left = self.was_active && !active;
+
+        self.was_active = active;
+
+        left
+    }
+
+    /// The page state to hand the settings widget, once one exists.
+    pub(super) fn render_target(&self) -> Option<&Entity<SettingsState>> {
+        self.state.as_ref()
+    }
 }
 
 impl Shell {
@@ -53,17 +114,7 @@ impl Shell {
             return;
         }
 
-        // Live theme previews need the themes directory watched for as long as
-        // the settings surface is on screen.
-        self.theme_watcher = ui::watch_themes(cx);
-
-        // Nothing else repaints on a page click, because the state lives
-        // outside the element tree that would otherwise notify for it.
-        let state = SettingsState::owned(SelectIndex::default(), window, cx);
-
-        cx.observe(&state, |_, _, cx| cx.notify()).detach();
-
-        self.settings_state = Some(state);
+        self.settings.open(window, cx);
 
         let id = Self::alloc_id(&mut self.next_id);
         let tabs = TabManager::new(
@@ -95,12 +146,7 @@ impl Shell {
         // Pick up relay URL / token edits made while the entry was open.
         ui::settings::reconcile_remote_host(cx);
 
-        // The surface is gone, so the next activation has nothing to flush.
-        self.settings_was_active = false;
-
-        self.theme_watcher = None;
-        // Reopening starts on the first page, matching what the modal did.
-        self.settings_state = None;
+        self.settings.retire();
     }
 
     /// Leave the settings entry for a normal workspace. Every path that adds a
