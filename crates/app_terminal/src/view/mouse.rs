@@ -168,12 +168,12 @@ impl TerminalPane {
     ) {
         self.selection_drag_origin = None;
 
-        if self.scrollbar_dragging {
+        if self.scrollbar.is_dragging() {
             // Drag ended: start the linger countdown that hides the bar.
-            self.mark_scroll_activity(cx);
+            self.scrollbar.mark_activity(cx);
         }
 
-        self.scrollbar_dragging = false;
+        self.scrollbar.end_drag();
 
         if self.frozen_select_anchor.take().is_some() {
             return;
@@ -202,9 +202,9 @@ impl TerminalPane {
             self.update_hovered_link(event.position, event.modifiers, cx);
         }
 
-        if self.scrollbar_dragging {
+        if self.scrollbar.is_dragging() {
             let fraction = self.scrollbar_fraction(event.position.y);
-            self.scroll_thumb_to(fraction - self.scrollbar_grab, cx);
+            self.scroll_thumb_to(self.scrollbar.thumb_top_for(fraction), cx);
             return;
         }
 
@@ -290,7 +290,7 @@ impl TerminalPane {
             lines,
             terminal_input::modifiers_state(event.modifiers),
         ) {
-            self.mark_scroll_activity(cx);
+            self.scrollbar.mark_activity(cx);
 
             self.invalidate(cx);
         }

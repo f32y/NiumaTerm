@@ -53,20 +53,19 @@ pub(super) fn scrollbar_element(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
                     cx.stop_propagation();
-                    this.scrollbar_dragging = true;
 
                     let fraction = this.scrollbar_fraction(event.position.y);
 
                     if (thumb_top..thumb_top + thumb_height).contains(&fraction) {
                         // Grab the thumb where the pointer hit it — no jump.
-                        this.scrollbar_grab = fraction - thumb_top;
+                        this.scrollbar.begin_drag(fraction - thumb_top);
                     } else {
                         // Track click: center the thumb on the pointer.
-                        this.scrollbar_grab = thumb_height / 2.0;
-                        this.scroll_thumb_to(fraction - this.scrollbar_grab, cx);
+                        this.scrollbar.begin_drag(thumb_height / 2.0);
+                        this.scroll_thumb_to(this.scrollbar.thumb_top_for(fraction), cx);
                     }
 
-                    this.mark_scroll_activity(cx);
+                    this.scrollbar.mark_activity(cx);
                 }),
             )
             .on_drag(ScrollbarDrag, |_, _, _, cx| {
@@ -75,7 +74,7 @@ pub(super) fn scrollbar_element(
             })
             .on_drag_move(
                 cx.listener(|this, event: &DragMoveEvent<ScrollbarDrag>, window, cx| {
-                    if this.scrollbar_dragging {
+                    if this.scrollbar.is_dragging() {
                         cx.stop_propagation();
                         this.on_mouse_move(&event.event, window, cx);
                     }
