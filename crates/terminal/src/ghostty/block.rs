@@ -13,6 +13,7 @@ use libghostty_vt_sys::{
     sized as vt_sized,
 };
 
+use crate::ghostty::grid_read::visit_row_cells;
 use crate::ghostty::{
     BlockHandle, CellText, CellWide, Error, GhosttyTerminal, Palette, PlacementScreenPos, Result,
     ScreenRowMeta, SnapshotStyle,
@@ -102,7 +103,7 @@ impl BlockRef {
             }
         }
 
-        Ok(Some(GhosttyTerminal::visit_row_cells(
+        Ok(Some(visit_row_cells(
             grid_ref, self.cols, palette, on_cell,
         )?))
     }
@@ -362,9 +363,7 @@ impl GhosttyTerminal {
 
         let cols = self.block_cols(handle).unwrap_or(self.cols);
 
-        Ok(Some(Self::visit_row_cells(
-            grid_ref, cols, palette, on_cell,
-        )?))
+        Ok(Some(visit_row_cells(grid_ref, cols, palette, on_cell)?))
     }
 
     /// Materializing convenience over [`Self::read_block_row_visit`] — test-only.

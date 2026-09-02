@@ -19,6 +19,7 @@ use libghostty_vt_sys::{
 };
 
 use crate::ansi;
+use crate::ghostty::grid_read::visit_row_cells;
 use crate::ghostty::{Error, GhosttyTerminal, Result, SnapshotColors, SnapshotCursor};
 use crate::render_buffer::RenderBuffer;
 
@@ -413,7 +414,7 @@ impl GhosttyTerminal {
             let meta = self
                 .grid_ref_at(VtPointTag::VIEWPORT, 0, y as u32)
                 .and_then(|grid_ref| {
-                    Self::visit_row_cells(grid_ref, self.cols, &palette, |x, text, wide, style| {
+                    visit_row_cells(grid_ref, self.cols, &palette, |x, text, wide, style| {
                         buffer.write_cell(x as usize, y as usize, text.as_str(), wide, &style);
                     })
                 })
