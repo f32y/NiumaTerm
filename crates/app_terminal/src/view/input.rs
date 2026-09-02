@@ -73,12 +73,14 @@ impl TerminalPane {
             && !event.keystroke.modifiers.modified();
 
         // Block-split: copy the frozen-region selection on the copy chord.
-        if let (SurfaceKeyAction::CopyOrWrite(_), Some((a, b))) = (&action, self.frozen_selection) {
+        if let (SurfaceKeyAction::CopyOrWrite(_), Some((a, b))) =
+            (&action, self.frozen_drag.current())
+        {
             let text = self.frozen_selection_to_text(a, b);
             if !text.is_empty() {
                 self.surface.copy_text_to_clipboard(text);
                 show_text_copied(window, cx);
-                self.frozen_selection = None;
+                self.frozen_drag.clear();
                 cx.notify();
                 return;
             }

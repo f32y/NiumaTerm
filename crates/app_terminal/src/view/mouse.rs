@@ -76,6 +76,77 @@ pub(super) fn terminal_scroll_lines(delta: ScrollDelta, cell: metrics::CellMetri
     }
 }
 
+/// A selection gesture in the frozen block region.
+///
+/// The three values are one gesture at three stages: the pixel the press
+/// landed on, the cell it resolved to once the pointer moved far enough, and
+/// the range that grew from it. A press alone selects nothing, so the anchor
+/// exists only between the press and the first move that commits to a drag.
+#[derive(Default)]
+pub(crate) struct FrozenSelectionDrag {
+    /// Frozen-region selection: (anchor, head), both inclusive cell points.
+    selection: Option<(FrozenPoint, FrozenPoint)>,
+    /// Anchor of an in-progress frozen-region drag. The selection itself is
+    /// only created on the first mouse-move, so a plain click selects nothing
+    /// (matching the engine's empty-selection-dropped-on-up semantics).
+    anchor: Option<FrozenPoint>,
+    /// Pixel origin of a text-selection gesture. Ignoring movement within a
+    /// quarter-cell radius prevents normal hand jitter from selecting a glyph.
+    drag_origin: Option<Point<Pixels>>,
+}
+
+impl FrozenSelectionDrag {
+    pub(super) fn origin(&self) -> Option<Point<Pixels>> {
+        self.drag_origin
+    }
+
+    pub(super) fn set_origin(&mut self, origin: Option<Point<Pixels>>) {
+        self.drag_origin = origin;
+    }
+
+    /// Start a drag from `anchor`, dropping whatever was selected.
+    pub(super) fn begin(&mut self, anchor: FrozenPoint) {
+        self.selection = None;
+        self.anchor = Some(anchor);
+    }
+
+    /// Take a range whole, as a double- or triple-click does. There is nothing
+    /// left to drag from, so the anchor goes with it.
+    pub(super) fn select(&mut self, selection: Option<(FrozenPoint, FrozenPoint)>) {
+        self.selection = selection;
+        self.anchor = None;
+    }
+
+    pub(super) fn anchor(&self) -> Option<FrozenPoint> {
+        self.anchor
+    }
+
+    /// Grow the selection to `head`, reporting whether a drag was in progress.
+    pub(super) fn extend(&mut self, head: FrozenPoint) -> bool {
+        let Some(anchor) = self.anchor else {
+            return false;
+        };
+
+        self.selection = Some((anchor, head));
+
+        true
+    }
+
+    /// End a drag without committing it, reporting whether one was open.
+    pub(super) fn commit(&mut self) -> bool {
+        self.anchor.take().is_some()
+    }
+
+    /// Drop the selection, reporting whether one was showing.
+    pub(crate) fn clear(&mut self) -> bool {
+        self.selection.take().is_some()
+    }
+
+    pub(crate) fn current(&self) -> Option<(FrozenPoint, FrozenPoint)> {
+        self.selection
+    }
+}
+
 impl TerminalPane {
     pub(super) fn on_mouse_down(
         &mut self,
@@ -85,7 +156,7 @@ impl TerminalPane {
     ) {
         window.focus(&self.focus, cx);
 
-        self.selection_drag_origin = None;
+        self.frozen_drag.set_origin(None);
 
         // Ctrl+left-click opens the URL under the pointer (OSC 8 target or
         // URL-shaped text). It wins over selection and mouse reporting so
@@ -117,8 +188,9 @@ impl TerminalPane {
 
         let selection_type = selection_type_for_click_count(event.click_count);
 
-        self.selection_drag_origin =
-            (event.button == MouseButton::Left && !reports_mouse).then_some(event.position);
+        self.frozen_drag.set_origin(
+            (event.button == MouseButton::Left && !reports_mouse).then_some(event.position),
+        );
 
         if self.block_list_mode(cx) && !reports_mouse {
             if event.button == MouseButton::Left
@@ -130,11 +202,10 @@ impl TerminalPane {
                 self.surface.clear_selection();
 
                 if selection_type == SelectionType::Simple {
-                    self.frozen_selection = None;
-                    self.frozen_select_anchor = Some(pt);
+                    self.frozen_drag.begin(pt);
                 } else {
-                    self.frozen_selection = self.expanded_frozen_selection(pt, selection_type);
-                    self.frozen_select_anchor = None;
+                    let expanded = self.expanded_frozen_selection(pt, selection_type);
+                    self.frozen_drag.select(expanded);
                 }
 
                 self.invalidate(cx);
@@ -144,7 +215,7 @@ impl TerminalPane {
                 return;
             }
 
-            if self.frozen_selection.take().is_some() {
+            if self.frozen_drag.clear() {
                 cx.notify();
             }
         }
@@ -166,7 +237,7 @@ impl TerminalPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.selection_drag_origin = None;
+        self.frozen_drag.set_origin(None);
 
         if self.scrollbar.is_dragging() {
             // Drag ended: start the linger countdown that hides the bar.
@@ -175,7 +246,7 @@ impl TerminalPane {
 
         self.scrollbar.end_drag();
 
-        if self.frozen_select_anchor.take().is_some() {
+        if self.frozen_drag.commit() {
             return;
         }
 
@@ -208,17 +279,17 @@ impl TerminalPane {
             return;
         }
 
-        if let Some(origin) = self.selection_drag_origin {
+        if let Some(origin) = self.frozen_drag.origin() {
             let cell_width = self.cell_metrics(window, cx).width_px;
 
             if !selection_drag_started(origin, event.position, cell_width) {
                 return;
             }
 
-            self.selection_drag_origin = None;
+            self.frozen_drag.set_origin(None);
         }
 
-        if let Some(anchor) = self.frozen_select_anchor {
+        if self.frozen_drag.anchor().is_some() {
             // Clamp into the frozen region so a drag past the boundary sticks to
             // the last frozen row instead of vanishing.
             let mut pos = event.position;
@@ -230,9 +301,9 @@ impl TerminalPane {
                 pos.y = max_y;
             }
 
-            if let Some(BlockListPoint::Frozen(head)) = self.block_list_point_at(pos, cx) {
-                self.frozen_selection = Some((anchor, head));
-
+            if let Some(BlockListPoint::Frozen(head)) = self.block_list_point_at(pos, cx)
+                && self.frozen_drag.extend(head)
+            {
                 cx.notify();
             }
 
