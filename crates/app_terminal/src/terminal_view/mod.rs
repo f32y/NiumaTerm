@@ -230,8 +230,8 @@ impl Element for BlockListView {
         cx: &mut App,
     ) {
         let pane = self.pane.read(cx);
-        let separators = pane.frozen_separators.clone();
-        let chrome = pane.frozen_chrome.clone();
+        let separators = pane.frozen.separators().to_vec();
+        let chrome = pane.frozen.chrome().to_vec();
 
         if self.show_chrome {
             block_list::paint_frozen_separators(bounds, &separators, window);

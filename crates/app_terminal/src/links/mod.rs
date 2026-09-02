@@ -217,7 +217,7 @@ impl TerminalPane {
                 let mut origin = self.content_origin();
 
                 if block_list {
-                    origin.y += px(self.frozen_hit.active_top);
+                    origin.y += px(self.frozen.active_top());
                 }
 
                 let (cell, _) = terminal_cell_at_position(position, origin, cell_metrics, &offsets);
@@ -247,21 +247,19 @@ impl TerminalPane {
 
                     if row < top {
                         // A live-history row above the engine viewport.
-                        return self
-                            .frozen_hit
-                            .row_top(usize::MAX, usize::try_from(row).ok()?);
+                        return self.frozen.row_top(usize::MAX, usize::try_from(row).ok()?);
                     }
 
                     let below = (row - top) as f32 * cell_metrics.height_px;
 
                     Some(if block_list {
-                        self.frozen_hit.active_top + below
+                        self.frozen.active_top() + below
                     } else {
                         below + slack
                     })
                 }
                 RowSource::Block { item, line, .. } => self
-                    .frozen_hit
+                    .frozen
                     .row_top(item, usize::try_from(line + delta).ok()?),
             }
         };

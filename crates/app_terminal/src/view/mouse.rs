@@ -295,7 +295,7 @@ impl TerminalPane {
             let mut pos = event.position;
 
             let origin = self.content_origin();
-            let max_y = origin.y + px((self.frozen_hit.active_top - 1.0).max(0.0));
+            let max_y = origin.y + px((self.frozen.active_top() - 1.0).max(0.0));
 
             if pos.y > max_y {
                 pos.y = max_y;
@@ -418,7 +418,7 @@ impl TerminalPane {
         let mut origin = self.content_origin();
 
         if self.block_list_mode(cx) {
-            origin.y += px(self.frozen_hit.active_top);
+            origin.y += px(self.frozen.active_top());
         }
 
         let (cell, side) = terminal_cell_at_position(position, origin, cell_metrics, &offsets);

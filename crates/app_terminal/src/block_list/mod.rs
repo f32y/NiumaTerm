@@ -44,7 +44,7 @@ pub(crate) use crate::block_list::images::{FrozenImage, frozen_block_images};
 pub(crate) use crate::block_list::paint::{paint_frozen, shape_frozen_rows};
 pub(crate) use crate::block_list::reconcile::{
     BlockListMeasureKey, BlockListState, ListReconcile, RemeasureScope, block_list_render_metrics,
-    plan_list_reconcile, plan_remeasure, shift_selected_item_for_eviction,
+    plan_list_reconcile, shift_selected_item_for_eviction,
 };
 #[cfg(test)]
 use crate::block_list::rows::HandleItemInfo;
@@ -52,7 +52,7 @@ pub(crate) use crate::block_list::rows::{
     EngineRowBuilder, frozen_block_view, handle_item_info, live_history_view,
 };
 pub(crate) use crate::block_list::selection::{
-    BlockListPoint, FrozenHitInfo, FrozenPoint, frozen_selection_pieces,
+    BlockListPoint, FrozenGutterSelection, FrozenPoint, frozen_selection_pieces,
 };
 use crate::frame::{
     LineBuilder, StyleRun, TerminalCell, TerminalColor, TerminalLine, theme_default_foreground,

@@ -14,6 +14,8 @@ pub(crate) struct BlockListState {
     pub scrollbar: (f32, f32),
     /// Element-local top of the live grid, even outside list prepaint overdraw.
     pub active_top: f32,
+    /// Inputs that affected measured heights of the mutable tail last frame.
+    last_measure_key: Option<BlockListMeasureKey>,
 }
 
 impl BlockListState {
@@ -27,7 +29,18 @@ impl BlockListState {
             scroll_handler_set: false,
             scrollbar: (0.0, 0.0),
             active_top: 0.0,
+            last_measure_key: None,
         }
+    }
+
+    /// What the native list has to re-measure for this frame, recording the
+    /// inputs so the next frame compares against them.
+    pub(crate) fn remeasure_scope(&mut self, next: BlockListMeasureKey) -> RemeasureScope {
+        let scope = plan_remeasure(self.last_measure_key, next);
+
+        self.last_measure_key = Some(next);
+
+        scope
     }
 }
 

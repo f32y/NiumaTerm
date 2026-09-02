@@ -34,8 +34,7 @@ use tracing::{info, warn};
 use crate::block_list::{
     BlockListMeasureKey, BlockListPoint, BlockListState, FrozenPoint, ListReconcile,
     RemeasureScope, block_list_active_top_px, block_list_alignment, block_list_render_metrics,
-    block_pad_rows, offset_frozen_chrome, plan_list_reconcile, plan_remeasure,
-    shift_selected_item_for_eviction,
+    block_pad_rows, plan_list_reconcile,
 };
 use crate::dirty::DirtyState;
 use crate::frame::{
@@ -109,17 +108,9 @@ pub struct TerminalPane {
     /// Whether a trusted prompt input region is open.
     open_prompt: bool,
     pub(super) block_list: BlockListState,
-    /// Hit-test data recorded from the last native list prepaint.
-    pub(super) frozen_hit: block_list::FrozenHitInfo,
-    /// Inputs that affect measured heights of the mutable tail of the native list.
-    last_list_measure_key: Option<BlockListMeasureKey>,
-    /// The gutter-selected frozen item (block-split): highlighted and
-    /// targeted by the copy/re-run/jump actions in list mode.
-    pub(super) selected_frozen_item: Option<usize>,
-    /// Visible frozen item chrome recorded from native list item bounds.
-    pub(super) frozen_chrome: Vec<block_list::FrozenItemChrome>,
-    /// Visible separator y positions, painted outside GPUI List's content mask.
-    pub(super) frozen_separators: Vec<f32>,
+    /// What the block list painted last frame, and the item selected in its
+    /// gutter.
+    pub(crate) frozen: block_list::FrozenGutterSelection,
     /// The in-progress selection gesture in the frozen block region.
     pub(super) frozen_drag: FrozenSelectionDrag,
     pub(super) links: LinkHover,
@@ -277,11 +268,7 @@ impl TerminalPane {
             in_flight: None,
             open_prompt: false,
             block_list: BlockListState::new(block_list_alignment(fixed_bottom_requested)),
-            frozen_hit: Default::default(),
-            last_list_measure_key: None,
-            selected_frozen_item: None,
-            frozen_chrome: Vec::new(),
-            frozen_separators: Vec::new(),
+            frozen: Default::default(),
             frozen_drag: FrozenSelectionDrag::default(),
             links: LinkHover::default(),
         }

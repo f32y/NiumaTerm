@@ -101,24 +101,21 @@ impl TerminalPane {
     ) {
         self.set_content_bounds(bounds, cell, cx);
 
-        self.frozen_hit.clear();
-        self.frozen_hit.set_active_top(self.block_list.active_top);
-        self.frozen_chrome.clear();
-        self.frozen_separators.clear();
+        self.frozen.begin_frame(self.block_list.active_top);
     }
 
     pub(crate) fn record_frozen_view(&mut self, view: &block_list::FrozenView, item_top: f32) {
-        self.frozen_separators
-            .extend(view.separators.iter().map(|y| item_top + y));
+        for y in &view.separators {
+            self.frozen.push_separator(item_top + y);
+        }
 
         for row in &view.rows {
-            self.frozen_hit
+            self.frozen
                 .push_row(item_top + row.y, row.item, row.row, row.cell_count);
         }
 
         for chrome in &view.items_chrome {
-            self.frozen_chrome
-                .push(offset_frozen_chrome(chrome.clone(), item_top));
+            self.frozen.push_chrome(chrome.clone(), item_top);
         }
     }
 
@@ -127,8 +124,7 @@ impl TerminalPane {
         chrome: block_list::FrozenItemChrome,
         item_top: f32,
     ) {
-        self.frozen_chrome
-            .push(offset_frozen_chrome(chrome, item_top));
+        self.frozen.push_chrome(chrome, item_top);
     }
 
     /// Map a window position to either an immutable block row or an absolute
@@ -147,11 +143,11 @@ impl TerminalPane {
         let local_x = (position.x - origin.x).as_f32();
         let local_y = (position.y - origin.y).as_f32();
 
-        if local_y >= self.frozen_hit.active_top {
+        if local_y >= self.frozen.active_top() {
             return None;
         }
 
-        self.frozen_hit.hit_test(
+        self.frozen.hit_test(
             local_x,
             local_y,
             cell.width_px,
@@ -179,14 +175,8 @@ impl TerminalPane {
         if block_gutter_hit(position.x.as_f32(), origin.x.as_f32()) {
             let y = (position.y - origin.y).as_f32();
 
-            let hit = self
-                .frozen_chrome
-                .iter()
-                .find(|chrome| (chrome.top..chrome.bottom).contains(&y))
-                .map(|chrome| chrome.item);
-
-            if let Some(item) = hit {
-                self.selected_frozen_item = Some(item);
+            if let Some(item) = self.frozen.item_at(y) {
+                self.frozen.select(item);
 
                 cx.notify();
 
@@ -194,7 +184,7 @@ impl TerminalPane {
             }
         }
 
-        let cleared_frozen = self.selected_frozen_item.take().is_some();
+        let cleared_frozen = self.frozen.clear_selection();
 
         if cleared_frozen {
             cx.notify();
@@ -248,7 +238,7 @@ impl TerminalPane {
     /// Metadata of the selected frozen item (list mode): the command line
     /// when one is known.
     fn selected_frozen_command(&self) -> Option<String> {
-        let item = self.selected_frozen_item?;
+        let item = self.frozen.selected()?;
         let store = self.surface.block_store();
         let store = store.lock();
 
@@ -264,7 +254,7 @@ impl TerminalPane {
     }
 
     fn selected_frozen_output(&self) -> Option<String> {
-        let item = self.selected_frozen_item?;
+        let item = self.frozen.selected()?;
         let store = self.surface.block_store();
         let store = store.lock();
 
@@ -451,11 +441,7 @@ impl TerminalPane {
             let evicted_delta =
                 evicted_items.saturating_sub(self.block_list.evicted_items) as usize;
 
-            self.selected_frozen_item = shift_selected_item_for_eviction(
-                self.selected_frozen_item,
-                evicted_delta,
-                store_len,
-            );
+            self.frozen.shift_for_eviction(evicted_delta, store_len);
 
             match plan_list_reconcile(self.block_list.item_count, evicted_delta, item_count) {
                 ListReconcile::Reset => self.block_list.list.reset(item_count),
@@ -485,7 +471,7 @@ impl TerminalPane {
                 live_rows,
             };
 
-            match plan_remeasure(self.last_list_measure_key, measure_key) {
+            match self.block_list.remeasure_scope(measure_key) {
                 RemeasureScope::All => self.block_list.list.remeasure(),
                 RemeasureScope::Tail => {
                     let start = store_len.saturating_sub(1);
@@ -493,8 +479,6 @@ impl TerminalPane {
                 }
                 RemeasureScope::None => {}
             }
-
-            self.last_list_measure_key = Some(measure_key);
 
             let pane = cx.entity();
 
@@ -525,7 +509,7 @@ impl TerminalPane {
             let frame_for_items = frame.clone();
             let in_flight_for_items = self.in_flight.clone();
             let has_open_prompt_for_items = self.open_prompt;
-            let selected_frozen_item = self.selected_frozen_item;
+            let selected_frozen_item = self.frozen.selected();
             let frozen_selection = self.frozen_drag.current();
             let cell_for_items = cell;
             let pane_for_items = pane.clone();
