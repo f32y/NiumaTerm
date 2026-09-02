@@ -1245,7 +1245,19 @@ PolychromeSpriteVertexOutput polychrome_sprite_vertex(uint vertex_id: SV_VertexI
 
 float4 polychrome_sprite_fragment(PolychromeSpriteFragmentInput input): SV_Target {
     PolychromeSprite sprite = poly_sprites[input.sprite_id];
-    float4 sample = t_sprite.Sample(s_sprite, input.tile_position);
+    // The sprite sampler wraps, and tiles are packed with no gutter, so a
+    // bilinear tap at the edge of a tile reaches half a texel past it: into
+    // the neighbouring tile, or around to the texture's opposite edge on a
+    // tile that fills its own texture. Either draws as a dark hairline around
+    // an image the destination rect scales. Holding the sample half a texel
+    // inside the tile keeps every tap on the image's own pixels.
+    float2 atlas_size;
+    t_sprite.GetDimensions(atlas_size.x, atlas_size.y);
+    float2 tile_min = (float2(sprite.tile.bounds.origin) + 0.5) / atlas_size;
+    float2 tile_max =
+        (float2(sprite.tile.bounds.origin + sprite.tile.bounds.size) - 0.5) / atlas_size;
+    float2 tile_position = clamp(input.tile_position, tile_min, tile_max);
+    float4 sample = t_sprite.Sample(s_sprite, tile_position);
     float distance = quad_sdf(input.position.xy, sprite.bounds, sprite.corner_radii);
 
     float4 color = sample;
