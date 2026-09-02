@@ -83,7 +83,7 @@ use crate::ui::shell::settings_workspace::SettingsSurface;
 pub(super) use crate::ui::shell::tab_presentation::pending_tab_icon;
 pub(crate) use crate::ui::shell::tab_surface::TabSurface;
 use crate::ui::shell::updates_layer::UpdateNotificationLayer;
-use crate::ui::shell::workspace_dirs::WorkspaceDirsEditor;
+use crate::ui::shell::workspace_dirs::{RootAvailability, WorkspaceDirsEditor};
 use crate::ui::tab_bar::TabStrip;
 use crate::ui::token_usage::TokenUsageView;
 use crate::ui::workflows::WorkflowsView;
@@ -178,11 +178,7 @@ pub(crate) struct Shell {
     /// view, and auto-hide clock live in one record so retiring a key cannot
     /// leave a stale sibling behind.
     update_notifications: UpdateNotificationLayer,
-    /// Workspace directories the last background availability check could not
-    /// reach, keyed by normalized path identity. A saved directory keeps its
-    /// place in its workspace whether or not the filesystem can see it, so
-    /// this drives presentation only.
-    unavailable_roots: collections::HashSet<String>,
+    root_availability: RootAvailability,
     /// Workspace excluded from session persistence: the user chose Quit in
     /// the close-last-workspace dialog, so it must not be restored on the
     /// next launch. Only set on the quit path — cancelling keeps everything.
@@ -345,7 +341,7 @@ impl Shell {
                 RightPanelController::new(panel, git_model)
             },
             update_notifications: UpdateNotificationLayer::default(),
-            unavailable_roots: collections::HashSet::new(),
+            root_availability: RootAvailability::default(),
             doomed_workspace: None,
         };
 
