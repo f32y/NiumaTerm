@@ -44,7 +44,7 @@ use crate::frame::{
 use crate::layout::{
     bottom_anchor_offsets, frame_content_rows, live_frame_text, row_y_offset, terminal_row_at_y,
 };
-use crate::links::LinkHit;
+use crate::links::LinkHover;
 use crate::scrollbar::{scrollbar_element, scrollbar_offset_for_thumb};
 use crate::session::{HostEvent, InFlightBlock};
 use crate::settings::TerminalSettings;
@@ -128,12 +128,7 @@ pub struct TerminalPane {
     /// Pixel origin of a text-selection gesture. Ignoring movement within a
     /// quarter-cell radius prevents normal hand jitter from selecting a glyph.
     selection_drag_origin: Option<Point<Pixels>>,
-    /// The link under a Ctrl-hover, underlined until the pointer or the
-    /// modifier leaves it.
-    pub(super) hovered_link: Option<LinkHit>,
-    /// Last pointer position, so a Ctrl press/release without movement can
-    /// still update the hover underline.
-    pub(super) last_mouse_position: Option<Point<Pixels>>,
+    pub(super) links: LinkHover,
 }
 
 pub struct AgentInterrupted;
@@ -296,8 +291,7 @@ impl TerminalPane {
             frozen_separators: Vec::new(),
             frozen_select_anchor: None,
             selection_drag_origin: None,
-            hovered_link: None,
-            last_mouse_position: None,
+            links: LinkHover::default(),
         }
     }
 
@@ -525,8 +519,9 @@ impl Render for TerminalPane {
             // so hover end is what clears a still-Ctrl-held underline.
             .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
                 if !hovered {
-                    this.last_mouse_position = None;
-                    if this.hovered_link.take().is_some() {
+                    this.links.forget_position();
+
+                    if this.links.clear() {
                         cx.notify();
                     }
                 }
@@ -557,7 +552,7 @@ impl Render for TerminalPane {
             // Ctrl-hover link underline. Rects are content-origin-relative;
             // absolute children position from the padding box, so shift by
             // the content padding.
-            .when_some(self.hovered_link.as_ref(), |this, link| {
+            .when_some(self.links.current(), |this, link| {
                 this.cursor_pointer()
                     .children(link.rects.iter().map(|rect| {
                         div()

@@ -81,6 +81,57 @@ fn url_at_col(text: &str, col: usize) -> Option<(String, Range<usize>)> {
     (url_range.contains(&col) && open_allowed(url)).then(|| (url.to_string(), url_range))
 }
 
+/// The Ctrl-hover link underline and the pointer position it was resolved
+/// at. The two travel together because pressing or releasing Ctrl without
+/// moving the mouse still has to rescan, and that rescan has no event position
+/// of its own to work from.
+#[derive(Default)]
+pub(super) struct LinkHover {
+    hit: Option<LinkHit>,
+    last_position: Option<Point<Pixels>>,
+}
+
+impl LinkHover {
+    /// Record the pointer position and the link resolved under it. Returns
+    /// whether the underline changed, so the caller repaints only when it did.
+    pub(super) fn update(&mut self, position: Point<Pixels>, hit: Option<LinkHit>) -> bool {
+        self.last_position = Some(position);
+
+        if self.hit == hit {
+            return false;
+        }
+
+        self.hit = hit;
+
+        true
+    }
+
+    /// Record where the pointer is without rescanning, so a later modifier
+    /// change resolves the link where the pointer actually sits.
+    pub(super) fn record_position(&mut self, position: Point<Pixels>) {
+        self.last_position = Some(position);
+    }
+
+    pub(super) fn position(&self) -> Option<Point<Pixels>> {
+        self.last_position
+    }
+
+    /// Forget where the pointer was, so a modifier change after the pointer
+    /// left the pane cannot resurrect an underline.
+    pub(super) fn forget_position(&mut self) {
+        self.last_position = None;
+    }
+
+    /// Drop the underline, reporting whether one was showing.
+    pub(super) fn clear(&mut self) -> bool {
+        self.hit.take().is_some()
+    }
+
+    pub(super) fn current(&self) -> Option<&LinkHit> {
+        self.hit.as_ref()
+    }
+}
+
 impl TerminalPane {
     /// Track the Ctrl-hover link underline: set while Ctrl is held over a
     /// link inside the content area, cleared otherwise.
@@ -98,8 +149,7 @@ impl TerminalPane {
             .then(|| self.link_at_position(position, cx))
             .flatten();
 
-        if self.hovered_link != hit {
-            self.hovered_link = hit;
+        if self.links.update(position, hit) {
             cx.notify();
         }
     }
@@ -110,7 +160,7 @@ impl TerminalPane {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(position) = self.last_mouse_position {
+        if let Some(position) = self.links.position() {
             self.update_hovered_link(position, event.modifiers, cx);
         }
     }
