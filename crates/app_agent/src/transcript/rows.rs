@@ -270,6 +270,14 @@ impl TranscriptView {
         self.transcript_list.set_follow_mode(FollowMode::Tail);
     }
 
+    /// Slide down to the live end rather than arriving there at once, so a
+    /// reader who was catching up on an earlier turn sees which direction the
+    /// conversation moved instead of finding a different screen of text in
+    /// front of them. The list takes the tail back once the slide lands.
+    pub(crate) fn glide_to_bottom(&self) {
+        self.transcript_list.scroll_to_end_smooth();
+    }
+
     /// Append an item and the images it carries, which only a user message
     /// has any of.
     pub(crate) fn push(
