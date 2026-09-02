@@ -128,7 +128,7 @@ impl TranscriptView {
         let expanded = expandable && self.disclosures.row_expanded(index);
         let detail_reveal = self
             .disclosures
-            .progress(RevealKey::Row(index), 0, Instant::now());
+            .progress(RevealKey::Row(index), Instant::now());
         let detail_part = RevealedPart::Block(RevealKey::Row(index));
         let detail_height = self.disclosures.height(detail_part);
         let detail_view = cx.entity().downgrade();

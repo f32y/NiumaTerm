@@ -165,10 +165,10 @@ impl TranscriptView {
         // step of no height, or a gap left where a step used to be, is the
         // part that would still jump.
         match (step, self.revealed_by(ix)) {
-            (Some(part), Some((key, ordinal))) => revealed_block(
+            (Some(part), Some(key)) => revealed_block(
                 row,
                 part,
-                self.disclosures.progress(key, ordinal, Instant::now()),
+                self.disclosures.progress(key, Instant::now()),
                 self.disclosures.height(part),
                 // The space under a run's last step is the space its toggle
                 // takes over the moment the run leaves: both boundaries are

@@ -119,7 +119,7 @@ pub(super) fn render_run_toggle(
             // being one, and its own chevron already says what it does.
             AgentDisclosureRow::new(("wl-run", run_start), label.clone())
                 .expanded(expanded)
-                .opening(disclosures.progress(RevealKey::Group(run_start), 0, Instant::now()))
+                .opening(disclosures.progress(RevealKey::Group(run_start), Instant::now()))
                 .accessible_label(format!(
                     "{label}. {}",
                     if disclosing {

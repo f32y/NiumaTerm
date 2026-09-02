@@ -50,11 +50,9 @@ pub(super) fn render_compaction_row(
         .preview(preview.clone())
         .accent(accent);
     if expandable {
-        header_row = header_row.expanded(expanded).opening(disclosures.progress(
-            RevealKey::Row(index),
-            0,
-            Instant::now(),
-        ));
+        header_row = header_row
+            .expanded(expanded)
+            .opening(disclosures.progress(RevealKey::Row(index), Instant::now()));
     }
     let accessible_label = if expandable {
         format!(
@@ -221,7 +219,7 @@ fn render_compaction_detail(
     revealed_block(
         block,
         part,
-        disclosures.progress(RevealKey::Row(index), 0, Instant::now()),
+        disclosures.progress(RevealKey::Row(index), Instant::now()),
         disclosures.height(part),
         px(0.),
         cx.entity().downgrade(),

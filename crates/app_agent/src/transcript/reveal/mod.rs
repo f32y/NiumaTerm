@@ -35,65 +35,22 @@ pub(crate) enum RevealedPart {
     Step(usize),
 }
 
-/// Pieces past this point all start together. A forty-step run staggered the
-/// whole way down would take a second to finish arriving, and the reader is
-/// already looking at the top of it. Low enough that what the stagger adds to
-/// the run's total stays under a third of it: the unrolling has to be visible,
-/// and it is the toggle's answer that the reader is waiting on.
-const REVEAL_STAGGER_LIMIT: usize = 3;
 /// How far revealed content is held above its resting place, in pixels. The
 /// content settles downwards, which is the direction the disclosure opened,
 /// and lifts back the same way as it shuts.
 const REVEAL_RISE: f32 = 4.0;
 
-/// How one kind of disclosure travels: how long each of its pieces takes, and
-/// how far apart consecutive pieces start. Every disclosure follows the same
-/// curve, so what separates a run from a block is how much time it is given
-/// for the distance it covers, not how it spends that time.
-#[derive(Clone, Copy)]
-struct Motion {
-    duration: Duration,
-    stagger: Duration,
-}
-
-impl Motion {
-    /// Longest a disclosure on this motion can still be moving, counted from
-    /// its start: the last piece held back, plus its own travel.
-    fn window(self) -> Duration {
-        self.duration + self.stagger * REVEAL_STAGGER_LIMIT as u32
-    }
-}
-
-/// A block opening under its own header: one piece, and a tall one. The ramp
-/// spends almost the whole distance in the first fifth, so a duration this
-/// long still reads as answered immediately, and a block worth hundreds of
-/// pixels has enough travel left over to resolve rather than stop dead.
-const BLOCK_MOTION: Motion = Motion {
-    duration: Duration::from_millis(300),
-    stagger: Duration::ZERO,
-};
-
-/// A run's steps: a handful of rows worth a couple of dozen pixels each.
+/// How long any disclosure takes to arrive, and to leave again.
 ///
-/// A row covers a fraction of a block's distance, so it is given a fraction
-/// of a block's time. The stagger that makes a run unroll from its toggle
-/// only exists if it clears a frame, which puts a floor under it, and all of
-/// it adds to what the run costs end to end — leaving each row rather less
-/// again, so the run still finishes inside a block's span.
-const RUN_MOTION: Motion = Motion {
-    duration: Duration::from_millis(160),
-    stagger: Duration::from_millis(30),
-};
-
-impl RevealKey {
-    /// How this disclosure's content travels.
-    fn motion(self) -> Motion {
-        match self {
-            Self::Group(_) => RUN_MOTION,
-            Self::Row(_) | Self::Annotation(_) => BLOCK_MOTION,
-        }
-    }
-}
+/// One duration for every kind of content, so a run of steps and a block of
+/// output opened moments apart read as one gesture rather than as two
+/// mechanisms. The ramp spends almost the whole distance in the first fifth,
+/// so a span this long still reads as answered immediately while leaving a
+/// block worth hundreds of pixels enough travel to resolve rather than stop
+/// dead. A run's steps start together for the same reason: held back from
+/// each other they arrive as a cascade, which is a second gesture on top of
+/// the one the reader asked for.
+const REVEAL_DURATION: Duration = Duration::from_millis(300);
 
 /// Which way a disclosure is moving.
 ///
@@ -145,13 +102,13 @@ impl Reveals {
     fn start(&mut self, key: RevealKey, direction: Direction, now: Instant) {
         let resume = match self.active.get(&key) {
             Some(reveal) if reveal.direction != direction => {
-                let progress = self.progress(key, 0, now);
+                let progress = self.progress(key, now);
                 let covered = match direction {
                     Direction::Opening => progress,
                     Direction::Closing => 1.0 - progress,
                 };
 
-                key.motion().duration.mul_f32(ease_out_inverse(covered))
+                REVEAL_DURATION.mul_f32(ease_out_inverse(covered))
             }
             _ => Duration::ZERO,
         };
@@ -173,20 +130,18 @@ impl Reveals {
         self.active.clear();
     }
 
-    /// How far along the given piece of a disclosure is, from 0 shut to 1
-    /// open. `ordinal` is the piece's position under the disclosure, which is
-    /// 0 for content that moves as a single block.
+    /// How far along a disclosure is, from 0 shut to 1 open. Every piece it
+    /// discloses reports the same figure, which is what makes a run of steps
+    /// travel as one thing.
     ///
     /// Content whose disclosure is not moving reports 1: a row the reader
     /// scrolled to long after opening it renders at rest, not mid-entrance.
-    pub(crate) fn progress(&self, key: RevealKey, ordinal: usize, now: Instant) -> f32 {
+    pub(crate) fn progress(&self, key: RevealKey, now: Instant) -> f32 {
         let Some(reveal) = self.active.get(&key) else {
             return 1.0;
         };
-        let motion = key.motion();
-        let delay = motion.stagger * ordinal.min(REVEAL_STAGGER_LIMIT) as u32;
-        let elapsed = now.saturating_duration_since(reveal.started + delay);
-        let ramp = ease_out(elapsed.as_secs_f32() / motion.duration.as_secs_f32());
+        let elapsed = now.saturating_duration_since(reveal.started);
+        let ramp = ease_out(elapsed.as_secs_f32() / REVEAL_DURATION.as_secs_f32());
 
         match reveal.direction {
             Direction::Opening => ramp,
@@ -197,9 +152,9 @@ impl Reveals {
     /// Whether every moving disclosure has finished, which is what decides if
     /// the transcript still needs frames of its own.
     pub(crate) fn settled(&self, now: Instant) -> bool {
-        self.active.iter().all(|(key, reveal)| {
-            now.saturating_duration_since(reveal.started) >= key.motion().window()
-        })
+        self.active
+            .values()
+            .all(|reveal| now.saturating_duration_since(reveal.started) >= REVEAL_DURATION)
     }
 
     /// Disclosures that have finished shutting, which is when the content they
@@ -208,9 +163,7 @@ impl Reveals {
         self.active
             .iter()
             .filter(|(_, reveal)| reveal.direction == Direction::Closing)
-            .filter(|(key, reveal)| {
-                now.saturating_duration_since(reveal.started) >= key.motion().window()
-            })
+            .filter(|(_, reveal)| now.saturating_duration_since(reveal.started) >= REVEAL_DURATION)
             .map(|(key, _)| *key)
             .collect()
     }
@@ -238,8 +191,7 @@ impl Reveals {
 /// time, so content on this curve is where the reader is looking before they
 /// can look for it, and finishes by settling rather than by arriving.
 ///
-/// Every disclosure travels on it. One curve is what makes a run of steps and
-/// a block of output opened moments apart read as the same gesture.
+/// Every disclosure travels on it, over the same span.
 fn ease_out(t: f32) -> f32 {
     match t >= 1.0 {
         true => 1.0,
@@ -366,10 +318,9 @@ impl Disclosures {
         }
     }
 
-    /// How far through its motion one disclosure is, for the row at `ordinal`
-    /// places down it.
-    pub(crate) fn progress(&self, key: RevealKey, ordinal: usize, now: Instant) -> f32 {
-        self.reveals.progress(key, ordinal, now)
+    /// How far through its motion one disclosure is.
+    pub(crate) fn progress(&self, key: RevealKey, now: Instant) -> f32 {
+        self.reveals.progress(key, now)
     }
 
     /// The measured full height of one piece, once it has been on screen.
@@ -491,7 +442,7 @@ impl TranscriptView {
     /// Transcript indices of the steps a run toggle currently has on screen.
     fn run_steps(&self, key: RevealKey) -> Vec<usize> {
         (0..self.rows.len())
-            .filter(|ix| self.revealed_by(*ix).is_some_and(|(row, _)| row == key))
+            .filter(|ix| self.revealed_by(*ix) == Some(key))
             .filter_map(|ix| match self.rows[ix].spec {
                 RowSpec::Work { index, .. } => Some(index),
                 _ => None,
@@ -521,27 +472,25 @@ impl TranscriptView {
         }
     }
 
-    /// The run toggle that put this list row on screen, and how far down the
-    /// run the row sits.
+    /// The run toggle that put this list row on screen.
     ///
     /// Rows that were already there report `None` and render at rest. A run's
     /// steps follow its toggle contiguously, so walking back over them to the
-    /// toggle is what identifies both the disclosure and the row's place under
-    /// it without the row specs having to carry either.
-    pub(crate) fn revealed_by(&self, ix: usize) -> Option<(RevealKey, usize)> {
+    /// toggle is what identifies the disclosure without the row specs having
+    /// to carry it.
+    pub(crate) fn revealed_by(&self, ix: usize) -> Option<RevealKey> {
         if !matches!(self.rows.get(ix)?.spec, RowSpec::Work { .. }) {
             return None;
         }
 
-        let mut ordinal = 0;
         for cursor in (0..ix).rev() {
             match self.rows[cursor].spec {
-                RowSpec::Work { .. } => ordinal += 1,
+                RowSpec::Work { .. } => continue,
                 RowSpec::RunToggle {
                     run_start,
                     expanded: true,
                     ..
-                } => return Some((RevealKey::Group(run_start), ordinal)),
+                } => return Some(RevealKey::Group(run_start)),
                 _ => break,
             }
         }
