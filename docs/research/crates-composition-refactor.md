@@ -192,7 +192,18 @@ lives in `crates/app_agent/src/pane_state.rs` (`SessionRuntime`,
 
 #### A1. Move command feedback onto `SlashPalette`
 
-Status: pending
+Status: done cb0eb4fc
+
+Note: the `impl SlashPalette` block sits in `composer/mod.rs`, not
+`composer/palette.rs`, because `CommandFeedback`, `FEEDBACK_LIFETIME`,
+`feedback_is_transient` and `feedback_is_current` all live there.
+`SlashPalette` itself stays declared in `lib.rs`; moving it would drag
+`CachedCatalog`, `SkillCatalog` and `PendingSlashCommand` along, so it belongs
+with A6. The suggested subject was 61 characters, one over the hook limit, so
+it shipped as `move command feedback to the slash palette`.
+Manual check: type an unknown slash command; the red error line appears above
+the composer and stays until you type. Type `/help`; the notice appears and
+fades after about six seconds.
 
 `AgentPane::set_command_feedback` (`composer/mod.rs:257`) and
 `visible_command_feedback` (`composer/mod.rs:291`) write and read only
@@ -878,3 +889,4 @@ left under the order.
 | C1 | done `b7bef98e` |
 | C2 | done `53eebc95` |
 | C3 | done `1e77f4ab` |
+| A1 | done `cb0eb4fc` |
