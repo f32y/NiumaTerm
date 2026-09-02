@@ -403,7 +403,17 @@ Commit: `refactor(agent): own pending prompts and turn timing as parts`
 
 #### A6. Unify rewind and fork as `BranchFlow`
 
-Status: pending. Depends on A1.
+Status: done 58234a72
+
+Note: the two picker models stayed as `AgentPane` methods. Both build palette
+rows out of the transcript entries and the pane's own working directory, so
+moving them onto `BranchFlow` would need the transcript passed in without
+removing the dependency. The three predicates moved as planned, and `clear`
+replaced the three field writes a session replacement made. The
+session-replacement half stayed on `AgentPane`.
+Manual check: open the rewind picker and the fork picker in turn; each closes
+the other, neither lets a prompt be sent while it is open, and picking a
+checkpoint replaces the conversation.
 
 `composer/rewind.rs` (654) and `composer/fork.rs` (445) are two variants of
 one flow (pick a checkpoint, replace the conversation). They cancel each
@@ -1063,3 +1073,4 @@ left under the order.
 | C6 | done `ec5e252b` |
 | C7 | done `8ac3ef86` |
 | A5 | done `0650d666` |
+| A6 | done `58234a72` |
