@@ -423,7 +423,7 @@ impl GhosttyTerminal {
         }
 
         let colors = self.render.colors(self.terminal);
-        let placements = self.placements();
+        let placements = self.kitty.placements(self.terminal);
         let scrollbar = self.scrollbar();
 
         buffer.finish_capture(

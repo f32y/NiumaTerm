@@ -9,22 +9,62 @@ use libghostty_vt_sys::{
     TerminalData as VtTerminalData, ghostty_block_ref_placement_pos, ghostty_kitty_graphics_get,
     ghostty_kitty_graphics_image, ghostty_kitty_graphics_image_get,
     ghostty_kitty_graphics_placement_get, ghostty_kitty_graphics_placement_grid_size,
+    ghostty_kitty_graphics_placement_iterator_free, ghostty_kitty_graphics_placement_iterator_new,
     ghostty_kitty_graphics_placement_next, ghostty_kitty_graphics_placement_pixel_size,
     ghostty_kitty_graphics_placement_source_rect, ghostty_kitty_graphics_placement_viewport_pos,
     ghostty_terminal_get,
 };
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::ghostty::{BlockRef, GhosttyTerminal, PlacementScreenPos, SnapshotPlacement};
+use crate::ghostty::{
+    BlockRef, Error, GhosttyTerminal, PlacementScreenPos, Result, SnapshotPlacement,
+};
 use crate::graphics;
 
-impl GhosttyTerminal {
+/// Kitty placement walking and the image-delta cache.
+///
+/// The iterator is a single FFI allocation reused for every walk, and the
+/// cache records exactly what those walks have already shipped, so a walk that
+/// re-points the iterator and a decision about whether to re-ship pixels are
+/// the same concern.
+pub(super) struct KittyState {
+    /// Reused each `snapshot()` to walk kitty placements. Allocated once;
+    /// `ghostty_kitty_graphics_get(PLACEMENT_ITERATOR)` re-points it at the live
+    /// storage with no allocation, so a no-graphics batch costs ~3 FFI calls.
+    placement_iter: VtKittyGraphicsPlacementIterator,
+    /// Kitty image-delta cache: `image_id -> (width, height, data_len)`
+    /// of every image already shipped to the frontend. Owned by the PTY reader
+    /// thread (only `take_image_deltas` mutates it). A key change (re-transmit
+    /// with new size/length) re-ships the pixels; a vanished id is removed.
+    shipped_images: FxHashMap<u32, (u32, u32, usize)>,
+}
+
+impl Drop for KittyState {
+    fn drop(&mut self) {
+        unsafe { ghostty_kitty_graphics_placement_iterator_free(self.placement_iter) };
+    }
+}
+
+impl KittyState {
     /// Walk the engine's kitty-graphics placements into owned `SnapshotPlacement`s
     /// Re-points the persistent iterator at the live storage (no alloc),
     /// then for each placement reads the scalar fields and — for non-virtual visible
     /// placements — the viewport-relative geometry. Returns empty when graphics are
     /// disabled or there are no placements (the common case: ~3 FFI calls).
-    pub(super) fn placements(&mut self) -> Vec<SnapshotPlacement> {
+    pub(super) fn new() -> Result<Self> {
+        let mut placement_iter = ptr::null_mut();
+
+        Error::from_code(unsafe {
+            ghostty_kitty_graphics_placement_iterator_new(ptr::null(), &mut placement_iter)
+        })?;
+
+        Ok(Self {
+            placement_iter,
+            shipped_images: FxHashMap::default(),
+        })
+    }
+
+    pub(super) fn placements(&mut self, terminal: VtTerminal) -> Vec<SnapshotPlacement> {
         let mut out = Vec::new();
 
         // Borrowed handle to the active screen's image storage; valid until the next
@@ -33,7 +73,7 @@ impl GhosttyTerminal {
 
         if unsafe {
             ghostty_terminal_get(
-                self.terminal,
+                terminal,
                 VtTerminalData::KITTY_GRAPHICS,
                 (&mut graphics as *mut VtKittyGraphics).cast(),
             )
@@ -109,7 +149,7 @@ impl GhosttyTerminal {
                 ghostty_kitty_graphics_placement_viewport_pos(
                     iter,
                     image,
-                    self.terminal,
+                    terminal,
                     &mut vp_col,
                     &mut vp_row,
                 )
@@ -123,15 +163,11 @@ impl GhosttyTerminal {
 
             unsafe {
                 ghostty_kitty_graphics_placement_pixel_size(
-                    iter,
-                    image,
-                    self.terminal,
-                    &mut px_w,
-                    &mut px_h,
+                    iter, image, terminal, &mut px_w, &mut px_h,
                 );
             }
 
-            let (g_cols, g_rows, [sx, sy, sw, sh]) = placement_geometry(iter, image, self.terminal);
+            let (g_cols, g_rows, [sx, sy, sw, sh]) = placement_geometry(iter, image, terminal);
 
             out.push(SnapshotPlacement {
                 image_id,
@@ -170,7 +206,11 @@ impl GhosttyTerminal {
     /// placements themselves come from the frozen storage pinned by `block`.
     /// Virtual placements and evicted pins are skipped; empty when graphics
     /// are disabled or the block has none (~2 FFI calls).
-    pub fn block_placements(&mut self, block: &BlockRef) -> Vec<PlacementScreenPos> {
+    pub(super) fn block_placements(
+        &mut self,
+        terminal: VtTerminal,
+        block: &BlockRef,
+    ) -> Vec<PlacementScreenPos> {
         let mut out = Vec::new();
 
         let Some(graphics) = block.kitty_graphics_raw() else {
@@ -205,7 +245,7 @@ impl GhosttyTerminal {
             if image.is_null() {
                 continue;
             }
-            let (g_cols, g_rows, [sx, sy, sw, sh]) = placement_geometry(iter, image, self.terminal);
+            let (g_cols, g_rows, [sx, sy, sw, sh]) = placement_geometry(iter, image, terminal);
 
             out.push(PlacementScreenPos {
                 image_id,
@@ -232,50 +272,15 @@ impl GhosttyTerminal {
     /// Kitty storage. The caller keys the lazily uploaded result by
     /// `(block_id, image_id)`. `None` if the block holds no such image. Engine lock
     /// held by the caller; the pixels are copied out before returning.
-    pub fn block_image_pixels(
-        &self,
-        block: &BlockRef,
-        image_id: u32,
-    ) -> Option<graphics::GraphicData> {
-        let graphics = block.kitty_graphics_raw()?;
-        let image = unsafe { ghostty_kitty_graphics_image(graphics, image_id) };
-
-        if image.is_null() {
-            return None;
-        }
-
-        let read_u32 = |data: VtKittyGraphicsImageData::Type| -> u32 {
-            let mut v: u32 = 0;
-            unsafe {
-                ghostty_kitty_graphics_image_get(image, data, (&mut v as *mut u32).cast());
-            }
-            v
-        };
-
-        let width = read_u32(VtKittyGraphicsImageData::WIDTH);
-        let height = read_u32(VtKittyGraphicsImageData::HEIGHT);
-
-        let mut data_len: usize = 0;
-
-        unsafe {
-            ghostty_kitty_graphics_image_get(
-                image,
-                VtKittyGraphicsImageData::DATA_LEN,
-                (&mut data_len as *mut usize).cast(),
-            );
-        }
-
-        unsafe { kitty_image_graphic_data(image, image_id, width, height, data_len) }
-    }
-
     /// Diff the live kitty images against the shipped set and return the pixel
     /// deltas. Called **only on the PTY reader thread** after `snapshot`
     /// (engine lock held by the caller); `placements` is that snapshot's placement
     /// list, so no second iterator walk. New or changed images (`(id,w,h,len)` key)
     /// have their pixels copied (`gray`/`gray_alpha` → rgba); vanished ids are
     /// reported for removal. Empty in steady state.
-    pub fn take_image_deltas(
+    pub(super) fn take_image_deltas(
         &mut self,
+        terminal: VtTerminal,
         placements: &[SnapshotPlacement],
     ) -> (Vec<(u32, graphics::GraphicData)>, Vec<u32>) {
         let mut pending = Vec::new();
@@ -285,7 +290,7 @@ impl GhosttyTerminal {
 
         let have_graphics = unsafe {
             ghostty_terminal_get(
-                self.terminal,
+                terminal,
                 VtTerminalData::KITTY_GRAPHICS,
                 (&mut graphics as *mut VtKittyGraphics).cast(),
             )
@@ -362,6 +367,58 @@ impl GhosttyTerminal {
         }
 
         (pending, removed)
+    }
+}
+
+impl GhosttyTerminal {
+    pub fn block_image_pixels(
+        &self,
+        block: &BlockRef,
+        image_id: u32,
+    ) -> Option<graphics::GraphicData> {
+        let graphics = block.kitty_graphics_raw()?;
+        let image = unsafe { ghostty_kitty_graphics_image(graphics, image_id) };
+
+        if image.is_null() {
+            return None;
+        }
+
+        let read_u32 = |data: VtKittyGraphicsImageData::Type| -> u32 {
+            let mut v: u32 = 0;
+            unsafe {
+                ghostty_kitty_graphics_image_get(image, data, (&mut v as *mut u32).cast());
+            }
+            v
+        };
+
+        let width = read_u32(VtKittyGraphicsImageData::WIDTH);
+        let height = read_u32(VtKittyGraphicsImageData::HEIGHT);
+
+        let mut data_len: usize = 0;
+
+        unsafe {
+            ghostty_kitty_graphics_image_get(
+                image,
+                VtKittyGraphicsImageData::DATA_LEN,
+                (&mut data_len as *mut usize).cast(),
+            );
+        }
+
+        unsafe { kitty_image_graphic_data(image, image_id, width, height, data_len) }
+    }
+
+    /// Screen positions of every kitty placement pinned by one frozen block.
+    pub fn block_placements(&mut self, block: &BlockRef) -> Vec<PlacementScreenPos> {
+        self.kitty.block_placements(self.terminal, block)
+    }
+
+    /// Image pixels the frontend has not been sent yet, plus the ids the
+    /// engine has dropped.
+    pub fn take_image_deltas(
+        &mut self,
+        placements: &[SnapshotPlacement],
+    ) -> (Vec<(u32, graphics::GraphicData)>, Vec<u32>) {
+        self.kitty.take_image_deltas(self.terminal, placements)
     }
 }
 
