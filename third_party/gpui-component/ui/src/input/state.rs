@@ -126,6 +126,7 @@ pub enum InputEvent {
     PressEnter { secondary: bool, shift: bool },
     Focus,
     Blur,
+    ClickLink(Range<usize>),
 }
 
 pub(super) const CONTEXT: &str = "Input";
@@ -359,6 +360,10 @@ pub struct InputState {
     pub(super) selection_reversed: bool,
     /// The marked range is the temporary insert text on IME typing.
     pub(super) ime_marked_range: Option<Selection>,
+    /// Byte ranges of the text drawn as links, in ascending order. The owner
+    /// decides what a link is by setting them; the input only draws them and
+    /// reports clicks on them, so the text stays plain to everything else.
+    pub(super) links: Vec<Range<usize>>,
     pub(super) last_layout: Option<LastLayout>,
     pub(super) last_cursor: Option<usize>,
     /// The input container bounds
@@ -500,6 +505,7 @@ impl InputState {
             selected_word_range: None,
             selection_reversed: false,
             ime_marked_range: None,
+            links: Vec::new(),
             input_bounds: Bounds::default(),
             selecting: false,
             disabled: false,
@@ -750,6 +756,32 @@ impl InputState {
         cx.notify();
     }
 
+    /// Draw the given byte ranges of the text as links, replacing the ranges
+    /// set before. A click inside one emits [`InputEvent::ClickLink`] instead
+    /// of placing the caret, so what the link does is the owner's to decide,
+    /// and Backspace or Delete next to one takes the whole range out at once:
+    /// a link is one thing to the reader, so it is one thing to edit.
+    ///
+    /// Ranges are taken in ascending order and must not overlap; the text they
+    /// cover is the owner's to keep current, since an edit moves the text under
+    /// ranges taken from an earlier reading of it.
+    pub fn set_links(&mut self, links: Vec<Range<usize>>, cx: &mut Context<Self>) {
+        if self.links == links {
+            return;
+        }
+
+        self.links = links;
+        cx.notify();
+    }
+
+    /// The link covering `offset`, if the text carries one there.
+    pub fn link_at(&self, offset: usize) -> Option<Range<usize>> {
+        self.links
+            .iter()
+            .find(|link| link.contains(&offset))
+            .cloned()
+    }
+
     /// Find which line and sub-line the given offset belongs to, along with the position within that sub-line.
     ///
     /// Returns:
@@ -875,6 +907,11 @@ impl InputState {
         self.disabled = false;
         let text: SharedString = text.into();
         let range = 0..self.text.chars().map(|c| c.len_utf16()).sum();
+        // Ranges taken from the old text address nothing in the new one, and
+        // this path reports no change, so the owner cannot correct them
+        // afterwards. Dropping them leaves the new text plain until whoever
+        // installed it marks its links.
+        self.links.clear();
         self.replace_text_in_range_silent(Some(range), &text, window, cx);
         self.reset_highlighter(cx);
         self.disabled = was_disabled;
@@ -1521,7 +1558,19 @@ impl InputState {
 
     pub(super) fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
-            self.select_to(self.previous_boundary(self.cursor()), cx)
+            // A link stands for one thing rather than for the characters that
+            // spell it, so it comes out whole. Erasing it one character at a
+            // time would leave a remnant that stands for nothing and that the
+            // owner can no longer recognise. A caret at a link's start is
+            // outside it: what precedes the link is ordinary text.
+            match self
+                .cursor()
+                .checked_sub(1)
+                .and_then(|before| self.link_at(before))
+            {
+                Some(link) => self.selected_range = (link.start..link.end).into(),
+                None => self.select_to(self.previous_boundary(self.cursor()), cx),
+            }
         }
         self.replace_text_in_range(None, "", window, cx);
         self.pause_blink_cursor(cx);
@@ -1529,7 +1578,10 @@ impl InputState {
 
     pub(super) fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
-            self.select_to(self.next_boundary(self.cursor()), cx)
+            match self.link_at(self.cursor()) {
+                Some(link) => self.selected_range = (link.start..link.end).into(),
+                None => self.select_to(self.next_boundary(self.cursor()), cx),
+            }
         }
         self.replace_text_in_range(None, "", window, cx);
         self.pause_blink_cursor(cx);
@@ -1805,6 +1857,21 @@ impl InputState {
         let offset = self.index_for_mouse_position(event.position);
 
         if self.handle_click_hover_definition(event, offset, window, cx) {
+            return;
+        }
+
+        // A plain press on a link acts on the link rather than reaching into
+        // the text: the caret stays where it was, so following a link does not
+        // disturb what the user was writing. Modified and repeated presses
+        // fall through, which leaves selecting and extending a link's text to
+        // the same gestures that work anywhere else.
+        if event.button == MouseButton::Left
+            && event.click_count == 1
+            && !event.modifiers.modified()
+            && let Some(range) = self.link_at(offset)
+        {
+            self.selecting = false;
+            cx.emit(InputEvent::ClickLink(range));
             return;
         }
 
