@@ -1444,3 +1444,73 @@ mod row_rhythm_tests {
         });
     }
 }
+
+mod typed_reply_tests {
+    use gpui::{AppContext as _, TestAppContext};
+    use nmt_agent_utils::chat::Item as SessionItem;
+
+    use crate::profile::AgentKind;
+    use crate::transcript::TranscriptView;
+
+    fn select_reply(item: &mut SessionItem) -> Option<&mut Option<String>> {
+        match item {
+            SessionItem::AgentMessage { text, .. } => Some(text),
+            _ => None,
+        }
+    }
+
+    /// Text a reply already showed when the stream reached it stays on screen;
+    /// only the arrival waits behind the typed edge.
+    #[gpui::test]
+    fn a_streamed_reply_types_from_what_it_already_showed(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
+
+            view.update(cx, |transcript, cx| {
+                transcript.push(
+                    1,
+                    SessionItem::AgentMessage {
+                        id: "a".into(),
+                        text: Some("Hello".into()),
+                    },
+                    Vec::new(),
+                    cx,
+                );
+                transcript.append_delta("a", " world", select_reply);
+
+                assert_eq!(transcript.shown_reply(0, "Hello world"), "Hello");
+                assert_eq!(transcript.typed_edge(0), Some(5));
+
+                transcript.clear();
+                assert_eq!(transcript.typed_edge(0), None);
+            });
+        });
+    }
+
+    /// Only the reply is typed. Reasoning streams into a row the reader
+    /// opens on request, which shows whatever has arrived.
+    #[gpui::test]
+    fn streamed_reasoning_is_shown_as_it_arrives(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
+
+            view.update(cx, |transcript, cx| {
+                transcript.push(
+                    1,
+                    SessionItem::Reasoning {
+                        id: "r".into(),
+                        summary: None,
+                    },
+                    Vec::new(),
+                    cx,
+                );
+                transcript.append_delta("r", "thinking", |item| match item {
+                    SessionItem::Reasoning { summary, .. } => Some(summary),
+                    _ => None,
+                });
+
+                assert_eq!(transcript.typed_edge(0), None);
+            });
+        });
+    }
+}

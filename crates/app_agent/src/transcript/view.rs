@@ -23,6 +23,7 @@ use crate::transcript::render::TRANSCRIPT_LINE_HEIGHT;
 use crate::transcript::reveal::Disclosures;
 use crate::transcript::rows::TranscriptRow;
 use crate::transcript::turns::{LiveTurn, TurnLedger};
+use crate::transcript::typewriter::{Typewriter, shown_prefix};
 use crate::transcript::{Entry, ReadingPosition, VirtualTranscriptCache, is_work_row};
 
 /// One agent conversation as the user reads it: the entry list, the row
@@ -80,6 +81,10 @@ pub struct TranscriptView {
     pub(crate) turn_ledger: TurnLedger,
     /// The running turn, while one is in flight.
     pub(crate) live_turn: LiveTurn,
+    /// The reply being let onto the screen a character at a time, while one
+    /// is. Only text that streams in through this view is typed: a restored
+    /// or mirrored conversation arrives whole and is shown whole.
+    typewriter: Option<Typewriter>,
     /// Presentation inputs rather than owned state: the working directory
     /// resolves transcript links, and the provider decides a few labels.
     pub(crate) cwd: Option<String>,
@@ -124,6 +129,7 @@ impl TranscriptView {
             virtual_transcripts: VirtualTranscriptCache::default(),
             turn_ledger: TurnLedger::default(),
             live_turn: LiveTurn::default(),
+            typewriter: None,
             cwd,
             kind,
             source_revision: None,
@@ -184,6 +190,7 @@ impl TranscriptView {
         self.turn_ledger.clear();
         self.virtual_transcripts.clear();
         self.live_turn.discard();
+        self.typewriter = None;
     }
 
     /// Append one turn of a restored conversation under its own turn id, with
@@ -247,17 +254,56 @@ impl TranscriptView {
         delta: &str,
         select: fn(&mut SessionItem) -> Option<&mut Option<String>>,
     ) -> bool {
-        for entry in &mut self.items {
-            if entry.item.id() == Some(item_id)
-                && let Some(text) = select(&mut entry.item)
-            {
+        for (index, entry) in self.items.iter_mut().enumerate() {
+            if entry.item.id() != Some(item_id) {
+                continue;
+            }
+
+            let is_reply = matches!(entry.item, SessionItem::AgentMessage { .. });
+            if let Some(text) = select(&mut entry.item) {
                 let text = text.get_or_insert_default();
+                // A reply starts typing from what it already showed when the
+                // stream reached it, so text that was on screen stays put and
+                // only the new arrival is let through the edge.
+                let typing = self
+                    .typewriter
+                    .as_ref()
+                    .is_some_and(|typewriter| typewriter.index() == index);
+                if is_reply && !typing {
+                    self.typewriter = Some(Typewriter::start(
+                        index,
+                        text.chars().count(),
+                        Instant::now(),
+                    ));
+                }
                 text.push_str(delta);
                 return !text.trim().is_empty();
             }
         }
 
         false
+    }
+
+    /// The part of reply `index` the reader sees this frame: the whole of it
+    /// unless its edge is still crossing the text.
+    pub(crate) fn shown_reply<'a>(&self, index: usize, text: &'a str) -> &'a str {
+        match &self.typewriter {
+            Some(typewriter) if typewriter.index() == index => {
+                shown_prefix(text, typewriter.shown())
+            }
+            _ => text,
+        }
+    }
+
+    /// How far the typed edge of a reply is from the text behind it, as the
+    /// height-relevant part of that row's signature. The row lays out to what
+    /// the edge lets through, so the signature has to move with the edge for
+    /// the list to remeasure the row as it grows.
+    pub(crate) fn typed_edge(&self, index: usize) -> Option<usize> {
+        self.typewriter
+            .as_ref()
+            .filter(|typewriter| typewriter.index() == index)
+            .map(Typewriter::shown)
     }
 
     /// Latest non-empty assistant reply of `turn`, for notification bodies.
@@ -361,6 +407,17 @@ impl TranscriptView {
     }
 }
 
+/// Length in characters of the reply at `index`, which is what its typed
+/// edge closes on.
+fn reply_chars(items: &[Entry], index: usize) -> usize {
+    match items.get(index).map(|entry| &entry.item) {
+        Some(SessionItem::AgentMessage {
+            text: Some(text), ..
+        }) => text.chars().count(),
+        _ => 0,
+    }
+}
+
 /// Empty space left below the conversation while a picker follows it.
 ///
 /// What has to be cleared is the picker itself, which floats over the bottom
@@ -388,6 +445,20 @@ impl Render for TranscriptView {
         // show the first frame of the motion and stop there.
         if !self.disclosures.settled(now) {
             window.request_animation_frame();
+        }
+
+        // The typed edge moves once per frame, before the rows are built, so
+        // the row signatures and the prefix they are measured against describe
+        // the same frame. The stream wakes the pump as each chunk lands; the
+        // frames between chunks are this view's to ask for. Reduced motion
+        // shows what has arrived as it arrives.
+        let reduce_motion = cx.global::<AgentSettings>().reduce_motion;
+        if let Some(typewriter) = &mut self.typewriter {
+            let total = reply_chars(&self.items, typewriter.index());
+            match !reduce_motion && typewriter.advance(total, now) {
+                true => window.request_animation_frame(),
+                false => self.typewriter = None,
+            }
         }
 
         let settings = cx.global::<AgentSettings>();

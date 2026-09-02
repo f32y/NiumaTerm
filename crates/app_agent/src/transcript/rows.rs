@@ -293,14 +293,21 @@ impl TranscriptView {
     /// it hides, the final reply, and last the "Worked for Ns" summary.
     /// Running turns render chronologically.
     pub(crate) fn entry_spec(&self, index: usize) -> RowSpec {
-        RowSpec::Entry {
-            index,
-            fingerprint: entry_fingerprint(
-                &self.items[index].item,
-                self.disclosures.row_expanded(index),
-                self.disclosures.annotation_expanded(index),
-            ),
-        }
+        let fingerprint = entry_fingerprint(
+            &self.items[index].item,
+            self.disclosures.row_expanded(index),
+            self.disclosures.annotation_expanded(index),
+        );
+        // A reply being typed lays out to the part let through so far, so its
+        // signature follows that edge rather than the text behind it. The
+        // edge sits above the length bits, which keeps every position of it
+        // distinct from every length the text could have.
+        let fingerprint = match self.typed_edge(index) {
+            Some(shown) => fingerprint ^ ((shown as u64) << 32),
+            None => fingerprint,
+        };
+
+        RowSpec::Entry { index, fingerprint }
     }
 
     pub(crate) fn work_spec(&self, index: usize) -> RowSpec {
