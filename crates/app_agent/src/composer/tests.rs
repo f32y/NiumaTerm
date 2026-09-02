@@ -2,7 +2,7 @@ use nmt_agent_utils::chat::SlashCommandRunPolicy;
 use nmt_agent_utils::claude_code::{sessions, stream_json};
 use nmt_agent_utils::codex::app_server;
 
-use crate::composer::images::spaced_placeholder;
+use crate::composer::attachments::spaced_placeholder;
 use crate::composer::{
     CommandFeedbackKind, FileRestoreNext, RewindState, feedback_is_current, feedback_is_transient,
     file_restore_next, parse_annotated_prompt, prompt_with_response_annotations,

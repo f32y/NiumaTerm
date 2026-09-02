@@ -6,7 +6,7 @@ use gpui_component::{ActiveTheme as _, IconName, Sizable as _, h_flex, v_flex};
 use nmt_i18n::i18n;
 
 use crate::AgentPane;
-use crate::composer::attachments::Attachment;
+use crate::composer::attachments::{Attachment, ComposerAttachments};
 use crate::settings::UI_RADIUS;
 
 /// Edge of a thumbnail. Large enough to recognize a screenshot by, small
@@ -16,12 +16,12 @@ const THUMBNAIL: f32 = 56.0;
 const ANNOTATION_WIDTH: f32 = 240.0;
 const ANNOTATION_PREVIEW_CHARS: usize = 160;
 
-impl AgentPane {
+impl ComposerAttachments {
     /// The images the pending message carries, above the composer text they
     /// are anchored in. Absent while nothing is attached, so an ordinary
     /// message keeps the composer where it has always been.
-    pub(super) fn render_attachments(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if self.attachments.is_empty() && self.response_annotations.is_empty() {
+    pub(crate) fn render(&self, cx: &mut Context<AgentPane>) -> Option<AnyElement> {
+        if self.images().is_empty() && self.annotations().is_empty() {
             return None;
         }
 
@@ -35,13 +35,13 @@ impl AgentPane {
                 .gap_2()
                 .flex_wrap()
                 .children(
-                    self.attachments
+                    self.images()
                         .iter()
                         .enumerate()
                         .map(|(index, attachment)| self.render_attachment(index, attachment, cx)),
                 )
                 .children(
-                    self.response_annotations
+                    self.annotations()
                         .iter()
                         .enumerate()
                         .map(|(index, text)| self.render_response_annotation(index, text, cx)),
@@ -57,7 +57,7 @@ impl AgentPane {
         &self,
         index: usize,
         attachment: &Attachment,
-        cx: &mut Context<Self>,
+        cx: &mut Context<AgentPane>,
     ) -> AnyElement {
         div()
             .id(("agent-attachment", index))
@@ -108,7 +108,7 @@ impl AgentPane {
         &self,
         index: usize,
         text: &str,
-        cx: &mut Context<Self>,
+        cx: &mut Context<AgentPane>,
     ) -> AnyElement {
         let mut chars = text.chars();
         let mut preview: String = chars.by_ref().take(ANNOTATION_PREVIEW_CHARS).collect();

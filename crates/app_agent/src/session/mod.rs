@@ -39,7 +39,7 @@ use crate::capabilities::QueuedPromptDelivery;
 use crate::commands::{
     is_current_session_epoch, next_session_epoch, reconcile_skill_binding, reset_command_runtime,
 };
-use crate::composer::attachments::{PendingAttachments, scratch_dir};
+use crate::composer::attachments::{ComposerAttachments, scratch_dir};
 use crate::composer::{CommandFeedbackKind, ForkFlow, prompt_with_response_annotations};
 use crate::input_history::{InputHistoryNavigation, InputHistoryScope};
 use crate::profile::{AgentKind, agent_launch};
@@ -244,8 +244,7 @@ impl AgentPane {
             workspace,
             input_history_scope,
             input_history_navigation: InputHistoryNavigation::default(),
-            attachments: PendingAttachments::default(),
-            response_annotations: Vec::new(),
+            attachments: ComposerAttachments::default(),
             last_response_at: None,
             conversation_named: false,
             pending_conversation_rename: None,
@@ -831,7 +830,7 @@ impl AgentPane {
         skill: Option<&SkillReference>,
         cx: &mut Context<Self>,
     ) -> bool {
-        let response_annotations = self.response_annotations.clone();
+        let response_annotations = self.attachments.annotations().to_vec();
         let submitted = prompt_with_response_annotations(&text, &response_annotations);
         self.send_text_inner(submitted, skill, Some((text, response_annotations)), cx)
     }
@@ -876,13 +875,17 @@ impl AgentPane {
                     &text,
                     &settings,
                     skill,
-                    &self.attachments,
+                    self.attachments.images(),
                     &scratch,
                     title,
                 ),
-            Some(session) => {
-                session.send_user_message(&text, &settings, skill, &self.attachments, &scratch)
-            }
+            Some(session) => session.send_user_message(
+                &text,
+                &settings,
+                skill,
+                self.attachments.images(),
+                &scratch,
+            ),
             None => SendOutcome::NotReady,
         };
 
@@ -912,12 +915,13 @@ impl AgentPane {
         // the message stays as recoverable as its text.
         let sent_images: Vec<Arc<Image>> = self
             .attachments
+            .images()
             .iter()
             .map(|attachment| attachment.image())
             .collect();
-        self.attachments.clear();
+        self.attachments.clear_images();
         if restore_on_interrupt.is_some() {
-            self.response_annotations.clear();
+            self.attachments.clear_annotations();
         }
 
         // The first message commits this tab to its conversation; the

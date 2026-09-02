@@ -16,9 +16,151 @@ use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use gpui::{Image, ImageFormat};
+use gpui::{Context, Entity, Image, ImageFormat, Window};
+use gpui_component::input::InputState;
 use image_rs::GenericImageView;
 use image_rs::imageops::FilterType;
+
+use crate::AgentPane;
+
+mod render;
+
+/// The placeholder as it is written into the composer. A space on each side
+/// keeps it a word of its own, so the prompt around it does not run into the
+/// marker. The leading one is dropped where there is nothing to separate it
+/// from: the start of the text, or whitespace the caret already sits after.
+pub(crate) fn spaced_placeholder(preceding: Option<char>, placeholder: &str) -> String {
+    match preceding {
+        Some(character) if !character.is_whitespace() => format!(" {placeholder} "),
+        _ => format!("{placeholder} "),
+    }
+}
+
+/// Everything the pending message carries besides its text: the images
+/// anchored in it by placeholder, and the earlier response text quoted into
+/// it. Both are cleared by the same send and drawn on the same strip above
+/// the composer, so they travel together.
+#[derive(Default)]
+pub(crate) struct ComposerAttachments {
+    images: PendingAttachments,
+    /// Earlier agent response text attached to the pending message.
+    annotations: Vec<String>,
+}
+
+impl ComposerAttachments {
+    pub(crate) fn images(&self) -> &PendingAttachments {
+        &self.images
+    }
+
+    pub(crate) fn annotations(&self) -> &[String] {
+        &self.annotations
+    }
+
+    pub(crate) fn clear_images(&mut self) {
+        self.images.clear();
+    }
+
+    pub(crate) fn clear_annotations(&mut self) {
+        self.annotations.clear();
+    }
+
+    /// Put annotations back in front of the ones already pending, which is
+    /// what an interrupted message restores.
+    pub(crate) fn restore_annotations(&mut self, mut earlier: Vec<String>) {
+        earlier.append(&mut self.annotations);
+        self.annotations = earlier;
+    }
+
+    /// Quote an earlier response into the pending message, reporting whether
+    /// there was anything to quote.
+    pub(crate) fn add_annotation(&mut self, text: String) -> bool {
+        let text = text.trim().to_string();
+
+        if text.is_empty() {
+            return false;
+        }
+
+        self.annotations.push(text);
+
+        true
+    }
+
+    /// Take one annotation back off the pending message. The rest keep their
+    /// order, so the numbers the remaining chips carry stay the numbers the
+    /// prompt will send them under.
+    pub(crate) fn remove_annotation(&mut self, index: usize) -> bool {
+        if index >= self.annotations.len() {
+            return false;
+        }
+
+        self.annotations.remove(index);
+
+        true
+    }
+
+    /// Attach a decoded image and write its placeholder at the cursor, so the
+    /// text keeps the record of where the image belongs.
+    pub(crate) fn attach_image(
+        &mut self,
+        image: &Image,
+        input: &Entity<InputState>,
+        window: &mut Window,
+        cx: &mut Context<AgentPane>,
+    ) -> Result<(), AttachError> {
+        let placeholder = self.images.attach(image)?;
+
+        input.update(cx, |input, cx| {
+            let preceding = input.text().chars_at(input.cursor()).prev();
+            input.insert(spaced_placeholder(preceding, &placeholder), window, cx);
+        });
+
+        Ok(())
+    }
+
+    /// Drop the attachment at `index` by deleting its placeholder, then let
+    /// reconciliation renumber what is left. Removal and a hand-edited
+    /// deletion therefore take the same path.
+    pub(crate) fn remove_image(
+        &mut self,
+        index: usize,
+        input: &Entity<InputState>,
+        window: &mut Window,
+        cx: &mut Context<AgentPane>,
+    ) -> bool {
+        let Some(placeholder) = self.images.placeholder_at(index) else {
+            return false;
+        };
+
+        let text = input.read(cx).text().to_string();
+        let without = text.replace(placeholder, "");
+
+        input.update(cx, |input, cx| input.set_value(without.clone(), window, cx));
+
+        self.sync(&without, input, window, cx)
+    }
+
+    /// Bring the attachment list back in line with the composer text. The text
+    /// is the record of which images the message still carries, so this runs
+    /// after every edit that could have changed its placeholders. Reports
+    /// whether the strip needs redrawing.
+    pub(crate) fn sync(
+        &mut self,
+        text: &str,
+        input: &Entity<InputState>,
+        window: &mut Window,
+        cx: &mut Context<AgentPane>,
+    ) -> bool {
+        if self.images.is_empty() {
+            return false;
+        }
+
+        if let Some(renumbered) = self.images.reconcile(text) {
+            input.update(cx, |input, cx| input.set_value(renumbered, window, cx));
+        }
+
+        true
+    }
+}
 
 /// Images one message may carry. Claude Code's harness takes them inline on a
 /// single stdin line, so a message that gathers many large screenshots is one
