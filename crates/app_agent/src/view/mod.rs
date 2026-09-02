@@ -4,7 +4,6 @@ use gpui_component::button::ButtonVariants as _;
 use gpui_component::{ActiveTheme as _, Disableable as _};
 
 use crate::BlurFade;
-mod attachments;
 mod banners;
 mod blocking_overlay;
 mod history;
@@ -315,7 +314,7 @@ impl Render for AgentPane {
                                     .children(command_feedback)
                                     .children(session_state)
                                     .children(queued_message)
-                                    .children(self.render_attachments(cx))
+                                    .children(self.attachments.render(cx))
                                     .child(
                                         h_flex()
                                             .w_full()

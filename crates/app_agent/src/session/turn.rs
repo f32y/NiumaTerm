@@ -171,9 +171,8 @@ impl AgentPane {
                 input.set_selected_range(cursor..cursor, cx);
             });
             self.palette.skill_binding = prompt.skill;
-            let mut response_annotations = prompt.response_annotations;
-            response_annotations.append(&mut self.response_annotations);
-            self.response_annotations = response_annotations;
+            self.attachments
+                .restore_annotations(prompt.response_annotations);
             cx.notify();
         }
 

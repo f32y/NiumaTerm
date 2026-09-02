@@ -75,23 +75,17 @@ impl AgentPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let text = text.trim().to_string();
-        if text.is_empty() {
+        if !self.attachments.add_annotation(text) {
             return;
         }
 
-        self.response_annotations.push(text);
         window.clear_text_selection(cx);
         self.focus(window, cx);
         cx.notify();
     }
 
-    /// Take one annotation back off the pending message. The rest keep their
-    /// order, so the numbers the remaining chips carry stay the numbers the
-    /// prompt will send them under.
     pub(crate) fn remove_response_annotation(&mut self, index: usize, cx: &mut Context<Self>) {
-        if index < self.response_annotations.len() {
-            self.response_annotations.remove(index);
+        if self.attachments.remove_annotation(index) {
             cx.notify();
         }
     }

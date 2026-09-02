@@ -39,7 +39,7 @@ use nmt_agent_utils::{AgentEvent, AgentRoute, AgentWorkspace};
 use nmt_config::profile::AgentProfile;
 use nmt_i18n::i18n;
 
-use crate::composer::attachments::PendingAttachments;
+use crate::composer::attachments::ComposerAttachments;
 use crate::composer::{CommandFeedback, ForkFlow, PendingSlashCommand, RewindState};
 use crate::input_history::{InputHistoryNavigation, InputHistoryScope};
 use crate::pane_state::{ChildAgents, SessionRuntime, TurnState};
@@ -567,10 +567,8 @@ pub struct AgentPane {
     input_history_scope: InputHistoryScope,
     input_history_navigation: InputHistoryNavigation,
     /// Images the pending message carries, anchored to the composer text by
-    /// their `[Image #N]` placeholders.
-    attachments: PendingAttachments,
-    /// Earlier agent response text attached to the pending message.
-    response_annotations: Vec<String>,
+    /// their `[Image #N]` placeholders, and the response text quoted into it.
+    attachments: ComposerAttachments,
     /// When the agent last finished answering, for the composer's idle
     /// reading of how long the conversation has been waiting on the user.
     /// `None` until the first turn settles.

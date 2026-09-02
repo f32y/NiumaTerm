@@ -17,17 +17,6 @@ use crate::composer::attachments::{AttachError, MAX_ATTACHMENTS};
 /// A copied file read as an image, or `None` for anything that is not one.
 /// Only the extension is trusted to decide whether reading is worth it; the
 /// decode decides whether it was an image.
-/// The placeholder as it is written into the composer. A space on each side
-/// keeps it a word of its own, so the prompt around it does not run into the
-/// marker. The leading one is dropped where there is nothing to separate it
-/// from: the start of the text, or whitespace the caret already sits after.
-pub(super) fn spaced_placeholder(preceding: Option<char>, placeholder: &str) -> String {
-    match preceding {
-        Some(character) if !character.is_whitespace() => format!(" {placeholder} "),
-        _ => format!("{placeholder} "),
-    }
-}
-
 fn image_file(path: &Path) -> Option<Image> {
     let format = match path
         .extension()
@@ -79,12 +68,11 @@ impl AgentPane {
             return true;
         }
 
-        match self.attachments.attach(&image) {
-            Ok(placeholder) => {
-                self.input.update(cx, |input, cx| {
-                    let preceding = input.text().chars_at(input.cursor()).prev();
-                    input.insert(spaced_placeholder(preceding, &placeholder), window, cx);
-                });
+        match self
+            .attachments
+            .attach_image(&image, &self.input, window, cx)
+        {
+            Ok(()) => {
                 cx.notify();
                 true
             }
@@ -103,45 +91,28 @@ impl AgentPane {
         }
     }
 
-    /// Drop the attachment at `index` by deleting its placeholder, then let
-    /// reconciliation renumber what is left. Removal and a hand-edited
-    /// deletion therefore take the same path.
     pub(crate) fn remove_attachment(
         &mut self,
         index: usize,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(placeholder) = self.attachments.placeholder_at(index) else {
-            return;
-        };
-
-        let text = self.input.read(cx).text().to_string();
-        let without = text.replace(placeholder, "");
-
-        self.input
-            .update(cx, |input, cx| input.set_value(without.clone(), window, cx));
-        self.sync_attachments(&without, window, cx);
+        if self
+            .attachments
+            .remove_image(index, &self.input, window, cx)
+        {
+            cx.notify();
+        }
     }
 
-    /// Bring the attachment list back in line with the composer text. The text
-    /// is the record of which images the message still carries, so this runs
-    /// after every edit that could have changed its placeholders.
     pub(crate) fn sync_attachments(
         &mut self,
         text: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.attachments.is_empty() {
-            return;
+        if self.attachments.sync(text, &self.input, window, cx) {
+            cx.notify();
         }
-
-        if let Some(renumbered) = self.attachments.reconcile(text) {
-            self.input
-                .update(cx, |input, cx| input.set_value(renumbered, window, cx));
-        }
-
-        cx.notify();
     }
 }
