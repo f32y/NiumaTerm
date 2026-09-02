@@ -1,10 +1,27 @@
+use std::collections::{HashMap, HashSet};
+use std::time::Instant;
+
+use chrono::{DateTime, Local};
+use gpui::prelude::*;
+use gpui::{
+    Context, FollowMode, IntoElement, ListAlignment, ListState, Pixels, Render, SharedString,
+    Window, div, list, px, relative,
+};
+use gpui_component::button::Button;
+use gpui_component::scroll::Scrollbar;
+use gpui_component::{ActiveTheme as _, ElementExt as _, IconName, Sizable as _};
+use nmt_agent_utils::chat::{Item as SessionItem, ReplayTurn};
+use nmt_config::agent::CollapseRows;
 use nmt_i18n::i18n;
 
-use crate::transcript::is_work_row;
+use crate::AgentPane;
+use crate::composer::PALETTE_MAX_HEIGHT;
+use crate::profile::AgentKind;
+use crate::settings::{AgentSettings, UI_RADIUS};
 use crate::transcript::render::TRANSCRIPT_LINE_HEIGHT;
 use crate::transcript::reveal::{RevealedPart, Reveals};
 use crate::transcript::rows::TranscriptRow;
-use crate::*;
+use crate::transcript::{Entry, ReadingPosition, VirtualTranscriptState, is_work_row};
 
 /// One agent conversation as the user reads it: the entry list, the row
 /// structure derived from it, and every piece of view state that structure

@@ -1,11 +1,27 @@
+use std::time::Duration;
+
+use gpui::prelude::*;
+use gpui::{AnyElement, Context, FontWeight, SharedString, div, px};
+use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::checkbox::Checkbox;
+use gpui_component::radio::Radio;
+use gpui_component::spinner::Spinner;
+use gpui_component::{
+    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, h_flex, v_flex,
+};
+use nmt_agent_utils::chat::{Question, QuestionOption};
+use nmt_agent_utils::{AgentWorkspace, MultiRootAccess};
 use nmt_i18n::i18n;
 
 use crate::context_usage::{ContextUsageIndicator, cache_hit_percent};
+use crate::profile::AgentKind;
+use crate::session::UpdateSuspension;
+use crate::settings::{AgentSettings, UI_RADIUS};
 use crate::view::blocking_overlay::BlockingOverlay;
 use crate::view::{
     COMPOSER_STATUS_PADDING_X, COMPOSER_STATUS_PADDING_Y, COMPOSER_STATUS_TEXT_SIZE,
 };
-use crate::*;
+use crate::{AgentPane, AgentPaneEvent, QuestionPrompt};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum UpdateOverlayPhase {

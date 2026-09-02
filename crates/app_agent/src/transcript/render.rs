@@ -1,9 +1,25 @@
-use gpui::{Font, ObjectFit, img, rems};
+use std::borrow::Cow;
+use std::path::Path;
+use std::time::Instant;
+
+use gpui::prelude::*;
+use gpui::{
+    AnyElement, App, ClipboardItem, Context, Div, ElementId, Font, ListHorizontalSizingBehavior,
+    ObjectFit, ScrollHandle, SharedString, StyleRefinement, Window, div, img, px, relative, rems,
+    uniform_list,
+};
 use gpui_component::modern_menu::{ModernMenu, ModernMenuExt as _};
+use gpui_component::scroll::Scrollbar;
+use gpui_component::spinner::Spinner;
+use gpui_component::text::TextViewStyle;
+use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, text, v_flex};
+use nmt_agent_utils::chat::{Compaction, Item as SessionItem};
 use nmt_i18n::i18n;
 
 use crate::composer::attachments::MAX_ATTACHMENTS;
 use crate::composer::{annotation_count_label, parse_annotated_prompt};
+use crate::links;
+use crate::settings::{AgentSettings, UI_RADIUS};
 use crate::transcript::disclosure_row::{
     AGENT_CARD_BODY_PADDING_Y, AGENT_CARD_DETAIL_SIZE, AGENT_CARD_GAP, AGENT_CARD_ICON_BLOCK,
     AGENT_CARD_PADDING_X, AGENT_CARD_RADIUS, AGENT_DISCLOSURE_DETAIL_INSET, AgentCardTone,
@@ -15,13 +31,12 @@ use crate::transcript::reveal::{RevealKey, RevealedPart, revealed, revealed_bloc
 use crate::transcript::rows::{RowGap, TranscriptRow, is_run_row};
 use crate::transcript::working_indicator::WorkingIndicator;
 use crate::transcript::{
-    code_transcript_format, command_execution_detail, command_execution_heading,
-    command_failure_reason, compact_token_count, compaction_accounting, compaction_label,
-    compaction_row_is_expandable, compaction_trigger_label, entry_copy_text, fenced_code_block_as,
-    is_work_row, should_virtualize_transcript, strip_read_gutter, truncated_user_prompt,
-    working_label,
+    RowSpec, TranscriptView, VirtualTranscriptState, code_transcript_format,
+    command_execution_detail, command_execution_heading, command_failure_reason,
+    compact_token_count, compaction_accounting, compaction_label, compaction_row_is_expandable,
+    compaction_trigger_label, entry_copy_text, fenced_code_block_as, is_work_row,
+    should_virtualize_transcript, strip_read_gutter, truncated_user_prompt, working_label,
 };
-use crate::*;
 
 /// Edge of a transcript thumbnail, matching the composer strip so an image
 /// does not change size when the message it belongs to is sent.

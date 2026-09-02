@@ -1,7 +1,22 @@
+use gpui::prelude::*;
+use gpui::{
+    AnyElement, App, Context, Div, FontWeight, IntoElement, MouseButton, Pixels, SharedString,
+    Stateful, div, px, relative,
+};
+use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_component::popover::Popover;
+use gpui_component::{ActiveTheme as _, Icon, IconName, IconNamed, Sizable as _, h_flex, v_flex};
+use nmt_agent_utils::claude_code::stream_json;
+use nmt_agent_utils::codex::app_server;
 use nmt_i18n::i18n;
 
+use crate::AgentPane;
+use crate::commands::setting_value_label;
+use crate::composer::PendingSlashCommand;
+use crate::profile::AgentKind;
+use crate::settings::AgentSettings;
 use crate::transcript::permission_icon;
-use crate::*;
 
 /// One composer setting, drawn as its own pill. Each pill opens its own menu
 /// and changes one value, so each carries its own outline: a shared frame

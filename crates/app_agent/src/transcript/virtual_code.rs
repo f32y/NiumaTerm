@@ -1,5 +1,11 @@
+use std::borrow::Cow;
+use std::ops::Range;
+use std::rc::Rc;
+
+use gpui::{SharedString, UniformListScrollHandle};
+use nmt_agent_utils::chat::Item as SessionItem;
+
 use crate::transcript::{detect_output_language, file_extension_lang, strip_read_gutter};
-use crate::*;
 
 pub(super) const VIRTUAL_TRANSCRIPT_MIN_BYTES: usize = 16 * 1024;
 pub(super) const VIRTUAL_TRANSCRIPT_MIN_ROWS: usize = 128;

@@ -37,6 +37,3 @@ pub(super) use crate::transcript::virtual_code::{
 };
 #[cfg(test)]
 mod tests;
-
-#[cfg(test)]
-use crate::*;

@@ -8,11 +8,15 @@
 //! backend which prompts it can branch in front of, show them, and hand the
 //! chosen one back so the branch starts where it was cut.
 
+use gpui::{Context, SharedString, Window};
+use nmt_agent_utils::chat::ForkCheckpoint;
 use nmt_i18n::i18n;
 
 use crate::composer::rewind::{rewind_blocks_submission, rewind_prompt_label, rewind_timestamp};
-use crate::composer::{CommandFeedbackKind, PaletteAction, PaletteModel, PaletteRow};
-use crate::*;
+use crate::composer::{CommandFeedbackKind, PaletteAction, PaletteModel, PaletteRow, RewindState};
+use crate::session::{Backend, Status};
+use crate::settings::AgentSettings;
+use crate::{AgentPane, RecentSessionsMode, translated};
 
 /// One prompt the user pointed at in the transcript, to be found in the list
 /// of branch points once the backend answers with it.

@@ -1,8 +1,24 @@
+use gpui::prelude::*;
+use gpui::{
+    AnyElement, Context, FontWeight, Pixels, ScrollStrategy, SharedString, Window, div, px,
+};
+use gpui_component::{ActiveTheme as _, h_flex, v_flex};
+use nmt_agent_utils::chat::{
+    ForkCheckpoint, SkillInfo, SlashCommandArguments, SlashCommandInfo, SlashCommandRunPolicy,
+    SlashCommandSource,
+};
+use nmt_agent_utils::claude_code::sessions;
 use nmt_i18n::i18n;
 
+use crate::commands::{
+    PaletteCatalogEntry, PaletteDirection, filter_palette_catalog, filter_skill_catalog,
+    move_palette_selection, parse_skill_prefix, parse_slash_command, prepare_skill_selection,
+};
 use crate::composer::{CommandFeedbackKind, ForkState, RewindAction, RewindState};
 use crate::input_history::InputHistoryDirection;
-use crate::*;
+use crate::session::Status;
+use crate::settings::{AgentSettings, UI_RADIUS};
+use crate::{AgentPane, RecentSessionsMode, translated};
 
 /// Tallest the palette grows before its own rows scroll: nine rows and the
 /// note under them. The transcript reads this as the height the picker covers

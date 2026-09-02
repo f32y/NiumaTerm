@@ -1,7 +1,13 @@
+use std::path::Path;
+use std::time::{Duration, Instant, SystemTime};
+
+use gpui::{Pixels, px};
+use gpui_component::IconName;
+use nmt_agent_utils::chat::{Compaction, CompactionTrigger, Item as SessionItem};
 use nmt_i18n::i18n;
 
 use crate::composer::visible_prompt;
-use crate::*;
+use crate::profile::AgentKind;
 
 /// Where the last-response reading stops counting and becomes "more than an
 /// hour".

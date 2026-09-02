@@ -1,11 +1,14 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
-use gpui::Image;
+use chrono::Local;
+use gpui::{Context, FollowMode, Image, ListOffset, px};
+use nmt_agent_utils::chat::Item as SessionItem;
+use nmt_config::agent::CollapseRows;
 
 use crate::composer::PromptTarget;
 use crate::transcript::view::TranscriptView;
 use crate::transcript::{compaction_accounting, hidden, is_work_row, should_show_jump_to_latest};
-use crate::*;
 
 /// A transcript entry plus the local wall-clock time it first appeared
 /// (shown on hover) and the turn it belongs to (drives turn folding).

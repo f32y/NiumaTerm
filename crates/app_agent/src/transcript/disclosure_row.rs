@@ -1,9 +1,12 @@
 use std::f32::consts::FRAC_PI_2;
 
-use gpui::{radians, transparent_black};
+use gpui::prelude::*;
+use gpui::{
+    App, Context, Div, ElementId, Hsla, Stateful, div, px, radians, relative, transparent_black,
+};
+use gpui_component::{ActiveTheme as _, Icon, IconName, h_flex, v_flex};
 
 use crate::transcript::view::TranscriptView;
-use crate::*;
 
 /// Card geometry for the transcript's expandable rows. Every tool call, work
 /// run and structural break in the conversation is drawn as one card, so these

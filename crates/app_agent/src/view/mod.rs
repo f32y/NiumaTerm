@@ -1,3 +1,9 @@
+use gpui::prelude::*;
+use gpui::{IntoElement, Render};
+use gpui_component::button::ButtonVariants as _;
+use gpui_component::{ActiveTheme as _, Disableable as _};
+
+use crate::BlurFade;
 mod attachments;
 mod banners;
 mod blocking_overlay;
@@ -9,18 +15,27 @@ mod settings_row;
 #[cfg(test)]
 mod tests;
 
-use gpui::{MouseUpEvent, Pixels, Point, WeakEntity};
-use gpui_component::WindowExt as _;
-use gpui_component::input::Paste;
+use std::time::Instant;
+
+use gpui::{
+    App, ClipboardItem, Context, FocusHandle, FontWeight, MouseButton, MouseUpEvent, Pixels, Point,
+    SharedString, WeakEntity, Window, div, px, relative,
+};
+use gpui_component::button::Button;
+use gpui_component::input::{Enter, Escape, IndentInline, Input, MoveDown, MoveUp, Paste};
 use gpui_component::modern_menu::ModernMenu;
+use gpui_component::{IconName, IconNamed, WindowExt as _, h_flex, v_flex};
 use nmt_app_terminal::frame::theme_default_background;
+use nmt_config::system::NewlineShortcut;
 use nmt_i18n::i18n;
 
 use crate::composer::{CommandFeedbackKind, ComposerAction, PaletteControl, composer_action};
+use crate::session::Status;
+use crate::settings::{AgentSettings, UI_RADIUS};
 // The composer takes the same share of the pane as the transcript column above
 // it, so the two edges line up at every window width.
 use crate::transcript::transcript_column_margin;
-use crate::*;
+use crate::{AgentPane, AgentPaneEvent, RecentSessionsMode};
 
 /// The composer is the one surface the user types into, so it carries a softer
 /// corner than the cards inside the conversation.

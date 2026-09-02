@@ -1,9 +1,13 @@
-use gpui::{ObjectFit, img};
+use gpui::prelude::*;
+use gpui::{AnyElement, Context, FontWeight, ObjectFit, SharedString, div, img, px};
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::tooltip::Tooltip;
+use gpui_component::{ActiveTheme as _, IconName, Sizable as _, h_flex, v_flex};
+use nmt_i18n::i18n;
 
+use crate::AgentPane;
 use crate::composer::attachments::Attachment;
-use crate::*;
+use crate::settings::UI_RADIUS;
 
 /// Edge of a thumbnail. Large enough to recognize a screenshot by, small
 /// enough that a full message's worth of them does not push the composer off

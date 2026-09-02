@@ -1,8 +1,16 @@
+use chrono::Local;
+use futures::channel::oneshot;
+use gpui::{Context, SharedString, Window};
+use nmt_agent_utils::chat::SlashCommandOutcome;
+use nmt_agent_utils::claude_code::sessions;
 use nmt_i18n::i18n;
 
+use crate::commands::reset_command_runtime;
 use crate::composer::fork::{PromptTarget, checkpoint_at_depth};
 use crate::composer::{CommandFeedbackKind, PaletteAction, PaletteModel, PaletteRow};
-use crate::*;
+use crate::profile::AgentKind;
+use crate::session::{Backend, RecoveryIdentity, Status};
+use crate::{AgentPane, RecentSessionsMode, translated};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RewindAction {

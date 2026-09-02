@@ -1,4 +1,12 @@
-use crate::*;
+use std::collections::{BTreeMap, HashMap};
+
+use gpui::SharedString;
+use gpui_component::{Icon, IconNamed};
+use nmt_agent_utils::chat::ThreadSettings;
+use nmt_agent_utils::update::ProviderKind;
+use nmt_agent_utils::{CodexProviderConfig, LaunchConfig, deepseek};
+use nmt_config::local_state::AgentDefaults as StoredAgentDefaults;
+use nmt_config::profile::{AgentProfile, AgentProfileKind, AgentProfileLauncher};
 
 /// Provider icons, defined beside the kind they mark. The usage view and the
 /// settings chrome borrow them from here.

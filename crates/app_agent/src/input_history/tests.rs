@@ -8,6 +8,7 @@ use std::{env, fs, process};
 use gpui::{Entity, TestAppContext, VisualTestContext, WindowHandle};
 use nmt_agent_utils::AgentWorkspace;
 use nmt_agent_utils::chat::{SendOutcome, SessionSummary, SlashCommandOutcome};
+use nmt_agent_utils::codex::app_server;
 use nmt_config::profile::{AgentProfile, AgentProfileKind};
 
 use crate::composer::PaletteControl;
@@ -18,7 +19,7 @@ use crate::input_history::{
 };
 use crate::session::{Backend, Status, TestBackend};
 use crate::settings::AgentSettings;
-use crate::{AgentKind, AgentPane, AgentThreadDefaults, RecentSessionsMode, app_server};
+use crate::{AgentKind, AgentPane, AgentThreadDefaults, RecentSessionsMode};
 
 static NEXT_TEST_DIRECTORY: AtomicU64 = AtomicU64::new(1);
 
