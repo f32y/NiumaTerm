@@ -4,8 +4,8 @@ use libghostty_vt_sys::{
     Formatter as VtFormatter, FormatterFormat as VtFormatterFormat,
     FormatterTerminalExtra as VtFormatterTerminalExtra,
     FormatterTerminalOptions as VtFormatterTerminalOptions, PointTag as VtPointTag,
-    Selection as VtSelection, ghostty_formatter_format_alloc, ghostty_formatter_free,
-    ghostty_formatter_terminal_new, ghostty_free, sized as vt_sized,
+    Selection as VtSelection, Terminal as VtTerminal, ghostty_formatter_format_alloc,
+    ghostty_formatter_free, ghostty_formatter_terminal_new, ghostty_free, sized as vt_sized,
 };
 
 use crate::ghostty::{Error, GhosttyTerminal, Result};
@@ -22,63 +22,21 @@ impl GhosttyTerminal {
         unwrap: bool,
         trim: bool,
     ) -> Result<String> {
-        self.format_terminal(VtFormatterFormat::PLAIN, selection, unwrap, trim)
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        format_terminal(
+            self.terminal,
+            VtFormatterFormat::PLAIN,
+            selection,
+            unwrap,
+            trim,
+        )
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
     }
 
     /// Export the complete terminal state as a VT stream. Replaying the returned
     /// bytes reconstructs the current screen, styles, modes, palette, and cursor,
     /// which lets a newly attached client start from a consistent checkpoint.
     pub fn format_vt_state(&mut self) -> Result<Vec<u8>> {
-        self.format_terminal(VtFormatterFormat::VT, None, false, false)
-    }
-
-    fn format_terminal(
-        &mut self,
-        emit: VtFormatterFormat::Type,
-        selection: Option<&VtSelection>,
-        unwrap: bool,
-        trim: bool,
-    ) -> Result<Vec<u8>> {
-        let mut opts = vt_sized!(VtFormatterTerminalOptions);
-
-        opts.emit = emit;
-        opts.unwrap = unwrap;
-        opts.trim = trim;
-        opts.extra = vt_sized!(VtFormatterTerminalExtra);
-        opts.selection = selection
-            .map(|s| s as *const VtSelection)
-            .unwrap_or(ptr::null());
-
-        let mut formatter: VtFormatter = ptr::null_mut();
-
-        Error::from_code(unsafe {
-            ghostty_formatter_terminal_new(ptr::null(), &mut formatter, self.terminal, opts)
-        })?;
-
-        let mut out_ptr: *mut u8 = ptr::null_mut();
-        let mut out_len: usize = 0;
-
-        let res = Error::from_code(unsafe {
-            ghostty_formatter_format_alloc(formatter, ptr::null(), &mut out_ptr, &mut out_len)
-        });
-
-        let bytes = res.map(|_| {
-            if out_ptr.is_null() || out_len == 0 {
-                Vec::new()
-            } else {
-                let bytes = unsafe { slice::from_raw_parts(out_ptr, out_len) };
-                bytes.to_vec()
-            }
-        });
-
-        if !out_ptr.is_null() {
-            unsafe { ghostty_free(ptr::null(), out_ptr, out_len) };
-        }
-
-        unsafe { ghostty_formatter_free(formatter) };
-
-        bytes
+        format_terminal(self.terminal, VtFormatterFormat::VT, None, false, false)
     }
 
     /// Selection-to-string for a SCREEN-coordinate range (inclusive endpoints).
@@ -104,4 +62,56 @@ impl GhosttyTerminal {
 
         self.format_text(Some(&sel), unwrap, trim)
     }
+}
+
+/// Run the engine formatter over one terminal and take ownership of the
+/// bytes it allocates. The formatter and its output buffer are separate FFI
+/// allocations that have to be released whether or not the format succeeded,
+/// which is why they never escape this function.
+fn format_terminal(
+    terminal: VtTerminal,
+    emit: VtFormatterFormat::Type,
+    selection: Option<&VtSelection>,
+    unwrap: bool,
+    trim: bool,
+) -> Result<Vec<u8>> {
+    let mut opts = vt_sized!(VtFormatterTerminalOptions);
+
+    opts.emit = emit;
+    opts.unwrap = unwrap;
+    opts.trim = trim;
+    opts.extra = vt_sized!(VtFormatterTerminalExtra);
+    opts.selection = selection
+        .map(|s| s as *const VtSelection)
+        .unwrap_or(ptr::null());
+
+    let mut formatter: VtFormatter = ptr::null_mut();
+
+    Error::from_code(unsafe {
+        ghostty_formatter_terminal_new(ptr::null(), &mut formatter, terminal, opts)
+    })?;
+
+    let mut out_ptr: *mut u8 = ptr::null_mut();
+    let mut out_len: usize = 0;
+
+    let res = Error::from_code(unsafe {
+        ghostty_formatter_format_alloc(formatter, ptr::null(), &mut out_ptr, &mut out_len)
+    });
+
+    let bytes = res.map(|_| {
+        if out_ptr.is_null() || out_len == 0 {
+            Vec::new()
+        } else {
+            let bytes = unsafe { slice::from_raw_parts(out_ptr, out_len) };
+            bytes.to_vec()
+        }
+    });
+
+    if !out_ptr.is_null() {
+        unsafe { ghostty_free(ptr::null(), out_ptr, out_len) };
+    }
+
+    unsafe { ghostty_formatter_free(formatter) };
+
+    bytes
 }
