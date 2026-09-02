@@ -209,7 +209,7 @@ impl Shell {
         if self.workspaces.active_tabs().active().is_settings() {
             let mut settings = ui::settings::settings_view(cx);
 
-            if let Some(state) = self.settings_state.clone() {
+            if let Some(state) = self.settings.render_target().cloned() {
                 settings = settings.state(state);
             }
 

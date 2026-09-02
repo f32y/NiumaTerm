@@ -24,7 +24,7 @@ use dirs::home_dir;
 use gpui::prelude::*;
 use gpui::{
     Anchor, AnyElement, App, Axis, Context, Div, Entity, FocusHandle, Focusable, MouseDownEvent,
-    ObjectFit, Pixels, Render, SharedString, Task, Window, WindowBounds, WindowId, div, img, px,
+    ObjectFit, Pixels, Render, SharedString, Window, WindowBounds, WindowId, div, img, px,
 };
 use gpui_component::button::{Button, ButtonVariants, Toggle, ToggleVariants};
 use gpui_component::dialog::{
@@ -36,7 +36,6 @@ use gpui_component::progress::Progress;
 use gpui_component::resizable::{
     PANEL_MIN_SIZE, ResizablePanelGroup, ResizableState, resizable_panel,
 };
-use gpui_component::setting::SettingsState;
 use gpui_component::{
     ActiveTheme, Icon, IconName, IconNamed, Root, TitleBar, WindowExt, h_flex, v_flex,
 };
@@ -80,6 +79,7 @@ pub(crate) use crate::ui::shell::actions::{
 use crate::ui::shell::close::{should_confirm_close, should_confirm_tab_close};
 pub(super) use crate::ui::shell::inline_rename::{InlineRename, InlineRenameStyle};
 use crate::ui::shell::panels::RightPanelController;
+use crate::ui::shell::settings_workspace::SettingsSurface;
 pub(super) use crate::ui::shell::tab_presentation::pending_tab_icon;
 pub(crate) use crate::ui::shell::tab_surface::TabSurface;
 use crate::ui::shell::updates_layer::UpdateNotificationLayer;
@@ -157,18 +157,7 @@ pub(crate) struct Shell {
     /// Whether we've started observing the wrapping `Root` (so dialog open/close
     /// re-renders the shell, which draws the dialog layer). Set on first render.
     root_observed: bool,
-    /// Theme directory watcher, alive only while this shell's settings entry
-    /// is open.
-    theme_watcher: Option<Task<()>>,
-    /// Selected page and search query of the settings surface. The shell owns
-    /// it so switching to another workspace and back returns to the page the
-    /// user left; the element state the component keeps by default would be
-    /// dropped the frame the surface stops rendering.
-    settings_state: Option<Entity<SettingsState>>,
-    /// Whether the settings surface was the active tab at the last activation.
-    /// Comparing against it turns every activation into an edge detector, so
-    /// leaving the surface can flush the edits it left in the global.
-    settings_was_active: bool,
+    settings: SettingsSurface,
     focus: FocusHandle,
     /// This shell's window in the `WindowRegistry`; all state writes target
     /// this entry.
@@ -342,9 +331,7 @@ impl Shell {
             pending_agent_resume: None,
             pending_agent_close: None,
             root_observed: false,
-            theme_watcher: None,
-            settings_state: None,
-            settings_was_active: false,
+            settings: SettingsSurface::default(),
             focus: cx.focus_handle(),
             window_id,
             token_usage: cx.new(TokenUsageView::new),
@@ -450,14 +437,9 @@ impl Shell {
 
         let settings_active = self.workspaces.active_tabs().active().is_settings();
 
-        // Settings edits only live in the global until something writes them
-        // out. Switching to another workspace leaves the surface on screen
-        // for an unbounded time, so treat the departure as a commit point
-        // instead of holding the edits until the entry is closed.
-        if self.settings_was_active && !settings_active {
+        if self.settings.note_active(settings_active) {
             cx.global::<AppSettings>().save();
         }
-        self.settings_was_active = settings_active;
 
         // The settings surface owns its inner focus (its search field and
         // controls), and it has no pane to hand the keyboard to, so focus
