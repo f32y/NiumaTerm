@@ -125,12 +125,12 @@ impl TranscriptView {
         };
 
         let expandable = detail.is_some();
-        let expanded = expandable && self.expanded_rows.contains(&index);
+        let expanded = expandable && self.disclosures.row_expanded(index);
         let detail_reveal = self
-            .reveals
+            .disclosures
             .progress(RevealKey::Row(index), 0, Instant::now());
         let detail_part = RevealedPart::Block(RevealKey::Row(index));
-        let detail_height = self.revealed_heights.get(&detail_part).copied();
+        let detail_height = self.disclosures.height(detail_part);
         let detail_view = cx.entity().downgrade();
         let status_label = match status.as_deref() {
             Some("failed") => i18n("agent-transcript-status-failed"),
@@ -158,7 +158,7 @@ impl TranscriptView {
             heading,
             status_label,
             if expandable {
-                if self.is_disclosing(RevealKey::Row(index)) {
+                if self.disclosures.is_disclosing(RevealKey::Row(index)) {
                     i18n("agent-transcript-accessibility-expanded")
                 } else {
                     i18n("agent-transcript-accessibility-collapsed")

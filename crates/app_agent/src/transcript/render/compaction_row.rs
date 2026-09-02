@@ -39,7 +39,7 @@ impl TranscriptView {
         let label = compaction_label(&detail);
         let preview = compaction_accounting(&detail).join(" · ");
         let expandable = compaction_row_is_expandable(self.kind);
-        let expanded = expandable && self.expanded_rows.contains(&index);
+        let expanded = expandable && self.disclosures.row_expanded(index);
         let accent = cx.theme().info;
 
         let mut header_row = AgentDisclosureRow::new(("compaction-head", index), label)
@@ -47,16 +47,17 @@ impl TranscriptView {
             .preview(preview.clone())
             .accent(accent);
         if expandable {
-            header_row = header_row.expanded(expanded).opening(self.reveals.progress(
-                RevealKey::Row(index),
-                0,
-                Instant::now(),
-            ));
+            header_row = header_row
+                .expanded(expanded)
+                .opening(
+                    self.disclosures
+                        .progress(RevealKey::Row(index), 0, Instant::now()),
+                );
         }
         let accessible_label = if expandable {
             format!(
                 "{label}. {preview}. {}",
-                if self.is_disclosing(RevealKey::Row(index)) {
+                if self.disclosures.is_disclosing(RevealKey::Row(index)) {
                     i18n("agent-transcript-expanded")
                 } else {
                     i18n("agent-transcript-collapsed")
@@ -211,9 +212,9 @@ impl TranscriptView {
         revealed_block(
             block,
             part,
-            self.reveals
+            self.disclosures
                 .progress(RevealKey::Row(index), 0, Instant::now()),
-            self.revealed_heights.get(&part).copied(),
+            self.disclosures.height(part),
             px(0.),
             cx.entity().downgrade(),
         )

@@ -297,8 +297,8 @@ impl TranscriptView {
             index,
             fingerprint: entry_fingerprint(
                 &self.items[index].item,
-                self.expanded_rows.contains(&index),
-                self.expanded_annotations.contains(&index),
+                self.disclosures.row_expanded(index),
+                self.disclosures.annotation_expanded(index),
             ),
         }
     }
@@ -308,7 +308,7 @@ impl TranscriptView {
             index,
             fingerprint: entry_fingerprint(
                 &self.items[index].item,
-                self.expanded_rows.contains(&index),
+                self.disclosures.row_expanded(index),
                 false,
             ),
         }
@@ -515,7 +515,7 @@ impl TranscriptView {
             }
 
             if !matches!(collapse, CollapseRows::Off) && visible.len() > 1 {
-                let expanded = self.expanded_groups.contains(&run_start);
+                let expanded = self.disclosures.group_expanded(run_start);
 
                 rows.push(RowSpec::RunToggle {
                     run_start,

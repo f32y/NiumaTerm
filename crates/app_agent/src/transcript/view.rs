@@ -19,7 +19,7 @@ use crate::composer::PALETTE_MAX_HEIGHT;
 use crate::profile::AgentKind;
 use crate::settings::{AgentSettings, UI_RADIUS};
 use crate::transcript::render::TRANSCRIPT_LINE_HEIGHT;
-use crate::transcript::reveal::{RevealedPart, Reveals};
+use crate::transcript::reveal::Disclosures;
 use crate::transcript::rows::TranscriptRow;
 use crate::transcript::{Entry, ReadingPosition, VirtualTranscriptState, is_work_row};
 
@@ -59,9 +59,6 @@ pub struct TranscriptView {
     /// screen, which leaves exactly those prompts behind the list naming
     /// them.
     pub(super) reserve_below: bool,
-    /// Collapsed work-log runs the user has expanded, keyed by the index of
-    /// the run's first transcript entry (stable — the list only appends).
-    pub(crate) expanded_groups: HashSet<usize>,
     /// Settled turns the user has flipped away from what the collapse setting
     /// does by default: unfolded where it folds a turn's work behind the
     /// "Show work" disclosure, folded where it leaves the work on screen.
@@ -69,19 +66,9 @@ pub struct TranscriptView {
     /// Collapse setting the rows above were built under, so a change to it can
     /// retire the per-turn and per-run departures from the mode it replaces.
     collapse_mode: CollapseRows,
-    /// Work-log rows whose detail (command output, reasoning text) is
-    /// expanded, keyed by transcript index.
-    pub(crate) expanded_rows: HashSet<usize>,
-    /// User-message annotation cards expanded to show their complete text.
-    pub(crate) expanded_annotations: HashSet<usize>,
-    /// When each moving disclosure started, and which way it is going. This
-    /// is what the content it discloses fades and grows against.
-    pub(crate) reveals: Reveals,
-    /// Full height of each piece of the transcript a disclosure opens,
-    /// measured while that piece is on screen. A piece being opened or shut is
-    /// drawn inside a box ramped towards this, so the height comes from what
-    /// the content actually lays out to rather than being guessed at.
-    pub(crate) revealed_heights: HashMap<RevealedPart, Pixels>,
+    /// Which parts of the transcript are open, how far through their motion
+    /// they are, and how tall each one lays out to.
+    pub(crate) disclosures: Disclosures,
     /// Long expanded code transcripts retain their segmented source and
     /// independent uniform-list position while visible. Collapsing a row drops
     /// the duplicate source so large outputs do not stay resident twice.
@@ -148,13 +135,9 @@ impl TranscriptView {
             transcript_font: Default::default(),
             transcript_width: None,
             transcript_height: None,
-            expanded_groups: HashSet::new(),
+            disclosures: Disclosures::default(),
             toggled_turns: HashSet::new(),
             collapse_mode: CollapseRows::default(),
-            expanded_rows: HashSet::new(),
-            expanded_annotations: HashSet::new(),
-            reveals: Reveals::default(),
-            revealed_heights: HashMap::new(),
             virtual_transcripts: HashMap::new(),
             settled_turns: HashSet::new(),
             completed_turn_seconds: HashMap::new(),
@@ -218,12 +201,8 @@ impl TranscriptView {
         self.stashed_position = None;
         self.reserve_below = false;
         self.scroll_to_bottom();
-        self.expanded_groups.clear();
         self.toggled_turns.clear();
-        self.expanded_rows.clear();
-        self.expanded_annotations.clear();
-        self.reveals.clear();
-        self.revealed_heights.clear();
+        self.disclosures.clear();
         self.settled_turns.clear();
         self.completed_turn_seconds.clear();
         self.completed_turn_output_tokens.clear();
@@ -449,7 +428,7 @@ impl Render for TranscriptView {
         // without the request the remaining frames arrive only when something
         // unrelated repaints, so a conversation nobody is typing into would
         // show the first frame of the motion and stop there.
-        if !self.reveals.settled(now) {
+        if !self.disclosures.settled(now) {
             window.request_animation_frame();
         }
 
@@ -472,15 +451,13 @@ impl Render for TranscriptView {
         if self.collapse_mode != collapse {
             self.collapse_mode = collapse;
             self.toggled_turns.clear();
-            self.expanded_groups.clear();
             // Anything mid-exit goes with its own state: dropping the reveal
             // alone would strand the disclosure open with nothing left to
             // finish shutting it.
-            for key in self.reveals.closing() {
+            for key in self.disclosures.closing() {
                 self.take_down_disclosure(key);
             }
-            self.reveals.clear();
-            self.revealed_heights.clear();
+            self.disclosures.forget_groups();
         }
         self.transcript_list.set_smooth_wheel_enabled(smooth_wheel);
 

@@ -110,7 +110,7 @@ impl TranscriptView {
         // The wording answers the click while the steps under it may still be
         // leaving: a toggle reading "show fewer" through the exit it started
         // would be offering to do again what it is in the middle of doing.
-        let disclosing = self.is_disclosing(RevealKey::Group(run_start));
+        let disclosing = self.disclosures.is_disclosing(RevealKey::Group(run_start));
         let label = if disclosing {
             i18n("agent-transcript-show-fewer-tool-calls").to_string()
         } else {
@@ -123,10 +123,11 @@ impl TranscriptView {
                 // being one, and its own chevron already says what it does.
                 AgentDisclosureRow::new(("wl-run", run_start), label.clone())
                     .expanded(expanded)
-                    .opening(
-                        self.reveals
-                            .progress(RevealKey::Group(run_start), 0, Instant::now()),
-                    )
+                    .opening(self.disclosures.progress(
+                        RevealKey::Group(run_start),
+                        0,
+                        Instant::now(),
+                    ))
                     .accessible_label(format!(
                         "{label}. {}",
                         if disclosing {

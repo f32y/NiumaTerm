@@ -161,8 +161,8 @@ impl TranscriptView {
             (Some(part), Some((key, ordinal))) => revealed_block(
                 row,
                 part,
-                self.reveals.progress(key, ordinal, Instant::now()),
-                self.revealed_heights.get(&part).copied(),
+                self.disclosures.progress(key, ordinal, Instant::now()),
+                self.disclosures.height(part),
                 // The space under a run's last step is the space its toggle
                 // takes over the moment the run leaves: both boundaries are
                 // read off the same pair of rows, so both are worth the same
