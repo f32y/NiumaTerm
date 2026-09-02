@@ -12,7 +12,7 @@ use gpui::{Context, SharedString, Window};
 use nmt_agent_utils::chat::ForkCheckpoint;
 use nmt_i18n::i18n;
 
-use crate::composer::rewind::{rewind_blocks_submission, rewind_prompt_label, rewind_timestamp};
+use crate::composer::branch::rewind::{rewind_prompt_label, rewind_timestamp};
 use crate::composer::{CommandFeedbackKind, PaletteAction, PaletteModel, PaletteRow, RewindState};
 use crate::session::{Backend, Status};
 use crate::settings::AgentSettings;
@@ -100,37 +100,16 @@ pub(crate) struct ForkFlow {
 }
 
 impl AgentPane {
-    /// Whether a branch or a rewind is holding the composer.
-    ///
-    /// Both replace the conversation under it, so a prompt sent while either
-    /// is open would reach a session about to be swapped out — and while a
-    /// picker is showing, the keys that would send it are the picker's.
-    pub(crate) fn branch_flow_holds_composer(&self) -> bool {
-        rewind_blocks_submission(self.rewind.state.as_ref()) || self.fork.state.is_some()
-    }
-
     /// Whether such a flow is past its picker and working. Until then the
     /// input still holds text worth editing, so only sending is refused.
     pub(crate) fn branch_flow_is_working(&self) -> bool {
-        self.rewind
-            .state
-            .as_ref()
-            .is_some_and(|state| !state.is_picker())
-            || self
-                .fork
-                .state
-                .as_ref()
-                .is_some_and(|state| !state.is_picker())
+        self.branch.is_working()
     }
 
     /// Whether a list of branch points is on screen, which is what makes the
     /// palette's highlight something the transcript follows.
     pub(crate) fn branch_picker_is_open(&self) -> bool {
-        self.rewind
-            .state
-            .as_ref()
-            .is_some_and(RewindState::is_picker)
-            || self.fork.state.as_ref().is_some_and(ForkState::is_picker)
+        self.branch.picker_is_open()
     }
 
     /// Hand the transcript to a picker that is about to scroll it to the
@@ -170,6 +149,7 @@ impl AgentPane {
     /// reaches both, and only one can be open at a time.
     pub(crate) fn cancel_branch_picker(&mut self, cx: &mut Context<Self>) -> bool {
         if self
+            .branch
             .rewind
             .state
             .as_ref()
@@ -178,7 +158,13 @@ impl AgentPane {
             self.cancel_rewind_picker(cx);
             return true;
         }
-        if self.fork.state.as_ref().is_some_and(ForkState::is_picker) {
+        if self
+            .branch
+            .fork
+            .state
+            .as_ref()
+            .is_some_and(ForkState::is_picker)
+        {
             self.cancel_fork_picker(cx);
             return true;
         }
@@ -233,7 +219,7 @@ impl AgentPane {
             return false;
         }
 
-        self.fork.state = Some(ForkState::Loading(target));
+        self.branch.fork.state = Some(ForkState::Loading(target));
         self.palette.selected = 0;
         self.palette.dismissed = false;
         self.palette.set_feedback(
@@ -254,7 +240,7 @@ impl AgentPane {
         checkpoints: Result<Vec<ForkCheckpoint>, String>,
         cx: &mut Context<Self>,
     ) {
-        let Some(ForkState::Loading(target)) = self.fork.state.take() else {
+        let Some(ForkState::Loading(target)) = self.branch.fork.state.take() else {
             return;
         };
 
@@ -271,7 +257,7 @@ impl AgentPane {
                     checkpoint_at_depth(&checkpoints, target, |checkpoint| &checkpoint.prompt)
                         .cloned()
                 });
-                self.fork.state = Some(ForkState::Selecting(checkpoints));
+                self.branch.fork.state = Some(ForkState::Selecting(checkpoints));
                 self.palette.feedback = None;
                 self.palette.selected = 0;
 
@@ -306,8 +292,14 @@ impl AgentPane {
     }
 
     pub(crate) fn cancel_fork_picker(&mut self, cx: &mut Context<Self>) {
-        if self.fork.state.as_ref().is_some_and(ForkState::is_picker) {
-            self.fork.state = None;
+        if self
+            .branch
+            .fork
+            .state
+            .as_ref()
+            .is_some_and(ForkState::is_picker)
+        {
+            self.branch.fork.state = None;
             self.palette.selected = 0;
             self.release_transcript_from_picker(cx);
             // Cancelling is the user's own no-op, and dropping the message
@@ -375,7 +367,7 @@ impl AgentPane {
             return;
         }
 
-        self.fork.state = Some(ForkState::Branching);
+        self.branch.fork.state = Some(ForkState::Branching);
         self.history_ui.mode = RecentSessionsMode::Loading;
         self.history_ui.pending_resume_replay = None;
         self.runtime.status = Status::Starting;
@@ -387,7 +379,7 @@ impl AgentPane {
         // Cutting in front of a prompt leaves that prompt unasked, so it goes
         // back where it was typed rather than being dropped with the turns
         // after it.
-        self.fork.pending_prompt = Some(checkpoint.prompt);
+        self.branch.fork.pending_prompt = Some(checkpoint.prompt);
 
         self.palette.set_feedback(
             CommandFeedbackKind::Notice,
@@ -401,8 +393,8 @@ impl AgentPane {
     /// transcript, which is the moment the branch is something the user can
     /// type into.
     pub(crate) fn finish_conversation_branch(&mut self, cx: &mut Context<Self>) {
-        if matches!(self.fork.state, Some(ForkState::Branching)) {
-            self.fork.state = None;
+        if matches!(self.branch.fork.state, Some(ForkState::Branching)) {
+            self.branch.fork.state = None;
             self.palette.set_feedback(
                 CommandFeedbackKind::Notice,
                 translated("agent-fork-complete"),
@@ -415,8 +407,8 @@ impl AgentPane {
     /// whatever the backend said went wrong, so this only releases the composer
     /// the branch was holding.
     pub(crate) fn abandon_conversation_branch(&mut self) {
-        if matches!(self.fork.state, Some(ForkState::Branching)) {
-            self.fork.state = None;
+        if matches!(self.branch.fork.state, Some(ForkState::Branching)) {
+            self.branch.fork.state = None;
         }
     }
 }
@@ -425,7 +417,7 @@ impl AgentPane {
     /// Put a cut prompt back in the composer, once there is a frame to do it
     /// in. Spent on the first render after the branch was requested.
     pub(crate) fn fill_branch_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(prompt) = self.fork.pending_prompt.take() else {
+        let Some(prompt) = self.branch.fork.pending_prompt.take() else {
             return;
         };
 

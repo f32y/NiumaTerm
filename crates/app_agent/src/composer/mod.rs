@@ -3,16 +3,21 @@ use gpui_component::ActiveTheme as _;
 use gpui_component::button::ButtonVariants as _;
 
 pub(crate) mod attachments;
-mod fork;
+mod branch;
 pub(super) mod images;
 mod palette;
 mod response_annotations;
-mod rewind;
 mod slash;
 
+pub(super) use crate::composer::branch::BranchFlow;
 #[cfg(test)]
-pub(super) use crate::composer::fork::checkpoint_at_depth;
-pub(super) use crate::composer::fork::{ForkFlow, ForkState, PromptTarget};
+pub(super) use crate::composer::branch::fork::checkpoint_at_depth;
+pub(super) use crate::composer::branch::fork::{ForkState, PromptTarget};
+#[cfg(test)]
+use crate::composer::branch::rewind::{
+    FileRestoreNext, file_restore_next, rewind_blocks_submission,
+};
+pub(super) use crate::composer::branch::rewind::{RewindAction, RewindState};
 pub(super) use crate::composer::palette::{
     PALETTE_MAX_HEIGHT, PaletteAction, PaletteControl, PaletteModel, PaletteRow,
 };
@@ -20,9 +25,6 @@ pub(crate) use crate::composer::response_annotations::{
     annotation_count_label, parse_annotated_prompt, prompt_with_response_annotations,
     visible_prompt,
 };
-#[cfg(test)]
-use crate::composer::rewind::{FileRestoreNext, file_restore_next, rewind_blocks_submission};
-pub(super) use crate::composer::rewind::{RewindAction, RewindState};
 #[cfg(test)]
 mod tests;
 

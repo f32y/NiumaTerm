@@ -43,7 +43,7 @@ use crate::commands::{
     is_current_session_epoch, next_session_epoch, reconcile_skill_binding, reset_command_runtime,
 };
 use crate::composer::attachments::{ComposerAttachments, scratch_dir};
-use crate::composer::{CommandFeedbackKind, ForkFlow, prompt_with_response_annotations};
+use crate::composer::{BranchFlow, CommandFeedbackKind, prompt_with_response_annotations};
 use crate::input_history::{InputHistoryNavigation, InputHistoryScope};
 use crate::profile::{AgentKind, agent_launch};
 pub(super) use crate::session::backend::Backend;
@@ -59,8 +59,7 @@ use crate::settings::AgentSettings;
 use crate::transcript::TranscriptView;
 use crate::workflows::WorkflowUi;
 use crate::{
-    AgentPane, AgentPaneEvent, GitBranchPoll, RecentSessionsMode, RewindFlow, SessionHistoryUi,
-    SlashPalette,
+    AgentPane, AgentPaneEvent, GitBranchPoll, RecentSessionsMode, SessionHistoryUi, SlashPalette,
 };
 
 /// A pane's attachment files live only as long as the pane: the harness that
@@ -288,8 +287,7 @@ impl AgentPane {
                 provider_commands_ready: !kind.caps().async_command_discovery,
                 ..SlashPalette::default()
             },
-            rewind: RewindFlow::default(),
-            fork: ForkFlow::default(),
+            branch: BranchFlow::default(),
             git_branch_poll: GitBranchPoll::default(),
             context_window_usage: None,
             context_composition: None,
@@ -988,9 +986,7 @@ impl AgentPane {
         self.session_state.clear();
         self.session_stats = None;
         self.turn.queued_user_messages.clear();
-        self.rewind.state = None;
-        self.rewind.file_completion = None;
-        self.fork.state = None;
+        self.branch.clear();
         self.history_ui.pending_resume_replay = None;
         // An approval belongs to the tool call that asked for it. The backend
         // that asked is the one being replaced, so leaving the card up offers a
