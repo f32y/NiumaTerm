@@ -57,6 +57,7 @@ use crate::theme::{BLOCK_GUTTER_GAP, BLOCK_GUTTER_WIDTH};
 use crate::view::events::terminal_surface_for_tab;
 #[cfg(test)]
 use crate::view::input::dropped_paths_text;
+use crate::view::mouse::FrozenSelectionDrag;
 pub(super) use crate::view::mouse::terminal_cell_at_position;
 #[cfg(test)]
 use crate::view::mouse::{
@@ -117,17 +118,10 @@ pub struct TerminalPane {
     pub(super) selected_frozen_item: Option<usize>,
     /// Visible frozen item chrome recorded from native list item bounds.
     pub(super) frozen_chrome: Vec<block_list::FrozenItemChrome>,
-    /// Frozen-region selection: (anchor, head), both inclusive cell points.
-    frozen_selection: Option<(block_list::FrozenPoint, block_list::FrozenPoint)>,
     /// Visible separator y positions, painted outside GPUI List's content mask.
     pub(super) frozen_separators: Vec<f32>,
-    /// Anchor of an in-progress frozen-region drag. The selection itself is
-    /// only created on the first mouse-move, so a plain click selects nothing
-    /// (matching the engine's empty-selection-dropped-on-up semantics).
-    frozen_select_anchor: Option<block_list::FrozenPoint>,
-    /// Pixel origin of a text-selection gesture. Ignoring movement within a
-    /// quarter-cell radius prevents normal hand jitter from selecting a glyph.
-    selection_drag_origin: Option<Point<Pixels>>,
+    /// The in-progress selection gesture in the frozen block region.
+    pub(super) frozen_drag: FrozenSelectionDrag,
     pub(super) links: LinkHover,
 }
 
@@ -287,10 +281,8 @@ impl TerminalPane {
             last_list_measure_key: None,
             selected_frozen_item: None,
             frozen_chrome: Vec::new(),
-            frozen_selection: None,
             frozen_separators: Vec::new(),
-            frozen_select_anchor: None,
-            selection_drag_origin: None,
+            frozen_drag: FrozenSelectionDrag::default(),
             links: LinkHover::default(),
         }
     }

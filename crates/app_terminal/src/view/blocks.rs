@@ -526,7 +526,7 @@ impl TerminalPane {
             let in_flight_for_items = self.in_flight.clone();
             let has_open_prompt_for_items = self.open_prompt;
             let selected_frozen_item = self.selected_frozen_item;
-            let frozen_selection = self.frozen_selection;
+            let frozen_selection = self.frozen_drag.current();
             let cell_for_items = cell;
             let pane_for_items = pane.clone();
             let store_for_items = store.clone();
