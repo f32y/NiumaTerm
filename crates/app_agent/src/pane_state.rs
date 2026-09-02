@@ -9,13 +9,15 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
+use gpui::Context;
 use nmt_agent_utils::background_task::{
     BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscript,
 };
 use nmt_agent_utils::chat::QueuedPrompt;
 
-use crate::UnansweredPrompt;
+use crate::session::turn::response_age_tick;
 use crate::session::{Backend, RecoverySnapshot, Status, UpdateSuspension};
+use crate::{AgentPane, UnansweredPrompt};
 
 /// The backend process and its lifecycle: everything a (re)spawn replaces.
 pub(crate) struct SessionRuntime {
@@ -74,6 +76,75 @@ pub(crate) struct TurnState {
     /// appears in would show the message a second time beside the row that is
     /// already there.
     pub(crate) published_prompt: Option<String>,
+    /// When the agent last finished answering, for the composer's idle reading
+    /// of how long the conversation has been waiting on the user. `None` until
+    /// the first turn settles.
+    pub(crate) last_response_at: Option<Instant>,
+}
+
+impl TurnState {
+    pub(crate) fn last_response_at(&self) -> Option<Instant> {
+        self.last_response_at
+    }
+
+    pub(crate) fn forget_last_response(&mut self) {
+        self.last_response_at = None;
+    }
+
+    /// Stamp the moment the agent stopped answering and keep the composer's
+    /// reading of it current.
+    ///
+    /// The label's resolution decides the cadence: a reading in seconds has to
+    /// be redrawn every second, one in minutes only every minute. A pane whose
+    /// last answer was an hour ago would otherwise hold the frame pump awake
+    /// for a label that has not changed.
+    pub(crate) fn note_response_settled(&mut self, at: Instant, cx: &mut Context<AgentPane>) {
+        let restart = self.last_response_at.is_none();
+
+        self.last_response_at = Some(at);
+
+        if !restart {
+            return;
+        }
+
+        cx.spawn(async move |this, cx| {
+            loop {
+                let Ok(interval) = this.update(cx, |this, cx| {
+                    cx.notify();
+                    this.turn
+                        .last_response_at()
+                        .and_then(|at| response_age_tick(at.elapsed()))
+                }) else {
+                    break;
+                };
+                let Some(interval) = interval else {
+                    break;
+                };
+
+                cx.background_executor().timer(interval).await;
+            }
+        })
+        .detach();
+    }
+
+    /// Note that the running turn has produced something visible.
+    ///
+    /// Only the first output of a turn answers "how long until it said
+    /// something", so taking the stamp both records the reading and closes the
+    /// measurement for the rest of the turn.
+    pub(crate) fn note_visible_output(&mut self) {
+        if let Some(submitted_at) = self.submitted_at.take() {
+            self.first_output_latency = Some(submitted_at.elapsed());
+        }
+
+        if self
+            .unanswered_prompt
+            .as_ref()
+            .is_some_and(|prompt| prompt.turn == self.seq)
+        {
+            self.unanswered_prompt = None;
+        }
+    }
 }
 
 /// Child-agent activity the provider adapter reports for this conversation.

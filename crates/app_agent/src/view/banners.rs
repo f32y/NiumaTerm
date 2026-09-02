@@ -93,7 +93,7 @@ pub(super) fn composer_stats_label(
 
 impl AgentPane {
     pub(super) fn render_approval_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        self.pending_approval.as_ref().map(|approval| {
+        self.prompts.approval().map(str::to_owned).map(|approval| {
             v_flex()
                 .w_full()
                 .px_4()
@@ -126,7 +126,7 @@ impl AgentPane {
                         .border_color(cx.theme().border)
                         .bg(cx.theme().background.opacity(0.7))
                         .text_sm()
-                        .child(approval.clone()),
+                        .child(approval),
                 )
                 .child(
                     h_flex()
@@ -178,7 +178,7 @@ impl AgentPane {
     /// of two to four options, so every question renders expanded rather than
     /// paged: the user sees the whole ask before answering any of it.
     pub(super) fn render_question_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let prompt = self.pending_questions.as_ref()?;
+        let prompt = self.prompts.questions()?;
         let complete = prompt.is_complete();
 
         // Collected eagerly: each row needs `cx` mutably to build its listeners,

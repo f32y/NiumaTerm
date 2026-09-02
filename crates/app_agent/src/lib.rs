@@ -44,6 +44,7 @@ use crate::composer::{CommandFeedback, ForkFlow, PendingSlashCommand, RewindStat
 use crate::input_history::{InputHistoryNavigation, InputHistoryScope};
 use crate::pane_state::{ChildAgents, SessionRuntime, TurnState};
 pub use crate::profile::{AgentKind, AgentThreadDefaults, agent_launch};
+use crate::session::prompts::PendingPrompts;
 pub use crate::session::{
     RecoveryIdentity, RecoveryReadiness, RecoverySnapshot, RestorationReadiness,
 };
@@ -570,10 +571,6 @@ pub struct AgentPane {
     /// Images the pending message carries, anchored to the composer text by
     /// their `[Image #N]` placeholders, and the response text quoted into it.
     attachments: ComposerAttachments,
-    /// When the agent last finished answering, for the composer's idle
-    /// reading of how long the conversation has been waiting on the user.
-    /// `None` until the first turn settles.
-    last_response_at: Option<Instant>,
     /// Whether this conversation has already named its tab. Only the message
     /// that opens a conversation names it: a later one is a follow-up on the
     /// same subject, and renaming on every send would make the tab strip
@@ -595,13 +592,8 @@ pub struct AgentPane {
     turn: TurnState,
     /// Child-agent activity the provider adapter reports for this session.
     children: ChildAgents,
-    /// Description of the approval request blocking the turn, shown as the
-    /// card above the input; the request id lives in the session.
-    pending_approval: Option<String>,
-    /// Questions the model wants answered before it continues, plus the
-    /// selection the user has built so far. The request id lives in the
-    /// session, so this holds only what the card renders.
-    pending_questions: Option<QuestionPrompt>,
+    /// The approval and question cards that block a turn until answered.
+    prompts: PendingPrompts,
     palette: SlashPalette,
     rewind: RewindFlow,
     fork: ForkFlow,

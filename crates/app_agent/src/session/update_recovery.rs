@@ -68,7 +68,7 @@ impl AgentPane {
             );
         }
         if matches!(self.runtime.status, Status::Starting | Status::Running)
-            || self.pending_approval.is_some()
+            || self.prompts.approval_open()
             || self.palette.awaiting_command_turn
             || !self.palette.command_queue.is_empty()
             || !self.turn.queued_user_messages.is_empty()
@@ -129,7 +129,7 @@ impl AgentPane {
     }
 
     pub fn stop_active_work_for_update(&mut self, cx: &mut Context<Self>) {
-        if self.pending_approval.is_some() {
+        if self.prompts.approval_open() {
             self.respond_approval("cancel", cx);
         } else {
             self.interrupt(cx);

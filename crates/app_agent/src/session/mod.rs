@@ -4,6 +4,7 @@ use nmt_agent_utils::AgentEvent;
 
 use crate::UnansweredPrompt;
 use crate::pane_state::{ChildAgents, SessionRuntime, TurnState};
+use crate::session::prompts::PendingPrompts;
 use crate::thread_controls::{ThreadControls, launch_effort, launch_model, stored_thread_settings};
 use crate::view::session_state::SessionStateBadge;
 mod backend;
@@ -11,9 +12,10 @@ mod background_tasks;
 mod conversation;
 mod events;
 mod history;
+pub(crate) mod prompts;
 #[cfg(test)]
 mod tests;
-mod turn;
+pub(crate) mod turn;
 mod update_recovery;
 
 use std::collections::{HashMap, VecDeque};
@@ -246,7 +248,6 @@ impl AgentPane {
             input_history_scope,
             input_history_navigation: InputHistoryNavigation::default(),
             attachments: ComposerAttachments::default(),
-            last_response_at: None,
             conversation_named: false,
             pending_conversation_rename: None,
             transcript,
@@ -261,8 +262,7 @@ impl AgentPane {
                 last_recovery_snapshot: None,
             },
             history_ui: SessionHistoryUi::default(),
-            pending_approval: None,
-            pending_questions: None,
+            prompts: PendingPrompts::default(),
             controls: ThreadControls {
                 settings: ThreadSettings::default(),
                 seed_thread_defaults: true,
@@ -282,6 +282,7 @@ impl AgentPane {
                 pending_interrupt: None,
                 queued_user_messages: VecDeque::new(),
                 published_prompt: None,
+                last_response_at: None,
             },
             palette: SlashPalette {
                 provider_commands_ready: !kind.caps().async_command_discovery,
@@ -977,7 +978,7 @@ impl AgentPane {
         // The reading answers "how long has this conversation been waiting on
         // me"; the replaced conversation's last answer says nothing about the
         // fresh one, which has never been answered at all.
-        self.last_response_at = None;
+        self.turn.forget_last_response();
         self.turn.unanswered_prompt = None;
         // The new conversation restarts turn ids from zero, so a stop request
         // left over from the old one could match an unrelated future turn.
@@ -994,7 +995,7 @@ impl AgentPane {
         // An approval belongs to the tool call that asked for it. The backend
         // that asked is the one being replaced, so leaving the card up offers a
         // decision that would be answered into a different conversation.
-        self.pending_approval = None;
+        self.prompts.dismiss_approval();
         // Child rows belong to the conversation being replaced; keeping them
         // would show another parent session's tasks until the new adapter
         // publishes its first snapshot.
@@ -1005,7 +1006,7 @@ impl AgentPane {
         self.clear_workflows();
         // The question card is answered into the backend being replaced, so it
         // cannot outlive it either.
-        self.pending_questions = None;
+        self.prompts.dismiss_questions();
     }
 
     /// Opening the `Background Tasks` view asks the provider for fresher data.
@@ -1042,9 +1043,9 @@ impl AgentPane {
         self.controls.models.clear();
         self.palette.skill_catalog = None;
         self.palette.skill_binding = None;
+        self.prompts.dismiss_approval();
         reset_command_runtime(
             !self.kind.caps().async_command_discovery,
-            &mut self.pending_approval,
             &mut self.palette.provider_commands,
             &mut self.palette.provider_commands_ready,
             &mut self.palette.command_queue,

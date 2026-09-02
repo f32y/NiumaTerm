@@ -218,7 +218,6 @@ fn palette_direction_navigation_wraps_and_handles_catalog_changes() {
 #[test]
 fn clear_resets_command_runtime_without_owning_history_state() {
     let mut provider = vec![info("review", SlashCommandSource::Provider)];
-    let mut approval = Some("command approval");
     let mut ready = true;
     let mut queue = VecDeque::from(["compact"]);
     let mut awaiting = true;
@@ -229,7 +228,6 @@ fn clear_resets_command_runtime_without_owning_history_state() {
 
     reset_command_runtime(
         false,
-        &mut approval,
         &mut provider,
         &mut ready,
         &mut queue,
@@ -238,7 +236,6 @@ fn clear_resets_command_runtime_without_owning_history_state() {
         &mut dismissed,
     );
 
-    assert!(approval.is_none());
     assert!(provider.is_empty());
     assert!(!ready);
     assert!(queue.is_empty());
