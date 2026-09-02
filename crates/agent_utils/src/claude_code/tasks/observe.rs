@@ -127,7 +127,8 @@ impl ClaudeTasks {
             if name == "Bash" {
                 // Recorded for every `Bash` call, because whether the command
                 // ends up backgrounded is decided after the block is written.
-                self.remember_bash_command(tool_use_id, &block["input"]);
+                self.shells
+                    .remember_bash_command(tool_use_id, &block["input"]);
                 continue;
             }
             if !LAUNCH_TOOLS.contains(&name) {
@@ -212,7 +213,7 @@ impl ClaudeTasks {
                 // started rather than what it did. Its outcome arrives later,
                 // as the task records that own the row.
                 if self.is_shell(&canonical) {
-                    self.remember_handoff_output_file(&canonical, block);
+                    self.shells.remember_handoff_output_file(&canonical, block);
                     continue;
                 }
                 let failed = block["is_error"].as_bool().unwrap_or(false);
@@ -363,7 +364,7 @@ impl ClaudeTasks {
             let canonical = self
                 .canonical(task_id)
                 .unwrap_or_else(|| task_id.to_owned());
-            self.reserve_shell_meta(task_id);
+            self.shells.reserve_shell_meta(task_id);
             // The snapshot lists what is running now. A row that already
             // reported its outcome keeps it: the CLI publishes the snapshot
             // before the terminal record, so re-asserting Working here would
@@ -372,7 +373,7 @@ impl ClaudeTasks {
                 Some(state) if state.is_terminal() => None,
                 _ => Some(BackgroundTaskState::Working),
             };
-            let meta = self.shell_meta.get(&canonical);
+            let meta = self.shells.meta(&canonical);
             let refs = BackgroundTaskRefs::ClaudeCode {
                 task_id: Some(task_id.to_owned()),
                 tool_use_id: meta.and_then(|meta| meta.tool_use_id.clone()),
@@ -388,7 +389,7 @@ impl ClaudeTasks {
                     kind: Some(BackgroundTaskKind::Shell),
                     state,
                     display_name,
-                    objective: self.shell_command(&canonical),
+                    objective: self.shells.shell_command(&canonical),
                     // The earliest start wins, so re-listing a running command
                     // in a later snapshot leaves its elapsed label alone. No
                     // update time is claimed here: a snapshot is republished

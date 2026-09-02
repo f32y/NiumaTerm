@@ -40,6 +40,7 @@ use crate::claude_code::sessions::RestoredTask;
 use crate::claude_code::tasks::records::{
     admits_new_row, lifecycle_state, record_identifiers, refs_from, stop_target,
 };
+use crate::claude_code::tasks::shells::ShellIndex;
 use crate::json::text_field;
 
 /// Tool names that launch a child agent.
@@ -65,11 +66,6 @@ const AGENT_TASK_TYPE: &str = "local_agent";
 /// registers one; only the backgrounded ones belong in this view, which is why
 /// admission tests `is_backgrounded` rather than the type alone.
 const SHELL_TASK_TYPE: &str = "local_bash";
-
-/// Shell entries retained per session, applied to both the metadata table and
-/// the command table beside it. Each entry is a few short strings, so this only
-/// caps a stream that keeps registering commands.
-const MAX_SHELL_META: usize = 256;
 
 /// Identifier aliases retained per session. One child contributes at most a
 /// handful (task, tool-use, agent), so this only bounds a stream that keeps
@@ -104,17 +100,8 @@ pub(crate) struct ClaudeTasks {
     /// record, which this recognizes as the same instruction rather than a
     /// second one.
     launch_prompts: HashMap<String, String>,
-    /// Everything a shell row needs that its lifecycle records do not all
-    /// carry at once, keyed by task id. Recorded for every registered shell,
-    /// including foreground ones, because a command the CLI moves to the
-    /// background later announces only its task id when it does.
-    shell_meta: HashMap<String, ShellMeta>,
-    shell_meta_order: VecDeque<String>,
-    /// Command text of recent `Bash` tool calls, keyed by tool-use id. The
-    /// task records name the shell's description but never its command, so the
-    /// launching block is where a row's command comes from.
-    bash_commands: HashMap<String, String>,
-    bash_command_order: VecDeque<String>,
+    /// Background shell metadata and the `Bash` commands behind it.
+    shells: ShellIndex,
 }
 
 /// What one shell's records have said about it so far. No single record
@@ -249,10 +236,7 @@ impl ClaudeTasks {
         self.pending_transcripts.clear();
         self.open_child_tools.clear();
         self.launch_prompts.clear();
-        self.shell_meta.clear();
-        self.shell_meta_order.clear();
-        self.bash_commands.clear();
-        self.bash_command_order.clear();
+        self.shells.clear();
         true
     }
 
@@ -275,9 +259,9 @@ impl ClaudeTasks {
             return false;
         }
         if task_type == Some(SHELL_TASK_TYPE) {
-            self.remember_shell(record);
+            self.shells.remember_shell(record);
         }
-        self.remember_output_file(record);
+        self.shells.remember_output_file(record);
 
         let ids = record_identifiers(record);
         let known = ids.iter().any(|id| self.canonical(id).is_some());
@@ -303,7 +287,9 @@ impl ClaudeTasks {
             // `summary` is the child's own account of what it did; the last
             // tool it ran is the best live substitute while it is working.
             status: text_field(record, &["summary", "last_tool_name"]),
-            objective: shell.then(|| self.shell_command(&canonical)).flatten(),
+            objective: shell
+                .then(|| self.shells.shell_command(&canonical))
+                .flatten(),
             completed_at: state
                 .filter(|state| state.is_terminal())
                 .map(|_| SystemTime::now()),
