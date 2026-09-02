@@ -13,7 +13,7 @@ use crate::view::banners::{
 };
 use crate::view::history::queued_message_label;
 use crate::view::last_response::{LastResponseTone, last_response_tone};
-use crate::view::settings_row::effort_gauge_step;
+use crate::view::settings_row::effort::effort_gauge_step;
 use crate::view::{ComposerEnterBehavior, composer_enter_behavior};
 use crate::{AgentKind, SessionHistoryUi};
 
