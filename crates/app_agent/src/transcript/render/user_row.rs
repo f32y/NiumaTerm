@@ -164,9 +164,9 @@ impl TranscriptView {
         // it in would fade the half of the prompt that was already on screen.
         // Its toggle still pins the reading position, which is what a paste
         // long enough to fold actually needs.
-        let annotations_reveal =
-            self.disclosures
-                .progress(RevealKey::Annotation(index), 0, Instant::now());
+        let annotations_reveal = self
+            .disclosures
+            .progress(RevealKey::Annotation(index), Instant::now());
         // The quotations open a rounded bubble, and a clip box is a rectangle,
         // so they fade in place rather than growing by height: squaring off
         // the corner the bubble is known by would cost more than the height

@@ -1153,12 +1153,11 @@ mod row_rhythm_tests {
         });
     }
 
-    /// The steps of an expanded run report the toggle that opened them and
-    /// their place under it, which is what staggers their entrance. The toggle
-    /// itself and the prose around the run report nothing, because neither
-    /// arrived when the run opened.
+    /// The steps of an expanded run report the toggle that opened them, which
+    /// is what puts them on its ramp. The toggle itself and the prose around
+    /// the run report nothing, because neither arrived when the run opened.
     #[gpui::test]
-    fn an_expanded_runs_steps_report_their_place_under_its_toggle(cx: &mut TestAppContext) {
+    fn an_expanded_runs_steps_report_the_toggle_that_opened_them(cx: &mut TestAppContext) {
         cx.update(|cx| {
             let view = transcript_with_a_collapsed_run(cx);
 
@@ -1175,8 +1174,8 @@ mod row_rhythm_tests {
                     vec!["entry", "entry", "run", "work", "work", "entry"]
                 );
                 assert_eq!(view.revealed_by(2), None, "the toggle was already there");
-                assert_eq!(view.revealed_by(3), Some((RevealKey::Group(2), 0)));
-                assert_eq!(view.revealed_by(4), Some((RevealKey::Group(2), 1)));
+                assert_eq!(view.revealed_by(3), Some(RevealKey::Group(2)));
+                assert_eq!(view.revealed_by(4), Some(RevealKey::Group(2)));
                 assert_eq!(view.revealed_by(5), None, "the reply was already there");
             });
         });
@@ -1235,8 +1234,7 @@ mod row_rhythm_tests {
 
                 assert!(view.disclosures.group_expanded(2), "the run still opens");
                 assert!(view.disclosures.settled(now));
-                assert_eq!(view.disclosures.progress(RevealKey::Group(2), 0, now), 1.0);
-                assert_eq!(view.disclosures.progress(RevealKey::Group(2), 40, now), 1.0);
+                assert_eq!(view.disclosures.progress(RevealKey::Group(2), now), 1.0);
             });
         });
     }

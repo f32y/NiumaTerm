@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use crate::transcript::reveal::*;
 
 /// A disclosure the reader never opened in this session — one restored with a
@@ -9,23 +7,21 @@ use crate::transcript::reveal::*;
 fn an_untracked_disclosure_is_already_at_rest() {
     let reveals = Reveals::default();
 
-    assert_eq!(reveals.progress(RevealKey::Row(3), 0, Instant::now()), 1.0);
+    assert_eq!(reveals.progress(RevealKey::Row(3), Instant::now()), 1.0);
 }
 
 /// The ramp front-loads the distance: the content is nearly all the way there
 /// by the halfway point and spends the rest settling, which is what lets a
-/// duration this long still read as an immediate answer to the click. Every
-/// disclosure travels on it, so the same share is covered at the same share
-/// of whatever time that disclosure is given.
+/// duration this long still read as an immediate answer to the click.
 #[test]
 fn a_reveal_ramps_from_its_start_to_rest() {
     let mut reveals = Reveals::default();
     let start = Instant::now();
     reveals.open(RevealKey::Row(1), start);
 
-    let opening = reveals.progress(RevealKey::Row(1), 0, start);
-    let middle = reveals.progress(RevealKey::Row(1), 0, start + BLOCK_MOTION.duration / 2);
-    let arrived = reveals.progress(RevealKey::Row(1), 0, start + BLOCK_MOTION.duration);
+    let opening = reveals.progress(RevealKey::Row(1), start);
+    let middle = reveals.progress(RevealKey::Row(1), start + REVEAL_DURATION / 2);
+    let arrived = reveals.progress(RevealKey::Row(1), start + REVEAL_DURATION);
 
     assert!(opening < 0.05, "opens from nothing, got {opening}");
     assert!(
@@ -33,14 +29,23 @@ fn a_reveal_ramps_from_its_start_to_rest() {
         "covers most of the distance early, got {middle}"
     );
     assert_eq!(arrived, 1.0);
+}
+
+/// A run and a block are one motion. The run is the kind that opens several
+/// pieces at once, and each of them reports what the disclosure reports, so
+/// the run grows as a single thing instead of unrolling.
+#[test]
+fn every_kind_of_disclosure_travels_the_same_way() {
+    let mut reveals = Reveals::default();
+    let start = Instant::now();
+    reveals.open(RevealKey::Row(1), start);
+    reveals.open(RevealKey::Group(0), start);
+
+    let at = start + REVEAL_DURATION / 4;
+
     assert_eq!(
-        middle,
-        {
-            let mut run = Reveals::default();
-            run.open(RevealKey::Group(0), start);
-            run.progress(RevealKey::Group(0), 0, start + RUN_MOTION.duration / 2)
-        },
-        "a run's row is the same share along at the same share of its own time"
+        reveals.progress(RevealKey::Group(0), at),
+        reveals.progress(RevealKey::Row(1), at)
     );
 }
 
@@ -53,9 +58,9 @@ fn shutting_runs_the_same_ramp_backwards() {
     let start = Instant::now();
     reveals.close(RevealKey::Row(1), start);
 
-    let closing = reveals.progress(RevealKey::Row(1), 0, start);
-    let middle = reveals.progress(RevealKey::Row(1), 0, start + BLOCK_MOTION.duration / 2);
-    let gone = reveals.progress(RevealKey::Row(1), 0, start + BLOCK_MOTION.duration);
+    let closing = reveals.progress(RevealKey::Row(1), start);
+    let middle = reveals.progress(RevealKey::Row(1), start + REVEAL_DURATION / 2);
+    let gone = reveals.progress(RevealKey::Row(1), start + REVEAL_DURATION);
 
     assert_eq!(closing, 1.0, "leaves from where it was sitting");
     assert!(
@@ -74,10 +79,10 @@ fn reversing_resumes_from_what_is_on_screen() {
     let start = Instant::now();
     reveals.close(RevealKey::Row(1), start);
 
-    let turn = start + BLOCK_MOTION.duration / 10;
-    let leaving = reveals.progress(RevealKey::Row(1), 0, turn);
+    let turn = start + REVEAL_DURATION / 10;
+    let leaving = reveals.progress(RevealKey::Row(1), turn);
     reveals.open(RevealKey::Row(1), turn);
-    let returning = reveals.progress(RevealKey::Row(1), 0, turn);
+    let returning = reveals.progress(RevealKey::Row(1), turn);
 
     assert!(
         (0.05..0.95).contains(&leaving),
@@ -89,55 +94,16 @@ fn reversing_resumes_from_what_is_on_screen() {
     );
 }
 
-/// Later steps of a run start later, so the run reads as unrolling downwards
-/// from the toggle rather than appearing all at once.
-#[test]
-fn later_rows_of_a_run_start_later() {
-    let mut reveals = Reveals::default();
-    let start = Instant::now();
-    reveals.open(RevealKey::Group(0), start);
-
-    let at =
-        |ordinal| reveals.progress(RevealKey::Group(0), ordinal, start + RUN_MOTION.stagger * 2);
-
-    assert!(at(0) > at(1), "{} vs {}", at(0), at(1));
-    assert!(at(1) > at(2), "{} vs {}", at(1), at(2));
-    assert_eq!(at(2), 0.0, "a row whose turn has not come has not started");
-}
-
-/// The delay stops growing past the limit, so a long run finishes arriving in
-/// a bounded time however many steps it holds.
-#[test]
-fn the_stagger_stops_growing_past_its_limit() {
-    let mut reveals = Reveals::default();
-    let start = Instant::now();
-    reveals.open(RevealKey::Group(0), start);
-
-    let at = |ordinal| {
-        reveals.progress(
-            RevealKey::Group(0),
-            ordinal,
-            start + RUN_MOTION.stagger * REVEAL_STAGGER_LIMIT as u32 + Duration::from_millis(1),
-        )
-    };
-
-    assert_eq!(at(REVEAL_STAGGER_LIMIT), at(REVEAL_STAGGER_LIMIT + 40));
-}
-
 /// The transcript asks for frames while anything is still moving, and stops
 /// once everything has, so an idle conversation leaves the frame pump parked.
 #[test]
-fn reveals_settle_after_their_window() {
+fn reveals_settle_once_their_duration_has_run() {
     let mut reveals = Reveals::default();
     let start = Instant::now();
     reveals.open(RevealKey::Group(0), start);
 
     assert!(!reveals.settled(start));
-    assert!(
-        !reveals.settled(start + RUN_MOTION.duration),
-        "the last staggered row is still going after the first has arrived"
-    );
-    assert!(reveals.settled(start + RUN_MOTION.window()));
+    assert!(reveals.settled(start + REVEAL_DURATION));
 
     reveals.end(RevealKey::Group(0));
     assert!(reveals.settled(start));
@@ -154,7 +120,7 @@ fn only_a_finished_exit_asks_to_be_taken_down() {
 
     assert!(reveals.shut(start).is_empty());
     assert_eq!(
-        reveals.shut(start + RUN_MOTION.window()),
+        reveals.shut(start + REVEAL_DURATION),
         vec![RevealKey::Group(0)]
     );
 }
