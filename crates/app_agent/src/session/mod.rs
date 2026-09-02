@@ -1644,59 +1644,61 @@ impl AgentPane {
             cx,
         );
 
-        match self.kind {
-            // Both continue an earlier conversation inside the running session,
-            // and both answer whether the request reached a backend that could.
-            AgentKind::Codex | AgentKind::DeepSeek => {
-                if !self
-                    .runtime
-                    .backend
-                    .as_mut()
-                    .is_some_and(|session| session.resume_thread(&id))
-                {
-                    self.history_ui.mode = RecentSessionsMode::Open;
-                    self.runtime.status = previous_status;
-                    self.set_command_feedback(
-                        CommandFeedbackKind::Error,
-                        i18n("agent-session-codex-recent-not-ready").to_string(),
+        if caps.session_resume {
+            // The backend answers whether the request reached a session that
+            // could take it, because a conversation rooted somewhere else is
+            // one this tab cannot adopt.
+            if !self
+                .runtime
+                .backend
+                .as_mut()
+                .is_some_and(|session| session.resume_thread(&id))
+            {
+                self.history_ui.mode = RecentSessionsMode::Open;
+                self.runtime.status = previous_status;
+                self.set_command_feedback(
+                    CommandFeedbackKind::Error,
+                    i18n("agent-session-codex-recent-not-ready").to_string(),
+                    cx,
+                );
+            }
+        } else {
+            // Without in-session resume the conversation is a file this side
+            // reads, so the pane respawns against its id and replays what it
+            // read into the fresh session.
+            let kind = self.kind;
+            let cwd = self.cwd();
+            let replay_id = id.clone();
+            let selected = index;
+
+            cx.spawn(async move |this, cx| {
+                let replay = cx
+                    .background_executor()
+                    .spawn(async move { sessions::load_replay(cwd.as_deref(), &replay_id) })
+                    .await;
+
+                let _ = this.update(cx, |this, cx| {
+                    if this.history_ui.mode != RecentSessionsMode::Loading
+                        || this.history_ui.selected != selected
+                    {
+                        return;
+                    }
+
+                    this.start_session_with_options(
+                        Some(RecoveryIdentity::new(kind, id)),
+                        false,
+                        move |this, started, _| {
+                            if started {
+                                this.history_ui.pending_resume_replay = Some(replay);
+                            } else {
+                                this.history_ui.mode = RecentSessionsMode::Open;
+                            }
+                        },
                         cx,
                     );
-                }
-            }
-            AgentKind::Claude => {
-                let cwd = self.cwd();
-                let replay_id = id.clone();
-                let selected = index;
-
-                cx.spawn(async move |this, cx| {
-                    let replay = cx
-                        .background_executor()
-                        .spawn(async move { sessions::load_replay(cwd.as_deref(), &replay_id) })
-                        .await;
-
-                    let _ = this.update(cx, |this, cx| {
-                        if this.history_ui.mode != RecentSessionsMode::Loading
-                            || this.history_ui.selected != selected
-                        {
-                            return;
-                        }
-
-                        this.start_session_with_options(
-                            Some(RecoveryIdentity::new(AgentKind::Claude, id)),
-                            false,
-                            move |this, started, _| {
-                                if started {
-                                    this.history_ui.pending_resume_replay = Some(replay);
-                                } else {
-                                    this.history_ui.mode = RecentSessionsMode::Open;
-                                }
-                            },
-                            cx,
-                        );
-                    });
-                })
-                .detach();
-            }
+                });
+            })
+            .detach();
         }
     }
 

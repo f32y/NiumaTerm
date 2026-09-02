@@ -305,6 +305,9 @@ impl Backend {
     pub(crate) fn search_sessions(&mut self, query: &str) {
         match self {
             Backend::DeepSeek(session) => session.search_sessions(query),
+            // `Capabilities::session_search` is what decides whether `/find`
+            // is offered at all, so these arms are only reached by a caller
+            // that skipped the question.
             Backend::Codex(_) | Backend::Claude(_) => {}
             #[cfg(test)]
             Backend::Test(_) => {}
@@ -328,6 +331,9 @@ impl Backend {
     pub(crate) fn rewind_files(&mut self, user_message_id: &str) -> SlashCommandOutcome {
         match self {
             Backend::Claude(session) => session.rewind_files(user_message_id),
+            // `Capabilities::file_rewind` gates the command that leads here.
+            // The rejection stays because it is the honest answer for a
+            // harness with no such operation to run.
             Backend::Codex(_) | Backend::DeepSeek(_) => SlashCommandOutcome::Rejected {
                 message: i18n("agent-session-file-rewind-claude-only").to_string(),
             },
@@ -453,6 +459,9 @@ impl Backend {
             // The harness answers whether it attached, because a conversation
             // rooted in another directory is one this tab cannot adopt.
             Backend::DeepSeek(session) => session.resume_thread(thread_id),
+            // `Capabilities::session_resume` sends this harness down the
+            // respawn-and-replay path instead, so nothing routes a request
+            // here to begin with.
             Backend::Claude(_) => false,
             #[cfg(test)]
             Backend::Test(_) => false,
