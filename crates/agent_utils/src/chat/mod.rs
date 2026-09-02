@@ -3,148 +3,19 @@
 //! these types, so the chat UI renders one transcript model
 //! and never touches protocol strings.
 
-use std::time::SystemTime;
+mod commands;
+mod controls;
+mod sessions;
+mod usage;
 
 use crate::background_task::{
     BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscriptUpdate,
 };
+pub use crate::chat::commands::*;
+pub use crate::chat::controls::*;
+pub use crate::chat::sessions::*;
+pub use crate::chat::usage::*;
 use crate::workflow::WorkflowSnapshot;
-
-/// Thread settings a chat UI lets the user pick. Field meanings are
-/// per-backend: Codex sends them as overrides on every `turn/start`;
-/// Claude stores its permission mode in `approval` and applies changes via
-/// control requests before the next message (`approvals_reviewer`, `sandbox`,
-/// and `tier` unused).
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct ThreadSettings {
-    pub model: Option<String>,
-    pub approval: Option<String>,
-    pub approvals_reviewer: Option<String>,
-    pub sandbox: Option<String>,
-    pub effort: Option<String>,
-    /// `None` is the normal tier: the model catalog only lists additional
-    /// tiers, so normal is expressed as an explicit `serviceTier: null`
-    /// (double-optional in the serialized payload — null resets, absent keeps).
-    pub tier: Option<String>,
-}
-
-/// One selectable execution-permission preset a backend advertises.
-///
-/// A backend whose presets are fixed needs none of this, because the UI can
-/// name them itself. This exists for one whose preset table is part of the
-/// deployment, where a hard-coded list would offer values the deployment does
-/// not serve and hide the ones it does.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ApprovalPreset {
-    /// Submitted back verbatim when the user picks it.
-    pub value: String,
-    pub label: String,
-    pub description: Option<String>,
-}
-
-/// One agent composition a conversation can be built from.
-///
-/// Separate from [`ApprovalPreset`] despite the matching shape: a permission
-/// preset is a policy the session switches between at will, while this decides
-/// which plugins compose the agent and can therefore only be chosen before the
-/// conversation has run anything.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AgentPreset {
-    /// Submitted back verbatim when the user picks it.
-    pub value: String,
-    pub label: String,
-    pub description: Option<String>,
-}
-
-/// One entry of a backend's model catalog.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ModelInfo {
-    pub model: String,
-    pub display: String,
-    /// `(tier id, tier name)` of the model's additional service tiers.
-    pub tiers: Vec<(String, String)>,
-    pub default_tier: Option<String>,
-    /// Reasoning-effort levels the model supports; empty when the model has
-    /// no effort control (or the backend keeps a global effort list instead).
-    pub efforts: Vec<String>,
-}
-
-/// Which layer contributed a slash command. The UI uses this only for
-/// deterministic precedence when two layers advertise the same name.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SlashCommandSource {
-    Local,
-    Adapter,
-    Provider,
-}
-
-/// Shape of the input accepted after a command name.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SlashCommandArguments {
-    None,
-    Freeform,
-    Choices,
-    Skills,
-}
-
-/// When a command may run relative to a model turn.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SlashCommandRunPolicy {
-    Immediate,
-    QueueUntilIdle,
-    IdleOnly,
-}
-
-/// Backend-neutral command metadata used by the composer palette.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SlashCommandInfo {
-    /// Normalized protocol name without the leading slash.
-    pub name: String,
-    pub description: String,
-    pub argument_hint: Option<String>,
-    pub source: SlashCommandSource,
-    pub arguments: SlashCommandArguments,
-    pub run_policy: SlashCommandRunPolicy,
-}
-
-/// One provider-discovered skill. `path` is part of the identity because
-/// Codex can publish the same skill name from multiple configuration scopes.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SkillInfo {
-    pub name: String,
-    pub description: String,
-    pub path: String,
-    pub scope: String,
-    pub enabled: bool,
-    pub display_name: Option<String>,
-}
-
-/// Complete skill-directory state for the current backend session. Errors
-/// can coexist with usable entries when one configured working directory or
-/// skill file fails to load.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct SkillCatalog {
-    pub skills: Vec<SkillInfo>,
-    pub errors: Vec<String>,
-}
-
-/// Exact provider identity selected by the UI for a structured skill input.
-/// The catalog is revalidated before this reference is sent to the backend.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SkillReference {
-    pub name: String,
-    pub path: String,
-}
-
-/// Immediate result of asking a backend to execute a slash command. Turn
-/// lifecycle remains event-driven: `Accepted` does not imply `TurnStarted`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SlashCommandOutcome {
-    Accepted,
-    Completed { message: Option<String> },
-    Rejected { message: String },
-    NotReady,
-}
 
 /// Why a context compaction ran.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -402,35 +273,6 @@ pub struct MessageImage {
     pub media_type: String,
 }
 
-/// Which directories a session listing covers. A conversation is recorded
-/// against the directory it ran in, and the tab that lists them is rooted in
-/// one, so the two answers a list can give are "this one" and "every one".
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum SessionScope {
-    #[default]
-    CurrentDirectory,
-    AllDirectories,
-}
-
-/// One resumable persisted session, for the history list an empty chat tab
-/// shows above its composer. Ordered newest-first by `last_active`.
-#[derive(Clone, Debug, PartialEq)]
-pub struct SessionSummary {
-    pub id: String,
-    /// First user prompt of the session (or an id prefix when none exists).
-    pub title: String,
-    pub branch: Option<String>,
-    /// Working directory the session ran in. Carried because a list can span
-    /// directories, and resuming a session outside the current one has to
-    /// happen where it worked. `None` for a source that does not record it.
-    pub cwd: Option<String>,
-    pub last_active: SystemTime,
-    /// Why a search returned this row. Present only in a list produced by a
-    /// content search, because the excerpt describes the query rather than the
-    /// session, and an ordinary list has no query to describe.
-    pub snippet: Option<String>,
-}
-
 /// One prompt the backend accepted but has not started working on, in the
 /// order it will be claimed.
 ///
@@ -463,105 +305,6 @@ pub struct GoalStatus {
     pub phase: String,
     pub rounds_started: u64,
     pub max_rounds: u64,
-}
-
-/// Whole-log conversation counters, independent of how much history has been
-/// paged in. Reported only by a backend that folds them from its complete log;
-/// a count derived from the visible transcript would disagree with it.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct SessionStats {
-    pub turns: u64,
-    pub steps: u64,
-    /// Summed model wall time over the steps that produced a message.
-    pub model_ms: u64,
-    /// Summed tool wall time over matched call/result pairs.
-    pub tool_ms: u64,
-}
-
-/// Token accounting from one provider reporting scope. The total is
-/// authoritative; optional categories describe parts of that total and stay
-/// absent when a protocol does not expose them.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TokenUsageBreakdown {
-    pub total_tokens: u64,
-    pub input_tokens: Option<u64>,
-    pub cache_read_input_tokens: Option<u64>,
-    pub cache_write_input_tokens: Option<u64>,
-    pub output_tokens: Option<u64>,
-    pub reasoning_output_tokens: Option<u64>,
-}
-
-impl TokenUsageBreakdown {
-    /// A compaction boundary can report the replacement size without enough
-    /// information to attribute tokens to categories.
-    pub const fn total_only(total_tokens: u64) -> Self {
-        Self {
-            total_tokens,
-            input_tokens: None,
-            cache_read_input_tokens: None,
-            cache_write_input_tokens: None,
-            output_tokens: None,
-            reasoning_output_tokens: None,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ContextUsageScope {
-    Thread,
-    LastTurn,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ScopedTokenUsage {
-    pub scope: ContextUsageScope,
-    pub breakdown: TokenUsageBreakdown,
-}
-
-/// Latest replacement snapshot of active context usage and any cumulative
-/// accounting that the same provider update can identify precisely.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ContextWindowUsage {
-    pub current: TokenUsageBreakdown,
-    pub cumulative: Option<ScopedTokenUsage>,
-    pub max_tokens: Option<u64>,
-}
-
-impl ContextWindowUsage {
-    pub const fn used_tokens(self) -> u64 {
-        self.current.total_tokens
-    }
-}
-
-/// One labelled part of what currently fills the context window, such as the
-/// system prompt, the tool definitions, or the conversation itself.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ContextSegment {
-    pub label: String,
-    pub tokens: u64,
-    /// Colour the provider suggests for this segment, as it writes it. Kept as
-    /// the provider's own string because a UI may prefer its theme instead.
-    pub color: Option<String>,
-    /// The segment is reserved rather than occupied: counted against the
-    /// window, but holding no conversation content yet.
-    pub deferred: bool,
-}
-
-/// How the context window is currently filled, as opposed to how tokens were
-/// billed. A provider that only reports accounting never publishes this, so
-/// its absence is a normal state rather than a failure.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ContextComposition {
-    pub segments: Vec<ContextSegment>,
-    pub used_tokens: u64,
-    /// Window the provider measures against. This can be smaller than the
-    /// model's own window when the provider reserves room to compact.
-    pub max_tokens: Option<u64>,
-    /// The model's window before any such reserve, when the provider
-    /// distinguishes the two.
-    pub raw_max_tokens: Option<u64>,
-    /// Where automatic compaction takes over, when the provider reports it.
-    pub auto_compact_threshold: Option<u64>,
 }
 
 /// Something a turn is doing that produces no output while it lasts.
@@ -765,65 +508,6 @@ pub enum Event {
         /// The handshake itself failed; the session will not become usable.
         fatal: bool,
     },
-}
-
-/// One turn of a resumed conversation. A live turn's shape comes from the turn
-/// lifecycle events — where it started, how long it ran, what it cost, whether
-/// the user stopped it — none of which a flat list of items can express, so a
-/// replay that dropped it left restored conversations unfoldable and without
-/// their durations. Every field is optional because providers persist
-/// different parts of it.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct ReplayTurn {
-    pub items: Vec<ReplayItem>,
-    /// Wall time the turn took.
-    pub seconds: Option<u64>,
-    /// Output tokens the turn produced.
-    pub output_tokens: Option<u64>,
-    /// The user stopped the turn before it finished.
-    pub interrupted: bool,
-}
-
-/// One entry of a resumed turn, with the wall-clock time the provider recorded
-/// for it as Unix seconds. Formatting belongs to the UI, which owns the
-/// viewer's time zone.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ReplayItem {
-    pub item: Item,
-    pub at: Option<i64>,
-}
-
-/// Where a branch is cut, named the way the backend that owns the conversation
-/// names positions in it.
-///
-/// The three coordinates are not interchangeable: one addresses a transcript
-/// record, one a turn, one an event, and only their own backend can resolve
-/// them. Carrying the backend's own name for the position keeps this side from
-/// maintaining a parallel numbering it would have to hold in step with a
-/// history it does not own.
-///
-/// Every variant names the same cut — the conversation stops before one human
-/// prompt — but the backends anchor it from opposite sides, so the variants
-/// spell out which side they mean.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ForkAnchor {
-    /// The Claude transcript record the copied prefix stops before.
-    ClaudeBefore(String),
-    /// The last Codex turn the copy keeps, inclusive.
-    CodexThrough(String),
-    /// A DeepSeek event seq lying inside the last turn the copy keeps.
-    DeepSeekThrough(u64),
-}
-
-/// One human prompt a branch can be cut in front of.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ForkCheckpoint {
-    /// The prompt the branch stops in front of, shown as the row's label and
-    /// handed back to the composer so the branch starts where it was cut.
-    pub prompt: String,
-    /// RFC 3339 as the provider recorded it; the UI owns the viewer's zone.
-    pub timestamp: Option<String>,
-    pub anchor: ForkAnchor,
 }
 
 /// Outcome of a session's `send_user_message`.
