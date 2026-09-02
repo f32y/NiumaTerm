@@ -230,7 +230,8 @@ impl AgentPane {
                 // used, and the transcript is what the conversation said.
                 self.controls.settings.effort = effort;
                 self.remember_thread_defaults(cx);
-                self.set_command_feedback(CommandFeedbackKind::Error, message, cx);
+                self.palette
+                    .set_feedback(CommandFeedbackKind::Error, message, cx);
             }
             SessionEvent::History(sessions) => self.on_history(sessions, cx),
             SessionEvent::SessionSearchResults(results) => self.show_search_results(results, cx),
@@ -399,14 +400,14 @@ impl AgentPane {
     ) {
         match outcome {
             SlashCommandOutcome::Accepted => {
-                self.set_command_feedback(
+                self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
                     i18n("agent-session-command-accepted").replace("{name}", name),
                     cx,
                 );
             }
             SlashCommandOutcome::Completed { message } => {
-                self.set_command_feedback(
+                self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
                     message.unwrap_or_else(|| {
                         i18n("agent-session-command-completed").replace("{name}", name)
@@ -420,12 +421,13 @@ impl AgentPane {
             }
             SlashCommandOutcome::Rejected { message } => {
                 self.palette.awaiting_command_turn = false;
-                self.set_command_feedback(CommandFeedbackKind::Error, message, cx);
+                self.palette
+                    .set_feedback(CommandFeedbackKind::Error, message, cx);
                 self.run_next_queued_command(cx);
             }
             SlashCommandOutcome::NotReady => {
                 self.palette.awaiting_command_turn = false;
-                self.set_command_feedback(
+                self.palette.set_feedback(
                     CommandFeedbackKind::Error,
                     i18n("agent-session-provider-not-ready").replace("{name}", self.kind.display()),
                     cx,
@@ -525,7 +527,7 @@ impl AgentPane {
             if !fatal {
                 self.runtime.status = Status::Idle;
             }
-            self.set_command_feedback(
+            self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-session-open-failed").replace("{error}", &message),
                 cx,
@@ -552,7 +554,7 @@ impl AgentPane {
         }
         self.push_item(SessionItem::Error { text: message }, cx);
         if cancelled_queue {
-            self.set_command_feedback(
+            self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-session-queued-cancelled-failed").to_string(),
                 cx,

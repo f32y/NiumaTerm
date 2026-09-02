@@ -80,7 +80,7 @@ impl PaletteControl {
 impl AgentPane {
     pub(crate) fn open_recent_sessions(&mut self, cx: &mut Context<Self>) -> bool {
         if self.is_command_busy() {
-            self.set_command_feedback(
+            self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 translated("agent-composer-resume-idle-only"),
                 cx,
@@ -94,7 +94,7 @@ impl AgentPane {
             .unwrap_or(self.history_ui.sessions.len());
         if rows == 0 {
             self.history_ui.mode = RecentSessionsMode::Hidden;
-            self.set_command_feedback(
+            self.palette.set_feedback(
                 CommandFeedbackKind::Notice,
                 translated("agent-composer-no-recent-sessions"),
                 cx,
@@ -501,7 +501,8 @@ impl AgentPane {
         };
 
         if let Some(reason) = row.disabled_reason {
-            self.set_command_feedback(CommandFeedbackKind::Error, reason, cx);
+            self.palette
+                .set_feedback(CommandFeedbackKind::Error, reason, cx);
             return;
         }
 
@@ -534,7 +535,7 @@ impl AgentPane {
             }
             PaletteAction::Skill(skill) => {
                 let Ok((text, binding)) = prepare_skill_selection(&skill) else {
-                    self.set_command_feedback(
+                    self.palette.set_feedback(
                         CommandFeedbackKind::Error,
                         i18n("agent-command-skill-disabled-by-codex")
                             .replace("{name}", &skill.name),

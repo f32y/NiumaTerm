@@ -727,7 +727,7 @@ impl AgentPane {
                 this.palette.awaiting_command_turn = false;
                 if !this.palette.command_queue.is_empty() {
                     this.palette.command_queue.clear();
-                    this.set_command_feedback(
+                    this.palette.set_feedback(
                         CommandFeedbackKind::Error,
                         i18n("agent-session-queued-cancelled-exited").replace("{name}", name),
                         cx,
@@ -844,7 +844,7 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) -> bool {
         if self.branch_flow_holds_composer() {
-            self.set_command_feedback(
+            self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-session-rewind-blocks-send").to_string(),
                 cx,
@@ -852,7 +852,7 @@ impl AgentPane {
             return false;
         }
         if self.palette.awaiting_command_turn {
-            self.set_command_feedback(
+            self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-session-command-starting").to_string(),
                 cx,

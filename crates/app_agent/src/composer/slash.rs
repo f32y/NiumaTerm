@@ -52,7 +52,7 @@ impl AgentPane {
             return false;
         };
         if parsed.name.is_empty() {
-            self.set_command_feedback(
+            self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-composer-choose-command").to_string(),
                 cx,
@@ -75,7 +75,7 @@ impl AgentPane {
                 return self.send_text(input.to_string(), cx);
             }
 
-            self.set_command_feedback(
+            self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-composer-unknown-command").replace("{name}", &parsed.name),
                 cx,
@@ -98,12 +98,13 @@ impl AgentPane {
                 Some(_) => i18n("agent-composer-choose-skill").to_string(),
             };
 
-            self.set_command_feedback(CommandFeedbackKind::Error, message, cx);
+            self.palette
+                .set_feedback(CommandFeedbackKind::Error, message, cx);
             return false;
         }
 
         if command.arguments == SlashCommandArguments::None && !parsed.arguments.trim().is_empty() {
-            self.set_command_feedback(
+            self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-composer-command-no-arguments").replace("{name}", &command.name),
                 cx,
@@ -113,7 +114,7 @@ impl AgentPane {
 
         if command.arguments == SlashCommandArguments::Choices {
             if parsed.arguments.trim().is_empty() {
-                self.set_command_feedback(
+                self.palette.set_feedback(
                     CommandFeedbackKind::Error,
                     i18n("agent-composer-choose-value").replace("{name}", &command.name),
                     cx,
@@ -126,7 +127,7 @@ impl AgentPane {
                 Ok(value) if command.name == "model" => {
                     self.controls.settings.model = Some(value.clone());
                     self.remember_thread_defaults(cx);
-                    self.set_command_feedback(
+                    self.palette.set_feedback(
                         CommandFeedbackKind::Notice,
                         i18n("agent-composer-model-set").replace("{value}", &value),
                         cx,
@@ -143,7 +144,7 @@ impl AgentPane {
                 Ok(value) if command.name == "permissions" => {
                     self.controls.settings.approval = Some(value.clone());
                     self.remember_thread_defaults(cx);
-                    self.set_command_feedback(
+                    self.palette.set_feedback(
                         CommandFeedbackKind::Notice,
                         i18n("agent-composer-permissions-set")
                             .replace("{value}", &setting_value_label(&value)),
@@ -153,7 +154,8 @@ impl AgentPane {
                 }
                 Ok(_) => {}
                 Err(message) => {
-                    self.set_command_feedback(CommandFeedbackKind::Error, message, cx);
+                    self.palette
+                        .set_feedback(CommandFeedbackKind::Error, message, cx);
                     return false;
                 }
             }
@@ -162,7 +164,7 @@ impl AgentPane {
         match command.name.as_str() {
             "new" | "clear" => {
                 if self.is_command_busy() {
-                    self.set_command_feedback(
+                    self.palette.set_feedback(
                         CommandFeedbackKind::Error,
                         i18n("agent-composer-command-idle-only").replace("{name}", &command.name),
                         cx,
@@ -216,7 +218,7 @@ impl AgentPane {
                     let name = command.name.clone();
                     self.palette.command_queue.push_back(command);
                     let count = self.palette.command_queue.len();
-                    self.set_command_feedback(
+                    self.palette.set_feedback(
                         CommandFeedbackKind::Queued,
                         i18n(if count == 1 {
                             "agent-composer-command-queued-one"
@@ -230,7 +232,7 @@ impl AgentPane {
                     true
                 }
                 SlashCommandRunPolicy::IdleOnly => {
-                    self.set_command_feedback(
+                    self.palette.set_feedback(
                         CommandFeedbackKind::Error,
                         i18n("agent-composer-command-idle-only").replace("{name}", &command.name),
                         cx,
@@ -258,7 +260,7 @@ impl AgentPane {
             SlashCommandOutcome::Accepted => {
                 self.history_ui.mode = RecentSessionsMode::Hidden;
                 self.palette.awaiting_command_turn = true;
-                self.set_command_feedback(
+                self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
                     i18n("agent-composer-command-starting").replace("{name}", &command.name),
                     cx,
@@ -266,7 +268,7 @@ impl AgentPane {
                 true
             }
             SlashCommandOutcome::Completed { message } => {
-                self.set_command_feedback(
+                self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
                     message.unwrap_or_else(|| {
                         i18n("agent-session-command-completed").replace("{name}", &command.name)
@@ -276,11 +278,12 @@ impl AgentPane {
                 true
             }
             SlashCommandOutcome::Rejected { message } => {
-                self.set_command_feedback(CommandFeedbackKind::Error, message, cx);
+                self.palette
+                    .set_feedback(CommandFeedbackKind::Error, message, cx);
                 false
             }
             SlashCommandOutcome::NotReady => {
-                self.set_command_feedback(
+                self.palette.set_feedback(
                     CommandFeedbackKind::Error,
                     i18n("agent-session-still-starting").replace("{name}", self.kind.display()),
                     cx,
@@ -359,7 +362,8 @@ impl AgentPane {
 
         // Answering /status is information the user asked for, so it holds
         // rather than fading out from under them.
-        self.set_command_feedback(CommandFeedbackKind::Status, fields.join(" · "), cx);
+        self.palette
+            .set_feedback(CommandFeedbackKind::Status, fields.join(" · "), cx);
     }
 
     pub(super) fn skill_disabled_reason(&self, skill: &SkillInfo) -> Option<SharedString> {

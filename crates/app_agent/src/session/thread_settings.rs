@@ -56,7 +56,9 @@ impl AgentPane {
 
         match outcome {
             Ok(()) => cx.notify(),
-            Err(error) => self.set_command_feedback(CommandFeedbackKind::Error, error, cx),
+            Err(error) => self
+                .palette
+                .set_feedback(CommandFeedbackKind::Error, error, cx),
         }
     }
 
@@ -79,7 +81,9 @@ impl AgentPane {
                 self.controls.agent_preset = Some(preset);
                 cx.notify();
             }
-            Err(error) => self.set_command_feedback(CommandFeedbackKind::Error, error, cx),
+            Err(error) => self
+                .palette
+                .set_feedback(CommandFeedbackKind::Error, error, cx),
         }
     }
 

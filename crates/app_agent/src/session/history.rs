@@ -153,7 +153,7 @@ impl AgentPane {
         self.controls.seed_thread_defaults = !caps.resume_restores_thread_settings;
         self.controls.seed_approval_reviewer =
             caps.resume_restores_thread_settings && !caps.resume_restores_approval_reviewer;
-        self.set_command_feedback(
+        self.palette.set_feedback(
             CommandFeedbackKind::Notice,
             i18n("agent-session-opening-recent").to_string(),
             cx,
@@ -171,7 +171,7 @@ impl AgentPane {
             {
                 self.history_ui.mode = RecentSessionsMode::Open;
                 self.runtime.status = previous_status;
-                self.set_command_feedback(
+                self.palette.set_feedback(
                     CommandFeedbackKind::Error,
                     i18n("agent-session-codex-recent-not-ready").to_string(),
                     cx,
