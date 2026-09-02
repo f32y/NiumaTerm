@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use nmt_agent_utils::background_task::{
     BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscript,
 };
-use nmt_agent_utils::chat::{AgentPreset, ApprovalPreset, ModelInfo, QueuedPrompt, ThreadSettings};
+use nmt_agent_utils::chat::QueuedPrompt;
 
 use crate::UnansweredPrompt;
 use crate::session::{Backend, RecoverySnapshot, Status, UpdateSuspension};
@@ -39,43 +39,6 @@ pub(crate) struct SessionRuntime {
     /// contents while preventing input from reaching a missing backend.
     pub(crate) update_suspension: Option<UpdateSuspension>,
     pub(crate) last_recovery_snapshot: Option<RecoverySnapshot>,
-}
-
-/// The thread controls under the composer: current values, catalogs to pick
-/// from, and the seeding flags that decide what the next `Ready` overlays.
-pub(crate) struct ThreadControls {
-    /// Current thread settings, seeded from the session's `Ready` event and
-    /// changed via the dropdowns under the input; sent as overrides on every
-    /// turn start (idempotent when unchanged).
-    pub(crate) settings: ThreadSettings,
-    /// Whether the next `Ready` should overlay all remembered settings. True
-    /// for fresh conversations and resumed Claude conversations; later Claude
-    /// confirmations keep the values currently selected under the input.
-    pub(crate) seed_thread_defaults: bool,
-    /// Whether the next resumed Codex thread should take the locally
-    /// remembered approval reviewer while preserving its other stored
-    /// settings.
-    pub(crate) seed_approval_reviewer: bool,
-    /// A rewind starts a new backend identity but keeps the user's current
-    /// thread controls. The first Ready payload describes process defaults,
-    /// so these values are overlaid once instead of being replaced by them.
-    pub(crate) restore_on_ready: Option<ThreadSettings>,
-    /// Model catalog; service tiers are per model, so the tier dropdown lists
-    /// the selected model's tiers.
-    pub(crate) models: Vec<ModelInfo>,
-    /// Execution-permission presets, for a harness whose preset table belongs
-    /// to its deployment. Empty for one whose presets this UI can name
-    /// itself.
-    pub(crate) approval_presets: Vec<ApprovalPreset>,
-    /// Agent compositions this deployment offers, and the one this
-    /// conversation was built from. Empty where the deployment composes none,
-    /// which is a picker with nothing to choose between rather than an
-    /// unsupported one.
-    pub(crate) agent_presets: Vec<AgentPreset>,
-    pub(crate) agent_preset: Option<String>,
-    /// Stop the effort slider's thumb is being dragged to while the button is
-    /// down. The level itself is applied on release.
-    pub(crate) effort_drag: Option<usize>,
 }
 
 /// One turn's bookkeeping, from submission to settled output.

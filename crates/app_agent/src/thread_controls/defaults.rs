@@ -8,6 +8,7 @@
 use gpui::{App, Context};
 use nmt_agent_utils::chat::ThreadSettings;
 use nmt_config::local_state;
+use nmt_config::profile::AgentProfile;
 use tracing::warn;
 
 use crate::AgentPane;
@@ -15,6 +16,78 @@ use crate::composer::CommandFeedbackKind;
 use crate::profile::{
     ANTHROPIC_MODEL_ENV, AgentKind, AgentThreadDefaults, agent_launch, launch_env_value,
 };
+use crate::thread_controls::ThreadControls;
+
+/// Key for the per-profile thread-settings memory; a profile without a
+/// name shares the agent-kind bucket (also the key older local_state
+/// snapshots used).
+pub(crate) fn defaults_key(kind: AgentKind, profile: &AgentProfile) -> String {
+    if profile.name.trim().is_empty() {
+        kind.id().to_string()
+    } else {
+        profile.name.clone()
+    }
+}
+
+/// The picks remembered for this profile, falling back to the bucket its
+/// agent kind shares with unnamed profiles.
+pub(crate) fn stored_thread_settings<'a>(
+    kind: AgentKind,
+    profile: &AgentProfile,
+    cx: &'a App,
+) -> Option<&'a ThreadSettings> {
+    let defaults = cx.try_global::<AgentThreadDefaults>()?;
+    defaults
+        .0
+        .get(&defaults_key(kind, profile))
+        .or_else(|| defaults.0.get(kind.id()))
+}
+
+/// Effective startup model after protocol mapping and user environment
+/// overrides. Claude resolves `ANTHROPIC_MODEL` with last-value-wins
+/// semantics; Codex receives the profile field over app-server RPC.
+pub(crate) fn launch_model(kind: AgentKind, profile: &AgentProfile) -> Option<String> {
+    let launch = agent_launch(profile);
+    match kind {
+        AgentKind::Claude => launch_env_value(&launch, ANTHROPIC_MODEL_ENV),
+        AgentKind::Codex => launch.model,
+        // DeepSeek takes a model through a per-session call rather than the
+        // launch, and that call is not mapped yet, so the profile field
+        // cannot describe what the session will actually run.
+        AgentKind::DeepSeek => None,
+    }
+}
+
+/// The reasoning effort this pane's profile pins. Claude receives it as a
+/// launch flag and Codex as a thread-start parameter; the picker shows it
+/// either way.
+pub(crate) fn launch_effort(profile: &AgentProfile) -> Option<String> {
+    agent_launch(profile).effort
+}
+
+impl ThreadControls {
+    /// Remember the current thread settings as the defaults for future
+    /// conversations launched from this profile. Called after every
+    /// user-driven settings change (dropdowns and slash commands).
+    pub(crate) fn remember_defaults(
+        &self,
+        kind: AgentKind,
+        profile: &AgentProfile,
+        cx: &mut Context<AgentPane>,
+    ) {
+        let stored = {
+            let defaults = cx.default_global::<AgentThreadDefaults>();
+            defaults
+                .0
+                .insert(defaults_key(kind, profile), self.settings.clone());
+            defaults.to_local_state()
+        };
+
+        if let Err(err) = local_state::save_agent_defaults(&stored) {
+            warn!("failed to save agent defaults to local_state.toml: {err}");
+        }
+    }
+}
 
 impl AgentPane {
     /// Push the current model and effort picks to a harness that applies them
@@ -84,66 +157,6 @@ impl AgentPane {
             Err(error) => self
                 .palette
                 .set_feedback(CommandFeedbackKind::Error, error, cx),
-        }
-    }
-
-    /// Key for the per-profile thread-settings memory; a profile without a
-    /// name shares the agent-kind bucket (also the key older local_state
-    /// snapshots used).
-    pub(super) fn defaults_key(&self) -> String {
-        if self.profile.name.trim().is_empty() {
-            self.kind.id().to_string()
-        } else {
-            self.profile.name.clone()
-        }
-    }
-
-    /// The picks remembered for this profile, falling back to the bucket its
-    /// agent kind shares with unnamed profiles.
-    pub(super) fn stored_thread_settings<'a>(&self, cx: &'a App) -> Option<&'a ThreadSettings> {
-        let defaults = cx.try_global::<AgentThreadDefaults>()?;
-        defaults
-            .0
-            .get(&self.defaults_key())
-            .or_else(|| defaults.0.get(self.kind.id()))
-    }
-
-    /// Effective startup model after protocol mapping and user environment
-    /// overrides. Claude resolves `ANTHROPIC_MODEL` with last-value-wins
-    /// semantics; Codex receives the profile field over app-server RPC.
-    pub(super) fn profile_model(&self) -> Option<String> {
-        let launch = agent_launch(&self.profile);
-        match self.kind {
-            AgentKind::Claude => launch_env_value(&launch, ANTHROPIC_MODEL_ENV),
-            AgentKind::Codex => launch.model,
-            // DeepSeek takes a model through a per-session call rather than the
-            // launch, and that call is not mapped yet, so the profile field
-            // cannot describe what the session will actually run.
-            AgentKind::DeepSeek => None,
-        }
-    }
-
-    /// The reasoning effort this pane's profile pins. Claude receives it as a
-    /// launch flag and Codex as a thread-start parameter; the picker shows it
-    /// either way.
-    pub(super) fn profile_effort(&self) -> Option<String> {
-        agent_launch(&self.profile).effort
-    }
-
-    /// Remember the pane's current thread settings as the defaults for future
-    /// conversations launched from this profile. Called after every
-    /// user-driven settings change (dropdowns and slash commands).
-    pub(crate) fn remember_thread_defaults(&self, cx: &mut Context<Self>) {
-        let stored = {
-            let defaults = cx.default_global::<AgentThreadDefaults>();
-            defaults
-                .0
-                .insert(self.defaults_key(), self.controls.settings.clone());
-            defaults.to_local_state()
-        };
-
-        if let Err(err) = local_state::save_agent_defaults(&stored) {
-            warn!("failed to save agent defaults to local_state.toml: {err}");
         }
     }
 }

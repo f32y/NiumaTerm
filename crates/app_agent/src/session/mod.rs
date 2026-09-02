@@ -3,7 +3,8 @@ use gpui::prelude::*;
 use nmt_agent_utils::AgentEvent;
 
 use crate::UnansweredPrompt;
-use crate::pane_state::{ChildAgents, SessionRuntime, ThreadControls, TurnState};
+use crate::pane_state::{ChildAgents, SessionRuntime, TurnState};
+use crate::thread_controls::{ThreadControls, launch_effort, launch_model, stored_thread_settings};
 mod backend;
 mod background_tasks;
 mod conversation;
@@ -11,7 +12,6 @@ mod events;
 mod history;
 #[cfg(test)]
 mod tests;
-mod thread_settings;
 mod turn;
 mod update_recovery;
 
@@ -529,14 +529,14 @@ impl AgentPane {
         // The profile model is known before either CLI completes its
         // handshake, so the picker need not flash the backend default while a
         // custom endpoint is starting.
-        if !preserve_thread_settings && let Some(model) = self.profile_model() {
+        if !preserve_thread_settings && let Some(model) = launch_model(self.kind, &self.profile) {
             self.controls.settings.model = Some(model);
         }
 
         // A pinned effort reaches the backend through the launch, so the
         // picker shows it from the first frame rather than the level the
         // agent would otherwise have used.
-        if !preserve_thread_settings && let Some(effort) = self.profile_effort() {
+        if !preserve_thread_settings && let Some(effort) = launch_effort(&self.profile) {
             self.controls.settings.effort = Some(effort);
         }
 
@@ -592,7 +592,7 @@ impl AgentPane {
         // configured model.
         if caps.model_baked_into_launch {
             launch.model = self.controls.settings.model.clone().or_else(|| {
-                self.stored_thread_settings(cx)
+                stored_thread_settings(self.kind, &self.profile, cx)
                     .and_then(|stored| stored.model.clone())
             });
         }

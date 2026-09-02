@@ -15,6 +15,7 @@ use crate::commands::claim_command_turn_start;
 use crate::composer::CommandFeedbackKind;
 use crate::session::conversation::claimed_prompts;
 use crate::session::{Backend, RecoverySnapshot, Status, UpdateSuspension};
+use crate::thread_controls::{launch_effort, launch_model, stored_thread_settings};
 use crate::transcript::hidden;
 use crate::{AgentPane, AgentPaneEvent, QuestionPrompt, RecentSessionsMode};
 
@@ -229,7 +230,8 @@ impl AgentPane {
                 // above the composer: it answers for the control the user just
                 // used, and the transcript is what the conversation said.
                 self.controls.settings.effort = effort;
-                self.remember_thread_defaults(cx);
+                self.controls
+                    .remember_defaults(self.kind, &self.profile, cx);
                 self.palette
                     .set_feedback(CommandFeedbackKind::Error, message, cx);
             }
@@ -326,7 +328,7 @@ impl AgentPane {
         let seed_thread_defaults = take(&mut self.controls.seed_thread_defaults);
         let seed_approval_reviewer = take(&mut self.controls.seed_approval_reviewer);
         let stored = (seed_thread_defaults || seed_approval_reviewer)
-            .then(|| self.stored_thread_settings(cx))
+            .then(|| stored_thread_settings(self.kind, &self.profile, cx))
             .flatten();
         let preserve_current = self.kind.caps().repeats_ready_during_init && !seed_thread_defaults;
         let local = if preserve_current {
@@ -334,9 +336,11 @@ impl AgentPane {
         } else {
             stored
         };
-        let startup_model = seed_thread_defaults.then(|| self.profile_model()).flatten();
+        let startup_model = seed_thread_defaults
+            .then(|| launch_model(self.kind, &self.profile))
+            .flatten();
         let startup_effort = seed_thread_defaults
-            .then(|| self.profile_effort())
+            .then(|| launch_effort(&self.profile))
             .flatten();
         next = resolve_ready_settings(
             next,
@@ -368,7 +372,7 @@ impl AgentPane {
             "agent thread ready: profile=\"{}\", model={:?}, profile_model={:?}",
             self.profile.name,
             self.controls.settings.model,
-            self.profile_model()
+            launch_model(self.kind, &self.profile)
         );
         // Claude's first-turn init confirms settings after its
         // synthetic TurnStarted event; that confirmation must not
