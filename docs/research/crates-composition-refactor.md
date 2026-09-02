@@ -300,7 +300,16 @@ Commit: `refactor(agent): give thread controls their rendering and defaults`
 
 #### A3. `ComposerAttachments`: images, placeholders, response annotations
 
-Status: pending. Independent of A2.
+Status: done be210589
+
+Note: `paste_image` stayed on `AgentPane`. It reads the clipboard, checks the
+harness capability and reports a refusal through the palette; only the attach
+and the placeholder insertion moved. Each component method reports whether it
+changed anything so the pane decides to repaint. `spaced_placeholder` moved
+beside the placeholder format it writes.
+Manual check: paste a screenshot into the composer, delete its placeholder by
+hand, and quote an agent response; the thumbnail strip and the annotation
+chips follow in both directions.
 
 Three files operate on `attachments: PendingAttachments`
 (`composer/attachments/mod.rs:76`) and `response_annotations: Vec<String>`:
@@ -328,7 +337,16 @@ Commit: `refactor(agent): fold attachments and annotations into one composer par
 
 #### A4. Workflow methods onto `WorkflowUi`
 
-Status: pending. Independent of A2, A3.
+Status: done 9eec587d
+
+Note: the public pane methods stay, because the `app` crate calls them; each
+is now a delegation plus the pane-level effect. The refresh loop, the restore
+read and `apply_event` routing stay on `AgentPane`, so `RefreshPlan` was not
+needed as a parameter type. `WorkflowActivity` is emitted only when the chrome
+would change, which the component reports.
+Manual check: run a Claude workflow, open the Workflows panel and open one
+agent conversation; rows update about once a second and the conversation
+extends while the agent is writing.
 
 `workflows.rs` (486) is the only file that touches `self.workflows`
 (`WorkflowUi` at `workflows.rs:52`). Its outside reads are `kind`,
@@ -945,3 +963,5 @@ left under the order.
 | B5 | done `30c5f10c` |
 | E1 | done `2cb20434` |
 | A2 | done `1ce5d202` |
+| A3 | done `be210589` |
+| A4 | done `9eec587d` |
