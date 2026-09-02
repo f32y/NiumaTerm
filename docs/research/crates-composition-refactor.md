@@ -560,7 +560,16 @@ Commit: `refactor(terminal-view): own selection state on the surface`
 
 #### C2. `ScrollbarActivity` (`crates/app_terminal/src/view/scroll.rs`)
 
-Status: pending
+Status: done 53eebc95
+
+Note: `opacity` returns `Option<f32>`, not `f32`. `None` is what tells the
+render path the bar has faded out and must not be painted at all, so the
+sketched signature would have changed behaviour. Added `thumb_top_for` for the
+two sites that subtracted the grab offset by hand. The suggested subject is 68
+characters and the commit-msg hook caps subjects at 60, so it shipped as
+`own scrollbar drag and fade state`.
+Manual check: drag the terminal scrollbar thumb; it follows the pointer and
+fades out about half a second after release.
 
 Four `TerminalPane` fields exist only to drive scrollbar opacity and thumb
 drag: `scrollbar_dragging`, `scrollbar_grab`, `last_scroll_activity`,
@@ -855,3 +864,4 @@ left under the order.
 | Order | Status |
 |---|---|
 | C1 | done `b7bef98e` |
+| C2 | done `53eebc95` |
