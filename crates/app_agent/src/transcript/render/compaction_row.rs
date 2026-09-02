@@ -18,6 +18,7 @@ use crate::settings::UI_RADIUS;
 use crate::transcript::disclosure_row::{
     AGENT_CARD_BODY_PADDING_Y, AGENT_CARD_PADDING_X, AgentDisclosureRow, agent_card,
 };
+use crate::transcript::render::text_style::markdown_view;
 use crate::transcript::reveal::{RevealKey, RevealedPart, revealed_block};
 use crate::transcript::{
     TranscriptView, compact_token_count, compaction_accounting, compaction_label,
@@ -185,12 +186,8 @@ impl TranscriptView {
                             .bg(cx.theme().tokens.muted)
                             .text_color(cx.theme().muted_foreground)
                             .child(
-                                Self::markdown_view(
-                                    ("compaction-md", index),
-                                    summary,
-                                    self.cwd.clone(),
-                                )
-                                .selectable(true),
+                                markdown_view(("compaction-md", index), summary, self.cwd.clone())
+                                    .selectable(true),
                             ),
                     )
                     .child(
