@@ -597,7 +597,15 @@ impl Render for TranscriptView {
                                         .icon(IconName::ArrowDown)
                                         .label(i18n("agent-transcript-scroll-bottom"))
                                         .on_click(cx.listener(|this, _, _, cx| {
-                                            this.scroll_to_bottom();
+                                            // A click arrives outside a frame,
+                                            // and the slide only starts on the
+                                            // next layout, so the notify is
+                                            // what wakes the pump for it.
+                                            if cx.global::<AgentSettings>().reduce_motion {
+                                                this.scroll_to_bottom();
+                                            } else {
+                                                this.glide_to_bottom();
+                                            }
                                             cx.notify();
                                         })),
                                 ),
