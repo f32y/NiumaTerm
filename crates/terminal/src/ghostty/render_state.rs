@@ -1,13 +1,17 @@
+use std::ptr;
+
 use libghostty_vt_sys::{
-    ColorRgb as VtColorRgb, PointTag as VtPointTag,
+    ColorRgb as VtColorRgb, PointTag as VtPointTag, RenderState as VtRenderState,
     RenderStateCursorVisualStyle as VtRenderStateCursorVisualStyle,
     RenderStateData as VtRenderStateData, RenderStateDirty as VtRenderStateDirty,
     RenderStateOption as VtRenderStateOption, RenderStateRowData as VtRenderStateRowData,
     RenderStateRowIterator as VtRenderStateRowIterator,
-    RenderStateRowOption as VtRenderStateRowOption, Result as VtResult,
-    TerminalData as VtTerminalData, ghostty_render_state_get, ghostty_render_state_row_get,
-    ghostty_render_state_row_iterator_next, ghostty_render_state_row_set, ghostty_render_state_set,
-    ghostty_render_state_update, ghostty_terminal_get,
+    RenderStateRowOption as VtRenderStateRowOption, Result as VtResult, Terminal as VtTerminal,
+    TerminalData as VtTerminalData, ghostty_render_state_free, ghostty_render_state_get,
+    ghostty_render_state_new, ghostty_render_state_row_get, ghostty_render_state_row_iterator_free,
+    ghostty_render_state_row_iterator_new, ghostty_render_state_row_iterator_next,
+    ghostty_render_state_row_set, ghostty_render_state_set, ghostty_render_state_update,
+    ghostty_terminal_get,
 };
 #[cfg(test)]
 use libghostty_vt_sys::{
@@ -18,21 +22,72 @@ use crate::ansi;
 use crate::ghostty::{Error, GhosttyTerminal, Result, SnapshotColors, SnapshotCursor};
 use crate::render_buffer::RenderBuffer;
 
-impl GhosttyTerminal {
-    /// Probe: whether any visible row carries a PROMPT semantic tag (command-blocks-
-    /// rendering — mark-forwarding regression checks in terminal pipeline tests).
-    #[cfg(test)]
-    pub(crate) fn has_prompt_tagged_row(&mut self) -> bool {
-        self.row_semantic_prompts()
-            .map(|tags| tags.contains(&VtRowSemanticPrompt::PROMPT))
-            .unwrap_or(false)
+/// The engine's render state and the row damage derived from it.
+///
+/// The two handles are FFI allocations this owns outright, and the row
+/// versions only mean anything against the state they were read from, so the
+/// four are constructed and freed as one. The terminal handle stays on the
+/// parent and arrives per call, which keeps a single owner for it.
+pub(super) struct RenderStateReader {
+    render_state: VtRenderState,
+    row_iter: VtRenderStateRowIterator,
+    /// Last terminal-content revision for each visible row. Revisions persist
+    /// across publications so a frontend that skips a buffer still sees every
+    /// row changed since its previous frame.
+    row_versions: Vec<u64>,
+    content_revision: u64,
+}
+
+impl Drop for RenderStateReader {
+    fn drop(&mut self) {
+        unsafe {
+            ghostty_render_state_row_iterator_free(self.row_iter);
+            ghostty_render_state_free(self.render_state);
+        }
+    }
+}
+
+impl RenderStateReader {
+    pub(super) fn new(rows: u16) -> Result<Self> {
+        let mut render_state = ptr::null_mut();
+
+        Error::from_code(unsafe { ghostty_render_state_new(ptr::null(), &mut render_state) })?;
+
+        let mut row_iter = ptr::null_mut();
+
+        if let Err(err) = Error::from_code(unsafe {
+            ghostty_render_state_row_iterator_new(ptr::null(), &mut row_iter)
+        }) {
+            unsafe { ghostty_render_state_free(render_state) };
+            return Err(err);
+        }
+
+        Ok(Self {
+            render_state,
+            row_iter,
+            row_versions: vec![0; rows as usize],
+            content_revision: 0,
+        })
+    }
+
+    /// Pull the engine's current frame into the render state.
+    pub(super) fn update(&mut self, terminal: VtTerminal) -> Result<()> {
+        Error::from_code(unsafe { ghostty_render_state_update(self.render_state, terminal) })
+    }
+
+    pub(super) fn row_versions(&self) -> &[u64] {
+        &self.row_versions
     }
 
     /// Probe the engine's `SEMANTIC_PROMPT` tag per visible row. This verifies that
     /// headless parsing preserves OSC 133 metadata used by command-block rendering.
     #[cfg(test)]
-    pub(super) fn row_semantic_prompts(&mut self) -> Result<Vec<VtRowSemanticPrompt::Type>> {
-        Error::from_code(unsafe { ghostty_render_state_update(self.render_state, self.terminal) })?;
+    pub(super) fn row_semantic_prompts(
+        &mut self,
+        terminal: VtTerminal,
+        rows: u16,
+    ) -> Result<Vec<VtRowSemanticPrompt::Type>> {
+        self.update(terminal)?;
 
         Error::from_code(unsafe {
             ghostty_render_state_get(
@@ -42,7 +97,7 @@ impl GhosttyTerminal {
             )
         })?;
 
-        let mut out = Vec::with_capacity(self.rows as usize);
+        let mut out = Vec::with_capacity(rows as usize);
 
         while unsafe { ghostty_render_state_row_iterator_next(self.row_iter) } {
             let mut tag: VtRowSemanticPrompt::Type = VtRowSemanticPrompt::NONE;
@@ -71,52 +126,10 @@ impl GhosttyTerminal {
         Ok(out)
     }
 
-    /// Populate a reusable render buffer from the full visible viewport.
-    pub fn snapshot_into(&mut self, buffer: &mut RenderBuffer) -> Result<()> {
-        Error::from_code(unsafe { ghostty_render_state_update(self.render_state, self.terminal) })?;
-
-        self.consume_render_damage()?;
-
-        let cursor = self.cursor().unwrap_or(SnapshotCursor {
-            x: 0,
-            y: 0,
-            visible: false,
-            shape: ansi::CursorShape::Block,
-            blinking: false,
-        });
-
-        let palette = self.color_palette();
-
-        buffer.begin_capture(self.cols as usize, self.rows as usize);
-
-        // A transient row lookup failure blanks only that row; publishing the
-        // remaining viewport is safer than withholding an otherwise valid frame.
-        for y in 0..self.rows {
-            let meta = self
-                .grid_ref_at(VtPointTag::VIEWPORT, 0, y as u32)
-                .and_then(|grid_ref| {
-                    Self::visit_row_cells(grid_ref, self.cols, &palette, |x, text, wide, style| {
-                        buffer.write_cell(x as usize, y as usize, text.as_str(), wide, &style);
-                    })
-                })
-                .unwrap_or_default();
-
-            buffer.write_row_meta(y as usize, meta.wrapped, meta.virtual_placeholder);
-        }
-
-        let colors = self.colors();
-        let placements = self.placements();
-        let scrollbar = self.scrollbar();
-
-        buffer.finish_capture(cursor, colors, placements, scrollbar, &self.row_versions);
-
-        Ok(())
-    }
-
     /// Transfer Ghostty's transient render damage into persistent row versions.
     /// Both damage layers must be cleared after consumption; otherwise every
     /// later capture would repeat the first dirty update indefinitely.
-    fn consume_render_damage(&mut self) -> Result<()> {
+    pub(super) fn consume_damage(&mut self, rows: u16) -> Result<()> {
         let mut dirty: VtRenderStateDirty::Type = VtRenderStateDirty::FALSE;
 
         Error::from_code(unsafe {
@@ -127,7 +140,7 @@ impl GhosttyTerminal {
             )
         })?;
 
-        let rows = self.rows as usize;
+        let rows = rows as usize;
         let dimensions_changed = self.row_versions.len() != rows;
 
         if dirty == VtRenderStateDirty::FALSE && !dimensions_changed {
@@ -196,16 +209,7 @@ impl GhosttyTerminal {
         })
     }
 
-    /// Allocate and populate an owned render buffer for diagnostics and tests.
-    pub fn snapshot(&mut self) -> Result<RenderBuffer> {
-        let mut buffer = RenderBuffer::new(self.cols as usize, self.rows as usize);
-
-        self.snapshot_into(&mut buffer)?;
-
-        Ok(buffer)
-    }
-
-    fn cursor(&self) -> Result<SnapshotCursor> {
+    pub(super) fn cursor(&self) -> Result<SnapshotCursor> {
         let mut visible = false;
 
         Error::from_code(unsafe {
@@ -293,7 +297,7 @@ impl GhosttyTerminal {
     }
 
     /// Effective default colors from the render-state.
-    fn colors(&self) -> SnapshotColors {
+    pub(super) fn colors(&self, terminal: VtTerminal) -> SnapshotColors {
         use nmt_config::colors::ColorRgb;
 
         let read = |data: VtRenderStateData::Type| -> Option<ColorRgb> {
@@ -342,7 +346,7 @@ impl GhosttyTerminal {
             let mut c = VtColorRgb::default();
 
             match unsafe {
-                ghostty_terminal_get(self.terminal, data, (&mut c as *mut VtColorRgb).cast())
+                ghostty_terminal_get(terminal, data, (&mut c as *mut VtColorRgb).cast())
             } {
                 VtResult::SUCCESS => Some(ColorRgb {
                     r: c.r,
@@ -367,5 +371,78 @@ impl GhosttyTerminal {
             cursor,
             bg_override,
         }
+    }
+}
+
+impl GhosttyTerminal {
+    /// Probe: whether any visible row carries a PROMPT semantic tag (command-blocks-
+    /// rendering — mark-forwarding regression checks in terminal pipeline tests).
+    #[cfg(test)]
+    pub(crate) fn has_prompt_tagged_row(&mut self) -> bool {
+        self.semantic_prompt_tags()
+            .map(|tags| tags.contains(&VtRowSemanticPrompt::PROMPT))
+            .unwrap_or(false)
+    }
+
+    /// The engine's `SEMANTIC_PROMPT` tag per visible row.
+    #[cfg(test)]
+    pub(super) fn semantic_prompt_tags(&mut self) -> Result<Vec<VtRowSemanticPrompt::Type>> {
+        self.render.row_semantic_prompts(self.terminal, self.rows)
+    }
+
+    /// Populate a reusable render buffer from the full visible viewport.
+    pub fn snapshot_into(&mut self, buffer: &mut RenderBuffer) -> Result<()> {
+        self.render.update(self.terminal)?;
+        self.render.consume_damage(self.rows)?;
+
+        let cursor = self.render.cursor().unwrap_or(SnapshotCursor {
+            x: 0,
+            y: 0,
+            visible: false,
+            shape: ansi::CursorShape::Block,
+            blinking: false,
+        });
+
+        let palette = self.color_palette();
+
+        buffer.begin_capture(self.cols as usize, self.rows as usize);
+
+        // A transient row lookup failure blanks only that row; publishing the
+        // remaining viewport is safer than withholding an otherwise valid frame.
+        for y in 0..self.rows {
+            let meta = self
+                .grid_ref_at(VtPointTag::VIEWPORT, 0, y as u32)
+                .and_then(|grid_ref| {
+                    Self::visit_row_cells(grid_ref, self.cols, &palette, |x, text, wide, style| {
+                        buffer.write_cell(x as usize, y as usize, text.as_str(), wide, &style);
+                    })
+                })
+                .unwrap_or_default();
+
+            buffer.write_row_meta(y as usize, meta.wrapped, meta.virtual_placeholder);
+        }
+
+        let colors = self.render.colors(self.terminal);
+        let placements = self.placements();
+        let scrollbar = self.scrollbar();
+
+        buffer.finish_capture(
+            cursor,
+            colors,
+            placements,
+            scrollbar,
+            self.render.row_versions(),
+        );
+
+        Ok(())
+    }
+
+    /// Allocate and populate an owned render buffer for diagnostics and tests.
+    pub fn snapshot(&mut self) -> Result<RenderBuffer> {
+        let mut buffer = RenderBuffer::new(self.cols as usize, self.rows as usize);
+
+        self.snapshot_into(&mut buffer)?;
+
+        Ok(buffer)
     }
 }

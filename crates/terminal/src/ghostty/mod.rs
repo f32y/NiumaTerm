@@ -10,20 +10,17 @@ use libghostty_vt_sys::{
     KITTY_KEY_REPORT_ALTERNATES, KITTY_KEY_REPORT_ASSOCIATED, KITTY_KEY_REPORT_EVENTS,
     KittyGraphics as VtKittyGraphics,
     KittyGraphicsPlacementIterator as VtKittyGraphicsPlacementIterator,
-    PointCoordinate as VtPointCoordinate, PointTag as VtPointTag, RenderState as VtRenderState,
-    RenderStateRowIterator as VtRenderStateRowIterator, Result as VtResult, String as VtString,
-    Terminal as VtTerminal, TerminalCursorStyle as VtTerminalCursorStyle,
+    PointCoordinate as VtPointCoordinate, PointTag as VtPointTag, Result as VtResult,
+    String as VtString, Terminal as VtTerminal, TerminalCursorStyle as VtTerminalCursorStyle,
     TerminalData as VtTerminalData, TerminalOption as VtTerminalOption,
     TerminalOptions as VtTerminalOptions, TerminalScrollViewport as VtTerminalScrollViewport,
     TerminalScrollViewportTag as VtTerminalScrollViewportTag,
     TerminalScrollViewportValue as VtTerminalScrollViewportValue,
     TerminalScrollbar as VtTerminalScrollbar, ghostty_kitty_graphics_image,
     ghostty_kitty_graphics_placement_iterator_free, ghostty_kitty_graphics_placement_iterator_new,
-    ghostty_render_state_free, ghostty_render_state_new, ghostty_render_state_row_iterator_free,
-    ghostty_render_state_row_iterator_new, ghostty_terminal_free, ghostty_terminal_get,
-    ghostty_terminal_mode_get, ghostty_terminal_new, ghostty_terminal_point_from_grid_ref,
-    ghostty_terminal_resize, ghostty_terminal_scroll_viewport, ghostty_terminal_set,
-    ghostty_terminal_vt_write,
+    ghostty_terminal_free, ghostty_terminal_get, ghostty_terminal_mode_get, ghostty_terminal_new,
+    ghostty_terminal_point_from_grid_ref, ghostty_terminal_resize,
+    ghostty_terminal_scroll_viewport, ghostty_terminal_set, ghostty_terminal_vt_write,
 };
 #[cfg(test)]
 use libghostty_vt_sys::{
@@ -48,6 +45,8 @@ mod format;
 mod grid_read;
 mod kitty;
 mod render_state;
+
+use crate::ghostty::render_state::RenderStateReader;
 mod types;
 
 pub use crate::ghostty::block::{AcquiredBlock, BlockRef};
@@ -71,19 +70,13 @@ pub mod mode;
 
 pub struct GhosttyTerminal {
     terminal: VtTerminal,
-    render_state: VtRenderState,
-    row_iter: VtRenderStateRowIterator,
+    render: RenderStateReader,
     /// Reused each `snapshot()` to walk kitty placements. Allocated once;
     /// `ghostty_kitty_graphics_get(PLACEMENT_ITERATOR)` re-points it at the live
     /// storage with no allocation, so a no-graphics batch costs ~3 FFI calls.
     placement_iter: VtKittyGraphicsPlacementIterator,
     cols: u16,
     rows: u16,
-    /// Last terminal-content revision for each visible row. Revisions persist
-    /// across publications so a frontend that skips a buffer still sees every
-    /// row changed since its previous frame.
-    row_versions: Vec<u64>,
-    content_revision: u64,
     /// Boxed so its heap address stays fixed across `GhosttyTerminal` moves;
     /// registered with the engine as the callback userdata pointer.
     callbacks: Box<Callbacks>,
@@ -119,34 +112,21 @@ impl GhosttyTerminal {
 
         Error::from_code(unsafe { ghostty_terminal_new(ptr::null(), &mut terminal, options) })?;
 
-        let mut render_state = ptr::null_mut();
-        if let Err(err) =
-            Error::from_code(unsafe { ghostty_render_state_new(ptr::null(), &mut render_state) })
-        {
-            unsafe { ghostty_terminal_free(terminal) };
-            return Err(err);
-        }
-
-        let mut row_iter = ptr::null_mut();
-        if let Err(err) = Error::from_code(unsafe {
-            ghostty_render_state_row_iterator_new(ptr::null(), &mut row_iter)
-        }) {
-            unsafe {
-                ghostty_render_state_free(render_state);
-                ghostty_terminal_free(terminal);
+        // The reader frees its own handles when it goes out of scope, so the
+        // failure paths below only have to release the terminal.
+        let render = match RenderStateReader::new(rows) {
+            Ok(render) => render,
+            Err(err) => {
+                unsafe { ghostty_terminal_free(terminal) };
+                return Err(err);
             }
-            return Err(err);
-        }
+        };
 
         let mut placement_iter = ptr::null_mut();
         if let Err(err) = Error::from_code(unsafe {
             ghostty_kitty_graphics_placement_iterator_new(ptr::null(), &mut placement_iter)
         }) {
-            unsafe {
-                ghostty_render_state_row_iterator_free(row_iter);
-                ghostty_render_state_free(render_state);
-                ghostty_terminal_free(terminal);
-            }
+            unsafe { ghostty_terminal_free(terminal) };
             return Err(err);
         }
 
@@ -202,13 +182,10 @@ impl GhosttyTerminal {
 
         Ok(Self {
             terminal,
-            render_state,
-            row_iter,
+            render,
             placement_iter,
             cols,
             rows,
-            row_versions: vec![0; rows as usize],
-            content_revision: 0,
             callbacks,
             last_title: String::new(),
             last_pwd: String::new(),
@@ -714,8 +691,6 @@ impl Drop for GhosttyTerminal {
     fn drop(&mut self) {
         unsafe {
             ghostty_kitty_graphics_placement_iterator_free(self.placement_iter);
-            ghostty_render_state_row_iterator_free(self.row_iter);
-            ghostty_render_state_free(self.render_state);
             ghostty_terminal_free(self.terminal);
         }
     }
