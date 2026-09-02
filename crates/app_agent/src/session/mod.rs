@@ -1,34 +1,31 @@
 use futures::StreamExt as _;
 use gpui::prelude::*;
 use nmt_agent_utils::AgentEvent;
-use nmt_config::local_state;
 
 use crate::UnansweredPrompt;
 use crate::pane_state::{ChildAgents, SessionRuntime, ThreadControls, TurnState};
 mod backend;
+mod background_tasks;
 mod conversation;
 mod events;
+mod history;
 #[cfg(test)]
 mod tests;
+mod thread_settings;
+mod turn;
 mod update_recovery;
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use std::{env, fs};
 
-use chrono::Utc;
 use futures::channel::mpsc;
 use gpui::{App, Context, Image, Window};
 use gpui_component::input::{InputEvent, InputState};
-use nmt_agent_utils::background_task::{
-    BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscript,
-};
 use nmt_agent_utils::chat::{
-    Item as SessionItem, QueuedPrompt, SendOutcome, SessionScope, SessionSummary, SkillReference,
-    ThreadSettings,
+    Item as SessionItem, QueuedPrompt, SendOutcome, SkillReference, ThreadSettings,
 };
-use nmt_agent_utils::claude_code::sessions;
 use nmt_agent_utils::codex::app_server;
 use nmt_agent_utils::{
     AgentEventKind, AgentRoute, AgentWorkspace, agent_process, git, normalize_body, normalize_title,
@@ -36,21 +33,16 @@ use nmt_agent_utils::{
 use nmt_config::profile::{AgentProfile, AgentProfileKind};
 use nmt_i18n::i18n;
 use serde_json::Value;
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::capabilities::QueuedPromptDelivery;
 use crate::commands::{
     is_current_session_epoch, next_session_epoch, reconcile_skill_binding, reset_command_runtime,
 };
 use crate::composer::attachments::{PendingAttachments, scratch_dir};
-use crate::composer::{
-    CommandFeedbackKind, ForkFlow, PaletteControl, prompt_with_response_annotations,
-    restored_input_after_interruption,
-};
+use crate::composer::{CommandFeedbackKind, ForkFlow, prompt_with_response_annotations};
 use crate::input_history::{InputHistoryNavigation, InputHistoryScope};
-use crate::profile::{
-    ANTHROPIC_MODEL_ENV, AgentKind, AgentThreadDefaults, agent_launch, launch_env_value,
-};
+use crate::profile::{AgentKind, agent_launch};
 pub(super) use crate::session::backend::Backend;
 use crate::session::backend::ConversationTitleRequest;
 pub use crate::session::backend::RecoveryIdentity;
@@ -61,7 +53,7 @@ pub use crate::session::update_recovery::{
     RecoveryReadiness, RecoverySnapshot, RestorationReadiness,
 };
 use crate::settings::AgentSettings;
-use crate::transcript::{LAST_RESPONSE_LIMIT, TranscriptView};
+use crate::transcript::TranscriptView;
 use crate::workflows::WorkflowUi;
 use crate::{
     AgentPane, AgentPaneEvent, GitBranchPoll, RecentSessionsMode, RewindFlow, SessionHistoryUi,
@@ -82,34 +74,6 @@ impl Drop for AgentPane {
 /// at all; short enough that a cold start is explained rather than looking like
 /// a dead tab.
 const START_OVERLAY_DELAY: Duration = Duration::from_millis(400);
-
-/// How long the composer's "last response" reading stays accurate, given how
-/// old it already is. Matches the coarsest unit the label shows, so the pane
-/// redraws exactly as often as the words change, and `None` once the label has
-/// settled on "more than an hour" and will never change again.
-/// How long ago a resumed conversation was answered, from the wall-clock stamp
-/// the provider recorded for it.
-///
-/// The age is clamped to the span the label distinguishes: everything past it
-/// reads "more than an hour ago" and passes every idle threshold a profile can
-/// warn at, and the clamp keeps the caller's subtraction inside the monotonic
-/// clock's range, which on Windows starts at boot and so cannot reach back to a
-/// conversation from before the last restart. A stamp from ahead of this
-/// machine's clock is idle time that has not happened.
-fn replayed_response_age(at_unix: i64, now_unix: i64) -> Duration {
-    let seconds = u64::try_from(now_unix.saturating_sub(at_unix)).unwrap_or(0);
-    Duration::from_secs(seconds).min(LAST_RESPONSE_LIMIT)
-}
-
-fn response_age_tick(age: Duration) -> Option<Duration> {
-    const MINUTE: u64 = 60;
-
-    match age.as_secs() {
-        ..MINUTE => Some(Duration::from_secs(1)),
-        seconds if seconds < LAST_RESPONSE_LIMIT.as_secs() => Some(Duration::from_secs(MINUTE)),
-        _ => None,
-    }
-}
 
 /// Whether two recorded working directories name the same place. Compared
 /// case-insensitively with separators normalized, because the two sides come
@@ -158,23 +122,6 @@ pub(crate) fn directory_label(cwd: &str) -> String {
     }
 }
 
-/// The filesystem history a scope covers. Only a backend that reads its own
-/// transcripts takes this route; one that lists over the protocol asks its
-/// server for the scope instead.
-fn count_scoped_sessions(scope: SessionScope, cwd: Option<&str>) -> usize {
-    match scope {
-        SessionScope::CurrentDirectory => sessions::count_sessions(cwd),
-        SessionScope::AllDirectories => sessions::count_all_sessions(),
-    }
-}
-
-fn list_scoped_sessions(scope: SessionScope, cwd: Option<&str>) -> Vec<SessionSummary> {
-    match scope {
-        SessionScope::CurrentDirectory => sessions::list_sessions(cwd),
-        SessionScope::AllDirectories => sessions::list_all_sessions(),
-    }
-}
-
 /// Cap for a tab title taken from a prompt. The strip truncates whatever it is
 /// given, so this only bounds what the tab carries around.
 const TAB_TITLE_CHARS: usize = 60;
@@ -206,20 +153,6 @@ pub(super) enum Status {
     Idle,
     Running,
     Exited,
-}
-
-/// Show a task snapshot only against the parent session it was produced for.
-/// Provider adapters publish snapshots asynchronously, so a snapshot can still
-/// be held when the pane has already moved to another session or has no
-/// session id yet; in both cases the view must render nothing rather than
-/// another conversation's children.
-fn scoped_background_tasks<'a>(
-    parent: Option<&BackgroundTaskKey>,
-    snapshot: Option<&'a BackgroundTaskSnapshot>,
-) -> Option<&'a BackgroundTaskSnapshot> {
-    let parent = parent?;
-    let snapshot = snapshot?;
-    (&snapshot.parent_session == parent).then_some(snapshot)
 }
 
 impl AgentPane {
@@ -398,83 +331,6 @@ impl AgentPane {
         this.load_filesystem_history(cx);
 
         this
-    }
-
-    /// Widen the session list to every directory, or narrow it back to this
-    /// tab's. The rows on screen answered the previous scope, so they go; the
-    /// reload republishes what the new one covers. A backend that lists over
-    /// the protocol is asked again, one that reads its own transcripts is
-    /// rescanned.
-    pub(super) fn toggle_history_scope(&mut self, cx: &mut Context<Self>) {
-        self.history_ui.scope = match self.history_ui.scope {
-            SessionScope::CurrentDirectory => SessionScope::AllDirectories,
-            SessionScope::AllDirectories => SessionScope::CurrentDirectory,
-        };
-        self.history_ui.sessions.clear();
-        self.history_ui.showing_search = false;
-        self.history_ui.selected = 0;
-
-        if let Some(session) = self.runtime.backend.as_mut() {
-            session.request_history(self.history_ui.scope);
-        }
-        self.load_filesystem_history(cx);
-
-        cx.notify();
-    }
-
-    /// History read from the CLI's transcript directory, for a harness that
-    /// does not deliver it over the protocol as `Event::History`. Two passes,
-    /// both off-thread: a cheap count first, so the list can reserve its final
-    /// height with placeholder rows, then title parsing, which swaps in the
-    /// real rows.
-    fn load_filesystem_history(&mut self, cx: &mut Context<Self>) {
-        if !self.kind.caps().filesystem_session_history {
-            return;
-        }
-
-        let cwd = self.cwd();
-        let scope = self.history_ui.scope;
-
-        cx.spawn(async move |this, cx| {
-            let count_cwd = cwd.clone();
-            let count = cx
-                .background_executor()
-                .spawn(async move { count_scoped_sessions(scope, count_cwd.as_deref()) })
-                .await;
-
-            let proceed = this
-                .update(cx, |this, cx| {
-                    this.history_ui.pending = Some(count);
-                    cx.notify();
-
-                    count > 0
-                })
-                .unwrap_or(false);
-
-            if !proceed {
-                return;
-            }
-
-            // Title parsing races a short hold: on a warm SSD it finishes
-            // within a frame, so without the hold the skeleton rows would
-            // never be visible and the swap would read as a flicker.
-            let load = cx
-                .background_executor()
-                .spawn(async move { list_scoped_sessions(scope, cwd.as_deref()) });
-
-            cx.background_executor()
-                .timer(Duration::from_millis(250))
-                .await;
-
-            let sessions = load.await;
-
-            let _ = this.update(cx, |this, cx| {
-                this.history_ui.sessions = sessions;
-                this.history_ui.pending = None;
-                cx.notify();
-            });
-        })
-        .detach();
     }
 
     pub fn agent_route(&self) -> &AgentRoute {
@@ -1149,54 +1005,6 @@ impl AgentPane {
         self.pending_questions = None;
     }
 
-    /// Rebuild Claude child agents from the session's persisted history. The
-    /// read runs on a background thread and its failure never blocks the
-    /// parent transcript or composer.
-    pub(crate) fn restore_background_tasks(&mut self, cx: &mut Context<Self>) {
-        let Some(session_id) = self
-            .runtime
-            .backend
-            .as_ref()
-            .and_then(|session| session.session_id())
-            .map(str::to_owned)
-        else {
-            return;
-        };
-        if self.children.restored_session.as_deref() == Some(session_id.as_str()) {
-            return;
-        }
-        self.children.restored_session = Some(session_id.clone());
-
-        let Some(session) = self.runtime.backend.as_mut() else {
-            return;
-        };
-        // Captured before the read starts so live updates that land while it
-        // runs keep their newer state.
-        let starting_sequence = session.begin_task_restoration();
-        let cwd = self.cwd();
-        let epoch = self.runtime.epoch;
-
-        cx.spawn(async move |this, cx| {
-            let restored = cx
-                .background_executor()
-                .spawn(async move { sessions::load_task_history(cwd.as_deref(), &session_id) })
-                .await;
-
-            let _ = this.update(cx, |this, cx| {
-                if this.runtime.epoch != epoch {
-                    return;
-                }
-                let Some(session) = this.runtime.backend.as_mut() else {
-                    return;
-                };
-                for event in session.finish_task_restoration(restored, starting_sequence) {
-                    this.apply_event(event, cx);
-                }
-            });
-        })
-        .detach();
-    }
-
     /// Opening the `Background Tasks` view asks the provider for fresher data.
     /// Pass a tab rename through to the conversation, so the name reaches the
     /// harness's own session record rather than living only in this tab.
@@ -1214,89 +1022,6 @@ impl AgentPane {
         } else {
             self.pending_conversation_rename = Some(title.to_string());
         }
-    }
-
-    pub fn refresh_background_tasks(&mut self) {
-        if let Some(session) = self.runtime.backend.as_mut() {
-            session.refresh_background_tasks();
-        }
-    }
-
-    /// Provider-qualified identity of the parent session child tasks belong to.
-    /// `None` until the backend reports a thread or session id, which is what
-    /// disables the title-bar `Background Tasks` button.
-    pub fn background_task_parent(&self) -> Option<BackgroundTaskKey> {
-        let identity = self.runtime.backend.as_ref()?.recovery_identity()?;
-        Some(match identity.kind {
-            AgentKind::Codex => BackgroundTaskKey::codex(identity.id),
-            AgentKind::Claude => BackgroundTaskKey::claude_code(identity.id),
-            // Child agents are not mapped for DeepSeek yet, so there is no
-            // parent to name and the Background Tasks button stays disabled.
-            AgentKind::DeepSeek => return None,
-        })
-    }
-
-    /// Ask the provider for one child's conversation. A provider that already
-    /// has it, or that streams it live, does no work here.
-    pub fn load_background_task_transcript(
-        &mut self,
-        key: &BackgroundTaskKey,
-        cx: &mut Context<Self>,
-    ) {
-        let cwd = self.cwd();
-        let Some(session) = self.runtime.backend.as_mut() else {
-            return;
-        };
-        for event in session.load_background_task_transcript(key, cwd.as_deref()) {
-            self.apply_event(event, cx);
-        }
-    }
-
-    /// Stop one child agent, leaving this tab's own turn running. Reports
-    /// whether the request was accepted, so the view can say so when a child
-    /// turns out not to be stoppable after all — the snapshot a row was drawn
-    /// from can be a moment behind the child finishing on its own.
-    pub fn interrupt_background_task(&mut self, key: &BackgroundTaskKey) -> bool {
-        self.runtime
-            .backend
-            .as_mut()
-            .is_some_and(|session| session.interrupt_background_task(key))
-    }
-
-    /// One child's conversation, only while the pane still holds the session
-    /// that child belongs to.
-    pub fn background_task_transcript(
-        &self,
-        key: &BackgroundTaskKey,
-    ) -> Option<&BackgroundTaskTranscript> {
-        self.background_tasks()?;
-        self.children.transcripts.get(key)
-    }
-
-    /// The latest snapshot, only while it still describes the session the pane
-    /// currently holds. A snapshot left over from a replaced session is hidden
-    /// rather than shown against the new parent.
-    pub fn background_tasks(&self) -> Option<&BackgroundTaskSnapshot> {
-        scoped_background_tasks(
-            self.background_task_parent().as_ref(),
-            self.children.background_tasks.as_ref(),
-        )
-    }
-
-    /// Child agents of this tab the provider currently reports as active.
-    pub fn running_background_tasks(&self) -> usize {
-        self.background_tasks()
-            .map(BackgroundTaskSnapshot::active_count)
-            .unwrap_or(0)
-    }
-
-    /// Child agents this tab has, running and finished alike. A finished child
-    /// is still something to open the view for, so the chrome asks for this
-    /// rather than the running count when deciding to offer the control.
-    pub fn background_task_count(&self) -> usize {
-        self.background_tasks()
-            .map(|tasks| tasks.tasks.len())
-            .unwrap_or(0)
     }
 
     pub(super) fn reset_conversation(&mut self, cx: &mut Context<Self>) {
@@ -1335,467 +1060,5 @@ impl AgentPane {
         // History records belong to the provider and remain intact; only the
         // live backend and this tab's conversation presentation are reset.
         self.start_session_with_options(None, false, move |_, _, _| drop(retiring), cx);
-    }
-
-    /// Start the turn clock and drive the once-a-second repaint of the live
-    /// progress row; the ticker stops itself once `finish_working` clears it.
-    pub(super) fn start_working(&mut self, cx: &mut Context<Self>) {
-        self.turn.submitted_at = Some(Instant::now());
-        self.transcript
-            .update(cx, |transcript, cx| transcript.start_working(cx));
-        cx.notify();
-
-        cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor().timer(Duration::from_secs(1)).await;
-
-                let ticking = this.update(cx, |this, cx| {
-                    if this.transcript.read(cx).is_working() {
-                        cx.notify();
-                        true
-                    } else {
-                        false
-                    }
-                });
-
-                if !ticking.unwrap_or(false) {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
-    /// Settle the current turn's duration and exact output usage for its status
-    /// row. These values are UI state rather than provider transcript content,
-    /// so they stay outside the shared item stream.
-    pub(super) fn finish_working(&mut self, cx: &mut Context<Self>) {
-        let turn = self.turn.seq;
-        self.transcript
-            .update(cx, |transcript, cx| transcript.settle_turn(turn, cx));
-        self.note_response_settled(Instant::now(), cx);
-        cx.notify();
-    }
-
-    /// Carry a resumed conversation's own last answer into the reading, from
-    /// the provider's wall-clock stamp for it.
-    ///
-    /// Without this the reading restarts at the resume, which reads as a warm
-    /// conversation and skips the cold-prompt-cache warning in front of the
-    /// first message — the one send where the cache is certainly gone.
-    pub(super) fn note_replayed_response(&mut self, at_unix: i64, cx: &mut Context<Self>) {
-        let age = replayed_response_age(at_unix, Utc::now().timestamp());
-        let now = Instant::now();
-        self.note_response_settled(now.checked_sub(age).unwrap_or(now), cx);
-    }
-
-    /// Stamp the moment the agent stopped answering and keep the composer's
-    /// reading of it current.
-    ///
-    /// The label's resolution decides the cadence: a reading in seconds has to
-    /// be redrawn every second, one in minutes only every minute. A pane whose
-    /// last answer was an hour ago would otherwise hold the frame pump awake
-    /// for a label that has not changed.
-    fn note_response_settled(&mut self, at: Instant, cx: &mut Context<Self>) {
-        let restart = self.last_response_at.is_none();
-        self.last_response_at = Some(at);
-
-        if !restart {
-            return;
-        }
-
-        cx.spawn(async move |this, cx| {
-            loop {
-                let Ok(interval) = this.update(cx, |this, cx| {
-                    cx.notify();
-                    this.last_response_at
-                        .and_then(|at| response_age_tick(at.elapsed()))
-                }) else {
-                    break;
-                };
-                let Some(interval) = interval else {
-                    break;
-                };
-
-                cx.background_executor().timer(interval).await;
-            }
-        })
-        .detach();
-    }
-
-    fn note_visible_agent_output(&mut self) {
-        // Only the first output of a turn answers "how long until it said
-        // something", so taking the stamp both records the reading and closes
-        // the measurement for the rest of the turn.
-        if let Some(submitted_at) = self.turn.submitted_at.take() {
-            self.turn.first_output_latency = Some(submitted_at.elapsed());
-        }
-
-        if self
-            .turn
-            .unanswered_prompt
-            .as_ref()
-            .is_some_and(|prompt| prompt.turn == self.turn.seq)
-        {
-            self.turn.unanswered_prompt = None;
-        }
-    }
-
-    pub(super) fn interrupt_from_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let working = self.transcript.read(cx).is_working();
-        if working {
-            self.turn.pending_interrupt = Some(self.turn.seq);
-        }
-        if let Some(prompt) = self
-            .turn
-            .unanswered_prompt
-            .take()
-            .filter(|prompt| prompt.turn == self.turn.seq && working)
-        {
-            let turn = prompt.turn;
-            self.transcript
-                .update(cx, |transcript, cx| transcript.discard_turn(turn, cx));
-
-            let current = self.input.read(cx).text().to_string();
-            let restored = restored_input_after_interruption(&prompt.text, &current);
-            let cursor = restored.len();
-            self.input.update(cx, |input, cx| {
-                input.set_value(restored, window, cx);
-                input.set_selected_range(cursor..cursor, cx);
-            });
-            self.palette.skill_binding = prompt.skill;
-            let mut response_annotations = prompt.response_annotations;
-            response_annotations.append(&mut self.response_annotations);
-            self.response_annotations = response_annotations;
-            cx.notify();
-        }
-
-        self.interrupt(cx);
-    }
-
-    pub(super) fn interrupt(&mut self, cx: &mut Context<Self>) {
-        if let Some(session) = self.runtime.backend.as_mut() {
-            session.interrupt();
-            cx.emit(AgentPaneEvent::Interrupted);
-            cx.notify();
-        }
-    }
-
-    pub(super) fn respond_approval(&mut self, decision: &str, cx: &mut Context<Self>) {
-        // The card is dismissed immediately for a snappy UI; the session's
-        // `ApprovalResolved` confirmation is then an idempotent status refresh.
-        self.pending_approval = None;
-        self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
-
-        if let Some(session) = self.runtime.backend.as_mut() {
-            session.respond_approval(decision);
-        }
-        cx.notify();
-    }
-
-    /// Record a pick without answering yet; the card stays open until the user
-    /// submits, so multi-select questions can accumulate choices.
-    pub(super) fn toggle_question_option(
-        &mut self,
-        question: usize,
-        option: usize,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(prompt) = self.pending_questions.as_mut() {
-            prompt.toggle(question, option);
-            // Clicking also moves the highlight, so a switch to the keyboard
-            // continues from the option the user just touched rather than from
-            // wherever the arrows were left.
-            prompt.focus = (question, option);
-            cx.notify();
-        }
-    }
-
-    /// Drive the question card from the keyboard. Returns whether the card
-    /// consumed the key, so the caller can fall through to the surfaces that
-    /// share these keys when no card is up.
-    ///
-    /// Enter answers the highlighted option rather than submitting the card:
-    /// with several questions, or a multi-select one, the user is rarely done
-    /// after one press, and a key that sometimes submits and sometimes selects
-    /// cannot be predicted from what is on screen.
-    pub(crate) fn handle_question_control(
-        &mut self,
-        control: PaletteControl,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let Some(prompt) = self.pending_questions.as_mut() else {
-            return false;
-        };
-
-        match control {
-            PaletteControl::Previous | PaletteControl::Next => {
-                if prompt.move_focus(matches!(control, PaletteControl::Next)) {
-                    cx.stop_propagation();
-                    cx.notify();
-                    return true;
-                }
-                false
-            }
-            PaletteControl::Activate => {
-                let (question, option) = prompt.focus;
-                cx.stop_propagation();
-                self.toggle_question_option(question, option, cx);
-                true
-            }
-            // Completion belongs to the composer, and dismissing the card would
-            // answer the question by refusing it, which needs the visible
-            // control rather than a keystroke.
-            PaletteControl::Complete | PaletteControl::Dismiss => false,
-        }
-    }
-
-    /// Submit the current picks, or decline when `submit` is false. The card is
-    /// dismissed immediately; the session's `QuestionsResolved` confirmation is
-    /// then an idempotent status refresh, as with approvals.
-    pub(super) fn respond_questions(&mut self, submit: bool, cx: &mut Context<Self>) {
-        let Some(prompt) = self.pending_questions.take() else {
-            return;
-        };
-
-        let answers = (submit && prompt.is_complete()).then(|| prompt.answers());
-
-        self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
-
-        if let Some(session) = self.runtime.backend.as_mut() {
-            session.respond_questions(answers);
-        }
-        cx.notify();
-    }
-
-    /// Push the current model and effort picks to a harness that applies them
-    /// as their own request.
-    ///
-    /// A refusal restores both pickers from what the session is actually set
-    /// to, because a picker left showing a value the harness never adopted
-    /// would misreport which model the next turn runs on.
-    pub(super) fn apply_model_selection(&mut self, cx: &mut Context<Self>) {
-        let Some(model) = self.controls.settings.model.clone() else {
-            return;
-        };
-        let Some(session) = self.runtime.backend.as_mut() else {
-            return;
-        };
-
-        // The levels belong to the exact model route, so an effort picked for
-        // the previous model could be one the new route rejects. A model change
-        // therefore travels alone and lets the adapter apply its own default,
-        // which is also why no caller has to clear the effort itself.
-        let effort = (session.selection().0 == Some(model.as_str()))
-            .then(|| self.controls.settings.effort.clone())
-            .flatten();
-
-        // Seeding the pickers from a remembered pick reaches here too, and it
-        // usually names what the session already has.
-        if session.selection() == (Some(model.as_str()), effort.as_deref()) {
-            return;
-        }
-
-        let outcome = session.select_model(&model, effort.as_deref());
-
-        // Whether it was taken or refused, the pickers now show what the
-        // session is actually set to: the harness answers a model change with
-        // the effort it chose, and a refusal leaves the previous pair standing.
-        let (model, effort) = session.selection();
-        self.controls.settings.model = model.map(str::to_string);
-        self.controls.settings.effort = effort.map(str::to_string);
-
-        match outcome {
-            Ok(()) => cx.notify(),
-            Err(error) => self.set_command_feedback(CommandFeedbackKind::Error, error, cx),
-        }
-    }
-
-    /// Rebuild this conversation's agent from another composition.
-    ///
-    /// The harness allows this only before the conversation has run anything,
-    /// because the logged history was produced under the previous composition's
-    /// tools. That rule is not repeated here: the picker reports whatever the
-    /// harness answers, and the row stays on the preset still in force.
-    pub(super) fn apply_agent_preset(&mut self, preset: String, cx: &mut Context<Self>) {
-        let Some(session) = self.runtime.backend.as_mut() else {
-            return;
-        };
-        if self.controls.agent_preset.as_deref() == Some(preset.as_str()) {
-            return;
-        }
-
-        match session.select_agent_preset(&preset) {
-            Ok(()) => {
-                self.controls.agent_preset = Some(preset);
-                cx.notify();
-            }
-            Err(error) => self.set_command_feedback(CommandFeedbackKind::Error, error, cx),
-        }
-    }
-
-    /// Resume the picked history entry without discarding the visible
-    /// conversation until the target confirms it can be opened.
-    pub(super) fn resume_session(&mut self, index: usize, cx: &mut Context<Self>) {
-        let Some(summary) = self.history_ui.sessions.get(index) else {
-            return;
-        };
-        let id = summary.id.clone();
-        let elsewhere = summary
-            .cwd
-            .clone()
-            .filter(|cwd| !directories_match(Some(cwd.as_str()), self.cwd().as_deref()));
-
-        if self.history_ui.mode == RecentSessionsMode::Loading {
-            return;
-        }
-
-        // A conversation belongs to the directory it ran in. Continuing one
-        // from elsewhere in this tab would either fail to find it or run it
-        // against the wrong tree, so it opens where it worked instead.
-        if let Some(cwd) = elsewhere {
-            self.history_ui.selected = index;
-            cx.emit(AgentPaneEvent::ResumeElsewhere {
-                cwd,
-                session_id: id,
-            });
-            cx.notify();
-            return;
-        }
-
-        let previous_status = self.runtime.status;
-        self.history_ui.mode = RecentSessionsMode::Loading;
-        self.history_ui.selected = index;
-        self.history_ui.pending_resume_replay = None;
-        self.runtime.status = Status::Starting;
-        // A backend that replays the resumed conversation's controls owns them;
-        // otherwise they stay local profile preferences. The reviewer is seeded
-        // separately because a backend can replay the rest without it.
-        let caps = self.kind.caps();
-        self.controls.seed_thread_defaults = !caps.resume_restores_thread_settings;
-        self.controls.seed_approval_reviewer =
-            caps.resume_restores_thread_settings && !caps.resume_restores_approval_reviewer;
-        self.set_command_feedback(
-            CommandFeedbackKind::Notice,
-            i18n("agent-session-opening-recent").to_string(),
-            cx,
-        );
-
-        if caps.session_resume {
-            // The backend answers whether the request reached a session that
-            // could take it, because a conversation rooted somewhere else is
-            // one this tab cannot adopt.
-            if !self
-                .runtime
-                .backend
-                .as_mut()
-                .is_some_and(|session| session.resume_thread(&id))
-            {
-                self.history_ui.mode = RecentSessionsMode::Open;
-                self.runtime.status = previous_status;
-                self.set_command_feedback(
-                    CommandFeedbackKind::Error,
-                    i18n("agent-session-codex-recent-not-ready").to_string(),
-                    cx,
-                );
-            }
-        } else {
-            // Without in-session resume the conversation is a file this side
-            // reads, so the pane respawns against its id and replays what it
-            // read into the fresh session.
-            let kind = self.kind;
-            let cwd = self.cwd();
-            let replay_id = id.clone();
-            let selected = index;
-
-            cx.spawn(async move |this, cx| {
-                let replay = cx
-                    .background_executor()
-                    .spawn(async move { sessions::load_replay(cwd.as_deref(), &replay_id) })
-                    .await;
-
-                let _ = this.update(cx, |this, cx| {
-                    if this.history_ui.mode != RecentSessionsMode::Loading
-                        || this.history_ui.selected != selected
-                    {
-                        return;
-                    }
-
-                    this.start_session_with_options(
-                        Some(RecoveryIdentity::new(kind, id)),
-                        false,
-                        move |this, started, _| {
-                            if started {
-                                this.history_ui.pending_resume_replay = Some(replay);
-                            } else {
-                                this.history_ui.mode = RecentSessionsMode::Open;
-                            }
-                        },
-                        cx,
-                    );
-                });
-            })
-            .detach();
-        }
-    }
-
-    /// Key for the per-profile thread-settings memory; a profile without a
-    /// name shares the agent-kind bucket (also the key older local_state
-    /// snapshots used).
-    pub(super) fn defaults_key(&self) -> String {
-        if self.profile.name.trim().is_empty() {
-            self.kind.id().to_string()
-        } else {
-            self.profile.name.clone()
-        }
-    }
-
-    /// The picks remembered for this profile, falling back to the bucket its
-    /// agent kind shares with unnamed profiles.
-    pub(super) fn stored_thread_settings<'a>(&self, cx: &'a App) -> Option<&'a ThreadSettings> {
-        let defaults = cx.try_global::<AgentThreadDefaults>()?;
-        defaults
-            .0
-            .get(&self.defaults_key())
-            .or_else(|| defaults.0.get(self.kind.id()))
-    }
-
-    /// Effective startup model after protocol mapping and user environment
-    /// overrides. Claude resolves `ANTHROPIC_MODEL` with last-value-wins
-    /// semantics; Codex receives the profile field over app-server RPC.
-    pub(super) fn profile_model(&self) -> Option<String> {
-        let launch = agent_launch(&self.profile);
-        match self.kind {
-            AgentKind::Claude => launch_env_value(&launch, ANTHROPIC_MODEL_ENV),
-            AgentKind::Codex => launch.model,
-            // DeepSeek takes a model through a per-session call rather than the
-            // launch, and that call is not mapped yet, so the profile field
-            // cannot describe what the session will actually run.
-            AgentKind::DeepSeek => None,
-        }
-    }
-
-    /// The reasoning effort this pane's profile pins. Claude receives it as a
-    /// launch flag and Codex as a thread-start parameter; the picker shows it
-    /// either way.
-    pub(super) fn profile_effort(&self) -> Option<String> {
-        agent_launch(&self.profile).effort
-    }
-
-    /// Remember the pane's current thread settings as the defaults for future
-    /// conversations launched from this profile. Called after every
-    /// user-driven settings change (dropdowns and slash commands).
-    pub(super) fn remember_thread_defaults(&self, cx: &mut Context<Self>) {
-        let stored = {
-            let defaults = cx.default_global::<AgentThreadDefaults>();
-            defaults
-                .0
-                .insert(self.defaults_key(), self.controls.settings.clone());
-            defaults.to_local_state()
-        };
-
-        if let Err(err) = local_state::save_agent_defaults(&stored) {
-            warn!("failed to save agent defaults to local_state.toml: {err}");
-        }
     }
 }

@@ -6,10 +6,11 @@ use nmt_agent_utils::background_task::{
 };
 use nmt_agent_utils::chat::ThreadSettings;
 
+use crate::session::background_tasks::scoped_background_tasks;
 use crate::session::events::resolve_ready_settings;
+use crate::session::turn::replayed_response_age;
 use crate::session::{
-    conversation_title_request, directories_match, directory_label, replayed_response_age,
-    scoped_background_tasks, tab_title_from_prompt,
+    conversation_title_request, directories_match, directory_label, tab_title_from_prompt,
 };
 use crate::transcript::LAST_RESPONSE_LIMIT;
 
