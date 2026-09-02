@@ -185,7 +185,7 @@ impl TranscriptView {
         compacting: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(started) = self.working_started else {
+        let Some(started) = self.live_turn.started() else {
             return div().into_any_element();
         };
 
@@ -226,8 +226,8 @@ impl TranscriptView {
                                 .text_color(cx.theme().muted_foreground)
                                 .child(working_label(
                                     started,
-                                    self.working_output_tokens,
-                                    self.working_detail.as_deref(),
+                                    self.live_turn.output_tokens(),
+                                    self.live_turn.detail(),
                                 )),
                         ),
                 )
@@ -259,8 +259,8 @@ impl TranscriptView {
                     .text_color(cx.theme().muted_foreground)
                     .child(working_label(
                         started,
-                        self.working_output_tokens,
-                        self.working_detail.as_deref(),
+                        self.live_turn.output_tokens(),
+                        self.live_turn.detail(),
                     )),
             )
             .into_any_element()

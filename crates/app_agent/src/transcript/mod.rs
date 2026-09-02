@@ -3,6 +3,7 @@ mod format;
 mod render;
 mod reveal;
 mod rows;
+mod turns;
 mod view;
 mod virtual_code;
 mod working_indicator;

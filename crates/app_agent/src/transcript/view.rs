@@ -21,6 +21,7 @@ use crate::settings::{AgentSettings, UI_RADIUS};
 use crate::transcript::render::TRANSCRIPT_LINE_HEIGHT;
 use crate::transcript::reveal::Disclosures;
 use crate::transcript::rows::TranscriptRow;
+use crate::transcript::turns::{LiveTurn, TurnLedger};
 use crate::transcript::{Entry, ReadingPosition, VirtualTranscriptState, is_work_row};
 
 /// One agent conversation as the user reads it: the entry list, the row
@@ -73,34 +74,11 @@ pub struct TranscriptView {
     /// independent uniform-list position while visible. Collapsing a row drops
     /// the duplicate source so large outputs do not stay resident twice.
     pub(crate) virtual_transcripts: HashMap<usize, VirtualTranscriptState>,
-    /// Turns that have finished, whether in this process or in a session this
-    /// view replayed. Folding keys off this rather than off a known duration,
-    /// because a resumed conversation carries no timing: the CLI reports a
-    /// turn's wall time only on the live stream, never in the transcript file.
-    pub(crate) settled_turns: HashSet<u64>,
-    /// Settled turn durations drive the closing summary without masquerading
-    /// as provider transcript items. Absent for a replayed turn.
-    pub(crate) completed_turn_seconds: HashMap<u64, u64>,
-    /// Final provider-reported output tokens for settled turns, keyed by the
-    /// same local turn id as the duration used by the fold header.
-    pub(crate) completed_turn_output_tokens: HashMap<u64, u64>,
-    /// User-stopped turns use a status row instead of an elapsed-time
-    /// disclosure, whether or not provider activity was already visible.
-    pub(crate) interrupted_turns: HashSet<u64>,
-    /// Start time of the running turn. While set, a ticking "Working for Ns"
-    /// row renders at the transcript end.
-    pub(crate) working_started: Option<Instant>,
-    /// Output tokens reported for the running turn.
-    pub(crate) working_output_tokens: Option<u64>,
-    /// What the backend says the running turn is currently doing, when that is
-    /// something the elapsed time and token count do not show. A turn waiting
-    /// out a provider retry looks identical to one thinking slowly, and the two
-    /// call for opposite reactions from the user.
-    pub(crate) working_detail: Option<String>,
-    /// The backend is rewriting the conversation to reclaim context. Turn
-    /// output pauses for the duration, so the live progress row explains the
-    /// wait instead of leaving a bare seconds counter that looks stalled.
-    pub(crate) compacting: bool,
+    /// What each finished turn is remembered by: whether it settled, how long
+    /// it took, what it produced, and whether the user stopped it.
+    pub(crate) turn_ledger: TurnLedger,
+    /// The running turn, while one is in flight.
+    pub(crate) live_turn: LiveTurn,
     /// Presentation inputs rather than owned state: the working directory
     /// resolves transcript links, and the provider decides a few labels.
     pub(crate) cwd: Option<String>,
@@ -139,14 +117,8 @@ impl TranscriptView {
             toggled_turns: HashSet::new(),
             collapse_mode: CollapseRows::default(),
             virtual_transcripts: HashMap::new(),
-            settled_turns: HashSet::new(),
-            completed_turn_seconds: HashMap::new(),
-            completed_turn_output_tokens: HashMap::new(),
-            interrupted_turns: HashSet::new(),
-            working_started: None,
-            working_output_tokens: None,
-            working_detail: None,
-            compacting: false,
+            turn_ledger: TurnLedger::default(),
+            live_turn: LiveTurn::default(),
             cwd,
             kind,
             source_revision: None,
@@ -203,15 +175,9 @@ impl TranscriptView {
         self.scroll_to_bottom();
         self.toggled_turns.clear();
         self.disclosures.clear();
-        self.settled_turns.clear();
-        self.completed_turn_seconds.clear();
-        self.completed_turn_output_tokens.clear();
-        self.interrupted_turns.clear();
+        self.turn_ledger.clear();
         self.virtual_transcripts.clear();
-        self.working_started = None;
-        self.working_output_tokens = None;
-        self.working_detail = None;
-        self.compacting = false;
+        self.live_turn.discard();
     }
 
     /// Append one turn of a restored conversation under its own turn id, with
@@ -234,18 +200,12 @@ impl TranscriptView {
             });
         }
 
-        self.settled_turns.insert(turn);
-
-        if replay.interrupted {
-            self.interrupted_turns.insert(turn);
-        }
-        if let Some(seconds) = replay.seconds {
-            self.completed_turn_seconds.insert(turn, seconds);
-        }
-        if let Some(output_tokens) = replay.output_tokens {
-            self.completed_turn_output_tokens
-                .insert(turn, output_tokens);
-        }
+        self.turn_ledger.replay(
+            turn,
+            replay.interrupted,
+            replay.seconds,
+            replay.output_tokens,
+        );
         cx.notify();
     }
 
@@ -325,46 +285,39 @@ impl TranscriptView {
     }
 
     pub(crate) fn is_working(&self) -> bool {
-        self.working_started.is_some()
+        self.live_turn.is_working()
     }
 
     pub(crate) fn is_compacting(&self) -> bool {
-        self.compacting
+        self.live_turn.is_compacting()
     }
 
     pub(crate) fn set_compacting(&mut self, compacting: bool, cx: &mut Context<Self>) {
-        self.compacting = compacting;
+        self.live_turn.set_compacting(compacting);
         cx.notify();
     }
 
     pub(crate) fn was_interrupted(&self, turn: u64) -> bool {
-        self.interrupted_turns.contains(&turn)
+        self.turn_ledger.was_interrupted(turn)
     }
 
     pub(crate) fn mark_interrupted(&mut self, turn: u64) {
-        self.interrupted_turns.insert(turn);
+        self.turn_ledger.mark_interrupted(turn);
     }
 
     pub(crate) fn start_working(&mut self, cx: &mut Context<Self>) {
-        self.working_started = Some(Instant::now());
-        self.working_output_tokens = None;
-        // Whatever the last turn was doing has nothing to say about this one.
-        self.working_detail = None;
+        self.live_turn.start();
         cx.notify();
     }
 
-    /// Report what the running turn is doing, or clear it once the backend has
-    /// nothing further to add.
     pub(crate) fn set_working_detail(&mut self, detail: Option<String>, cx: &mut Context<Self>) {
-        if self.working_detail != detail {
-            self.working_detail = detail;
+        if self.live_turn.set_detail(detail) {
             cx.notify();
         }
     }
 
     pub(crate) fn set_working_output_tokens(&mut self, output_tokens: u64, cx: &mut Context<Self>) {
-        if self.working_started.is_some() {
-            self.working_output_tokens = Some(output_tokens);
+        if self.live_turn.set_output_tokens(output_tokens) {
             cx.notify();
         }
     }
@@ -373,32 +326,21 @@ impl TranscriptView {
     /// These are view state rather than provider transcript content, so they
     /// stay outside the shared item stream.
     pub(crate) fn settle_turn(&mut self, turn: u64, cx: &mut Context<Self>) {
-        let output_tokens = self.working_output_tokens.take();
-        self.working_detail = None;
-        if let Some(started) = self.working_started.take() {
-            self.settled_turns.insert(turn);
-            if !self.interrupted_turns.contains(&turn) {
-                self.completed_turn_seconds
-                    .insert(turn, started.elapsed().as_secs());
-            }
-            if let Some(output_tokens) = output_tokens {
-                self.completed_turn_output_tokens
-                    .insert(turn, output_tokens);
-            }
-            cx.notify();
-        }
+        let Some((started, output_tokens)) = self.live_turn.finish() else {
+            return;
+        };
+
+        self.turn_ledger
+            .settle(turn, started.elapsed().as_secs(), output_tokens);
+
+        cx.notify();
     }
 
     /// Discard a turn that never produced visible output, so an immediate stop
     /// leaves no elapsed-time row behind for work that did not happen.
     pub(crate) fn discard_turn(&mut self, turn: u64, cx: &mut Context<Self>) {
-        self.working_started = None;
-        self.working_output_tokens = None;
-        self.working_detail = None;
-        self.settled_turns.remove(&turn);
-        self.completed_turn_seconds.remove(&turn);
-        self.completed_turn_output_tokens.remove(&turn);
-        self.compacting = false;
+        self.live_turn.discard();
+        self.turn_ledger.forget(turn);
         cx.notify();
     }
 }

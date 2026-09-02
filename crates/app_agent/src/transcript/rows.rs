@@ -335,9 +335,9 @@ impl TranscriptView {
 
         // Live progress row, pinned below everything the running turn has
         // produced; replaced by the turn's fold header on completion.
-        if self.working_started.is_some() {
+        if self.live_turn.is_working() {
             rows.push(RowSpec::Working {
-                compacting: self.compacting,
+                compacting: self.live_turn.is_compacting(),
             });
         }
 
@@ -356,15 +356,15 @@ impl TranscriptView {
         // own marker; otherwise an elapsed-time line, when the session reported
         // a duration at all.
         let summary = turn_summary(
-            self.interrupted_turns.contains(&turn),
-            self.completed_turn_seconds.get(&turn).copied(),
+            self.turn_ledger.was_interrupted(turn),
+            self.turn_ledger.seconds(turn),
         );
 
         if summary == Some(TurnSummary::Interrupted) {
             self.stream_specs(start, end, &|_| false, collapse, rows);
             rows.push(RowSpec::Interrupted {
                 turn,
-                output_tokens: self.completed_turn_output_tokens.get(&turn).copied(),
+                output_tokens: self.turn_ledger.output_tokens(turn),
             });
             return;
         }
@@ -373,7 +373,7 @@ impl TranscriptView {
         // work is what the user is watching happen. Folding keys off the turn
         // having settled rather than off a known duration, so a replayed turn
         // folds too — the transcript file carries no timing for it.
-        if !self.settled_turns.contains(&turn) {
+        if !self.turn_ledger.is_settled(turn) {
             self.stream_specs(start, end, &|_| false, collapse, rows);
             return;
         }
@@ -466,7 +466,7 @@ impl TranscriptView {
         if let Some(TurnSummary::Worked(seconds)) = summary {
             rows.push(RowSpec::TurnSummary {
                 seconds,
-                output_tokens: self.completed_turn_output_tokens.get(&turn).copied(),
+                output_tokens: self.turn_ledger.output_tokens(turn),
             });
         }
     }
