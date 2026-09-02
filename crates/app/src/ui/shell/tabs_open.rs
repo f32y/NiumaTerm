@@ -1,6 +1,7 @@
 use nmt_app_agent::RecoveryIdentity;
 use nmt_i18n::i18n;
 
+use crate::ui::persistence::spawn_default_pane;
 use crate::ui::shell::*;
 
 impl Shell {
@@ -75,7 +76,7 @@ impl Shell {
 
         let id = Self::alloc_id(&mut self.next_id);
 
-        let pane = Self::spawn_default_pane(cx, id, profile, explicit_cwd(&cwd));
+        let pane = spawn_default_pane(cx, id, profile, explicit_cwd(&cwd));
 
         self.register_agent_pane(&pane, cx);
 
