@@ -130,7 +130,7 @@ fn is_turn_edge(items: &[Entry], spec: &RowSpec) -> bool {
 /// follows the run, and a rank read off the upper row alone cannot say both.
 /// The last row is spaced as though a turn followed it, so gaining a row
 /// beneath it leaves its height alone.
-fn row_gap(items: &[Entry], above: &RowSpec, below: Option<&RowSpec>) -> RowGap {
+pub(crate) fn row_gap(items: &[Entry], above: &RowSpec, below: Option<&RowSpec>) -> RowGap {
     let Some(below) = below else {
         return RowGap::Group;
     };
@@ -174,6 +174,12 @@ pub(crate) enum ReadingPosition {
 pub(crate) enum TurnSummary {
     Worked(u64),
     Interrupted,
+}
+
+/// Whether the collapse setting folds a settled turn's work away by default.
+/// Only the mode that names work does; the other two leave it on screen.
+pub(crate) fn folds_turns(collapse: CollapseRows) -> bool {
+    matches!(collapse, CollapseRows::WorkAndToolCalls)
 }
 
 pub(crate) fn turn_summary(interrupted: bool, seconds: Option<u64>) -> Option<TurnSummary> {
@@ -392,15 +398,7 @@ impl TranscriptView {
         // and record hand-folds against whichever direction their default
         // points.
         let discloses_work = !matches!(collapse, CollapseRows::ToolCalls);
-        let folds_by_default = matches!(collapse, CollapseRows::WorkAndToolCalls);
-        let folded = discloses_work && folds_by_default != self.toggled_turns.contains(&turn);
-
-        // The final reply stays visible when the turn folds; everything
-        // between the prompt and the answer is what the fold hides.
-        let final_agent = (start..end).rev().find(|&i| {
-            matches!(&self.items[i].item, SessionItem::AgentMessage { .. })
-                && !hidden(&self.items[i].item)
-        });
+        let folded = discloses_work && folds_turns(collapse) != self.disclosures.turn_toggled(turn);
 
         // Only the prompt that opened the turn heads it. A message steered
         // into a turn already in flight was written after part of the reply
@@ -416,20 +414,10 @@ impl TranscriptView {
         // What the fold owns: everything the expanded turn shows that the
         // folded one does not. Counting it here keeps the disclosure's label
         // honest and lets a turn with nothing to hide skip the control.
-        let folded_away = |i: usize| {
-            let item = &self.items[i].item;
-
-            !hidden(item)
-                && Some(i) != opening_user
-                && Some(i) != final_agent
-                && !matches!(
-                    item,
-                    SessionItem::Error { .. }
-                        | SessionItem::Compaction { .. }
-                        | SessionItem::UserMessage { .. }
-                )
-        };
-        let row_count = (start..end).filter(|&i| folded_away(i)).count();
+        let shown = |i: usize| !hidden(&self.items[i].item) && Some(i) != opening_user;
+        let row_count = (start..end)
+            .filter(|&i| shown(i) && !self.survives_fold(i))
+            .count();
 
         // Above the rows it discloses, so expanding inserts them below the
         // control the user just clicked instead of further up the turn.
@@ -442,24 +430,8 @@ impl TranscriptView {
         }
 
         if folded {
-            // Errors, compaction boundaries and steered prompts stay visible
-            // inside a folded turn: an error is what the user needs to act on,
-            // a boundary marks where the conversation above it stopped being
-            // verbatim, and words the user typed are never work to hide. The
-            // final reply is selected by identity rather than moved, because
-            // visible events can still arrive after it while the turn closes.
-            for i in start..end {
-                let visible_when_folded = Some(i) == final_agent
-                    || match &self.items[i].item {
-                        SessionItem::Error { .. } | SessionItem::Compaction { .. } => true,
-                        SessionItem::UserMessage { .. } => {
-                            Some(i) != opening_user && !hidden(&self.items[i].item)
-                        }
-                        _ => false,
-                    };
-                if visible_when_folded {
-                    rows.push(self.entry_spec(i));
-                }
+            for i in (start..end).filter(|&i| shown(i) && self.survives_fold(i)) {
+                rows.push(self.entry_spec(i));
             }
         } else {
             let skip = |i: usize| Some(i) == opening_user;
@@ -541,6 +513,35 @@ impl TranscriptView {
             }
 
             i = j;
+        }
+    }
+
+    /// Whether an entry stays on screen while its turn is folded. Errors,
+    /// compaction boundaries and steered prompts do: an error is what the
+    /// user needs to act on, a boundary marks where the conversation above
+    /// it stopped being verbatim, and words the user typed are never work to
+    /// hide. The final reply does too, selected by identity rather than
+    /// moved, because visible events can still arrive after it while the
+    /// turn closes; everything between the prompt and that answer is what the
+    /// fold hides.
+    pub(crate) fn survives_fold(&self, index: usize) -> bool {
+        let entry = &self.items[index];
+
+        match &entry.item {
+            SessionItem::Error { .. }
+            | SessionItem::Compaction { .. }
+            | SessionItem::UserMessage { .. } => true,
+            SessionItem::AgentMessage { .. } => {
+                !hidden(&entry.item)
+                    && self.items[index + 1..]
+                        .iter()
+                        .take_while(|later| later.turn == entry.turn)
+                        .all(|later| {
+                            hidden(&later.item)
+                                || !matches!(later.item, SessionItem::AgentMessage { .. })
+                        })
+            }
+            _ => false,
         }
     }
 

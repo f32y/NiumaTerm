@@ -17,36 +17,39 @@ use crate::transcript::reveal::{Disclosures, RevealKey};
 /// The settled turn's work disclosure. It heads the rows it hides, so the
 /// chevron keeps its usual meaning: the content it reveals is below it.
 pub(super) fn render_turn_fold(
+    disclosures: &Disclosures,
     turn: u64,
     row_count: usize,
     folded: bool,
     cx: &mut Context<TranscriptView>,
 ) -> AnyElement {
-    let label = if folded {
-        i18n("agent-transcript-turn-work").replace("{count}", &row_count.to_string())
-    } else {
+    // The wording answers the click while the work under it may still be
+    // leaving: a row reading "hide" through the exit it started would be
+    // offering to do again what it is in the middle of doing.
+    let disclosing = disclosures.is_disclosing(RevealKey::Turn(turn));
+    let label = if disclosing {
         i18n("agent-transcript-turn-work-hide").to_string()
+    } else {
+        i18n("agent-transcript-turn-work").replace("{count}", &row_count.to_string())
     };
 
     agent_card()
         .child(
             AgentDisclosureRow::new(("turn-fold", turn as usize), label.clone())
                 .expanded(!folded)
+                .opening(disclosures.progress(RevealKey::Turn(turn), Instant::now()))
                 .type_icon(IconName::GalleryVerticalEnd)
                 .accessible_label(format!(
                     "{label}. {}",
-                    if folded {
-                        i18n("agent-transcript-collapsed")
-                    } else {
+                    if disclosing {
                         i18n("agent-transcript-expanded")
+                    } else {
+                        i18n("agent-transcript-collapsed")
                     }
                 ))
                 .render(cx)
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    if !this.toggled_turns.insert(turn) {
-                        this.toggled_turns.remove(&turn);
-                    }
-                    cx.notify();
+                    this.toggle_disclosure(RevealKey::Turn(turn), cx)
                 })),
         )
         .into_any_element()
