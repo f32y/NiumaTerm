@@ -196,7 +196,7 @@ impl TerminalPane {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.last_mouse_position = Some(event.position);
+        self.links.record_position(event.position);
 
         if event.pressed_button.is_none() {
             self.update_hovered_link(event.position, event.modifiers, cx);
@@ -258,7 +258,7 @@ impl TerminalPane {
     ) {
         // Rows shift under the pointer; drop the underline instead of leaving
         // it stale. The next mouse move recomputes it.
-        if self.hovered_link.take().is_some() {
+        if self.links.clear() {
             cx.notify();
         }
 
