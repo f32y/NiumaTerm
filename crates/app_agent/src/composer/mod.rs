@@ -37,7 +37,7 @@ use nmt_i18n::i18n;
 use crate::commands::{parse_slash_command, reconcile_skill_binding, validate_skill_binding};
 use crate::session::Status;
 use crate::transcript::last_response_label;
-use crate::{AgentPane, RecentSessionsMode};
+use crate::{AgentPane, RecentSessionsMode, SlashPalette};
 
 #[derive(Clone)]
 pub(super) struct PendingSlashCommand {
@@ -121,6 +121,51 @@ pub(super) fn restored_input_after_interruption(submitted: &str, current: &str) 
         submitted.to_string()
     } else {
         format!("{submitted}\n\n{current}")
+    }
+}
+
+impl SlashPalette {
+    /// Show a one-line result above the composer, replacing whatever was
+    /// there.
+    pub(crate) fn set_feedback(
+        &mut self,
+        kind: CommandFeedbackKind,
+        message: impl Into<SharedString>,
+        cx: &mut Context<AgentPane>,
+    ) {
+        self.feedback_seq += 1;
+        let seq = self.feedback_seq;
+        self.feedback = Some(CommandFeedback {
+            kind,
+            message: message.into(),
+        });
+        cx.notify();
+
+        if !feedback_is_transient(kind) {
+            return;
+        }
+
+        // A notice acknowledges a request before anything visible happens. A
+        // command that then runs a whole turn fills the transcript with its
+        // real answer, and the acknowledgement above the composer becomes a
+        // line the user cannot dismiss, because only typing clears it.
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(FEEDBACK_LIFETIME).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.palette.feedback_seq == seq {
+                    this.palette.feedback = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// The message worth showing right now, if any.
+    pub(crate) fn visible_feedback(&self) -> Option<&CommandFeedback> {
+        self.feedback
+            .as_ref()
+            .filter(|feedback| feedback_is_current(feedback.kind, self.command_queue.is_empty()))
     }
 }
 
@@ -208,7 +253,7 @@ impl AgentPane {
 
     fn send_user_message_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.branch_flow_holds_composer() {
-            self.set_command_feedback(
+            self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-session-rewind-blocks-send").to_string(),
                 cx,
@@ -238,7 +283,8 @@ impl AgentPane {
             ) {
                 Ok(skill) => skill,
                 Err(message) => {
-                    self.set_command_feedback(CommandFeedbackKind::Error, message, cx);
+                    self.palette
+                        .set_feedback(CommandFeedbackKind::Error, message, cx);
                     return;
                 }
             }
@@ -252,47 +298,6 @@ impl AgentPane {
             self.input
                 .update(cx, |input, cx| input.set_value("", window, cx));
         }
-    }
-
-    pub(super) fn set_command_feedback(
-        &mut self,
-        kind: CommandFeedbackKind,
-        message: impl Into<SharedString>,
-        cx: &mut Context<Self>,
-    ) {
-        self.palette.feedback_seq += 1;
-        let seq = self.palette.feedback_seq;
-        self.palette.feedback = Some(CommandFeedback {
-            kind,
-            message: message.into(),
-        });
-        cx.notify();
-
-        if !feedback_is_transient(kind) {
-            return;
-        }
-
-        // A notice acknowledges a request before anything visible happens. A
-        // command that then runs a whole turn fills the transcript with its
-        // real answer, and the acknowledgement above the composer becomes a
-        // line the user cannot dismiss, because only typing clears it.
-        cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(FEEDBACK_LIFETIME).await;
-            let _ = this.update(cx, |this, cx| {
-                if this.palette.feedback_seq == seq {
-                    this.palette.feedback = None;
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-    }
-
-    /// The message worth showing right now, if any.
-    pub(crate) fn visible_command_feedback(&self) -> Option<&CommandFeedback> {
-        self.palette.feedback.as_ref().filter(|feedback| {
-            feedback_is_current(feedback.kind, self.palette.command_queue.is_empty())
-        })
     }
 
     pub(super) fn is_command_busy(&self) -> bool {

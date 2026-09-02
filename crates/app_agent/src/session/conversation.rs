@@ -39,7 +39,7 @@ impl AgentPane {
     pub(crate) fn rename_conversation(&mut self, title: &str, cx: &mut Context<Self>) -> bool {
         let title = title.trim();
         if title.is_empty() {
-            self.set_command_feedback(
+            self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-session-rename-needs-title").to_string(),
                 cx,
@@ -59,7 +59,7 @@ impl AgentPane {
         // keep would describe a rename that did not happen that way.
         match outcome {
             Ok(accepted) => {
-                self.set_command_feedback(
+                self.palette.set_feedback(
                     CommandFeedbackKind::Notice,
                     i18n("agent-session-renamed").replace("{title}", &accepted),
                     cx,
@@ -67,7 +67,8 @@ impl AgentPane {
                 true
             }
             Err(error) => {
-                self.set_command_feedback(CommandFeedbackKind::Error, error, cx);
+                self.palette
+                    .set_feedback(CommandFeedbackKind::Error, error, cx);
                 false
             }
         }
@@ -81,7 +82,7 @@ impl AgentPane {
     pub(crate) fn search_conversations(&mut self, query: &str, cx: &mut Context<Self>) -> bool {
         let query = query.trim();
         if query.is_empty() {
-            self.set_command_feedback(
+            self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-session-search-needs-query").to_string(),
                 cx,
@@ -90,7 +91,7 @@ impl AgentPane {
         }
 
         let Some(session) = self.runtime.backend.as_mut() else {
-            self.set_command_feedback(
+            self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-session-still-starting").replace("{name}", self.kind.display()),
                 cx,
@@ -99,7 +100,7 @@ impl AgentPane {
         };
 
         session.search_sessions(query);
-        self.set_command_feedback(
+        self.palette.set_feedback(
             CommandFeedbackKind::Notice,
             i18n("agent-session-searching").replace("{query}", query),
             cx,
@@ -117,7 +118,7 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) {
         if results.is_empty() {
-            self.set_command_feedback(
+            self.palette.set_feedback(
                 CommandFeedbackKind::Notice,
                 i18n("agent-session-search-no-matches").to_string(),
                 cx,
@@ -131,7 +132,7 @@ impl AgentPane {
         self.history_ui.pending = None;
         self.history_ui.selected = 0;
         self.history_ui.mode = RecentSessionsMode::Open;
-        self.set_command_feedback(
+        self.palette.set_feedback(
             CommandFeedbackKind::Notice,
             i18n("agent-session-search-matches").replace("{count}", &count.to_string()),
             cx,
@@ -151,7 +152,7 @@ impl AgentPane {
             .is_some_and(|session| session.remove_queued_prompt(item_id));
 
         if !removed {
-            self.set_command_feedback(
+            self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-session-queued-remove-failed").to_string(),
                 cx,

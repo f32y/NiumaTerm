@@ -96,7 +96,7 @@ impl gpui::Focusable for AgentPane {
 impl Render for AgentPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let command_palette = self.render_command_palette(cx);
-        let command_feedback = self.visible_command_feedback().map(|feedback| {
+        let command_feedback = self.palette.visible_feedback().map(|feedback| {
             let (color, label) = match feedback.kind {
                 CommandFeedbackKind::Notice => (cx.theme().primary, i18n("agent-feedback-notice")),
                 CommandFeedbackKind::Status => {

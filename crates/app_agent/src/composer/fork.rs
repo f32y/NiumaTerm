@@ -211,7 +211,7 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) -> bool {
         if self.runtime.status != Status::Idle || self.is_command_busy() {
-            self.set_command_feedback(
+            self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 translated("agent-fork-idle-only"),
                 cx,
@@ -225,7 +225,7 @@ impl AgentPane {
             .as_mut()
             .is_some_and(Backend::request_fork_checkpoints);
         if !asked {
-            self.set_command_feedback(
+            self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-session-still-starting").replace("{name}", self.kind.display()),
                 cx,
@@ -236,7 +236,7 @@ impl AgentPane {
         self.fork.state = Some(ForkState::Loading(target));
         self.palette.selected = 0;
         self.palette.dismissed = false;
-        self.set_command_feedback(
+        self.palette.set_feedback(
             CommandFeedbackKind::Status,
             translated("agent-fork-loading-checkpoints"),
             cx,
@@ -260,7 +260,7 @@ impl AgentPane {
 
         match checkpoints {
             Ok(checkpoints) if checkpoints.is_empty() => {
-                self.set_command_feedback(
+                self.palette.set_feedback(
                     CommandFeedbackKind::Error,
                     translated("agent-fork-no-prompts"),
                     cx,
@@ -283,7 +283,7 @@ impl AgentPane {
                         // a menu pick would otherwise look like the pick was
                         // simply the wrong one.
                         if target.is_some() {
-                            self.set_command_feedback(
+                            self.palette.set_feedback(
                                 CommandFeedbackKind::Error,
                                 translated("agent-fork-prompt-not-a-branch-point"),
                                 cx,
@@ -299,7 +299,8 @@ impl AgentPane {
                 }
             }
             Err(message) => {
-                self.set_command_feedback(CommandFeedbackKind::Error, message, cx);
+                self.palette
+                    .set_feedback(CommandFeedbackKind::Error, message, cx);
             }
         }
     }
@@ -369,7 +370,8 @@ impl AgentPane {
         // from, so the reason is read beside the other prompts rather than
         // after the list it applies to has closed.
         if let Err(error) = outcome {
-            self.set_command_feedback(CommandFeedbackKind::Error, error, cx);
+            self.palette
+                .set_feedback(CommandFeedbackKind::Error, error, cx);
             return;
         }
 
@@ -387,7 +389,7 @@ impl AgentPane {
         // after it.
         self.fork.pending_prompt = Some(checkpoint.prompt);
 
-        self.set_command_feedback(
+        self.palette.set_feedback(
             CommandFeedbackKind::Notice,
             translated("agent-session-forking"),
             cx,
@@ -401,7 +403,7 @@ impl AgentPane {
     pub(crate) fn finish_conversation_branch(&mut self, cx: &mut Context<Self>) {
         if matches!(self.fork.state, Some(ForkState::Branching)) {
             self.fork.state = None;
-            self.set_command_feedback(
+            self.palette.set_feedback(
                 CommandFeedbackKind::Notice,
                 translated("agent-fork-complete"),
                 cx,

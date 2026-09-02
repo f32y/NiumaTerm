@@ -71,7 +71,7 @@ impl AgentPane {
         };
 
         if !self.kind.caps().image_input {
-            self.set_command_feedback(
+            self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 i18n("agent-composer-images-unsupported").replace("{name}", self.kind.display()),
                 cx,
@@ -89,7 +89,7 @@ impl AgentPane {
                 true
             }
             Err(AttachError::Full) => {
-                self.set_command_feedback(
+                self.palette.set_feedback(
                     CommandFeedbackKind::Error,
                     i18n("agent-composer-images-full")
                         .replace("{count}", &MAX_ATTACHMENTS.to_string()),

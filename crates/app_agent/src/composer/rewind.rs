@@ -145,7 +145,7 @@ impl AgentPane {
         cx: &mut Context<Self>,
     ) -> bool {
         if self.runtime.status != Status::Idle || self.is_command_busy() {
-            self.set_command_feedback(
+            self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 translated("agent-rewind-idle-only"),
                 cx,
@@ -160,7 +160,7 @@ impl AgentPane {
             .and_then(Backend::session_id)
             .map(str::to_owned)
         else {
-            self.set_command_feedback(
+            self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 translated("agent-rewind-no-session-id"),
                 cx,
@@ -173,7 +173,7 @@ impl AgentPane {
         self.rewind.state = Some(RewindState::Loading { operation_id });
         self.palette.selected = 0;
         self.palette.dismissed = false;
-        self.set_command_feedback(
+        self.palette.set_feedback(
             CommandFeedbackKind::Status,
             translated("agent-rewind-loading-checkpoints"),
             cx,
@@ -200,7 +200,7 @@ impl AgentPane {
                 match checkpoints {
                     Ok(checkpoints) if checkpoints.is_empty() => {
                         this.rewind.state = None;
-                        this.set_command_feedback(
+                        this.palette.set_feedback(
                             CommandFeedbackKind::Error,
                             translated("agent-rewind-no-prompts"),
                             cx,
@@ -228,7 +228,7 @@ impl AgentPane {
                             },
                         });
                         if unresolved {
-                            this.set_command_feedback(
+                            this.palette.set_feedback(
                                 CommandFeedbackKind::Error,
                                 translated("agent-rewind-prompt-not-a-checkpoint"),
                                 cx,
@@ -246,7 +246,8 @@ impl AgentPane {
                     }
                     Err(message) => {
                         this.rewind.state = None;
-                        this.set_command_feedback(CommandFeedbackKind::Error, message, cx);
+                        this.palette
+                            .set_feedback(CommandFeedbackKind::Error, message, cx);
                     }
                 }
             });
@@ -429,11 +430,12 @@ impl AgentPane {
         match outcome {
             SlashCommandOutcome::Accepted => {}
             SlashCommandOutcome::Rejected { message } => {
-                self.set_command_feedback(CommandFeedbackKind::Error, message, cx);
+                self.palette
+                    .set_feedback(CommandFeedbackKind::Error, message, cx);
                 return;
             }
             SlashCommandOutcome::NotReady => {
-                self.set_command_feedback(
+                self.palette.set_feedback(
                     CommandFeedbackKind::Error,
                     translated("agent-rewind-files-not-ready"),
                     cx,
@@ -441,7 +443,7 @@ impl AgentPane {
                 return;
             }
             SlashCommandOutcome::Completed { message } => {
-                self.set_command_feedback(
+                self.palette.set_feedback(
                     CommandFeedbackKind::Error,
                     message.unwrap_or_else(|| i18n("agent-rewind-invalid-file-state").to_string()),
                     cx,
@@ -453,7 +455,7 @@ impl AgentPane {
         let (completion_tx, completion_rx) = oneshot::channel();
         self.rewind.file_completion = Some(completion_tx);
         self.rewind.state = Some(RewindState::RestoringFiles { operation_id });
-        self.set_command_feedback(
+        self.palette.set_feedback(
             CommandFeedbackKind::Status,
             if continue_with_fork {
                 translated("agent-rewind-restoring-before-fork")
@@ -483,7 +485,7 @@ impl AgentPane {
                     }
                     FileRestoreNext::Complete => {
                         this.rewind.state = None;
-                        this.set_command_feedback(
+                        this.palette.set_feedback(
                             CommandFeedbackKind::Notice,
                             translated("agent-rewind-files-restored"),
                             cx,
@@ -495,7 +497,7 @@ impl AgentPane {
                             checkpoint,
                         });
                         this.palette.selected = 0;
-                        this.set_command_feedback(
+                        this.palette.set_feedback(
                             CommandFeedbackKind::Error,
                             if continue_with_fork {
                                 i18n("agent-rewind-file-failed-no-conversation")
@@ -531,7 +533,7 @@ impl AgentPane {
                 operation_id,
                 checkpoint,
             });
-            self.set_command_feedback(
+            self.palette.set_feedback(
                 CommandFeedbackKind::Error,
                 if files_restored {
                     translated("agent-rewind-source-id-missing-after-files")
@@ -546,7 +548,7 @@ impl AgentPane {
         let cwd = self.cwd();
         let user_message_id = checkpoint.user_message_id.clone();
         self.rewind.state = Some(RewindState::ForkingConversation { operation_id });
-        self.set_command_feedback(
+        self.palette.set_feedback(
             CommandFeedbackKind::Status,
             translated("agent-rewind-creating-prefix"),
             cx,
@@ -577,7 +579,7 @@ impl AgentPane {
                     ),
                     Err(message) => {
                         this.rewind.state = None;
-                        this.set_command_feedback(
+                        this.palette.set_feedback(
                             CommandFeedbackKind::Error,
                             if files_restored {
                                 i18n("agent-rewind-conversation-failed-after-files")
@@ -630,7 +632,7 @@ impl AgentPane {
                 .map(|id| RecoveryIdentity::new(AgentKind::Claude, id)),
             true,
             move |this, started, cx| {
-                this.set_command_feedback(
+                this.palette.set_feedback(
                     if started {
                         CommandFeedbackKind::Notice
                     } else {
