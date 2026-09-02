@@ -12,107 +12,114 @@ pub(super) struct UpdateCard {
     elapsed: Option<FocusedVisibleLifetime>,
 }
 
-impl Shell {
-    fn update_notification_card(
-        view: UpdateNotificationView,
-        shell: gpui::WeakEntity<Self>,
-    ) -> Notification {
-        let tone = match view.tone {
-            UpdateNotificationTone::Info => NotificationType::Info,
-            UpdateNotificationTone::Success => NotificationType::Success,
-            UpdateNotificationTone::Warning => NotificationType::Warning,
-            UpdateNotificationTone::Error => NotificationType::Error,
-        };
-        let icon = match view.provider {
-            ProviderKind::Claude => Icon::new(ClaudeUpdateIcon),
-            ProviderKind::Codex => Icon::new(CodexUpdateIcon),
-        };
-        let close_key = view.installation.clone();
-        let close_target = view.target.clone();
-        let close_phase = view.phase;
-        let progress = view.progress.clone();
-        let progress_key = view.key.clone();
-        let settings_key = view.key.clone();
-        let settings_shell = shell.clone();
+/// The on-screen provider-update notifications: one card per coordinator key
+/// plus the single polling task that retires the auto-hiding ones. The task
+/// flag belongs beside the cards because it may only run while some card still
+/// has a clock, and it is what stops a second task being spawned.
+#[derive(Default)]
+pub(super) struct UpdateNotificationLayer {
+    cards: collections::HashMap<String, UpdateCard>,
+    timer_running: bool,
+}
 
-        let mut notification = Notification::new()
-            .id1::<AgentUpdateNotification>(view.key.clone())
-            .placement(Anchor::TopRight)
-            .with_type(tone)
-            .icon(icon)
-            .title(view.title.clone())
-            .message(view.message.clone())
-            .autohide(false)
-            .content(move |_, _, _| {
-                let progress_bar = match progress {
-                    NotificationProgress::None => None,
-                    NotificationProgress::Indeterminate => Some(
-                        Progress::new(format!("{progress_key}-progress"))
-                            .loading(true)
-                            .into_any_element(),
-                    ),
-                    NotificationProgress::Determinate(value) => Some(
-                        Progress::new(format!("{progress_key}-progress"))
-                            .value(value)
-                            .into_any_element(),
-                    ),
-                };
-                let has_progress = progress_bar.is_some();
-                v_flex()
-                    .w_full()
-                    .when(has_progress, |this| this.pt_2())
-                    .children(progress_bar)
-                    .into_any_element()
-            })
-            .secondary_action(move |_, _, _| {
-                let settings_shell = settings_shell.clone();
-                Button::new(format!("{settings_key}-settings"))
-                    .ghost()
-                    .label(i18n("shell-updates-settings"))
-                    .on_click(move |_, window, cx| {
-                        let _ = settings_shell.update(cx, |shell, cx| {
-                            shell.on_show_settings(&ShowSettings, window, cx)
-                        });
-                    })
-            })
-            .on_close(move |_, cx| {
-                let Some(updates) = cx.try_global::<AgentUpdates>() else {
-                    return;
-                };
-                if close_phase == UpdatePhase::Available {
-                    if let Some(target) = close_target.as_ref() {
-                        updates.coordinator.dismiss_available(&close_key, target);
-                    }
-                } else {
-                    updates.coordinator.hide_notification(&close_key);
+fn update_notification_card(
+    view: UpdateNotificationView,
+    shell: gpui::WeakEntity<Shell>,
+) -> Notification {
+    let tone = match view.tone {
+        UpdateNotificationTone::Info => NotificationType::Info,
+        UpdateNotificationTone::Success => NotificationType::Success,
+        UpdateNotificationTone::Warning => NotificationType::Warning,
+        UpdateNotificationTone::Error => NotificationType::Error,
+    };
+    let icon = match view.provider {
+        ProviderKind::Claude => Icon::new(ClaudeUpdateIcon),
+        ProviderKind::Codex => Icon::new(CodexUpdateIcon),
+    };
+    let close_key = view.installation.clone();
+    let close_target = view.target.clone();
+    let close_phase = view.phase;
+    let progress = view.progress.clone();
+    let progress_key = view.key.clone();
+    let settings_key = view.key.clone();
+    let settings_shell = shell.clone();
+
+    let mut notification = Notification::new()
+        .id1::<AgentUpdateNotification>(view.key.clone())
+        .placement(Anchor::TopRight)
+        .with_type(tone)
+        .icon(icon)
+        .title(view.title.clone())
+        .message(view.message.clone())
+        .autohide(false)
+        .content(move |_, _, _| {
+            let progress_bar = match progress {
+                NotificationProgress::None => None,
+                NotificationProgress::Indeterminate => Some(
+                    Progress::new(format!("{progress_key}-progress"))
+                        .loading(true)
+                        .into_any_element(),
+                ),
+                NotificationProgress::Determinate(value) => Some(
+                    Progress::new(format!("{progress_key}-progress"))
+                        .value(value)
+                        .into_any_element(),
+                ),
+            };
+            let has_progress = progress_bar.is_some();
+            v_flex()
+                .w_full()
+                .when(has_progress, |this| this.pt_2())
+                .children(progress_bar)
+                .into_any_element()
+        })
+        .secondary_action(move |_, _, _| {
+            let settings_shell = settings_shell.clone();
+            Button::new(format!("{settings_key}-settings"))
+                .ghost()
+                .label(i18n("shell-updates-settings"))
+                .on_click(move |_, window, cx| {
+                    let _ = settings_shell.update(cx, |shell, cx| {
+                        shell.on_show_settings(&ShowSettings, window, cx)
+                    });
+                })
+        })
+        .on_close(move |_, cx| {
+            let Some(updates) = cx.try_global::<AgentUpdates>() else {
+                return;
+            };
+            if close_phase == UpdatePhase::Available {
+                if let Some(target) = close_target.as_ref() {
+                    updates.coordinator.dismiss_available(&close_key, target);
                 }
-                cx.refresh_windows();
-            });
+            } else {
+                updates.coordinator.hide_notification(&close_key);
+            }
+            cx.refresh_windows();
+        });
 
-        if let Some(primary) = view.primary {
-            let action_key = view.installation.clone();
-            notification = notification.action(move |_, _, _| {
-                Button::new(format!("{}-primary", action_key.as_str()))
-                    .primary()
-                    .label(match primary {
-                        NotificationPrimaryAction::Update => i18n("shell-updates-update"),
-                        NotificationPrimaryAction::Retry => i18n("shell-updates-retry"),
-                    })
-                    .on_click({
-                        let action_key = action_key.clone();
-                        move |_, window, cx| {
-                            agent_updates::request_update(action_key.clone(), window, cx)
-                        }
-                    })
-            });
-        }
-        notification
+    if let Some(primary) = view.primary {
+        let action_key = view.installation.clone();
+        notification = notification.action(move |_, _, _| {
+            Button::new(format!("{}-primary", action_key.as_str()))
+                .primary()
+                .label(match primary {
+                    NotificationPrimaryAction::Update => i18n("shell-updates-update"),
+                    NotificationPrimaryAction::Retry => i18n("shell-updates-retry"),
+                })
+                .on_click({
+                    let action_key = action_key.clone();
+                    move |_, window, cx| {
+                        agent_updates::request_update(action_key.clone(), window, cx)
+                    }
+                })
+        });
     }
+    notification
+}
 
-    pub(super) fn render_update_notification_layer(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+impl UpdateNotificationLayer {
+    pub(super) fn render(&mut self, cx: &mut Context<Shell>) -> Option<AnyElement> {
         let snapshots = cx.global::<AgentUpdates>().coordinator.snapshots();
         let views = snapshots
             .iter()
@@ -122,25 +129,24 @@ impl Shell {
             .iter()
             .map(|view| view.key.clone())
             .collect::<collections::HashSet<_>>();
-        self.update_cards.retain(|key, _| active_keys.contains(key));
+        self.cards.retain(|key, _| active_keys.contains(key));
 
         let shell = cx.weak_entity();
         let mut cards = Vec::with_capacity(views.len());
         for view in views {
-            let entry = match self.update_cards.entry(view.key.clone()) {
+            let entry = match self.cards.entry(view.key.clone()) {
                 collections::hash_map::Entry::Occupied(occupied) => {
                     let entry = occupied.into_mut();
                     if entry.view != view {
                         entry.card.update(cx, |card, _| {
-                            *card = Self::update_notification_card(view.clone(), shell.clone())
+                            *card = update_notification_card(view.clone(), shell.clone())
                         });
                     }
                     entry.view = view;
                     entry
                 }
                 collections::hash_map::Entry::Vacant(vacant) => {
-                    let card =
-                        cx.new(|_| Self::update_notification_card(view.clone(), shell.clone()));
+                    let card = cx.new(|_| update_notification_card(view.clone(), shell.clone()));
                     vacant.insert(UpdateCard {
                         view,
                         card,
@@ -163,7 +169,7 @@ impl Shell {
             cards.push(entry.card.clone());
         }
 
-        self.ensure_update_notification_timer(cx);
+        self.ensure_timer(cx);
         (!cards.is_empty()).then(|| {
             v_flex()
                 .absolute()
@@ -176,15 +182,12 @@ impl Shell {
         })
     }
 
-    fn ensure_update_notification_timer(&mut self, cx: &mut Context<Self>) {
-        let any_expiring = self
-            .update_cards
-            .values()
-            .any(|entry| entry.elapsed.is_some());
-        if self.update_notification_timer_running || !any_expiring {
+    fn ensure_timer(&mut self, cx: &mut Context<Shell>) {
+        let any_expiring = self.cards.values().any(|entry| entry.elapsed.is_some());
+        if self.timer_running || !any_expiring {
             return;
         }
-        self.update_notification_timer_running = true;
+        self.timer_running = true;
         cx.spawn(async move |shell, cx| {
             loop {
                 cx.background_executor()
@@ -194,7 +197,7 @@ impl Shell {
                     .update(cx, |shell, cx| {
                         let mut expired = Vec::new();
                         if shell.window_active {
-                            for (key, entry) in &mut shell.update_cards {
+                            for (key, entry) in &mut shell.update_notifications.cards {
                                 if let Some(lifetime) = &mut entry.elapsed
                                     && lifetime.tick(true, time::Duration::from_millis(100))
                                 {
@@ -205,7 +208,7 @@ impl Shell {
                         if !expired.is_empty() {
                             let coordinator = cx.global::<AgentUpdates>().coordinator.clone();
                             for key in &expired {
-                                if let Some(entry) = shell.update_cards.get_mut(key) {
+                                if let Some(entry) = shell.update_notifications.cards.get_mut(key) {
                                     coordinator.hide_notification(&entry.view.installation);
                                     // The card stays until the coordinator's
                                     // next snapshot retires its key; only the
@@ -216,14 +219,15 @@ impl Shell {
                             cx.refresh_windows();
                         }
                         shell
-                            .update_cards
+                            .update_notifications
+                            .cards
                             .values()
                             .any(|entry| entry.elapsed.is_some())
                     })
                     .unwrap_or(false);
                 if !keep_running {
                     let _ = shell.update(cx, |shell, _| {
-                        shell.update_notification_timer_running = false;
+                        shell.update_notifications.timer_running = false;
                     });
                     break;
                 }

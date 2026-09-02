@@ -81,7 +81,7 @@ use crate::ui::shell::close::{should_confirm_close, should_confirm_tab_close};
 pub(super) use crate::ui::shell::inline_rename::{InlineRename, InlineRenameStyle};
 pub(super) use crate::ui::shell::tab_presentation::pending_tab_icon;
 pub(crate) use crate::ui::shell::tab_surface::TabSurface;
-use crate::ui::shell::updates_layer::UpdateCard;
+use crate::ui::shell::updates_layer::UpdateNotificationLayer;
 use crate::ui::shell::workspace_dirs::WorkspaceDirsEditor;
 use crate::ui::tab_bar::TabStrip;
 use crate::ui::token_usage::TokenUsageView;
@@ -198,8 +198,7 @@ pub(crate) struct Shell {
     /// On-screen provider-update notifications by key. Card entity, source
     /// view, and auto-hide clock live in one record so retiring a key cannot
     /// leave a stale sibling behind.
-    update_cards: collections::HashMap<String, UpdateCard>,
-    update_notification_timer_running: bool,
+    update_notifications: UpdateNotificationLayer,
     /// Workspace directories the last background availability check could not
     /// reach, keyed by normalized path identity. A saved directory keeps its
     /// place in its workspace whether or not the filesystem can see it, so
@@ -370,8 +369,7 @@ impl Shell {
                 cx.new(|_| RightPanel::new(git, tasks, workflows))
             },
             git_model,
-            update_cards: collections::HashMap::new(),
-            update_notification_timer_running: false,
+            update_notifications: UpdateNotificationLayer::default(),
             unavailable_roots: collections::HashSet::new(),
             doomed_workspace: None,
         };
