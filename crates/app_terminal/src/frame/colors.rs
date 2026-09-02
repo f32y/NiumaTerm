@@ -1,6 +1,6 @@
-use nmt_config::active_colors;
 use nmt_config::colors::term::{DIM_FACTOR, List, TermColors};
 use nmt_config::colors::{AnsiColor, NamedColor};
+use nmt_config::{active_colors, with_active_colors};
 use nmt_terminal::grid_emit::RowSelection;
 use nmt_terminal::render_buffer::RenderBuffer;
 use nmt_terminal::terminal::square::{ContentTag, Square};
@@ -120,16 +120,16 @@ impl BackgroundColors {
 /// The theme's default foreground, for harvested cells with no explicit fg
 /// (block-split).
 pub(crate) fn theme_default_foreground() -> TerminalColor {
-    TerminalColor::from_color_arr(active_colors().foreground)
+    with_active_colors(|colors| TerminalColor::from_color_arr(colors.foreground))
 }
 
 pub fn theme_default_background() -> TerminalColor {
-    TerminalColor::from_color_arr(active_colors().background.0)
+    with_active_colors(|colors| TerminalColor::from_color_arr(colors.background.0))
 }
 
 /// The theme's selection background (block-split frozen selection).
 pub(crate) fn theme_selection_background() -> TerminalColor {
-    TerminalColor::from_color_arr(active_colors().selection_background)
+    with_active_colors(|colors| TerminalColor::from_color_arr(colors.selection_background))
 }
 
 pub(super) fn cell_is_selected(row_selection: Option<RowSelection>, col: u16) -> bool {

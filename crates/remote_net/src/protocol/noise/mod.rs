@@ -28,8 +28,15 @@ pub struct StaticKeypair {
     pub public: Vec<u8>,
 }
 
+/// A builder for one of the two patterns above. Both are compile-time
+/// constants this module owns, so a parse failure would be a typo in this file
+/// rather than anything a running program can reach.
+fn builder(pattern: &str) -> Builder<'static> {
+    Builder::new(pattern.parse().expect("pattern constant is well formed"))
+}
+
 pub fn generate_keypair() -> Result<StaticKeypair, NoiseError> {
-    let keypair = Builder::new(PATTERN_IK.parse().expect("valid pattern")).generate_keypair()?;
+    let keypair = builder(PATTERN_IK).generate_keypair()?;
     Ok(StaticKeypair {
         private: keypair.private,
         public: keypair.public,
@@ -46,7 +53,7 @@ impl Handshake {
     /// Client side of a normal connection: requires the host's static public
     /// key learned during pairing.
     pub fn initiator_ik(local_private: &[u8], remote_public: &[u8]) -> Result<Self, NoiseError> {
-        let state = Builder::new(PATTERN_IK.parse().expect("valid pattern"))
+        let state = builder(PATTERN_IK)
             .local_private_key(local_private)?
             .remote_public_key(remote_public)?
             .build_initiator()?;
@@ -57,7 +64,7 @@ impl Handshake {
     /// available via `remote_static()` after reading the first message, which
     /// is when the host checks its authorized-device list.
     pub fn responder_ik(local_private: &[u8]) -> Result<Self, NoiseError> {
-        let state = Builder::new(PATTERN_IK.parse().expect("valid pattern"))
+        let state = builder(PATTERN_IK)
             .local_private_key(local_private)?
             .build_responder()?;
         Ok(Self { state })
@@ -65,7 +72,7 @@ impl Handshake {
 
     /// Client side of a pairing connection (host static key not yet trusted).
     pub fn initiator_xx(local_private: &[u8]) -> Result<Self, NoiseError> {
-        let state = Builder::new(PATTERN_XX.parse().expect("valid pattern"))
+        let state = builder(PATTERN_XX)
             .local_private_key(local_private)?
             .build_initiator()?;
         Ok(Self { state })
@@ -73,7 +80,7 @@ impl Handshake {
 
     /// Host side of a pairing connection.
     pub fn responder_xx(local_private: &[u8]) -> Result<Self, NoiseError> {
-        let state = Builder::new(PATTERN_XX.parse().expect("valid pattern"))
+        let state = builder(PATTERN_XX)
             .local_private_key(local_private)?
             .build_responder()?;
         Ok(Self { state })
