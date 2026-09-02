@@ -94,6 +94,11 @@ pub(crate) struct Capabilities {
     /// The harness indexes its own conversations and can be asked which of
     /// them mention a phrase, which is what `/find` offers.
     pub(crate) session_search: bool,
+    /// An earlier conversation can be continued inside the running session,
+    /// which is what makes reopening one from the recent list a request rather
+    /// than a relaunch. A harness without this has to be respawned with the
+    /// conversation's id, and the pane replays the transcript itself.
+    pub(crate) session_resume: bool,
     /// The model pick is its own request the harness answers immediately, so a
     /// remembered pick seeded into the picker has to be pushed to reach the
     /// session at all. Where the pick instead rides the launch or the next
@@ -124,6 +129,7 @@ const CODEX: Capabilities = Capabilities {
     queued_prompt_delivery: QueuedPromptDelivery::RunningTurn,
     session_fork: true,
     session_rename: false,
+    session_resume: true,
     session_search: false,
     model_selection_is_a_request: false,
     multi_root_access: MultiRootAccess::Full,
@@ -147,6 +153,7 @@ const CLAUDE: Capabilities = Capabilities {
     queued_prompt_delivery: QueuedPromptDelivery::FollowingTurn,
     session_fork: false,
     session_rename: false,
+    session_resume: false,
     session_search: false,
     model_selection_is_a_request: false,
     multi_root_access: MultiRootAccess::Full,
@@ -174,6 +181,7 @@ const DEEPSEEK: Capabilities = Capabilities {
     queued_prompt_delivery: QueuedPromptDelivery::PendingInbox,
     session_fork: true,
     session_rename: true,
+    session_resume: true,
     session_search: true,
     model_selection_is_a_request: true,
     // The installed Harness resolves one workspace root per session and its
