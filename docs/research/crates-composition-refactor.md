@@ -781,7 +781,17 @@ and is passed by value into every component method.
 
 #### D1. `RenderStateReader`
 
-Status: pending
+Status: done e9200582
+
+Note: the reader frees its own handles in its own `Drop`, so the two
+hand-written unwind paths in `GhosttyTerminal::new` are gone. That changes the
+FFI free order: the terminal is now released before the render state and the
+row iterator. Checked against `render.h`, which documents
+`ghostty_render_state_free` as releasing only the render state's own
+resources; the state and both iterators are allocated independently of any
+terminal.
+Manual check: run a full-screen program and scroll; the viewport repaints and
+only changed rows are republished.
 
 `render_state.rs` (371) exclusively owns `render_state`, `row_iter`,
 `row_versions`, `content_revision` (the last three appear nowhere else except
@@ -796,7 +806,15 @@ Commit: `refactor(terminal): own render state and row damage together`
 
 #### D2. `KittyState`
 
-Status: pending. Independent of D1.
+Status: done c8a14e86
+
+Note: `block_placements` needs the terminal handle too, for the cell-metric
+reads its geometry helpers make. `block_image_pixels` stayed on
+`GhosttyTerminal`; it reads neither field. The public `block_placements` and
+`take_image_deltas` stay on the terminal as delegations because the PTY pipe
+and the block list call them there.
+Manual check: display a kitty-protocol image, scroll it off screen and back;
+it is not re-shipped, and deleting it removes it.
 
 `kitty.rs` (484) owns `placement_iter` and `shipped_images` (mutated nowhere
 else). Target: `struct KittyState { placement_iter: VtKittyGraphicsPlacementIterator, shipped_images: FxHashMap<u32, (u32, u32, usize)> }`
@@ -808,7 +826,12 @@ Commit: `refactor(terminal): own kitty placement iteration and image cache`
 
 #### D3. `TitleMirror`
 
-Status: pending. Independent.
+Status: done 88ea465a
+
+Note: `note_title` and `note_pwd` take the value already read from the engine
+rather than the terminal handle, so the mirror makes no FFI calls of its own.
+Manual check: run a command that sets the window title and one that emits
+OSC 7; the tab title and the git indicator follow.
 
 `last_title` and `last_pwd` in `mod.rs` are change-detection mirrors read only
 by `poll_title` / `poll_pwd`. Target: `struct TitleMirror { title: String, pwd: String }`
@@ -965,3 +988,6 @@ left under the order.
 | A2 | done `1ce5d202` |
 | A3 | done `be210589` |
 | A4 | done `9eec587d` |
+| D1 | done `e9200582` |
+| D2 | done `c8a14e86` |
+| D3 | done `88ea465a` |
