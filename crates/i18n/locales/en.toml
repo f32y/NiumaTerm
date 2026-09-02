@@ -968,3 +968,5 @@
 "sidebar-workspaces-title" = "Workspaces"
 "tasks-background-kind-agent" = "Agent"
 "tasks-background-kind-shell" = "Shell"
+"agent-transcript-image-open" = "Open image"
+"agent-transcript-image-close" = "Close image"

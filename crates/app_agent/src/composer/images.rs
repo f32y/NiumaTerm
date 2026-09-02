@@ -5,7 +5,9 @@
 //! rather than driven by the buttons on the row.
 
 use std::fs;
+use std::ops::Range;
 use std::path::Path;
+use std::sync::Arc;
 
 use gpui::{ClipboardEntry, Context, Image, ImageFormat, Window};
 use nmt_i18n::i18n;
@@ -114,5 +116,25 @@ impl AgentPane {
         if self.attachments.sync(text, &self.input, window, cx) {
             cx.notify();
         }
+    }
+
+    /// Open a pending image over the message stream, in the same layer a sent
+    /// image opens in: an attachment is read at full size the same way
+    /// wherever the reader meets it.
+    pub(crate) fn open_image(&mut self, image: Arc<Image>, cx: &mut Context<Self>) {
+        self.transcript
+            .update(cx, |transcript, cx| transcript.zoom_image(image, cx));
+    }
+
+    /// Open the image a composer placeholder names. The placeholder is the
+    /// only thing in the pending message that stands for an image, so
+    /// following it shows what it stands for.
+    pub(crate) fn open_attached_image(&mut self, range: Range<usize>, cx: &mut Context<Self>) {
+        let text = self.input.read(cx).text().to_string();
+        let Some(image) = self.attachments.images().linked_image(&text, range) else {
+            return;
+        };
+
+        self.open_image(image, cx);
     }
 }

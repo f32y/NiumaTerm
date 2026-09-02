@@ -1,4 +1,5 @@
 mod compaction_row;
+mod image_preview;
 mod text_style;
 
 #[cfg(test)]
