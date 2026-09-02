@@ -72,7 +72,8 @@ impl TerminalSurface {
 
         let pos = Pos::new(Line(cell.row as i32), Column(cell.col as usize));
 
-        self.apply_selection_at(self.screen_pos(pos), side, kind, selection_type)
+        self.selection
+            .apply_at(self.screen_pos(pos), side, kind, selection_type)
     }
 
     pub(super) fn modes(&self) -> Mode {

@@ -7,7 +7,6 @@ use nmt_config::local_state::TabState;
 use nmt_input::keyboard::ModifiersState;
 use nmt_terminal::clipboard::{Clipboard, ClipboardType};
 use nmt_terminal::render_buffer::RenderBuffer;
-use nmt_terminal::selection::Selection;
 use nmt_terminal::terminal::pos::{Line, Pos};
 use parking_lot::Mutex;
 use tracing::{trace, warn};
@@ -32,6 +31,7 @@ pub(crate) use crate::surface::mouse::{
 };
 #[cfg(test)]
 use crate::surface::mouse::{mouse_button_code, mouse_motion_code, mouse_report_mods};
+use crate::surface::selection::SurfaceSelection;
 #[cfg(test)]
 use crate::surface::selection::{block_selection_range, selection_screen_range};
 
@@ -39,7 +39,7 @@ pub struct TerminalSurface {
     session: TerminalSession,
     launch_state: TabState,
     last_cwd: Mutex<Option<String>>,
-    selection: Mutex<Option<Selection>>,
+    selection: SurfaceSelection,
     read_only: AtomicBool,
     /// A full-screen program owns the grid (alt-screen). A subset of
     /// [`Self::interactive`] — excludes the unmarked-prompt fallback — used to
@@ -100,7 +100,7 @@ impl TerminalSurface {
             session,
             launch_state,
             last_cwd: Mutex::new(None),
-            selection: Mutex::new(None),
+            selection: SurfaceSelection::default(),
             read_only: AtomicBool::new(false),
             alt_screen: AtomicBool::new(false),
             grid_size,
@@ -151,7 +151,7 @@ impl TerminalSurface {
             session,
             launch_state: TabState::default(),
             last_cwd: Mutex::new(None),
-            selection: Mutex::new(None),
+            selection: SurfaceSelection::default(),
             read_only: AtomicBool::new(false),
             alt_screen: AtomicBool::new(false),
             grid_size,
@@ -235,7 +235,7 @@ impl TerminalSurface {
 
     pub(crate) fn frame(&self, previous: Option<&TerminalFrame>) -> TerminalFrame {
         let total_start = time::Instant::now();
-        let selection = self.selection_range();
+        let selection = self.selection.range_at(&self.session, self.viewport_top());
 
         // Resolve live image generations before taking the render-buffer lock so the
         // generation-store and render locks are never nested. A graphics-free
