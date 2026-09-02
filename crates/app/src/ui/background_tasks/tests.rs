@@ -5,10 +5,11 @@ use nmt_agent_utils::background_task::{
     BackgroundTaskSnapshot, BackgroundTaskState, BackgroundTaskUpdate,
 };
 
-use crate::ui::background_tasks::{
-    COMPACT_FINISHED_ROWS, COMPACT_RUNNING_ROWS, duration_label, finished_heading, finished_rows,
-    row_detail, row_timing, running_heading, running_rows, section_control_label, visible_rows,
+use crate::ui::background_tasks::rows::{
+    duration_label, finished_heading, finished_rows, row_detail, row_timing, running_heading,
+    running_rows, section_control_label, visible_rows,
 };
+use crate::ui::background_tasks::{COMPACT_FINISHED_ROWS, COMPACT_RUNNING_ROWS};
 
 fn at(seconds: u64) -> SystemTime {
     UNIX_EPOCH + Duration::from_secs(seconds)
