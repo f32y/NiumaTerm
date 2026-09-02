@@ -421,20 +421,21 @@ impl Shell {
     }
 }
 
-impl Shell {
-    /// Re-check every workspace directory off the UI thread and remember which
+/// Workspace directories the last background check could not reach, keyed by
+/// normalized path identity. A saved directory keeps its place in its
+/// workspace whether or not the filesystem can see it, so this drives
+/// presentation only.
+#[derive(Default)]
+pub(super) struct RootAvailability {
+    unavailable: collections::HashSet<String>,
+}
+
+impl RootAvailability {
+    /// Re-check the given directories off the UI thread and remember which
     /// ones the filesystem could not reach. Rendering a sidebar row or opening
     /// the New Tab menu reads the remembered answer, so neither one waits on a
     /// sleeping disk or a disconnected share.
-    pub(crate) fn refresh_root_availability(&mut self, cx: &mut Context<Self>) {
-        let paths: Vec<String> = self
-            .workspaces
-            .summaries()
-            .iter()
-            .flat_map(|ws| iter::once(ws.cwd.clone()).chain(ws.additional_cwds.iter().cloned()))
-            .filter(|path| !path.trim().is_empty())
-            .collect();
-
+    pub(super) fn refresh(&mut self, paths: Vec<String>, cx: &mut Context<Shell>) {
         cx.spawn(async move |shell, cx| {
             let unreachable = cx
                 .background_executor()
@@ -448,8 +449,8 @@ impl Shell {
                 .await;
 
             let _ = shell.update(cx, |this, cx| {
-                if this.unavailable_roots != unreachable {
-                    this.unavailable_roots = unreachable;
+                if this.root_availability.unavailable != unreachable {
+                    this.root_availability.unavailable = unreachable;
                     cx.notify();
                 }
             });
@@ -460,8 +461,23 @@ impl Shell {
     /// Whether `path` was reachable at the last availability check. A
     /// directory nobody has checked yet counts as available, so a row never
     /// flashes a warning it has no evidence for.
-    pub(crate) fn root_is_available(&self, path: &str) -> bool {
-        root_key(path).is_none_or(|key| !self.unavailable_roots.contains(&key))
+    pub(crate) fn is_available(&self, path: &str) -> bool {
+        root_key(path).is_none_or(|key| !self.unavailable.contains(&key))
+    }
+}
+
+impl Shell {
+    /// Re-check every directory the open workspaces name.
+    pub(crate) fn refresh_root_availability(&mut self, cx: &mut Context<Self>) {
+        let paths: Vec<String> = self
+            .workspaces
+            .summaries()
+            .iter()
+            .flat_map(|ws| iter::once(ws.cwd.clone()).chain(ws.additional_cwds.iter().cloned()))
+            .filter(|path| !path.trim().is_empty())
+            .collect();
+
+        self.root_availability.refresh(paths, cx);
     }
 
     /// The active workspace's directories paired with their last known
@@ -472,7 +488,7 @@ impl Shell {
             .active_roots()
             .into_iter()
             .flat_map(|roots| roots.ordered())
-            .map(|path| (path.to_string(), self.root_is_available(path)))
+            .map(|path| (path.to_string(), self.root_availability.is_available(path)))
             .collect()
     }
 }
