@@ -72,8 +72,8 @@ impl AgentPane {
             || self.palette.awaiting_command_turn
             || !self.palette.command_queue.is_empty()
             || !self.turn.queued_user_messages.is_empty()
-            || self.rewind.state.is_some()
-            || self.fork.state.is_some()
+            || self.branch.rewind.state.is_some()
+            || self.branch.fork.state.is_some()
             || self.transcript.read(cx).is_compacting()
             || self
                 .runtime
@@ -138,15 +138,22 @@ impl AgentPane {
         self.palette.awaiting_command_turn = false;
         self.publish_queued_user_messages(cx);
         if self
+            .branch
             .rewind
             .state
             .as_ref()
             .is_some_and(RewindState::is_picker)
         {
-            self.rewind.state = None;
+            self.branch.rewind.state = None;
         }
-        if self.fork.state.as_ref().is_some_and(ForkState::is_picker) {
-            self.fork.state = None;
+        if self
+            .branch
+            .fork
+            .state
+            .as_ref()
+            .is_some_and(ForkState::is_picker)
+        {
+            self.branch.fork.state = None;
         }
         self.transcript
             .update(cx, |transcript, cx| transcript.set_compacting(false, cx));

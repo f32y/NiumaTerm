@@ -153,10 +153,10 @@ impl AgentPane {
     }
 
     pub(crate) fn palette_model(&mut self, cx: &Context<Self>) -> Option<PaletteModel> {
-        if let Some(state) = self.rewind.state.as_ref() {
+        if let Some(state) = self.branch.rewind.state.as_ref() {
             return self.rewind_palette_model(state);
         }
-        if let Some(state) = self.fork.state.as_ref() {
+        if let Some(state) = self.branch.fork.state.as_ref() {
             return self.fork_palette_model(state);
         }
         if self.palette.dismissed {
@@ -400,13 +400,20 @@ impl AgentPane {
 
     fn dismiss_command_palette(&mut self, cx: &mut Context<Self>) {
         if self
+            .branch
             .rewind
             .state
             .as_ref()
             .is_some_and(RewindState::is_picker)
         {
             self.cancel_rewind_picker(cx);
-        } else if self.fork.state.as_ref().is_some_and(ForkState::is_picker) {
+        } else if self
+            .branch
+            .fork
+            .state
+            .as_ref()
+            .is_some_and(ForkState::is_picker)
+        {
             self.cancel_fork_picker(cx);
         } else {
             self.palette.dismissed = true;
@@ -555,13 +562,21 @@ impl AgentPane {
                 return;
             }
             PaletteAction::RewindCheckpoint(checkpoint) => {
-                let Some(operation_id) = self.rewind.state.as_ref().and_then(|state| match state {
-                    RewindState::SelectingCheckpoint { operation_id, .. } => Some(*operation_id),
-                    _ => None,
-                }) else {
+                let Some(operation_id) =
+                    self.branch
+                        .rewind
+                        .state
+                        .as_ref()
+                        .and_then(|state| match state {
+                            RewindState::SelectingCheckpoint { operation_id, .. } => {
+                                Some(*operation_id)
+                            }
+                            _ => None,
+                        })
+                else {
                     return;
                 };
-                self.rewind.state = Some(RewindState::SelectingAction {
+                self.branch.rewind.state = Some(RewindState::SelectingAction {
                     operation_id,
                     checkpoint,
                 });

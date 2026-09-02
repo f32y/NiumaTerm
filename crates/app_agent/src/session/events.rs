@@ -217,7 +217,7 @@ impl AgentPane {
             }
             SessionEvent::FileRewindCompleted { error } => {
                 let result = error.map_or(Ok(()), Err);
-                if let Some(completion) = self.rewind.file_completion.take() {
+                if let Some(completion) = self.branch.rewind.file_completion.take() {
                     let _ = completion.send(result);
                 } else {
                     warn!("received a Claude file rewind result with no pending UI operation");

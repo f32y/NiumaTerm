@@ -6,7 +6,17 @@ use nmt_agent_utils::claude_code::sessions;
 use nmt_i18n::i18n;
 
 use crate::commands::reset_command_runtime;
-use crate::composer::fork::{PromptTarget, checkpoint_at_depth};
+use crate::composer::branch::fork::{PromptTarget, checkpoint_at_depth};
+
+/// Rewind is a local multi-step operation, not a model turn. Keeping its
+/// state separate prevents timers, transcript rows, and slash queues from
+/// treating file restoration or session forking as provider output.
+#[derive(Default)]
+pub(crate) struct RewindFlow {
+    pub(crate) state: Option<RewindState>,
+    pub(crate) operation_seq: u64,
+    pub(crate) file_completion: Option<oneshot::Sender<Result<(), String>>>,
+}
 use crate::composer::{CommandFeedbackKind, PaletteAction, PaletteModel, PaletteRow};
 use crate::profile::AgentKind;
 use crate::session::{Backend, RecoveryIdentity, Status};
@@ -168,9 +178,9 @@ impl AgentPane {
             return false;
         };
 
-        self.rewind.operation_seq = self.rewind.operation_seq.wrapping_add(1);
-        let operation_id = self.rewind.operation_seq;
-        self.rewind.state = Some(RewindState::Loading { operation_id });
+        self.branch.rewind.operation_seq = self.branch.rewind.operation_seq.wrapping_add(1);
+        let operation_id = self.branch.rewind.operation_seq;
+        self.branch.rewind.state = Some(RewindState::Loading { operation_id });
         self.palette.selected = 0;
         self.palette.dismissed = false;
         self.palette.set_feedback(
@@ -188,7 +198,7 @@ impl AgentPane {
 
             let _ = this.update(cx, |this, cx| {
                 let is_current = matches!(
-                    &this.rewind.state,
+                    &this.branch.rewind.state,
                     Some(RewindState::Loading {
                         operation_id: current,
                     }) if *current == operation_id
@@ -199,7 +209,7 @@ impl AgentPane {
 
                 match checkpoints {
                     Ok(checkpoints) if checkpoints.is_empty() => {
-                        this.rewind.state = None;
+                        this.branch.rewind.state = None;
                         this.palette.set_feedback(
                             CommandFeedbackKind::Error,
                             translated("agent-rewind-no-prompts"),
@@ -217,7 +227,7 @@ impl AgentPane {
                             .cloned()
                         });
                         let unresolved = target.is_some() && pointed_at.is_none();
-                        this.rewind.state = Some(match pointed_at {
+                        this.branch.rewind.state = Some(match pointed_at {
                             Some(checkpoint) => RewindState::SelectingAction {
                                 operation_id,
                                 checkpoint,
@@ -245,7 +255,7 @@ impl AgentPane {
                         cx.notify();
                     }
                     Err(message) => {
-                        this.rewind.state = None;
+                        this.branch.rewind.state = None;
                         this.palette
                             .set_feedback(CommandFeedbackKind::Error, message, cx);
                     }
@@ -259,12 +269,13 @@ impl AgentPane {
 
     pub(crate) fn cancel_rewind_picker(&mut self, cx: &mut Context<Self>) {
         if self
+            .branch
             .rewind
             .state
             .as_ref()
             .is_some_and(RewindState::is_picker)
         {
-            self.rewind.state = None;
+            self.branch.rewind.state = None;
             self.palette.selected = 0;
             self.release_transcript_from_picker(cx);
             // Cancelling is the user's own no-op, so an acknowledgement tells
@@ -387,13 +398,17 @@ impl AgentPane {
         }
 
         let Some((operation_id, checkpoint)) =
-            self.rewind.state.as_ref().and_then(|state| match state {
-                RewindState::SelectingAction {
-                    operation_id,
-                    checkpoint,
-                } => Some((*operation_id, checkpoint.clone())),
-                _ => None,
-            })
+            self.branch
+                .rewind
+                .state
+                .as_ref()
+                .and_then(|state| match state {
+                    RewindState::SelectingAction {
+                        operation_id,
+                        checkpoint,
+                    } => Some((*operation_id, checkpoint.clone())),
+                    _ => None,
+                })
         else {
             return;
         };
@@ -453,8 +468,8 @@ impl AgentPane {
         }
 
         let (completion_tx, completion_rx) = oneshot::channel();
-        self.rewind.file_completion = Some(completion_tx);
-        self.rewind.state = Some(RewindState::RestoringFiles { operation_id });
+        self.branch.rewind.file_completion = Some(completion_tx);
+        self.branch.rewind.state = Some(RewindState::RestoringFiles { operation_id });
         self.palette.set_feedback(
             CommandFeedbackKind::Status,
             if continue_with_fork {
@@ -471,7 +486,7 @@ impl AgentPane {
                 .unwrap_or_else(|_| Err(i18n("agent-rewind-file-restore-cancelled").to_string()));
 
             let _ = this.update_in(cx, |this, window, cx| {
-                let is_current = this.rewind.state.as_ref().is_some_and(|state| {
+                let is_current = this.branch.rewind.state.as_ref().is_some_and(|state| {
                     state.has_operation(operation_id)
                         && matches!(state, RewindState::RestoringFiles { .. })
                 });
@@ -484,7 +499,7 @@ impl AgentPane {
                         this.start_conversation_fork(operation_id, checkpoint, true, window, cx)
                     }
                     FileRestoreNext::Complete => {
-                        this.rewind.state = None;
+                        this.branch.rewind.state = None;
                         this.palette.set_feedback(
                             CommandFeedbackKind::Notice,
                             translated("agent-rewind-files-restored"),
@@ -492,7 +507,7 @@ impl AgentPane {
                         );
                     }
                     FileRestoreNext::RetryAction(message) => {
-                        this.rewind.state = Some(RewindState::SelectingAction {
+                        this.branch.rewind.state = Some(RewindState::SelectingAction {
                             operation_id,
                             checkpoint,
                         });
@@ -529,7 +544,7 @@ impl AgentPane {
             .and_then(Backend::session_id)
             .map(str::to_owned)
         else {
-            self.rewind.state = Some(RewindState::SelectingAction {
+            self.branch.rewind.state = Some(RewindState::SelectingAction {
                 operation_id,
                 checkpoint,
             });
@@ -547,7 +562,7 @@ impl AgentPane {
 
         let cwd = self.cwd();
         let user_message_id = checkpoint.user_message_id.clone();
-        self.rewind.state = Some(RewindState::ForkingConversation { operation_id });
+        self.branch.rewind.state = Some(RewindState::ForkingConversation { operation_id });
         self.palette.set_feedback(
             CommandFeedbackKind::Status,
             translated("agent-rewind-creating-prefix"),
@@ -561,7 +576,7 @@ impl AgentPane {
             let result = fork.await;
 
             let _ = this.update_in(cx, |this, window, cx| {
-                let is_current = this.rewind.state.as_ref().is_some_and(|state| {
+                let is_current = this.branch.rewind.state.as_ref().is_some_and(|state| {
                     state.has_operation(operation_id)
                         && matches!(state, RewindState::ForkingConversation { .. })
                 });
@@ -578,7 +593,7 @@ impl AgentPane {
                         cx,
                     ),
                     Err(message) => {
-                        this.rewind.state = None;
+                        this.branch.rewind.state = None;
                         this.palette.set_feedback(
                             CommandFeedbackKind::Error,
                             if files_restored {

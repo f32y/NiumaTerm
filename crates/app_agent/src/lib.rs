@@ -27,7 +27,6 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use futures::channel::oneshot;
 use gpui::{Entity, FocusHandle, Pixels, Point, ScrollHandle, SharedString};
 use gpui_component::VirtualListScrollHandle;
 use gpui_component::input::InputState;
@@ -40,7 +39,7 @@ use nmt_config::profile::AgentProfile;
 use nmt_i18n::i18n;
 
 use crate::composer::attachments::ComposerAttachments;
-use crate::composer::{CommandFeedback, ForkFlow, PendingSlashCommand, RewindState};
+use crate::composer::{BranchFlow, CommandFeedback, PendingSlashCommand};
 use crate::input_history::{InputHistoryNavigation, InputHistoryScope};
 use crate::pane_state::{ChildAgents, SessionRuntime, TurnState};
 pub use crate::profile::{AgentKind, AgentThreadDefaults, agent_launch};
@@ -108,16 +107,6 @@ impl RecentSessionsMode {
     fn dismisses_on_outside_click(self) -> bool {
         !matches!(self, Self::Automatic)
     }
-}
-
-/// Rewind is a local multi-step operation, not a model turn. Keeping its
-/// state separate prevents timers, transcript rows, and slash queues from
-/// treating file restoration or session forking as provider output.
-#[derive(Default)]
-struct RewindFlow {
-    state: Option<RewindState>,
-    operation_seq: u64,
-    file_completion: Option<oneshot::Sender<Result<(), String>>>,
 }
 
 /// Background-refreshed git branch of the pane's working directory.
@@ -595,8 +584,8 @@ pub struct AgentPane {
     /// The approval and question cards that block a turn until answered.
     prompts: PendingPrompts,
     palette: SlashPalette,
-    rewind: RewindFlow,
-    fork: ForkFlow,
+    /// Cutting the conversation at an earlier point, by rewind or by fork.
+    branch: BranchFlow,
     git_branch_poll: GitBranchPoll,
     context_window_usage: Option<ContextWindowUsage>,
     /// How that window is currently filled, when the provider measures it.
