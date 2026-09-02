@@ -967,3 +967,5 @@
 "sidebar-workspaces-title" = "工作区"
 "tasks-background-kind-agent" = "智能体"
 "tasks-background-kind-shell" = "命令"
+"agent-transcript-image-open" = "打开图片"
+"agent-transcript-image-close" = "关闭图片"

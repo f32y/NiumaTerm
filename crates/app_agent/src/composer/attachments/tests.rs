@@ -107,6 +107,38 @@ fn moving_a_placeholder_reorders_the_attachments() {
 }
 
 #[test]
+fn only_placeholders_naming_an_attachment_are_links() {
+    let mut pending = PendingAttachments::default();
+    let placeholder = pending.attach(&png(4, 4)).ok().expect("attach");
+    let text = format!("look at {placeholder} and a typed [Image #7]");
+
+    assert_eq!(pending.placeholder_links(&text), vec![8..18]);
+    assert_eq!(&text[8..18], placeholder);
+}
+
+#[test]
+fn a_link_resolves_to_the_image_its_placeholder_names() {
+    let (pending, text) = attach_three();
+    let second = pending.iter().nth(1).expect("second").bytes().to_vec();
+
+    let links = pending.placeholder_links(&text);
+    let image = pending
+        .linked_image(&text, links[1].clone())
+        .expect("linked image");
+
+    assert_eq!(image.bytes(), second.as_slice());
+}
+
+#[test]
+fn a_range_naming_no_placeholder_resolves_to_nothing() {
+    let (pending, text) = attach_three();
+
+    // What a range from an earlier reading of the text looks like once an
+    // edit has moved the placeholders out from under it.
+    assert!(pending.linked_image(&text, 3..13).is_none());
+}
+
+#[test]
 fn a_message_carries_no_more_than_the_cap() {
     let mut pending = PendingAttachments::default();
     for _ in 0..MAX_ATTACHMENTS {

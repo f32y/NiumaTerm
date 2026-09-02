@@ -363,6 +363,15 @@ impl TranscriptView {
                         // `MAX_ATTACHMENTS` images, so its band cannot overlap
                         // the next row's.
                         .id(("entry-image", index * MAX_ATTACHMENTS + position))
+                        // A thumbnail is cropped to a square and small enough
+                        // to only recognize the image by, so opening it is the
+                        // only way to read what was sent.
+                        .cursor_pointer()
+                        .aria_label(i18n("agent-transcript-image-open"))
+                        .on_click(cx.listener({
+                            let image = image.clone();
+                            move |this, _, _, cx| this.zoom_image(image.clone(), cx)
+                        }))
                         .child(img(image.clone()).size_full().object_fit(ObjectFit::Cover))
                 }))
                 .into_any_element(),

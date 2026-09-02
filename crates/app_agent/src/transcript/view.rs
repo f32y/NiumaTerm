@@ -1,11 +1,12 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::{DateTime, Local};
 use gpui::prelude::*;
 use gpui::{
-    Context, FollowMode, IntoElement, ListAlignment, ListState, Pixels, Render, SharedString,
-    Window, div, list, px, relative,
+    Context, FollowMode, Image, IntoElement, ListAlignment, ListState, Pixels, Render,
+    SharedString, Window, div, list, px, relative,
 };
 use gpui_component::button::Button;
 use gpui_component::scroll::Scrollbar;
@@ -46,10 +47,10 @@ pub struct TranscriptView {
     transcript_font: (SharedString, f32, SharedString, f32),
     /// Virtual rows cache measured heights; a width change can rewrap prose
     /// without changing row fingerprints, so the viewport width is tracked too.
-    transcript_width: Option<Pixels>,
+    pub(super) transcript_width: Option<Pixels>,
     /// Last measured viewport height, which is how much empty space below the
     /// conversation lets its final row reach the top of the screen.
-    transcript_height: Option<Pixels>,
+    pub(super) transcript_height: Option<Pixels>,
     /// Reading position from before a picker started scrolling the transcript
     /// to the prompt it highlights, so cancelling that picker returns the
     /// conversation to where the user was reading it.
@@ -86,6 +87,10 @@ pub struct TranscriptView {
     /// Revision of the conversation this view was last filled from, for a view
     /// that mirrors content someone else owns rather than accumulating its own.
     source_revision: Option<u64>,
+    /// The image a reader opened at full size over the conversation, while one
+    /// is open. Held per conversation rather than per pane so a child agent's
+    /// transcript enlarges its own images inside its own bounds.
+    pub(crate) zoomed_image: Option<Arc<Image>>,
     /// The pane whose conversation this is, for the row actions that address
     /// the conversation rather than the row: branching in front of a prompt,
     /// rewinding to one. Absent on a view that mirrors somebody else's
@@ -122,6 +127,7 @@ impl TranscriptView {
             cwd,
             kind,
             source_revision: None,
+            zoomed_image: None,
             owner: None,
         }
     }
@@ -533,5 +539,6 @@ impl Render for TranscriptView {
                         ),
                 )
             })
+            .children(self.render_zoomed_image(window, cx))
     }
 }

@@ -221,6 +221,8 @@ impl AgentPane {
                     this.palette.feedback = None;
                 }
                 cx.notify();
+            } else if let InputEvent::ClickLink(range) = event {
+                this.open_attached_image(range.clone(), cx);
             }
         })
         .detach();

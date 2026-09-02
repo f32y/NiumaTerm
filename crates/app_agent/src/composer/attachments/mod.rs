@@ -151,12 +151,34 @@ impl ComposerAttachments {
         cx: &mut Context<AgentPane>,
     ) -> bool {
         if self.images.is_empty() {
+            input.update(cx, |input, cx| input.set_links(Vec::new(), cx));
             return false;
         }
 
-        if let Some(renumbered) = self.images.reconcile(text) {
-            input.update(cx, |input, cx| input.set_value(renumbered, window, cx));
-        }
+        // Reconciliation is the one place the placeholders settle, so the
+        // links are marked from here: every route that can move them --
+        // typing, deleting a thumbnail, renumbering -- ends up here, and the
+        // ranges are read from the text the input is left holding.
+        let text = match self.images.reconcile(text) {
+            Some(renumbered) => {
+                // Renumbering rewrites digits in place, and a message carries
+                // fewer than ten images, so every placeholder keeps its length
+                // and the caret still belongs where the edit left it. Setting
+                // the value drops the selection, so it is put back rather than
+                // letting an edit in the middle of a prompt throw the caret to
+                // the top of the composer.
+                let cursor = input.read(cx).cursor();
+                input.update(cx, |input, cx| {
+                    input.set_value(renumbered.clone(), window, cx);
+                    input.set_selected_range(cursor..cursor, cx);
+                });
+                renumbered
+            }
+            None => text.to_string(),
+        };
+
+        let links = self.images.placeholder_links(&text);
+        input.update(cx, |input, cx| input.set_links(links, cx));
 
         true
     }
@@ -259,6 +281,38 @@ impl PendingAttachments {
         });
 
         Ok(placeholder)
+    }
+
+    /// The image a `[Image #N]` placeholder names, counting from one the way
+    /// the text reads. `None` where the number names nothing this message
+    /// carries.
+    fn image_for_number(&self, number: usize) -> Option<&Arc<Image>> {
+        self.items
+            .get(number.checked_sub(1)?)
+            .map(|item| &item.image)
+    }
+
+    /// The byte range of every placeholder in `text` that names an image this
+    /// message still carries, which is what the composer draws as a link. A
+    /// placeholder naming no attachment stays plain text: the user typed it,
+    /// and it stands for nothing to open.
+    pub(crate) fn placeholder_links(&self, text: &str) -> Vec<Range<usize>> {
+        placeholder_spans(text)
+            .into_iter()
+            .filter(|(_, number)| self.image_for_number(*number).is_some())
+            .map(|(span, _)| span)
+            .collect()
+    }
+
+    /// The image the placeholder at `range` names. The range is matched
+    /// against a fresh reading of the text rather than trusted as an offset,
+    /// so a range taken before an edit resolves to nothing rather than to
+    /// whatever now sits at those bytes.
+    pub(crate) fn linked_image(&self, text: &str, range: Range<usize>) -> Option<Arc<Image>> {
+        placeholder_spans(text)
+            .into_iter()
+            .find(|(span, _)| *span == range)
+            .and_then(|(_, number)| self.image_for_number(number).cloned())
     }
 
     /// The placeholder of the attachment at `index`, for a caller about to

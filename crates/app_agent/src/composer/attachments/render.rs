@@ -59,6 +59,8 @@ impl ComposerAttachments {
         attachment: &Attachment,
         cx: &mut Context<AgentPane>,
     ) -> AnyElement {
+        let image = attachment.image();
+
         div()
             .id(("agent-attachment", index))
             .group("agent-attachment")
@@ -71,11 +73,14 @@ impl ComposerAttachments {
             .border_color(cx.theme().border)
             .bg(cx.theme().muted)
             .aria_label(attachment.placeholder().to_string())
-            .child(
-                img(attachment.image())
-                    .size_full()
-                    .object_fit(ObjectFit::Cover),
-            )
+            // A thumbnail is cropped to a square this small, so opening it is
+            // the only way to check what is about to be sent.
+            .cursor_pointer()
+            .on_click(cx.listener({
+                let image = image.clone();
+                move |this, _, _, cx| this.open_image(image.clone(), cx)
+            }))
+            .child(img(image).size_full().object_fit(ObjectFit::Cover))
             .child(
                 div()
                     .absolute()
@@ -90,6 +95,10 @@ impl ComposerAttachments {
                             .icon(IconName::Close)
                             .aria_label(i18n("agent-composer-image-remove"))
                             .on_click(cx.listener(move |this, _, window, cx| {
+                                // The control sits on the thumbnail, which
+                                // opens the image; taking the image off is not
+                                // a request to look at it.
+                                cx.stop_propagation();
                                 this.remove_attachment(index, window, cx)
                             })),
                     ),
