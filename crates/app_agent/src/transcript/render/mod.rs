@@ -12,7 +12,7 @@ mod work_row;
 use std::time::Instant;
 
 use gpui::prelude::*;
-use gpui::{AnyElement, Context, Window, div, px, relative};
+use gpui::{AnyElement, Context, Pixels, Window, div, px, relative};
 use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::spinner::Spinner;
 use gpui_component::{ActiveTheme as _, IconName, Sizable as _, h_flex};
@@ -23,8 +23,8 @@ use crate::settings::UI_RADIUS;
 use crate::transcript::disclosure_row::{
     AGENT_CARD_DETAIL_SIZE, AGENT_CARD_GAP, AGENT_CARD_ICON_BLOCK, AGENT_CARD_PADDING_X,
 };
-use crate::transcript::reveal::{RevealedPart, revealed_block};
-use crate::transcript::rows::{RowGap, TranscriptRow, is_run_row};
+use crate::transcript::reveal::{RevealKey, revealed_block, revealed_part};
+use crate::transcript::rows::{RowGap, TranscriptRow, is_run_row, row_gap};
 use crate::transcript::working_indicator::WorkingIndicator;
 use crate::transcript::{RowSpec, TranscriptView, is_work_row, working_label};
 
@@ -53,6 +53,15 @@ const PROSE_MEASURE_REMS: f32 = 55.0;
 const TRANSCRIPT_GROUP_GAP: f32 = 24.0;
 const TRANSCRIPT_WORK_TEXT_GAP: f32 = 12.0;
 const TRANSCRIPT_STEP_GAP: f32 = 8.0;
+
+/// How many pixels a rank of space is worth.
+fn gap_px(gap: RowGap) -> f32 {
+    match gap {
+        RowGap::Step => TRANSCRIPT_STEP_GAP,
+        RowGap::Work => TRANSCRIPT_WORK_TEXT_GAP,
+        RowGap::Group => TRANSCRIPT_GROUP_GAP,
+    }
+}
 /// The rule down the left of a run of work rows. The steps carry no border of
 /// their own, so this is what marks where a run starts and ends and keeps its
 /// rows reading as one block. It holds the rows off nothing: a gap after it
@@ -91,18 +100,13 @@ impl TranscriptView {
         // space belongs below the rule rather than inside it.
         let in_run = is_run_row(&spec);
         let rule_carries_gap = in_run && gap == RowGap::Step;
-        let gap = match gap {
-            RowGap::Step => TRANSCRIPT_STEP_GAP,
-            RowGap::Work => TRANSCRIPT_WORK_TEXT_GAP,
-            RowGap::Group => TRANSCRIPT_GROUP_GAP,
-        };
+        let gap = gap_px(gap);
 
-        // A run's steps open and shut as list rows of their own, so each one
-        // ramps its own height and needs a height of its own to ramp towards.
-        let step = match &spec {
-            RowSpec::Work { index, .. } => Some(RevealedPart::Step(*index)),
-            _ => None,
-        };
+        // The rows a run or a fold splices in open and shut as list rows of
+        // their own, so each one ramps its own height and needs a height of
+        // its own to ramp towards.
+        let part = revealed_part(&spec);
+        let now = Instant::now();
 
         let row = match spec {
             RowSpec::Entry { index, .. } => self.render_entry_row(index, window, cx),
@@ -111,7 +115,7 @@ impl TranscriptView {
                 turn,
                 row_count,
                 folded,
-            } => turn_rows::render_turn_fold(turn, row_count, folded, cx),
+            } => turn_rows::render_turn_fold(&self.disclosures, turn, row_count, folded, cx),
             RowSpec::TurnSummary {
                 seconds,
                 output_tokens,
@@ -157,31 +161,55 @@ impl TranscriptView {
                 false => this.child(body),
             });
 
-        // A row a run toggle spliced in grows and shrinks rather than
-        // appearing and vanishing, so the conversation below the run travels
-        // with it the whole way instead of catching up in one jump at the end.
-        // The ramp wraps the row entire — its slice of the grouping rule and
-        // the space it owes the row below it — because a rule drawn down to a
-        // step of no height, or a gap left where a step used to be, is the
-        // part that would still jump.
-        match (step, self.revealed_by(ix)) {
+        // A row a run toggle or a turn fold spliced in grows and shrinks
+        // rather than appearing and vanishing, so the conversation below it
+        // travels with it the whole way instead of catching up in one jump at
+        // the end. The ramp wraps the row entire — its slice of the grouping
+        // rule and the space it owes the row below it — because a rule drawn
+        // down to a step of no height, or a gap left where a step used to be,
+        // is the part that would still jump.
+        match (part, self.revealed_by(ix, now)) {
             (Some(part), Some(key)) => revealed_block(
                 row,
                 part,
-                self.disclosures.progress(key, Instant::now()),
+                self.disclosures.progress(key, now),
                 self.disclosures.height(part),
-                // The space under a run's last step is the space its toggle
-                // takes over the moment the run leaves: both boundaries are
-                // read off the same pair of rows, so both are worth the same
-                // rank. Holding that much back makes the two changes cancel.
-                // Every step above the last owes nothing, because the step
-                // rhythm it carries is the one the toggle already sits on.
-                px(gap - TRANSCRIPT_STEP_GAP),
+                self.shut_height(ix, key, now),
                 cx.entity().downgrade(),
             )
             .into_any_element(),
             _ => row.into_any_element(),
         }
+    }
+
+    /// What a shutting row still occupies once it has finished shutting.
+    ///
+    /// When a block of rows leaves the list, the row above the block stops
+    /// holding its space off the block's first row and starts holding it off
+    /// whatever followed the block, and those two boundaries can rank apart:
+    /// a toggle sits a step off its first step and a work rank off the reply
+    /// after the run. The block's last row holds back exactly that
+    /// difference, so the space the row above gains at the removal is the
+    /// space the block gives up, and the removal itself moves nothing. Every
+    /// row above the last owes nothing, because the boundary it leaves
+    /// behind is inside the block.
+    fn shut_height(&self, ix: usize, key: RevealKey, now: Instant) -> Pixels {
+        if self.revealed_by(ix + 1, now) == Some(key) {
+            return px(0.);
+        }
+
+        let first = (0..ix)
+            .rev()
+            .take_while(|cursor| self.revealed_by(*cursor, now) == Some(key))
+            .last()
+            .unwrap_or(ix);
+        let Some(above) = first.checked_sub(1).map(|above| &self.rows[above]) else {
+            return px(0.);
+        };
+        let below = self.rows.get(ix + 1).map(|row| &row.spec);
+        let merged = row_gap(&self.items, &above.spec, below);
+
+        px(gap_px(merged) - gap_px(above.gap))
     }
 
     /// The live progress line. While the backend is compacting it names that

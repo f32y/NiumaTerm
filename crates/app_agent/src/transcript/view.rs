@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -21,7 +20,7 @@ use crate::profile::AgentKind;
 use crate::settings::{AgentSettings, UI_RADIUS};
 use crate::transcript::render::TRANSCRIPT_LINE_HEIGHT;
 use crate::transcript::reveal::Disclosures;
-use crate::transcript::rows::TranscriptRow;
+use crate::transcript::rows::{TranscriptRow, folds_turns};
 use crate::transcript::turns::{LiveTurn, TurnLedger};
 use crate::transcript::typewriter::{Typewriter, shown_prefix};
 use crate::transcript::{Entry, ReadingPosition, VirtualTranscriptCache, is_work_row};
@@ -62,10 +61,6 @@ pub struct TranscriptView {
     /// screen, which leaves exactly those prompts behind the list naming
     /// them.
     pub(super) reserve_below: bool,
-    /// Settled turns the user has flipped away from what the collapse setting
-    /// does by default: unfolded where it folds a turn's work behind the
-    /// "Show work" disclosure, folded where it leaves the work on screen.
-    pub(crate) toggled_turns: HashSet<u64>,
     /// Collapse setting the rows above were built under, so a change to it can
     /// retire the per-turn and per-run departures from the mode it replaces.
     collapse_mode: CollapseRows,
@@ -106,6 +101,8 @@ pub struct TranscriptView {
 
 impl TranscriptView {
     pub fn new(kind: AgentKind, cwd: Option<String>) -> Self {
+        let collapse_mode = CollapseRows::default();
+
         Self {
             items: Vec::new(),
             transcript_list: {
@@ -123,9 +120,8 @@ impl TranscriptView {
             transcript_font: Default::default(),
             transcript_width: None,
             transcript_height: None,
-            disclosures: Disclosures::default(),
-            toggled_turns: HashSet::new(),
-            collapse_mode: CollapseRows::default(),
+            disclosures: Disclosures::new(folds_turns(collapse_mode)),
+            collapse_mode,
             virtual_transcripts: VirtualTranscriptCache::default(),
             turn_ledger: TurnLedger::default(),
             live_turn: LiveTurn::default(),
@@ -185,7 +181,6 @@ impl TranscriptView {
         self.stashed_position = None;
         self.reserve_below = false;
         self.scroll_to_bottom();
-        self.toggled_turns.clear();
         self.disclosures.clear();
         self.turn_ledger.clear();
         self.virtual_transcripts.clear();
@@ -479,14 +474,13 @@ impl Render for TranscriptView {
         // says.
         if self.collapse_mode != collapse {
             self.collapse_mode = collapse;
-            self.toggled_turns.clear();
             // Anything mid-exit goes with its own state: dropping the reveal
             // alone would strand the disclosure open with nothing left to
             // finish shutting it.
             for key in self.disclosures.closing() {
                 self.take_down_disclosure(key);
             }
-            self.disclosures.forget_groups();
+            self.disclosures.forget_departures(folds_turns(collapse));
         }
         self.transcript_list.set_smooth_wheel_enabled(smooth_wheel);
 

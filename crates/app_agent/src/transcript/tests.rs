@@ -399,7 +399,9 @@ mod separate_view_state_tests {
                 transcript
                     .disclosures
                     .open(RevealKey::Annotation(0), Instant::now(), false);
-                transcript.toggled_turns.insert(1);
+                transcript
+                    .disclosures
+                    .open(RevealKey::Turn(1), Instant::now(), false);
                 transcript
                     .disclosures
                     .open(RevealKey::Group(0), Instant::now(), false);
@@ -413,7 +415,7 @@ mod separate_view_state_tests {
                     "row expansion belongs to one conversation"
                 );
                 assert!(transcript.disclosures.expanded_annotations().is_empty());
-                assert!(transcript.toggled_turns.is_empty());
+                assert!(transcript.disclosures.toggled_turns().is_empty());
                 assert!(transcript.disclosures.expanded_groups().is_empty());
                 assert!(
                     !transcript.was_interrupted(1),
@@ -481,11 +483,14 @@ mod separate_view_state_tests {
 /// queue partway through the turn; row order has to keep it where it happened
 /// rather than lifting it to the head of the turn it interrupted.
 mod steered_prompt_rows_tests {
+    use std::time::Instant;
+
     use gpui::{AppContext as _, TestAppContext};
     use nmt_agent_utils::chat::Item as SessionItem;
     use nmt_config::agent::CollapseRows;
 
     use crate::profile::AgentKind;
+    use crate::transcript::reveal::RevealKey;
     use crate::transcript::{RowSpec, TranscriptView};
 
     fn reply(id: &str) -> SessionItem {
@@ -539,7 +544,9 @@ mod steered_prompt_rows_tests {
                 // the turn below the reply.
                 assert_eq!(order(transcript), vec!["0", "fold(1)", "2", "3", "summary"]);
 
-                transcript.toggled_turns.insert(1);
+                transcript
+                    .disclosures
+                    .open(RevealKey::Turn(1), Instant::now(), false);
                 assert_eq!(
                     order(transcript),
                     vec!["0", "fold(1)", "1", "2", "3", "summary"],
@@ -595,7 +602,9 @@ mod steered_prompt_rows_tests {
 
                 assert_eq!(order(transcript), vec!["0", "fold(1)", "2", "3", "summary"]);
 
-                transcript.toggled_turns.insert(1);
+                transcript
+                    .disclosures
+                    .open(RevealKey::Turn(1), Instant::now(), false);
                 assert_eq!(
                     order(transcript),
                     vec!["0", "fold(1)", "1", "2", "3", "summary"]
@@ -622,7 +631,9 @@ mod steered_prompt_rows_tests {
                 // rather than stating a duration the session never reported.
                 assert_eq!(order(transcript), vec!["0", "fold(1)", "2"]);
 
-                transcript.toggled_turns.insert(1);
+                transcript
+                    .disclosures
+                    .open(RevealKey::Turn(1), Instant::now(), false);
                 assert_eq!(order(transcript), vec!["0", "fold(1)", "1", "2"]);
             });
         });
@@ -1165,6 +1176,7 @@ mod row_rhythm_tests {
                 view.toggle_disclosure(RevealKey::Group(2), cx);
                 let specs = view.build_row_specs(CollapseRows::ToolCalls);
                 view.sync_transcript_list(specs);
+                let now = Instant::now();
 
                 assert_eq!(
                     rhythm(view)
@@ -1173,10 +1185,18 @@ mod row_rhythm_tests {
                         .collect::<Vec<_>>(),
                     vec!["entry", "entry", "run", "work", "work", "entry"]
                 );
-                assert_eq!(view.revealed_by(2), None, "the toggle was already there");
-                assert_eq!(view.revealed_by(3), Some(RevealKey::Group(2)));
-                assert_eq!(view.revealed_by(4), Some(RevealKey::Group(2)));
-                assert_eq!(view.revealed_by(5), None, "the reply was already there");
+                assert_eq!(
+                    view.revealed_by(2, now),
+                    None,
+                    "the toggle was already there"
+                );
+                assert_eq!(view.revealed_by(3, now), Some(RevealKey::Group(2)));
+                assert_eq!(view.revealed_by(4, now), Some(RevealKey::Group(2)));
+                assert_eq!(
+                    view.revealed_by(5, now),
+                    None,
+                    "the reply was already there"
+                );
             });
         });
     }
@@ -1331,9 +1351,9 @@ mod row_rhythm_tests {
 
                 let elsewhere = RevealedPart::Block(RevealKey::Row(0));
                 view.disclosures
-                    .record_height(RevealedPart::Step(2), px(40.));
+                    .record_height(RevealedPart::Entry(2), px(40.));
                 view.disclosures
-                    .record_height(RevealedPart::Step(3), px(40.));
+                    .record_height(RevealedPart::Entry(3), px(40.));
                 view.disclosures.record_height(elsewhere, px(80.));
 
                 view.toggle_disclosure(RevealKey::Group(2), cx);
@@ -1381,6 +1401,108 @@ mod row_rhythm_tests {
 
                 assert!(view.disclosures.expanded_groups().is_empty());
                 assert!(view.disclosures.settled(Instant::now()));
+            });
+        });
+    }
+
+    /// Unfolding a turn splices its work in under the "Show work" row, and
+    /// every row it splices in reports the fold, which is what puts them on
+    /// its ramp. The fold itself and the reply that was on screen while the
+    /// turn was folded report nothing.
+    #[gpui::test]
+    fn an_unfolded_turns_work_reports_the_fold_that_opened_it(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+
+            view.update(cx, |view, cx| {
+                let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
+                view.sync_transcript_list(specs);
+                assert_eq!(
+                    rhythm(view)
+                        .iter()
+                        .map(|(kind, _)| *kind)
+                        .collect::<Vec<_>>(),
+                    vec!["entry", "fold", "entry"]
+                );
+
+                view.toggle_disclosure(RevealKey::Turn(1), cx);
+                let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
+                view.sync_transcript_list(specs);
+                let now = Instant::now();
+
+                assert_eq!(
+                    rhythm(view)
+                        .iter()
+                        .map(|(kind, _)| *kind)
+                        .collect::<Vec<_>>(),
+                    vec!["entry", "fold", "entry", "run", "entry"]
+                );
+                assert_eq!(view.revealed_by(1, now), None, "the fold was already there");
+                assert_eq!(view.revealed_by(2, now), Some(RevealKey::Turn(1)));
+                assert_eq!(view.revealed_by(3, now), Some(RevealKey::Turn(1)));
+                assert_eq!(
+                    view.revealed_by(4, now),
+                    None,
+                    "the reply was already there"
+                );
+            });
+        });
+    }
+
+    /// Folding a turn back starts an exit rather than finishing one: its work
+    /// stays on the list while it leaves, and comes off only once there is
+    /// nothing left on screen to lose.
+    #[gpui::test]
+    fn a_folding_turn_keeps_its_work_until_the_exit_finishes(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+
+            view.update(cx, |view, cx| {
+                view.toggle_disclosure(RevealKey::Turn(1), cx);
+                view.toggle_disclosure(RevealKey::Turn(1), cx);
+
+                let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
+                view.sync_transcript_list(specs);
+                assert_eq!(rhythm(view).len(), 5, "the work is still on its way out");
+                assert!(
+                    !view.disclosures.is_disclosing(RevealKey::Turn(1)),
+                    "the row already reads as folded"
+                );
+
+                view.settle_shut_disclosures(Instant::now() + Duration::from_secs(1));
+                let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
+                view.sync_transcript_list(specs);
+
+                assert!(view.disclosures.toggled_turns().is_empty());
+                assert_eq!(rhythm(view).len(), 3);
+            });
+        });
+    }
+
+    /// A step of a run inside an unfolded turn is on screen by two
+    /// disclosures at once. It follows its run while the fold rests, so a run
+    /// opened inside a settled turn still travels, and the fold as soon as
+    /// the fold moves, because the fold is then moving everything under it.
+    #[gpui::test]
+    fn a_step_follows_its_run_until_its_fold_moves(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let view = transcript_with_a_collapsed_run(cx);
+
+            view.update(cx, |view, cx| {
+                view.disclosures
+                    .open(RevealKey::Turn(1), Instant::now(), false);
+                view.toggle_disclosure(RevealKey::Group(2), cx);
+                let specs = view.build_row_specs(CollapseRows::WorkAndToolCalls);
+                view.sync_transcript_list(specs);
+                let now = Instant::now();
+
+                assert_eq!(rhythm(view)[4].0, "work");
+                assert_eq!(view.revealed_by(4, now), Some(RevealKey::Group(2)));
+
+                view.toggle_disclosure(RevealKey::Turn(1), cx);
+                let now = Instant::now();
+
+                assert_eq!(view.revealed_by(4, now), Some(RevealKey::Turn(1)));
             });
         });
     }

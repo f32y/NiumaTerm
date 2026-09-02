@@ -9,7 +9,7 @@ use crate::transcript::{RowSpec, TranscriptView};
 
 /// One disclosure in the transcript, as the thing whose opening is animated.
 ///
-/// The three variants key three different collections of expanded state, and
+/// The four variants key four different collections of expanded state, and
 /// a single map over this enum is what lets one toggle path serve all of them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum RevealKey {
@@ -19,20 +19,41 @@ pub(crate) enum RevealKey {
     Annotation(usize),
     /// A collapsed run of work steps, keyed by the run's first entry.
     Group(usize),
+    /// A settled turn's work, folded behind its "Show work" row, keyed by
+    /// turn id.
+    Turn(u64),
 }
 
 /// A piece of the transcript with a height of its own, which is what a height
 /// ramp has to run towards.
 ///
 /// A disclosure's block opens inside the row that heads it, while a run's
-/// steps open as list rows of their own, so the two are measured apart even
-/// when one run toggle is moving all of them at once.
+/// steps and a turn's folded work open as list rows of their own, so they are
+/// measured apart even when one toggle is moving all of them at once.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum RevealedPart {
     /// A disclosure's block, opened under its own header.
     Block(RevealKey),
-    /// One step of a run, keyed by the entry it draws.
-    Step(usize),
+    /// One list row drawn from one entry: a step of a run, or a reply
+    /// written between steps. An entry draws at most one row, so the index
+    /// names the row.
+    Entry(usize),
+    /// A run's toggle, keyed by the run's first entry. Inside a folded turn
+    /// the toggle is one of the rows the fold hides; it is keyed apart from
+    /// the step drawn for that same entry once the run opens.
+    Toggle(usize),
+}
+
+/// The list row a piece of the transcript measures as, for the rows that a
+/// disclosure can splice in.
+pub(crate) fn revealed_part(spec: &RowSpec) -> Option<RevealedPart> {
+    match spec {
+        RowSpec::Work { index, .. } | RowSpec::Entry { index, .. } => {
+            Some(RevealedPart::Entry(*index))
+        }
+        RowSpec::RunToggle { run_start, .. } => Some(RevealedPart::Toggle(*run_start)),
+        _ => None,
+    }
 }
 
 /// How far revealed content is held above its resting place, in pixels. The
@@ -176,6 +197,15 @@ impl Reveals {
             .is_some_and(|reveal| reveal.direction == Direction::Closing)
     }
 
+    /// Whether this disclosure is part-way through its motion, either way.
+    /// An entry that has run its course reports false even though it is kept,
+    /// which is what tells a settled disclosure from one still travelling.
+    pub(crate) fn moving(&self, key: RevealKey, now: Instant) -> bool {
+        self.active
+            .get(&key)
+            .is_some_and(|reveal| now.saturating_duration_since(reveal.started) < REVEAL_DURATION)
+    }
+
     /// Every disclosure currently shutting, whatever stage it has reached.
     pub(crate) fn closing(&self) -> Vec<RevealKey> {
         self.active
@@ -211,12 +241,11 @@ fn ease_out_inverse(covered: f32) -> f32 {
 /// Which parts of the transcript are open, how far through their motion they
 /// are, and how tall each one lays out to.
 ///
-/// The three expansion sets, the motion clock and the measured heights are one
+/// The four expansion sets, the motion clock and the measured heights are one
 /// thing at three lifetimes: a click writes the set, the clock runs the ramp
 /// the set makes visible, and the height is what that ramp interpolates
 /// towards. Taking a disclosure down has to retire all three together, which
-/// is why they are held here rather than as five fields on the view.
-#[derive(Default)]
+/// is why they are held here rather than as six fields on the view.
 pub(crate) struct Disclosures {
     /// Work-log rows whose detail (command output, reasoning text) is
     /// expanded, keyed by transcript index.
@@ -226,6 +255,16 @@ pub(crate) struct Disclosures {
     expanded_groups: HashSet<usize>,
     /// User-message annotation cards expanded to show their complete text.
     expanded_annotations: HashSet<usize>,
+    /// Settled turns the user has flipped away from what the collapse setting
+    /// does by default: unfolded where it folds a turn's work behind the
+    /// "Show work" row, folded where it leaves the work on screen. Recorded
+    /// as departures rather than as absolute states because turns keep
+    /// settling after the setting was read, and each new one has to take the
+    /// default.
+    toggled_turns: HashSet<u64>,
+    /// Which way that default points, so a turn's disclosure can answer
+    /// whether it is open without being handed the setting on every call.
+    turns_fold_by_default: bool,
     /// When each moving disclosure started, and which way it is going. This
     /// is what the content it discloses fades and grows against.
     reveals: Reveals,
@@ -237,6 +276,20 @@ pub(crate) struct Disclosures {
 }
 
 impl Disclosures {
+    /// Start with nothing open, under a collapse setting that either folds a
+    /// settled turn's work by default or leaves it on screen.
+    pub(crate) fn new(turns_fold_by_default: bool) -> Self {
+        Self {
+            expanded_rows: HashSet::new(),
+            expanded_groups: HashSet::new(),
+            expanded_annotations: HashSet::new(),
+            toggled_turns: HashSet::new(),
+            turns_fold_by_default,
+            reveals: Reveals::default(),
+            revealed_heights: HashMap::new(),
+        }
+    }
+
     /// Whether the disclosure is open or heading there, which is what its
     /// wording reports: a click that starts an exit has already answered the
     /// reader, whatever is still leaving the screen behind it.
@@ -251,6 +304,7 @@ impl Disclosures {
             RevealKey::Row(index) => self.expanded_rows.contains(&index),
             RevealKey::Annotation(index) => self.expanded_annotations.contains(&index),
             RevealKey::Group(run_start) => self.expanded_groups.contains(&run_start),
+            RevealKey::Turn(turn) => self.turns_fold_by_default == self.turn_toggled(turn),
         }
     }
 
@@ -266,14 +320,37 @@ impl Disclosures {
         self.expanded_groups.contains(&run_start)
     }
 
+    /// Whether the user has flipped this turn away from the collapse
+    /// setting's default. The rows are built under that setting, so they read
+    /// the departure and apply the default themselves.
+    pub(crate) fn turn_toggled(&self, turn: u64) -> bool {
+        self.toggled_turns.contains(&turn)
+    }
+
+    /// Record whether a turn's work is on screen, as a departure from the
+    /// default or a return to it.
+    fn set_turn_unfolded(&mut self, turn: u64, unfolded: bool) {
+        match unfolded == self.turns_fold_by_default {
+            true => self.toggled_turns.insert(turn),
+            false => self.toggled_turns.remove(&turn),
+        };
+    }
+
     /// Put the disclosure's content on screen and start it opening. Ending the
     /// motion immediately is what reduced motion asks for.
     pub(crate) fn open(&mut self, key: RevealKey, now: Instant, animate: bool) {
         match key {
-            RevealKey::Row(index) => self.expanded_rows.insert(index),
-            RevealKey::Annotation(index) => self.expanded_annotations.insert(index),
-            RevealKey::Group(run_start) => self.expanded_groups.insert(run_start),
-        };
+            RevealKey::Row(index) => {
+                self.expanded_rows.insert(index);
+            }
+            RevealKey::Annotation(index) => {
+                self.expanded_annotations.insert(index);
+            }
+            RevealKey::Group(run_start) => {
+                self.expanded_groups.insert(run_start);
+            }
+            RevealKey::Turn(turn) => self.set_turn_unfolded(turn, true),
+        }
 
         match animate {
             true => self.reveals.open(key, now),
@@ -289,11 +366,15 @@ impl Disclosures {
 
     /// Remove a shut disclosure's content and everything measured for it.
     /// Returns the transcript index of a collapsed row, whose segmented source
-    /// the caller drops; `steps` are the run rows whose measured heights leave
-    /// the list with the run.
-    pub(crate) fn take_down(&mut self, key: RevealKey, steps: &[usize]) -> Option<usize> {
+    /// the caller drops; `parts` are the list rows the disclosure spliced in,
+    /// whose measured heights leave the list with them.
+    pub(crate) fn take_down(&mut self, key: RevealKey, parts: &[RevealedPart]) -> Option<usize> {
         self.reveals.end(key);
         self.revealed_heights.remove(&RevealedPart::Block(key));
+
+        for part in parts {
+            self.revealed_heights.remove(part);
+        }
 
         match key {
             RevealKey::Row(index) => {
@@ -309,9 +390,10 @@ impl Disclosures {
             RevealKey::Group(run_start) => {
                 self.expanded_groups.remove(&run_start);
 
-                for index in steps {
-                    self.revealed_heights.remove(&RevealedPart::Step(*index));
-                }
+                None
+            }
+            RevealKey::Turn(turn) => {
+                self.set_turn_unfolded(turn, false);
 
                 None
             }
@@ -321,6 +403,11 @@ impl Disclosures {
     /// How far through its motion one disclosure is.
     pub(crate) fn progress(&self, key: RevealKey, now: Instant) -> f32 {
         self.reveals.progress(key, now)
+    }
+
+    /// Whether one disclosure is still travelling, either way.
+    pub(crate) fn moving(&self, key: RevealKey, now: Instant) -> bool {
+        self.reveals.moving(key, now)
     }
 
     /// The measured full height of one piece, once it has been on screen.
@@ -351,15 +438,19 @@ impl Disclosures {
         self.expanded_rows.clear();
         self.expanded_groups.clear();
         self.expanded_annotations.clear();
+        self.toggled_turns.clear();
         self.reveals.clear();
         self.revealed_heights.clear();
     }
 
-    /// Forget the run expansions and everything measured, which a change to
-    /// the collapse setting asks for. The per-row and per-annotation
+    /// Forget the run expansions, the turn folds and everything measured,
+    /// which a change to the collapse setting asks for, and take the default
+    /// the new setting folds turns by. The per-row and per-annotation
     /// expansions are not departures from that setting, so they stay.
-    pub(crate) fn forget_groups(&mut self) {
+    pub(crate) fn forget_departures(&mut self, turns_fold_by_default: bool) {
         self.expanded_groups.clear();
+        self.toggled_turns.clear();
+        self.turns_fold_by_default = turns_fold_by_default;
         self.reveals.clear();
         self.revealed_heights.clear();
     }
@@ -373,6 +464,10 @@ impl Disclosures {
 
     pub(crate) fn expanded_groups(&self) -> &HashSet<usize> {
         &self.expanded_groups
+    }
+
+    pub(crate) fn toggled_turns(&self) -> &HashSet<u64> {
+        &self.toggled_turns
     }
 
     pub(crate) fn expanded_annotations(&self) -> &HashSet<usize> {
@@ -426,27 +521,29 @@ impl TranscriptView {
     /// for it. Splitting this from the click is what gives the exit something
     /// to move; by the time it runs there is nothing left on screen to lose.
     pub(crate) fn take_down_disclosure(&mut self, key: RevealKey) {
-        // A run's steps are measured a row at a time, and those rows leave the
-        // list with the run. Their heights are read off the rows still
-        // standing, which is why they are collected before the run stops
-        // reporting itself as expanded.
-        let steps = self.run_steps(key);
+        // The rows a run or a fold spliced in are measured a row at a time,
+        // and those rows leave the list with it. Their heights are read off
+        // the rows still standing, which is why they are collected before the
+        // disclosure stops reporting itself as open.
+        let parts = self.revealed_parts(key);
 
         // A closed row's segmented source would otherwise keep a second copy
         // of a large output resident behind a row showing none of it.
-        if let Some(index) = self.disclosures.take_down(key, &steps) {
+        if let Some(index) = self.disclosures.take_down(key, &parts) {
             self.virtual_transcripts.drop_row(index);
         }
     }
 
-    /// Transcript indices of the steps a run toggle currently has on screen.
-    fn run_steps(&self, key: RevealKey) -> Vec<usize> {
+    /// The list rows a run toggle or a turn fold currently has on screen,
+    /// whichever ramp they happen to be travelling on this frame.
+    fn revealed_parts(&self, key: RevealKey) -> Vec<RevealedPart> {
         (0..self.rows.len())
-            .filter(|ix| self.revealed_by(*ix) == Some(key))
-            .filter_map(|ix| match self.rows[ix].spec {
-                RowSpec::Work { index, .. } => Some(index),
-                _ => None,
+            .filter(|ix| match key {
+                RevealKey::Group(run_start) => self.run_over(*ix) == Some(run_start),
+                RevealKey::Turn(turn) => self.fold_over(*ix) == Some(turn),
+                RevealKey::Row(_) | RevealKey::Annotation(_) => false,
             })
+            .filter_map(|ix| revealed_part(&self.rows[ix].spec))
             .collect()
     }
 
@@ -472,13 +569,29 @@ impl TranscriptView {
         }
     }
 
-    /// The run toggle that put this list row on screen.
+    /// The disclosure whose ramp this list row travels on this frame.
     ///
-    /// Rows that were already there report `None` and render at rest. A run's
-    /// steps follow its toggle contiguously, so walking back over them to the
-    /// toggle is what identifies the disclosure without the row specs having
-    /// to carry it.
-    pub(crate) fn revealed_by(&self, ix: usize) -> Option<RevealKey> {
+    /// Rows that were already there report `None` and render at rest. A step
+    /// of a run inside an unfolded turn is on screen by two disclosures at
+    /// once; it follows the fold while the fold is moving, because the fold is
+    /// then moving everything under it, and its run the rest of the time, so
+    /// a run opened inside a resting turn still travels.
+    pub(crate) fn revealed_by(&self, ix: usize, now: Instant) -> Option<RevealKey> {
+        let fold = self.fold_over(ix).map(RevealKey::Turn);
+        let run = self.run_over(ix).map(RevealKey::Group);
+
+        match (fold, run) {
+            (Some(fold), Some(run)) if !self.disclosures.moving(fold, now) => Some(run),
+            (Some(fold), _) => Some(fold),
+            (None, run) => run,
+        }
+    }
+
+    /// The run whose expanded toggle put this row on screen. A run's steps
+    /// follow its toggle contiguously, so walking back over them to the
+    /// toggle is what identifies the run without the row specs having to
+    /// carry it.
+    fn run_over(&self, ix: usize) -> Option<usize> {
         if !matches!(self.rows.get(ix)?.spec, RowSpec::Work { .. }) {
             return None;
         }
@@ -490,12 +603,62 @@ impl TranscriptView {
                     run_start,
                     expanded: true,
                     ..
-                } => return Some(RevealKey::Group(run_start)),
+                } => return Some(run_start),
                 _ => break,
             }
         }
 
         None
+    }
+
+    /// The turn whose unfolded "Show work" row put this row on screen.
+    ///
+    /// The fold heads its turn, and every row of the turn below it that a
+    /// folded turn would not show is the fold's. Rows a folded turn keeps —
+    /// the final reply, an error, a steered prompt — sit among them and are
+    /// walked over, so the work after a steered prompt still finds its fold.
+    /// Only a settled turn has one, which spares an unsettled conversation
+    /// the walk.
+    fn fold_over(&self, ix: usize) -> Option<u64> {
+        let turn = self.row_turn(ix)?;
+        if !self.turn_ledger.is_settled(turn) || !self.hidden_by_fold(ix) {
+            return None;
+        }
+
+        for cursor in (0..ix).rev() {
+            match self.rows[cursor].spec {
+                RowSpec::TurnFold {
+                    turn: heads,
+                    folded: false,
+                    ..
+                } if heads == turn => return Some(turn),
+                _ if self.row_turn(cursor) == Some(turn) => continue,
+                _ => break,
+            }
+        }
+
+        None
+    }
+
+    /// Whether this row is one a folded turn would take off the screen.
+    fn hidden_by_fold(&self, ix: usize) -> bool {
+        match self.rows[ix].spec {
+            RowSpec::Work { .. } | RowSpec::RunToggle { .. } => true,
+            RowSpec::Entry { index, .. } => !self.survives_fold(index),
+            _ => false,
+        }
+    }
+
+    /// The turn a list row belongs to, for the rows that belong to one.
+    fn row_turn(&self, ix: usize) -> Option<u64> {
+        match self.rows.get(ix)?.spec {
+            RowSpec::Entry { index, .. } | RowSpec::Work { index, .. } => {
+                Some(self.items[index].turn)
+            }
+            RowSpec::RunToggle { run_start, .. } => Some(self.items[run_start].turn),
+            RowSpec::TurnFold { turn, .. } | RowSpec::Interrupted { turn, .. } => Some(turn),
+            RowSpec::TurnSummary { .. } | RowSpec::Working { .. } => None,
+        }
     }
 }
 
