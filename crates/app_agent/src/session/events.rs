@@ -478,6 +478,9 @@ impl AgentPane {
                 .update(cx, |transcript, _| transcript.mark_interrupted(turn));
         }
         let interrupted_by_user = self.transcript.read(cx).was_interrupted(self.turn.seq);
+        let error_already_shown = error
+            .as_deref()
+            .is_some_and(|text| self.transcript.read(cx).turn_has_error(self.turn.seq, text));
         let completion_body = error
             .clone()
             .or_else(|| self.latest_agent_message(cx))
@@ -505,6 +508,7 @@ impl AgentPane {
         }
         if let Some(text) = error
             && !interrupted_by_user
+            && !error_already_shown
         {
             self.push_item(SessionItem::Error { text }, cx);
         }

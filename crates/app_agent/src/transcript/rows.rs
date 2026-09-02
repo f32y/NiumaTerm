@@ -438,26 +438,25 @@ impl TranscriptView {
             // Errors, compaction boundaries and steered prompts stay visible
             // inside a folded turn: an error is what the user needs to act on,
             // a boundary marks where the conversation above it stopped being
-            // verbatim, and words the user typed are never work to hide.
+            // verbatim, and words the user typed are never work to hide. The
+            // final reply is selected by identity rather than moved, because
+            // visible events can still arrive after it while the turn closes.
             for i in start..end {
-                let visible_when_folded = match &self.items[i].item {
-                    SessionItem::Error { .. } | SessionItem::Compaction { .. } => true,
-                    SessionItem::UserMessage { .. } => {
-                        Some(i) != opening_user && !hidden(&self.items[i].item)
-                    }
-                    _ => false,
-                };
+                let visible_when_folded = Some(i) == final_agent
+                    || match &self.items[i].item {
+                        SessionItem::Error { .. } | SessionItem::Compaction { .. } => true,
+                        SessionItem::UserMessage { .. } => {
+                            Some(i) != opening_user && !hidden(&self.items[i].item)
+                        }
+                        _ => false,
+                    };
                 if visible_when_folded {
                     rows.push(self.entry_spec(i));
                 }
             }
         } else {
-            let skip = |i: usize| Some(i) == final_agent || Some(i) == opening_user;
+            let skip = |i: usize| Some(i) == opening_user;
             self.stream_specs(start, end, &skip, collapse, rows);
-        }
-
-        if let Some(i) = final_agent {
-            rows.push(self.entry_spec(i));
         }
 
         // The turn's summary closes it, below the answer it accounts for, the

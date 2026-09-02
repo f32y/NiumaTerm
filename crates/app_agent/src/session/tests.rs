@@ -578,6 +578,85 @@ mod queued_prompt_placement_tests {
     }
 }
 
+mod turn_error_tests {
+    use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext, WindowHandle};
+    use nmt_agent_utils::AgentWorkspace;
+    use nmt_agent_utils::chat::{Event as SessionEvent, Item as SessionItem};
+    use nmt_config::profile::{AgentProfile, AgentProfileKind};
+
+    use crate::settings::AgentSettings;
+    use crate::{AgentPane, AgentThreadDefaults};
+
+    fn open_pane(
+        cx: &mut TestAppContext,
+    ) -> (Entity<AgentPane>, WindowHandle<gpui_component::Root>) {
+        let profile = AgentProfile {
+            name: "Turn Error Test".into(),
+            kind: AgentProfileKind::Codex,
+            executable: "missing-codex.exe".into(),
+            ..AgentProfile::default()
+        };
+        let mut pane = None;
+        let window = cx.update(|cx| {
+            gpui_component::init(cx);
+            cx.set_global(AgentSettings::default());
+            cx.set_global(AgentThreadDefaults::default());
+            cx.open_window(Default::default(), |window, cx| {
+                let agent =
+                    cx.new(|cx| AgentPane::new(profile, AgentWorkspace::default(), window, cx));
+                pane = Some(agent.clone());
+                cx.new(|cx| gpui_component::Root::new(agent, window, cx))
+            })
+            .expect("open Agent test window")
+        });
+        (pane.expect("create Agent pane"), window)
+    }
+
+    #[gpui::test]
+    fn a_terminal_failure_does_not_repeat_an_error_already_shown(cx: &mut TestAppContext) {
+        let (pane, window) = open_pane(cx);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.apply_event(SessionEvent::TurnStarted, cx);
+                pane.apply_event(
+                    SessionEvent::ItemStarted(SessionItem::AgentMessage {
+                        id: "message".into(),
+                        text: Some("partial answer".into()),
+                    }),
+                    cx,
+                );
+                pane.apply_event(
+                    SessionEvent::Error {
+                        message: "model unavailable".into(),
+                        fatal: false,
+                    },
+                    cx,
+                );
+                pane.apply_event(
+                    SessionEvent::TurnCompleted {
+                        error: Some("model unavailable".into()),
+                    },
+                    cx,
+                );
+
+                let errors = pane
+                    .transcript
+                    .read(cx)
+                    .items
+                    .iter()
+                    .filter_map(|entry| match &entry.item {
+                        SessionItem::Error { text } => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(errors, vec!["model unavailable"]);
+            });
+        });
+    }
+}
+
 /// What `/new` does with the session it replaces. The DeepSeek host is one
 /// process shared by every tab holding a session on it, so releasing the old
 /// session before the replacement has taken its own hold stops the host

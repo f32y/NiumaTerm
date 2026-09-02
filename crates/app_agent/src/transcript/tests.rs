@@ -567,6 +567,44 @@ mod steered_prompt_rows_tests {
     }
 
     #[gpui::test]
+    fn a_failure_after_the_reply_stays_below_it(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let transcript = cx.new(|_| TranscriptView::new(AgentKind::Codex, None));
+
+            transcript.update(cx, |transcript, cx| {
+                transcript.push(1, prompt("ask"), Vec::new(), cx);
+                transcript.push(
+                    1,
+                    SessionItem::Reasoning {
+                        id: "work".into(),
+                        summary: Some("working".into()),
+                    },
+                    Vec::new(),
+                    cx,
+                );
+                transcript.push(1, reply("answer"), Vec::new(), cx);
+                transcript.push(
+                    1,
+                    SessionItem::Error {
+                        text: "model unavailable".into(),
+                    },
+                    Vec::new(),
+                    cx,
+                );
+                settle(transcript, 1, 3);
+
+                assert_eq!(order(transcript), vec!["0", "fold(1)", "2", "3", "summary"]);
+
+                transcript.toggled_turns.insert(1);
+                assert_eq!(
+                    order(transcript),
+                    vec!["0", "fold(1)", "1", "2", "3", "summary"]
+                );
+            });
+        });
+    }
+
+    #[gpui::test]
     fn a_replayed_turn_folds_without_claiming_a_duration(cx: &mut TestAppContext) {
         cx.update(|cx| {
             let transcript = cx.new(|_| TranscriptView::new(AgentKind::Claude, None));
