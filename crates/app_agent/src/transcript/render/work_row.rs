@@ -24,6 +24,7 @@ use crate::transcript::disclosure_row::{
     AGENT_DISCLOSURE_DETAIL_INSET, AgentCardTone, AgentDisclosureRow, agent_card,
 };
 use crate::transcript::render::TRANSCRIPT_LINE_HEIGHT;
+use crate::transcript::render::text_style::{markdown_view, work_detail_text_style};
 use crate::transcript::reveal::{RevealKey, RevealedPart, revealed_block};
 use crate::transcript::{
     TranscriptView, VirtualTranscriptState, code_transcript_format, command_execution_detail,
@@ -359,13 +360,9 @@ impl TranscriptView {
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
                                     .child(
-                                        Self::markdown_view(
-                                            ("wl-md", index),
-                                            markdown,
-                                            cwd.clone(),
-                                        )
-                                        .style(Self::work_detail_text_style(cx))
-                                        .selectable(true),
+                                        markdown_view(("wl-md", index), markdown, cwd.clone())
+                                            .style(work_detail_text_style(cx))
+                                            .selectable(true),
                                     ),
                             )
                             .child(

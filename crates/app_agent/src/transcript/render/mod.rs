@@ -1,5 +1,9 @@
 mod compaction_row;
 mod text_style;
+
+#[cfg(test)]
+pub(crate) use crate::transcript::render::text_style::transcript_code_block_style;
+use crate::transcript::render::text_style::{agent_text_style, markdown_view};
 mod turn_rows;
 mod user_row;
 mod work_row;
@@ -305,8 +309,8 @@ impl TranscriptView {
             .modern_context_menu(Self::copy_menu(cx.entity().downgrade(), index))
             .child(
                 div().flex_1().min_w_0().px_1().child(
-                    Self::markdown_view(("agent-md", index), text, self.cwd.clone())
-                        .style(Self::agent_text_style(cx))
+                    markdown_view(("agent-md", index), text, self.cwd.clone())
+                        .style(agent_text_style(cx))
                         .selectable(true),
                 ),
             )

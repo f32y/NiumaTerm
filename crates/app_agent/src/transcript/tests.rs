@@ -6,14 +6,15 @@ mod prompt_truncation_tests {
     use crate::profile::AgentKind;
     use crate::session::Status;
     use crate::settings::AgentSettings;
+    use crate::transcript::render::transcript_code_block_style;
     use crate::transcript::{
         AGENT_CARD_GAP, AGENT_CARD_ICON_BLOCK, AGENT_CARD_PADDING_X, AGENT_DISCLOSURE_DETAIL_INSET,
-        TranscriptView, TurnSummary, VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES,
-        command_execution_detail, command_execution_heading, compaction_accounting,
-        compaction_label, compaction_row_is_expandable, elapsed_label, entry_copy_text,
-        interrupted_status_label, is_work_row, last_response_label, should_show_jump_to_latest,
-        should_virtualize_transcript, transcript_segments, truncated_user_prompt, turn_summary,
-        worked_status_label, working_status_label,
+        TurnSummary, VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES, command_execution_detail,
+        command_execution_heading, compaction_accounting, compaction_label,
+        compaction_row_is_expandable, elapsed_label, entry_copy_text, interrupted_status_label,
+        is_work_row, last_response_label, should_show_jump_to_latest, should_virtualize_transcript,
+        transcript_segments, truncated_user_prompt, turn_summary, worked_status_label,
+        working_status_label,
     };
 
     #[test]
@@ -23,7 +24,7 @@ mod prompt_truncation_tests {
             ..AgentSettings::default()
         };
         let font = settings.font_with_fallbacks("JetBrains Mono".into());
-        let style = TranscriptView::transcript_code_block_style(font, 12.5);
+        let style = transcript_code_block_style(font, 12.5);
         let fallbacks = style
             .text
             .font_fallbacks
