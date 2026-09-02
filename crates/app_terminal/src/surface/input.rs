@@ -40,7 +40,7 @@ impl TerminalSurface {
                 }
             }
             TerminalKeyAction::CopyOrWrite(bytes) => {
-                if self.copy_selection() {
+                if self.selection.copy(&self.session, self.viewport_top()) {
                     return TerminalKeyResult::Copied;
                 }
 
