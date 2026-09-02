@@ -5,6 +5,7 @@ use nmt_agent_utils::AgentEvent;
 use crate::UnansweredPrompt;
 use crate::pane_state::{ChildAgents, SessionRuntime, TurnState};
 use crate::thread_controls::{ThreadControls, launch_effort, launch_model, stored_thread_settings};
+use crate::view::session_state::SessionStateBadge;
 mod backend;
 mod background_tasks;
 mod conversation;
@@ -291,8 +292,7 @@ impl AgentPane {
             git_branch_poll: GitBranchPoll::default(),
             context_window_usage: None,
             context_composition: None,
-            goal: None,
-            plan_mode: false,
+            session_state: SessionStateBadge::default(),
             session_stats: None,
             children: ChildAgents {
                 background_tasks: None,
@@ -984,8 +984,7 @@ impl AgentPane {
         self.turn.pending_interrupt = None;
         self.context_window_usage = None;
         self.context_composition = None;
-        self.goal = None;
-        self.plan_mode = false;
+        self.session_state.clear();
         self.session_stats = None;
         self.turn.queued_user_messages.clear();
         self.rewind.state = None;

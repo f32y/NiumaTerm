@@ -306,9 +306,7 @@ impl AgentPane {
                 true
             }
             InputHistoryAction::Replace(text) => {
-                self.palette.skill_binding = None;
-                self.palette.dismissed = true;
-                self.palette.selected = 0;
+                self.palette.reset_for_recall();
                 replace_input_with_history(&self.input, text, window, cx);
                 cx.stop_propagation();
                 cx.notify();

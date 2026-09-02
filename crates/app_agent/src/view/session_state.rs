@@ -1,22 +1,44 @@
 use gpui::prelude::*;
 use gpui::{Context, IntoElement, div};
 use gpui_component::{ActiveTheme as _, Icon, IconName, h_flex};
+use nmt_agent_utils::chat::GoalStatus;
 use nmt_i18n::i18n;
 
 use crate::AgentPane;
 
-impl AgentPane {
-    /// State that outlives the running turn, in one strip above the composer:
-    /// whether the backend is planning rather than working, and the objective
-    /// it keeps returning to.
-    ///
-    /// Both belong here rather than in the transcript because neither is
-    /// something the conversation said — they are what the next turn will be
-    /// governed by, which is the question the composer is asking.
-    pub(super) fn render_session_state(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> Option<impl IntoElement + use<>> {
+/// State that outlives the running turn, drawn as one strip above the
+/// composer: whether the backend is planning rather than working, and the
+/// objective it keeps returning to.
+///
+/// Both belong here rather than in the transcript because neither is
+/// something the conversation said — they are what the next turn will be
+/// governed by, which is the question the composer is asking. They are set and
+/// cleared together, and drawn nowhere else.
+#[derive(Default)]
+pub(crate) struct SessionStateBadge {
+    /// The standing objective the backend is working towards, when it runs
+    /// one.
+    goal: Option<GoalStatus>,
+    /// Whether the backend is collaborating on a plan rather than carrying out
+    /// work. Backends that have no such mode never set it.
+    plan_mode: bool,
+}
+
+impl SessionStateBadge {
+    pub(crate) fn set_goal(&mut self, goal: Option<GoalStatus>) {
+        self.goal = goal;
+    }
+
+    pub(crate) fn set_plan_mode(&mut self, active: bool) {
+        self.plan_mode = active;
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.goal = None;
+        self.plan_mode = false;
+    }
+
+    pub(crate) fn render(&self, cx: &mut Context<AgentPane>) -> Option<impl IntoElement + use<>> {
         if !self.plan_mode && self.goal.is_none() {
             return None;
         }

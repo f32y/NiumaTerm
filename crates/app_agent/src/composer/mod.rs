@@ -125,6 +125,15 @@ pub(super) fn restored_input_after_interruption(submitted: &str, current: &str) 
 }
 
 impl SlashPalette {
+    /// Stand down for text the composer did not type. A recalled entry is a
+    /// whole message, so a skill bound to what was there no longer applies and
+    /// the palette must not reopen on the leading `/` the entry may carry.
+    pub(crate) fn reset_for_recall(&mut self) {
+        self.skill_binding = None;
+        self.dismissed = true;
+        self.selected = 0;
+    }
+
     /// Show a one-line result above the composer, replacing whatever was
     /// there.
     pub(crate) fn set_feedback(

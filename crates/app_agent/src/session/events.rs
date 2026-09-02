@@ -251,11 +251,11 @@ impl AgentPane {
             SessionEvent::BackgroundTasks(snapshot) => self.on_background_tasks(snapshot, cx),
             SessionEvent::QueuedPrompts(prompts) => self.on_queued_prompts(prompts, cx),
             SessionEvent::GoalUpdated(goal) => {
-                self.goal = goal;
+                self.session_state.set_goal(goal);
                 cx.notify();
             }
             SessionEvent::PlanModeUpdated(active) => {
-                self.plan_mode = active;
+                self.session_state.set_plan_mode(active);
                 cx.notify();
             }
             SessionEvent::SessionStatsUpdated(stats) => {
