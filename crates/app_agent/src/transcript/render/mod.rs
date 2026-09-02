@@ -110,19 +110,21 @@ impl TranscriptView {
                 turn,
                 row_count,
                 folded,
-            } => self.render_turn_fold(turn, row_count, folded, cx),
+            } => turn_rows::render_turn_fold(turn, row_count, folded, cx),
             RowSpec::TurnSummary {
                 seconds,
                 output_tokens,
-            } => self.render_turn_summary(seconds, output_tokens, cx),
+            } => turn_rows::render_turn_summary(seconds, output_tokens, cx),
             RowSpec::Interrupted { output_tokens, .. } => {
-                self.render_interrupted_row(output_tokens, cx)
+                turn_rows::render_interrupted_row(output_tokens, cx)
             }
             RowSpec::RunToggle {
                 run_start,
                 tool_count,
                 expanded,
-            } => self.render_run_toggle(run_start, tool_count, expanded, cx),
+            } => {
+                turn_rows::render_run_toggle(&self.disclosures, run_start, tool_count, expanded, cx)
+            }
             RowSpec::Working { compacting } => self.render_working_row(compacting, cx),
         };
 
@@ -287,7 +289,15 @@ impl TranscriptView {
             SessionItem::Compaction { detail, .. } => {
                 let detail = detail.clone();
 
-                self.render_compaction_row(index, detail, window, cx)
+                compaction_row::render_compaction_row(
+                    self.kind,
+                    self.cwd.as_deref(),
+                    &self.disclosures,
+                    index,
+                    detail,
+                    window,
+                    cx,
+                )
             }
             item if is_work_row(item) => self.render_work_row(index, window, cx),
             _ => div().into_any_element(),
