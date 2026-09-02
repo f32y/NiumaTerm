@@ -116,7 +116,7 @@ impl AgentPane {
                 cx.notify();
             }
             SessionEvent::CompactionStarted => {
-                self.note_visible_agent_output();
+                self.turn.note_visible_output();
                 self.transcript
                     .update(cx, |transcript, cx| transcript.set_compacting(true, cx));
                 cx.notify();
@@ -170,23 +170,23 @@ impl AgentPane {
                 );
             }
             SessionEvent::ApprovalRequested { description } => {
-                self.note_visible_agent_output();
+                self.turn.note_visible_output();
                 self.emit_lifecycle(
                     AgentEventKind::PermissionRequested,
                     &i18n("agent-session-needs-input").replace("{name}", self.kind.display()),
                     &description,
                     cx,
                 );
-                self.pending_approval = Some(description);
+                self.prompts.ask_approval(description);
                 cx.notify();
             }
             SessionEvent::ApprovalResolved => {
-                self.pending_approval = None;
+                self.prompts.dismiss_approval();
                 self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
                 cx.notify();
             }
             SessionEvent::QuestionsRequested { questions } => {
-                self.note_visible_agent_output();
+                self.turn.note_visible_output();
                 // The turn is blocked on the user exactly as an approval is, so
                 // it raises the same attention signal rather than a new one.
                 self.emit_lifecycle(
@@ -197,7 +197,7 @@ impl AgentPane {
                         .map_or("", |question| question.question.as_str()),
                     cx,
                 );
-                self.pending_questions = Some(QuestionPrompt::new(questions));
+                self.prompts.ask_questions(QuestionPrompt::new(questions));
                 cx.notify();
             }
             SessionEvent::Workflows(snapshot) => {
@@ -211,7 +211,7 @@ impl AgentPane {
                 self.apply_workflow_transcript(&task_id, &agent_id, items, cx);
             }
             SessionEvent::QuestionsResolved => {
-                self.pending_questions = None;
+                self.prompts.dismiss_questions();
                 self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
                 cx.notify();
             }
@@ -521,7 +521,7 @@ impl AgentPane {
     /// A backend error lands in the transcript; a fatal one also ends the
     /// session, returns queued work, and reports the interruption outward.
     fn on_error(&mut self, message: String, fatal: bool, cx: &mut Context<Self>) {
-        self.note_visible_agent_output();
+        self.turn.note_visible_output();
         if self.history_ui.mode == RecentSessionsMode::Loading {
             self.history_ui.mode = RecentSessionsMode::Open;
             self.history_ui.pending_resume_replay = None;
@@ -711,7 +711,7 @@ impl AgentPane {
         }
 
         if !hidden(&item) {
-            self.note_visible_agent_output();
+            self.turn.note_visible_output();
         }
 
         // Where a prompt joins the turn already in flight, assistant output is
@@ -757,7 +757,7 @@ impl AgentPane {
             .update(cx, |transcript, _| transcript.merge_completed(&item));
 
         if !hidden(&item) {
-            self.note_visible_agent_output();
+            self.turn.note_visible_output();
         }
 
         cx.notify();
@@ -776,7 +776,7 @@ impl AgentPane {
             transcript.append_delta(item_id, delta, select)
         });
         if visible {
-            self.note_visible_agent_output();
+            self.turn.note_visible_output();
         }
         cx.notify();
     }

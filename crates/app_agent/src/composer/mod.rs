@@ -205,7 +205,8 @@ impl AgentPane {
         minutes > 0
             && !self.transcript.read(cx).is_working()
             && self
-                .last_response_at
+                .turn
+                .last_response_at()
                 .is_some_and(|at| at.elapsed() >= Duration::from_secs(u64::from(minutes) * 60))
     }
 
@@ -213,7 +214,8 @@ impl AgentPane {
     /// in the composer, so the decision costs nothing to reverse.
     fn confirm_send_after_cache_expiry(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let idle = self
-            .last_response_at
+            .turn
+            .last_response_at()
             .map(|at| last_response_label(at.elapsed().as_secs()))
             .unwrap_or_default();
         let pane = cx.entity();

@@ -609,9 +609,9 @@ impl AgentPane {
         self.clear_conversation_presentation(cx);
         self.palette.skill_catalog = None;
         self.palette.skill_binding = None;
+        self.prompts.dismiss_approval();
         reset_command_runtime(
             false,
-            &mut self.pending_approval,
             &mut self.palette.provider_commands,
             &mut self.palette.provider_commands_ready,
             &mut self.palette.command_queue,

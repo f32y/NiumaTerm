@@ -213,9 +213,9 @@ impl Render for AgentPane {
                 // A branch or rewind picker owns Escape ahead of anything
                 // under it, and closing one changes nothing else.
                 if this.cancel_branch_picker(cx) {
-                } else if this.pending_approval.is_some() {
+                } else if this.prompts.approval_open() {
                     this.respond_approval("cancel", cx);
-                } else if this.pending_questions.is_some() {
+                } else if this.prompts.questions_open() {
                     // Dismissing questions is not cancelling the turn: the
                     // model is told to assume and continue, so Escape here
                     // deliberately does not interrupt.

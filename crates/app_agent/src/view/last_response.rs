@@ -56,7 +56,7 @@ impl AgentPane {
     /// transcript's own live "Working for" reading is the answer then, and two
     /// clocks a few pixels apart would be read as disagreeing.
     pub(super) fn render_last_response(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let at = self.last_response_at?;
+        let at = self.turn.last_response_at()?;
         if self.transcript.read(cx).is_working() {
             return None;
         }
