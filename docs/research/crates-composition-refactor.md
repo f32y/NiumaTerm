@@ -605,7 +605,13 @@ Commit: `refactor(shell): make session persistence a plain module`
 
 #### B7. Command files as free functions over `WorkspaceManager`
 
-Status: pending. Do after B1 to B6.
+Status: done, no commit
+
+Both follow-through points already hold. `panes.rs` reads the settings page
+through `SettingsSurface::render_target` after B3, and `pump.rs` reaches the
+git model through `Shell::sync_git_target`, which delegates to
+`RightPanelController::set_git_target` after B2. The three files stay as
+`impl Shell` blocks as the order directs.
 
 `tabs_open.rs` (277), `panes.rs` (303), `pump.rs` (176) own no state; each
 is a command surface over `workspaces` and `next_id` plus the helper trio
@@ -811,7 +817,32 @@ Commit: `refactor(transcript): group live turn and turn ledger state`
 
 #### C8. Render files as free functions
 
-Status: pending. Do last in group C.
+Status: partly done dc72a7db, 1db89a7a, 19fbebe5
+
+`text_style.rs` (zero `self` uses), `turn_rows.rs` (one field) and
+`compaction_row.rs` (three fields) are free functions now, and
+`virtual_transcripts` became a `VirtualTranscriptCache` with `ensure`,
+`drop_row` and `clear` as the order asked.
+
+`user_row.rs`, `work_row.rs` and `render/mod.rs` stay as `impl TranscriptView`
+blocks:
+
+- `render/mod.rs` is the `Render` composition root. It dispatches one row spec
+  to every other renderer, which section 1 classifies as an orchestrator that
+  stays on the parent.
+- `render_work_row` takes `&mut self` because it writes the virtual transcript
+  cache. As a free function it would need `&[Entry]`, `&Disclosures` and
+  `&mut VirtualTranscriptCache` split out of the same view at a call site that
+  only holds `&self` through the dispatcher, which does not borrow-check.
+- `user_row.rs` reads four fields and calls three sibling renderers
+  (`render_entry_images`, `user_row_menu`, `hover_stamp`), each with its own
+  read set. Converting the file lands `render_user_row` at seven parameters,
+  against a `clippy::too_many_arguments` limit of seven that the pre-commit
+  hook denies, and leaves the dependency count unchanged.
+
+Manual check: expand a long command output, a truncated user prompt and an
+annotation card; each opens, the virtualized body scrolls, and collapsing one
+drops its segmented source.
 
 `transcript/render/text_style.rs` (56) has zero `self` uses;
 `render/turn_rows.rs`, `render/compaction_row.rs`, `render/user_row.rs`,
@@ -901,7 +932,26 @@ Commit: `refactor(terminal): keep title and pwd change detection together`
 
 #### D4. Read-only files as free functions
 
-Status: pending. Do after D1, D2.
+Status: partly done d28eb734
+
+`visit_row_cells` (already an associated function taking no `self`) and
+`format_terminal` (the private formatter run) are free functions now.
+
+`grid_read.rs` and `block.rs` stay as `impl GhosttyTerminal`. Every function
+in them is `pub` and read from `app_terminal` through a `GhosttyTerminal`, and
+the parameter a free function would take is the raw `VtTerminal` handle. That
+handle is deliberately private: `GhosttyTerminal` owns it exclusively, which is
+what the `unsafe impl Send` on the type rests on. Exposing it would break that
+ownership, and keeping it private means every converted function needs a
+method wrapper, so the conversion adds a layer instead of removing one. This
+is the same shape of objection the order raises against moving
+`scrollbar_override`, and it is recorded here rather than worked around.
+
+`BlockRef` and `AcquiredBlock` carry per-block state and were left alone as
+directed. `scrollbar_override` was not touched.
+
+Manual check: select text spanning the viewport and scrollback and copy it;
+the copied text matches, including rows read out of finished blocks.
 
 `grid_read.rs` (380), `format.rs` (107), `block.rs` (393) own zero mutable
 state; `visit_row_cells` (`grid_read.rs:123`) already takes no `self`.
@@ -1074,3 +1124,7 @@ left under the order.
 | C7 | done `8ac3ef86` |
 | A5 | done `0650d666` |
 | A6 | done `58234a72` |
+| B6 | done `6e5ae097` |
+| B7 | done, no commit |
+| C8 | partly done `dc72a7db`, `1db89a7a`, `19fbebe5` |
+| D4 | partly done `d28eb734` |
