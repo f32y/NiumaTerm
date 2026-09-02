@@ -411,7 +411,13 @@ touching `workspaces` or `next_id`.
 
 #### B1. `UpdateNotificationLayer`
 
-Status: pending
+Status: done 4534af75
+
+Note: `update_notification_card` became a free function rather than a method;
+it never read `self`. The polling task still runs on the shell entity because
+it reads `window_active`.
+Manual check: trigger a provider update notification; the card appears top
+right and an auto-hiding phase retires itself while the window is focused.
 
 `updates_layer.rs` (252) owns `update_cards: HashMap<String, UpdateCard>` and
 `update_notification_timer_running: bool`; it reads `window_active` once in
@@ -429,7 +435,13 @@ Commit: `refactor(shell): own update notification cards as one layer`
 
 #### B2. `RightPanelController`
 
-Status: pending
+Status: done 8160f059
+
+Note: `set_git_sidebar_open` replaced the three hand-written `sidebar_open`
+writes. `panel()` and `git_model()` accessors exist because render draws the
+panel entity directly and reads the branch off the git model.
+Manual check: toggle Git, Workflows and Background Tasks from the title bar;
+only one opens at a time and the git poller stops when you leave Git.
 
 `panels.rs` (139) reads and writes `right_panel`, `git_model`,
 `workflows_seen`, `background_tasks_seen`; it reaches the rest of `Shell`
@@ -448,7 +460,13 @@ Commit: `refactor(shell): put right panel targeting under one controller`
 
 #### B3. `SettingsSurface`
 
-Status: pending
+Status: done 78e8e74a
+
+Note: `note_active` replaces the `was_active` getter the plan sketched. It
+reports the activation that leaves the surface, which is the only thing the
+caller did with the flag. Saving the global settings stays on `Shell`.
+Manual check: open Settings, change a value, switch to another workspace; the
+value is written to the settings file at the switch.
 
 `settings_workspace.rs` (116) owns `theme_watcher`, `settings_state`,
 `settings_was_active`. Two leaks: `panes.rs:212` reads `settings_state` to
@@ -465,7 +483,13 @@ Commit: `refactor(shell): keep settings surface state in one place`
 
 #### B4. `RootAvailability`
 
-Status: pending
+Status: done 3c2b569d
+
+Note: `workspace_dirs.rs` is 500 lines after the change, so the editor stays
+beside it. `Shell::root_is_available` was dropped; its one remaining caller
+asks the component.
+Manual check: add a workspace directory on a disconnected share; its sidebar
+row shows the unavailable marker after the background sweep.
 
 `workspace_dirs.rs` (484) is two things: `WorkspaceDirsEditor` (already its
 own entity; leave it) and a `Shell`-side availability cache over
@@ -483,7 +507,14 @@ Commit: `refactor(shell): track root availability as its own state`
 
 #### B5. `InlineRenameSession`
 
-Status: pending
+Status: done 30c5f10c
+
+Note: the sidebar and the tab strip now take `&InlineRenameSession` instead
+of two raw tuple options, and the three duplicated filter-by-id-then-clone
+blocks became `workspace_input` / `tab_input`. `finish_*` stays on `Shell`
+because gpui invokes it by function pointer from the input subscription.
+Manual check: rename a workspace and a tab from their context menus; Enter and
+clicking away commit, Escape keeps the old name.
 
 In `workspaces.rs` (489) the rename half (`rename_input`,
 `start_workspace_rename`, `finish_workspace_rename`, `start_tab_rename`,
@@ -890,3 +921,8 @@ left under the order.
 | C2 | done `53eebc95` |
 | C3 | done `1e77f4ab` |
 | A1 | done `cb0eb4fc` |
+| B1 | done `4534af75` |
+| B2 | done `8160f059` |
+| B3 | done `78e8e74a` |
+| B4 | done `3c2b569d` |
+| B5 | done `30c5f10c` |
