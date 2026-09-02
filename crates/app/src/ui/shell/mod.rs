@@ -5,6 +5,7 @@ mod inline_rename;
 mod panels;
 mod panes;
 mod pump;
+mod rename;
 mod render;
 mod settings_workspace;
 mod tab_presentation;
@@ -30,7 +31,7 @@ use gpui_component::button::{Button, ButtonVariants, Toggle, ToggleVariants};
 use gpui_component::dialog::{
     DIALOG_BUTTON_MIN_WIDTH, DialogAction, DialogButtonProps, DialogClose, DialogFooter,
 };
-use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::input::{Input, InputState};
 use gpui_component::notification::{Notification, NotificationType};
 use gpui_component::progress::Progress;
 use gpui_component::resizable::{
@@ -79,6 +80,7 @@ pub(crate) use crate::ui::shell::actions::{
 use crate::ui::shell::close::{should_confirm_close, should_confirm_tab_close};
 pub(super) use crate::ui::shell::inline_rename::{InlineRename, InlineRenameStyle};
 use crate::ui::shell::panels::RightPanelController;
+pub(super) use crate::ui::shell::rename::InlineRenameSession;
 use crate::ui::shell::settings_workspace::SettingsSurface;
 pub(super) use crate::ui::shell::tab_presentation::pending_tab_icon;
 pub(crate) use crate::ui::shell::tab_surface::TabSurface;
@@ -138,12 +140,9 @@ pub(crate) struct Shell {
     pub(super) sidebar: Sidebar,
     /// Tab-strip view state (scroll + active-tab reveal) and its renderer.
     pub(super) tab_strip: TabStrip,
-    /// In-flight sidebar workspace rename: the item renders this input in
+    /// In-flight inline renames: a sidebar item or a tab renders an input in
     /// place of its name. Enter or clicking anywhere else (blur) commits.
-    pub(crate) workspace_rename: Option<(WorkspaceId, Entity<InputState>)>,
-    /// In-flight tab rename in the tab bar; same lifecycle as
-    /// `workspace_rename`.
-    pub(crate) tab_rename: Option<(TabId, Entity<InputState>)>,
+    pub(crate) renames: InlineRenameSession,
     /// Focus the active pane on the first render (the window root is `Root`, so
     /// initial focus can't be set from the app entry point).
     needs_focus: bool,
@@ -321,8 +320,7 @@ impl Shell {
             window_active: Self::exact_window_active(window),
             sidebar: Sidebar::new(sidebar_width),
             tab_strip: TabStrip::new(),
-            workspace_rename: None,
-            tab_rename: None,
+            renames: InlineRenameSession::default(),
             needs_focus: true,
             pending_agent_resume: None,
             pending_agent_close: None,

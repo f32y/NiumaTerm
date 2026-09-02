@@ -12,7 +12,7 @@ impl Sidebar {
         &self,
         idx: usize,
         ws: &WorkspaceSummary,
-        rename: Option<&(WorkspaceId, Entity<InputState>)>,
+        renames: &InlineRenameSession,
         cx: &mut Context<Shell>,
     ) -> AnyElement {
         let settings_entry = ws.kind == WorkspaceKind::Settings;
@@ -51,9 +51,7 @@ impl Sidebar {
 
         let ws_id = ws.id;
 
-        let renaming = rename
-            .filter(|(id, _)| *id == ws_id)
-            .map(|(_, input)| input.clone());
+        let renaming = renames.workspace_input(ws_id).cloned();
 
         let controls: AnyElement = if vertical_tabs && !settings_entry {
             // This row heads the workspace's own tab list here, so its control
@@ -447,7 +445,7 @@ impl Sidebar {
         tab_idx: usize,
         tab: &SidebarTab,
         closeable: bool,
-        rename: Option<&(TabId, Entity<InputState>)>,
+        renames: &InlineRenameSession,
         cx: &mut Context<Shell>,
     ) -> AnyElement {
         let tab_id = tab.id;
@@ -507,9 +505,7 @@ impl Sidebar {
                 }),
         };
 
-        let renaming = rename
-            .filter(|(id, _)| *id == tab_id)
-            .map(|(_, input)| input.clone());
+        let renaming = renames.tab_input(tab_id).cloned();
 
         let label: AnyElement = match renaming {
             Some(input) => {

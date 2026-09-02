@@ -4,7 +4,6 @@ use gpui::{
     SharedString, div, px, relative,
 };
 use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants};
-use gpui_component::input::InputState;
 use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::scroll::Scrollbar;
 use gpui_component::{
@@ -24,14 +23,14 @@ use crate::ui::composition::{
     sidebar_selection,
 };
 use crate::ui::fluent::{SELECTION_BAR_HEIGHT, SELECTION_BAR_RADIUS, SELECTION_BAR_WIDTH};
-use crate::ui::shell::{InlineRename, InlineRenameStyle, pending_tab_icon};
+use crate::ui::shell::{InlineRename, InlineRenameSession, InlineRenameStyle, pending_tab_icon};
 use crate::ui::sidebar_resize::{self, ResizeDrag};
 use crate::ui::tab_bar::{new_tab_menu, progress_visual, tab_icon};
 use crate::ui::terminal_status::{terminal_dot, terminal_presentation};
 use crate::ui::token_usage::TokenUsageView;
 use crate::ui::{AppSettings, NewWorkspace, Shell, UI_RADIUS};
 use crate::window::WindowRegistry;
-use crate::workspace::{TerminalActivity, WorkspaceId, WorkspaceKind, WorkspaceSummary};
+use crate::workspace::{TerminalActivity, WorkspaceKind, WorkspaceSummary};
 
 mod drag;
 mod rows;
@@ -368,8 +367,7 @@ impl Sidebar {
         // One entry per summary in the vertical tab-bar style, empty in the
         // horizontal one where the title bar still owns the tabs.
         tabs: Vec<Vec<SidebarTab>>,
-        rename: Option<&(WorkspaceId, Entity<InputState>)>,
-        tab_rename: Option<&(TabId, Entity<InputState>)>,
+        renames: &InlineRenameSession,
         usage: SidebarUsage,
         cx: &mut Context<Shell>,
     ) -> AnyElement {
@@ -496,7 +494,7 @@ impl Sidebar {
                                 // from the next; a rule between them would
                                 // draw a second boundary inside the same gap.
                                 let mut rows = Vec::new();
-                                rows.push(self.render_item(idx, ws, rename, cx));
+                                rows.push(self.render_item(idx, ws, renames, cx));
                                 let ws_tabs = tabs.get(idx).map(Vec::as_slice).unwrap_or_default();
                                 // Closing a workspace's last tab falls through to
                                 // closing the workspace, so the row keeps its
@@ -507,9 +505,7 @@ impl Sidebar {
                                 let closeable = ws_tabs.len() > 1 || ws.closeable;
 
                                 rows.extend(ws_tabs.iter().enumerate().map(|(tab_idx, tab)| {
-                                    self.render_tab_row(
-                                        idx, tab_idx, tab, closeable, tab_rename, cx,
-                                    )
+                                    self.render_tab_row(idx, tab_idx, tab, closeable, renames, cx)
                                 }));
 
                                 v_flex().w_full().children(rows)
