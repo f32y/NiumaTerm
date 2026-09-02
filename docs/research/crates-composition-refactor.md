@@ -889,7 +889,16 @@ Commit: `refactor(claude): own background shell metadata as an index`
 
 #### E2. `ChildTranscripts`
 
-Status: pending. Do after E1.
+Status: done 6197bcbb
+
+Note: the struct went in a new `tasks/children.rs` rather than into
+`observe.rs`, matching how `ShellIndex` sits in `shells.rs`. `push` skips an
+empty item list, which every call site checked for itself. `repeats_launch`,
+`open_tool` and `close_tool` replace the three direct map reads `child_items`
+made.
+Manual check: launch a Task from an agent tab and open the child row; the
+opening message is the launch instruction, tool calls complete in place, and
+the instruction is not repeated when the harness replays it.
 
 `pending_transcripts`, `open_child_tools`, `launch_prompts` form one unit:
 open a child's conversation, accumulate items, dedupe the launch prompt,
@@ -902,7 +911,13 @@ Commit: `refactor(claude): keep child transcript accumulation in one place`
 
 #### E3. `AliasTable`
 
-Status: pending. Do after E2.
+Status: done 5803ba0c
+
+Note: `canonical` keeps the registry fallback and asks the table for the
+lookup, so each layer answers the question it can. `set_session` now calls
+four `clear()`s plus the registry replacement.
+Manual check: stop a running child from the Background Tasks panel; it stops
+whether the row is keyed by its task id or its tool-use id.
 
 `aliases`, `alias_order`, `MAX_ALIASES`, `link_all`. `canonical()`
 (`mod.rs:351`) straddles alias lookup and registry membership: make
@@ -991,3 +1006,5 @@ left under the order.
 | D1 | done `e9200582` |
 | D2 | done `c8a14e86` |
 | D3 | done `88ea465a` |
+| E2 | done `6197bcbb` |
+| E3 | done `5803ba0c` |
