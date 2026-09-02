@@ -264,6 +264,16 @@ impl TranscriptView {
         })
     }
 
+    /// Whether this turn already shows the provider error reported at
+    /// completion. Codex can announce the error immediately and repeat it in
+    /// the terminal turn state, while the transcript should show one row.
+    pub(crate) fn turn_has_error(&self, turn: u64, text: &str) -> bool {
+        self.items.iter().any(|entry| {
+            entry.turn == turn
+                && matches!(&entry.item, SessionItem::Error { text: shown } if shown == text)
+        })
+    }
+
     /// How many actions `turn` has taken: the tool calls, file changes and
     /// thinking passes it logged. Conversation text is the turn talking rather
     /// than working, so it does not count.
