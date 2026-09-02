@@ -589,7 +589,19 @@ Commit: `refactor(terminal-view): keep scrollbar drag and fade state together`
 
 #### C3. `LinkHover` (`crates/app_terminal/src/links/mod.rs`)
 
-Status: pending
+Status: done 1e77f4ab
+
+Note: `link_at_position` stayed on `TerminalPane`. It reads no hover state and
+depends on `cell_metrics`, `current_row_offsets`, `&TerminalSurface`,
+`block_list_point_at` and `frozen_hit`, so a free function would need a
+parameter struct to stay under the argument limit and would relocate the
+dependency rather than remove it. The position accessors split into
+`record_position` / `forget_position` / `position` because a drag records the
+position without rescanning; folding them into `update` would change when the
+position is kept.
+Manual check: Ctrl-hover a URL in terminal output; it underlines, the
+underline follows the pointer, and it clears on scroll or when Ctrl is
+released.
 
 `hovered_link: Option<LinkHit>` and `last_mouse_position: Option<Point<Pixels>>`
 form a two-field state machine with one write site (`links/mod.rs:102`, plus
@@ -865,3 +877,4 @@ left under the order.
 |---|---|
 | C1 | done `b7bef98e` |
 | C2 | done `53eebc95` |
+| C3 | done `1e77f4ab` |
