@@ -391,13 +391,22 @@ pub fn get() -> &'static Config {
     CONFIG.get_or_init(Config::default)
 }
 
+/// Read from the active terminal palette under its lock. `Colors` carries a
+/// field per palette entry, so a caller after one of them reads it here rather
+/// than copying several hundred bytes out to reach it.
+pub fn with_active_colors<T>(read: impl FnOnce(&Colors) -> T) -> T {
+    read(
+        &ACTIVE_COLORS
+            .get_or_init(|| RwLock::new(get().colors))
+            .read()
+            .expect("active theme colors lock poisoned"),
+    )
+}
+
 /// Return the active terminal palette. Unlike the rest of the startup config,
 /// this value can change when the user selects a theme.
 pub fn active_colors() -> Colors {
-    *ACTIVE_COLORS
-        .get_or_init(|| RwLock::new(get().colors))
-        .read()
-        .expect("active theme colors lock poisoned")
+    with_active_colors(|colors| *colors)
 }
 
 pub fn set_active_colors(colors: Colors) {

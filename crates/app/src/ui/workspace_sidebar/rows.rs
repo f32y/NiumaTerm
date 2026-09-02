@@ -142,9 +142,12 @@ impl Sidebar {
         // A temporary workspace wears the same `*` an unsaved document does,
         // so its absence from the next session is visible before the user
         // closes the window.
-        let display_label = match ws.temporary {
-            true => format!("* {}", workspace_display_label(&ws.name, &ws.cwd)),
-            false => workspace_display_label(&ws.name, &ws.cwd),
+        // Both of these reach the view several times per row and the drag
+        // payload once more, so they are built in the form those take rather
+        // than copied into it at each use.
+        let display_label: SharedString = match ws.temporary {
+            true => format!("* {}", workspace_display_label(&ws.name, &ws.cwd)).into(),
+            false => workspace_display_label(&ws.name, &ws.cwd).into(),
         };
         // The `+N` token holds a fixed lane beside the path, so the path's own
         // budget shrinks by its width instead of pushing it off the row. The
@@ -163,10 +166,11 @@ impl Sidebar {
                 .as_ref()
                 .map_or(0.0, |token| 8.0 + 7.0 * token.chars().count() as f32))
             / 7.0;
-        let display_path = tail_preserving_path(
+        let display_path: SharedString = tail_preserving_path(
             &full_path,
             (path_budget.floor().max(0.0) as usize).clamp(8, 64),
-        );
+        )
+        .into();
         // Tooltip and assistive technology get every directory in order; the
         // row itself only has room for the primary path.
         let dirs_description = workspace_dirs_description(&ws.cwd, &ws.additional_cwds);
@@ -222,7 +226,7 @@ impl Sidebar {
                         .whitespace_nowrap()
                         .aria_label(dirs_description.clone())
                         .text_color(cx.theme().sidebar_foreground.opacity(0.4))
-                        .child(SharedString::from(display_path.clone()))
+                        .child(display_path.clone())
                 }))
                 .children(additional_summary.map(|token| {
                     div()
@@ -239,8 +243,8 @@ impl Sidebar {
                 .into_any_element()
         };
 
-        let drag_name: SharedString = display_label.clone().into();
-        let drag_cwd: SharedString = display_path.clone().into();
+        let drag_name = display_label.clone();
+        let drag_cwd = display_path.clone();
         let drag_agent_status = ws.agent_status;
         let drag_terminal_activity = ws.terminal_activity;
 
@@ -259,6 +263,7 @@ impl Sidebar {
                     .replace("{name}", &display_label)
                     .replace("{path}", &dirs_description)
                     .replace("{status}", &status_label)
+                    .into()
             })
             // The active tab's own row is highlighted in the vertical tab-bar
             // style, and it sits under its workspace, so highlighting the
