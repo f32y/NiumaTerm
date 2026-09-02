@@ -1,7 +1,7 @@
 use std::collections;
 use std::sync::Arc;
 
-use super::TerminalFrame;
+use crate::frame::TerminalFrame;
 use crate::graphics;
 
 #[derive(Default)]

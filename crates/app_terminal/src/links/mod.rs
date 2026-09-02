@@ -5,8 +5,8 @@ use gpui::{
 };
 use nmt_terminal::ghostty::BlockHandle;
 
-use super::block_list::BlockListPoint;
-use super::view::{TerminalPane, terminal_cell_at_position};
+use crate::block_list::BlockListPoint;
+use crate::view::{TerminalPane, terminal_cell_at_position};
 /// A link resolved under the pointer: the URL plus underline rects relative
 /// to the content origin (only the visible rows of a wrapped URL get rects).
 #[derive(Clone, Debug, PartialEq)]

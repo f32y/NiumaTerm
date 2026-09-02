@@ -97,4 +97,4 @@ use nmt_input::bracket_paste;
 use nmt_terminal::clipboard::{Clipboard, ClipboardType};
 use nmt_terminal::terminal::Mode;
 
-use super::TerminalSurface;
+use crate::surface::TerminalSurface;

@@ -38,10 +38,6 @@ use parse::{
 };
 use serde_json::{Value, json};
 
-use super::compaction::{compaction_metadata, parse_compaction};
-use super::tool_items::{complete_tool_item, tool_item};
-#[cfg(test)]
-use super::tool_items::{edit_diff, input_detail};
 use crate::LaunchConfig;
 use crate::background_task::{BackgroundTaskKey, BackgroundTaskTranscriptUpdate};
 #[cfg(test)]
@@ -51,9 +47,13 @@ use crate::chat::{
     SlashCommandArguments, SlashCommandInfo, SlashCommandOutcome, SlashCommandRunPolicy,
     SlashCommandSource, ThreadSettings, TokenUsageBreakdown,
 };
+use crate::claude_code::compaction::{compaction_metadata, parse_compaction};
 use crate::claude_code::sessions::{RestoredTask, load_child_transcript};
 use crate::claude_code::shell_output::shell_items;
 use crate::claude_code::tasks::ClaudeTasks;
+use crate::claude_code::tool_items::{complete_tool_item, tool_item};
+#[cfg(test)]
+use crate::claude_code::tool_items::{edit_diff, input_detail};
 use crate::claude_code::workflows::{
     ClaudeWorkflows, RestoredWorkflowRun, WorkflowRefreshRequest, WorkflowRefreshResult,
 };

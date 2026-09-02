@@ -208,7 +208,7 @@ pub fn spsc_buffer(size: usize) -> (SpscBufferWriter, SpscBufferReader) {
 
 #[cfg(test)]
 mod test {
-    use super::*;
+    use crate::windows::spsc::*;
 
     #[test]
     fn test_spsc_buffer() {

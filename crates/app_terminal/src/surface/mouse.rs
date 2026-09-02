@@ -167,4 +167,4 @@ use nmt_terminal::selection::SelectionType;
 use nmt_terminal::terminal::Mode;
 use nmt_terminal::terminal::pos::{Column, Line, Pos};
 
-use super::TerminalSurface;
+use crate::surface::TerminalSurface;

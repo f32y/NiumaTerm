@@ -8,8 +8,8 @@ use nmt_terminal::event::{BlockEvent, EventListener, TerminalEvent, WindowId};
 use parking_lot::Mutex;
 use tracing::debug;
 
-use super::{HostEvent, HostEventQueue, InFlightBlock, SessionGraphics};
 use crate::graphics;
+use crate::session::{HostEvent, HostEventQueue, InFlightBlock, SessionGraphics};
 use crate::wake::{Wake, WakeSender};
 
 #[derive(Clone)]

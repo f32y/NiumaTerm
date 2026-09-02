@@ -11,11 +11,11 @@ use nmt_config::local_state::{
 use nmt_i18n::i18n;
 use tracing::warn;
 
-use super::Shell;
-use super::settings::{AgentProfile, AppSettings, builtin_agent_profile};
-use super::shell::{TabSurface, agent_workspace};
 use crate::pane_tree::{PaneId, PaneNode, PaneTree};
 use crate::tabs::{TabId, TabManager};
+use crate::ui::Shell;
+use crate::ui::settings::{AgentProfile, AppSettings, builtin_agent_profile};
+use crate::ui::shell::{TabSurface, agent_workspace};
 use crate::window::WindowRegistry;
 use crate::workspace::{
     WorkspaceId, WorkspaceKind, WorkspaceManager, WorkspaceRoots, default_workspace_name,
@@ -643,7 +643,9 @@ impl Shell {
 mod launch_resolution_tests {
     use nmt_config::local_state::TabState;
 
-    use super::{legacy_generated_tab_title, normalize_saved_launch, resolve_restored_launch};
+    use crate::ui::persistence::{
+        legacy_generated_tab_title, normalize_saved_launch, resolve_restored_launch,
+    };
     use crate::ui::settings::{AppSettings, Profile};
 
     fn settings_with_pwsh_default() -> AppSettings {
