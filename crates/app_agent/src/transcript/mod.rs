@@ -4,6 +4,7 @@ mod render;
 mod reveal;
 mod rows;
 mod turns;
+mod typewriter;
 mod view;
 mod virtual_code;
 mod working_indicator;

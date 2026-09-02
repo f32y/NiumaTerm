@@ -285,7 +285,7 @@ impl TranscriptView {
             SessionItem::UserMessage { text: Some(text) } => self.render_user_row(index, text, cx),
             SessionItem::AgentMessage {
                 text: Some(text), ..
-            } => self.render_agent_row(index, text.clone(), cx),
+            } => self.render_agent_row(index, self.shown_reply(index, text).to_string(), cx),
             SessionItem::Error { text } => self.render_error_row(index, text.clone(), cx),
             SessionItem::Compaction { detail, .. } => {
                 let detail = detail.clone();
