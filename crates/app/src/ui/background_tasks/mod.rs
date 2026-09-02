@@ -5,27 +5,29 @@
 //! to a row beyond the one operation a snapshot reports as available — a row
 //! offers Stop only while its adapter says that task can be stopped.
 
-use std::cmp::Ordering;
+mod detail;
+pub(super) mod rows;
+
 use std::time::{Duration, SystemTime};
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, Context, Entity, Hsla, ScrollHandle, SharedString, Task, WeakEntity, Window, div,
-    px,
+    AnyElement, Context, Entity, ScrollHandle, SharedString, Task, WeakEntity, Window, div, px,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::{
-    ActiveTheme as _, IconName, IconNamed, Sizable as _, StyledExt as _, h_flex, v_flex,
-};
+use gpui_component::{ActiveTheme as _, IconNamed, Sizable as _, StyledExt as _, h_flex, v_flex};
 use nmt_agent_utils::background_task::{
-    BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskKind, BackgroundTaskSnapshot,
-    BackgroundTaskState, BackgroundTaskSummary, BackgroundTaskTranscriptState,
+    BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskSummary,
 };
 use nmt_app_agent::AgentPane;
 use nmt_app_agent::transcript::TranscriptView;
 use nmt_i18n::i18n;
 
 use crate::ui::AppSettings;
+use crate::ui::background_tasks::rows::{
+    empty_state, finished_heading, finished_rows, render_row, running_heading, running_rows,
+    section_control_label, visible_rows,
+};
 use crate::ui::composition::panel_header;
 
 /// Rows shown before the section control offers the rest. Running work is the
@@ -194,196 +196,6 @@ impl BackgroundTasksView {
         }));
     }
 
-    /// Re-read the open child while it is still working. Claude Code writes a
-    /// child's own turns to that child's file instead of publishing them on
-    /// the parent stream, so no event arrives to repaint from and the panel
-    /// has to look again. The read costs one transcript parse per tick, which
-    /// is why it runs only while a working child is actually on screen.
-    fn refresh_open_child(&mut self, cx: &mut Context<Self>) {
-        let Some(key) = self.mode.detail_key().cloned() else {
-            return;
-        };
-        let Some(pane) = self.target.as_ref().and_then(WeakEntity::upgrade) else {
-            return;
-        };
-        pane.update(cx, |pane, cx| {
-            pane.load_background_task_transcript(&key, cx);
-        });
-    }
-
-    /// Open one child's conversation, remembering the list state so going back
-    /// returns to what the user was reading.
-    fn open_detail(&mut self, key: BackgroundTaskKey, cx: &mut Context<Self>) {
-        let Some(pane) = self.target.as_ref().and_then(WeakEntity::upgrade) else {
-            return;
-        };
-        let (kind, cwd) = {
-            let pane = pane.read(cx);
-            (pane.agent_kind(), pane.working_directory())
-        };
-        self.detail_transcript = Some(cx.new(|_| TranscriptView::new(kind, cwd)));
-        self.mode
-            .open(key.clone(), self.running_expanded, self.finished_expanded);
-        // Codex stores a descendant's conversation and hands it over on
-        // request; Claude Code has been accumulating it live, so this is a
-        // no-op there.
-        pane.update(cx, |pane, cx| {
-            pane.load_background_task_transcript(&key, cx);
-        });
-        cx.notify();
-    }
-
-    /// Ask the provider to stop one child. A refusal means the child settled
-    /// between the snapshot this row was drawn from and the click, so the next
-    /// snapshot reports the outcome either way and nothing is said here.
-    fn stop_task(&mut self, key: &BackgroundTaskKey, cx: &mut Context<Self>) {
-        let Some(pane) = self.target.as_ref().and_then(WeakEntity::upgrade) else {
-            return;
-        };
-        pane.update(cx, |pane, _| pane.interrupt_background_task(key));
-    }
-
-    fn close_detail(&mut self, cx: &mut Context<Self>) {
-        let Some((running_expanded, finished_expanded)) = self.mode.close() else {
-            return;
-        };
-        self.running_expanded = running_expanded;
-        self.finished_expanded = finished_expanded;
-        self.detail_transcript = None;
-        cx.notify();
-    }
-
-    fn render_detail(
-        &mut self,
-        key: BackgroundTaskKey,
-        transcript: Entity<TranscriptView>,
-        snapshot: &BackgroundTaskSnapshot,
-        now: SystemTime,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let Some(task) = snapshot.tasks.iter().find(|task| task.key == key) else {
-            // The child left this session's snapshot, so there is nothing to
-            // show; the list is the honest place to be.
-            self.close_detail(cx);
-            return div().into_any_element();
-        };
-        // A finished child's conversation cannot change again, so only one
-        // that is still working keeps the refresh tick alive.
-        let active = task.state.is_active();
-        self.sync_elapsed_timer(active, cx);
-
-        let (items, state, dropped, revision) = self
-            .target
-            .as_ref()
-            .and_then(WeakEntity::upgrade)
-            .and_then(|pane| {
-                let pane = pane.read(cx);
-                let child = pane.background_task_transcript(&key)?;
-                Some((
-                    child.items().to_vec(),
-                    child.state().clone(),
-                    child.dropped(),
-                    child.revision(),
-                ))
-            })
-            .unwrap_or_else(|| (Vec::new(), BackgroundTaskTranscriptState::NotLoaded, 0, 0));
-
-        transcript.update(cx, |view, cx| view.show_items(&items, revision, cx));
-
-        let theme = cx.theme();
-        let header = v_flex()
-            .px_2()
-            .py_1()
-            .gap_0p5()
-            .border_b_1()
-            .border_color(theme.sidebar_border)
-            .child(
-                h_flex()
-                    .gap_1()
-                    .items_center()
-                    .child(
-                        Button::new("background-task-back")
-                            .ghost()
-                            .xsmall()
-                            .icon(IconName::ArrowLeft)
-                            .tooltip(i18n("tasks-background-back-tooltip"))
-                            .aria_label(i18n("tasks-background-back-tooltip"))
-                            .on_click(cx.listener(|this, _, _, cx| this.close_detail(cx))),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .truncate()
-                            .text_sm()
-                            .child(task.display_label()),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(state_color(task.state, cx))
-                            .child(background_task_state_label(task.state)),
-                    ),
-            )
-            .child(
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child(div().flex_none().child(task.key.provider.label()))
-                    .child(
-                        div()
-                            .flex_none()
-                            .child(background_task_kind_label(task.kind)),
-                    )
-                    .child(div().flex_1().truncate().child(row_detail(task)))
-                    .children(row_timing(task, now).map(|timing| div().flex_none().child(timing))),
-            );
-
-        let body: AnyElement = match (&state, items.is_empty()) {
-            (BackgroundTaskTranscriptState::Unavailable { message }, _) => empty_state(
-                i18n("tasks-background-transcript-unavailable-title"),
-                &i18n("tasks-background-transcript-unavailable-detail")
-                    .replace("{message}", message),
-                cx,
-            ),
-            (BackgroundTaskTranscriptState::Loading, true) => empty_state(
-                i18n("tasks-background-loading-title"),
-                i18n("tasks-background-transcript-loading-detail"),
-                cx,
-            ),
-            (_, true) => empty_state(
-                i18n("tasks-background-transcript-empty-title"),
-                i18n("tasks-background-transcript-empty-detail"),
-                cx,
-            ),
-            _ => v_flex()
-                .flex_1()
-                .min_h_0()
-                // The retention bound drops the oldest content, so a truncated
-                // conversation says so rather than reading as complete.
-                .children((dropped > 0).then(|| {
-                    div()
-                        .px_2()
-                        .py_1()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child(
-                            i18n("tasks-background-transcript-truncated")
-                                .replace("{count}", &dropped.to_string()),
-                        )
-                }))
-                .child(transcript)
-                .into_any_element(),
-        };
-
-        v_flex()
-            .size_full()
-            .child(header)
-            .child(body)
-            .into_any_element()
-    }
-
     #[allow(clippy::too_many_arguments)]
     fn render_section(
         &self,
@@ -434,235 +246,6 @@ impl BackgroundTasksView {
             .children(control.map(|control| div().px_2().pb_1().child(control)))
             .into_any_element()
     }
-}
-
-fn render_row(
-    index: usize,
-    task: &BackgroundTaskSummary,
-    now: SystemTime,
-    cx: &mut Context<BackgroundTasksView>,
-) -> AnyElement {
-    let theme = cx.theme();
-    let color = state_color(task.state, cx);
-    let name = task.display_label();
-    let detail = row_detail(task);
-    let timing = row_timing(task, now);
-    let state_label = background_task_state_label(task.state);
-    // Everything the row shows visually, in one string. A screen reader
-    // announces the row as a whole, so it needs the parts the layout separates
-    // into two lines plus the child id, which is not rendered anywhere.
-    let description: SharedString = format!(
-        "{} · {} · {} · {}\n{}",
-        task.key.provider.label(),
-        background_task_kind_label(task.kind),
-        task.key.id,
-        state_label,
-        detail
-    )
-    .into();
-
-    let key = task.key.clone();
-    let stop_key = task.key.clone();
-
-    // Whether a child can be stopped depends on identifiers the provider may
-    // not have published yet, not on the lifecycle state alone, so the control
-    // follows what the snapshot reports rather than being inferred here.
-    let stop = task.can_stop.then(|| {
-        // Keyed by the child rather than by row position: the two sections
-        // enumerate independently, so a positional id is not unique across them.
-        Button::new(SharedString::from(format!(
-            "background-task-stop-{}",
-            task.key.id
-        )))
-        .ghost()
-        .xsmall()
-        .icon(StopTaskIcon)
-        .tooltip(i18n("tasks-background-stop-tooltip"))
-        .aria_label(i18n("tasks-background-stop-tooltip"))
-        .on_click(cx.listener(move |this, _, _, cx| {
-            // The row opens the child's conversation, so a click that was
-            // meant for Stop must not also navigate.
-            cx.stop_propagation();
-            this.stop_task(&stop_key, cx);
-        }))
-    });
-
-    h_flex()
-        // Activating a row opens that child's own conversation.
-        .id(("background-task-row", index))
-        .px_2()
-        .py_1()
-        .gap_2()
-        // The control is centred against the row as a whole rather than aligned
-        // to either text line, which keeps it steady whether the row has a
-        // timing label or not.
-        .items_center()
-        .cursor_pointer()
-        .hover(|this| this.bg(theme.list_hover))
-        .aria_label(description)
-        .on_click(cx.listener(move |this, _, _, cx| this.open_detail(key.clone(), cx)))
-        .child(
-            v_flex()
-                .flex_1()
-                .min_w_0()
-                .gap_0p5()
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .items_center()
-                        .child(div().flex_1().truncate().text_sm().child(name))
-                        .child(div().text_xs().text_color(color).child(state_label)),
-                )
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .items_center()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child(div().flex_none().child(task.key.provider.label()))
-                        .child(
-                            div()
-                                .flex_none()
-                                .child(background_task_kind_label(task.kind)),
-                        )
-                        .child(div().flex_1().truncate().child(detail))
-                        .children(timing.map(|timing| div().flex_none().child(timing))),
-                ),
-        )
-        .children(stop.map(|stop| div().flex_none().child(stop)))
-        .into_any_element()
-}
-
-/// Objective first, then the latest status line, then a neutral fallback so a
-/// row with no optional metadata still reads as a real entry.
-fn state_color(state: BackgroundTaskState, cx: &Context<BackgroundTasksView>) -> Hsla {
-    let theme = cx.theme();
-    match state {
-        BackgroundTaskState::Failed => theme.red,
-        BackgroundTaskState::NeedsInput => theme.yellow,
-        BackgroundTaskState::Done => theme.green,
-        BackgroundTaskState::Working | BackgroundTaskState::Starting => theme.foreground,
-        BackgroundTaskState::Interrupted | BackgroundTaskState::Stopped => theme.muted_foreground,
-    }
-}
-
-fn row_detail(task: &BackgroundTaskSummary) -> String {
-    task.objective
-        .as_deref()
-        .or(task.status.as_deref())
-        .or(task.last_preview.as_deref())
-        .map(str::to_owned)
-        .unwrap_or_else(|| i18n("tasks-background-no-description").to_string())
-}
-
-fn row_timing(task: &BackgroundTaskSummary, now: SystemTime) -> Option<String> {
-    if task.state.is_terminal() {
-        return task.completed_at.map(|completed| {
-            i18n("tasks-background-finished-ago")
-                .replace("{duration}", &duration_label(now, completed))
-        });
-    }
-    task.started_at.map(|started| duration_label(now, started))
-}
-
-/// Compact difference between two instants. Rounded down, because a label that
-/// reads longer than the real elapsed time is the worse error.
-fn duration_label(now: SystemTime, past: SystemTime) -> String {
-    let seconds = now.duration_since(past).unwrap_or_default().as_secs();
-    match seconds {
-        0..60 => i18n("tasks-background-duration-seconds").replace("{count}", &seconds.to_string()),
-        60..3600 => i18n("tasks-background-duration-minutes")
-            .replace("{count}", &(seconds / 60).to_string()),
-        3600..86400 => i18n("tasks-background-duration-hours")
-            .replace("{count}", &(seconds / 3600).to_string()),
-        _ => i18n("tasks-background-duration-days")
-            .replace("{count}", &(seconds / 86400).to_string()),
-    }
-}
-
-/// What kind of work a row is. Shown beside the provider because a child agent
-/// and a background command differ in what the row's detail and its output
-/// mean, which the description text alone does not say.
-fn background_task_kind_label(kind: BackgroundTaskKind) -> &'static str {
-    match kind {
-        BackgroundTaskKind::Agent => i18n("tasks-background-kind-agent"),
-        BackgroundTaskKind::Shell => i18n("tasks-background-kind-shell"),
-    }
-}
-
-fn background_task_state_label(state: BackgroundTaskState) -> &'static str {
-    match state {
-        BackgroundTaskState::Starting => i18n("tasks-background-state-starting"),
-        BackgroundTaskState::Working => i18n("tasks-background-state-working"),
-        BackgroundTaskState::NeedsInput => i18n("tasks-background-state-needs-input"),
-        BackgroundTaskState::Done => i18n("tasks-background-state-done"),
-        BackgroundTaskState::Interrupted => i18n("tasks-background-state-interrupted"),
-        BackgroundTaskState::Stopped => i18n("tasks-background-state-stopped"),
-        BackgroundTaskState::Failed => i18n("tasks-background-state-failed"),
-    }
-}
-
-/// Running work sorts by earliest known start so the longest-running child
-/// leads; a row with no start time falls back to its update order.
-fn running_rows(snapshot: &BackgroundTaskSnapshot) -> Vec<&BackgroundTaskSummary> {
-    let mut rows: Vec<_> = snapshot
-        .tasks
-        .iter()
-        .filter(|task| task.state.is_active())
-        .collect();
-    rows.sort_by(|left, right| match (left.started_at, right.started_at) {
-        (Some(left_start), Some(right_start)) => left_start.cmp(&right_start),
-        (Some(_), None) => Ordering::Less,
-        (None, Some(_)) => Ordering::Greater,
-        (None, None) => left.sequence.cmp(&right.sequence),
-    });
-    rows
-}
-
-/// Finished work sorts by most recent completion, which is the order a user
-/// scans for "what just ended".
-fn finished_rows(snapshot: &BackgroundTaskSnapshot) -> Vec<&BackgroundTaskSummary> {
-    let mut rows: Vec<_> = snapshot
-        .tasks
-        .iter()
-        .filter(|task| task.state.is_terminal())
-        .collect();
-    rows.sort_by(
-        |left, right| match (left.completed_at, right.completed_at) {
-            (Some(left_end), Some(right_end)) => right_end.cmp(&left_end),
-            (Some(_), None) => Ordering::Less,
-            (None, Some(_)) => Ordering::Greater,
-            (None, None) => right.sequence.cmp(&left.sequence),
-        },
-    );
-    rows
-}
-
-fn visible_rows(total: usize, limit: usize, expanded: bool) -> usize {
-    if expanded { total } else { total.min(limit) }
-}
-
-fn section_control_label(hidden: usize, expanded: bool) -> Option<String> {
-    if expanded {
-        return Some(i18n("tasks-background-show-fewer").to_string());
-    }
-    (hidden > 0).then(|| i18n("tasks-background-show-more").replace("{count}", &hidden.to_string()))
-}
-
-fn running_heading(snapshot: &BackgroundTaskSnapshot) -> String {
-    let active = snapshot.active_count();
-    let needs_input = snapshot.needs_input_count();
-    if needs_input > 0 {
-        return i18n("tasks-background-heading-running-needs-input")
-            .replace("{count}", &active.to_string())
-            .replace("{needs}", &needs_input.to_string());
-    }
-    i18n("tasks-background-heading-running").replace("{count}", &active.to_string())
-}
-
-fn finished_heading(snapshot: &BackgroundTaskSnapshot) -> String {
-    i18n("tasks-background-heading-finished")
-        .replace("{count}", &snapshot.terminal_count().to_string())
 }
 
 impl Render for BackgroundTasksView {
@@ -781,23 +364,6 @@ impl BackgroundTasksView {
             .child(finished_section)
             .into_any_element()
     }
-}
-
-fn empty_state(title: &str, detail: &str, cx: &Context<BackgroundTasksView>) -> AnyElement {
-    v_flex()
-        .flex_1()
-        .items_center()
-        .justify_center()
-        .gap_1()
-        .px(px(16.0))
-        .child(div().text_sm().child(title.to_string()))
-        .child(
-            div()
-                .text_xs()
-                .text_color(cx.theme().muted_foreground)
-                .child(detail.to_string()),
-        )
-        .into_any_element()
 }
 
 #[cfg(test)]

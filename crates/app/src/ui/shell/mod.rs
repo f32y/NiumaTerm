@@ -2,9 +2,11 @@ mod actions;
 mod agent_notifications;
 mod close;
 mod inline_rename;
+mod panels;
 mod panes;
 mod pump;
 mod render;
+mod settings_workspace;
 mod tab_presentation;
 mod tab_surface;
 mod tabs_open;
@@ -34,7 +36,7 @@ use gpui_component::progress::Progress;
 use gpui_component::resizable::{
     PANEL_MIN_SIZE, ResizablePanelGroup, ResizableState, resizable_panel,
 };
-use gpui_component::setting::{SelectIndex, SettingsState};
+use gpui_component::setting::SettingsState;
 use gpui_component::{
     ActiveTheme, Icon, IconName, IconNamed, Root, TitleBar, WindowExt, h_flex, v_flex,
 };
@@ -46,7 +48,6 @@ use nmt_agent_utils::{
 use nmt_app_agent::{AgentKind, AgentPane, AgentPaneEvent};
 use nmt_app_terminal::session::HostEvent;
 use nmt_app_terminal::view::{AgentInterrupted, TerminalPane};
-use nmt_config::get;
 use nmt_config::local_state::WindowState;
 use nmt_config::system::WarnBeforeTerminatingShell;
 use nmt_i18n::i18n;
@@ -92,13 +93,6 @@ use crate::workspace::{
     WorkspaceRoots, best_match, exact_match,
 };
 use crate::{remote, ui};
-
-/// Sidebar entry name and tab title of the settings pseudo workspace, in the
-/// active language. Looked up at creation time; the entry is never persisted,
-/// so a stale-language name cannot leak into local_state.
-pub(super) fn settings_title() -> &'static str {
-    i18n("shell-workspace-settings-title")
-}
 
 /// A workspace cwd as a shell working directory: `None` for empty or the
 /// legacy `"."` placeholder (shells then start in their default directory).
@@ -388,131 +382,6 @@ impl Shell {
         this
     }
 
-    /// Centralized target-CWD sync: read the active pane's
-    /// OSC7-tracked CWD (falling back to the configured working-dir) and
-    /// hand it to the git model, which no-ops when unchanged. Called on
-    /// every render and on `HostEvent::Cwd`, so no switch path is missed.
-    fn sync_git_target(&self, cx: &mut Context<Self>) {
-        // Agent tabs have no OSC7-tracking pane; the configured working dir
-        // keeps the git indicator on something sensible.
-        let cwd = self
-            .try_active_pane()
-            .and_then(|pane| pane.read(cx).tab_state().cwd)
-            .or_else(|| get().working_dir.clone());
-
-        self.git_model
-            .update(cx, |model, cx| model.set_target_cwd(cwd, cx));
-    }
-
-    fn on_toggle_git_sidebar(
-        &mut self,
-        _: &ToggleGitSidebar,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let open = self
-            .right_panel
-            .update(cx, |panel, cx| panel.select(RightPanelKind::Git, cx));
-
-        self.git_model.update(cx, |model, cx| {
-            model.sidebar_open = open;
-            if open {
-                model.refresh(cx);
-            }
-        });
-
-        cx.notify();
-    }
-
-    fn on_toggle_background_tasks(
-        &mut self,
-        _: &ToggleBackgroundTasks,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let open = self.right_panel.update(cx, |panel, cx| {
-            panel.select(RightPanelKind::BackgroundTasks, cx)
-        });
-
-        if open {
-            self.sync_task_panel_target(cx);
-            // Asking for fresher data happens on the open edge, not on every
-            // render, so a visible panel does not re-query the provider each
-            // frame. The adapter still ignores overlapping requests.
-            if let Some(pane) = self.active_agent() {
-                pane.update(cx, |pane, _| pane.refresh_background_tasks());
-            }
-        }
-        // Git content owns the poller's own visibility flag; leaving Git for
-        // another view stops the polling it turned on.
-        self.git_model
-            .update(cx, |model, _| model.sidebar_open = false);
-
-        cx.notify();
-    }
-
-    pub(super) fn workflows_seen(&self) -> bool {
-        self.workflows_seen
-    }
-
-    pub(super) fn background_tasks_seen(&self) -> bool {
-        self.background_tasks_seen
-    }
-
-    /// Whether the right-side area currently shows this content, which is the
-    /// checked state of the title-bar control that opens it.
-    pub(super) fn right_panel_shows(&self, kind: RightPanelKind, cx: &App) -> bool {
-        self.right_panel.read(cx).shows(kind)
-    }
-
-    fn on_toggle_workflows(
-        &mut self,
-        _: &ToggleWorkflows,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let open = self
-            .right_panel
-            .update(cx, |panel, cx| panel.select(RightPanelKind::Workflows, cx));
-
-        if open {
-            self.sync_workflow_panel_target(cx);
-        }
-        // Git owns the poller's own visibility flag; leaving Git for another
-        // view stops the polling it turned on.
-        self.git_model
-            .update(cx, |model, _| model.sidebar_open = false);
-
-        cx.notify();
-    }
-
-    /// Point the workflow view at the active Agent pane. Only Claude Code
-    /// reports workflows, so any other pane clears the target and the view
-    /// reports that there is no session rather than closing.
-    fn sync_workflow_panel_target(&mut self, cx: &mut Context<Self>) {
-        let target = self
-            .active_agent()
-            .filter(|pane| pane.read(cx).workflow_session_id().is_some());
-
-        let handle = target.map(|pane| pane.downgrade());
-        let workflows = self.right_panel.read(cx).workflows().clone();
-        workflows.update(cx, |view, cx| view.set_target(handle, cx));
-    }
-
-    /// Point the view at the active Agent pane. A pane with no supported
-    /// provider session clears the target rather than closing the view: the
-    /// panel reports that there is nothing to show, which keeps the right-side
-    /// area from vanishing while the user moves between tabs.
-    fn sync_task_panel_target(&mut self, cx: &mut Context<Self>) {
-        let target = self
-            .active_agent()
-            .filter(|pane| pane.read(cx).background_task_parent().is_some());
-
-        let handle = target.map(|pane| pane.downgrade());
-        let tasks = self.right_panel.read(cx).tasks().clone();
-        tasks.update(cx, |view, cx| view.set_target(handle, cx));
-    }
-
     pub(crate) fn alloc_id(next_id: &mut u64) -> u64 {
         let id = *next_id;
 
@@ -783,95 +652,5 @@ impl Shell {
         self.sidebar.animated = true;
 
         cx.notify();
-    }
-
-    /// Show settings as a pseudo workspace: a sidebar entry holding a single
-    /// `Settings` tab whose surface fills the main area. A modal would block
-    /// the terminal the user is adjusting settings for, while an entry can be
-    /// left open and switched away from.
-    ///
-    /// Field edits mutate the `AppSettings` global live (for preview); the set
-    /// is written when the entry closes and again on quit, since an entry the
-    /// user never closes would otherwise never reach the file.
-    pub(super) fn on_show_settings(
-        &mut self,
-        _: &ShowSettings,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(id) = self.workspaces.settings_id() {
-            if let Some(index) = self
-                .workspaces
-                .summaries()
-                .iter()
-                .position(|ws| ws.id == id)
-            {
-                self.workspaces.activate(index);
-                self.focus_active(window, cx);
-                cx.notify();
-            }
-
-            return;
-        }
-
-        // Live theme previews need the themes directory watched for as long as
-        // the settings surface is on screen.
-        self.theme_watcher = ui::watch_themes(cx);
-
-        // Nothing else repaints on a page click, because the state lives
-        // outside the element tree that would otherwise notify for it.
-        let state = SettingsState::owned(SelectIndex::default(), window, cx);
-
-        cx.observe(&state, |_, _, cx| cx.notify()).detach();
-
-        self.settings_state = Some(state);
-
-        let id = Self::alloc_id(&mut self.next_id);
-        let tabs = TabManager::new(
-            TabSurface::Settings,
-            TabId(id),
-            settings_title().to_string(),
-        );
-        let ws_id = Self::alloc_id(&mut self.next_id);
-
-        self.workspaces.new_workspace_of_kind(
-            tabs,
-            WorkspaceId(ws_id),
-            settings_title().to_string(),
-            // The settings entry is a view of the configuration file, so it
-            // owns no directory and never contributes to path routing.
-            None,
-            WorkspaceKind::Settings,
-        );
-
-        self.focus_active(window, cx);
-
-        cx.notify();
-    }
-
-    /// Persist settings and drop the machinery the settings surface owns.
-    /// Reached from every path that removes the settings entry.
-    pub(super) fn retire_settings_workspace(&mut self, cx: &mut Context<Self>) {
-        cx.global::<AppSettings>().save();
-        // Pick up relay URL / token edits made while the entry was open.
-        ui::settings::reconcile_remote_host(cx);
-
-        // The surface is gone, so the next activation has nothing to flush.
-        self.settings_was_active = false;
-
-        self.theme_watcher = None;
-        // Reopening starts on the first page, matching what the modal did.
-        self.settings_state = None;
-    }
-
-    /// Leave the settings entry for a normal workspace. Every path that adds a
-    /// tab funnels through this, so a new tab never lands in the settings
-    /// entry and breaks its single-tab presentation.
-    pub(crate) fn leave_settings_workspace(&mut self) {
-        if self.workspaces.active_kind() == WorkspaceKind::Settings {
-            let index = self.workspaces.first_normal_index();
-
-            self.workspaces.activate(index);
-        }
     }
 }
