@@ -66,6 +66,41 @@ pub use crate::ghostty::types::{RowCell, ScreenRowRead};
 /// raw number; an ANSI mode sets bit 15. See Ghostty `src/terminal/modes.zig`.
 pub mod mode;
 
+/// What the engine last reported for the title and the working directory.
+///
+/// Both are read fresh from the engine on every poll, so the only thing kept
+/// here is the previous answer: it is what turns an unconditional read into a
+/// change report, and neither value is used for anything else.
+#[derive(Default)]
+struct TitleMirror {
+    title: String,
+    pwd: String,
+}
+
+impl TitleMirror {
+    /// Report `latest` only when it differs from the last reported title.
+    fn note_title(&mut self, latest: String) -> Option<String> {
+        if latest == self.title {
+            return None;
+        }
+
+        self.title = latest.clone();
+
+        Some(latest)
+    }
+
+    /// Report `latest` only when it differs from the last reported directory.
+    fn note_pwd(&mut self, latest: String) -> Option<String> {
+        if latest == self.pwd {
+            return None;
+        }
+
+        self.pwd = latest.clone();
+
+        Some(latest)
+    }
+}
+
 pub struct GhosttyTerminal {
     terminal: VtTerminal,
     render: RenderStateReader,
@@ -75,8 +110,7 @@ pub struct GhosttyTerminal {
     /// Boxed so its heap address stays fixed across `GhosttyTerminal` moves;
     /// registered with the engine as the callback userdata pointer.
     callbacks: Box<Callbacks>,
-    last_title: String,
-    last_pwd: String,
+    titles: TitleMirror,
     scrollbar_override: Option<ScrollbarInfo>,
 }
 
@@ -177,8 +211,7 @@ impl GhosttyTerminal {
             cols,
             rows,
             callbacks,
-            last_title: String::new(),
-            last_pwd: String::new(),
+            titles: TitleMirror::default(),
             scrollbar_override: None,
         })
     }
@@ -204,12 +237,7 @@ impl GhosttyTerminal {
     pub fn poll_title(&mut self) -> Option<String> {
         let title = self.get_string(VtTerminalData::TITLE);
 
-        if title != self.last_title {
-            self.last_title = title.clone();
-            Some(title)
-        } else {
-            None
-        }
+        self.titles.note_title(title)
     }
 
     /// Poll the working directory (OSC 7); returns `Some(pwd)` only when it
@@ -217,12 +245,7 @@ impl GhosttyTerminal {
     pub fn poll_pwd(&mut self) -> Option<String> {
         let pwd = self.get_string(VtTerminalData::PWD);
 
-        if pwd != self.last_pwd {
-            self.last_pwd = pwd.clone();
-            Some(pwd)
-        } else {
-            None
-        }
+        self.titles.note_pwd(pwd)
     }
 
     /// The current OSC window title (peek — reads the engine's live value, no
