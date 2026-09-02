@@ -1,10 +1,10 @@
 //! The pane's state, grouped by the concern that changes it.
 //!
 //! [`crate::AgentPane`] coordinates one conversation across a backend
-//! process, thread controls, per-turn bookkeeping, and child-agent activity.
-//! Each group below holds the fields one of those concerns mutates together,
-//! so a reader can tell from the type which fields move as a unit and which
-//! merely live on the same pane.
+//! process, per-turn bookkeeping, and child-agent activity. Each group below
+//! holds the fields one of those concerns mutates together, so a reader can
+//! tell from the type which fields move as a unit and which merely live on
+//! the same pane.
 
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
