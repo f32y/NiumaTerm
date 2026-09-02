@@ -8,7 +8,7 @@ mod banners;
 mod blocking_overlay;
 mod history;
 mod last_response;
-mod session_state;
+pub(crate) mod session_state;
 
 #[cfg(test)]
 mod tests;
@@ -124,7 +124,7 @@ impl Render for AgentPane {
                 )
         });
         let queued_message = self.render_queued_prompts(cx);
-        let session_state = self.render_session_state(cx);
+        let session_state = self.session_state.render(cx);
 
         let approval = self.render_approval_panel(cx);
         let questions = self.render_question_panel(cx);

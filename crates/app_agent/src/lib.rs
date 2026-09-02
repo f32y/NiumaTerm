@@ -32,8 +32,8 @@ use gpui::{Entity, FocusHandle, Pixels, Point, ScrollHandle, SharedString};
 use gpui_component::VirtualListScrollHandle;
 use gpui_component::input::InputState;
 use nmt_agent_utils::chat::{
-    ContextComposition, ContextWindowUsage, GoalStatus, Question, ReplayTurn, SessionScope,
-    SessionStats, SessionSummary, SkillCatalog, SkillReference, SlashCommandInfo,
+    ContextComposition, ContextWindowUsage, Question, ReplayTurn, SessionScope, SessionStats,
+    SessionSummary, SkillCatalog, SkillReference, SlashCommandInfo,
 };
 use nmt_agent_utils::{AgentEvent, AgentRoute, AgentWorkspace};
 use nmt_config::profile::AgentProfile;
@@ -49,6 +49,7 @@ pub use crate::session::{
 };
 use crate::thread_controls::ThreadControls;
 use crate::transcript::TranscriptView;
+use crate::view::session_state::SessionStateBadge;
 use crate::workflows::WorkflowUi;
 
 #[derive(Clone)]
@@ -609,13 +610,8 @@ pub struct AgentPane {
     /// How that window is currently filled, when the provider measures it.
     /// Codex reports only accounting, so this stays empty there.
     context_composition: Option<ContextComposition>,
-    /// The standing objective the backend is working towards, when it runs
-    /// one. It outlives the turn that created it, so it belongs beside the
-    /// composer rather than in the transcript.
-    goal: Option<GoalStatus>,
-    /// Whether the backend is collaborating on a plan rather than carrying out
-    /// work. Backends that have no such mode never set it.
-    plan_mode: bool,
+    /// The plan mode and standing objective drawn above the composer.
+    session_state: SessionStateBadge,
     /// Whole-log counters the backend folds from its own log. Absent where the
     /// backend reports none, because counting the visible transcript instead
     /// would disagree with the conversation's real length.
