@@ -551,8 +551,7 @@ impl Render for Shell {
         let sidebar = self.sidebar.render(
             summaries,
             sidebar_tabs,
-            self.workspace_rename.as_ref(),
-            self.tab_rename.as_ref(),
+            &self.renames,
             SidebarUsage {
                 daily: self.token_usage.clone(),
                 quotas: self.agent_usage.clone(),
@@ -587,7 +586,7 @@ impl Render for Shell {
                 self.workspaces.active_tabs(),
                 &unread_tabs,
                 &busy_agent_tabs,
-                self.tab_rename.as_ref(),
+                &self.renames,
                 cx,
             ),
         };

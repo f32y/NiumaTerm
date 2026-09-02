@@ -2,11 +2,10 @@ use std::{cell, collections, rc};
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Context, DragMoveEvent, Entity, Hsla, IsZero as _, Pixels, ScrollHandle,
-    SharedString, div, px, relative,
+    AnyElement, App, Context, DragMoveEvent, Hsla, IsZero as _, Pixels, ScrollHandle, SharedString,
+    div, px, relative,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::input::InputState;
 use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::tab::{Tab, TabBar, TabVariant};
 use gpui_component::{ActiveTheme, ElementExt as _, IconName, Sizable};
@@ -18,7 +17,9 @@ use crate::tabs::{TabId, TabManager};
 use crate::ui::composition::{
     HoverActionLayout, HoverActionVisibility, StatusMark, StatusMarkTone, hover_action,
 };
-use crate::ui::shell::{InlineRename, InlineRenameStyle, TabSurface, pending_tab_icon};
+use crate::ui::shell::{
+    InlineRename, InlineRenameSession, InlineRenameStyle, TabSurface, pending_tab_icon,
+};
 use crate::ui::terminal_status::{TerminalVisual, terminal_dot, terminal_presentation};
 use crate::ui::{AppSettings, Shell, UI_RADIUS, modern_dropdown};
 use crate::workspace::TerminalActivity;
@@ -261,7 +262,7 @@ impl TabStrip {
         tabs: &TabManager<TabSurface>,
         unread_tabs: &collections::HashSet<TabId>,
         busy_agent_tabs: &collections::HashSet<TabId>,
-        rename: Option<&(TabId, Entity<InputState>)>,
+        renames: &InlineRenameSession,
         cx: &mut Context<Shell>,
     ) -> AnyElement {
         let active_idx = tabs.active_index();
@@ -400,9 +401,7 @@ impl TabStrip {
                 // stopper keeps clicks in the input from activating the tab
                 // (and blurring the input); Escape cancels before the input
                 // sees it. Otherwise the label carries the right-click menu.
-                let renaming = rename
-                    .filter(|(rid, _)| *rid == TabId(id))
-                    .map(|(_, input)| input.clone());
+                let renaming = renames.tab_input(TabId(id)).cloned();
 
                 let content: AnyElement = if let Some(input) = renaming {
                     let rename_shell = cx.entity();
