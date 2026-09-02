@@ -51,10 +51,12 @@ members = [
     "third_party/gpui-component/macros",
     "third_party/gpui-component/ui",
 ]
+# The binaries a bare `cargo build` produces. `remote_session_hub` is not one:
+# it is a library the app already pulls in through `remote_net`, so naming it
+# here only made it read as a build target of its own.
 default-members = [
     "crates/agent_hook_cli",
     "crates/app",
-    "crates/remote_session_hub",
     "crates/shell_extension",
     "crates/tree_sitter_bundle",
 ]
@@ -602,7 +604,10 @@ zeno = "0.3.3"
 [profile.release]
 strip = "symbols"
 split-debuginfo = "packed"
-debug = "full"
+# Enough to name a function and a line in a backtrace, without the type and
+# local records that make up most of a full build's debug output. Packaging
+# ships the executable alone, so nothing downstream reads the rest.
+debug = "line-tables-only"
 incremental = false
 lto = "thin"
 panic = "abort"
@@ -612,3 +617,11 @@ split-debuginfo = "unpacked"
 lto = false
 incremental = true
 opt-level = 0
+
+# Dependencies are optimized even in a debug build: the VT engine, the rope,
+# and the window system all sit in the path of every keystroke, and unoptimized
+# they make a debug build too slow to judge anything by. They are compiled once
+# and cached, so the edit-run loop over this repository's own crates does not
+# get slower.
+[profile.dev.package."*"]
+opt-level = 2
