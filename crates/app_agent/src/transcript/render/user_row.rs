@@ -130,7 +130,7 @@ impl TranscriptView {
         let parsed = parse_annotated_prompt(text);
         let text = parsed.as_ref().map_or(text, |parsed| parsed.prompt);
         let head_len = truncated_user_prompt(text).map(str::len);
-        let expanded = head_len.is_some() && self.expanded_rows.contains(&index);
+        let expanded = head_len.is_some() && self.disclosures.row_expanded(index);
         let shown = match (head_len, expanded) {
             (Some(len), false) => text[..len].to_string(),
             _ => text.to_string(),
@@ -165,7 +165,7 @@ impl TranscriptView {
         // Its toggle still pins the reading position, which is what a paste
         // long enough to fold actually needs.
         let annotations_reveal =
-            self.reveals
+            self.disclosures
                 .progress(RevealKey::Annotation(index), 0, Instant::now());
         // The quotations open a rounded bubble, and a clip box is a rectangle,
         // so they fade in place rather than growing by height: squaring off
@@ -173,8 +173,8 @@ impl TranscriptView {
         // ramp buys on a block this size. The card is shaped for as long as
         // they are on screen and the wording answers the click at once.
         let annotations_shown =
-            self.expanded_annotations.contains(&index) && annotations_reveal > 0.0;
-        let annotations_disclosing = self.is_disclosing(RevealKey::Annotation(index));
+            self.disclosures.annotation_expanded(index) && annotations_reveal > 0.0;
+        let annotations_disclosing = self.disclosures.is_disclosing(RevealKey::Annotation(index));
         let annotations = parsed.as_ref().and_then(|parsed| {
             (!parsed.annotations.is_empty()).then(|| {
                 let action_label = if annotations_disclosing {

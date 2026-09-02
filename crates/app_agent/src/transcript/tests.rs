@@ -367,12 +367,15 @@ mod fence_tests {
 /// `TranscriptView`s, so anything held on the type rather than per instance
 /// would leak one conversation's reading position into the other.
 mod separate_view_state_tests {
+    use std::time::Instant;
+
     use gpui::{AppContext as _, TestAppContext};
     use nmt_agent_utils::chat::Item as SessionItem;
     use nmt_config::agent::CollapseRows;
 
     use crate::profile::AgentKind;
     use crate::transcript::TranscriptView;
+    use crate::transcript::reveal::RevealKey;
 
     fn message(id: &str, text: &str) -> SessionItem {
         SessionItem::AgentMessage {
@@ -389,22 +392,28 @@ mod separate_view_state_tests {
 
             parent.update(cx, |transcript, cx| {
                 transcript.push(1, message("a", "parent reply"), Vec::new(), cx);
-                transcript.expanded_rows.insert(0);
-                transcript.expanded_annotations.insert(0);
+                transcript
+                    .disclosures
+                    .open(RevealKey::Row(0), Instant::now(), false);
+                transcript
+                    .disclosures
+                    .open(RevealKey::Annotation(0), Instant::now(), false);
                 transcript.toggled_turns.insert(1);
-                transcript.expanded_groups.insert(0);
+                transcript
+                    .disclosures
+                    .open(RevealKey::Group(0), Instant::now(), false);
                 transcript.mark_interrupted(1);
             });
 
             child.update(cx, |transcript, cx| {
                 transcript.push(1, message("b", "child reply"), Vec::new(), cx);
                 assert!(
-                    transcript.expanded_rows.is_empty(),
+                    transcript.disclosures.expanded_rows().is_empty(),
                     "row expansion belongs to one conversation"
                 );
-                assert!(transcript.expanded_annotations.is_empty());
+                assert!(transcript.disclosures.expanded_annotations().is_empty());
                 assert!(transcript.toggled_turns.is_empty());
-                assert!(transcript.expanded_groups.is_empty());
+                assert!(transcript.disclosures.expanded_groups().is_empty());
                 assert!(
                     !transcript.was_interrupted(1),
                     "turn accounting belongs to one conversation"
@@ -413,8 +422,8 @@ mod separate_view_state_tests {
 
             // The parent keeps everything it had after the child was touched.
             parent.update(cx, |transcript, _| {
-                assert!(transcript.expanded_rows.contains(&0));
-                assert!(transcript.expanded_annotations.contains(&0));
+                assert!(transcript.disclosures.row_expanded(0));
+                assert!(transcript.disclosures.annotation_expanded(0));
                 assert!(transcript.was_interrupted(1));
                 assert!(!transcript.is_empty());
             });
@@ -1186,10 +1195,10 @@ mod row_rhythm_tests {
                 view.toggle_disclosure(RevealKey::Group(2), cx);
                 let now = Instant::now();
 
-                assert!(view.expanded_groups.contains(&2), "the run still opens");
-                assert!(view.reveals.settled(now));
-                assert_eq!(view.reveals.progress(RevealKey::Group(2), 0, now), 1.0);
-                assert_eq!(view.reveals.progress(RevealKey::Group(2), 40, now), 1.0);
+                assert!(view.disclosures.group_expanded(2), "the run still opens");
+                assert!(view.disclosures.settled(now));
+                assert_eq!(view.disclosures.progress(RevealKey::Group(2), 0, now), 1.0);
+                assert_eq!(view.disclosures.progress(RevealKey::Group(2), 40, now), 1.0);
             });
         });
     }
@@ -1209,7 +1218,7 @@ mod row_rhythm_tests {
                 let specs = view.build_row_specs(CollapseRows::ToolCalls);
                 view.sync_transcript_list(specs);
                 assert!(
-                    view.expanded_groups.contains(&2),
+                    view.disclosures.group_expanded(2),
                     "the run is still on its way out"
                 );
                 assert_eq!(
@@ -1224,7 +1233,7 @@ mod row_rhythm_tests {
                 let specs = view.build_row_specs(CollapseRows::ToolCalls);
                 view.sync_transcript_list(specs);
 
-                assert!(view.expanded_groups.is_empty());
+                assert!(view.disclosures.expanded_groups().is_empty());
                 assert_eq!(
                     rhythm(view)
                         .iter()
@@ -1248,7 +1257,8 @@ mod row_rhythm_tests {
             let view = transcript_with_a_collapsed_run(cx);
 
             view.update(cx, |view, cx| {
-                view.expanded_groups.insert(2);
+                view.disclosures
+                    .open(RevealKey::Group(2), Instant::now(), false);
                 let specs = view.build_row_specs(CollapseRows::ToolCalls);
                 view.sync_transcript_list(specs);
 
@@ -1284,17 +1294,16 @@ mod row_rhythm_tests {
                 view.sync_transcript_list(specs);
 
                 let elsewhere = RevealedPart::Block(RevealKey::Row(0));
-                view.revealed_heights.insert(RevealedPart::Step(2), px(40.));
-                view.revealed_heights.insert(RevealedPart::Step(3), px(40.));
-                view.revealed_heights.insert(elsewhere, px(80.));
+                view.disclosures
+                    .record_height(RevealedPart::Step(2), px(40.));
+                view.disclosures
+                    .record_height(RevealedPart::Step(3), px(40.));
+                view.disclosures.record_height(elsewhere, px(80.));
 
                 view.toggle_disclosure(RevealKey::Group(2), cx);
                 view.settle_shut_disclosures(Instant::now() + Duration::from_secs(1));
 
-                assert_eq!(
-                    view.revealed_heights.keys().copied().collect::<Vec<_>>(),
-                    vec![elsewhere]
-                );
+                assert_eq!(view.disclosures.measured_parts(), vec![elsewhere]);
             });
         });
     }
@@ -1315,7 +1324,7 @@ mod row_rhythm_tests {
 
                 view.settle_shut_disclosures(Instant::now() + Duration::from_secs(1));
                 assert!(
-                    view.expanded_groups.contains(&2),
+                    view.disclosures.group_expanded(2),
                     "the run stayed open rather than finishing the exit"
                 );
             });
@@ -1334,8 +1343,8 @@ mod row_rhythm_tests {
                 view.toggle_disclosure(RevealKey::Group(2), cx);
                 view.toggle_disclosure(RevealKey::Group(2), cx);
 
-                assert!(view.expanded_groups.is_empty());
-                assert!(view.reveals.settled(Instant::now()));
+                assert!(view.disclosures.expanded_groups().is_empty());
+                assert!(view.disclosures.settled(Instant::now()));
             });
         });
     }
@@ -1346,7 +1355,8 @@ mod row_rhythm_tests {
             let view = transcript_with_a_collapsed_run(cx);
 
             view.update(cx, |view, _| {
-                view.expanded_groups.insert(2);
+                view.disclosures
+                    .open(RevealKey::Group(2), Instant::now(), false);
                 let specs = view.build_row_specs(CollapseRows::ToolCalls);
                 view.sync_transcript_list(specs);
 

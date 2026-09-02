@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use gpui::prelude::*;
@@ -256,6 +256,184 @@ fn ease_out_inverse(covered: f32) -> f32 {
     }
 }
 
+/// Which parts of the transcript are open, how far through their motion they
+/// are, and how tall each one lays out to.
+///
+/// The three expansion sets, the motion clock and the measured heights are one
+/// thing at three lifetimes: a click writes the set, the clock runs the ramp
+/// the set makes visible, and the height is what that ramp interpolates
+/// towards. Taking a disclosure down has to retire all three together, which
+/// is why they are held here rather than as five fields on the view.
+#[derive(Default)]
+pub(crate) struct Disclosures {
+    /// Work-log rows whose detail (command output, reasoning text) is
+    /// expanded, keyed by transcript index.
+    expanded_rows: HashSet<usize>,
+    /// Collapsed work-log runs the user has expanded, keyed by the index of
+    /// the run's first transcript entry (stable, the list only appends).
+    expanded_groups: HashSet<usize>,
+    /// User-message annotation cards expanded to show their complete text.
+    expanded_annotations: HashSet<usize>,
+    /// When each moving disclosure started, and which way it is going. This
+    /// is what the content it discloses fades and grows against.
+    reveals: Reveals,
+    /// Full height of each piece of the transcript a disclosure opens,
+    /// measured while that piece is on screen. A piece being opened or shut is
+    /// drawn inside a box ramped towards this, so the height comes from what
+    /// the content actually lays out to rather than being guessed at.
+    revealed_heights: HashMap<RevealedPart, Pixels>,
+}
+
+impl Disclosures {
+    /// Whether the disclosure is open or heading there, which is what its
+    /// wording reports: a click that starts an exit has already answered the
+    /// reader, whatever is still leaving the screen behind it.
+    pub(crate) fn is_disclosing(&self, key: RevealKey) -> bool {
+        self.is_disclosed(key) && !self.reveals.is_closing(key)
+    }
+
+    /// Whether the disclosure's content is currently part of the transcript,
+    /// which stays true through the whole of its exit.
+    fn is_disclosed(&self, key: RevealKey) -> bool {
+        match key {
+            RevealKey::Row(index) => self.expanded_rows.contains(&index),
+            RevealKey::Annotation(index) => self.expanded_annotations.contains(&index),
+            RevealKey::Group(run_start) => self.expanded_groups.contains(&run_start),
+        }
+    }
+
+    pub(crate) fn row_expanded(&self, index: usize) -> bool {
+        self.expanded_rows.contains(&index)
+    }
+
+    pub(crate) fn annotation_expanded(&self, index: usize) -> bool {
+        self.expanded_annotations.contains(&index)
+    }
+
+    pub(crate) fn group_expanded(&self, run_start: usize) -> bool {
+        self.expanded_groups.contains(&run_start)
+    }
+
+    /// Put the disclosure's content on screen and start it opening. Ending the
+    /// motion immediately is what reduced motion asks for.
+    pub(crate) fn open(&mut self, key: RevealKey, now: Instant, animate: bool) {
+        match key {
+            RevealKey::Row(index) => self.expanded_rows.insert(index),
+            RevealKey::Annotation(index) => self.expanded_annotations.insert(index),
+            RevealKey::Group(run_start) => self.expanded_groups.insert(run_start),
+        };
+
+        match animate {
+            true => self.reveals.open(key, now),
+            false => self.reveals.end(key),
+        }
+    }
+
+    /// Start the exit. The content stays until [`Self::take_down`] runs, which
+    /// is what gives the exit something to move.
+    pub(crate) fn begin_close(&mut self, key: RevealKey, now: Instant) {
+        self.reveals.close(key, now);
+    }
+
+    /// Remove a shut disclosure's content and everything measured for it.
+    /// Returns the transcript index of a collapsed row, whose segmented source
+    /// the caller drops; `steps` are the run rows whose measured heights leave
+    /// the list with the run.
+    pub(crate) fn take_down(&mut self, key: RevealKey, steps: &[usize]) -> Option<usize> {
+        self.reveals.end(key);
+        self.revealed_heights.remove(&RevealedPart::Block(key));
+
+        match key {
+            RevealKey::Row(index) => {
+                self.expanded_rows.remove(&index);
+
+                Some(index)
+            }
+            RevealKey::Annotation(index) => {
+                self.expanded_annotations.remove(&index);
+
+                None
+            }
+            RevealKey::Group(run_start) => {
+                self.expanded_groups.remove(&run_start);
+
+                for index in steps {
+                    self.revealed_heights.remove(&RevealedPart::Step(*index));
+                }
+
+                None
+            }
+        }
+    }
+
+    /// How far through its motion one disclosure is, for the row at `ordinal`
+    /// places down it.
+    pub(crate) fn progress(&self, key: RevealKey, ordinal: usize, now: Instant) -> f32 {
+        self.reveals.progress(key, ordinal, now)
+    }
+
+    /// The measured full height of one piece, once it has been on screen.
+    pub(crate) fn height(&self, part: RevealedPart) -> Option<Pixels> {
+        self.revealed_heights.get(&part).copied()
+    }
+
+    pub(crate) fn record_height(&mut self, part: RevealedPart, height: Pixels) {
+        self.revealed_heights.insert(part, height);
+    }
+
+    pub(crate) fn settled(&self, now: Instant) -> bool {
+        self.reveals.settled(now)
+    }
+
+    /// The disclosures whose exit has finished and whose content can go.
+    pub(crate) fn shut(&self, now: Instant) -> Vec<RevealKey> {
+        self.reveals.shut(now)
+    }
+
+    pub(crate) fn closing(&self) -> Vec<RevealKey> {
+        self.reveals.closing()
+    }
+
+    /// Forget every expansion and every motion, as a replaced conversation
+    /// does.
+    pub(crate) fn clear(&mut self) {
+        self.expanded_rows.clear();
+        self.expanded_groups.clear();
+        self.expanded_annotations.clear();
+        self.reveals.clear();
+        self.revealed_heights.clear();
+    }
+
+    /// Forget the run expansions and everything measured, which a change to
+    /// the collapse setting asks for. The per-row and per-annotation
+    /// expansions are not departures from that setting, so they stay.
+    pub(crate) fn forget_groups(&mut self) {
+        self.expanded_groups.clear();
+        self.reveals.clear();
+        self.revealed_heights.clear();
+    }
+}
+
+#[cfg(test)]
+impl Disclosures {
+    pub(crate) fn expanded_rows(&self) -> &HashSet<usize> {
+        &self.expanded_rows
+    }
+
+    pub(crate) fn expanded_groups(&self) -> &HashSet<usize> {
+        &self.expanded_groups
+    }
+
+    pub(crate) fn expanded_annotations(&self) -> &HashSet<usize> {
+        &self.expanded_annotations
+    }
+
+    /// Every piece a height has been measured for.
+    pub(crate) fn measured_parts(&self) -> Vec<RevealedPart> {
+        self.revealed_heights.keys().copied().collect()
+    }
+}
+
 impl TranscriptView {
     /// Flip one disclosure open or shut, holding the reader's place while its
     /// content changes and setting that content moving either way.
@@ -284,77 +462,29 @@ impl TranscriptView {
         // A disclosure part-way through its exit is still on screen but is on
         // its way out, so the click that catches it there is asking for it
         // back rather than asking again for what it is already doing.
-        match self.is_disclosing(key) {
+        match self.disclosures.is_disclosing(key) {
             true if reduce_motion => self.take_down_disclosure(key),
-            true => self.reveals.close(key, now),
-            false => {
-                self.disclose(key);
-                match reduce_motion {
-                    true => self.reveals.end(key),
-                    false => self.reveals.open(key, now),
-                }
-            }
+            true => self.disclosures.begin_close(key, now),
+            false => self.disclosures.open(key, now, !reduce_motion),
         }
 
         cx.notify();
-    }
-
-    /// Whether the disclosure is open or heading there, which is what its
-    /// wording reports: a click that starts an exit has already answered the
-    /// reader, whatever is still leaving the screen behind it.
-    pub(crate) fn is_disclosing(&self, key: RevealKey) -> bool {
-        self.is_disclosed(key) && !self.reveals.is_closing(key)
-    }
-
-    /// Whether the disclosure's content is currently part of the transcript,
-    /// which stays true through the whole of its exit.
-    fn is_disclosed(&self, key: RevealKey) -> bool {
-        match key {
-            RevealKey::Row(index) => self.expanded_rows.contains(&index),
-            RevealKey::Annotation(index) => self.expanded_annotations.contains(&index),
-            RevealKey::Group(run_start) => self.expanded_groups.contains(&run_start),
-        }
-    }
-
-    fn disclose(&mut self, key: RevealKey) {
-        match key {
-            RevealKey::Row(index) => self.expanded_rows.insert(index),
-            RevealKey::Annotation(index) => self.expanded_annotations.insert(index),
-            RevealKey::Group(run_start) => self.expanded_groups.insert(run_start),
-        };
     }
 
     /// Remove a shut disclosure's content and everything measured or cached
     /// for it. Splitting this from the click is what gives the exit something
     /// to move; by the time it runs there is nothing left on screen to lose.
     pub(crate) fn take_down_disclosure(&mut self, key: RevealKey) {
-        self.reveals.end(key);
-        self.revealed_heights.remove(&RevealedPart::Block(key));
+        // A run's steps are measured a row at a time, and those rows leave the
+        // list with the run. Their heights are read off the rows still
+        // standing, which is why they are collected before the run stops
+        // reporting itself as expanded.
+        let steps = self.run_steps(key);
 
-        match key {
-            RevealKey::Row(index) => {
-                self.expanded_rows.remove(&index);
-
-                // A closed row's segmented source would otherwise keep a
-                // second copy of a large output resident behind a row showing
-                // none of it.
-                self.virtual_transcripts.remove(&index);
-            }
-            RevealKey::Annotation(index) => {
-                self.expanded_annotations.remove(&index);
-            }
-            RevealKey::Group(run_start) => {
-                // A run's steps are measured a row at a time, and those rows
-                // leave the list with the run. Their heights are read off the
-                // rows still standing, which is why they are collected before
-                // the run stops reporting itself as expanded.
-                let steps = self.run_steps(key);
-                self.expanded_groups.remove(&run_start);
-
-                for index in steps {
-                    self.revealed_heights.remove(&RevealedPart::Step(index));
-                }
-            }
+        // A closed row's segmented source would otherwise keep a second copy
+        // of a large output resident behind a row showing none of it.
+        if let Some(index) = self.disclosures.take_down(key, &steps) {
+            self.virtual_transcripts.remove(&index);
         }
     }
 
@@ -377,7 +507,7 @@ impl TranscriptView {
     /// in between. Naming the position against the layout this frame is built
     /// on is what keeps that removal from moving it.
     pub(crate) fn settle_shut_disclosures(&mut self, now: Instant) {
-        let shut = self.reveals.shut(now);
+        let shut = self.disclosures.shut(now);
         if shut.is_empty() {
             return;
         }
@@ -456,7 +586,7 @@ pub(crate) fn revealed_block(
         };
 
         view.update(cx, |view, _| {
-            view.revealed_heights.insert(part, height);
+            view.disclosures.record_height(part, height);
         })
         .ok();
     };
