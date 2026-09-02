@@ -240,7 +240,7 @@ impl TerminalPane {
 
         self.block_list.scrollbar.0 = target.min(max_scroll);
 
-        self.mark_scroll_activity(cx);
+        self.scrollbar.mark_activity(cx);
 
         cx.notify();
     }
@@ -502,7 +502,7 @@ impl TerminalPane {
                 self.block_list.list.set_scroll_handler({
                     let pane = pane.clone();
                     move |_, _window, cx| {
-                        pane.update(cx, |pane, cx| pane.mark_scroll_activity(cx));
+                        pane.update(cx, |pane, cx| pane.scrollbar.mark_activity(cx));
                     }
                 });
 

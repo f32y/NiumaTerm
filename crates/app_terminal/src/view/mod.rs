@@ -45,7 +45,7 @@ use crate::layout::{
     bottom_anchor_offsets, frame_content_rows, live_frame_text, row_y_offset, terminal_row_at_y,
 };
 use crate::links::LinkHit;
-use crate::scrollbar::{scrollbar_element, scrollbar_offset_for_thumb, scrollbar_opacity};
+use crate::scrollbar::{scrollbar_element, scrollbar_offset_for_thumb};
 use crate::session::{HostEvent, InFlightBlock};
 use crate::settings::TerminalSettings;
 use crate::surface::{
@@ -62,6 +62,7 @@ pub(super) use crate::view::mouse::terminal_cell_at_position;
 use crate::view::mouse::{
     block_gutter_hit, selection_drag_started, selection_type_for_click_count, terminal_scroll_lines,
 };
+use crate::view::scroll::ScrollbarActivity;
 use crate::{block_list, metrics, wake};
 
 actions!(
@@ -99,18 +100,7 @@ pub struct TerminalPane {
     /// excluded), set from the element's paint. Resize and pointer hit-testing use
     /// it so chrome (tab bar) offsets are honored instead of assuming the window.
     pub(super) content_bounds: Option<Bounds<Pixels>>,
-    /// True while the scrollbar thumb is being dragged (mouse-move then scrolls
-    /// to the pointer instead of selecting text).
-    pub(super) scrollbar_dragging: bool,
-    /// Last user scroll action; the scrollbar stays opaque within
-    /// [`gpui_component::scroll::SCROLLBAR_AUTO_HIDE_DELAY`], then fades out
-    /// unless it is being dragged.
-    pub(super) last_scroll_activity: Option<time::Instant>,
-    /// Bumped per scroll action so only the newest hide-timer repaints.
-    scroll_activity_gen: u64,
-    /// Pointer offset inside the thumb at drag start (track fraction), so
-    /// grabbing the thumb doesn't jump it.
-    pub(super) scrollbar_grab: f32,
+    pub(super) scrollbar: ScrollbarActivity,
     wake: wake::WakeSignal,
     dirty: DirtyState,
     /// The in-flight command mirrored from the session on drain.
@@ -292,10 +282,7 @@ impl TerminalPane {
             frame_cache: TerminalFrameCache::default(),
             cell_metrics: None,
             content_bounds: None,
-            scrollbar_dragging: false,
-            last_scroll_activity: None,
-            scroll_activity_gen: 0,
-            scrollbar_grab: 0.0,
+            scrollbar: ScrollbarActivity::default(),
             wake,
             dirty: DirtyState::default(),
             in_flight: None,
@@ -481,10 +468,7 @@ impl Render for TerminalPane {
         let block_list_element = self.render_block_list_content(&frame, cell, viewport_px, cx);
 
         // Auto-hide: the scrollbar stays solid briefly, then fades out.
-        let scrollbar_opacity = scrollbar_opacity(
-            self.scrollbar_dragging,
-            self.last_scroll_activity.map(|at| at.elapsed()),
-        );
+        let scrollbar_opacity = self.scrollbar.opacity();
 
         if scrollbar_opacity.is_some_and(|opacity| opacity < 1.0) {
             window.request_animation_frame();
