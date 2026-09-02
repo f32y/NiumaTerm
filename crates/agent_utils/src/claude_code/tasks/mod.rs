@@ -20,12 +20,13 @@
 //! therefore still admitted from their own `local_agent` records. Monitors and
 //! workflows appear in the snapshot too and stay out by task type.
 
+mod aliases;
 mod children;
 mod observe;
 mod records;
 mod shells;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::time::SystemTime;
 
 use serde_json::Value;
@@ -36,6 +37,7 @@ use crate::background_task::{
     BackgroundTaskUpdate,
 };
 use crate::claude_code::sessions::RestoredTask;
+use crate::claude_code::tasks::aliases::AliasTable;
 use crate::claude_code::tasks::children::ChildTranscripts;
 use crate::claude_code::tasks::records::{
     admits_new_row, lifecycle_state, record_identifiers, refs_from, stop_target,
@@ -67,19 +69,12 @@ const AGENT_TASK_TYPE: &str = "local_agent";
 /// admission tests `is_backgrounded` rather than the type alone.
 const SHELL_TASK_TYPE: &str = "local_bash";
 
-/// Identifier aliases retained per session. One child contributes at most a
-/// handful (task, tool-use, agent), so this only bounds a stream that keeps
-/// inventing identifiers.
-const MAX_ALIASES: usize = 512;
-
 #[derive(Default)]
 pub(crate) struct ClaudeTasks {
     registry: Option<BackgroundTaskRegistry>,
     /// Task, tool-use, and agent identifiers mapped onto the canonical id of
-    /// the row they describe. Only records that carry two identifiers together
-    /// create an alias; recency is never used to guess a relationship.
-    aliases: HashMap<String, String>,
-    alias_order: VecDeque<String>,
+    /// the row they describe.
+    aliases: AliasTable,
     /// Process run each task was first seen in. A task still shown as running
     /// from an earlier run cannot be alive in the current process.
     created_epoch: HashMap<String, u64>,
@@ -137,7 +132,7 @@ impl ClaudeTasks {
     /// finds the task id the CLI knows it by.
     pub(crate) fn stop_target(&self, key: &BackgroundTaskKey) -> Option<&str> {
         let registry = self.registry.as_ref()?;
-        let canonical = self.aliases.get(key.id.as_str()).map(String::as_str);
+        let canonical = self.aliases.lookup(&key.id);
         let task = registry
             .get(&BackgroundTaskKey::claude_code(
                 canonical.unwrap_or(&key.id),
@@ -215,7 +210,6 @@ impl ClaudeTasks {
             session_id,
         )));
         self.aliases.clear();
-        self.alias_order.clear();
         self.created_epoch.clear();
         self.children.clear();
         self.shells.clear();
@@ -253,7 +247,7 @@ impl ClaudeTasks {
         let Some(canonical) = self.canonical_from(&ids) else {
             return false;
         };
-        self.link_all(&canonical, &ids);
+        self.aliases.link_all(&canonical, &ids);
 
         let shell = task_type == Some(SHELL_TASK_TYPE) || self.is_shell(&canonical);
         let state = lifecycle_state(kind, record);
@@ -317,8 +311,8 @@ impl ClaudeTasks {
 
     /// Canonical id for one identifier: itself when it already names a row.
     fn canonical(&self, id: &str) -> Option<String> {
-        if let Some(canonical) = self.aliases.get(id) {
-            return Some(canonical.clone());
+        if let Some(canonical) = self.aliases.lookup(id) {
+            return Some(canonical.to_owned());
         }
         self.registry
             .as_ref()
@@ -333,23 +327,6 @@ impl ClaudeTasks {
         ids.iter()
             .find_map(|id| self.canonical(id))
             .or_else(|| ids.first().cloned())
-    }
-
-    /// Record that these identifiers describe the same child. Only called with
-    /// identifiers a single record carried together.
-    fn link_all(&mut self, canonical: &str, ids: &[String]) {
-        for id in ids {
-            if id == canonical || self.aliases.contains_key(id) {
-                continue;
-            }
-            if self.alias_order.len() >= MAX_ALIASES
-                && let Some(oldest) = self.alias_order.pop_front()
-            {
-                self.aliases.remove(&oldest);
-            }
-            self.alias_order.push_back(id.clone());
-            self.aliases.insert(id.clone(), canonical.to_owned());
-        }
     }
 
     fn apply(&mut self, canonical: &str, update: BackgroundTaskUpdate) -> bool {
