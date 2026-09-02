@@ -18,6 +18,7 @@ mod pane_state;
 pub mod profile;
 mod session;
 pub mod settings;
+mod thread_controls;
 pub mod transcript;
 mod view;
 mod workflows;
@@ -41,11 +42,12 @@ use nmt_i18n::i18n;
 use crate::composer::attachments::PendingAttachments;
 use crate::composer::{CommandFeedback, ForkFlow, PendingSlashCommand, RewindState};
 use crate::input_history::{InputHistoryNavigation, InputHistoryScope};
-use crate::pane_state::{ChildAgents, SessionRuntime, ThreadControls, TurnState};
+use crate::pane_state::{ChildAgents, SessionRuntime, TurnState};
 pub use crate::profile::{AgentKind, AgentThreadDefaults, agent_launch};
 pub use crate::session::{
     RecoveryIdentity, RecoveryReadiness, RecoverySnapshot, RestorationReadiness,
 };
+use crate::thread_controls::ThreadControls;
 use crate::transcript::TranscriptView;
 use crate::workflows::WorkflowUi;
 

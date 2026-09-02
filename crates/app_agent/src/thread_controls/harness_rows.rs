@@ -14,17 +14,23 @@ use nmt_i18n::i18n;
 use crate::AgentPane;
 use crate::commands::setting_value_label;
 use crate::composer::PendingSlashCommand;
+use crate::profile::AgentKind;
+use crate::thread_controls::effort::{effort_levels, effort_panel};
+use crate::thread_controls::{
+    FoldedSetting, SETTINGS_PILL_GAP, ThreadControls, folded_settings_pill, setting_picker,
+    settings_group,
+};
 use crate::transcript::permission_icon;
-use crate::view::settings_row::{FoldedSetting, SETTINGS_PILL_GAP};
 
-impl AgentPane {
+impl ThreadControls {
     /// Claude settings: model, permission mode, and reasoning effort. The
     /// model catalog comes from the initialize handshake, and all three apply
     /// via control requests before the next message. Models without effort
     /// support (e.g. Haiku) get no effort control.
-    pub(super) fn render_claude_settings_row(
+    pub(super) fn render_claude_row(
         &self,
-        cx: &mut Context<Self>,
+        kind: AgentKind,
+        cx: &mut Context<AgentPane>,
     ) -> impl IntoElement + use<> {
         let model_options = self.model_options(cx);
         let permission_options: Vec<(String, String)> = stream_json::PERMISSION_OPTIONS
@@ -36,33 +42,34 @@ impl AgentPane {
         // advertises none (Haiku) gets no control rather than one whose every
         // value it would reject.
         let supports_effort = self
-            .controls
             .models
             .iter()
-            .find(|m| Some(&m.model) == self.controls.settings.model.as_ref())
+            .find(|m| Some(&m.model) == self.settings.model.as_ref())
             .is_some_and(|m| !m.efforts.is_empty());
 
-        let model = Self::setting_picker(
+        let model = setting_picker(
             cx,
             "agent-model",
             i18n("agent-setting-model"),
             IconName::Cpu,
-            self.controls.settings.model.clone(),
+            self.settings.model.clone(),
             model_options,
             |this, value, cx| {
                 this.controls.settings.model = Some(value);
-                this.remember_thread_defaults(cx);
+                this.controls
+                    .remember_defaults(this.kind, &this.profile, cx);
             },
         )
         .into_any_element();
         let folded = vec![FoldedSetting {
             name: i18n("agent-setting-permissions"),
-            icon: permission_icon(self.controls.settings.approval.as_deref()),
-            current: self.controls.settings.approval.clone(),
+            icon: permission_icon(self.settings.approval.as_deref()),
+            current: self.settings.approval.clone(),
             options: permission_options,
             set: |this, value, cx| {
                 this.controls.settings.approval = Some(value);
-                this.remember_thread_defaults(cx);
+                this.controls
+                    .remember_defaults(this.kind, &this.profile, cx);
             },
         }];
 
@@ -71,36 +78,33 @@ impl AgentPane {
             .gap(px(SETTINGS_PILL_GAP))
             .flex_wrap()
             .text_color(cx.theme().muted_foreground)
-            .child(Self::settings_group(
-                i18n("agent-settings-model"),
-                vec![model],
-            ));
+            .child(settings_group(i18n("agent-settings-model"), vec![model]));
 
         if supports_effort {
-            let effort = Self::effort_panel(
+            let effort = effort_panel(
                 cx,
                 // The protocol never reports the session's current effort;
                 // until the user picks one, the honest label is the CLI's
                 // own per-model default rather than an empty dash.
-                self.controls
-                    .settings
+                self.settings
                     .effort
                     .clone()
                     .or_else(|| Some("default".to_string())),
-                Self::effort_levels(self.kind),
+                effort_levels(kind),
                 |this, value, cx| {
                     this.controls.settings.effort = Some(value);
-                    this.remember_thread_defaults(cx);
+                    this.controls
+                        .remember_defaults(this.kind, &this.profile, cx);
                 },
             )
             .into_any_element();
-            row = row.child(Self::settings_group(
+            row = row.child(settings_group(
                 i18n("agent-settings-quality-cost"),
                 vec![effort],
             ));
         }
 
-        row.children(Self::folded_settings_pill(cx, folded))
+        row.children(folded_settings_pill(cx, folded))
     }
 
     /// DeepSeek settings: model, reasoning effort, and permission preset. Each
@@ -111,31 +115,32 @@ impl AgentPane {
     /// the deployment; a list written here would offer values a deployment does
     /// not serve and hide the ones it does. A composition with no permission
     /// service reports none, and then the control is absent rather than empty.
-    pub(super) fn render_deepseek_settings_row(
+    pub(super) fn render_deepseek_row(
         &self,
-        cx: &mut Context<Self>,
+        kind: AgentKind,
+        cx: &mut Context<AgentPane>,
     ) -> impl IntoElement + use<> {
         let model_options = self.model_options(cx);
         // The setting belongs to the exact model route, so a model that
         // advertises no levels simply has no effort control; the levels it
         // then offers are the shared ladder.
         let supports_effort = self
-            .controls
             .models
             .iter()
-            .find(|m| Some(&m.model) == self.controls.settings.model.as_ref())
+            .find(|m| Some(&m.model) == self.settings.model.as_ref())
             .is_some_and(|m| !m.efforts.is_empty());
 
-        let model = Self::setting_picker(
+        let model = setting_picker(
             cx,
             "agent-model",
             i18n("agent-setting-model"),
             IconName::Cpu,
-            self.controls.settings.model.clone(),
+            self.settings.model.clone(),
             model_options,
             |this, value, cx| {
                 this.controls.settings.model = Some(value);
-                this.remember_thread_defaults(cx);
+                this.controls
+                    .remember_defaults(this.kind, &this.profile, cx);
                 this.apply_model_selection(cx);
             },
         )
@@ -145,13 +150,12 @@ impl AgentPane {
 
         // A deployment that composes no presets has one composition for every
         // conversation, so the control would offer a choice that does not exist.
-        if !self.controls.agent_presets.is_empty() {
+        if !self.agent_presets.is_empty() {
             folded.push(FoldedSetting {
                 name: i18n("agent-setting-agent-preset"),
                 icon: IconName::Bot,
-                current: self.controls.agent_preset.clone(),
+                current: self.agent_preset.clone(),
                 options: self
-                    .controls
                     .agent_presets
                     .iter()
                     .map(|preset| (preset.value.clone(), preset.label.clone()))
@@ -160,13 +164,12 @@ impl AgentPane {
             });
         }
 
-        if !self.controls.approval_presets.is_empty() {
+        if !self.approval_presets.is_empty() {
             folded.push(FoldedSetting {
                 name: i18n("agent-setting-permissions"),
-                icon: permission_icon(self.controls.settings.approval.as_deref()),
-                current: self.controls.settings.approval.clone(),
+                icon: permission_icon(self.settings.approval.as_deref()),
+                current: self.settings.approval.clone(),
                 options: self
-                    .controls
                     .approval_presets
                     .iter()
                     .map(|preset| (preset.value.clone(), preset.label.clone()))
@@ -185,39 +188,38 @@ impl AgentPane {
             .gap(px(SETTINGS_PILL_GAP))
             .flex_wrap()
             .text_color(cx.theme().muted_foreground)
-            .child(Self::settings_group(
-                i18n("agent-settings-model"),
-                vec![model],
-            ));
+            .child(settings_group(i18n("agent-settings-model"), vec![model]));
 
         if supports_effort {
-            let effort = Self::effort_panel(
+            let effort = effort_panel(
                 cx,
-                self.controls.settings.effort.clone(),
-                Self::effort_levels(self.kind),
+                self.settings.effort.clone(),
+                effort_levels(kind),
                 |this, value, cx| {
                     this.controls.settings.effort = Some(value);
-                    this.remember_thread_defaults(cx);
+                    this.controls
+                        .remember_defaults(this.kind, &this.profile, cx);
                     this.apply_model_selection(cx);
                 },
             )
             .into_any_element();
 
-            row = row.child(Self::settings_group(
+            row = row.child(settings_group(
                 i18n("agent-settings-quality-cost"),
                 vec![effort],
             ));
         }
 
-        row.children(Self::folded_settings_pill(cx, folded))
+        row.children(folded_settings_pill(cx, folded))
     }
 
     /// Codex settings: model, approval policy, approval reviewer, sandbox,
     /// reasoning effort, and service tier. Values are thread settings sent as
     /// overrides on the next `turn/start`.
-    pub(super) fn render_codex_settings_row(
+    pub(super) fn render_codex_row(
         &self,
-        cx: &mut Context<Self>,
+        kind: AgentKind,
+        cx: &mut Context<AgentPane>,
     ) -> impl IntoElement + use<> {
         let model_options = self.model_options(cx);
         // Service tiers are per model, and the catalog only lists the
@@ -228,10 +230,9 @@ impl AgentPane {
             vec![(String::new(), setting_value_label("normal"))];
 
         tier_options.extend(
-            self.controls
-                .models
+            self.models
                 .iter()
-                .find(|m| Some(&m.model) == self.controls.settings.model.as_ref())
+                .find(|m| Some(&m.model) == self.settings.model.as_ref())
                 .map(|m| m.tiers.clone())
                 .unwrap_or_default(),
         );
@@ -247,12 +248,12 @@ impl AgentPane {
             .iter()
             .map(|(v, label)| (v.to_string(), setting_value_label(label)))
             .collect();
-        let model = Self::setting_picker(
+        let model = setting_picker(
             cx,
             "agent-model",
             i18n("agent-setting-model"),
             IconName::Cpu,
-            self.controls.settings.model.clone(),
+            self.settings.model.clone(),
             model_options,
             |this, value, cx| {
                 // A tier the new model doesn't offer falls back to that
@@ -268,59 +269,65 @@ impl AgentPane {
                     this.controls.settings.tier = info.default_tier.clone();
                 }
                 this.controls.settings.model = Some(value);
-                this.remember_thread_defaults(cx);
+                this.controls
+                    .remember_defaults(this.kind, &this.profile, cx);
             },
         )
         .into_any_element();
         let folded = vec![
             FoldedSetting {
                 name: i18n("agent-setting-approval"),
-                icon: permission_icon(self.controls.settings.approval.as_deref()),
-                current: self.controls.settings.approval.clone(),
+                icon: permission_icon(self.settings.approval.as_deref()),
+                current: self.settings.approval.clone(),
                 options: approval_options,
                 set: |this, value, cx| {
                     this.controls.settings.approval = Some(value);
-                    this.remember_thread_defaults(cx);
+                    this.controls
+                        .remember_defaults(this.kind, &this.profile, cx);
                 },
             },
             FoldedSetting {
                 name: i18n("agent-setting-approval-reviewer"),
                 icon: IconName::User,
-                current: self.controls.settings.approvals_reviewer.clone(),
+                current: self.settings.approvals_reviewer.clone(),
                 options: reviewer_options,
                 set: |this, value, cx| {
                     this.controls.settings.approvals_reviewer = Some(value);
-                    this.remember_thread_defaults(cx);
+                    this.controls
+                        .remember_defaults(this.kind, &this.profile, cx);
                 },
             },
             FoldedSetting {
                 name: i18n("agent-setting-sandbox"),
                 icon: IconName::Shield,
-                current: self.controls.settings.sandbox.clone(),
+                current: self.settings.sandbox.clone(),
                 options: sandbox_options,
                 set: |this, value, cx| {
                     this.controls.settings.sandbox = Some(value);
-                    this.remember_thread_defaults(cx);
+                    this.controls
+                        .remember_defaults(this.kind, &this.profile, cx);
                 },
             },
             FoldedSetting {
                 name: i18n("agent-setting-tier"),
                 icon: IconName::Zap,
-                current: Some(self.controls.settings.tier.clone().unwrap_or_default()),
+                current: Some(self.settings.tier.clone().unwrap_or_default()),
                 options: tier_options,
                 set: |this, value, cx| {
                     this.controls.settings.tier = (!value.is_empty()).then_some(value);
-                    this.remember_thread_defaults(cx);
+                    this.controls
+                        .remember_defaults(this.kind, &this.profile, cx);
                 },
             },
         ];
-        let effort = Self::effort_panel(
+        let effort = effort_panel(
             cx,
-            self.controls.settings.effort.clone(),
-            Self::effort_levels(self.kind),
+            self.settings.effort.clone(),
+            effort_levels(kind),
             |this, value, cx| {
                 this.controls.settings.effort = Some(value);
-                this.remember_thread_defaults(cx);
+                this.controls
+                    .remember_defaults(this.kind, &this.profile, cx);
             },
         )
         .into_any_element();
@@ -330,14 +337,11 @@ impl AgentPane {
             .gap(px(SETTINGS_PILL_GAP))
             .flex_wrap()
             .text_color(cx.theme().muted_foreground)
-            .child(Self::settings_group(
-                i18n("agent-settings-model"),
-                vec![model],
-            ))
-            .child(Self::settings_group(
+            .child(settings_group(i18n("agent-settings-model"), vec![model]))
+            .child(settings_group(
                 i18n("agent-settings-quality-cost"),
                 vec![effort],
             ))
-            .children(Self::folded_settings_pill(cx, folded))
+            .children(folded_settings_pill(cx, folded))
     }
 }

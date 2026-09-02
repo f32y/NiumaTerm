@@ -126,7 +126,8 @@ impl AgentPane {
             match resolve_choice(&parsed.arguments, &choices) {
                 Ok(value) if command.name == "model" => {
                     self.controls.settings.model = Some(value.clone());
-                    self.remember_thread_defaults(cx);
+                    self.controls
+                        .remember_defaults(self.kind, &self.profile, cx);
                     self.palette.set_feedback(
                         CommandFeedbackKind::Notice,
                         i18n("agent-composer-model-set").replace("{value}", &value),
@@ -143,7 +144,8 @@ impl AgentPane {
                 }
                 Ok(value) if command.name == "permissions" => {
                     self.controls.settings.approval = Some(value.clone());
-                    self.remember_thread_defaults(cx);
+                    self.controls
+                        .remember_defaults(self.kind, &self.profile, cx);
                     self.palette.set_feedback(
                         CommandFeedbackKind::Notice,
                         i18n("agent-composer-permissions-set")

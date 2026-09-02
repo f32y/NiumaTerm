@@ -10,7 +10,6 @@ mod blocking_overlay;
 mod history;
 mod last_response;
 mod session_state;
-mod settings_row;
 
 #[cfg(test)]
 mod tests;
@@ -430,7 +429,7 @@ impl Render for AgentPane {
                                                 div()
                                                     .flex_1()
                                                     .min_w_0()
-                                                    .child(self.render_settings_row(cx)),
+                                                    .child(self.controls.render_row(self.kind, cx)),
                                             )
                                             .children(self.render_last_response(cx))
                                             // Send stands at the card's trailing
