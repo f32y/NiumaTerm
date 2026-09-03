@@ -230,7 +230,7 @@ impl Shell {
                     };
 
                     shell.update(cx, |this, cx| {
-                        this.create_workspace(name, roots, window, cx)
+                        this.create_workspace(name, roots, window, cx);
                     });
 
                     true
@@ -248,20 +248,38 @@ impl Shell {
         cx.notify();
     }
 
-    /// Create a workspace named `name` (empty falls back to the shared default)
-    /// whose shells start in `dir` (empty falls back to the default
-    /// startup directory), seeded with one fresh tab, and activate it.
-    ///
-    /// The workspace starts out temporary — opening a directory to run one
-    /// command should not grow the saved session behind the user's back — and
-    /// the sidebar's "activate" action is what makes it stick.
-    pub(super) fn create_workspace(
+    /// Create a workspace for a directory the user only asked to open, such as
+    /// a drop or an external open request. It stays out of the saved session
+    /// until the sidebar's "activate" action adopts it, so running one command
+    /// somewhere does not grow the session behind the user's back.
+    pub(super) fn create_temporary_workspace(
         &mut self,
         name: String,
         roots: WorkspaceRoots,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let id = self.create_workspace(name, roots, window, cx);
+
+        self.workspaces.set_temporary(id, true);
+
+        self.sync_session_memory(cx);
+    }
+
+    /// Create a workspace named `name` (empty falls back to the shared default)
+    /// whose shells start in `dir` (empty falls back to the default
+    /// startup directory), seeded with one fresh tab, and activate it.
+    ///
+    /// The workspace is part of the saved session from the moment it exists,
+    /// because asking for a workspace by name is already the decision to keep
+    /// it.
+    pub(super) fn create_workspace(
+        &mut self,
+        name: String,
+        roots: WorkspaceRoots,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> WorkspaceId {
         let name = if name.is_empty() {
             i18n("shell-workspace-default-name").to_string()
         } else {
@@ -289,14 +307,14 @@ impl Shell {
             .workspaces
             .new_workspace(tabs, WorkspaceId(ws_id), name, roots);
 
-        self.workspaces.set_temporary(ws_id, true);
-
         self.focus_active(window, cx);
 
         self.refresh_root_availability(cx);
         self.sync_session_memory(cx);
 
         cx.notify();
+
+        ws_id
     }
 
     pub(super) fn on_next_workspace(
