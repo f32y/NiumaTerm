@@ -69,7 +69,13 @@ impl Shell {
             return false;
         };
 
-        window.is_window_active() && is_foreground_and_not_minimized(handle.hwnd)
+        // GetForegroundWindow answers this on its own: only the foreground
+        // top-level window holds keyboard focus. GPUI's cached activation bit
+        // is skipped here because it starts out false and is only refreshed
+        // from WM_ACTIVATE, which the window misses when it is shown already
+        // activated -- leaving the bit false until the user clicks or
+        // alt-tabs, long after the window is genuinely in front.
+        is_foreground_and_not_minimized(handle.hwnd)
     }
 
     pub(super) fn acknowledge_notification(
