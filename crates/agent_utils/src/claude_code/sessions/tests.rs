@@ -323,7 +323,7 @@ fn titles_come_from_the_first_real_user_prompt() {
 
     assert_eq!(
         user_prompt_text(&record).as_deref().and_then(title_line),
-        Some("fix the login bug".to_string())
+        Some("fix the login bug more detail".to_string())
     );
 }
 
@@ -505,6 +505,10 @@ fn prompt_wrappers_are_stripped() {
             "<command-message>opsx:apply</command-message>\n<command-name>/opsx:apply</command-name>"
         ),
         Some("opsx:apply".to_string())
+    );
+    assert_eq!(
+        title_line("one two three four five six seven eight"),
+        Some("one two three four five six".to_string())
     );
 }
 
@@ -906,16 +910,12 @@ fn an_unlinked_sidechain_contributes_no_child_conversation() {
     );
 }
 
-/// Claude persists a child agent beside the parent transcript rather than
-/// Renaming a session leaves a `custom-title` record behind, and the CLI keeps
-/// repeating whichever name is current as the transcript grows. Only the tail
-/// of the file is read, so the name found there is the one in force however
-/// far back the rename happened.
+/// Claude Code repeats current title metadata as the transcript grows. Only
+/// the tail is read, so each title kind keeps its newest value while a user
+/// name remains more important than a later model name.
 #[test]
-fn a_session_carries_the_newest_name_it_was_given() {
+fn a_session_uses_recorded_title_precedence() {
     use std::fs;
-
-    use crate::claude_code::sessions::titles::renamed_title;
 
     let root = env::temp_dir().join(format!("nmt-session-name-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
@@ -930,6 +930,12 @@ fn a_session_carries_the_newest_name_it_was_given() {
             serde_json::json!({"type": "custom-title", "customTitle": title})
         )
     };
+    let generated = |title: &str| {
+        format!(
+            "{}\n",
+            serde_json::json!({"type": "ai-title", "aiTitle": title})
+        )
+    };
 
     let mut transcript = named("first name");
     // Enough to push the first name out of the window the tail scan reads,
@@ -942,13 +948,48 @@ fn a_session_carries_the_newest_name_it_was_given() {
 
     let renamed = root.join("renamed.jsonl");
     fs::write(&renamed, transcript).unwrap();
-    assert_eq!(renamed_title(&renamed).as_deref(), Some("second name"));
+    assert_eq!(recorded_title(&renamed).as_deref(), Some("second name"));
 
-    // A session nobody named has no such record, and the listing falls back
-    // to the prompt it opened with.
+    let generated_only = root.join("generated.jsonl");
+    fs::write(
+        &generated_only,
+        format!(
+            "{}{}",
+            generated("first model name"),
+            generated("model name")
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        resolved_session_title(
+            &generated_only,
+            Some("prompt fallback".into()),
+            "12345678-rest"
+        ),
+        "model name"
+    );
+
+    let user_named = root.join("user-named.jsonl");
+    fs::write(
+        &user_named,
+        format!("{}{}", named("user name"), generated("later model name")),
+    )
+    .unwrap();
+    assert_eq!(
+        resolved_session_title(&user_named, Some("prompt fallback".into()), "12345678-rest"),
+        "user name"
+    );
+
     let untouched = root.join("untouched.jsonl");
     fs::write(&untouched, &filler).unwrap();
-    assert_eq!(renamed_title(&untouched), None);
+    assert_eq!(
+        resolved_session_title(&untouched, Some("prompt fallback".into()), "12345678-rest"),
+        "prompt fallback"
+    );
+    assert_eq!(
+        resolved_session_title(&untouched, None, "12345678-rest"),
+        "12345678"
+    );
 
     fs::remove_dir_all(root).unwrap();
 }

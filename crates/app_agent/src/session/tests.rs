@@ -292,8 +292,32 @@ fn title_requests_keep_each_provider_semantics() {
         "  Inspect title generation\n and its fallback  ",
     )
     .unwrap();
-    assert_eq!(claude.provisional_title, "Inspect title generation");
+    assert_eq!(
+        claude.provisional_title,
+        "Inspect title generation and its fallback"
+    );
     assert!(conversation_title_request(crate::AgentKind::Codex, "/effort high").is_none());
+    assert!(conversation_title_request(crate::AgentKind::Claude, "/effort high").is_none());
+}
+
+#[test]
+fn claude_provisional_titles_match_the_desktop_projection() {
+    assert_eq!(
+        conversation_title_request(
+            crate::AgentKind::Claude,
+            "  one two\nthree four five six seven eight  "
+        )
+        .as_ref()
+        .map(|request| request.provisional_title.as_str()),
+        Some("one two three four five six")
+    );
+
+    let long_word = "界".repeat(80);
+    let title = conversation_title_request(crate::AgentKind::Claude, &long_word)
+        .unwrap()
+        .provisional_title;
+    assert_eq!(title.chars().count(), 60);
+    assert!(title.ends_with('…'));
 }
 
 mod conversation_title_tests {
@@ -307,13 +331,14 @@ mod conversation_title_tests {
     use nmt_agent_utils::chat::{SendOutcome, SlashCommandOutcome};
     use nmt_config::profile::{AgentProfile, AgentProfileKind};
 
-    use crate::session::{Backend, Status, TestBackend};
+    use crate::session::{Backend, RecoveryIdentity, Status, TestBackend};
     use crate::settings::AgentSettings;
     use crate::{AgentPane, AgentPaneEvent, AgentThreadDefaults};
 
     fn open_pane(
         cx: &mut TestAppContext,
         kind: AgentProfileKind,
+        resume: Option<RecoveryIdentity>,
     ) -> (Entity<AgentPane>, WindowHandle<gpui_component::Root>) {
         let profile = AgentProfile {
             name: "Conversation Title Test".into(),
@@ -328,8 +353,9 @@ mod conversation_title_tests {
             cx.set_global(AgentSettings::default());
             cx.set_global(AgentThreadDefaults::default());
             cx.open_window(Default::default(), |window, cx| {
-                let agent =
-                    cx.new(|cx| AgentPane::new(profile, AgentWorkspace::default(), window, cx));
+                let agent = cx.new(|cx| {
+                    AgentPane::new_resuming(profile, AgentWorkspace::default(), resume, window, cx)
+                });
                 pane = Some(agent.clone());
                 cx.new(|cx| gpui_component::Root::new(agent, window, cx))
             })
@@ -356,7 +382,7 @@ mod conversation_title_tests {
 
     #[gpui::test]
     fn accepted_codex_prompt_publishes_a_provisional_title(cx: &mut TestAppContext) {
-        let (pane, window) = open_pane(cx, AgentProfileKind::Codex);
+        let (pane, window) = open_pane(cx, AgentProfileKind::Codex, None);
         let mut cx = VisualTestContext::from_window(window.into(), cx);
         let (titles, _subscription) = collect_titles(&pane, &mut cx);
 
@@ -381,6 +407,66 @@ mod conversation_title_tests {
             *titles.borrow(),
             vec!["Inspect title generation and its fallback".to_string()]
         );
+    }
+
+    #[gpui::test]
+    fn accepted_claude_prompt_publishes_one_provisional_title(cx: &mut TestAppContext) {
+        // Starting the test fixture as Codex avoids a real Claude subprocess;
+        // the installed test backend below owns all message behavior.
+        let (pane, window) = open_pane(cx, AgentProfileKind::Codex, None);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        let (titles, _subscription) = collect_titles(&pane, &mut cx);
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.kind = crate::AgentKind::Claude;
+                pane.runtime.backend = Some(Backend::Test(TestBackend::new(
+                    [SendOutcome::StartedTurn, SendOutcome::Steered],
+                    SlashCommandOutcome::NotReady,
+                    Vec::new(),
+                )));
+                pane.runtime.status = Status::Idle;
+
+                assert!(pane.send_text("one two three four five six seven eight".into(), cx));
+                assert!(pane.conversation_named);
+                assert!(pane.send_text("a later prompt cannot rename this".into(), cx));
+            });
+        });
+        cx.run_until_parked();
+
+        assert_eq!(*titles.borrow(), vec!["one two three four five six"]);
+    }
+
+    #[gpui::test]
+    fn resumed_claude_prompt_does_not_enter_first_prompt_naming(cx: &mut TestAppContext) {
+        let (pane, window) = open_pane(
+            cx,
+            AgentProfileKind::Codex,
+            Some(RecoveryIdentity::new(
+                crate::AgentKind::Codex,
+                "resumed-conversation",
+            )),
+        );
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        let (titles, _subscription) = collect_titles(&pane, &mut cx);
+
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
+                assert!(pane.conversation_named);
+                pane.kind = crate::AgentKind::Claude;
+                pane.runtime.backend = Some(Backend::Test(TestBackend::new(
+                    [SendOutcome::StartedTurn],
+                    SlashCommandOutcome::NotReady,
+                    Vec::new(),
+                )));
+                pane.runtime.status = Status::Idle;
+
+                assert!(pane.send_text("follow up on the restored session".into(), cx));
+            });
+        });
+        cx.run_until_parked();
+
+        assert!(titles.borrow().is_empty());
     }
 }
 
