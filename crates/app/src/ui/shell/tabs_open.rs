@@ -253,7 +253,7 @@ impl Shell {
             .flatten();
 
         let Some(ws_id) = containing else {
-            self.create_workspace(
+            self.create_temporary_workspace(
                 i18n("shell-workspace-default-name").into(),
                 WorkspaceRoots::single(target),
                 window,
