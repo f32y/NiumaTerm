@@ -29,6 +29,7 @@ use gpui_component::input::{InputEvent, InputState};
 use nmt_agent_utils::chat::{
     Item as SessionItem, QueuedPrompt, SendOutcome, SkillReference, ThreadSettings,
 };
+use nmt_agent_utils::claude_code::sessions as claude_sessions;
 use nmt_agent_utils::codex::app_server;
 use nmt_agent_utils::{
     AgentEventKind, AgentRoute, AgentWorkspace, agent_process, git, normalize_body, normalize_title,
@@ -141,7 +142,8 @@ fn tab_title_from_prompt(text: &str) -> Option<String> {
 fn conversation_title_request(kind: AgentKind, text: &str) -> Option<ConversationTitleRequest> {
     let provisional_title = match kind {
         AgentKind::Codex => app_server::provisional_title_from_prompt(text),
-        AgentKind::Claude | AgentKind::DeepSeek => tab_title_from_prompt(text),
+        AgentKind::Claude => claude_sessions::provisional_title_from_prompt(text),
+        AgentKind::DeepSeek => tab_title_from_prompt(text),
     }?;
     Some(ConversationTitleRequest {
         description: text.to_string(),
@@ -571,9 +573,10 @@ impl AgentPane {
         // on any more, and this start is what the pane now reports.
         self.runtime.start_failure = None;
         self.runtime.epoch = next_session_epoch(self.runtime.epoch);
-        // A replacement conversation names the tab again from its own opening
-        // message; the previous one's subject no longer describes the tab.
-        self.conversation_named = false;
+        // A resumed conversation already has an opening prompt, even when an
+        // older transcript has no stored title. Only a fresh conversation may
+        // claim its next accepted prompt as the subject.
+        self.conversation_named = recovery.is_some();
         self.palette.skill_catalog = None;
         self.palette.skill_binding = None;
         let epoch = self.runtime.epoch;
@@ -904,7 +907,10 @@ impl AgentPane {
             return false;
         }
 
-        if self.kind == AgentKind::Codex
+        // Both providers generate their final title asynchronously. Claiming
+        // the first accepted prompt here prevents a failed generation from
+        // naming the conversation from a later message.
+        if matches!(self.kind, AgentKind::Codex | AgentKind::Claude)
             && let Some(title) = title_request
         {
             self.conversation_named = true;

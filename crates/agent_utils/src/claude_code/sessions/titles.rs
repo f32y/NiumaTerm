@@ -1,6 +1,6 @@
 use std::io::{BufRead, BufReader, Read as _, Seek as _, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::{cmp, fs};
+use std::{cmp, fs, iter};
 
 use serde_json::Value;
 
@@ -12,12 +12,13 @@ use crate::claude_code::sessions::paths::{project_dir, projects_root};
 /// they stay well under this; anything past it falls back to the id title.
 const TITLE_SCAN_BYTES: u64 = 64 * 1024;
 
-/// Tail window scanned for the name the user gave a session. The CLI repeats
-/// its `custom-title` record through the file after a rename, so the newest
-/// one sits near the end; a rename followed by one enormous tool result can
-/// still push it past this window, and the listing then falls back to the
-/// prompt the session opened with.
-const NAME_SCAN_BYTES: u64 = 64 * 1024;
+/// Tail window scanned for the titles Claude Code recorded. The CLI repeats
+/// session metadata as the transcript grows, so current names normally remain
+/// near the end; one enormous tool result can still push them past this window,
+/// and the listing then falls back to the prompt the session opened with.
+const RECORDED_TITLE_SCAN_BYTES: u64 = 64 * 1024;
+const PROVISIONAL_TITLE_CHARS: usize = 60;
+const PROVISIONAL_TITLE_WORDS: usize = 6;
 
 /// Cheap first pass for the history UI: how many sessions exist, so the list
 /// can reserve its final height (placeholder rows) before any transcript
@@ -62,9 +63,9 @@ fn project_dirs() -> Vec<PathBuf> {
         .collect()
 }
 
-/// Sessions resumable from `cwd`, newest first. Title extraction reads only
-/// the head of each file, so listing a directory of multi-megabyte
-/// transcripts stays cheap; still meant for a background thread.
+/// Sessions resumable from `cwd`, newest first. Title extraction reads bounded
+/// head and tail windows, so listing multi-megabyte transcripts stays cheap;
+/// still meant for a background thread.
 pub fn list_sessions(cwd: Option<&str>) -> Vec<SessionSummary> {
     let Some(dir) = project_dir(cwd) else {
         return Vec::new();
@@ -110,12 +111,7 @@ fn sessions_in_dir(dir: &Path) -> Vec<SessionSummary> {
             let head = head_summary(&path);
 
             Some(SessionSummary {
-                // A renamed session lists under the name it was given. The
-                // opening prompt is only what an unnamed one is recognizable
-                // by, and an id prefix only what an empty one is.
-                title: renamed_title(&path)
-                    .or(head.title)
-                    .unwrap_or_else(|| id.chars().take(8).collect()),
+                title: resolved_session_title(&path, head.title, &id),
                 id,
                 branch: head.branch,
                 cwd: head.cwd,
@@ -126,19 +122,27 @@ fn sessions_in_dir(dir: &Path) -> Vec<SessionSummary> {
         .collect()
 }
 
-/// The name the user gave this session, or `None` for one never renamed.
-///
-/// The last record in the window wins: renaming a session twice leaves both
-/// records behind, and the CLI keeps repeating whichever is current.
-pub(super) fn renamed_title(path: &Path) -> Option<String> {
+/// Resolve current persisted metadata before prompt and id fallbacks. User
+/// names always outrank model names, even if model generation finishes later.
+pub(super) fn resolved_session_title(path: &Path, provisional: Option<String>, id: &str) -> String {
+    recorded_title(path)
+        .or(provisional)
+        .unwrap_or_else(|| id.chars().take(8).collect())
+}
+
+/// The newest user and model titles in the bounded tail window. The newest
+/// record of each kind wins, then a user-authored title outranks a model title.
+pub(super) fn recorded_title(path: &Path) -> Option<String> {
     let mut file = fs::File::open(path).ok()?;
     let size = file.metadata().ok()?.len();
-    let start = size.saturating_sub(NAME_SCAN_BYTES);
+    let start = size.saturating_sub(RECORDED_TITLE_SCAN_BYTES);
 
     file.seek(SeekFrom::Start(start)).ok()?;
 
     let mut tail = Vec::new();
-    file.take(NAME_SCAN_BYTES).read_to_end(&mut tail).ok()?;
+    file.take(RECORDED_TITLE_SCAN_BYTES)
+        .read_to_end(&mut tail)
+        .ok()?;
 
     let mut lines = tail.split(|byte| *byte == b'\n');
 
@@ -149,17 +153,26 @@ pub(super) fn renamed_title(path: &Path) -> Option<String> {
         lines.next();
     }
 
-    lines
-        .filter_map(|line| serde_json::from_slice::<Value>(line).ok())
-        .filter(|record| record["type"].as_str() == Some("custom-title"))
-        .filter_map(|record| {
-            record["customTitle"]
-                .as_str()
-                .map(str::trim)
-                .filter(|title| !title.is_empty())
-                .map(str::to_owned)
-        })
-        .next_back()
+    let mut user_title = None;
+    let mut generated_title = None;
+
+    for record in lines.filter_map(|line| serde_json::from_slice::<Value>(line).ok()) {
+        let (field, key) = match record["type"].as_str() {
+            Some("custom-title") => (&mut user_title, "customTitle"),
+            Some("ai-title") => (&mut generated_title, "aiTitle"),
+            _ => continue,
+        };
+
+        if let Some(title) = record[key]
+            .as_str()
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+        {
+            *field = Some(title.to_owned());
+        }
+    }
+
+    user_title.or(generated_title)
 }
 
 /// What the head of a transcript file says about its session.
@@ -341,12 +354,33 @@ pub(super) fn clean_prompt(text: &str) -> String {
     text.trim().to_string()
 }
 
-/// One-line title from a prompt: cleaned, first non-empty line, capped.
-pub(super) fn title_line(text: &str) -> Option<String> {
+/// The compact opening-prompt title shown while Claude generates a model title.
+/// It is also the history fallback when no persisted title metadata exists.
+pub fn provisional_title_from_prompt(text: &str) -> Option<String> {
     let cleaned = clean_prompt(text);
-    let line = cleaned.lines().find(|line| !line.trim().is_empty())?.trim();
+    let mut words = cleaned.split_whitespace();
+    let first = words.next()?;
+    if first.starts_with('/') {
+        return None;
+    }
 
-    let title: String = line.chars().take(120).collect();
+    let normalized = iter::once(first)
+        .chain(words.take(PROVISIONAL_TITLE_WORDS - 1))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut chars = normalized.chars();
+    let prefix: String = chars.by_ref().take(PROVISIONAL_TITLE_CHARS).collect();
 
-    (!title.is_empty()).then_some(title)
+    if chars.next().is_none() {
+        return Some(prefix);
+    }
+
+    let mut truncated: String = prefix.chars().take(PROVISIONAL_TITLE_CHARS - 1).collect();
+    truncated.push('…');
+    Some(truncated)
+}
+
+/// One-line title from a prompt, after removing provider-added wrappers.
+pub(super) fn title_line(text: &str) -> Option<String> {
+    provisional_title_from_prompt(text)
 }

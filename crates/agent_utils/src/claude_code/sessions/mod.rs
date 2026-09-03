@@ -40,13 +40,18 @@ pub use task_history::{RestoredTask, load_child_transcript, load_task_history};
 #[cfg(test)]
 use task_history::{load_child_transcript_at, load_task_history_at, parse_task_history};
 #[cfg(test)]
-use titles::{compaction_summary_text, title_line, user_prompt_text};
-pub use titles::{count_all_sessions, count_sessions, list_all_sessions, list_sessions};
-#[cfg(test)]
 use uuid::Uuid;
 
 #[cfg(test)]
 use crate::chat::Compaction;
+#[cfg(test)]
+use crate::claude_code::sessions::titles::{
+    compaction_summary_text, recorded_title, resolved_session_title, title_line, user_prompt_text,
+};
+pub use crate::claude_code::sessions::titles::{
+    count_all_sessions, count_sessions, list_all_sessions, list_sessions,
+    provisional_title_from_prompt,
+};
 
 /// Whether the selected user message has a persisted file-history snapshot.
 /// `Unknown` is reserved for snapshot records whose schema is not understood;

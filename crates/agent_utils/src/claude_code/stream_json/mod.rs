@@ -84,6 +84,15 @@ pub const PERMISSION_OPTIONS: [&str; 5] = [
 ];
 
 const INIT_REQUEST_ID: &str = "nmt-init";
+const SESSION_TITLE_DESCRIPTION_CHARS: usize = 2_000;
+
+fn session_title_description(description: &str) -> String {
+    description
+        .trim()
+        .chars()
+        .take(SESSION_TITLE_DESCRIPTION_CHARS)
+        .collect()
+}
 
 #[derive(Default)]
 struct TurnOutputUsage {
@@ -588,6 +597,11 @@ impl Session {
             .values()
             .any(|operation| *operation == PendingControlOperation::SessionTitle)
         {
+            return;
+        }
+
+        let description = session_title_description(description);
+        if description.is_empty() {
             return;
         }
 

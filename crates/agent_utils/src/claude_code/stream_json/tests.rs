@@ -18,6 +18,15 @@ fn turn_output_usage_accumulates_model_responses() {
 }
 
 #[test]
+fn title_descriptions_are_trimmed_and_unicode_safe() {
+    let input = format!("  {}界  ", "界".repeat(SESSION_TITLE_DESCRIPTION_CHARS));
+    let description = session_title_description(&input);
+
+    assert_eq!(description.chars().count(), SESSION_TITLE_DESCRIPTION_CHARS);
+    assert!(description.chars().all(|character| character == '界'));
+}
+
+#[test]
 fn claude_usage_normalizes_cache_categories_into_total_input() {
     let usage = parse_claude_usage(&json!({
         "input_tokens": 8_500,
