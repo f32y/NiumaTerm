@@ -659,9 +659,17 @@ impl TabStrip {
                                                     id as usize,
                                                 ))
                                                 .into_any_element(),
+                                                // An agent waiting on the user
+                                                // is the same "this tab is
+                                                // done working" state a
+                                                // finished command reports, so
+                                                // it takes the success color
+                                                // the terminal dot already
+                                                // uses rather than a second
+                                                // color for one meaning.
                                                 AgentTabIndicator::Ready => StatusMark::new(
                                                     ("tab-agent-ready", id as usize),
-                                                    StatusMarkTone::Primary,
+                                                    StatusMarkTone::Success,
                                                     px(TAB_DOT),
                                                 )
                                                 .label(i18n("tabbar-tooltip-agent-ready"))

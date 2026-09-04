@@ -16,6 +16,7 @@ const PULSE_MIN_OPACITY: f32 = 0.35;
 pub(crate) enum StatusMarkTone {
     Primary,
     Warning,
+    Success,
 }
 
 enum StatusMarkVisual {
@@ -79,6 +80,7 @@ impl RenderOnce for StatusMark {
                 let mark = match tone {
                     StatusMarkTone::Primary => mark.bg(cx.theme().primary),
                     StatusMarkTone::Warning => mark.bg(cx.theme().warning),
+                    StatusMarkTone::Success => mark.bg(cx.theme().success),
                 };
 
                 if !self.pulse {
