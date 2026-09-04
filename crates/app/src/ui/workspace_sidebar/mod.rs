@@ -118,8 +118,11 @@ fn workspace_status_glyphs(
     let glyphs = agent
         .map(|(visual, label)| match visual {
             AgentVisual::Running => StatusMark::busy(busy_id).into_any_element(),
+            // Same success color the terminal mark uses when a command
+            // finishes: both say the tab has stopped working and is waiting on
+            // the user.
             AgentVisual::NeedsInput => {
-                StatusMark::new(busy_id, StatusMarkTone::Primary, px(STATUS_DOT))
+                StatusMark::new(busy_id, StatusMarkTone::Success, px(STATUS_DOT))
                     .label(label)
                     .into_any_element()
             }
