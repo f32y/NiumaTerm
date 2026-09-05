@@ -14,7 +14,6 @@ const PULSE_PERIOD: Duration = Duration::from_millis(1_600);
 const PULSE_MIN_OPACITY: f32 = 0.35;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StatusMarkTone {
-    Primary,
     Warning,
     Success,
 }
@@ -78,7 +77,6 @@ impl RenderOnce for StatusMark {
                     .rounded_full()
                     .when_some(self.label, |this, label| this.aria_label(label));
                 let mark = match tone {
-                    StatusMarkTone::Primary => mark.bg(cx.theme().primary),
                     StatusMarkTone::Warning => mark.bg(cx.theme().warning),
                     StatusMarkTone::Success => mark.bg(cx.theme().success),
                 };
