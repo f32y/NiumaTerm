@@ -244,6 +244,13 @@ fn claude_command(
     // can create checkpoints for subsequent `/rewind` operations.
     enable_file_checkpointing(&mut command);
 
+    // Recent models omit thinking text by default and emit signature-only
+    // thinking blocks, which would leave the chat's reasoning sections
+    // permanently empty. Asking for the summarized form at launch is the only
+    // way to get that text for the whole session; the per-session control
+    // request only overrides a mode that was already chosen here.
+    command.args(["--thinking-display", "summarized"]);
+
     // The CLI takes effort as a launch flag; its `/effort` command is the
     // only other way in, and that costs a visible turn on every new
     // conversation.
@@ -350,7 +357,14 @@ impl Session {
         session.send(json!({
             "type": "control_request",
             "request_id": INIT_REQUEST_ID,
-            "request": {"subtype": "initialize"},
+            "request": {
+                "subtype": "initialize",
+                // Subagents otherwise report only their tool calls, so a task
+                // running under the Agent tool shows as a silent gap. This
+                // forwards their text and thinking blocks under the spawning
+                // tool-use id so the nested transcript can be rendered.
+                "forwardSubagentText": true,
+            },
         }));
 
         Ok(session)
