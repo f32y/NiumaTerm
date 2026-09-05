@@ -57,6 +57,18 @@ impl PendingPrompts {
         }
     }
 
+    /// A settled batch has nothing left to answer, so the panel steps to the
+    /// next batch that still does and otherwise hands the space back to the
+    /// composer. A history card stays because the user opened it to read.
+    pub(crate) fn hide_settled(&mut self) {
+        let settled = self
+            .questions()
+            .is_some_and(|prompt| !prompt.pending() && prompt.status != QuestionStatus::History);
+        if settled {
+            self.active = self.batches.iter().position(QuestionPrompt::pending);
+        }
+    }
+
     pub(crate) fn dismiss_approval(&mut self) {
         self.approval = None;
     }
