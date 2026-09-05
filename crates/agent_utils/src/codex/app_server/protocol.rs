@@ -293,6 +293,11 @@ pub(super) fn turn_start_params(
     if let Some(effort) = &settings.effort {
         params["effort"] = json!(effort);
     }
+    // Codex defaults the reasoning summary to "auto", which lets the model emit
+    // a terse summary or none at all, leaving the chat's reasoning section
+    // sparse or empty. "detailed" asks for the fullest summary the model
+    // produces, which is the only reasoning text this client renders.
+    params["summary"] = json!("detailed");
     // An explicit null changes a previously selected service tier back to normal.
     params["serviceTier"] = json!(settings.tier);
 
