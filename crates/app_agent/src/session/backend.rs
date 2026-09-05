@@ -10,8 +10,8 @@ use std::time::Duration;
 
 use nmt_agent_utils::background_task::{BackgroundTaskKey, BackgroundTaskProvider};
 use nmt_agent_utils::chat::{
-    Event as SessionEvent, ForkAnchor, MessageImage, SendOutcome, SessionScope, SkillReference,
-    SlashCommandInfo, SlashCommandOutcome, ThreadSettings,
+    Event as SessionEvent, ForkAnchor, MessageImage, QuestionRequest, SendOutcome, SessionScope,
+    SkillReference, SlashCommandInfo, SlashCommandOutcome, ThreadSettings,
 };
 use nmt_agent_utils::claude_code::sessions::RestoredTask;
 use nmt_agent_utils::claude_code::stream_json;
@@ -690,8 +690,25 @@ impl Backend {
         }
     }
 
-    /// Answer an `AskUserQuestion` card. Codex has no equivalent request, so
-    /// there is nothing to answer there.
+    pub(crate) fn restore_question_requests(&mut self, requests: Vec<QuestionRequest>) {
+        if let Backend::Codex(session) = self {
+            session.restore_question_requests(requests);
+        }
+    }
+
+    pub(crate) fn respond_input(
+        &mut self,
+        id: &str,
+        answers: Option<Vec<Vec<String>>>,
+        settings: &ThreadSettings,
+    ) -> Result<(), String> {
+        match self {
+            Backend::Codex(session) => session.respond_input(id, answers, settings),
+            _ => Err("This session cannot answer that question".to_string()),
+        }
+    }
+
+    /// Answer a provider's selection request using its original response format.
     pub(crate) fn respond_questions(&mut self, answers: Option<Vec<Vec<String>>>) {
         match self {
             Backend::Claude(session) => session.respond_questions(answers),

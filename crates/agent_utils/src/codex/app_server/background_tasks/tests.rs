@@ -712,6 +712,7 @@ fn a_spawn_prompt_is_the_first_item_in_a_child_transcript() {
         vec![Item::AgentMessage {
             id: "reply-1".into(),
             text: Some("review complete".into()),
+            questions: None,
         }],
     );
 

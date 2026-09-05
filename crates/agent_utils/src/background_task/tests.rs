@@ -256,6 +256,7 @@ mod child_transcript {
         Item::AgentMessage {
             id: id.into(),
             text: Some(text.into()),
+            questions: None,
         }
     }
 
@@ -406,6 +407,7 @@ mod restored_child_transcript {
         Item::AgentMessage {
             id: id.into(),
             text: Some("line".into()),
+            questions: None,
         }
     }
 

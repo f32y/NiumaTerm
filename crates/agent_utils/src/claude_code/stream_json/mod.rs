@@ -1080,7 +1080,11 @@ impl Session {
                         self.open_blocks.insert(index, id.clone());
                         self.open_texts.push_back(id.clone());
 
-                        vec![Event::ItemStarted(Item::AgentMessage { id, text: None })]
+                        vec![Event::ItemStarted(Item::AgentMessage {
+                            id,
+                            text: None,
+                            questions: None,
+                        })]
                     }
                     Some("thinking") => {
                         let id = self.alloc_item_id("thinking");
@@ -1163,6 +1167,7 @@ impl Session {
                     events.push(Event::ItemCompleted(Item::AgentMessage {
                         id,
                         text: block["text"].as_str().map(str::to_owned),
+                        questions: None,
                     }));
                 }
                 Some("thinking") => {

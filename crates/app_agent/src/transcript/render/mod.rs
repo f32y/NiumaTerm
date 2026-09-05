@@ -5,6 +5,7 @@ mod text_style;
 #[cfg(test)]
 pub(crate) use crate::transcript::render::text_style::transcript_code_block_style;
 use crate::transcript::render::text_style::{agent_text_style, markdown_view};
+mod questions;
 mod turn_rows;
 mod user_row;
 mod work_row;
@@ -311,6 +312,13 @@ impl TranscriptView {
 
         match &entry.item {
             SessionItem::UserMessage { text: Some(text) } => self.render_user_row(index, text, cx),
+            SessionItem::AgentMessage {
+                id,
+                text: Some(text),
+                questions: Some(questions),
+            } => {
+                self.render_question_message(index, id.clone(), text.clone(), questions.clone(), cx)
+            }
             SessionItem::AgentMessage {
                 text: Some(text), ..
             } => self.render_agent_row(index, self.shown_reply(index, text).to_string(), cx),

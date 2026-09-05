@@ -269,6 +269,7 @@ mod detail_navigation {
         BackgroundTaskTranscriptUpdate::appended(vec![Item::AgentMessage {
             id: "a".into(),
             text: Some("partial output".into()),
+            questions: None,
         }])
         .apply_to(&mut transcript);
 
@@ -291,6 +292,7 @@ mod detail_navigation {
             transcript.push(Item::AgentMessage {
                 id: format!("m{index}"),
                 text: Some("line".into()),
+                questions: None,
             });
         }
 
@@ -309,6 +311,7 @@ mod detail_navigation {
         BackgroundTaskTranscriptUpdate::appended(vec![Item::AgentMessage {
             id: "a".into(),
             text: Some("one".into()),
+            questions: None,
         }])
         .apply_to(&mut transcript);
         let after_append = transcript.revision();

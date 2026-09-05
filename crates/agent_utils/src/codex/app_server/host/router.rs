@@ -58,12 +58,17 @@ struct PendingRoute {
     purpose: RequestPurpose,
 }
 
+struct ServerRequestRoute {
+    owner: RegistrationId,
+    thread_id: String,
+}
+
 struct RouterState {
     next_registration_id: RegistrationId,
     next_request_id: u64,
     sessions: HashMap<RegistrationId, Delivery>,
     pending_requests: HashMap<u64, PendingRoute>,
-    server_requests: HashMap<u64, RegistrationId>,
+    server_requests: HashMap<u64, ServerRequestRoute>,
     thread_owners: HashMap<String, RegistrationId>,
     root_by_owner: HashMap<RegistrationId, String>,
     early_messages: HashMap<String, VecDeque<Value>>,
@@ -152,7 +157,18 @@ impl RouterState {
             .into_iter()
             .map(|message| {
                 if let (Some(id), Some(_)) = (message["id"].as_u64(), message["method"].as_str()) {
-                    self.server_requests.insert(id, owner);
+                    self.server_requests.insert(
+                        id,
+                        ServerRequestRoute {
+                            owner,
+                            thread_id: thread_id.clone(),
+                        },
+                    );
+                }
+                if message["method"].as_str() == Some("serverRequest/resolved")
+                    && let Some(id) = message["params"]["requestId"].as_u64()
+                {
+                    self.server_requests.remove(&id);
                 }
                 (Arc::clone(&delivery), message)
             })
@@ -177,11 +193,14 @@ impl RouterState {
         }
         self.thread_owners
             .retain(|_, candidate| *candidate != owner);
+        self.server_requests.retain(|_, route| route.owner != owner);
         self.root_by_owner.insert(owner, thread_id.clone());
         self.claim_thread(owner, thread_id)
     }
 
     fn remove_thread(&mut self, thread_id: &str) {
+        self.server_requests
+            .retain(|_, route| route.thread_id != thread_id);
         self.thread_owners.remove(thread_id);
         self.root_by_owner.retain(|_, root| root != thread_id);
         self.early_messages.remove(thread_id);
@@ -245,9 +264,9 @@ impl Router {
 
         let mut state = self.state.lock();
         match state.server_requests.remove(&id) {
-            Some(expected_owner) if expected_owner == owner => Ok(()),
-            Some(expected_owner) => {
-                state.server_requests.insert(id, expected_owner);
+            Some(route) if route.owner == owner => Ok(()),
+            Some(route) => {
+                state.server_requests.insert(id, route);
                 Err("Codex server request belongs to another Agent Tab".to_string())
             }
             None => Err("Codex server request is no longer pending".to_string()),
@@ -326,7 +345,9 @@ impl Router {
         let Some(delivery) = state.delivery(owner) else {
             return Vec::new();
         };
-        state.server_requests.insert(id, owner);
+        state
+            .server_requests
+            .insert(id, ServerRequestRoute { owner, thread_id });
         vec![(delivery, message)]
     }
 
@@ -344,6 +365,15 @@ impl Router {
 
         let mut state = self.state.lock();
         let mut deliveries = Vec::new();
+        if method == "serverRequest/resolved"
+            && let Some(id) = message["params"]["requestId"].as_u64()
+            && state
+                .server_requests
+                .get(&id)
+                .is_some_and(|route| route.thread_id == thread_id)
+        {
+            state.server_requests.remove(&id);
+        }
         if method == "thread/started"
             && !state.thread_owners.contains_key(&thread_id)
             && let Some(parent_id) = message["params"]["thread"]["parentThreadId"].as_str()
@@ -395,7 +425,7 @@ impl Router {
             .retain(|_, route| route.owner != owner);
         state
             .server_requests
-            .retain(|_, request_owner| *request_owner != owner);
+            .retain(|_, route| route.owner != owner);
         state
             .thread_owners
             .retain(|_, thread_owner| *thread_owner != owner);

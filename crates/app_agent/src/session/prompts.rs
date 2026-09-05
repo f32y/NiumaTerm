@@ -1,33 +1,15 @@
-//! The two cards that block a turn until the user answers them.
-//!
-//! An approval request and an `AskUserQuestion` batch are the same shape of
-//! interruption: the backend stops, the pane draws a card above the input, and
-//! the answer goes back over the session. At most one of each can be open, and
-//! a session replacement drops both, so they are held together.
+//! Approval display and independently addressable question drafts for one pane.
 
-use crate::QuestionPrompt;
-use crate::composer::PaletteControl;
+use nmt_agent_utils::chat::QuestionMode;
 
-/// What one keyboard press did to the question card.
-pub(crate) enum QuestionControl {
-    /// The card did not use the key; the caller falls through to the surfaces
-    /// that share it.
-    Ignored,
-    /// The highlight moved, so the card needs redrawing.
-    Moved,
-    /// The highlighted option was picked.
-    Toggled { question: usize, option: usize },
-}
+use crate::questions::{QuestionPrompt, QuestionStatus};
 
 #[derive(Default)]
 pub(crate) struct PendingPrompts {
-    /// Description of the approval request blocking the turn, shown as the
-    /// card above the input; the request id lives in the session.
     approval: Option<String>,
-    /// Questions the model wants answered before it continues, plus the
-    /// selection the user has built so far. The request id lives in the
-    /// session, so this holds only what the card renders.
-    questions: Option<QuestionPrompt>,
+    pub(crate) batches: Vec<QuestionPrompt>,
+    pub(crate) active: Option<usize>,
+    pub(crate) collapsed: bool,
 }
 
 impl PendingPrompts {
@@ -36,7 +18,11 @@ impl PendingPrompts {
     }
 
     pub(crate) fn questions(&self) -> Option<&QuestionPrompt> {
-        self.questions.as_ref()
+        self.active.and_then(|index| self.batches.get(index))
+    }
+
+    pub(crate) fn questions_mut(&mut self) -> Option<&mut QuestionPrompt> {
+        self.active.and_then(|index| self.batches.get_mut(index))
     }
 
     pub(crate) fn approval_open(&self) -> bool {
@@ -44,7 +30,7 @@ impl PendingPrompts {
     }
 
     pub(crate) fn questions_open(&self) -> bool {
-        self.questions.is_some()
+        !self.collapsed && self.questions().is_some()
     }
 
     pub(crate) fn ask_approval(&mut self, description: String) {
@@ -52,7 +38,23 @@ impl PendingPrompts {
     }
 
     pub(crate) fn ask_questions(&mut self, prompt: QuestionPrompt) {
-        self.questions = Some(prompt);
+        if let Some(index) = self.batches.iter().position(|entry| entry.id == prompt.id) {
+            if prompt.id.is_none() || self.batches[index].status == QuestionStatus::History {
+                self.batches[index] = prompt;
+                self.active = Some(index);
+                self.collapsed = false;
+            }
+            return;
+        }
+        let reveal = self.questions().is_none_or(|question| {
+            !question.pending()
+                || (prompt.mode != QuestionMode::Async && question.mode == QuestionMode::Async)
+        });
+        self.batches.push(prompt);
+        if reveal {
+            self.active = Some(self.batches.len() - 1);
+            self.collapsed = false;
+        }
     }
 
     pub(crate) fn dismiss_approval(&mut self) {
@@ -60,60 +62,15 @@ impl PendingPrompts {
     }
 
     pub(crate) fn dismiss_questions(&mut self) {
-        self.questions = None;
+        self.batches.clear();
+        self.active = None;
+        self.collapsed = false;
     }
 
-    /// Record a pick without answering yet; the card stays open until the user
-    /// submits, so multi-select questions can accumulate choices. Clicking also
-    /// moves the highlight, so a switch to the keyboard continues from the
-    /// option the user just touched rather than from wherever the arrows were
-    /// left.
-    pub(crate) fn toggle_option(&mut self, question: usize, option: usize) -> bool {
-        let Some(prompt) = self.questions.as_mut() else {
-            return false;
-        };
-
-        prompt.toggle(question, option);
-        prompt.focus = (question, option);
-
-        true
-    }
-
-    /// Drive the card from the keyboard.
-    ///
-    /// Enter answers the highlighted option rather than submitting the card:
-    /// with several questions, or a multi-select one, the user is rarely done
-    /// after one press, and a key that sometimes submits and sometimes selects
-    /// cannot be predicted from what is on screen.
-    pub(crate) fn handle_control(&mut self, control: PaletteControl) -> QuestionControl {
-        let Some(prompt) = self.questions.as_mut() else {
-            return QuestionControl::Ignored;
-        };
-
-        match control {
-            PaletteControl::Previous | PaletteControl::Next => {
-                match prompt.move_focus(matches!(control, PaletteControl::Next)) {
-                    true => QuestionControl::Moved,
-                    false => QuestionControl::Ignored,
-                }
-            }
-            PaletteControl::Activate => {
-                let (question, option) = prompt.focus;
-
-                QuestionControl::Toggled { question, option }
-            }
-            // Completion belongs to the composer, and dismissing the card would
-            // answer the question by refusing it, which needs the visible
-            // control rather than a keystroke.
-            PaletteControl::Complete | PaletteControl::Dismiss => QuestionControl::Ignored,
-        }
-    }
-
-    /// Take the card down and report the answers to send, or `None` when the
-    /// user declined or left it incomplete.
-    pub(crate) fn take_answers(&mut self, submit: bool) -> Option<Option<Vec<Vec<String>>>> {
-        let prompt = self.questions.take()?;
-
-        Some((submit && prompt.is_complete()).then(|| prompt.answers()))
+    pub(crate) fn pending_count(&self) -> usize {
+        self.batches
+            .iter()
+            .filter(|prompt| prompt.pending())
+            .count()
     }
 }

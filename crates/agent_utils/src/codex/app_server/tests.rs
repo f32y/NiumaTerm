@@ -607,11 +607,13 @@ fn resumed_turns_replay_dialogue_and_preserve_activity_details() {
             },
             Item::AgentMessage {
                 id: "i5".into(),
-                text: Some("answer".into())
+                text: Some("answer".into()),
+                questions: None,
             },
             Item::AgentMessage {
                 id: "i6".into(),
-                text: Some("follow-up".into())
+                text: Some("follow-up".into()),
+                questions: None,
             },
         ]
     );

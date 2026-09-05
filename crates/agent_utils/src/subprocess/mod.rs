@@ -107,9 +107,14 @@ impl JsonLineProcess {
     /// also closes its stdout, so the reader-side EOF is the single
     /// exit-detection path.
     pub(crate) fn write_line(&mut self, message: &Value) {
-        if let Some(stdin) = self.stdin.as_mut() {
-            let _ = writeln!(stdin, "{message}").and_then(|_| stdin.flush());
-        }
+        let _ = self.try_write_line(message);
+    }
+
+    pub(crate) fn try_write_line(&mut self, message: &Value) -> Result<(), String> {
+        let stdin = self.stdin.as_mut().ok_or("The agent input is closed")?;
+        writeln!(stdin, "{message}")
+            .and_then(|_| stdin.flush())
+            .map_err(|error| format!("Could not write agent input: {error}"))
     }
 
     /// False once shutdown has closed the protocol input.

@@ -216,8 +216,7 @@ impl CodexHost {
 
     pub(super) fn send(&self, owner: RegistrationId, mut message: Value) -> Result<(), String> {
         self.router.prepare_outgoing(owner, &mut message)?;
-        self.process.lock().write_line(&message);
-        Ok(())
+        self.process.lock().try_write_line(&message)
     }
 
     pub(super) fn claim_descendants(

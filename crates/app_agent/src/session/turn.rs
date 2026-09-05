@@ -11,8 +11,7 @@ use chrono::Utc;
 use gpui::{Context, Window};
 use nmt_agent_utils::AgentEventKind;
 
-use crate::composer::{PaletteControl, restored_input_after_interruption};
-use crate::session::prompts::QuestionControl;
+use crate::composer::restored_input_after_interruption;
 use crate::transcript::LAST_RESPONSE_LIMIT;
 use crate::{AgentPane, AgentPaneEvent};
 
@@ -47,7 +46,7 @@ pub(crate) fn response_age_tick(age: Duration) -> Option<Duration> {
 impl AgentPane {
     /// Start the turn clock and drive the once-a-second repaint of the live
     /// progress row; the ticker stops itself once `finish_working` clears it.
-    pub(super) fn start_working(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn start_working(&mut self, cx: &mut Context<Self>) {
         self.turn.submitted_at = Some(Instant::now());
         self.transcript
             .update(cx, |transcript, cx| transcript.start_working(cx));
@@ -145,56 +144,6 @@ impl AgentPane {
 
         if let Some(session) = self.runtime.backend.as_mut() {
             session.respond_approval(decision);
-        }
-        cx.notify();
-    }
-
-    pub(crate) fn toggle_question_option(
-        &mut self,
-        question: usize,
-        option: usize,
-        cx: &mut Context<Self>,
-    ) {
-        if self.prompts.toggle_option(question, option) {
-            cx.notify();
-        }
-    }
-
-    /// Drive the question card from the keyboard. Returns whether the card
-    /// consumed the key, so the caller can fall through to the surfaces that
-    /// share these keys when no card is up.
-    pub(crate) fn handle_question_control(
-        &mut self,
-        control: PaletteControl,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        match self.prompts.handle_control(control) {
-            QuestionControl::Ignored => false,
-            QuestionControl::Moved => {
-                cx.stop_propagation();
-                cx.notify();
-                true
-            }
-            QuestionControl::Toggled { question, option } => {
-                cx.stop_propagation();
-                self.toggle_question_option(question, option, cx);
-                true
-            }
-        }
-    }
-
-    /// Submit the current picks, or decline when `submit` is false. The card is
-    /// dismissed immediately; the session's `QuestionsResolved` confirmation is
-    /// then an idempotent status refresh, as with approvals.
-    pub(crate) fn respond_questions(&mut self, submit: bool, cx: &mut Context<Self>) {
-        let Some(answers) = self.prompts.take_answers(submit) else {
-            return;
-        };
-
-        self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
-
-        if let Some(session) = self.runtime.backend.as_mut() {
-            session.respond_questions(answers);
         }
         cx.notify();
     }

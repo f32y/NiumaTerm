@@ -4,8 +4,8 @@ use gpui::Context;
 use nmt_agent_utils::AgentEventKind;
 use nmt_agent_utils::background_task::BackgroundTaskSnapshot;
 use nmt_agent_utils::chat::{
-    Event as SessionEvent, Item as SessionItem, QueuedPrompt, ReplayTurn, SessionSummary,
-    SlashCommandOutcome, ThreadSettings, TurnActivity,
+    Event as SessionEvent, Item as SessionItem, QuestionMode, QueuedPrompt, ReplayTurn,
+    SessionSummary, SlashCommandOutcome, ThreadSettings, TurnActivity,
 };
 use nmt_i18n::i18n;
 use tracing::{info, warn};
@@ -13,11 +13,12 @@ use tracing::{info, warn};
 use crate::capabilities::QueuedPromptDelivery;
 use crate::commands::claim_command_turn_start;
 use crate::composer::CommandFeedbackKind;
+use crate::questions::{QuestionPrompt, QuestionStatus};
 use crate::session::conversation::claimed_prompts;
 use crate::session::{Backend, RecoverySnapshot, Status, UpdateSuspension};
 use crate::thread_controls::{launch_effort, launch_model, stored_thread_settings};
 use crate::transcript::hidden;
-use crate::{AgentPane, AgentPaneEvent, QuestionPrompt, RecentSessionsMode};
+use crate::{AgentPane, AgentPaneEvent, RecentSessionsMode};
 
 /// Fold the thread's reported settings together with what the pane
 /// remembered. `startup_model` and `startup_effort` come from the launch
@@ -210,8 +211,22 @@ impl AgentPane {
             } => {
                 self.apply_workflow_transcript(&task_id, &agent_id, items, cx);
             }
+            SessionEvent::InputRequested(request) => self.receive_questions(request, cx),
+            SessionEvent::InputResolved { id, resolution } => {
+                self.resolve_questions(&id, resolution, cx)
+            }
+            SessionEvent::InputSubmissionFailed { id, message } => {
+                self.question_submission_failed(&id, message, cx)
+            }
             SessionEvent::QuestionsResolved => {
-                self.prompts.dismiss_questions();
+                if let Some(prompt) = self
+                    .prompts
+                    .batches
+                    .iter_mut()
+                    .find(|prompt| prompt.id.is_none() && prompt.pending())
+                {
+                    prompt.settle(QuestionStatus::Expired);
+                }
                 self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
                 cx.notify();
             }
@@ -307,6 +322,8 @@ impl AgentPane {
             self.palette.feedback = None;
             self.apply_replay(replay, cx);
         }
+
+        self.restore_question_drafts();
 
         // Seed the settings dropdowns with the thread's effective
         // configuration so they show real values before any change.
@@ -551,6 +568,14 @@ impl AgentPane {
         }
         let cancelled_queue = fatal && !self.palette.command_queue.is_empty();
         if fatal {
+            for prompt in &mut self.prompts.batches {
+                if prompt.mode == QuestionMode::Async && prompt.pending() {
+                    prompt.status = QuestionStatus::Pending;
+                    prompt.error = Some(i18n("agent-question-disconnected").to_string());
+                } else if prompt.pending() {
+                    prompt.settle(QuestionStatus::Expired);
+                }
+            }
             cx.emit(AgentPaneEvent::Interrupted);
             self.runtime.status = Status::Exited;
             self.turn.unanswered_prompt = None;

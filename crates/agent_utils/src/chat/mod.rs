@@ -5,6 +5,7 @@
 
 mod commands;
 mod controls;
+mod questions;
 mod sessions;
 mod usage;
 
@@ -13,6 +14,7 @@ use crate::background_task::{
 };
 pub use crate::chat::commands::*;
 pub use crate::chat::controls::*;
+pub use crate::chat::questions::*;
 pub use crate::chat::sessions::*;
 pub use crate::chat::usage::*;
 use crate::workflow::WorkflowSnapshot;
@@ -68,6 +70,7 @@ pub enum Item {
     AgentMessage {
         id: String,
         text: Option<String>,
+        questions: Option<Vec<Question>>,
     },
     Reasoning {
         id: String,
@@ -168,13 +171,20 @@ impl Item {
 
         match (self, completed) {
             (
-                Self::AgentMessage { text, .. },
                 Self::AgentMessage {
-                    text: completed, ..
+                    text, questions, ..
+                },
+                Self::AgentMessage {
+                    text: completed,
+                    questions: completed_questions,
+                    ..
                 },
             ) => {
                 if let Some(completed) = completed {
                     *text = Some(completed.clone());
+                }
+                if let Some(completed) = completed_questions {
+                    *questions = Some(completed.clone());
                 }
             }
             (
@@ -321,29 +331,6 @@ pub enum TurnActivity {
     },
 }
 
-/// One selectable answer of a [`Question`].
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct QuestionOption {
-    /// Sent back verbatim as the answer; the provider matches on this text.
-    pub label: String,
-    pub description: Option<String>,
-}
-
-/// A choice the model needs from the user before it can continue. The provider
-/// caps a batch at four questions of two to four options each, so the card that
-/// renders these never needs scrolling or paging.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Question {
-    /// Short chip label above the question text.
-    pub header: Option<String>,
-    /// Full question text. It is also the key the answer is reported under, so
-    /// it must survive the round trip unmodified.
-    pub question: String,
-    /// Whether more than one option may be chosen.
-    pub multi_select: bool,
-    pub options: Vec<QuestionOption>,
-}
-
 /// What a chat UI needs to react to, in transcript order.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
@@ -437,6 +424,15 @@ pub enum Event {
     },
     /// The pending questions were answered or cleared by turn lifecycle.
     QuestionsResolved,
+    InputRequested(QuestionRequest),
+    InputResolved {
+        id: String,
+        resolution: QuestionResolution,
+    },
+    InputSubmissionFailed {
+        id: String,
+        message: String,
+    },
     /// Replacement snapshot of the child agents this session spawned. Child
     /// lifecycle is reduced by the adapter, so this never affects the parent
     /// transcript, turn state, or approvals.
