@@ -1,5 +1,5 @@
 [workspace.package]
-version = "1.2.8"
+version = "1.2.9"
 publish = false
 authors = ["f32y <nyhvec@gmail.com>"]
 edition = "2024"

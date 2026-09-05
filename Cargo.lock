@@ -285,7 +285,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app"
-version = "1.2.8"
+version = "1.2.9"
 dependencies = [
  "anyhow",
  "base64",
@@ -3804,7 +3804,7 @@ checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
 name = "libghostty-vt-sys"
-version = "1.2.8"
+version = "1.2.9"
 dependencies = [
  "bindgen",
  "heck",
@@ -4194,7 +4194,7 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
 name = "nmt_agent_hook_cli"
-version = "1.2.8"
+version = "1.2.9"
 dependencies = [
  "nmt_agent_utils",
  "nmt_platform",
@@ -4205,7 +4205,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_agent_utils"
-version = "1.2.8"
+version = "1.2.9"
 dependencies = [
  "base64",
  "chrono",
@@ -4225,7 +4225,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_app_agent"
-version = "1.2.8"
+version = "1.2.9"
 dependencies = [
  "chrono",
  "futures",
@@ -4245,7 +4245,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_app_terminal"
-version = "1.2.8"
+version = "1.2.9"
 dependencies = [
  "base64",
  "futures",
@@ -4267,7 +4267,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_config"
-version = "1.2.8"
+version = "1.2.9"
 dependencies = [
  "aes-gcm",
  "base64",
@@ -4282,7 +4282,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_i18n"
-version = "1.2.8"
+version = "1.2.9"
 dependencies = [
  "toml 1.1.3+spec-1.1.0",
  "tracing",
@@ -4290,7 +4290,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_input"
-version = "1.2.8"
+version = "1.2.9"
 dependencies = [
  "bitflags 2.13.1",
  "smol_str",
@@ -4298,7 +4298,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_platform"
-version = "1.2.8"
+version = "1.2.9"
 dependencies = [
  "anyhow",
  "base64",
@@ -4326,7 +4326,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_remote_net"
-version = "1.2.8"
+version = "1.2.9"
 dependencies = [
  "base32",
  "futures",
@@ -4347,7 +4347,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_remote_session_hub"
-version = "1.2.8"
+version = "1.2.9"
 dependencies = [
  "nmt_config",
  "nmt_platform",
@@ -4358,7 +4358,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_shell_extension"
-version = "1.2.8"
+version = "1.2.9"
 dependencies = [
  "nmt_platform",
  "nmt_version",
@@ -4367,7 +4367,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_terminal"
-version = "1.2.8"
+version = "1.2.9"
 dependencies = [
  "base64",
  "bitflags 2.13.1",
@@ -4398,7 +4398,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_tree_sitter_bundle"
-version = "1.2.8"
+version = "1.2.9"
 dependencies = [
  "nmt_version",
  "tree-sitter",
@@ -4441,7 +4441,7 @@ dependencies = [
 
 [[package]]
 name = "nmt_version"
-version = "1.2.8"
+version = "1.2.9"
 
 [[package]]
 name = "nohash-hasher"
