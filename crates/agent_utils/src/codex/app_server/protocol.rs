@@ -304,6 +304,32 @@ pub(super) fn turn_start_params(
     params
 }
 
+/// The reasoning text to display for one item.
+///
+/// Codex reports two independent arrays: `content` holds the model's own
+/// reasoning tokens, and `summary` holds the recap the API generates from
+/// them. A hosted model normally returns only the recap, while a local or
+/// open-weights model returns only the raw tokens, so reading one array
+/// alone leaves the reasoning section empty for the other kind of model.
+/// When a model returns both, the raw tokens are the fuller record.
+fn reasoning_text(item: &Value) -> Option<String> {
+    let joined = |field: &str| {
+        Some(
+            item[field]
+                .as_array()?
+                .iter()
+                .filter_map(|part| part.as_str())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+    };
+
+    match joined("content") {
+        Some(content) if !content.is_empty() => Some(content),
+        _ => joined("summary"),
+    }
+}
+
 /// The sandbox policy for one turn. Workspace-write is the only mode whose
 /// meaning depends on which directories the workspace owns: it names its
 /// writable roots explicitly, so every selected directory has to be listed or
@@ -605,13 +631,7 @@ pub(super) fn parse_item(item: &Value) -> Option<Item> {
         },
         "reasoning" => Item::Reasoning {
             id,
-            summary: item["summary"].as_array().map(|summary| {
-                summary
-                    .iter()
-                    .filter_map(|part| part.as_str())
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            }),
+            summary: reasoning_text(item),
         },
         "commandExecution" => Item::CommandExecution {
             id,

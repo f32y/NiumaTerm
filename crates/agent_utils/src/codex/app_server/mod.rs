@@ -81,7 +81,7 @@ const THREAD_LIST_LIMIT: u64 = 50;
 /// Notifications that describe one thread's activity. They are routed by
 /// thread id before parent handling, so a descendant's turn or item can never
 /// change the parent's turn identity, running state, or transcript.
-const THREAD_SCOPED_NOTIFICATIONS: [&str; 10] = [
+const THREAD_SCOPED_NOTIFICATIONS: [&str; 11] = [
     "turn/started",
     "turn/completed",
     "thread/status/changed",
@@ -90,6 +90,7 @@ const THREAD_SCOPED_NOTIFICATIONS: [&str; 10] = [
     "item/completed",
     "item/agentMessage/delta",
     "item/reasoning/summaryTextDelta",
+    "item/reasoning/textDelta",
     "item/commandExecution/outputDelta",
     "error",
 ];
@@ -1105,6 +1106,15 @@ impl Session {
                 Event::AgentMessageDelta { item_id, delta }
             }),
             "item/reasoning/summaryTextDelta" => delta_event(params, |item_id, delta| {
+                Event::ReasoningSummaryDelta { item_id, delta }
+            }),
+            // Raw reasoning tokens stream under their own method and append to
+            // the same text as the summary deltas, because a model that emits
+            // raw tokens is the one that emits no summary. A model that sent
+            // both would interleave them for the rest of the item, since a
+            // stream cannot retract text it already appended and a completed
+            // item only fills reasoning text that streamed empty.
+            "item/reasoning/textDelta" => delta_event(params, |item_id, delta| {
                 Event::ReasoningSummaryDelta { item_id, delta }
             }),
             "item/commandExecution/outputDelta" => delta_event(params, |item_id, delta| {
