@@ -511,13 +511,17 @@ impl TabStrip {
                             this.when(density == TabDensity::Full, |this| {
                                 this.child(div().truncate().child(label.clone()))
                             })
-                            // Unread-notification dot: a filled accent
-                            // circle instead of a text bullet, so it stays
-                            // visible against the muted inactive-tab text.
+                            // Unread-notification dot: a filled circle
+                            // instead of a text bullet, so it stays visible
+                            // against the muted inactive-tab text. An agent
+                            // notification nobody has read reports the same
+                            // "this tab wants you" state a finished command
+                            // does, so it takes the success color the
+                            // terminal dot already uses.
                             .children((unread && agent_kind.is_none()).then(|| {
                                 StatusMark::new(
                                     ("tab-unread", id as usize),
-                                    StatusMarkTone::Primary,
+                                    StatusMarkTone::Success,
                                     px(TAB_DOT),
                                 )
                                 .label(

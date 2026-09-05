@@ -493,10 +493,13 @@ impl Sidebar {
                         .into_any_element()
                 })
                 .or_else(|| {
+                    // Same success color the horizontal strip gives an
+                    // unread notification, so one meaning keeps one color
+                    // across both tab styles.
                     tab.unread.then(|| {
                         StatusMark::new(
                             ("sidebar-tab-unread", key),
-                            StatusMarkTone::Primary,
+                            StatusMarkTone::Success,
                             px(TAB_ROW_DOT),
                         )
                         .label(i18n("sidebar-workspace-unread-label").replace("{count}", "1"))
