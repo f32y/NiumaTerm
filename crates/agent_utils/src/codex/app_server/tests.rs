@@ -1016,3 +1016,58 @@ fn a_thread_with_one_turn_offers_no_branch_point() {
     assert!(parse_fork_checkpoints(&turns).is_empty());
     assert!(parse_fork_checkpoints(&serde_json::Value::Null).is_empty());
 }
+
+#[test]
+fn raw_reasoning_tokens_outrank_the_generated_recap() {
+    let recap_only = json!({
+        "id": "r1",
+        "type": "reasoning",
+        "summary": ["Checked the parser", "Fixed the offset"],
+    });
+    assert_eq!(
+        parse_item(&recap_only),
+        Some(Item::Reasoning {
+            id: "r1".into(),
+            summary: Some("Checked the parser\nFixed the offset".into()),
+        })
+    );
+
+    let both = json!({
+        "id": "r2",
+        "type": "reasoning",
+        "summary": ["Checked the parser"],
+        "content": ["Re-reading the offset math", "It is off by one"],
+    });
+    assert_eq!(
+        parse_item(&both),
+        Some(Item::Reasoning {
+            id: "r2".into(),
+            summary: Some("Re-reading the offset math\nIt is off by one".into()),
+        })
+    );
+
+    // An open-weights model reports raw tokens and no recap at all.
+    let raw_only = json!({"id": "r3", "type": "reasoning", "content": ["Thinking aloud"]});
+    assert_eq!(
+        parse_item(&raw_only),
+        Some(Item::Reasoning {
+            id: "r3".into(),
+            summary: Some("Thinking aloud".into()),
+        })
+    );
+
+    // An empty content array must leave a recap that is present untouched.
+    let empty_content = json!({
+        "id": "r4",
+        "type": "reasoning",
+        "summary": ["Recap"],
+        "content": [],
+    });
+    assert_eq!(
+        parse_item(&empty_content),
+        Some(Item::Reasoning {
+            id: "r4".into(),
+            summary: Some("Recap".into()),
+        })
+    );
+}
