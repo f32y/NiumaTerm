@@ -119,6 +119,7 @@ impl AgentPane {
             QuestionResolution::Expired => QuestionStatus::Expired,
         };
         self.prompts.batches[index].settle(status);
+        self.prompts.hide_settled();
         if waiting
             && !self
                 .prompts
@@ -312,6 +313,7 @@ impl AgentPane {
                 prompt.error = Some(message);
             }
         }
+        self.prompts.hide_settled();
         cx.notify();
     }
 
