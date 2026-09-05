@@ -311,6 +311,7 @@ fn turn_start_sends_the_selected_approval_reviewer() {
             "approvalsReviewer": "auto_review",
             "sandboxPolicy": {"type": "workspaceWrite"},
             "effort": "high",
+            "summary": "detailed",
             "serviceTier": null
         })
     );
