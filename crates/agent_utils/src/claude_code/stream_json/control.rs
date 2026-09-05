@@ -99,6 +99,7 @@ pub(super) fn parse_questions(input: &Value) -> Vec<Question> {
             }
 
             Some(Question {
+                input: Default::default(),
                 header: question["header"].as_str().map(str::to_owned),
                 question: question["question"].as_str()?.to_owned(),
                 multi_select: question["multiSelect"].as_bool().unwrap_or(false),

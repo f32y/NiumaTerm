@@ -286,6 +286,7 @@ fn a_missing_parent_keeps_only_the_reachable_suffix() {
         vec![Item::AgentMessage {
             id: "replay-message-0".into(),
             text: Some("reachable suffix only".into()),
+            questions: None,
         }]
     );
 }
@@ -386,7 +387,8 @@ fn a_compaction_replays_as_one_row_carrying_summary_and_accounting() {
             },
             Item::AgentMessage {
                 id: "replay-message-0".into(),
-                text: Some("answer".into())
+                text: Some("answer".into()),
+                questions: None,
             },
         ]
     );
@@ -435,7 +437,8 @@ fn a_summary_before_its_boundary_marker_still_replays_as_one_row() {
             },
             Item::AgentMessage {
                 id: "replay-message-0".into(),
-                text: Some("answer".into())
+                text: Some("answer".into()),
+                questions: None,
             },
         ]
     );
@@ -469,7 +472,8 @@ fn a_boundary_without_a_summary_turn_still_marks_the_break() {
             },
             Item::AgentMessage {
                 id: "replay-message-0".into(),
-                text: Some("after".into())
+                text: Some("after".into()),
+                questions: None,
             },
         ]
     );
@@ -567,7 +571,8 @@ fn replay_keeps_dialogue_and_preserves_tool_details() {
             },
             Item::AgentMessage {
                 id: "replay-message-0".into(),
-                text: Some("answer".into())
+                text: Some("answer".into()),
+                questions: None,
             },
         ]
     );
@@ -1308,7 +1313,8 @@ fn replay_divides_a_session_into_the_turns_it_recorded() {
             },
             Item::AgentMessage {
                 id: "replay-message-0".into(),
-                text: Some("first answer".into())
+                text: Some("first answer".into()),
+                questions: None,
             },
         ]
     );

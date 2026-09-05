@@ -382,6 +382,7 @@ mod separate_view_state_tests {
         SessionItem::AgentMessage {
             id: id.into(),
             text: Some(text.into()),
+            questions: None,
         }
     }
 
@@ -497,6 +498,7 @@ mod steered_prompt_rows_tests {
         SessionItem::AgentMessage {
             id: id.into(),
             text: Some(format!("reply {id}")),
+            questions: None,
         }
     }
 
@@ -718,6 +720,7 @@ mod resumed_collapse_tests {
                         SessionItem::AgentMessage {
                             id: "a".into(),
                             text: Some("answer".into()),
+                            questions: None,
                         },
                     ]),
                     cx,
@@ -768,6 +771,7 @@ mod branch_point_targeting_tests {
             item: SessionItem::AgentMessage {
                 id: text.to_string(),
                 text: Some(text.to_string()),
+                questions: None,
             },
             at: None,
         }
@@ -1075,6 +1079,7 @@ mod row_rhythm_tests {
             item: SessionItem::AgentMessage {
                 id: text.to_string(),
                 text: Some(text.to_string()),
+                questions: None,
             },
             at: None,
         }
@@ -1594,6 +1599,7 @@ mod typed_reply_tests {
                     SessionItem::AgentMessage {
                         id: "a".into(),
                         text: Some("Hello".into()),
+                        questions: None,
                     },
                     Vec::new(),
                     cx,

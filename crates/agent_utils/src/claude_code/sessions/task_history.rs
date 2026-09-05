@@ -343,6 +343,7 @@ fn child_items(record: &Value, open_tools: &mut HashMap<String, Item>) -> Vec<It
                 items.push(Item::AgentMessage {
                     id,
                     text: block["text"].as_str().map(str::to_owned),
+                    questions: None,
                 })
             }
             Some("text") => {}

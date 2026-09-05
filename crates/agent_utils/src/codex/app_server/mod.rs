@@ -33,6 +33,7 @@ mod compaction;
 mod host;
 mod options;
 mod protocol;
+mod questions;
 mod skills;
 mod title_generation;
 
@@ -53,6 +54,7 @@ use crate::codex::app_server::protocol::{
     resumed_thread_events, skills_list_request, stringify_command, thread_list_params,
     thread_resume_params, turn_start_params,
 };
+use crate::codex::app_server::questions::QuestionState;
 #[cfg(test)]
 use crate::codex::app_server::skills::parse_skill_catalog;
 use crate::codex::app_server::skills::{SkillRefreshState, skill_catalog_from_response};
@@ -156,6 +158,7 @@ pub struct Session {
     current_turn: Option<String>,
     /// JSON-RPC id of the server→client approval request awaiting an answer.
     pending_approval: Option<u64>,
+    questions: QuestionState,
     /// Cursor for the next history page; `None` once the final page arrived.
     history_cursor: Option<String>,
     /// Command RPC responses are independent of turn ids. Tracking their
@@ -292,6 +295,7 @@ impl Session {
             thread_id: None,
             current_turn: None,
             pending_approval: None,
+            questions: QuestionState::default(),
             history_cursor: None,
             pending_commands: HashMap::new(),
             pending_thread_names: HashMap::new(),
@@ -323,6 +327,7 @@ impl Session {
     pub fn has_active_operation(&self) -> bool {
         self.current_turn.is_some()
             || self.pending_approval.is_some()
+            || self.questions.has_active_request()
             || !self.pending_commands.is_empty()
             || self.compaction.active.is_some()
     }
@@ -720,19 +725,25 @@ impl Session {
         self.send(request);
     }
 
-    /// Write one request line; write failures stay unsurfaced because the
-    /// reader-side EOF is the single exit-detection path.
+    /// Interactive submissions need the write result to retain a rejected draft.
+    fn try_send(&self, message: Value) -> Result<(), String> {
+        self.host
+            .as_ref()
+            .ok_or("Codex app-server is not connected")?
+            .send(self.registration_id, message)
+    }
+
     fn send(&mut self, message: Value) {
-        let Some(host) = &self.host else {
-            return;
-        };
-        if let Err(error) = host.send(self.registration_id, message) {
+        if let Err(error) = self.try_send(message) {
             tracing::warn!("could not write Codex app-server request: {error}");
         }
     }
 
     fn process_server_request(&mut self, rpc_id: u64, method: &str, message: &Value) -> Vec<Event> {
         match method {
+            "item/tool/requestUserInput" => {
+                self.process_question_request(rpc_id, &message["params"])
+            }
             "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" => {
                 let params = &message["params"];
                 let description = if method == "item/commandExecution/requestApproval" {
@@ -764,6 +775,9 @@ impl Session {
     }
 
     fn process_response(&mut self, rpc_id: u64, message: &Value) -> Vec<Event> {
+        if let Some(events) = self.process_question_response(rpc_id, message) {
+            return events;
+        }
         if let Some(pending) = self.pending_thread_names.remove(&rpc_id) {
             if self.thread_id.as_deref() != Some(pending.thread_id.as_str()) {
                 return Vec::new();
@@ -937,6 +951,8 @@ impl Session {
             THREAD_RESUME_RPC_ID | THREAD_FORK_RPC_ID => {
                 let result = &message["result"];
 
+                self.questions = QuestionState::default();
+                self.current_turn = None;
                 self.thread_id = result["thread"]["id"].as_str().map(str::to_owned);
                 self.initial_resume = None;
                 // A resumed parent can already have finished descendants, and
@@ -954,6 +970,7 @@ impl Session {
             self.cancel_title_generation();
             self.current_turn = None;
             self.pending_approval = None;
+            self.questions = QuestionState::default();
             self.pending_commands.clear();
             self.compaction.reset_thread();
             return vec![Event::HostExited {
@@ -1016,6 +1033,9 @@ impl Session {
                 vec![Event::TurnStarted]
             }
             "turn/completed" => {
+                let mut events = self
+                    .questions
+                    .end_turn(params["turn"]["id"].as_str().unwrap_or_default());
                 self.current_turn = None;
                 self.turn_output_usage.finish_turn();
 
@@ -1025,7 +1045,8 @@ impl Session {
                     .map(str::to_owned);
                 self.compaction.clear_incomplete();
 
-                vec![Event::TurnCompleted { error }]
+                events.push(Event::TurnCompleted { error });
+                events
             }
             "thread/tokenUsage/updated" => {
                 let Some(usage) = parse_context_window_usage(&params["tokenUsage"]) else {
@@ -1076,6 +1097,7 @@ impl Session {
                     .map(Event::ItemCompleted)
                     .into_iter()
                     .collect();
+                events.extend(self.questions.observe_message(item));
                 events.extend(self.background_events(changed));
                 events
             }
@@ -1089,6 +1111,15 @@ impl Session {
                 Event::CommandOutputDelta { item_id, delta }
             }),
             "serverRequest/resolved" => {
+                if params["threadId"].as_str() != self.thread_id.as_deref() {
+                    return Vec::new();
+                }
+                if let Some(event) = params["requestId"]
+                    .as_u64()
+                    .and_then(|id| self.questions.resolve_request(id))
+                {
+                    return vec![event];
+                }
                 // Fires when a pending approval is answered or cleared by
                 // turn lifecycle — tear down the approval UI either way.
                 if self.pending_approval.is_some()

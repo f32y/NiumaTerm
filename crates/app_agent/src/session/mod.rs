@@ -47,6 +47,7 @@ use crate::composer::attachments::{ComposerAttachments, scratch_dir};
 use crate::composer::{BranchFlow, CommandFeedbackKind, prompt_with_response_annotations};
 use crate::input_history::{InputHistoryNavigation, InputHistoryScope};
 use crate::profile::{AgentKind, agent_launch};
+use crate::questions::QuestionStatus;
 pub(super) use crate::session::backend::Backend;
 use crate::session::backend::ConversationTitleRequest;
 pub use crate::session::backend::RecoveryIdentity;
@@ -846,6 +847,19 @@ impl AgentPane {
         restore_on_interrupt: Option<(String, Vec<String>)>,
         cx: &mut Context<Self>,
     ) -> bool {
+        if self
+            .prompts
+            .batches
+            .iter()
+            .any(|prompt| prompt.status == QuestionStatus::Submitting)
+        {
+            self.palette.set_feedback(
+                CommandFeedbackKind::Notice,
+                i18n("agent-question-send-pending"),
+                cx,
+            );
+            return false;
+        }
         if self.branch_flow_holds_composer() {
             self.palette.set_feedback(
                 CommandFeedbackKind::Error,

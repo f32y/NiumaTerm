@@ -1,15 +1,10 @@
 use std::time::Duration;
 
 use gpui::prelude::*;
-use gpui::{AnyElement, Context, FontWeight, SharedString, div, px};
+use gpui::{AnyElement, Context, FontWeight, div, px};
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::checkbox::Checkbox;
-use gpui_component::radio::Radio;
 use gpui_component::spinner::Spinner;
-use gpui_component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, h_flex, v_flex,
-};
-use nmt_agent_utils::chat::{Question, QuestionOption};
+use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 use nmt_agent_utils::{AgentWorkspace, MultiRootAccess};
 use nmt_i18n::i18n;
 
@@ -21,7 +16,7 @@ use crate::view::blocking_overlay::BlockingOverlay;
 use crate::view::{
     COMPOSER_STATUS_PADDING_X, COMPOSER_STATUS_PADDING_Y, COMPOSER_STATUS_TEXT_SIZE,
 };
-use crate::{AgentPane, AgentPaneEvent, QuestionPrompt};
+use crate::{AgentPane, AgentPaneEvent};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum UpdateOverlayPhase {
@@ -172,147 +167,6 @@ impl AgentPane {
                 )
                 .into_any_element()
         })
-    }
-
-    /// The `AskUserQuestion` card. The provider caps a batch at four questions
-    /// of two to four options, so every question renders expanded rather than
-    /// paged: the user sees the whole ask before answering any of it.
-    pub(super) fn render_question_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let prompt = self.prompts.questions()?;
-        let complete = prompt.is_complete();
-
-        // Collected eagerly: each row needs `cx` mutably to build its listeners,
-        // which a lazy iterator would still be holding while the surrounding
-        // card reads the theme.
-        let questions: Vec<AnyElement> = prompt
-            .questions
-            .iter()
-            .enumerate()
-            .map(|(index, question)| {
-                let header = question.header.as_ref().map(|header| {
-                    div()
-                        .text_xs()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(cx.theme().muted_foreground)
-                        .child(header.clone())
-                });
-
-                v_flex()
-                    .w_full()
-                    .gap_1p5()
-                    .children(header)
-                    .child(div().text_sm().child(question.question.clone()))
-                    .child(self.render_question_options(index, question, prompt, cx))
-                    .into_any_element()
-            })
-            .collect();
-
-        Some(
-            v_flex()
-                .w_full()
-                .px_4()
-                .py_3()
-                .gap_3()
-                .border_b_1()
-                .border_color(cx.theme().border.opacity(0.65))
-                .bg(cx.theme().muted.opacity(0.2))
-                .child(
-                    div()
-                        .text_xs()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(cx.theme().muted_foreground)
-                        .child(i18n("agent-question-pending")),
-                )
-                .children(questions)
-                .child(
-                    h_flex()
-                        .justify_end()
-                        .gap_2()
-                        .child(
-                            Button::new("question-skip")
-                                .ghost()
-                                .label(i18n("agent-question-skip"))
-                                .on_click(
-                                    cx.listener(|this, _, _, cx| this.respond_questions(false, cx)),
-                                ),
-                        )
-                        .child(
-                            Button::new("question-submit")
-                                .primary()
-                                // Submitting a partial set would report the
-                                // unanswered questions as refusals, so the
-                                // button waits for every question.
-                                .disabled(!complete)
-                                .label(i18n("agent-question-submit"))
-                                .on_click(
-                                    cx.listener(|this, _, _, cx| this.respond_questions(true, cx)),
-                                ),
-                        ),
-                )
-                .into_any_element(),
-        )
-    }
-
-    fn render_question_options(
-        &self,
-        question_index: usize,
-        question: &Question,
-        prompt: &QuestionPrompt,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let describe = |option: &QuestionOption| {
-            option
-                .description
-                .as_ref()
-                .filter(|description| !description.is_empty())
-                .map_or_else(
-                    || option.label.clone(),
-                    |description| format!("{} — {description}", option.label),
-                )
-        };
-
-        // One id namespace per question, so option ids stay unique across the
-        // card without assuming how many options a question carries.
-        let group: SharedString = format!("agent-question-{question_index}").into();
-        let multi_select = question.multi_select;
-
-        // Each option is drawn on its own so the row the arrow keys are on can
-        // carry the highlight. A radio group would render its own children and
-        // leave no way to mark one of them.
-        v_flex()
-            .gap_1()
-            .children(question.options.iter().enumerate().map(|(index, option)| {
-                let control: AnyElement = if multi_select {
-                    Checkbox::new((group.clone(), index))
-                        .label(describe(option))
-                        .checked(prompt.is_selected(question_index, index))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.toggle_question_option(question_index, index, cx)
-                        }))
-                        .into_any_element()
-                } else {
-                    // One answer only, which the pick itself enforces by
-                    // replacing rather than adding.
-                    Radio::new((group.clone(), index))
-                        .label(describe(option))
-                        .checked(prompt.is_selected(question_index, index))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.toggle_question_option(question_index, index, cx)
-                        }))
-                        .into_any_element()
-                };
-
-                div()
-                    .w_full()
-                    .px_1p5()
-                    .py_0p5()
-                    .rounded(UI_RADIUS)
-                    .when(prompt.is_focused(question_index, index), |this| {
-                        this.bg(cx.theme().list_active)
-                    })
-                    .child(control)
-            }))
-            .into_any_element()
     }
 
     /// A strip naming the workspace directories the installed harness cannot

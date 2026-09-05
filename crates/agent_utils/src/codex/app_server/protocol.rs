@@ -9,6 +9,7 @@ use crate::chat::{
     ModelInfo, ReplayItem, ReplayTurn, ScopedTokenUsage, SessionScope, SessionSummary,
     SkillReference, SlashCommandOutcome, ThreadSettings, TokenUsageBreakdown,
 };
+use crate::codex::app_server::questions::parse_async_questions;
 use crate::codex::app_server::{
     PROVIDER_API_FIELD, THREAD_LIST_LIMIT, THREAD_RESUME_RPC_ID, THREAD_START_RPC_ID, ThreadProfile,
 };
@@ -595,6 +596,7 @@ pub(super) fn parse_item(item: &Value) -> Option<Item> {
         "agentMessage" => Item::AgentMessage {
             id,
             text: item["text"].as_str().map(str::to_owned),
+            questions: parse_async_questions(item),
         },
         "reasoning" => Item::Reasoning {
             id,

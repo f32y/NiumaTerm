@@ -234,6 +234,7 @@ fn parse_transcript(reader: impl BufRead, sidechain: bool) -> Vec<ReplayTurn> {
                                     Item::AgentMessage {
                                         id,
                                         text: Some(text.to_string()),
+                                        questions: None,
                                     }
                                 };
                                 items.push(ReplayItem { item, at });

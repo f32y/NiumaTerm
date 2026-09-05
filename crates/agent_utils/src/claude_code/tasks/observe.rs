@@ -293,6 +293,7 @@ impl ClaudeTasks {
                     items.push(Item::AgentMessage {
                         id,
                         text: block["text"].as_str().map(str::to_owned),
+                        questions: None,
                     })
                 }
                 Some("text") => {}

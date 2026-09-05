@@ -99,6 +99,7 @@ pub(crate) fn question_request(
         let id = item["id"].as_str()?;
         ids.push(id.to_string());
         questions.push(Question {
+            input: Default::default(),
             header: item["header"].as_str().map(str::to_string),
             // `detail` is supporting text the harness deliberately keeps out of
             // the option labels; folding it into the question text is what puts
@@ -532,6 +533,7 @@ fn map_chunk(data: &Value) -> Vec<Event> {
             Some("text") => vec![Event::ItemStarted(Item::AgentMessage {
                 id: item_id,
                 text: None,
+                questions: None,
             })],
             _ => Vec::new(),
         },
@@ -577,6 +579,7 @@ fn map_completed_message(data: &Value) -> Vec<Event> {
                 "text" => Some(Event::ItemCompleted(Item::AgentMessage {
                     id,
                     text: block["text"].as_str().map(str::to_string),
+                    questions: None,
                 })),
                 // Tool calls are part of the same message. They are not
                 // transcript rows in this integration yet, and rendering them

@@ -233,6 +233,7 @@ fn a_completed_message_reconciles_with_the_blocks_that_streamed() {
             Event::ItemCompleted(Item::AgentMessage {
                 id: "1:1:2".into(),
                 text: Some("the whole answer".into()),
+                questions: None,
             }),
         ]
     );
@@ -818,6 +819,7 @@ fn a_replayed_page_rebuilds_turns_from_the_same_events_the_stream_carries() {
             &Item::AgentMessage {
                 id: "1:1:0".into(),
                 text: Some("done".into()),
+                questions: None,
             },
         ]
     );

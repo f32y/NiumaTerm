@@ -127,7 +127,7 @@ impl Render for AgentPane {
         let session_state = self.session_state.render(cx);
 
         let approval = self.render_approval_panel(cx);
-        let questions = self.render_question_panel(cx);
+        let questions = self.render_question_panel(window, cx);
 
         let running = composer_action(self.runtime.status) == ComposerAction::Stop;
         let update_suspended = self.runtime.update_suspension.is_some();
@@ -216,10 +216,8 @@ impl Render for AgentPane {
                 } else if this.prompts.approval_open() {
                     this.respond_approval("cancel", cx);
                 } else if this.prompts.questions_open() {
-                    // Dismissing questions is not cancelling the turn: the
-                    // model is told to assume and continue, so Escape here
-                    // deliberately does not interrupt.
-                    this.respond_questions(false, cx);
+                    this.prompts.collapsed = true;
+                    cx.notify();
                 } else if this.runtime.status == Status::Running {
                     this.interrupt_from_ui(window, cx);
                 }

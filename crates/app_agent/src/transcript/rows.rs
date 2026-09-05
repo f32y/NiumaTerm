@@ -200,9 +200,14 @@ pub(crate) fn entry_fingerprint(
     annotations_expanded: bool,
 ) -> u64 {
     let (content_len, status_len, extra) = match item {
-        SessionItem::UserMessage { text }
-        | SessionItem::AgentMessage { text, .. }
-        | SessionItem::Reasoning { summary: text, .. } => {
+        SessionItem::AgentMessage {
+            text, questions, ..
+        } => (
+            text.as_ref().map_or(0, String::len),
+            questions.as_ref().map_or(0, Vec::len),
+            u64::from(questions.is_some()),
+        ),
+        SessionItem::UserMessage { text } | SessionItem::Reasoning { summary: text, .. } => {
             (text.as_ref().map_or(0, String::len), 0, 0)
         }
         SessionItem::Error { text } => (text.len(), 0, 0),
@@ -539,6 +544,9 @@ impl TranscriptView {
             SessionItem::Error { .. }
             | SessionItem::Compaction { .. }
             | SessionItem::UserMessage { .. } => true,
+            SessionItem::AgentMessage {
+                questions: Some(_), ..
+            } => true,
             SessionItem::AgentMessage { .. } => {
                 !hidden(&entry.item)
                     && self.items[index + 1..]

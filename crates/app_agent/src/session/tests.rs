@@ -579,6 +579,7 @@ mod queued_prompt_placement_tests {
                     SessionEvent::ItemStarted(SessionItem::AgentMessage {
                         id: "msg-1".into(),
                         text: Some("the first answer".into()),
+                        questions: None,
                     }),
                     cx,
                 );
@@ -710,6 +711,7 @@ mod turn_error_tests {
                     SessionEvent::ItemStarted(SessionItem::AgentMessage {
                         id: "message".into(),
                         text: Some("partial answer".into()),
+                        questions: None,
                     }),
                     cx,
                 );
