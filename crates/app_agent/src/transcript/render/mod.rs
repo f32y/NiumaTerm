@@ -2,9 +2,11 @@ mod compaction_row;
 mod image_preview;
 pub(super) mod text_style;
 
-#[cfg(test)]
-pub(crate) use crate::transcript::render::text_style::transcript_code_block_style;
 use crate::transcript::render::text_style::{agent_text_style, markdown_view};
+#[cfg(test)]
+pub(crate) use crate::transcript::render::text_style::{
+    highlight_theme_for_surface, is_dark_surface, transcript_code_block_style,
+};
 mod questions;
 mod turn_rows;
 mod user_row;

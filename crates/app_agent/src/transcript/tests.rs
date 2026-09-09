@@ -1616,3 +1616,60 @@ mod typed_reply_tests {
         });
     }
 }
+
+mod surface_palette_tests {
+    use std::sync::Arc;
+
+    use gpui::rgb;
+    use gpui_component::ThemeMode;
+    use gpui_component::highlighter::HighlightTheme;
+
+    use crate::transcript::render::{highlight_theme_for_surface, is_dark_surface};
+
+    #[test]
+    fn palette_is_kept_when_it_matches_the_surface() {
+        let dark = HighlightTheme::default_dark();
+        let light = HighlightTheme::default_light();
+        let own = Arc::new(HighlightTheme {
+            name: "Own Dark".to_string(),
+            appearance: ThemeMode::Dark,
+            style: Default::default(),
+        });
+
+        assert!(Arc::ptr_eq(
+            &highlight_theme_for_surface(dark.clone(), true),
+            &dark
+        ));
+        assert!(Arc::ptr_eq(
+            &highlight_theme_for_surface(light.clone(), false),
+            &light
+        ));
+        assert!(Arc::ptr_eq(
+            &highlight_theme_for_surface(own.clone(), true),
+            &own
+        ));
+    }
+
+    #[test]
+    fn palette_follows_a_surface_on_the_other_side_of_mid_gray() {
+        let dark = HighlightTheme::default_dark();
+        let light = HighlightTheme::default_light();
+
+        assert_eq!(
+            highlight_theme_for_surface(light, true).appearance,
+            ThemeMode::Dark
+        );
+        assert_eq!(
+            highlight_theme_for_surface(dark, false).appearance,
+            ThemeMode::Light
+        );
+    }
+
+    #[test]
+    fn surfaces_split_at_mid_gray() {
+        assert!(is_dark_surface(rgb(0x300A24).into()));
+        assert!(is_dark_surface(rgb(0x1C1C1C).into()));
+        assert!(!is_dark_surface(rgb(0xE0E0E0).into()));
+        assert!(!is_dark_surface(rgb(0xFCFBFA).into()));
+    }
+}
