@@ -8,6 +8,7 @@ use nmt_i18n::i18n;
 
 use crate::composer::visible_prompt;
 use crate::profile::AgentKind;
+use crate::transcript::code::clean_output;
 
 /// Where the last-response reading stops counting and becomes "more than an
 /// hour".
@@ -187,26 +188,28 @@ pub(crate) fn truncated_user_prompt(text: &str) -> Option<&str> {
     None
 }
 
-/// Wrap tool output in a Markdown fence with an explicit language tag. The
-/// fence grows past any backtick run in the body, so raw output can never
-/// terminate the syntax-highlighted block early.
-pub(crate) fn fenced_code_block_as(output: &str, lang: &str) -> String {
-    let mut fence = String::from("```");
-    while output.contains(fence.as_str()) {
-        fence.push('`');
-    }
-    format!("{fence}{lang}\n{output}\n{fence}")
-}
-
-/// First-bytes sniff covering the two formats tool output actually produces
-/// in bulk (diffs and JSON payloads); anything else renders as an unhighlighted
-/// code block. Extend per-tool only if more grammars earn their keep.
+/// Recognize structured output without treating bracketed log levels as JSON.
+/// Incomplete objects and arrays remain eligible while their contents stream.
 pub(crate) fn detect_output_language(output: &str) -> &'static str {
     let trimmed = output.trim_start();
-    if trimmed.starts_with("diff --git") || trimmed.starts_with("@@ ") {
+    if trimmed.starts_with("diff --git")
+        || trimmed.starts_with("@@ ")
+        || (trimmed.starts_with("--- ")
+            && trimmed
+                .lines()
+                .nth(1)
+                .is_some_and(|line| line.starts_with("+++ ")))
+    {
         "diff"
-    } else if trimmed.starts_with('{') || trimmed.starts_with('[') {
-        "json"
+    } else if trimmed.starts_with(['{', '[']) {
+        // Validate only a bounded prefix. An incomplete value is expected
+        // during streaming; other parse errors identify prose or log markers.
+        let end = trimmed.floor_char_boundary(trimmed.len().min(16 * 1024));
+        match serde_json::from_str::<serde_json::Value>(&trimmed[..end]) {
+            Ok(_) => "json",
+            Err(error) if error.is_eof() => "json",
+            Err(_) => "",
+        }
     } else {
         ""
     }
@@ -257,7 +260,7 @@ pub(crate) fn command_execution_detail(command: &str, aggregated_output: Option<
 
     if let Some(output) = aggregated_output.filter(|output| !output.is_empty()) {
         detail.push_str("\n\n");
-        detail.push_str(output);
+        detail.push_str(&clean_output(output));
     }
 
     detail
@@ -268,11 +271,11 @@ pub(crate) fn command_execution_detail(command: &str, aggregated_output: Option<
 /// wrong, and the lines after it are usually the same failure restated as a
 /// stack or a usage dump; the whole output stays one click away.
 pub(crate) fn command_failure_reason(aggregated_output: Option<&str>) -> Option<String> {
-    aggregated_output?
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .map(str::to_string)
+    aggregated_output?.lines().find_map(|line| {
+        let line = clean_output(line);
+        let line = line.trim();
+        (!line.is_empty()).then(|| line.to_owned())
+    })
 }
 
 /// Full text of an entry for the right-click Copy action — the whole message,
@@ -302,7 +305,7 @@ pub(crate) fn entry_copy_text(item: &SessionItem) -> String {
             Some(diff) => i18n("agent-transcript-file-edit-detail")
                 .replace("{paths}", paths)
                 .replace("{status}", status.as_deref().unwrap_or("inProgress"))
-                .replace("{diff}", diff),
+                .replace("{diff}", &clean_output(diff)),
             None => i18n("agent-transcript-file-edit")
                 .replace("{paths}", paths)
                 .replace("{status}", status.as_deref().unwrap_or("inProgress")),
@@ -315,8 +318,9 @@ pub(crate) fn entry_copy_text(item: &SessionItem) -> String {
             ..
         } => match output {
             Some(output) => format!(
-                "{kind} {title} — {}\n{output}",
-                status.as_deref().unwrap_or("inProgress")
+                "{kind} {title} — {}\n{}",
+                status.as_deref().unwrap_or("inProgress"),
+                clean_output(output)
             ),
             None => format!(
                 "{kind} {title} — {}",

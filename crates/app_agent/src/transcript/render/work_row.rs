@@ -4,32 +4,24 @@
 //! A work row collapses to a title and opens to whatever the call produced, so
 //! most of what it draws is only reachable once the reader asks for it.
 
-use std::borrow::Cow;
 use std::time::Instant;
 
 use gpui::prelude::*;
-use gpui::{
-    AnyElement, Context, ListHorizontalSizingBehavior, ScrollHandle, SharedString, Window, div, px,
-    uniform_list,
-};
+use gpui::{AnyElement, Context, ScrollHandle, Window, div, px};
 use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::scroll::Scrollbar;
 use gpui_component::{ActiveTheme as _, IconName};
 use nmt_agent_utils::chat::Item as SessionItem;
 use nmt_i18n::i18n;
 
-use crate::settings::{AgentSettings, UI_RADIUS};
+use crate::transcript::code::is_code_item;
 use crate::transcript::disclosure_row::{
     AGENT_CARD_BODY_PADDING_Y, AGENT_CARD_DETAIL_SIZE, AGENT_CARD_PADDING_X, AGENT_CARD_RADIUS,
     AGENT_DISCLOSURE_DETAIL_INSET, AgentCardTone, AgentDisclosureRow, agent_card,
 };
-use crate::transcript::render::TRANSCRIPT_LINE_HEIGHT;
 use crate::transcript::render::text_style::{markdown_view, work_detail_text_style};
 use crate::transcript::reveal::{RevealKey, RevealedPart, revealed_block};
-use crate::transcript::{
-    TranscriptView, code_transcript_format, command_execution_detail, command_execution_heading,
-    command_failure_reason, fenced_code_block_as, should_virtualize_transcript, strip_read_gutter,
-};
+use crate::transcript::{TranscriptView, command_execution_heading, command_failure_reason};
 
 impl TranscriptView {
     /// One step of the work log, as a card: icon block · heading · outcome
@@ -48,7 +40,6 @@ impl TranscriptView {
         let cwd = self.cwd.clone();
         let (icon, heading, reason, status, detail) = match &self.items[index].item {
             SessionItem::CommandExecution {
-                command,
                 purpose,
                 aggregated_output,
                 status,
@@ -61,7 +52,7 @@ impl TranscriptView {
                 let failed = matches!(state, "failed" | "declined")
                     || exit_code.is_some_and(|code| code != 0);
                 let state = if failed { "failed" } else { state };
-                let detail = command_execution_detail(command, aggregated_output.as_deref());
+                let detail = aggregated_output.as_deref().unwrap_or("");
 
                 (
                     IconName::SquareTerminal,
@@ -70,7 +61,7 @@ impl TranscriptView {
                         .then(|| command_failure_reason(aggregated_output.as_deref()))
                         .flatten(),
                     Some(state.to_string()),
-                    Some(Cow::Owned(detail)),
+                    Some(detail),
                 )
             }
             SessionItem::FileChange {
@@ -83,9 +74,7 @@ impl TranscriptView {
                 i18n("agent-transcript-edit-paths").replace("{paths}", paths),
                 None,
                 Some(status.as_deref().unwrap_or("inProgress").to_string()),
-                diff.as_deref()
-                    .filter(|diff| !diff.trim().is_empty())
-                    .map(Cow::Borrowed),
+                diff.as_deref().filter(|diff| !diff.trim().is_empty()),
             ),
             SessionItem::Other {
                 kind,
@@ -106,20 +95,14 @@ impl TranscriptView {
                 },
                 None,
                 Some(status.as_deref().unwrap_or("inProgress").to_string()),
-                output
-                    .as_deref()
-                    .filter(|output| !output.trim().is_empty())
-                    .map(Cow::Borrowed),
+                output.as_deref().filter(|output| !output.trim().is_empty()),
             ),
             SessionItem::Reasoning { summary, .. } => (
                 IconName::Bot,
                 i18n("agent-transcript-thinking").to_string(),
                 None,
                 None,
-                summary
-                    .as_deref()
-                    .filter(|text| !text.trim().is_empty())
-                    .map(Cow::Borrowed),
+                summary.as_deref().filter(|text| !text.trim().is_empty()),
             ),
             _ => return div().into_any_element(),
         };
@@ -212,129 +195,23 @@ impl TranscriptView {
                         .text_color(cx.theme().danger.opacity(0.85))
                         .child(reason)
                 }))
-                .children(detail.as_deref().filter(|_| expanded).map(|detail| {
-                    let code_format = code_transcript_format(&self.items[index].item, detail);
-                    let virtualized = should_virtualize_transcript(code_format.is_some(), detail);
-
-                    let body = if virtualized {
-                        let (_, strip_gutter) = code_format.as_ref().expect("code format");
-                        let (source, segments, widest_segment, scroll) = {
-                            let state =
-                                self.virtual_transcripts
-                                    .ensure(index, detail, *strip_gutter);
-                            (
-                                state.source.clone(),
-                                state.segments.clone(),
-                                state.widest_segment,
-                                state.scroll.clone(),
-                            )
-                        };
-                        let segment_count = segments.len();
-                        let settings = cx.global::<AgentSettings>();
-                        let transcript_font = settings.transcript_font();
-                        let transcript_font_size = px(settings.transcript_font_size);
-                        let line_height = transcript_font_size * TRANSCRIPT_LINE_HEIGHT;
-                        let text_color = cx.theme().muted_foreground;
-                        let list_source = source.clone();
-                        let list_segments = segments.clone();
-
+                .children(detail.filter(|_| expanded).map(|detail| {
+                    let body = if is_code_item(&self.items[index].item) {
+                        let view = self
+                            .code_transcripts
+                            .ensure(index, &self.items[index].item, cx);
                         div()
-                            .id(("wl-out", index))
                             .w_full()
-                            .h(px(256.))
-                            .relative()
-                            .overflow_hidden()
-                            .rounded(UI_RADIUS)
-                            .bg(cx.theme().tokens.muted)
-                            .font(transcript_font)
-                            .text_size(transcript_font_size)
-                            // The outer transcript list is behind this viewport in
-                            // hit-test order. Occlusion prevents wheel input at the
-                            // virtual list's limits from moving the conversation.
-                            .occlude()
                             .modern_context_menu(Self::copy_menu(cx.entity().downgrade(), index))
-                            .child(
-                                uniform_list(
-                                    SharedString::from(format!("wl-virtual-{index}")),
-                                    segment_count,
-                                    move |range, _, _| {
-                                        range
-                                            .filter_map(|segment_index| {
-                                                let range =
-                                                    list_segments.get(segment_index)?.clone();
-                                                Some(
-                                                    div()
-                                                        .h(line_height)
-                                                        .flex_none()
-                                                        .line_height(line_height)
-                                                        .whitespace_nowrap()
-                                                        .text_color(text_color)
-                                                        .child(list_source[range].to_string()),
-                                                )
-                                            })
-                                            .collect::<Vec<_>>()
-                                    },
-                                )
-                                .with_width_from_item(Some(widest_segment))
-                                .with_horizontal_sizing_behavior(
-                                    ListHorizontalSizingBehavior::Unconstrained,
-                                )
-                                .track_scroll(&scroll)
-                                .size_full()
-                                .p_3(),
-                            )
-                            .child(
-                                div()
-                                    .absolute()
-                                    .top_0()
-                                    .right_0()
-                                    .bottom_0()
-                                    .w(px(16.0))
-                                    .child(
-                                        Scrollbar::vertical(&scroll)
-                                            .id(("wl-virtual-v-scrollbar", index)),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .absolute()
-                                    .left_0()
-                                    .right_0()
-                                    .bottom_0()
-                                    .h(px(16.0))
-                                    .child(
-                                        Scrollbar::horizontal(&scroll)
-                                            .id(("wl-virtual-h-scrollbar", index)),
-                                    ),
-                            )
+                            .child(view)
                             .into_any_element()
                     } else {
-                        self.virtual_transcripts.drop_row(index);
-
-                        // Small technical transcripts retain syntax highlighting;
-                        // Markdown-native tool output and reasoning retain their
-                        // rich formatting. The expensive fence and gutter copy are
-                        // therefore bounded by the virtualization thresholds.
-                        let markdown = match code_format {
-                            Some((language, strip_gutter)) => {
-                                let normalized = if strip_gutter {
-                                    strip_read_gutter(detail)
-                                        .map(Cow::Owned)
-                                        .unwrap_or(Cow::Borrowed(detail))
-                                } else {
-                                    Cow::Borrowed(detail)
-                                };
-                                fenced_code_block_as(&normalized, language.as_ref())
-                            }
-                            None => detail.to_owned(),
-                        };
                         let detail_scroll = window
                             .use_keyed_state(("wl-scroll", index), cx, |_, _| {
                                 ScrollHandle::default()
                             })
                             .read(cx)
                             .clone();
-
                         div()
                             .w_full()
                             .relative()
@@ -345,10 +222,6 @@ impl TranscriptView {
                                     .max_h(px(256.))
                                     .overflow_y_scroll()
                                     .track_scroll(&detail_scroll)
-                                    // The virtual conversation list handles wheel input
-                                    // before child bubble listeners run. Occluding its
-                                    // earlier hitbox makes this viewport the only scroll
-                                    // target under the pointer, even at either limit.
                                     .occlude()
                                     .modern_context_menu(Self::copy_menu(
                                         cx.entity().downgrade(),
@@ -357,9 +230,13 @@ impl TranscriptView {
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
                                     .child(
-                                        markdown_view(("wl-md", index), markdown, cwd.clone())
-                                            .style(work_detail_text_style(cx))
-                                            .selectable(true),
+                                        markdown_view(
+                                            ("wl-md", index),
+                                            detail.to_owned(),
+                                            cwd.clone(),
+                                        )
+                                        .style(work_detail_text_style(cx))
+                                        .selectable(true),
                                     ),
                             )
                             .child(

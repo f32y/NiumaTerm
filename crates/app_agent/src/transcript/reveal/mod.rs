@@ -530,7 +530,7 @@ impl TranscriptView {
         // A closed row's segmented source would otherwise keep a second copy
         // of a large output resident behind a row showing none of it.
         if let Some(index) = self.disclosures.take_down(key, &parts) {
-            self.virtual_transcripts.drop_row(index);
+            self.code_transcripts.drop_row(index);
         }
     }
 

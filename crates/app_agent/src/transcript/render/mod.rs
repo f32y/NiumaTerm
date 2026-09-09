@@ -1,6 +1,6 @@
 mod compaction_row;
 mod image_preview;
-mod text_style;
+pub(super) mod text_style;
 
 #[cfg(test)]
 pub(crate) use crate::transcript::render::text_style::transcript_code_block_style;

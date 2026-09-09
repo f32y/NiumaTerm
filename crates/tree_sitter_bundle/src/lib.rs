@@ -1,7 +1,7 @@
 use std::ptr;
 
 const ABI_VERSION: u32 = 1;
-const LANGUAGE_COUNT: u32 = 36;
+const LANGUAGE_COUNT: u32 = 37;
 
 type LanguageBuilder = unsafe extern "C" fn() -> *const ();
 
@@ -403,6 +403,15 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             include_str!(
                 "../../../third_party/gpui-component/ui/src/highlighter/languages/zig/injections.scm"
             ),
+            ""
+        ),
+        36 => language!(
+            "powershell",
+            "ps1\0psm1\0psd1\0pwsh",
+            "",
+            tree_sitter_powershell::LANGUAGE,
+            tree_sitter_powershell::HIGHLIGHTS_QUERY,
+            "",
             ""
         ),
         _ => return None,

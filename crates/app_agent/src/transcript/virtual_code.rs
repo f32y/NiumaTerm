@@ -1,47 +1,12 @@
-use std::borrow::Cow;
-use std::collections::HashMap;
 use std::ops::Range;
-use std::rc::Rc;
-
-use gpui::{SharedString, UniformListScrollHandle};
-use nmt_agent_utils::chat::Item as SessionItem;
-
-use crate::transcript::{detect_output_language, file_extension_lang, strip_read_gutter};
 
 pub(super) const VIRTUAL_TRANSCRIPT_MIN_BYTES: usize = 16 * 1024;
 pub(super) const VIRTUAL_TRANSCRIPT_MIN_ROWS: usize = 128;
 pub(super) const VIRTUAL_TRANSCRIPT_MAX_SEGMENT_BYTES: usize = 4 * 1024;
 
-pub(crate) fn should_virtualize_transcript(code: bool, text: &str) -> bool {
-    code && (text.len() >= VIRTUAL_TRANSCRIPT_MIN_BYTES
-        || text.lines().take(VIRTUAL_TRANSCRIPT_MIN_ROWS + 1).count() > VIRTUAL_TRANSCRIPT_MIN_ROWS)
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) struct TranscriptSourceKey {
-    allocation: usize,
-    len: usize,
-    edge_hash: u64,
-    strip_read_gutter: bool,
-}
-
-pub(crate) fn transcript_source_key(text: &str, strip_read_gutter: bool) -> TranscriptSourceKey {
-    // Allocation identity and bounded edges catch streamed appends and full
-    // payload replacements without rescanning a potentially multi-megabyte
-    // transcript whenever unrelated pane state triggers a render.
-    let bytes = text.as_bytes();
-    let mut edge_hash = 0xcbf2_9ce4_8422_2325_u64;
-    for byte in bytes.iter().take(64).chain(bytes.iter().rev().take(64)) {
-        edge_hash ^= u64::from(*byte);
-        edge_hash = edge_hash.wrapping_mul(0x100_0000_01b3);
-    }
-
-    TranscriptSourceKey {
-        allocation: bytes.as_ptr() as usize,
-        len: bytes.len(),
-        edge_hash,
-        strip_read_gutter,
-    }
+pub(crate) fn should_virtualize_transcript(text: &str) -> bool {
+    text.len() >= VIRTUAL_TRANSCRIPT_MIN_BYTES
+        || text.lines().take(VIRTUAL_TRANSCRIPT_MIN_ROWS + 1).count() > VIRTUAL_TRANSCRIPT_MIN_ROWS
 }
 
 pub(crate) fn transcript_segments(text: &str) -> Vec<Range<usize>> {
@@ -80,123 +45,4 @@ pub(crate) fn transcript_segments(text: &str) -> Vec<Range<usize>> {
     }
 
     segments
-}
-
-/// Segmented sources for the expanded code transcripts currently on screen,
-/// keyed by transcript index.
-///
-/// A long expanded output is rendered through a uniform list, which needs the
-/// text split into line ranges and a scroll position that survives repaints.
-/// Both are derived from the row's own text, so an entry is only worth keeping
-/// while its row is expanded and long enough to virtualize; anything else
-/// would hold a second copy of a large output behind a row showing none of it.
-#[derive(Default)]
-pub(crate) struct VirtualTranscriptCache {
-    states: HashMap<usize, VirtualTranscriptState>,
-}
-
-impl VirtualTranscriptCache {
-    /// The segmented source for one row, building it on first sight and
-    /// re-deriving it when the text behind it has changed.
-    pub(crate) fn ensure(
-        &mut self,
-        index: usize,
-        text: &str,
-        strip_gutter: bool,
-    ) -> &VirtualTranscriptState {
-        let state = self
-            .states
-            .entry(index)
-            .or_insert_with(|| VirtualTranscriptState::new(text, strip_gutter));
-
-        state.sync(text, strip_gutter);
-
-        state
-    }
-
-    /// Drop the segmented source for a row that no longer needs one.
-    pub(crate) fn drop_row(&mut self, index: usize) {
-        self.states.remove(&index);
-    }
-
-    pub(crate) fn clear(&mut self) {
-        self.states.clear();
-    }
-}
-
-pub(crate) struct VirtualTranscriptState {
-    pub(super) source_key: TranscriptSourceKey,
-    pub(super) source: SharedString,
-    pub(super) segments: Rc<Vec<Range<usize>>>,
-    pub(super) widest_segment: usize,
-    pub(super) scroll: UniformListScrollHandle,
-}
-
-impl VirtualTranscriptState {
-    pub(super) fn new(text: &str, strip_gutter: bool) -> Self {
-        let source_key = transcript_source_key(text, strip_gutter);
-        let source = normalized_virtual_transcript(text, strip_gutter);
-        let segments = transcript_segments(&source);
-        let widest_segment = segments
-            .iter()
-            .enumerate()
-            .max_by_key(|(_, range)| range.len())
-            .map_or(0, |(index, _)| index);
-
-        Self {
-            source_key,
-            source: SharedString::from(source),
-            segments: Rc::new(segments),
-            widest_segment,
-            scroll: UniformListScrollHandle::default(),
-        }
-    }
-
-    pub(super) fn sync(&mut self, text: &str, strip_gutter: bool) {
-        let source_key = transcript_source_key(text, strip_gutter);
-        if self.source_key == source_key {
-            return;
-        }
-
-        let source = normalized_virtual_transcript(text, strip_gutter);
-        let segments = transcript_segments(&source);
-        self.widest_segment = segments
-            .iter()
-            .enumerate()
-            .max_by_key(|(_, range)| range.len())
-            .map_or(0, |(index, _)| index);
-        self.source_key = source_key;
-        self.source = SharedString::from(source);
-        self.segments = Rc::new(segments);
-    }
-}
-
-pub(crate) fn normalized_virtual_transcript(text: &str, strip_gutter: bool) -> String {
-    if strip_gutter {
-        strip_read_gutter(text).unwrap_or_else(|| text.to_owned())
-    } else {
-        text.to_owned()
-    }
-}
-
-/// Returns the syntax language and whether a Read gutter needs stripping.
-/// `None` identifies Markdown-native transcript details that retain rich text
-/// rendering instead of entering the code-oriented virtual list.
-pub(crate) fn code_transcript_format(
-    item: &SessionItem,
-    detail: &str,
-) -> Option<(Cow<'static, str>, bool)> {
-    match item {
-        SessionItem::CommandExecution { .. } => {
-            Some((Cow::Borrowed(detect_output_language(detail)), false))
-        }
-        SessionItem::FileChange { .. } => Some((Cow::Borrowed("diff"), false)),
-        SessionItem::Other { kind, title, .. } => match kind.as_str() {
-            "TodoWrite" | "ExitPlanMode" | "Task" => None,
-            "Read" => Some((Cow::Owned(file_extension_lang(title)), true)),
-            _ => Some((Cow::Borrowed(detect_output_language(detail)), false)),
-        },
-        SessionItem::Reasoning { .. } => None,
-        _ => None,
-    }
 }

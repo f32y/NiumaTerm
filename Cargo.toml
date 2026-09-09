@@ -178,6 +178,7 @@ tree-sitter-lua = "0.5.0"
 tree-sitter-make = "1.1.1"
 tree-sitter-md = "0.5.3"
 tree-sitter-php = "0.24.2"
+tree-sitter-powershell = "0.26.4"
 tree-sitter-proto = "0.4.0"
 tree-sitter-python = "0.25.0"
 tree-sitter-ruby = "0.23.1"
@@ -307,6 +308,7 @@ smallvec = { version = "1.15.2", default-features = false, features = ["const_ne
 tree-sitter = "0.26.10"
 tree-sitter-bash = "0.25.1"
 tree-sitter-language = "0.1.7"
+vte = "0.15.0"
 
 # unicode-width = "0.2.0"
 unicode-width = { package = "unicode-width-16", version = "0.1.0" }

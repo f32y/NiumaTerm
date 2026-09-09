@@ -23,7 +23,7 @@ use crate::transcript::reveal::Disclosures;
 use crate::transcript::rows::{TranscriptRow, folds_turns};
 use crate::transcript::turns::{LiveTurn, TurnLedger};
 use crate::transcript::typewriter::{Typewriter, shown_prefix};
-use crate::transcript::{Entry, ReadingPosition, VirtualTranscriptCache, is_work_row};
+use crate::transcript::{CodeTranscriptCache, Entry, ReadingPosition, is_work_row};
 
 /// One agent conversation as the user reads it: the entry list, the row
 /// structure derived from it, and every piece of view state that structure
@@ -67,10 +67,9 @@ pub struct TranscriptView {
     /// Which parts of the transcript are open, how far through their motion
     /// they are, and how tall each one lays out to.
     pub(crate) disclosures: Disclosures,
-    /// Long expanded code transcripts retain their segmented source and
-    /// independent uniform-list position while visible. Collapsing a row drops
-    /// the duplicate source so large outputs do not stay resident twice.
-    pub(crate) virtual_transcripts: VirtualTranscriptCache,
+    /// Expanded technical output retains its parsed source and scroll position.
+    /// Collapsing a row releases the extra source, syntax trees, and worker.
+    pub(crate) code_transcripts: CodeTranscriptCache,
     /// What each finished turn is remembered by: whether it settled, how long
     /// it took, what it produced, and whether the user stopped it.
     pub(crate) turn_ledger: TurnLedger,
@@ -122,7 +121,7 @@ impl TranscriptView {
             transcript_height: None,
             disclosures: Disclosures::new(folds_turns(collapse_mode)),
             collapse_mode,
-            virtual_transcripts: VirtualTranscriptCache::default(),
+            code_transcripts: CodeTranscriptCache::default(),
             turn_ledger: TurnLedger::default(),
             live_turn: LiveTurn::default(),
             typewriter: None,
@@ -158,6 +157,7 @@ impl TranscriptView {
         }
         let follow = self.source_revision.is_none();
         self.source_revision = Some(revision);
+        self.code_transcripts.invalidate_all();
         self.items = items
             .iter()
             .map(|item| Entry {
@@ -183,7 +183,7 @@ impl TranscriptView {
         self.scroll_to_bottom();
         self.disclosures.clear();
         self.turn_ledger.clear();
-        self.virtual_transcripts.clear();
+        self.code_transcripts.clear();
         self.live_turn.discard();
         self.typewriter = None;
     }
@@ -234,8 +234,9 @@ impl TranscriptView {
 
     /// Fold an authoritative completed payload into the entry that streamed it.
     pub(crate) fn merge_completed(&mut self, item: &SessionItem) {
-        for entry in &mut self.items {
+        for (index, entry) in self.items.iter_mut().enumerate() {
             if entry.item.merge_completed(item) {
+                self.code_transcripts.invalidate(index);
                 break;
             }
         }
@@ -272,6 +273,7 @@ impl TranscriptView {
                     ));
                 }
                 text.push_str(delta);
+                self.code_transcripts.invalidate(index);
                 return !text.trim().is_empty();
             }
         }

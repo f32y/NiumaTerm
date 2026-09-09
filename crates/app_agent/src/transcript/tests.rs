@@ -261,10 +261,9 @@ mod prompt_truncation_tests {
         let many_rows = "output\n".repeat(129);
         let large_single_row = "x".repeat(16 * 1024);
 
-        assert!(should_virtualize_transcript(true, &many_rows));
-        assert!(should_virtualize_transcript(true, &large_single_row));
-        assert!(!should_virtualize_transcript(true, "short output"));
-        assert!(!should_virtualize_transcript(false, &many_rows));
+        assert!(should_virtualize_transcript(&many_rows));
+        assert!(should_virtualize_transcript(&large_single_row));
+        assert!(!should_virtualize_transcript("short output"));
     }
 
     #[test]
@@ -335,31 +334,6 @@ mod read_gutter_tests {
     fn extension_is_the_language_tag() {
         assert_eq!(file_extension_lang("C:\\src\\main.RS"), "rs");
         assert_eq!(file_extension_lang("noext"), "");
-    }
-}
-
-mod fence_tests {
-    use crate::transcript::{detect_output_language, fenced_code_block_as};
-
-    #[test]
-    fn fence_outgrows_backtick_runs_and_sniffs_language() {
-        assert_eq!(
-            fenced_code_block_as("plain output", detect_output_language("plain output")),
-            "```\nplain output\n```"
-        );
-        assert_eq!(
-            fenced_code_block_as("{\"key\": 1}", detect_output_language("{\"key\": 1}")),
-            "```json\n{\"key\": 1}\n```"
-        );
-        assert_eq!(detect_output_language("diff --git a/x b/x"), "diff");
-
-        let tricky = "text with ```` four backticks";
-        let fenced = fenced_code_block_as(tricky, "");
-        assert!(
-            fenced.starts_with("`````\n"),
-            "fence must outgrow body runs"
-        );
-        assert!(fenced.ends_with("\n`````"));
     }
 }
 

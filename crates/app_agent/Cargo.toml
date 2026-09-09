@@ -22,10 +22,16 @@ gpui-component.workspace = true
 # Pasted images become GPUI `RenderImage` frames; same crate/version GPUI
 # links, so `image_rs::Frame` unifies with `gpui`'s `Frame`.
 image_rs.workspace = true
+ropey.workspace = true
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
+vte.workspace = true
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
+tree-sitter-bash.workspace = true
+tree-sitter-diff.workspace = true
+tree-sitter-powershell.workspace = true
+tree-sitter-rust.workspace = true
