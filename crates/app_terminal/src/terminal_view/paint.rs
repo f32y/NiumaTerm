@@ -1,3 +1,5 @@
+use tracing::error;
+
 use crate::terminal_view::*;
 use crate::{block_list, frame, graphics};
 
@@ -187,8 +189,20 @@ fn paint_image_clipped(
         bounds: to_bounds(dest),
     };
 
-    window.with_content_mask(Some(mask), |w| {
-        let _ = w.paint_image(to_bounds(full), Corners::default(), image, 0, false);
+    let image_bounds = to_bounds(full);
+    window.with_content_mask(Some(mask), |window| {
+        // Keep clipping in the mask so fractional source crops are not rounded
+        // to atlas texels by the image-bounds crop path.
+        if let Err(error) = window.paint_image(
+            image_bounds,
+            image_bounds,
+            Corners::default(),
+            image,
+            0,
+            false,
+        ) {
+            error!(%error, "Failed to paint terminal image");
+        }
     });
 }
 

@@ -31,11 +31,13 @@ members = [
     # GPUI fork
     "third_party/gpui/collections",
     "third_party/gpui/gpui",
+    "third_party/gpui/gpui_apple",
     "third_party/gpui/gpui_linux",
     "third_party/gpui/gpui_macos",
     "third_party/gpui/gpui_macros",
     "third_party/gpui/gpui_platform",
     "third_party/gpui/gpui_util",
+    "third_party/gpui/gpui_tokio",
     "third_party/gpui/gpui_web",
     "third_party/gpui/gpui_wgpu",
     "third_party/gpui/gpui_windows",
@@ -104,6 +106,7 @@ tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
 # GPUI fork
 collections = { path = "third_party/gpui/collections" }
 gpui = { path = "third_party/gpui/gpui" }
+gpui_apple = { path = "third_party/gpui/gpui_apple" }
 gpui_linux = { path = "third_party/gpui/gpui_linux" }
 # `font-kit` is what carries the CoreText-backed text system; without it the
 # backend installs a no-op one and the whole application draws without a
@@ -113,6 +116,7 @@ gpui_macros = { path = "third_party/gpui/gpui_macros" }
 gpui_media = { path = "third_party/gpui/media" }
 gpui_platform = { path = "third_party/gpui/gpui_platform" }
 gpui_util = { path = "third_party/gpui/gpui_util" }
+gpui_tokio = { path = "third_party/gpui/gpui_tokio" }
 gpui_web = { path = "third_party/gpui/gpui_web" }
 gpui_wgpu = { path = "third_party/gpui/gpui_wgpu" }
 gpui_windows = { path = "third_party/gpui/gpui_windows" }
@@ -198,7 +202,7 @@ wasm-bindgen-futures = "0.4.76"
 # GPUI
 ##########################################
 
-accesskit = "0.24.1"
+accesskit = { version = "0.24.1", features = ["enumn"] }
 accesskit_windows = "0.33.1"
 anyhow = "1.0.103"
 async-channel = "2.5.0"
@@ -212,13 +216,14 @@ cocoa-foundation = "=0.2.1"
 core-foundation-sys = "0.8.7"
 core-video = { version = "0.6.1", features = ["metal"] }
 cosmic-text = "0.19.0"
-ctor = "1.0.7"
+ctor = "1.0.12"
 derive_more = { version = "2.1.1", features = [
     "add",
     "add_assign",
     "deref",
     "deref_mut",
     "display",
+    "from",
     "from_str",
     "mul",
     "mul_assign",
@@ -288,14 +293,14 @@ js-sys = "0.3"
 oo7 = { version = "0.6", default-features = false }
 open = "5.2.0"
 semver = { version = "1.0", features = ["serde"] }
-wasm_thread = "0.3"
+wasm_thread = { git = "https://github.com/zed-industries/wasm_thread", rev = "0cf96c7708dfb97ccf3da50347e25edcf75d6937", version = "0.3" }
 wayland-cursor = "0.31.11"
 wayland-protocols-wlr = "0.3.9"
 web-sys = "0.3"
 x11-clipboard = "0.9.3"
 xim = { git = "https://github.com/zed-industries/xim-rs.git", rev = "16f35a2c881b815a2b6cdfd6687988e84f8447d8", package = "zed-xim", version = "0.4.0-zed" }
 xkbcommon = "0.8.0"
-wgpu = { git = "https://github.com/zed-industries/wgpu.git", rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88" }
+wgpu = "29.0.4"
 
 raw-window-handle = { version = "0.6.2", features = ["std"] }
 parking_lot = { version = "0.12.5", features = [
@@ -303,7 +308,7 @@ parking_lot = { version = "0.12.5", features = [
     "hardware-lock-elision",
 ] }
 rustc-hash = "2.1.3"
-smallvec = { version = "1.15.2", default-features = false, features = ["const_new"] }
+smallvec = { version = "1.15.2", default-features = false, features = ["const_new", "union"] }
 
 tree-sitter = "0.26.10"
 tree-sitter-bash = "0.25.1"
@@ -352,7 +357,7 @@ approx = "0.5.1"
 bindgen = "0.72.1"
 block2 = "0.6.2"
 bytes = "1.12.0"
-calloop = "0.14.4"
+calloop = "0.14.3"
 cfg-if = "1.0.4"
 cfg_aliases = "0.2.1"
 clap = "4.6.1"
@@ -371,7 +376,7 @@ deflate = "1.0.0"
 dirs = "6.0.0"
 dpi = "0.1.2"
 dunce = "1.0.5"
-font-kit = { package = "zed-font-kit", version = "0.14.1-zed" }
+font-kit = { git = "https://github.com/zed-industries/font-kit", rev = "94b0f28166665e8fd2f53ff6d268a14955c82269", package = "zed-font-kit", version = "0.14.1-zed" }
 fontconfig-parser = { version = "0.5.8", default-features = false }
 guillotiere = "0.7.0"
 half = "2.7.1"
@@ -390,6 +395,7 @@ memchr = { version = "2.8.2", default-features = false }
 mio = { version = "1.2.1", features = ["os-poll", "os-ext", "net"] }
 miow = "0.6.1"
 notify = "8.2.0"
+notify-rust = "4"
 num-traits = "0.2.19"
 objc2 = { version = "0.6.4", features = ["relax-sign-encoding"] }
 objc2-app-kit = { version = "0.3.2", features = [
@@ -422,6 +428,7 @@ objc2-app-kit = { version = "0.3.2", features = [
     "NSWindowScripting",
     "NSWindowTabGroup",
     "NSWorkspace",
+    "objc2-core-foundation",
 ] }
 objc2-foundation = { version = "0.3.2", features = [
     "NSArray",
@@ -442,6 +449,15 @@ objc2-foundation = { version = "0.3.2", features = [
     "NSString",
     "NSThread",
     "NSValue",
+    "NSCoder",
+    "NSDate",
+    "NSNull",
+    "NSObject",
+    "NSRange",
+    "NSURL",
+    "NSUndoManager",
+    "objc2-core-foundation",
+    "std",
 ] }
 objc2-user-notifications = { version = "0.3.2", features = [
     "UNUserNotificationCenter",
@@ -479,7 +495,7 @@ softbuffer = { version = "0.4.8", default-features = false, features = [
     "wayland-dlopen",
 ] }
 swash = "0.2.9"
-taffy = "=0.12.1"
+taffy = "=0.13.0"
 tempdir = "0.3.7"
 tiny-skia = "0.12.0"
 tinyvec = "1.11.0"
@@ -498,6 +514,7 @@ twox-hash = { version = "2.1.2", default-features = false, features = [
 ] }
 ucd-trie = "0.1.7"
 unicode-segmentation = "1.13.3"
+unicode-bidi = { version = "0.3.18", default-features = false, features = ["hardcoded-data"] }
 usvg = { version = "0.47.0", default-features = false }
 walkdir = "2.5.0"
 wayland-backend = { version = "0.3.15", default-features = false, features = [
@@ -559,6 +576,22 @@ windows = { version = "0.62.2", features = [
     "Win32_UI_Shell_Common",
     "Win32_UI_Shell_PropertiesSystem",
     "Win32_UI_WindowsAndMessaging",
+    "Globalization_DateTimeFormatting",
+    "Storage_Search",
+    "Storage_Streams",
+    "Win32_Globalization",
+    "Win32_Graphics_Imaging",
+    "Win32_Networking_WinSock",
+    "Win32_Security_Cryptography",
+    "Win32_Storage_FileSystem",
+    "Win32_Storage_Packaging_Appx",
+    "Win32_System_Console",
+    "Win32_System_IO",
+    "Win32_System_JobObjects",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Ole",
+    "Win32_System_Pipes",
+    "Win32_System_RestartManager",
 ] }
 windows-core = "0.62.2"
 windows-sys = { version = "0.61.2", features = [
@@ -615,6 +648,9 @@ yeslogic-fontconfig-sys = "6.0.1"
 zbus = { version = "5.16.0", features = ["blocking"] }
 zip = { version = "6.0.0", default-features = false, features = ["deflate"] }
 zeno = "0.3.3"
+
+[patch.crates-io]
+calloop = { git = "https://github.com/zed-industries/calloop", rev = "eb6b4fd17b9af5ecc226546bdd04185391b3e265" }
 
 [profile.release]
 strip = "symbols"
