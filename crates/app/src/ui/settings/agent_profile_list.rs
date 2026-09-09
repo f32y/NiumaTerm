@@ -26,7 +26,7 @@ use crate::ui::settings::table::{
 /// Column widths shared by the header and the rows, so the two line up
 /// without either having to measure the other.
 const TYPE_COLUMN: Pixels = px(56.0);
-const OPERATION_COLUMN: Pixels = px(56.0);
+const OPERATION_COLUMN: Pixels = px(80.0);
 
 /// Thickness of the line marking where a dragged profile would be dropped.
 const DROP_LINE_HEIGHT: Pixels = px(2.0);
@@ -336,6 +336,7 @@ impl ListDelegate for AgentProfileList {
                         .w(OPERATION_COLUMN)
                         .flex_none()
                         .text_right()
+                        .whitespace_nowrap()
                         .child(i18n("settings-common-operation")),
                 ),
         )
