@@ -93,10 +93,16 @@ enum RecentSessionsMode {
 }
 
 impl RecentSessionsMode {
-    fn is_visible(self, transcript_empty: bool, rows: usize) -> bool {
+    /// The automatic list is a blank tab's default surface, and a composer
+    /// with anything in it -- typed text or the placeholder a pasted image
+    /// leaves -- means the tab is being used for a new conversation, so the
+    /// list steps aside and comes back once the composer is empty again. An
+    /// explicit `/resume` list stays up over text: typing into it narrows
+    /// the rows.
+    fn is_visible(self, transcript_empty: bool, composer_empty: bool, rows: usize) -> bool {
         rows > 0
             && match self {
-                Self::Automatic => transcript_empty,
+                Self::Automatic => transcript_empty && composer_empty,
                 Self::Open => true,
                 Self::Hidden | Self::Loading => false,
             }

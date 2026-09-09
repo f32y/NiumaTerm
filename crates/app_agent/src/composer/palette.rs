@@ -426,7 +426,8 @@ impl AgentPane {
         control: PaletteControl,
         cx: &mut Context<Self>,
     ) -> bool {
-        if matches!(control, PaletteControl::Complete) || self.input.read(cx).text().len() != 0 {
+        let composer_empty = self.input.read(cx).text().len() == 0;
+        if matches!(control, PaletteControl::Complete) || !composer_empty {
             return false;
         }
 
@@ -434,11 +435,11 @@ impl AgentPane {
             .history_ui
             .pending
             .unwrap_or(self.history_ui.sessions.len());
-        if !self
-            .history_ui
-            .mode
-            .is_visible(self.transcript.read(cx).is_empty(), rows)
-        {
+        if !self.history_ui.mode.is_visible(
+            self.transcript.read(cx).is_empty(),
+            composer_empty,
+            rows,
+        ) {
             return false;
         }
 

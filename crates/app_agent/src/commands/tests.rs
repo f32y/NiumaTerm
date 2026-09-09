@@ -68,12 +68,21 @@ fn local_resume_replaces_the_provider_catalog_entry() {
 
 #[test]
 fn recent_sessions_open_explicitly_after_a_conversation_starts() {
-    assert!(RecentSessionsMode::Automatic.is_visible(true, 1));
-    assert!(!RecentSessionsMode::Automatic.is_visible(false, 1));
-    assert!(RecentSessionsMode::Open.is_visible(false, 1));
-    assert!(!RecentSessionsMode::Hidden.is_visible(true, 1));
-    assert!(!RecentSessionsMode::Loading.is_visible(true, 1));
-    assert!(!RecentSessionsMode::Open.is_visible(false, 0));
+    assert!(RecentSessionsMode::Automatic.is_visible(true, true, 1));
+    assert!(!RecentSessionsMode::Automatic.is_visible(false, true, 1));
+    assert!(RecentSessionsMode::Open.is_visible(false, true, 1));
+    assert!(!RecentSessionsMode::Hidden.is_visible(true, true, 1));
+    assert!(!RecentSessionsMode::Loading.is_visible(true, true, 1));
+    assert!(!RecentSessionsMode::Open.is_visible(false, true, 0));
+}
+
+/// Typed text and a pasted image's placeholder both fill the composer, so
+/// either takes the automatic list off a blank tab; an explicit `/resume`
+/// list stays up so the text can narrow it.
+#[test]
+fn recent_sessions_step_aside_while_the_composer_holds_anything() {
+    assert!(!RecentSessionsMode::Automatic.is_visible(true, false, 1));
+    assert!(RecentSessionsMode::Open.is_visible(true, false, 1));
 }
 
 #[test]

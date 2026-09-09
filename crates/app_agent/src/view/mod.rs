@@ -159,10 +159,11 @@ impl Render for AgentPane {
             .pending
             .unwrap_or(self.history_ui.sessions.len());
         let transcript_empty = self.transcript.read(cx).is_empty();
+        let composer_empty = self.input.read(cx).text().len() == 0;
         let history = self
             .history_ui
             .mode
-            .is_visible(transcript_empty, history_rows)
+            .is_visible(transcript_empty, composer_empty, history_rows)
             .then(|| self.render_history(background, cx));
         // A list opened over a live conversation is a picker, and the
         // transcript behind it is not what the next click should reach. Blur
