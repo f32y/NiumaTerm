@@ -111,7 +111,7 @@ The pre-commit hook enforces these commit boundaries:
   `pre-commit: unfinished spec documents cannot be committed`.
 - Changes under `third_party/gpui` must be committed separately from every
   other path. The same independent-commit rule applies to
-  `third_party/gpui-component`.
+  `third_party/gpui-kit`.
 - Newly added content containing the repository's AI-slop marker is rejected.
 - Added code comments are checked for implementation-instruction references;
   comments must explain the underlying technical rationale as described above.

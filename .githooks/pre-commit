@@ -59,7 +59,7 @@ EOF
 }
 
 check_third_party_dirs_are_separate() {
-    for isolated_path in third_party/gpui third_party/gpui-component; do
+    for isolated_path in third_party/gpui 'third_party/gpui-(kit|component)'; do
         isolated_files=$(printf '%s\n' "$staged_files" | grep -E "^$isolated_path/" || true)
         other_files=$(printf '%s\n' "$staged_files" | grep -Ev "^$isolated_path/" || true)
         if [ -z "$isolated_files" ] || [ -z "$other_files" ]; then
