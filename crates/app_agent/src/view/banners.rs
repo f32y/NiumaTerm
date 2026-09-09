@@ -3,6 +3,7 @@ use std::time::Duration;
 use gpui::prelude::*;
 use gpui::{AnyElement, Context, FontWeight, div, px};
 use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::progress::ProgressCircle;
 use gpui_component::spinner::Spinner;
 use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 use nmt_agent_utils::{AgentWorkspace, MultiRootAccess};
@@ -346,9 +347,10 @@ impl AgentPane {
                 .items_center()
                 .gap_3()
                 .child(
-                    Spinner::new()
-                        .icon(IconName::LoaderCircle)
-                        .with_size(px(22.))
+                    ProgressCircle::new("agent-start-progress")
+                        .loading(true)
+                        .loading_duration(Duration::from_millis(1_200))
+                        .size(px(22.))
                         .color(cx.theme().primary),
                 )
                 .child(
