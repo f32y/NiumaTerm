@@ -24,9 +24,10 @@
 //! could not keep up, and the `draw`/`present`/`gpu-wait` splits say which
 //! part of it.
 
-use std::sync::Mutex;
+use parking_lot::Mutex;
+use scheduler::Instant;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const REPORT_INTERVAL: Duration = Duration::from_secs(1);
 const DEFAULT_VSYNC_INTERVAL_US: u64 = 16_667;
@@ -139,7 +140,7 @@ pub fn set_enabled(enabled: bool) {
     if ENABLED.swap(enabled, Ordering::Release) == enabled {
         return;
     }
-    *STATS.lock().unwrap() = Stats::new();
+    *STATS.lock() = Stats::new();
 }
 
 /// Whether collection is on. Hot paths that would need a clock read to report
@@ -163,7 +164,7 @@ pub fn record_frame_armed() {
         return;
     }
     let now = Instant::now();
-    STATS.lock().unwrap().armed_at.get_or_insert(now);
+    STATS.lock().armed_at.get_or_insert(now);
 }
 
 /// Closes out the latency of the frame request the UI thread is now servicing.
@@ -175,7 +176,7 @@ pub fn record_request_serviced() {
         return;
     }
     let now = Instant::now();
-    let mut stats = STATS.lock().unwrap();
+    let mut stats = STATS.lock();
     if let Some(armed_at) = stats.armed_at.take() {
         stats.arm_lag.add(now.saturating_duration_since(armed_at));
     }
@@ -188,7 +189,7 @@ pub fn record_main_thread_task(duration: Duration) {
     if !enabled() {
         return;
     }
-    STATS.lock().unwrap().main_tasks.add(duration);
+    STATS.lock().main_tasks.add(duration);
 }
 
 /// Records one window message handled on the UI thread, excluding the paint
@@ -197,7 +198,7 @@ pub fn record_window_message(duration: Duration) {
     if !enabled() {
         return;
     }
-    STATS.lock().unwrap().window_msgs.add(duration);
+    STATS.lock().window_msgs.add(duration);
 }
 
 /// Records one `Window::draw`, along with how many views it had to re-render.
@@ -205,7 +206,7 @@ pub fn record_draw(duration: Duration, dirty_views: usize) {
     if !enabled() {
         return;
     }
-    let mut stats = STATS.lock().unwrap();
+    let mut stats = STATS.lock();
     stats.draw.add(duration);
     stats.dirty_views += dirty_views as u64;
 }
@@ -217,7 +218,7 @@ pub fn record_present(duration: Duration, primitives: usize) {
         return;
     }
     let now = Instant::now();
-    let mut stats = STATS.lock().unwrap();
+    let mut stats = STATS.lock();
     stats.present.add(duration);
     stats.frames += 1;
     stats.primitives += primitives as u64;
@@ -237,7 +238,7 @@ pub fn record_throttled() {
     if !enabled() {
         return;
     }
-    STATS.lock().unwrap().throttled += 1;
+    STATS.lock().throttled += 1;
 }
 
 /// Records the pre-draw wait on the compositor's frame-latency handle: time
@@ -246,7 +247,7 @@ pub fn record_gpu_wait(duration: Duration) {
     if !enabled() {
         return;
     }
-    STATS.lock().unwrap().gpu_wait.add(duration);
+    STATS.lock().gpu_wait.add(duration);
 }
 
 /// Records one vsync tick observed by the platform frame pump. `short_wait`
@@ -257,7 +258,7 @@ pub fn record_vsync_tick(short_wait: bool) {
         return;
     }
     let now = Instant::now();
-    let mut stats = STATS.lock().unwrap();
+    let mut stats = STATS.lock();
     stats.vsync_ticks += 1;
     if short_wait {
         stats.vsync_short_waits += 1;
@@ -270,7 +271,7 @@ pub fn record_redraws_requested(count: usize) {
     if !enabled() {
         return;
     }
-    STATS.lock().unwrap().redraws_requested += count as u64;
+    STATS.lock().redraws_requested += count as u64;
 }
 
 fn report_if_due(stats: &mut Stats, now: Instant) {

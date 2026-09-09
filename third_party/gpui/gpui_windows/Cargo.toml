@@ -47,3 +47,6 @@ optional = true
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
 windows-registry.workspace = true
+
+[package.metadata.cargo-shear]
+ignored = ["scap"]

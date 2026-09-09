@@ -1,4 +1,5 @@
 use std::{
+    cell::Cell,
     rc::Rc,
     sync::atomic::Ordering,
     time::{Duration, Instant},
@@ -32,8 +33,55 @@ pub(crate) const WM_GPUI_FORCE_UPDATE_WINDOW: u32 = WM_USER + 5;
 pub(crate) const WM_GPUI_KEYBOARD_LAYOUT_CHANGED: u32 = WM_USER + 6;
 pub(crate) const WM_GPUI_GPU_DEVICE_LOST: u32 = WM_USER + 7;
 pub(crate) const WM_GPUI_KEYDOWN: u32 = WM_USER + 8;
+pub(crate) const WM_GPUI_END_SESSION: u32 = WM_USER + 9;
 
 const SIZE_MOVE_LOOP_TIMER_ID: usize = 1;
+
+/// Coordinates window draws on the UI thread. Owned by the platform and
+/// shared with every window (like `WindowsPlatformState::cursor_visible`),
+/// because the coordination is inherently cross-window: while window A is
+/// drawing, a re-entrant paint request for window B must be deferred.
+pub(crate) struct DrawCoordinator {
+    /// Whether some window is currently inside `draw_window`. Win32 can
+    /// re-enter the window procedure while a draw is in progress (e.g.
+    /// cross-thread `SendMessage` dispatch during message pumping, or modal
+    /// message loops entered by COM calls), and drawing re-entrantly would
+    /// nest GPUI draws. Nested draws are wasted work whose output is
+    /// immediately redrawn, so we defer them instead.
+    drawing: Cell<bool>,
+}
+
+impl DrawCoordinator {
+    pub(crate) fn new() -> Self {
+        Self {
+            drawing: Cell::new(false),
+        }
+    }
+
+    fn try_begin_draw(&self) -> Option<DrawWindowGuard<'_>> {
+        // This only covers the `draw_window` span (which extends past the GPUI
+        // draw, through presentation and IME updates). Requests that arrive
+        // re-entrantly during GPUI-initiated draws (e.g. key dispatch or
+        // opening a window draws synchronously) are deferred by GPUI's
+        // `on_request_frame` callback itself, which no-ops in that case.
+        if self.drawing.get() {
+            None
+        } else {
+            self.drawing.set(true);
+            Some(DrawWindowGuard { coordinator: self })
+        }
+    }
+}
+
+struct DrawWindowGuard<'a> {
+    coordinator: &'a DrawCoordinator,
+}
+
+impl Drop for DrawWindowGuard<'_> {
+    fn drop(&mut self) {
+        self.coordinator.drawing.set(false);
+    }
+}
 
 /// A window message handled for this long pushes the next frame past the vsync
 /// interval of a 144Hz display. Paint messages are excluded: their cost is the
@@ -66,6 +114,8 @@ impl WindowsWindowInner {
             WM_PAINT => self.handle_paint_msg(handle),
             WM_CLOSE => self.handle_close_msg(),
             WM_DESTROY => self.handle_destroy_msg(handle),
+            WM_QUERYENDSESSION => Some(1),
+            WM_ENDSESSION => self.handle_end_session_msg(wparam),
             WM_MOUSEMOVE => self.handle_mouse_move_msg(handle, lparam, wparam),
             WM_MOUSELEAVE | WM_NCMOUSELEAVE => self.handle_mouse_leave_msg(),
             WM_NCMOUSEMOVE => self.handle_nc_mouse_move_msg(handle, lparam),
@@ -139,6 +189,20 @@ impl WindowsWindowInner {
         } else {
             unsafe { DefWindowProcW(handle, msg, wparam, lparam) }
         }
+    }
+
+    fn handle_end_session_msg(&self, wparam: WPARAM) -> Option<isize> {
+        if wparam.0 != 0 {
+            unsafe {
+                SendMessageW(
+                    self.platform_window_handle,
+                    WM_GPUI_END_SESSION,
+                    Some(WPARAM(self.validation_number)),
+                    None,
+                );
+            }
+        }
+        Some(0)
     }
 
     fn handle_move_msg(&self, handle: HWND, lparam: LPARAM) -> Option<isize> {
@@ -445,10 +509,9 @@ impl WindowsWindowInner {
             return Some(MA_NOACTIVATE as isize);
         }
 
-        // Ordinary application windows activate eagerly so `active_window` is
-        // correct while the mouse-down message from the same click is handled.
-        unsafe { SetActiveWindow(handle).ok() };
-        None
+        // DefWindowProc defers caption activation until WM_NCLBUTTONDOWN, which
+        // GPUI may consume. Activate before dispatching that mouse-down event.
+        Some(MA_ACTIVATE as isize)
     }
 
     fn handle_mouse_down_msg(
@@ -678,7 +741,11 @@ impl WindowsWindowInner {
                     .ok()
                     .log_err();
             } else {
-                if let Some(ctx) = ImeContext::get(handle) {
+                // The IME context is per-thread, so without this check a change in this
+                // window's text input state could commit an IME composition happening in another window.
+                if GetFocus() == handle
+                    && let Some(ctx) = ImeContext::get(handle)
+                {
                     ImmNotifyIME(*ctx, NI_COMPOSITIONSTR, CPS_COMPLETE, 0)
                         .ok()
                         .log_err();
@@ -940,8 +1007,12 @@ impl WindowsWindowInner {
                 WindowControlArea::Drag if self.is_movable => Some(HTCAPTION as _),
                 WindowControlArea::Drag => None,
                 WindowControlArea::Close => Some(HTCLOSE as _),
-                WindowControlArea::Max => Some(HTMAXBUTTON as _),
-                WindowControlArea::Min => Some(HTMINBUTTON as _),
+                WindowControlArea::Max if self.is_resizable => Some(HTMAXBUTTON as _),
+                WindowControlArea::Max if self.is_movable => Some(HTCAPTION as _),
+                WindowControlArea::Max => Some(HTNOWHERE as _),
+                WindowControlArea::Min if self.is_minimizable => Some(HTMINBUTTON as _),
+                WindowControlArea::Min if self.is_movable => Some(HTCAPTION as _),
+                WindowControlArea::Min => Some(HTNOWHERE as _),
             })
         } else {
             None
@@ -1095,11 +1166,12 @@ impl WindowsWindowInner {
             && let Some(last_pressed) = last_pressed
         {
             let handled = match (wparam.0 as u32, last_pressed) {
-                (HTMINBUTTON, HTMINBUTTON) => {
+                (HTMINBUTTON, HTMINBUTTON) if self.is_minimizable => {
                     unsafe { ShowWindowAsync(handle, SW_MINIMIZE).ok().log_err() };
                     true
                 }
-                (HTMAXBUTTON, HTMAXBUTTON) => {
+                (HTMINBUTTON, HTMINBUTTON) => true,
+                (HTMAXBUTTON, HTMAXBUTTON) if self.is_resizable => {
                     if self.state.is_maximized() {
                         unsafe { ShowWindowAsync(handle, SW_NORMAL).ok().log_err() };
                     } else {
@@ -1107,6 +1179,7 @@ impl WindowsWindowInner {
                     }
                     true
                 }
+                (HTMAXBUTTON, HTMAXBUTTON) => true,
                 (HTCLOSE, HTCLOSE) => {
                     unsafe {
                         PostMessageW(Some(handle), WM_CLOSE, WPARAM::default(), LPARAM::default())
@@ -1252,7 +1325,7 @@ impl WindowsWindowInner {
         // from the forced WM_GPUI_FORCE_UPDATE_WINDOW or a stray WM_PAINT in
         // between) is treated as a forced render so it both clears
         // `skip_draws` and bypasses the view cache.
-        self.state.force_render_after_recovery.set(true);
+        self.state.force_render_pending.set(true);
         Some(0)
     }
 
@@ -1266,6 +1339,19 @@ impl WindowsWindowInner {
 
     #[inline]
     fn draw_window(&self, handle: HWND, force_render: bool) -> Option<isize> {
+        let Some(_guard) = self.state.draw_coordinator.try_begin_draw() else {
+            log::debug!("deferring re-entrant draw of window {handle:?}");
+            if force_render {
+                self.state.force_render_pending.set(true);
+            }
+            // Validate the region so a nested message pump doesn't keep
+            // re-dispatching WM_PAINT for the still-invalid region in a busy
+            // loop until the in-progress draw unwinds. Re-arm the demand-driven
+            // pump so the deferred window is invalidated again on the next vsync.
+            unsafe { ValidateRect(Some(handle), None).ok().log_err() };
+            self.state.frame_pump.arm(&self.state.frame_request);
+            return Some(0);
+        };
         let mut request_frame = self.state.callbacks.request_frame.take()?;
 
         self.state.direct_manipulation.update();
@@ -1285,7 +1371,7 @@ impl WindowsWindowInner {
             }
         }
 
-        let force_render = force_render || self.state.force_render_after_recovery.take();
+        let force_render = force_render || self.state.force_render_pending.take();
         if force_render {
             // Re-enable drawing after a device loss recovery. The forced render
             // will rebuild the scene with fresh atlas textures.

@@ -29,6 +29,7 @@ profiling.workspace = true
 raw-window-handle.workspace = true
 smallvec.workspace = true
 swash.workspace = true
+unicode-bidi.workspace = true
 unicode-segmentation.workspace = true
 gpui_util.workspace = true
 wgpu.workspace = true
@@ -37,17 +38,13 @@ wgpu.workspace = true
 # WARNING: If you change this, you must also publish a new version of zed-font-kit to crates.io
 font-kit = { workspace = true, optional = true }
 
-[target.'cfg(not(target_family = "wasm"))'.dependencies]
-pollster.workspace = true
-
 [target.'cfg(target_family = "wasm")'.dependencies]
-wasm-bindgen.workspace = true
-wasm-bindgen-futures.workspace = true
 web-sys = { workspace = true, features = ["HtmlCanvasElement"] }
-js-sys.workspace = true
+wgpu = { workspace = true, features = ["webgl"] }
 
 [dev-dependencies]
 criterion.workspace = true
+naga = { version = "29.0.4", features = ["wgsl-in"] }
 
 [[bench]]
 name = "layout_line"

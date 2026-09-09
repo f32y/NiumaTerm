@@ -27,7 +27,7 @@ wayland = [
     "wayland-protocols-plasma",
     "wayland-protocols-wlr",
     "filedescriptor",
-    "xkbcommon",
+    "xkbcommon/wayland",
     "open",
     "gpui/wayland",
 ]
@@ -37,7 +37,7 @@ x11 = [
 
     "as-raw-xcb-connection",
     "x11rb",
-    "xkbcommon",
+    "xkbcommon/x11",
     "xim",
     "x11-clipboard",
     "filedescriptor",
@@ -56,18 +56,13 @@ accesskit_unix.workspace = true
 anyhow.workspace = true
 bytemuck.workspace = true
 collections.workspace = true
-image.workspace = true
 futures.workspace = true
 gpui.workspace = true
 gpui_util.workspace = true
 gpui_wgpu = { workspace = true, optional = true, features = ["font-kit"] }
-itertools.workspace = true
 libc.workspace = true
 log.workspace = true
 parking_lot.workspace = true
-pathfinder_geometry.workspace = true
-pollster.workspace = true
-profiling.workspace = true
 smallvec.workspace = true
 smol.workspace = true
 strum.workspace = true
@@ -80,15 +75,15 @@ oo7 = { workspace = true, features = [
     "native_crypto",
 ] }
 calloop.workspace = true
+notify-rust.workspace = true
 raw-window-handle.workspace = true
 
 # Used in both windowing options
 ashpd = { workspace = true, optional = true }
-swash.workspace = true
 bitflags = { workspace = true, optional = true }
 filedescriptor = { workspace = true, optional = true }
 open = { workspace = true, optional = true }
-xkbcommon = { workspace = true, features = ["wayland", "x11"], optional = true }
+xkbcommon = { workspace = true, optional = true }
 
 # Screen capture
 scap = { workspace = true, optional = true }
@@ -130,3 +125,6 @@ xim = { workspace = true, features = [
     "x11rb-client",
 ], optional = true }
 x11-clipboard = { workspace = true, optional = true }
+
+[package.metadata.cargo-shear]
+ignored = ["bitflags", "scap", "x11-clipboard"]

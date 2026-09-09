@@ -18,14 +18,17 @@ mod bounds_tree;
 mod color;
 /// The default colors used by GPUI.
 pub mod colors;
+#[cfg(feature = "profiler")]
+mod debug_overlay;
 mod element;
 mod elements;
 mod executor;
 mod platform_scheduler;
 pub(crate) use platform_scheduler::PlatformScheduler;
-/// Per-second frame pacing digest, logged at debug level.
+/// Per-second frame pacing digest, logged at info level while enabled.
 pub mod frame_stats;
 mod geometry;
+mod gestures;
 mod global;
 mod input;
 mod inspector;
@@ -42,13 +45,15 @@ pub mod profiler;
     target_os = "windows",
     target_os = "linux",
     target_family = "wasm",
-    feature = "bench"
+    feature = "test-support",
+    feature = "bench-support"
 ))]
 #[expect(missing_docs)]
 pub mod queue;
 mod scene;
 mod shared_uri;
 mod smooth_scroll;
+mod spring;
 mod style;
 mod styled;
 mod subscription;
@@ -97,14 +102,18 @@ pub use asset_cache::*;
 pub use assets::*;
 pub use color::*;
 pub use ctor::ctor;
+#[cfg(feature = "profiler")]
+pub use debug_overlay::*;
 pub use element::*;
 pub use elements::*;
 pub use executor::*;
 pub use geometry::*;
+pub use gestures::*;
 pub use global::*;
 pub use gpui_macros::{
     AppContext, IntoElement, Render, VisualContext, bench, property_test, register_action, test,
 };
+pub use spring::*;
 
 /// Defines a Criterion benchmark group for benchmarks annotated with [`gpui::bench`].
 ///

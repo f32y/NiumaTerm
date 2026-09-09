@@ -11,6 +11,12 @@ pub fn background_executor() -> gpui::BackgroundExecutor {
 }
 
 pub fn application() -> gpui::Application {
+    #[cfg(target_family = "wasm")]
+    {
+        application_with_web_backend(gpui_web::WebBackendPreference::Auto)
+    }
+
+    #[cfg(not(target_family = "wasm"))]
     gpui::Application::with_platform(current_platform(false))
 }
 
@@ -18,10 +24,23 @@ pub fn headless() -> gpui::Application {
     gpui::Application::with_platform(current_platform(true))
 }
 
+#[cfg(target_family = "wasm")]
+pub use gpui_web::WebBackendPreference;
+
+#[cfg(target_family = "wasm")]
+pub fn application_with_web_backend(backend_preference: WebBackendPreference) -> gpui::Application {
+    let platform = Rc::new(gpui_web::WebPlatform::new_with_backend(
+        true,
+        backend_preference,
+    ));
+    gpui::Application::with_platform(platform)
+}
+
 /// Unlike `application`, this function returns a single-threaded web application.
 #[cfg(target_family = "wasm")]
 pub fn single_threaded_web() -> gpui::Application {
-    gpui::Application::with_platform(Rc::new(gpui_web::WebPlatform::new(false)))
+    let platform = Rc::new(gpui_web::WebPlatform::new(false));
+    gpui::Application::with_platform(platform)
 }
 
 /// Initializes panic hooks and logging for the web platform.
@@ -60,7 +79,7 @@ pub fn current_platform(headless: bool) -> Rc<dyn Platform> {
 }
 
 /// Returns a new [`HeadlessRenderer`] for the current platform, if available.
-#[cfg(feature = "test-support")]
+#[cfg(any(feature = "bench-support", feature = "test-support"))]
 pub fn current_headless_renderer() -> Option<Box<dyn gpui::PlatformHeadlessRenderer>> {
     #[cfg(target_os = "macos")]
     {

@@ -25,12 +25,12 @@ test-support = [
     "x11",
     "proptest",
 ]
-bench = ["test-support", "dep:criterion", "dep:hdrhistogram"]
+bench-support = ["profiler", "dep:criterion"]
+# Preserve the published feature name while consumers migrate to `bench-support`.
+bench = ["bench-support"]
 inspector = ["gpui_macros/inspector"]
 leak-detection = ["backtrace"]
-wayland = [
-    "bitflags",
-]
+wayland = []
 x11 = [
     "scap?/x11",
 ]
@@ -38,8 +38,8 @@ screen-capture = [
     "scap",
 ]
 windows-manifest = ["dep:embed-resource"]
-input-latency-histogram = ["dep:hdrhistogram"]
-profiler = []
+profiler = ["dep:hdrhistogram"]
+stacker = ["dep:stacksafe"]
 
 [lib]
 path = "src/gpui.rs"
@@ -50,7 +50,7 @@ accesskit.workspace = true
 anyhow.workspace = true
 async-task.workspace = true
 backtrace = { workspace = true, optional = true }
-bitflags = { workspace = true, optional = true }
+bitflags.workspace = true
 
 collections.workspace = true
 criterion = { workspace = true, optional = true }
@@ -88,11 +88,12 @@ serde_json.workspace = true
 slotmap.workspace = true
 smallvec.workspace = true
 async-channel.workspace = true
-stacksafe.workspace = true
+stacksafe = { workspace = true, optional = true }
 strum.workspace = true
 sum_tree.workspace = true
 taffy.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
 gpui_util.workspace = true
 hdrhistogram = { workspace = true, optional = true }
 waker-fn.workspace = true
@@ -111,27 +112,11 @@ uuid = { workspace = true, features = ["js"] }
 
 
 [target.'cfg(target_os = "macos")'.dependencies]
-block.workspace = true
-cocoa.workspace = true
-cocoa-foundation.workspace = true
-core-foundation.workspace = true
-core-foundation-sys.workspace = true
-core-graphics.workspace = true
 core-video.workspace = true
-core-text.workspace = true
-# WARNING: If you change this, you must also publish a new version of zed-font-kit to crates.io
 font-kit = { workspace = true, optional = true }
-foreign-types.workspace = true
 log.workspace = true
-objc.workspace = true
 objc2 = { workspace = true, optional = true }
 objc2-metal = { workspace = true, optional = true }
-mach2.workspace = true
-#TODO: replace with "objc2"
-metal.workspace = true
-
-[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "macos"))'.dependencies]
-pathfinder_geometry.workspace = true
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "windows"))'.dependencies]
 scap = { workspace = true, optional = true }
@@ -164,12 +149,17 @@ embed-resource = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "macos")'.build-dependencies]
 bindgen.workspace = true
-cbindgen.workspace = true
 
-
-
-
-
+[package.metadata.cargo-shear]
+ignored = [
+    "bindgen",
+    "font-kit",
+    "getrandom",
+    "objc2",
+    "objc2-metal",
+    "tracing",
+]
+ignored-paths = ["src/_ownership_and_data_flow.rs"]
 
 [[example]]
 name = "hello_world"
@@ -192,6 +182,10 @@ name = "on_window_close_quit"
 path = "examples/on_window_close_quit.rs"
 
 [[example]]
+name = "window_movable"
+path = "examples/window_movable.rs"
+
+[[example]]
 name = "opacity"
 path = "examples/opacity.rs"
 
@@ -202,6 +196,11 @@ path = "examples/pattern.rs"
 [[example]]
 name = "set_menus"
 path = "examples/set_menus.rs"
+
+[[example]]
+name = "system_notifications"
+path = "examples/system_notifications.rs"
+
 
 [[example]]
 name = "shadow"
@@ -250,3 +249,7 @@ path = "examples/mouse_pressure.rs"
 [[example]]
 name = "a11y"
 path = "examples/a11y.rs"
+
+[[example]]
+name = "view_example"
+path = "examples/view_example/view_example_main.rs"

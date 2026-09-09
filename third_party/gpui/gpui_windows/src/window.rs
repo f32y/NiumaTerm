@@ -64,12 +64,14 @@ pub struct WindowsWindowState {
     pub direct_manipulation: DirectManipulationHandler,
 
     pub renderer: RefCell<DirectXRenderer>,
-    /// Set after a GPU device-lost recovery so the next `draw_window` call is
-    /// treated as a forced render. This guarantees the next frame both
-    /// re-enables drawing (via `mark_drawable`) and bypasses the GPUI view
-    /// cache, which would otherwise replay stale atlas tile references from
-    /// the previous frame and panic in `DirectXAtlasState::texture`.
-    pub force_render_after_recovery: Cell<bool>,
+    /// Set when the next `draw_window` call must be treated as a forced
+    /// render. Used after a GPU device-lost recovery, where the next frame
+    /// must both re-enable drawing (via `mark_drawable`) and bypass the GPUI
+    /// view cache (which would otherwise replay stale atlas tile references
+    /// from the previous frame and panic in `DirectXAtlasState::texture`),
+    /// and when a forced render was requested while another draw was in
+    /// progress and had to be deferred.
+    pub force_render_pending: Cell<bool>,
 
     pub click_state: ClickState,
     pub current_cursor: Cell<Option<HCURSOR>>,
@@ -81,6 +83,8 @@ pub struct WindowsWindowState {
     /// Flag to instruct the `VSyncProvider` thread to invalidate the directx devices
     /// as resizing them has failed, causing us to have lost at least the render target.
     pub invalidate_devices: Arc<AtomicBool>,
+    /// Shared with [`WindowsPlatformState::draw_coordinator`] and every other window.
+    pub(crate) draw_coordinator: Rc<DrawCoordinator>,
     /// Demand-driven frame pump shared with the vsync thread.
     pub frame_pump: Arc<FramePump>,
     /// This window's armed-frame flag in the pump.
@@ -100,6 +104,8 @@ pub(crate) struct WindowsWindowInner {
     pub(crate) handle: AnyWindowHandle,
     pub(crate) hide_title_bar: bool,
     pub(crate) is_movable: bool,
+    pub(crate) is_resizable: bool,
+    pub(crate) is_minimizable: bool,
     pub(crate) executor: ForegroundExecutor,
     pub(crate) validation_number: usize,
     pub(crate) main_receiver: PriorityQueueReceiver<RunnableVariant>,
@@ -120,6 +126,7 @@ impl WindowsWindowState {
         appearance_override: Option<WindowAppearance>,
         disable_direct_composition: bool,
         invalidate_devices: Arc<AtomicBool>,
+        draw_coordinator: Rc<DrawCoordinator>,
         frame_pump: Arc<FramePump>,
     ) -> Result<Self> {
         let frame_request = frame_pump.register(hwnd);
@@ -175,7 +182,7 @@ impl WindowsWindowState {
             last_reported_capslock: Cell::new(last_reported_capslock),
             hovered: Cell::new(hovered),
             renderer: RefCell::new(renderer),
-            force_render_after_recovery: Cell::new(false),
+            force_render_pending: Cell::new(false),
             click_state,
             current_cursor: Cell::new(current_cursor),
             cursor_visible,
@@ -185,6 +192,7 @@ impl WindowsWindowState {
             initial_placement: Cell::new(initial_placement),
             hwnd,
             invalidate_devices,
+            draw_coordinator,
             frame_pump,
             frame_request,
             direct_manipulation,
@@ -265,6 +273,7 @@ impl WindowsWindowInner {
             context.appearance_override,
             context.disable_direct_composition,
             context.invalidate_devices.clone(),
+            context.draw_coordinator.clone(),
             context.frame_pump.clone(),
         )?;
 
@@ -276,6 +285,8 @@ impl WindowsWindowInner {
             handle: context.handle,
             hide_title_bar: context.hide_title_bar,
             is_movable: context.is_movable,
+            is_resizable: context.is_resizable,
+            is_minimizable: context.is_minimizable,
             executor: context.executor.clone(),
             validation_number: context.validation_number,
             main_receiver: context.main_receiver.clone(),
@@ -398,6 +409,8 @@ struct WindowCreateContext {
     hide_title_bar: bool,
     display: WindowsDisplay,
     is_movable: bool,
+    is_resizable: bool,
+    is_minimizable: bool,
     min_size: Option<Size<Pixels>>,
     executor: ForegroundExecutor,
     current_cursor: Option<HCURSOR>,
@@ -412,6 +425,7 @@ struct WindowCreateContext {
     disable_direct_composition: bool,
     directx_devices: DirectXDevices,
     invalidate_devices: Arc<AtomicBool>,
+    draw_coordinator: Rc<DrawCoordinator>,
     frame_pump: Arc<FramePump>,
     parent_hwnd: Option<HWND>,
 }
@@ -422,6 +436,12 @@ impl WindowsWindow {
         params: WindowParams,
         creation_info: WindowCreationInfo,
     ) -> Result<Self> {
+        // Native popups are not implemented on Windows yet. Rejecting lets callers fall back to
+        // gpui's in-window popovers.
+        if let WindowKind::AnchoredPopup(_) = params.kind {
+            return Err(popup::PopupNotSupportedError.into());
+        }
+
         let WindowCreationInfo {
             icon,
             executor,
@@ -435,6 +455,7 @@ impl WindowsWindow {
             disable_direct_composition,
             directx_devices,
             invalidate_devices,
+            draw_coordinator,
             frame_pump,
         } = creation_info;
         register_window_class(icon);
@@ -508,6 +529,8 @@ impl WindowsWindow {
             hide_title_bar,
             display,
             is_movable: params.is_movable,
+            is_resizable: params.is_resizable,
+            is_minimizable: params.is_minimizable,
             min_size: params.window_min_size,
             executor,
             current_cursor,
@@ -522,6 +545,7 @@ impl WindowsWindow {
             disable_direct_composition,
             directx_devices,
             invalidate_devices,
+            draw_coordinator,
             frame_pump,
             parent_hwnd,
         };
@@ -555,14 +579,13 @@ impl WindowsWindow {
             configure_flyout_window(hwnd);
         }
         this.state.border_offset.update(hwnd)?;
-        let placement = retrieve_window_placement(
-            hwnd,
-            display,
-            params.bounds,
-            this.state.scale_factor.get(),
-            &this.state.border_offset,
-        )?;
+        let placement =
+            retrieve_window_placement(hwnd, display, params.bounds, &this.state.border_offset)?;
         if params.show {
+            let mut placement = placement;
+            if !params.focus {
+                placement.showCmd = SW_SHOWNOACTIVATE.0 as u32;
+            }
             unsafe { SetWindowPlacement(hwnd, &placement)? };
         } else {
             this.state.initial_placement.set(Some(WindowOpenStatus {
@@ -864,6 +887,27 @@ impl PlatformWindow for WindowsWindow {
             .detach();
     }
 
+    fn request_attention(&self) {
+        if self.is_active() {
+            return;
+        }
+
+        let hwnd = self.0.hwnd;
+        self.0
+            .executor
+            .spawn(async move {
+                let info = FLASHWINFO {
+                    cbSize: std::mem::size_of::<FLASHWINFO>() as u32,
+                    hwnd,
+                    dwFlags: FLASHW_ALL,
+                    uCount: 1,
+                    dwTimeout: 0,
+                };
+                unsafe { FlashWindowEx(&info).ok().log_err() };
+            })
+            .detach();
+    }
+
     fn is_active(&self) -> bool {
         self.0.hwnd == unsafe { GetActiveWindow() }
     }
@@ -1001,6 +1045,11 @@ impl PlatformWindow for WindowsWindow {
         self.state.is_fullscreen()
     }
 
+    fn frame_waker(&self) -> Option<Rc<dyn Fn()>> {
+        let waker = self.frame_pump_waker()?;
+        Some(Rc::new(move || waker()))
+    }
+
     fn frame_pump_waker(&self) -> Option<std::sync::Arc<dyn Fn() + Send + Sync>> {
         Some(
             self.state
@@ -1071,6 +1120,13 @@ impl PlatformWindow for WindowsWindow {
             .borrow_mut()
             .draw(scene, damage)
             .log_err();
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    fn render_to_image(&self, scene: &Scene) -> anyhow::Result<image::RgbaImage> {
+        let mut renderer = self.state.renderer.borrow_mut();
+        let background_appearance = renderer.background_appearance();
+        renderer.render_to_image(scene, background_appearance)
     }
 
     fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas> {
@@ -1646,7 +1702,6 @@ fn retrieve_window_placement(
     hwnd: HWND,
     display: WindowsDisplay,
     initial_bounds: Bounds<Pixels>,
-    scale_factor: f32,
     border_offset: &WindowBorderOffset,
 ) -> Result<WINDOWPLACEMENT> {
     let mut placement = WINDOWPLACEMENT {
@@ -1660,7 +1715,14 @@ fn retrieve_window_placement(
     } else {
         display.default_bounds()
     };
-    let bounds = bounds.to_device_pixels(scale_factor);
+    // `bounds` is expressed in logical pixels for `display`, so it must be converted
+    // to device pixels using that display's own scale factor. The window's current
+    // scale factor can't be used here: `CreateWindowExW` was called with
+    // `CW_USEDEFAULT`, so at this point the window may still be sitting on whichever
+    // monitor Windows picked by default, which can have a different DPI than `display`
+    // and would otherwise throw off the physical position (e.g. leaving the window
+    // partially off-screen when moved to a monitor with a different scale factor).
+    let bounds = bounds.to_device_pixels(display.scale_factor());
     placement.rcNormalPosition = calculate_window_rect(bounds, border_offset);
     Ok(placement)
 }
@@ -1742,8 +1804,12 @@ fn set_window_composition_attribute(hwnd: HWND, color: Option<Color>, state: u32
             .log_err()
         {
             let func_name = PCSTR::from_raw(c"SetWindowCompositionAttribute".as_ptr() as *const u8);
+            let Some(raw_set_window_composition_attribute) = GetProcAddress(user32, func_name)
+            else {
+                return;
+            };
             let set_window_composition_attribute: SetWindowCompositionAttributeType =
-                std::mem::transmute(GetProcAddress(user32, func_name));
+                std::mem::transmute(raw_set_window_composition_attribute);
             let mut color = color.unwrap_or_default();
             let is_acrylic = state == 4;
             if is_acrylic && color.3 == 0 {
