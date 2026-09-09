@@ -15,6 +15,7 @@ use std::time::Instant;
 use gpui::prelude::*;
 use gpui::{AnyElement, Context, Pixels, Window, div, px, relative};
 use gpui_component::modern_menu::ModernMenuExt as _;
+use gpui_component::shimmer::ShimmerText;
 use gpui_component::spinner::Spinner;
 use gpui_component::{ActiveTheme as _, IconName, Sizable as _, h_flex};
 use nmt_agent_utils::chat::Item as SessionItem;
@@ -293,11 +294,26 @@ impl TranscriptView {
                 div()
                     .text_size(px(AGENT_CARD_DETAIL_SIZE))
                     .text_color(cx.theme().muted_foreground)
-                    .child(working_label(
-                        started,
-                        self.live_turn.output_tokens(),
-                        self.live_turn.detail(),
-                    )),
+                    .child(
+                        // The label text changes every second, so it cannot
+                        // serve as the animation identity; a fixed id keeps
+                        // one animation state alive across those rewrites.
+                        //
+                        // The band lifts the muted label to full foreground
+                        // contrast. The component's theme-derived default
+                        // mixes the text toward the background on light
+                        // themes, which fades the band into the page instead,
+                        // and its default peak leaves the muted label only
+                        // slightly lifted at the twelve-pixel detail size.
+                        ShimmerText::new(working_label(
+                            started,
+                            self.live_turn.output_tokens(),
+                            self.live_turn.detail(),
+                        ))
+                        .id("agent-working-label")
+                        .highlight_color(cx.theme().foreground)
+                        .peak_opacity(0.9),
+                    ),
             )
             .into_any_element()
     }
