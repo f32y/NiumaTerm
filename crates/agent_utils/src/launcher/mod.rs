@@ -9,7 +9,9 @@ use std::process::{Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 use std::{env, fmt, io, thread};
 
-use nmt_platform::process::{KillOnCloseJob, hidden_cmd_command, launch_env_var};
+use nmt_platform::process::{
+    KillOnCloseJob, decode_child_output, hidden_cmd_command, launch_env_var,
+};
 
 use crate::LaunchConfig;
 
@@ -146,7 +148,7 @@ impl AgentCli {
     }
 
     fn redact_capped(&self, bytes: &[u8], output_limit: usize) -> (String, bool) {
-        let redacted = self.redact(&String::from_utf8_lossy(bytes));
+        let redacted = self.redact(&decode_child_output(bytes));
         let truncated = redacted.len() > output_limit;
         (utf8_suffix(&redacted, output_limit), truncated)
     }
@@ -321,9 +323,9 @@ where
                 let stdout = join_reader(stdout_reader)?;
                 let stderr = join_reader(stderr_reader)?;
                 let raw_diagnostic = if stderr.bytes.is_empty() {
-                    String::from_utf8_lossy(&stdout.bytes)
+                    decode_child_output(&stdout.bytes)
                 } else {
-                    String::from_utf8_lossy(&stderr.bytes)
+                    decode_child_output(&stderr.bytes)
                 };
                 let diagnostic = launcher.redact(&raw_diagnostic);
                 return Err(ProcessError::TimedOut {
@@ -346,10 +348,7 @@ where
 
     let stdout = join_reader(stdout_reader)?;
     let stderr = join_reader(stderr_reader)?;
-    let raw_stdout = utf8_suffix(
-        &String::from_utf8_lossy(&stdout.bytes),
-        limits.max_output_bytes,
-    );
+    let raw_stdout = utf8_suffix(&decode_child_output(&stdout.bytes), limits.max_output_bytes);
     let (stdout_text, stdout_redaction_truncated) =
         launcher.redact_capped(&stdout.bytes, limits.max_output_bytes);
     let (stderr_text, stderr_redaction_truncated) =

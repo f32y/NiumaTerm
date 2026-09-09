@@ -9,7 +9,7 @@ use std::sync::{Arc, Weak};
 use std::thread;
 use std::time::Duration;
 
-use nmt_platform::process::KillOnCloseJob;
+use nmt_platform::process::{KillOnCloseJob, decode_child_output};
 use parking_lot::Mutex;
 
 use crate::deepseek::api::ApiClient;
@@ -188,7 +188,8 @@ impl Host {
         let retained = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&retained);
         thread::spawn(move || {
-            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            for line in BufReader::new(stderr).split(b'\n').map_while(Result::ok) {
+                let line = decode_child_output(line.strip_suffix(b"\r").unwrap_or(&line));
                 let mut lines = sink.lock();
                 if lines.len() == RETAINED_STDERR_LINES {
                     lines.remove(0);

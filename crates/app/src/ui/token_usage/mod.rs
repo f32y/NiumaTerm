@@ -19,7 +19,7 @@ use gpui_component::{
     ActiveTheme as _, Icon, IconNamed, IndexPath, Sizable as _, StyledExt as _, h_flex, v_flex,
 };
 use nmt_i18n::i18n;
-use nmt_platform::process::hidden_cmd_command;
+use nmt_platform::process::{decode_child_output, hidden_cmd_command};
 use serde::Deserialize;
 use serde_json::from_slice;
 use tracing::warn;
@@ -506,7 +506,7 @@ fn fetch_usage(since: &str, date: &str) -> Result<DailyTokenUsage, String> {
         return Err(format!(
             "ccusage exited with {}: {}",
             output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
+            decode_child_output(&output.stderr).trim()
         ));
     }
 

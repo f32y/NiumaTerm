@@ -3,9 +3,10 @@ use std::os::windows::io::AsRawHandle as _;
 use std::os::windows::process::{CommandExt as _, ExitStatusExt as _};
 use std::process::{Child, Command, ExitStatus};
 use std::sync::{Arc, Weak};
-use std::{env, ffi, io, mem, ptr};
+use std::{env, ffi, io, mem, ptr, str};
 
 use windows_sys::Win32::Foundation::{CloseHandle, ERROR_MORE_DATA, GetLastError, HANDLE};
+use windows_sys::Win32::Globalization::{CP_OEMCP, MB_ERR_INVALID_CHARS, MultiByteToWideChar};
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
@@ -25,6 +26,59 @@ pub fn hidden_cmd_command(executable: impl AsRef<OsStr>) -> Command {
     command.args([OsStr::new("/D"), OsStr::new("/C")]);
     command.arg(executable);
     command
+}
+
+/// Text of one child's stdout or stderr capture.
+///
+/// Programs write UTF-8 to a pipe, but `cmd.exe` itself writes its own
+/// diagnostics ("'x' is not recognized as an internal or external command")
+/// in the console OEM code page, which on a Chinese system is GBK. Decoding
+/// those bytes as UTF-8 turns every localized message into replacement
+/// characters before it reaches the log. GBK text almost never validates as
+/// UTF-8, so a failed UTF-8 decode is a reliable signal to retry with the OEM
+/// code page. Bytes that neither decoder accepts fall back to lossy UTF-8 so a
+/// truncated capture still yields its readable prefix.
+pub fn decode_child_output(bytes: &[u8]) -> String {
+    if let Ok(text) = str::from_utf8(bytes) {
+        return text.to_owned();
+    }
+    decode_oem(bytes).unwrap_or_else(|| String::from_utf8_lossy(bytes).into_owned())
+}
+
+fn decode_oem(bytes: &[u8]) -> Option<String> {
+    let len = i32::try_from(bytes.len()).ok()?;
+    // SAFETY: the input pointer and length describe `bytes`; a null output
+    // buffer asks only for the required length.
+    let needed = unsafe {
+        MultiByteToWideChar(
+            CP_OEMCP,
+            MB_ERR_INVALID_CHARS,
+            bytes.as_ptr(),
+            len,
+            ptr::null_mut(),
+            0,
+        )
+    };
+    if needed <= 0 {
+        return None;
+    }
+    let mut wide = vec![0_u16; needed as usize];
+    // SAFETY: `wide` holds exactly the number of code units the first call
+    // reported for the same input.
+    let written = unsafe {
+        MultiByteToWideChar(
+            CP_OEMCP,
+            MB_ERR_INVALID_CHARS,
+            bytes.as_ptr(),
+            len,
+            wide.as_mut_ptr(),
+            needed,
+        )
+    };
+    if written <= 0 {
+        return None;
+    }
+    Some(String::from_utf16_lossy(&wide[..written as usize]))
 }
 
 /// The value `name` carries in a child started by [`hidden_cmd_command`].

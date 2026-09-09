@@ -7,7 +7,7 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use nmt_platform::process::KillOnCloseJob;
+use nmt_platform::process::{KillOnCloseJob, decode_child_output};
 use serde_json::Value;
 
 /// A spawned agent CLI with piped stdio, kill-on-close containment, and
@@ -90,8 +90,10 @@ impl JsonLineProcess {
         });
 
         thread::spawn(move || {
-            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                on_stderr(line);
+            for line in BufReader::new(stderr).split(b'\n').map_while(Result::ok) {
+                on_stderr(decode_child_output(
+                    line.strip_suffix(b"\r").unwrap_or(&line),
+                ));
             }
         });
 

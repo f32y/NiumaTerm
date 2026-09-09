@@ -74,6 +74,15 @@ pub fn launch_env_var(name: &str) -> Option<OsString> {
     env::var_os(name)
 }
 
+/// Text of one child's stdout or stderr capture.
+///
+/// Unix children write in the locale encoding, which is UTF-8 on every
+/// supported system; invalid sequences are replaced so a capture cut
+/// mid-character still yields its readable prefix.
+pub fn decode_child_output(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
 /// Build the status a process that exited with `code` would report.
 ///
 /// `ExitStatus` wraps a `wait` status rather than the exit code, and the exit

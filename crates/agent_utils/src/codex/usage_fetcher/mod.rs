@@ -6,7 +6,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use nmt_platform::process::{KillOnCloseJob, hidden_cmd_command};
+use nmt_platform::process::{KillOnCloseJob, decode_child_output, hidden_cmd_command};
 use serde_json::{Value, from_str};
 
 use crate::usage::{
@@ -59,11 +59,11 @@ pub fn fetch() -> Result<UsageSnapshot, String> {
     });
 
     let stderr_reader = thread::spawn(move || {
-        let mut text = String::new();
+        let mut bytes = Vec::new();
 
-        let _ = stderr.read_to_string(&mut text);
+        let _ = stderr.read_to_end(&mut bytes);
 
-        text
+        decode_child_output(&bytes)
     });
 
     let result = (|| {
