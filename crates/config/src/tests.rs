@@ -38,6 +38,7 @@ fn sample_appearance() -> AppearanceConfig {
 
 fn sample_system() -> SystemConfig {
     SystemConfig {
+        send_system_notifications: false,
         restore_last_session_when_opening: false,
         manage_subprocess_job: true,
         warn_before_terminating_shell: system::WarnBeforeTerminatingShell::Disabled,
@@ -717,4 +718,11 @@ fn a_model_entry_carries_the_names_the_style_asks_for() {
     assert_eq!(ModelListStyle::NameAndId.label("gpt-5", "gpt-5"), "gpt-5");
     assert_eq!(ModelListStyle::IdAndName.label("", "gpt-5"), "gpt-5");
     assert_eq!(ModelListStyle::NameOnly.label("  ", "gpt-5"), "gpt-5");
+}
+
+#[test]
+fn older_system_settings_keep_native_notifications_enabled() {
+    let config: Config = parse_toml("[system]\nopen-in-best-workspace = false\n").unwrap();
+    assert!(config.system.send_system_notifications);
+    assert!(!config.system.open_in_best_workspace);
 }

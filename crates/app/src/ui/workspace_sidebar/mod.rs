@@ -23,7 +23,9 @@ use crate::ui::composition::{
     sidebar_selection,
 };
 use crate::ui::fluent::{SELECTION_BAR_HEIGHT, SELECTION_BAR_RADIUS, SELECTION_BAR_WIDTH};
-use crate::ui::shell::{InlineRename, InlineRenameSession, InlineRenameStyle, pending_tab_icon};
+use crate::ui::shell::{
+    InlineRename, InlineRenameSession, InlineRenameStyle, MIN_SIDEBAR_WIDTH, pending_tab_icon,
+};
 use crate::ui::sidebar_resize::{self, ResizeDrag};
 use crate::ui::tab_bar::{new_tab_menu, progress_visual, tab_icon};
 use crate::ui::terminal_status::{terminal_dot, terminal_presentation};
@@ -49,7 +51,7 @@ pub(super) const SIDEBAR_WIDTH: f32 = 180.0;
 /// every other column's drag-move events, so this is what distinguishes them.
 pub(super) const RESIZE_HANDLE: &str = "workspace-sidebar-resize";
 
-pub(super) const MIN_WIDTH: f32 = 140.0;
+pub(super) const MIN_WIDTH: f32 = MIN_SIDEBAR_WIDTH;
 pub(crate) const MAX_WIDTH: f32 = 480.0;
 
 /// Side of the vertical tab-bar new-tab control on a workspace row, and the
@@ -271,6 +273,7 @@ const SIDEBAR_PADDING_X: f32 = 12.0;
 const SIDEBAR_ROW_GUTTER: f32 = 6.0;
 const SIDEBAR_PADDING_TOP: f32 = 14.0;
 const SIDEBAR_GROUP_GAP: f32 = 14.0;
+const WORKSPACE_LIST_GAP: f32 = 6.0;
 /// The list heading. It names the column rather than competing with the
 /// workspaces under it, so it is the smallest run of text in the panel.
 const SIDEBAR_SECTION_TEXT: f32 = 10.5;
@@ -458,7 +461,7 @@ impl Sidebar {
                         v_flex()
                             .id("workspace-list")
                             .size_full()
-                            .gap(px(SIDEBAR_GROUP_GAP))
+                            .gap(px(WORKSPACE_LIST_GAP))
                             // Pulled back over the panel's inset so a row's
                             // fill can reach into it. The list clips its own
                             // children horizontally, so a row cannot overhang

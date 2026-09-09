@@ -191,6 +191,7 @@ fn preview_color(color: ColorArray) -> Hsla {
     .into()
 }
 
+// Fixed terminal samples keep theme comparisons consistent across UI languages.
 fn theme_preview(colors: Colors) -> Div {
     let swatches = [
         colors.red,
@@ -214,22 +215,18 @@ fn theme_preview(colors: Colors) -> Div {
                 .child(
                     div()
                         .text_color(preview_color(colors.foreground))
-                        .child(i18n("settings-theme-preview-command")),
+                        .child("ls"),
                 )
-                .child(
-                    div()
-                        .text_color(preview_color(colors.blue))
-                        .child(i18n("settings-theme-preview-directory")),
-                )
+                .child(div().text_color(preview_color(colors.blue)).child("dir"))
                 .child(
                     div()
                         .text_color(preview_color(colors.red))
-                        .child(i18n("settings-theme-preview-executable")),
+                        .child("executable"),
                 )
                 .child(
                     div()
                         .text_color(preview_color(colors.foreground))
-                        .child(i18n("settings-theme-preview-file")),
+                        .child("file"),
                 ),
         )
         .child(h_flex().gap_1().children(swatches.into_iter().map(|color| {

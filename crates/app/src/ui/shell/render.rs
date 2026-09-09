@@ -4,6 +4,7 @@ use gpui_component::modern_menu::{ModernMenu, dispatch_modern_menu_key};
 use nmt_app_agent::RecoveryIdentity;
 use nmt_i18n::i18n;
 
+use crate::ui::composition::FLOATING_SURFACE_SIDE_INSET;
 use crate::ui::shell::*;
 #[cfg(windows)]
 use crate::update::check_now;
@@ -23,6 +24,14 @@ const TITLE_BAR_LEADING_INSET: f32 = 80.0;
 /// reads as one cluster rather than as separate buttons.
 const TITLE_BAR_BUTTON: f32 = 26.0;
 const TITLE_BAR_BUTTON_GAP: f32 = 4.0;
+// Four controls, the divider, four internal gaps, and a trailing gap must
+// stay visible before the first tab, including at the sidebar's drag limit.
+const TITLE_BAR_CONTROLS_WIDTH: f32 = 4.0 * TITLE_BAR_BUTTON + 1.0 + 5.0 * TITLE_BAR_BUTTON_GAP;
+pub(crate) const MIN_SIDEBAR_WIDTH: f32 = if cfg!(target_os = "macos") {
+    TITLE_BAR_LEADING_INSET + TITLE_BAR_CONTROLS_WIDTH - FLOATING_SURFACE_SIDE_INSET
+} else {
+    140.0
+};
 /// A hairline between the application menu and the layout controls beside it.
 /// At 26px the two icon clusters would otherwise read as one undifferentiated
 /// row, and the menu opens application-wide commands while its neighbours only
@@ -104,10 +113,10 @@ impl Shell {
                 h_flex()
                     // Subtract the title bar's existing inset so the tabs line up
                     // with the content surface after its sidebar gutter.
-                    // On narrow windows this column can shrink and clip before
-                    // the tabs and window controls lose their usable width.
+                    // Keep all leading controls reachable when the sidebar is narrow.
                     .w(px(leading_width))
-                    .min_w_0()
+                    .min_w(px(TITLE_BAR_CONTROLS_WIDTH))
+                    .flex_none()
                     .overflow_hidden()
                     .gap(px(TITLE_BAR_BUTTON_GAP))
                     .child(

@@ -57,6 +57,7 @@ use nmt_config::appearance::SmoothScrollingMode;
 #[cfg(windows)]
 use nmt_config::remote_session::RemoteSessionConfig;
 use nmt_config::system::{NewlineShortcut, WarnBeforeTerminatingShell};
+#[cfg(windows)]
 use nmt_platform::{
     is_shell_integration_registered, register_shell_integration, set_system_notification_enabled,
     shell_integration_dll_mismatched, system_notification_enabled, unregister_shell_integration,
@@ -142,7 +143,10 @@ pub fn settings_view(cx: &App) -> Settings {
     let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
     let backdrop = cx.global::<AppSettings>().window_backdrop;
     let background_image_enabled = cx.global::<AppSettings>().background_image.is_some();
+    #[cfg(windows)]
     let shell_integration_mismatched = shell_integration_dll_mismatched();
+    #[cfg(not(windows))]
+    let shell_integration_mismatched = false;
 
     let sidebar_style = sidebar_surface(cx).border_r_0();
 
@@ -173,3 +177,6 @@ pub fn settings_view(cx: &App) -> Settings {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(target_os = "macos")]
+mod macos_page;

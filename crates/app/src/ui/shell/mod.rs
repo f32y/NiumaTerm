@@ -7,6 +7,7 @@ mod panes;
 mod pump;
 mod rename;
 mod render;
+pub(crate) use crate::ui::shell::render::MIN_SIDEBAR_WIDTH;
 mod settings_workspace;
 mod tab_presentation;
 mod tab_surface;
@@ -289,7 +290,7 @@ impl Shell {
         let sidebar_width = registry_entry
             .and_then(|entry| entry.sidebar_width)
             .map(|width| width.clamp(workspace_sidebar::MIN_WIDTH, workspace_sidebar::MAX_WIDTH))
-            .unwrap_or(workspace_sidebar::SIDEBAR_WIDTH);
+            .unwrap_or(workspace_sidebar::SIDEBAR_WIDTH.max(workspace_sidebar::MIN_WIDTH));
 
         let mut restore_next_id = 1;
 
