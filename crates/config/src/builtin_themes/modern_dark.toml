@@ -186,38 +186,52 @@ overlay = "#0000004D"
 "base.cyan" = "#11A8CD"
 "base.cyan.light" = "#29B8DB"
 
-# Syntax palette for code blocks, drawn from the terminal palette above so
-# a snippet in the Agent pane reads in the same hues as the shell beside it.
+# Syntax palette from VS Code's 2026 Dark theme: the token rules in
+# `extensions/theme-defaults/themes/2026-dark.json` plus the values a scope
+# inherits through `dark_modern`, `dark_plus`, and `dark_vs` when the 2026
+# file leaves it alone, which is what VS Code renders. Editor colors are
+# the theme's own; its editor background is this theme's content layer.
 [colors.ui.highlight]
 "editor.background" = "#121314"
-"editor.foreground" = "#D6D6D6"
-"editor.line_number" = "#666666"
-"editor.active_line_number" = "#D6D6D6"
-"editor.invisible" = "#66666666"
+"editor.foreground" = "#BBBEBF"
+"editor.active_line.background" = "#242526"
+"editor.line_number" = "#858889"
+"editor.active_line_number" = "#BBBEBF"
+"editor.invisible" = "#8C8C8C4D"
 
 [colors.ui.highlight.syntax]
-comment = { color = "#666666" }
-"comment.doc" = { color = "#666666" }
-keyword = { color = "#3B8EEA" }
-tag = { color = "#3B8EEA" }
-link_text = { color = "#3B8EEA" }
-function = { color = "#F5F543" }
-type = { color = "#29B8DB" }
-constructor = { color = "#29B8DB" }
-enum = { color = "#29B8DB" }
-attribute = { color = "#29B8DB" }
-string = { color = "#23D18B" }
-"string.escape" = { color = "#23D18B" }
-"string.regex" = { color = "#23D18B" }
-"string.special" = { color = "#23D18B" }
-"string.special.symbol" = { color = "#23D18B" }
-"text.literal" = { color = "#23D18B" }
-"text.code.span" = { color = "#23D18B" }
-number = { color = "#D670D6" }
-boolean = { color = "#D670D6" }
-constant = { color = "#D670D6" }
-"variable.special" = { color = "#D670D6" }
-link_uri = { color = "#666666", font_style = "italic" }
-title = { color = "#3B8EEA", font_weight = 600 }
+comment = { color = "#8B949E" }
+"comment.doc" = { color = "#8B949E" }
+keyword = { color = "#FF7B72" }
+preproc = { color = "#569CD6" }
+operator = { color = "#D4D4D4" }
+function = { color = "#D2A8FF" }
+type = { color = "#4EC9B0" }
+constructor = { color = "#4EC9B0" }
+enum = { color = "#4EC9B0" }
+variant = { color = "#79C0FF" }
+constant = { color = "#79C0FF" }
+boolean = { color = "#569CD6" }
+number = { color = "#B5CEA8" }
+variable = { color = "#C9D1D9" }
+"variable.special" = { color = "#79C0FF" }
+property = { color = "#79C0FF" }
+label = { color = "#C8C8C8" }
+string = { color = "#A5D6FF" }
+"string.escape" = { color = "#D7BA7D" }
+"string.regex" = { color = "#A5D6FF" }
+"string.special" = { color = "#A5D6FF" }
+"string.special.symbol" = { color = "#79C0FF" }
+tag = { color = "#7EE787" }
+"tag.doctype" = { color = "#7EE787" }
+attribute = { color = "#9CDCFE" }
+embedded = { color = "#D4D4D4" }
+"punctuation.special" = { color = "#FF7B72" }
+"punctuation.list_marker" = { color = "#FFA657" }
+"text.literal" = { color = "#79C0FF" }
+"text.code.span" = { color = "#79C0FF" }
+link_text = { color = "#A5D6FF" }
+link_uri = { color = "#A5D6FF" }
+title = { color = "#79C0FF", font_weight = 700 }
 emphasis = { font_style = "italic" }
 "emphasis.strong" = { font_weight = 700 }
