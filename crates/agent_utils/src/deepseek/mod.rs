@@ -7,9 +7,8 @@
 //! packages that refuse to start without a plugin composition the application
 //! would then have to author and maintain.
 //!
-//! The host publishes an already-normalized session event stream and computes
-//! its own render cards, so this adapter maps rather than reassembles. That is
-//! why it is a fraction of the size of the two CLI adapters.
+//! The Remote API supplies raw session events, projection updates, and
+//! answerable interactions over independent logical streams on one connection.
 
 mod api;
 mod close;

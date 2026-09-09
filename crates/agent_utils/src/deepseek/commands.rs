@@ -1,10 +1,6 @@
 //! The harness's own slash commands.
 //!
-//! These reach a different endpoint family than the rest of this adapter: the
-//! session methods are served by the host's API proxy, while the command
-//! registry is a service behind the typed RPC gateway. Both speak the same
-//! request message over the same `/api` route, so only the method name and the
-//! named-argument wrapper differ.
+//! The Remote gateway resolves each command against the addressed Agent.
 
 use serde_json::{Value, json};
 
@@ -29,14 +25,8 @@ pub(crate) const EXECUTE_METHOD: &str = "commands/execute";
 /// by the resolver that does the resolving rather than by the method's own
 /// parameter, so the two names differ.
 pub(crate) fn agent_args(session_id: &str) -> Value {
-    json!({ "args": { "agentId": session_id } })
+    json!({ "agentId": session_id })
 }
-
-/// How the gateway refuses an argument set carrying an image list on a release
-/// whose command descriptor has no image parameter. The check compares the
-/// whole field set, so an empty list is as unacceptable there as a full one,
-/// and the refusal is what tells this apart from a command that failed.
-pub(crate) const UNEXPECTED_IMAGES: &str = "unexpected \"images\"";
 
 /// Named arguments for one command line addressed to a session's agent.
 ///
@@ -44,12 +34,7 @@ pub(crate) const UNEXPECTED_IMAGES: &str = "unexpected \"images\"";
 /// whether or not the command reads them. The commands this adapter runs carry
 /// none, so the list is present and empty.
 pub(crate) fn execute_args(session_id: &str, line: &str) -> Value {
-    json!({ "args": { "agentId": session_id, "line": line, "images": [] } })
-}
-
-/// The same call for a release that predates the image parameter.
-pub(crate) fn execute_args_without_images(session_id: &str, line: &str) -> Value {
-    json!({ "args": { "agentId": session_id, "line": line } })
+    json!({ "agentId": session_id, "line": line, "images": [] })
 }
 
 /// Read a `skill.list` result.

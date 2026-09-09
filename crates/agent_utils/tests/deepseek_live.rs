@@ -14,6 +14,7 @@ use std::{env, fs};
 use nmt_agent_utils::chat::{Event, Item, SendOutcome};
 use nmt_agent_utils::deepseek::{Host, Session};
 use nmt_agent_utils::{AgentWorkspace, LaunchConfig};
+use uuid::Uuid;
 
 /// A prompt into an idle conversation starts a turn of its own. Steering means
 /// this side thought a turn was running, and a refusal means the harness would
@@ -80,6 +81,14 @@ fn folded_text(events: &[Event]) -> String {
         .collect()
 }
 
+fn item_text(item: &Item) -> &str {
+    match item {
+        Item::AgentMessage { text, .. } => text.as_deref().unwrap_or_default(),
+        Item::Reasoning { summary, .. } => summary.as_deref().unwrap_or_default(),
+        _ => "",
+    }
+}
+
 #[test]
 #[ignore = "starts a real harness host and spends a model call"]
 fn a_turn_streams_and_survives_being_stopped() {
@@ -126,13 +135,18 @@ fn a_turn_streams_and_survives_being_stopped() {
         after.iter().last()
     );
 
-    // The harness emits no completed message for a stopped turn, so the streamed
-    // rows are the only record of the partial answer.
+    // The interrupted message records the partial output under the streamed
+    // row's identity, allowing the next attachment to restore it.
+    let saved: String = after
+        .iter()
+        .filter_map(|event| match event {
+            Event::ItemCompleted(item) => Some(item_text(item)),
+            _ => None,
+        })
+        .collect();
     assert!(
-        !after
-            .iter()
-            .any(|e| matches!(e, Event::ItemCompleted(Item::AgentMessage { .. }))),
-        "a stopped turn should not produce a completed assistant message"
+        saved.contains(before_stop.trim()),
+        "the interrupted message should retain the streamed text"
     );
 
     assert!(
@@ -140,6 +154,15 @@ fn a_turn_streams_and_survives_being_stopped() {
         "the turn should have ended"
     );
     assert!(session.host_is_running(), "the host outlives its turns");
+
+    let id = session.session_id().unwrap().to_string();
+    assert!(session.resume_thread(&id));
+    let (replayed, restored) =
+        collect_until(&mut session, &frames, Duration::from_secs(15), |event| {
+            matches!(event, Event::Replay(turns) if turns.iter().flat_map(|turn| &turn.items)
+            .map(|entry| item_text(&entry.item)).collect::<String>().contains(before_stop.trim()))
+        });
+    assert!(restored, "partial output was lost on resume: {replayed:?}");
 
     // The tab keeps working after a stop. The instruction is emphatic because
     // the abandoned counting task is still in context, and a model that
@@ -176,6 +199,26 @@ fn the_host_serves_whether_or_not_it_knows_the_no_browser_flag() {
 }
 
 #[test]
+#[ignore = "starts a real harness host without sending a prompt"]
+fn a_session_opens_and_receives_its_preset_catalog() {
+    let (tx, frames) = channel();
+    let mut session = Session::create(&launch(), &AgentWorkspace::default(), move |frame| {
+        let _ = tx.send(frame);
+    })
+    .expect("the harness should create a conversation through its local API");
+
+    assert!(session.host_is_running());
+    assert!(session.session_id().is_some());
+    let (seen, received) = collect_until(&mut session, &frames, Duration::from_secs(15), |event| {
+        matches!(event, Event::AgentPresets { .. })
+    });
+    assert!(
+        received,
+        "the session should receive its preset catalog: {seen:?}"
+    );
+}
+
+#[test]
 #[ignore = "starts a real harness host"]
 fn two_sessions_share_one_host_and_do_not_see_each_other() {
     let (first_tx, first_frames) = channel();
@@ -206,10 +249,17 @@ fn two_sessions_share_one_host_and_do_not_see_each_other() {
     let (leaked, _) = collect_until(&mut second, &second_frames, Duration::from_secs(2), |_| {
         false
     });
-    assert_eq!(
-        leaked,
-        Vec::new(),
-        "another conversation's activity reached this one"
+    assert!(
+        !leaked.iter().any(|event| matches!(
+            event,
+            Event::TurnStarted
+                | Event::TurnCompleted { .. }
+                | Event::ItemStarted(_)
+                | Event::ItemCompleted(_)
+                | Event::AgentMessageDelta { .. }
+                | Event::ReasoningSummaryDelta { .. }
+        )),
+        "another conversation's activity reached this one: {leaked:?}"
     );
 }
 
@@ -231,8 +281,8 @@ fn the_installed_release_is_one_this_build_supports() {
 #[test]
 #[ignore = "starts a real harness host and spends model calls"]
 fn an_approval_is_raised_answered_and_the_turn_continues() {
-    let outside: PathBuf = env::temp_dir().join("nmt-deepseek-approval-probe.txt");
-    let _ = fs::remove_file(&outside);
+    let outside: PathBuf =
+        env::temp_dir().join(format!("nmt-deepseek-approval-{}.txt", Uuid::new_v4()));
 
     let (tx, frames) = channel();
     let mut session = Session::create(&launch(), &AgentWorkspace::default(), move |frame| {
@@ -253,11 +303,16 @@ fn an_approval_is_raised_answered_and_the_turn_continues() {
         )
         .assert_started_a_turn();
 
-    let (before, asked) = collect_until(&mut session, &frames, Duration::from_secs(180), |e| {
-        matches!(e, Event::ApprovalRequested { .. })
+    let (before, _) = collect_until(&mut session, &frames, Duration::from_secs(60), |e| {
+        matches!(
+            e,
+            Event::ApprovalRequested { .. } | Event::TurnCompleted { .. }
+        )
     });
     assert!(
-        asked,
+        before
+            .iter()
+            .any(|event| matches!(event, Event::ApprovalRequested { .. })),
         "no approval was raised, so this cannot check answering one; saw {before:?}"
     );
 
@@ -305,7 +360,7 @@ fn a_real_turn_shows_its_commands_and_file_changes() {
     // A workspace of its own rather than the temp root itself: the harness
     // refuses to run its shell tool when its ACL temp root and the workspace
     // are the same directory, which a bare temp-dir workspace makes true.
-    let workspace = env::temp_dir().join("nmt-deepseek-tool-probe");
+    let workspace = env::temp_dir().join(format!("nmt-deepseek-tool-{}", Uuid::new_v4()));
     fs::create_dir_all(&workspace).expect("the probe workspace should exist");
     let target = workspace.join("probe-target.txt");
     fs::write(&target, "line one\nbefore\nline three\n").expect("the probe file should be written");
@@ -479,4 +534,65 @@ fn the_agent_preset_roster_reaches_the_picker() {
         presets.iter().any(|preset| preset.value == current),
         "the conversation's own preset {current} should be one the picker offers",
     );
+}
+
+#[test]
+#[ignore = "starts a real harness host and spends a model call"]
+fn a_question_is_answered_and_the_turn_continues() {
+    let (tx, frames) = channel();
+    let mut session = Session::create(&launch(), &AgentWorkspace::default(), move |frame| {
+        let _ = tx.send(frame);
+    })
+    .unwrap();
+    session.send_user_message("Ask the protocol-probe question using ask_user_question. Offer Yes and No, then report the answer.", &[]).assert_started_a_turn();
+    let (before, _) = collect_until(&mut session, &frames, Duration::from_secs(60), |event| {
+        matches!(
+            event,
+            Event::QuestionsRequested { .. } | Event::TurnCompleted { .. }
+        )
+    });
+    assert!(
+        before.iter().any(
+            |event| matches!(event, Event::QuestionsRequested { questions } if questions.len() == 1)
+        ),
+        "no question arrived: {before:?}"
+    );
+    session.respond_questions(Some(vec![vec!["Yes".into()]]));
+    let (after, ended) = collect_until(&mut session, &frames, Duration::from_secs(60), |event| {
+        matches!(event, Event::TurnCompleted { .. })
+    });
+    assert!(ended, "the answer did not resume the turn: {after:?}");
+    assert!(
+        after
+            .iter()
+            .any(|event| matches!(event, Event::QuestionsResolved))
+    );
+    assert!(after.iter().any(|event| matches!(event, Event::ItemCompleted(Item::Other { output: Some(output), .. }) if output.contains("Yes"))));
+}
+
+#[test]
+#[ignore = "starts an isolated harness and declares a test model"]
+fn a_profile_can_declare_and_select_an_image_model() {
+    let isolated = env::temp_dir().join(format!("nmt-deepseek-profile-{}", Uuid::new_v4()));
+    let launch = LaunchConfig {
+        model: Some("nmt-probe-vision".into()),
+        declares_image_input: true,
+        env: vec![("DSH_HOME".into(), isolated.display().to_string())],
+        ..launch()
+    };
+    let (tx, frames) = channel();
+    let mut session = Session::create(&launch, &AgentWorkspace::default(), move |frame| {
+        let _ = tx.send(frame);
+    })
+    .unwrap();
+    let (seen, _) = collect_until(&mut session, &frames, Duration::from_secs(5), |_| false);
+    assert!(seen.iter().any(|event| matches!(event, Event::Ready(settings) if settings.model.as_deref() == Some("nmt-probe-vision"))), "the custom model was not selected: {seen:?}");
+    assert!(
+        !seen
+            .iter()
+            .any(|event| matches!(event, Event::EffortRejected { .. } | Event::Error { .. })),
+        "model declaration failed: {seen:?}"
+    );
+    drop(session);
+    let _ = fs::remove_dir_all(&isolated);
 }

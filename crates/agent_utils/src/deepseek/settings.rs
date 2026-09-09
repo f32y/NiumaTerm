@@ -28,9 +28,9 @@ pub(super) fn declare_image_input(
     model: &str,
 ) -> Result<bool, String> {
     let providers = client
-        .call("llm.providers", json!({}))
+        .call("llm/listConfigurableProviders", json!({}))
         .map_err(|error| error.message().to_string())?;
-    let route = providers["providers"]
+    let route = providers
         .as_array()
         .into_iter()
         .flatten()
@@ -58,7 +58,7 @@ pub(super) fn declare_image_input(
         .collect();
 
     let described = client
-        .call("settings.describe", json!({}))
+        .call("settings/describe", json!({}))
         .map_err(|error| error.message().to_string())?;
     if described["writable"] != Value::Bool(true) {
         return Err("the harness runs on settings it cannot write".to_string());
@@ -87,7 +87,7 @@ pub(super) fn declare_image_input(
     }
 
     let written = client
-        .call("settings.mutate", payload)
+        .call("settings/mutate", payload)
         .map_err(|error| error.message().to_string())?;
 
     // The answer is the namespace as the harness now reads it, which is the

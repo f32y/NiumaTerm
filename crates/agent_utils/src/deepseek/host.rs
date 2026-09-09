@@ -70,7 +70,6 @@ impl HostError {
 /// observed not to end a process that had already run a turn.
 pub struct Host {
     client: ApiClient,
-    base: String,
     /// Held for its Drop: releasing the job terminates the host and every
     /// descendant it spawned.
     _job: KillOnCloseJob,
@@ -227,7 +226,6 @@ impl Host {
 
         Ok(Self {
             client,
-            base,
             _job: job,
             child: Mutex::new(child),
         })
@@ -235,11 +233,6 @@ impl Host {
 
     pub(crate) fn client(&self) -> &ApiClient {
         &self.client
-    }
-
-    /// The origin the host bound to, for the WebSocket downlinks.
-    pub(crate) fn base(&self) -> &str {
-        &self.base
     }
 
     /// Whether the host is still serving. A host that exited takes every open
@@ -292,7 +285,7 @@ fn start_timeout(launch: &crate::LaunchConfig) -> Duration {
 
 fn address_in(line: &str) -> Option<String> {
     let start = line.find(ADDRESS_MARKER)?;
-    let address = line[start..].trim();
+    let address = line[start..].split_whitespace().next()?;
 
     (!address.is_empty()).then(|| address.to_string())
 }

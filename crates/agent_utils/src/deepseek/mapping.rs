@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use serde_json::Value;
+use serde_json::{Value, from_str, json};
 
 use crate::chat::{
     Compaction, CompactionTrigger, Event, Item, Question, QuestionOption, TurnActivity,
@@ -22,13 +22,12 @@ const FAILED: &str = "failed";
 /// is answered, so a client that recognizes the frame and then does nothing
 /// leaves the agent waiting with no way for the user to see why.
 ///
-/// `rpc_id` correlates the answer and `approval_id` is the harness's own audit
-/// identity; both have to travel back on the reply, and neither is derivable
-/// from the other.
+/// The event identity is scoped to a live client generation; both must return
+/// with the answer so a reconnect cannot settle an unrelated request.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ApprovalRequest {
-    pub(crate) rpc_id: String,
-    pub(crate) approval_id: String,
+    pub(crate) client_id: String,
+    pub(crate) event_id: String,
     pub(crate) description: String,
 }
 
@@ -56,8 +55,8 @@ pub(crate) fn approval_request(frame: &Value, session_id: &str) -> Option<Approv
     };
 
     Some(ApprovalRequest {
-        rpc_id: frame["rpcId"].as_str()?.to_string(),
-        approval_id: payload["approvalId"].as_str()?.to_string(),
+        client_id: frame["clientId"].as_str()?.to_string(),
+        event_id: frame["eventId"].as_str()?.to_string(),
         description,
     })
 }
@@ -70,7 +69,8 @@ pub(crate) fn approval_request(frame: &Value, session_id: &str) -> Option<Approv
 /// also why this holds the whole batch rather than one question at a time.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct QuestionRequest {
-    pub(crate) rpc_id: String,
+    pub(crate) client_id: String,
+    pub(crate) event_id: String,
     pub(crate) ids: Vec<String>,
 }
 
@@ -133,7 +133,8 @@ pub(crate) fn question_request(
 
     Some((
         QuestionRequest {
-            rpc_id: frame["rpcId"].as_str()?.to_string(),
+            client_id: frame["clientId"].as_str()?.to_string(),
+            event_id: frame["eventId"].as_str()?.to_string(),
             ids,
         },
         questions,
@@ -152,8 +153,6 @@ pub(crate) fn map_frame(frame: &Value, session_id: &str, tools: &mut ToolTracker
             if payload["sessionId"].as_str() != Some(session_id) {
                 return Vec::new();
             }
-            // The host computes the render card and attaches it to the frame,
-            // not to the logged event, so it travels separately.
             map_session_event(&payload["event"], &payload["view"], tools)
         }
         Some("host/agent-error") if payload["sessionId"].as_str() == Some(session_id) => {
@@ -192,12 +191,25 @@ pub(crate) struct ToolTracker {
     started: HashMap<String, Item>,
 }
 
-/// Which transcript row a tool call becomes, decided by the render card the
-/// host computed rather than by the tool's name.
-///
-/// The host states how a call should read, so a tool this build has never heard
-/// of still lands in the right row; keying on names would need a table updated
-/// on every harness release, and would silently mis-render until it was.
+/// Derive native rows from the standard tools' logged arguments. Unknown tools
+/// keep their name and raw arguments so extensions remain readable.
+fn call_view(call: &Value) -> Value {
+    let arguments = call["arguments"].as_str().unwrap_or_default();
+    let args: Value = from_str(arguments).unwrap_or(Value::Null);
+    match call["name"].as_str() {
+        Some("bash" | "pwsh") if args["command"].is_string() => json!({
+            "card": "terminal", "title": args["command"], "description": args["description"],
+        }),
+        Some(name @ ("edit" | "write")) if args["file_path"].is_string() => json!({
+            "card": "diff", "diffs": [{"path": args["file_path"],
+                "oldText": if name == "edit" { &args["old_string"] } else { &Value::Null },
+                "newText": if name == "edit" { &args["new_string"] } else { &args["content"] },
+            }],
+        }),
+        _ => json!({"rawInput": arguments}),
+    }
+}
+
 fn started_tool_item(call: &Value, view: &Value) -> Item {
     let id = call["callId"].as_str().unwrap_or_default().to_string();
     let name = call["name"].as_str().unwrap_or("tool").to_string();
@@ -224,7 +236,10 @@ fn started_tool_item(call: &Value, view: &Value) -> Item {
             id,
             kind: name,
             title,
-            output: None,
+            output: view["rawInput"]
+                .as_str()
+                .filter(|text| !text.is_empty())
+                .map(str::to_string),
             status: Some(IN_PROGRESS.to_string()),
         },
     }
@@ -239,23 +254,44 @@ fn completed_tool_item(started: &Item, view: &Value, message: &Value, failed: bo
     let status = Some(if failed { FAILED } else { COMPLETED }.to_string());
 
     match started {
-        Item::CommandExecution { id, command, .. } => Item::CommandExecution {
-            id: id.clone(),
-            command: command.clone(),
-            purpose: None,
-            aggregated_output: view["output"]
+        Item::CommandExecution {
+            id,
+            command,
+            purpose,
+            ..
+        } => {
+            let output = view["output"]
                 .as_str()
                 .map(str::to_string)
-                .or_else(|| result_text(message)),
-            status,
-            exit_code: view["exitCode"].as_i64(),
-        },
-        Item::FileChange { id, paths, .. } => Item::FileChange {
+                .or_else(|| result_text(message));
+            let exit_code = view["exitCode"].as_i64().or_else(|| {
+                if failed {
+                    None
+                } else {
+                    output.as_deref().and_then(command_exit_code)
+                }
+            });
+            Item::CommandExecution {
+                id: id.clone(),
+                command: command.clone(),
+                purpose: purpose.clone(),
+                aggregated_output: output,
+                status,
+                exit_code,
+            }
+        }
+        Item::FileChange {
+            id, paths, diff, ..
+        } => Item::FileChange {
             id: id.clone(),
             paths: paths.clone(),
             // The result diff carries surrounding context the arguments did
             // not, so it replaces the call-time one when present.
-            diff: render_diffs(&view["diffs"]),
+            diff: if failed {
+                None
+            } else {
+                render_diffs(&view["diffs"]).or_else(|| diff.clone())
+            },
             status,
         },
         _ => Item::Other {
@@ -266,6 +302,22 @@ fn completed_tool_item(started: &Item, view: &Value, message: &Value, failed: bo
             status,
         },
     }
+}
+
+/// Shell tools append process status to their model-facing output. A normal
+/// zero exit has no marker; a timeout or signal has no numeric exit code.
+fn command_exit_code(output: &str) -> Option<i64> {
+    let line = output.trim_end().lines().next_back().unwrap_or_default();
+    if let Some(code) = line
+        .strip_prefix("[exit code: ")
+        .and_then(|line| line.strip_suffix(']'))
+    {
+        return code.parse().ok();
+    }
+    if line.starts_with("[timed out after ") || line.starts_with("[killed by signal: ") {
+        return None;
+    }
+    Some(0)
 }
 
 /// The text the model itself received. It is what a reader wants when no card
@@ -328,6 +380,13 @@ fn map_tool_call(data: &Value, view: &Value, tools: &mut ToolTracker) -> Vec<Eve
         return Vec::new();
     };
 
+    let derived;
+    let view = if view.is_null() {
+        derived = call_view(data);
+        &derived
+    } else {
+        view
+    };
     let item = started_tool_item(data, view);
     tools.started.insert(call_id.to_string(), item.clone());
 
@@ -351,6 +410,7 @@ fn map_tool_result(data: &Value, view: &Value, tools: &mut ToolTracker) -> Vec<E
 
     let failed = message["content"][0]["isError"] == Value::Bool(true);
 
+    let view = if view.is_null() { &data["meta"] } else { view };
     vec![Event::ItemCompleted(completed_tool_item(
         &started, view, message, failed,
     ))]
@@ -371,6 +431,20 @@ pub(crate) fn map_session_event(
             error: turn_failure(&data["reason"]),
         }],
         Some("assistant/chunk") => map_chunk(data),
+        Some(kind @ ("chunkrow/text-chunks" | "chunkrow/reasoning-chunks")) => {
+            let delta: String = data["texts"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+            let item_id = block_id(data, data["index"].as_u64().unwrap_or_default());
+            if kind == "chunkrow/text-chunks" {
+                vec![Event::AgentMessageDelta { item_id, delta }]
+            } else {
+                vec![Event::ReasoningSummaryDelta { item_id, delta }]
+            }
+        }
         Some("assistant/message") => map_completed_message(data),
         Some("user/message") => map_user_message(data),
         Some("compaction/start") => vec![Event::CompactionStarted],
@@ -559,8 +633,8 @@ fn map_chunk(data: &Value) -> Vec<Event> {
 /// block by its position lets the transcript reconcile with what it already
 /// showed instead of appending a duplicate.
 ///
-/// A turn the user stopped never produces one of these, so the streamed rows
-/// have to stand on their own.
+/// Interrupted requests can also record their partial message here; completing
+/// its rows preserves the output without marking the whole turn successful.
 fn map_completed_message(data: &Value) -> Vec<Event> {
     let Some(blocks) = data["message"]["content"].as_array() else {
         return Vec::new();

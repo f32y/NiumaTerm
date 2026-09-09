@@ -30,17 +30,19 @@ pub(crate) fn run_close_actions(
     for action in actions {
         let (method, payload) = match action {
             CloseAction::RemoveQueued(item_id) => (
-                "session.updateQueue",
+                "session/updateQueue",
                 json!({
                     "sessionId": session_id,
                     "itemId": item_id,
                     "action": { "kind": "remove" },
                 }),
             ),
-            CloseAction::CancelTurn => ("session.cancel", json!({ "sessionId": session_id })),
+            CloseAction::CancelTurn => ("session/cancel", json!({ "sessionId": session_id })),
         };
 
-        if let Err(error) = client.call_with_timeout(method, payload, CLOSE_CALL_TIMEOUT) {
+        if let Err(error) =
+            client.call_with_timeout(method, json!({ "request": payload }), CLOSE_CALL_TIMEOUT)
+        {
             failures.push(format!("{method}: {}", error.message()));
         }
     }

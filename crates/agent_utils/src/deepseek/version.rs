@@ -1,9 +1,7 @@
 //! Which `dsh` releases this build was written against.
 //!
-//! The interface carries no protocol version field, and the host's own
-//! `host.describe` reports the web application's version (`0.0.1`) rather than
-//! the harness release, so it cannot serve as the gate. The installed package
-//! version is what this checks instead.
+//! The Remote interface does not negotiate a protocol version. The installed
+//! package release is therefore what the compatibility notice checks.
 
 use std::time::Duration;
 
@@ -14,7 +12,7 @@ use crate::launcher::{AgentCli, ProcessLimits, run_bounded};
 /// The range this build has been exercised against. `dsh` is pre-release with
 /// an explicit expectation of breaking changes, so this is a statement about
 /// what was tested rather than a guarantee about what works.
-pub const SUPPORTED_VERSIONS: &str = ">=0.1.0-rc.6, <0.2.0";
+pub const SUPPORTED_VERSIONS: &str = ">=0.1.2-rc.1, <0.1.3-0";
 
 /// `dsh --version` only has to start Node and print, but a first run on a cold
 /// machine still pays for module resolution.

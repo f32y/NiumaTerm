@@ -98,20 +98,15 @@ pub(crate) fn search_results(
         .collect()
 }
 
-/// Rebuild one session's turns from a `session.history` page.
-///
-/// The page carries the raw events plus the host's render cards, which is what
-/// lets the live mapping do the work: a replayed tool call produces the same
-/// row it produced when it ran. A turn's accounting comes from the boundary
-/// events themselves, because the item stream cannot express how long a turn
-/// took or whether the user stopped it.
+/// Rebuild turns from the follow stream's opening snapshot or a history page.
+/// Packed delta records and live events share the same item identities.
 pub(crate) fn replay(value: &Value) -> Vec<ReplayTurn> {
     let mut tools = ToolTracker::default();
     let mut turns: Vec<ReplayTurn> = Vec::new();
     let mut current = ReplayTurn::default();
     let mut started_at: Option<u64> = None;
 
-    for entry in value["events"].as_array().into_iter().flatten() {
+    for entry in value["records"].as_array().into_iter().flatten() {
         let event = &entry["event"];
         let time = event["time"].as_u64();
 
@@ -157,6 +152,45 @@ pub(crate) fn replay(value: &Value) -> Vec<ReplayTurn> {
                         });
                     }
                 }
+                Event::AgentMessageDelta { item_id, delta } => {
+                    if let Some(Item::AgentMessage { text, .. }) = current
+                        .items
+                        .iter_mut()
+                        .rev()
+                        .find(|entry| entry.item.id() == Some(item_id.as_str()))
+                        .map(|entry| &mut entry.item)
+                    {
+                        text.get_or_insert_default().push_str(&delta);
+                    } else {
+                        current.items.push(ReplayItem {
+                            item: Item::AgentMessage {
+                                id: item_id,
+                                text: Some(delta),
+                                questions: None,
+                            },
+                            at: time.map(|millis| (millis / 1000) as i64),
+                        });
+                    }
+                }
+                Event::ReasoningSummaryDelta { item_id, delta } => {
+                    if let Some(Item::Reasoning { summary, .. }) = current
+                        .items
+                        .iter_mut()
+                        .rev()
+                        .find(|entry| entry.item.id() == Some(item_id.as_str()))
+                        .map(|entry| &mut entry.item)
+                    {
+                        summary.get_or_insert_default().push_str(&delta);
+                    } else {
+                        current.items.push(ReplayItem {
+                            item: Item::Reasoning {
+                                id: item_id,
+                                summary: Some(delta),
+                            },
+                            at: time.map(|millis| (millis / 1000) as i64),
+                        });
+                    }
+                }
                 // Turn boundaries are read from the raw events above, and the
                 // rest of the vocabulary describes live state a replay has no
                 // moment to apply it to.
@@ -183,7 +217,7 @@ pub(crate) fn replay(value: &Value) -> Vec<ReplayTurn> {
 /// front of it is an empty conversation, which starting a new one already is,
 /// and on a page that does not, its predecessor is simply not loaded.
 pub(crate) fn fork_checkpoints(page: &Value) -> Vec<ForkCheckpoint> {
-    let prompts: Vec<(u64, String, Option<u64>)> = page["events"]
+    let prompts: Vec<(u64, String, Option<u64>)> = page["records"]
         .as_array()
         .into_iter()
         .flatten()

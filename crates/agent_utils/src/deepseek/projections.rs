@@ -5,6 +5,8 @@
 //! several independent updates. This holds the latest of each and republishes
 //! the combination, which is why it is a tracker rather than a pure mapping.
 
+use std::collections::HashMap;
+
 use serde_json::Value;
 
 use crate::chat::{
@@ -15,6 +17,7 @@ use crate::chat::{
 /// The projection values this session has seen so far.
 #[derive(Default)]
 pub(crate) struct ProjectionTracker {
+    seen: HashMap<String, i64>,
     /// Provider-reported totals over the whole log.
     cumulative: Option<TokenUsageBreakdown>,
     /// What the next request's prompt is expected to cost.
@@ -37,7 +40,11 @@ impl ProjectionTracker {
             return None;
         }
 
-        Some(self.apply_unit(payload["key"].as_str()?, &payload["value"]))
+        Some(self.apply_at(
+            payload["key"].as_str()?,
+            &payload["value"],
+            payload["seq"].as_i64(),
+        ))
     }
 
     /// Fold the whole baseline a history page carries.
@@ -45,13 +52,27 @@ impl ProjectionTracker {
     /// A live push only reports what changed since the session started, so a
     /// tab that read nothing else would show no accounting and no permission
     /// preset until one of them happened to move.
-    pub(crate) fn apply_baseline(&mut self, values: &Value) -> Vec<Event> {
+    pub(crate) fn apply_baseline(&mut self, values: &Value, seq: Option<i64>) -> Vec<Event> {
         values
             .as_object()
             .into_iter()
             .flatten()
-            .flat_map(|(key, value)| self.apply_unit(key, value))
+            .flat_map(|(key, value)| self.apply_at(key, value, seq))
             .collect()
+    }
+
+    /// Control updates and the log snapshot arrive on separate streams. Keep
+    /// each unit's cursor so an older snapshot cannot undo a newer update.
+    /// Pending selections can change without advancing the log cursor, so
+    /// updates at the same cursor must still be applied.
+    fn apply_at(&mut self, key: &str, value: &Value, seq: Option<i64>) -> Vec<Event> {
+        if let Some(seq) = seq {
+            if self.seen.get(key).is_some_and(|seen| *seen > seq) {
+                return Vec::new();
+            }
+            self.seen.insert(key.to_string(), seq);
+        }
+        self.apply_unit(key, value)
     }
 
     fn apply_unit(&mut self, key: &str, value: &Value) -> Vec<Event> {

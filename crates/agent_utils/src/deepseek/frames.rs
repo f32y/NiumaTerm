@@ -98,7 +98,9 @@ pub(crate) struct ReplayFrame {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ModelsFrame {
+    pub(crate) session_id: String,
     #[serde(default)]
     pub(crate) models: Value,
     #[serde(default)]

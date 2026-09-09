@@ -19,6 +19,7 @@ use crate::deepseek::events::pump_for_test;
 use crate::deepseek::history::sessions;
 use crate::deepseek::mapping::{ToolTracker, map_frame};
 use crate::deepseek::session::session_create_payload;
+use crate::deepseek::{history, mapping};
 use crate::workspace::AgentWorkspace;
 
 const SESSION: &str = "session-debb6efc";
@@ -133,12 +134,21 @@ fn closing_a_session_drops_queued_work_before_cancelling_the_turn() {
         .collect();
     server.join().expect("API server should exit");
 
-    assert_eq!(requests[0]["method"], "session.updateQueue");
-    assert_eq!(requests[0]["payload"]["itemId"], "queued-1");
-    assert_eq!(requests[1]["method"], "session.updateQueue");
-    assert_eq!(requests[1]["payload"]["itemId"], "steering-2");
-    assert_eq!(requests[2]["method"], "session.cancel");
-    assert_eq!(requests[2]["payload"]["sessionId"], SESSION);
+    assert_eq!(requests[0]["method"], "session/updateQueue");
+    assert_eq!(
+        requests[0]["payload"]["args"]["request"]["itemId"],
+        "queued-1"
+    );
+    assert_eq!(requests[1]["method"], "session/updateQueue");
+    assert_eq!(
+        requests[1]["payload"]["args"]["request"]["itemId"],
+        "steering-2"
+    );
+    assert_eq!(requests[2]["method"], "session/cancel");
+    assert_eq!(
+        requests[2]["payload"]["args"]["request"]["sessionId"],
+        SESSION
+    );
 }
 
 fn chunk(chunk: Value) -> Value {
@@ -407,7 +417,7 @@ fn the_tested_release_is_inside_the_supported_range() {
     // A pre-release only satisfies a requirement when some comparator carries
     // the same triple and its own pre-release, which is why the lower bound is
     // written as a pre-release rather than as a plain `0.1.0`.
-    for inside in ["0.1.0-rc.6", "0.1.0", "0.1.4"] {
+    for inside in ["0.1.2-rc.1", "0.1.2"] {
         assert_eq!(
             classify(&Version::parse(inside).unwrap()),
             VersionSupport::Supported,
@@ -415,7 +425,14 @@ fn the_tested_release_is_inside_the_supported_range() {
         );
     }
 
-    for outside in ["0.1.0-rc.5", "0.2.0", "1.0.0"] {
+    for outside in [
+        "0.1.0-rc.6",
+        "0.1.1-rc.2",
+        "0.1.2-rc.0",
+        "0.1.3",
+        "0.2.0",
+        "1.0.0",
+    ] {
         assert!(
             matches!(
                 classify(&Version::parse(outside).unwrap()),
@@ -453,7 +470,8 @@ fn an_approval_request_carries_what_answering_it_needs() {
     // visible reason.
     let frame = json!({
         "type": "server-request",
-        "rpcId": "3fcb9bcf-614d-414e-9041-ada82f9a0fad",
+        "clientId": "generation-1",
+        "eventId": "3fcb9bcf-614d-414e-9041-ada82f9a0fad",
         "method": "approval/requested",
         "payload": {
             "type": "approval/requested",
@@ -466,8 +484,8 @@ fn an_approval_request_carries_what_answering_it_needs() {
     });
 
     let request = approval_request(&frame, SESSION).expect("the request should be recognized");
-    assert_eq!(request.rpc_id, "3fcb9bcf-614d-414e-9041-ada82f9a0fad");
-    assert_eq!(request.approval_id, "5cc446e3-8026-44f7-9fc5-e62d5213d18a");
+    assert_eq!(request.event_id, "3fcb9bcf-614d-414e-9041-ada82f9a0fad");
+    assert_eq!(request.client_id, "generation-1");
     assert!(
         request.description.contains("pwsh"),
         "{}",
@@ -494,11 +512,7 @@ fn a_command_result_reports_what_the_registry_settled() {
     // carries an attachment.
     assert_eq!(
         commands::execute_args(SESSION, "/compact keep the design"),
-        json!({ "args": { "agentId": SESSION, "line": "/compact keep the design", "images": [] } })
-    );
-    assert_eq!(
-        commands::execute_args_without_images(SESSION, "/compact keep the design"),
-        json!({ "args": { "agentId": SESSION, "line": "/compact keep the design" } })
+        json!({ "agentId": SESSION, "line": "/compact keep the design", "images": [] })
     );
 
     assert_eq!(
@@ -706,10 +720,7 @@ fn the_command_registry_fills_the_palette() {
 
     // The registry resolves the agent from a session id, and the argument is
     // named by that resolver rather than by the method's own parameter.
-    assert_eq!(
-        commands::agent_args(SESSION),
-        json!({ "args": { "agentId": SESSION } })
-    );
+    assert_eq!(commands::agent_args(SESSION), json!({ "agentId": SESSION }));
 }
 
 #[test]
@@ -765,7 +776,7 @@ fn a_replayed_page_rebuilds_turns_from_the_same_events_the_stream_carries() {
     let entry = |event: Value| json!({ "event": event });
     let page = json!({
         "hasMore": false,
-        "events": [
+        "records": [
             entry(json!({ "type": "turn/start", "seq": 1, "time": 1_770_000_000_000u64, "data": { "turn": 1 } })),
             entry(json!({
                 "type": "user/message",
@@ -1250,10 +1261,13 @@ fn the_history_page_baseline_seeds_what_a_live_push_would_not() {
     // A push reports only what changed after the tab attached, so a session
     // that has been running since before it opened would show nothing.
     let mut projections = ProjectionTracker::default();
-    let events = projections.apply_baseline(&json!({
-        "contextPressure": { "projectedTokens": 4200, "contextWindow": 64000 },
-        "title": "Map the harness",
-    }));
+    let events = projections.apply_baseline(
+        &json!({
+            "contextPressure": { "projectedTokens": 4200, "contextWindow": 64000 },
+            "title": "Map the harness",
+        }),
+        None,
+    );
 
     let [
         Event::ContextWindowUpdated(window),
@@ -1280,12 +1294,12 @@ fn a_conversation_still_waiting_for_a_name_keeps_the_one_it_shows() {
 
     assert!(
         projections
-            .apply_baseline(&json!({ "title": Value::Null }))
+            .apply_baseline(&json!({ "title": Value::Null }), None)
             .is_empty()
     );
     assert!(
         projections
-            .apply_baseline(&json!({ "title": "   " }))
+            .apply_baseline(&json!({ "title": "   " }), None)
             .is_empty()
     );
 }
@@ -1331,7 +1345,8 @@ fn a_question_request_carries_the_ids_an_answer_is_matched_against() {
 
     let frame = json!({
         "type": "server-request",
-        "rpcId": "0f21a6f2-7f52-4b0f-bb2f-9c0e9d2f0a11",
+        "clientId": "generation-2",
+        "eventId": "0f21a6f2-7f52-4b0f-bb2f-9c0e9d2f0a11",
         "method": "question/requested",
         "payload": {
             "type": "question/requested",
@@ -1359,7 +1374,8 @@ fn a_question_request_carries_the_ids_an_answer_is_matched_against() {
 
     let (request, questions) =
         question_request(&frame, SESSION).expect("the request should be recognized");
-    assert_eq!(request.rpc_id, "0f21a6f2-7f52-4b0f-bb2f-9c0e9d2f0a11");
+    assert_eq!(request.event_id, "0f21a6f2-7f52-4b0f-bb2f-9c0e9d2f0a11");
+    assert_eq!(request.client_id, "generation-2");
     // The harness matches each answer against the question at the same
     // position, so the ask order is what makes the batch answerable.
     assert_eq!(request.ids, vec!["q1".to_string(), "q2".to_string()]);
@@ -1495,7 +1511,7 @@ fn a_shell_command_becomes_a_command_row_with_its_output_and_exit_code() {
         vec![Event::ItemCompleted(Item::CommandExecution {
             id: "call_1".into(),
             command: "echo hello".into(),
-            purpose: None,
+            purpose: Some("Greet".into()),
             aggregated_output: Some("hello\n".into()),
             status: Some("completed".into()),
             exit_code: Some(0),
@@ -1892,7 +1908,7 @@ fn branch_points_pair_each_prompt_with_the_seq_of_the_one_ahead_of_it() {
     };
     let page = json!({
         "hasMore": false,
-        "events": [
+        "records": [
             entry(json!({ "type": "turn/start", "seq": 0, "data": { "turn": 1 } })),
             prompt(1, 1_770_000_000_000u64, "first"),
             entry(json!({ "type": "turn/end", "seq": 2, "data": { "turn": 1 } })),
@@ -1986,7 +2002,7 @@ fn a_frame_missing_a_required_field_is_dropped_not_emptied() {
 
     let complete = json!({
         "type": "nmt/workflow-transcript", "taskId": "t1", "agentId": "a1",
-        "page": { "events": [] },
+        "page": { "records": [] },
     });
     assert!(matches!(
         complete_events(&complete).as_slice(),
@@ -2015,4 +2031,84 @@ fn a_frame_missing_a_required_field_is_dropped_not_emptied() {
         fork_checkpoint_events(&json!({ "type": "nmt/fork-checkpoints" })).as_slice(),
         [Event::ForkCheckpoints(Ok(checkpoints))] if checkpoints.is_empty()
     ));
+}
+#[test]
+fn raw_tool_events_keep_commands_output_and_applied_diffs() {
+    let mut tools = ToolTracker::default();
+    let call = json!({"type":"tool/call","data":{
+        "callId":"raw-shell","name":"bash","arguments":"{\"command\":\"echo ok\",\"description\":\"Print a marker\"}"
+    }});
+    let started = mapping::map_session_event(&call, &Value::Null, &mut tools);
+    assert!(
+        matches!(&started[0], Event::ItemStarted(Item::CommandExecution { command, .. }) if command == "echo ok")
+    );
+    let result = json!({"type":"tool/result","data":{"message":{
+        "source":{"callId":"raw-shell"},"content":[{"type":"tool-result","content":[{"type":"text","text":"ok\n"}]}]
+    }}});
+    let completed = mapping::map_session_event(&result, &Value::Null, &mut tools);
+    assert!(
+        matches!(&completed[0], Event::ItemCompleted(Item::CommandExecution { aggregated_output: Some(output), .. }) if output == "ok\n")
+    );
+    for (output, expected) in [
+        ("ok\n", Some(0)),
+        ("error\n[exit code: 17]\n", Some(17)),
+        ("[timed out after 500ms]", None),
+    ] {
+        mapping::map_session_event(&call, &Value::Null, &mut tools);
+        let mut result = result.clone();
+        result["data"]["message"]["content"][0]["content"][0]["text"] = json!(output);
+        let completed = mapping::map_session_event(&result, &Value::Null, &mut tools);
+        assert!(
+            matches!(&completed[0], Event::ItemCompleted(Item::CommandExecution { exit_code, .. }) if *exit_code == expected)
+        );
+    }
+    let call = json!({"type":"tool/call","data":{
+        "callId":"raw-edit","name":"edit","arguments":"{\"file_path\":\"a.txt\",\"old_string\":\"before\",\"new_string\":\"after\"}"
+    }});
+    mapping::map_session_event(&call, &Value::Null, &mut tools);
+    let result = json!({"type":"tool/result","data":{
+        "meta":{"diffs":[{"path":"a.txt","oldText":"context\nbefore","newText":"context\nafter"}]},
+        "message":{"source":{"callId":"raw-edit"},"content":[{"content":[]}]}
+    }});
+    let completed = mapping::map_session_event(&result, &Value::Null, &mut tools);
+    assert!(
+        matches!(&completed[0], Event::ItemCompleted(Item::FileChange { paths, diff: Some(diff), .. }) if paths == "a.txt" && diff.contains("+after") && diff.contains("context"))
+    );
+}
+
+#[test]
+fn stopped_history_keeps_packed_and_unpacked_partial_text() {
+    let page = json!({"records":[
+        {"event":{"type":"turn/start","time":1000,"data":{}}},
+        {"event":{"type":"assistant/chunk","data":{"turn":1,"step":1,"chunk":{"type":"block-start","blockType":"text","index":0}}}},
+        {"type":"chunks","event":{"type":"chunkrow/text-chunks","data":{"turn":1,"step":1,"index":0,"texts":["hello"," "]}}},
+        {"event":{"type":"assistant/chunk","data":{"turn":1,"step":1,"chunk":{"type":"text-delta","index":0,"text":"world"}}}},
+        {"event":{"type":"turn/end","time":4000,"data":{"reason":{"kind":"aborted"}}}}
+    ]});
+    let turns = history::replay(&page);
+    assert_eq!(turns.len(), 1);
+    assert!(turns[0].interrupted);
+    assert!(
+        matches!(&turns[0].items[0].item, Item::AgentMessage { text: Some(text), .. } if text == "hello world")
+    );
+}
+
+#[test]
+fn an_older_log_snapshot_cannot_overwrite_a_newer_control_update() {
+    use crate::deepseek::projections::ProjectionTracker;
+    let mut tracker = ProjectionTracker::default();
+    let frame = json!({"payload":{"type":"session/projection","sessionId":SESSION,"key":"title","seq":12,"value":"new title"}});
+    assert_eq!(
+        tracker.apply(&frame, SESSION),
+        Some(vec![Event::TitleUpdated("new title".into())])
+    );
+    assert!(
+        tracker
+            .apply_baseline(&json!({"title":"old title"}), Some(10))
+            .is_empty()
+    );
+    assert_eq!(
+        tracker.apply_baseline(&json!({"title":"latest title"}), Some(13)),
+        vec![Event::TitleUpdated("latest title".into())]
+    );
 }
