@@ -14,7 +14,9 @@ use nmt_agent_utils::chat::{Item as SessionItem, ReplayTurn};
 use nmt_config::agent::CollapseRows;
 use nmt_i18n::i18n;
 
+use crate::AgentPane;
 use crate::composer::PALETTE_MAX_HEIGHT;
+use crate::fade::Fade;
 use crate::profile::AgentKind;
 use crate::settings::{AgentSettings, UI_RADIUS};
 use crate::transcript::render::TRANSCRIPT_LINE_HEIGHT;
@@ -23,7 +25,6 @@ use crate::transcript::rows::{TranscriptRow, folds_turns};
 use crate::transcript::turns::{LiveTurn, TurnLedger};
 use crate::transcript::typewriter::{Typewriter, shown_prefix};
 use crate::transcript::{CodeTranscriptCache, Entry, ReadingPosition, is_work_row};
-use crate::{AgentPane, Fade};
 
 /// One agent conversation as the user reads it: the entry list, the row
 /// structure derived from it, and every piece of view state that structure

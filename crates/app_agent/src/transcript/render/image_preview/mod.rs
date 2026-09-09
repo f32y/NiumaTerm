@@ -13,11 +13,11 @@ use gpui::prelude::*;
 use gpui::{
     AnyElement, Context, Image, MouseButton, ObjectFit, Pixels, Size, Window, div, img, px, size,
 };
+use gpui_component::IconName;
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::{ActiveTheme as _, IconName};
 use nmt_i18n::i18n;
 
-use crate::settings::AgentSettings;
+use crate::fade::FrostedLayer;
 use crate::transcript::TranscriptView;
 
 /// Share of the message stream an enlarged image may take. Short of the whole
@@ -46,52 +46,27 @@ impl TranscriptView {
     }
 
     /// The enlarged image and the mask under it, while one is open or still
-    /// fading out. The layer cross-fades as a whole: the renderer lerps the
-    /// sharp backdrop to the blurred one by element opacity, so image, mask
-    /// and blur arrive and leave together.
+    /// fading out.
     pub(crate) fn render_zoomed_image(
         &mut self,
         now: Instant,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let target = if self.zoom_open { 1.0 } else { 0.0 };
-        self.zoom_fade.retarget(target, now);
-        let opacity = if cx.global::<AgentSettings>().reduce_motion {
-            target
-        } else {
-            self.zoom_fade.animate(now, window)
-        };
+        let frost = self.zoom_fade.drive(self.zoom_open, now, window, cx);
         // The image is released only once the fade-out has nothing left to
         // show; an opening layer also starts at zero and must keep it.
-        if !self.zoom_open && opacity <= 0.0 {
+        if frost.gone() {
             self.zoomed_image = None;
         }
         let image = self.zoomed_image.clone()?;
 
         Some(
-            div()
-                .id("agent-transcript-image-preview")
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                // Takes the pointer for the whole message stream: the
-                // conversation underneath is context for the image now, so
-                // clicking it dismisses the image rather than acting on the
-                // row that happens to be under the pointer. Only while the
-                // layer is up: one still eating clicks as it fades would read
-                // as the transcript having hung.
-                .when(self.zoom_open, |this| {
-                    this.occlude()
-                        .on_click(cx.listener(|this, _, _, cx| this.close_zoomed_image(cx)))
-                })
-                .flex()
-                .items_center()
-                .justify_center()
-                .opacity(opacity)
-                .backdrop_blur(px(24.))
-                .bg(cx.theme().background.opacity(0.45))
+            FrostedLayer::new(frost)
+                // The conversation underneath is context for the image now,
+                // so clicking it dismisses the image rather than acting on
+                // the row that happens to be under the pointer.
+                .on_click(cx.listener(|this, _, _, cx| this.close_zoomed_image(cx)))
                 .children(self.render_preview_image(image, window, cx))
                 .into_any_element(),
         )

@@ -13,6 +13,7 @@ mod capabilities;
 mod commands;
 mod composer;
 mod context_usage;
+mod fade;
 mod links;
 mod pane_state;
 pub mod profile;
@@ -26,9 +27,8 @@ mod workflows;
 
 use std::collections::VecDeque;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
 
-use gpui::{Entity, FocusHandle, Pixels, Point, ScrollHandle, SharedString, Window};
+use gpui::{Entity, FocusHandle, Pixels, Point, ScrollHandle, SharedString};
 use gpui_component::VirtualListScrollHandle;
 use gpui_component::input::TextareaState;
 use nmt_agent_utils::chat::{
@@ -41,6 +41,7 @@ use nmt_i18n::i18n;
 
 use crate::composer::attachments::ComposerAttachments;
 use crate::composer::{BranchFlow, CommandFeedback, PendingSlashCommand};
+use crate::fade::Fade;
 use crate::input_history::{InputHistoryNavigation, InputHistoryScope};
 use crate::pane_state::{ChildAgents, SessionRuntime, TurnState};
 pub use crate::profile::{AgentKind, AgentThreadDefaults, agent_launch};
@@ -155,74 +156,6 @@ impl GitBranchPoll {
 
 #[cfg(test)]
 mod tests;
-
-/// Eased position along a transition, for a parameter already clamped to
-/// `0..=1`. The ramp leaves and arrives at zero speed, so neither end of a
-/// transition built on it reads as the effect being switched on.
-fn smoothstep(t: f32) -> f32 {
-    t * t * (3.0 - 2.0 * t)
-}
-
-/// A `0..=1` ramp between two states of an effect: where it started, what it
-/// is heading for, and when it left. Reversing mid-ramp starts a fresh one from
-/// wherever the previous had reached, so an effect dismissed while it is still
-/// arriving retreats from the value actually on screen instead of snapping to
-/// full first.
-#[derive(Clone, Copy)]
-struct Fade {
-    from: f32,
-    to: f32,
-    start: Instant,
-}
-
-impl Fade {
-    const DURATION: Duration = Duration::from_millis(150);
-
-    /// Points the ramp at `to`, leaving from wherever it is now. A ramp already
-    /// heading there is left alone, so calling this every frame is free.
-    fn retarget(&mut self, to: f32, now: Instant) {
-        if self.to != to {
-            *self = Self {
-                from: self.progress(now),
-                to,
-                start: now,
-            };
-        }
-    }
-
-    /// The value on screen this frame, asking for another frame while the ramp
-    /// is still travelling. Called from a render, so the notify that produced
-    /// this frame already woke the pump; the next-frame request keeps it awake
-    /// until the ramp settles.
-    fn animate(&self, now: Instant, window: &mut Window) -> f32 {
-        if !self.settled(now) {
-            window.request_animation_frame();
-        }
-
-        self.progress(now)
-    }
-
-    fn progress(&self, now: Instant) -> f32 {
-        let elapsed = now.duration_since(self.start).as_secs_f32();
-        let t = (elapsed / Self::DURATION.as_secs_f32()).clamp(0.0, 1.0);
-
-        self.from + (self.to - self.from) * smoothstep(t)
-    }
-
-    fn settled(&self, now: Instant) -> bool {
-        now.duration_since(self.start) >= Self::DURATION
-    }
-}
-
-impl Default for Fade {
-    fn default() -> Self {
-        Self {
-            from: 0.0,
-            to: 0.0,
-            start: Instant::now(),
-        }
-    }
-}
 
 /// Recent-session list shown above the composer.
 struct SessionHistoryUi {

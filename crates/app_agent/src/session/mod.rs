@@ -45,6 +45,7 @@ use crate::commands::{
 };
 use crate::composer::attachments::{ComposerAttachments, scratch_dir};
 use crate::composer::{BranchFlow, CommandFeedbackKind, prompt_with_response_annotations};
+use crate::fade::Fade;
 use crate::input_history::{InputHistoryNavigation, InputHistoryScope};
 use crate::profile::{AgentKind, agent_launch};
 use crate::questions::QuestionStatus;
@@ -61,8 +62,7 @@ use crate::settings::AgentSettings;
 use crate::transcript::TranscriptView;
 use crate::workflows::WorkflowUi;
 use crate::{
-    AgentPane, AgentPaneEvent, Fade, GitBranchPoll, RecentSessionsMode, SessionHistoryUi,
-    SlashPalette,
+    AgentPane, AgentPaneEvent, GitBranchPoll, RecentSessionsMode, SessionHistoryUi, SlashPalette,
 };
 
 /// A pane's attachment files live only as long as the pane: the harness that

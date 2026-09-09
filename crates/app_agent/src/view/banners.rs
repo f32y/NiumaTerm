@@ -12,7 +12,6 @@ use crate::context_usage::{ContextUsageIndicator, cache_hit_percent};
 use crate::profile::AgentKind;
 use crate::session::UpdateSuspension;
 use crate::settings::{AgentSettings, UI_RADIUS};
-use crate::view::blocking_overlay::BlockingOverlay;
 use crate::view::{
     COMPOSER_STATUS_PADDING_X, COMPOSER_STATUS_PADDING_Y, COMPOSER_STATUS_TEXT_SIZE,
 };
@@ -272,10 +271,10 @@ impl AgentPane {
         })
     }
 
-    /// Covers the surface while the update transaction owns the backend: input
-    /// would go nowhere, and the transcript underneath is a stale snapshot of a
-    /// conversation that is about to be replayed.
-    pub(super) fn render_update_overlay(&self, cx: &mut Context<Self>) -> Option<BlockingOverlay> {
+    /// What the blocking layer shows while the update transaction owns the
+    /// backend: input would go nowhere, and the transcript underneath is a
+    /// stale snapshot of a conversation that is about to be replayed.
+    pub(super) fn render_update_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let label = update_overlay_phase(self.runtime.update_suspension.as_ref()?)?.label();
 
         let body = v_flex()
@@ -295,16 +294,16 @@ impl AgentPane {
                     .child(label),
             );
 
-        Some(BlockingOverlay::new(body))
+        Some(body.into_any_element())
     }
 
-    /// The harness's start, over the tab it is starting in. When a start
+    /// What the blocking layer shows during the harness's start. When a start
     /// counts as still running is the session's own call.
     ///
-    /// A start that failed keeps the overlay and answers with the two things
+    /// A start that failed keeps the layer and answers with the two things
     /// left to do, because the pane behind it has no conversation to return
     /// to: the transcript holds one error row and nothing else.
-    pub(super) fn render_start_overlay(&self, cx: &mut Context<Self>) -> Option<BlockingOverlay> {
+    pub(super) fn render_start_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let failure = self.runtime.start_failure.clone();
         if failure.is_none() && !self.shows_start_overlay() {
             return None;
@@ -361,7 +360,7 @@ impl AgentPane {
                 ),
         };
 
-        Some(BlockingOverlay::new(body).padded())
+        Some(body.into_any_element())
     }
 
     pub(super) fn render_composer_status(&self, cx: &mut Context<Self>) -> AnyElement {

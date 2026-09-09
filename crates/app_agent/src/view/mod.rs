@@ -4,7 +4,6 @@ use gpui_component::button::ButtonVariants as _;
 use gpui_component::{ActiveTheme as _, Disableable as _};
 
 mod banners;
-mod blocking_overlay;
 mod history;
 mod last_response;
 pub(crate) mod session_state;
@@ -28,12 +27,12 @@ use nmt_config::system::NewlineShortcut;
 use nmt_i18n::i18n;
 
 use crate::composer::{CommandFeedbackKind, ComposerAction, PaletteControl, composer_action};
+use crate::fade::FrostedLayer;
 use crate::session::Status;
 use crate::settings::{AgentSettings, UI_RADIUS};
 // The composer takes the same share of the pane as the transcript column above
 // it, so the two edges line up at every window width.
 use crate::transcript::transcript_column_margin;
-use crate::view::blocking_overlay::BlockingOverlay;
 use crate::{AgentPane, AgentPaneEvent, RecentSessionsMode};
 
 /// The composer is the one surface the user types into, so it carries a softer
@@ -170,44 +169,17 @@ impl Render for AgentPane {
         // pushes it back a layer while keeping the tab recognizable as that
         // conversation; a blank tab has nothing to push back.
         let blur_transcript = history.is_some() && !transcript_empty;
-        // The ramp is retargeted from the render rather than from the places
-        // that open and close the list, so every path in and out of it — the
-        // command, Escape, an outside click, resuming a row — animates without
-        // each having to remember to.
         let now = Instant::now();
-        let reduce_motion = cx.global::<AgentSettings>().reduce_motion;
-        let blur_target = if blur_transcript { 1.0 } else { 0.0 };
-        self.history_ui.transcript_blur.retarget(blur_target, now);
-        // Under reduced motion the ramp is still retargeted, so a list opened
-        // while it is on and closed after it is off resumes from the blur
-        // actually on screen; only the travel to the target is skipped.
-        let blur = if reduce_motion {
-            blur_target
-        } else {
-            self.history_ui.transcript_blur.animate(now, window)
-        };
-
-        // The blocking layer cross-fades the same way, and for the same
-        // reason: its target comes from whether either overlay has a state to
-        // show, so every way the backend can go away and come back animates.
-        let overlay_target = if update_overlay.is_some() || start_overlay.is_some() {
-            1.0
-        } else {
-            0.0
-        };
-        self.overlay_fade.retarget(overlay_target, now);
-        let overlay_opacity = if reduce_motion {
-            overlay_target
-        } else {
-            self.overlay_fade.animate(now, window)
-        };
-        // Once both states are gone the layer keeps fading on its own, with
-        // nothing on it; a body from the state that just ended would be stale.
-        let overlay_fading = overlay_opacity > 0.0 && overlay_target == 0.0;
-        let update_overlay = update_overlay.map(|overlay| overlay.opacity(overlay_opacity));
-        let start_overlay = start_overlay
-            .or_else(|| overlay_fading.then(BlockingOverlay::fading))
-            .map(|overlay| overlay.opacity(overlay_opacity));
+        let transcript_frost =
+            self.history_ui
+                .transcript_blur
+                .drive(blur_transcript, now, window, cx);
+        // One layer holds the pane for both the update and the start; a start
+        // over an update is the more recent thing to say.
+        let blocking_body = start_overlay.or(update_overlay);
+        let blocking_frost = self
+            .overlay_fade
+            .drive(blocking_body.is_some(), now, window, cx);
 
         v_flex()
             .size_full()
@@ -267,29 +239,11 @@ impl Render for AgentPane {
                     )
                     .relative()
                     .child(self.transcript.clone())
-                    .when(blur > 0.0, |this| {
-                        this.child(
-                            div()
-                                .absolute()
-                                .top_0()
-                                .left_0()
-                                .size_full()
-                                // Swallows clicks aimed at the transcript; the
-                                // list's outside-click handler still sees them
-                                // and dismisses itself. Only while the list is
-                                // up: the fade out outlives it, and a layer
-                                // still eating clicks after it closed would
-                                // read as the tab having hung.
-                                .when(blur_transcript, |this| this.occlude())
-                                // The layer fades as a whole rather than by
-                                // radius: the renderer lerps sharp to blurred
-                                // by element opacity, while its reduction pass
-                                // puts a floor under small radii that would
-                                // show as a jump on the first frame.
-                                .opacity(blur)
-                                .backdrop_blur(px(16.))
-                                .bg(cx.theme().background.opacity(0.25)),
-                        )
+                    // The layer swallows clicks aimed at the transcript; the
+                    // list's outside-click handler still sees them and
+                    // dismisses itself.
+                    .when(!transcript_frost.gone(), |this| {
+                        this.child(FrostedLayer::new(transcript_frost).light())
                     }),
             )
             .child({
@@ -514,8 +468,15 @@ impl Render for AgentPane {
                     )
             })
             // Painted last so it sits over the transcript and the composer.
-            .children(update_overlay)
-            .children(start_overlay)
+            // Once the state it showed has ended the layer keeps fading with
+            // nothing on it; the body belonged to that state.
+            .when(!blocking_frost.gone(), |this| {
+                this.child(
+                    FrostedLayer::new(blocking_frost)
+                        .padded()
+                        .children(blocking_body),
+                )
+            })
     }
 }
 
