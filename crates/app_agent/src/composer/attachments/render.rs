@@ -1,8 +1,11 @@
+use std::cell::Cell;
+use std::rc::Rc;
+
 use gpui::prelude::*;
-use gpui::{AnyElement, Context, FontWeight, ObjectFit, SharedString, div, img, px};
+use gpui::{AnyElement, Bounds, Context, FontWeight, ObjectFit, SharedString, div, img, px};
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::tooltip::Tooltip;
-use gpui_component::{ActiveTheme as _, IconName, Sizable as _, h_flex, v_flex};
+use gpui_component::{ActiveTheme as _, ElementExt as _, IconName, Sizable as _, h_flex, v_flex};
 use nmt_i18n::i18n;
 
 use crate::AgentPane;
@@ -12,7 +15,7 @@ use crate::settings::UI_RADIUS;
 /// Edge of a thumbnail. Large enough to recognize a screenshot by, small
 /// enough that a full message's worth of them does not push the composer off
 /// the pane.
-const THUMBNAIL: f32 = 56.0;
+pub(in crate::composer) const THUMBNAIL: f32 = 56.0;
 const ANNOTATION_WIDTH: f32 = 240.0;
 const ANNOTATION_PREVIEW_CHARS: usize = 160;
 
@@ -60,6 +63,10 @@ impl ComposerAttachments {
         cx: &mut Context<AgentPane>,
     ) -> AnyElement {
         let image = attachment.image();
+        // A click carries the pointer's position, not the thumbnail's; the
+        // bounds the layout gave it are kept from the prepaint that precedes
+        // the click, so the preview knows where to grow from.
+        let placed = Rc::new(Cell::new(Bounds::default()));
 
         div()
             .id(("agent-attachment", index))
@@ -76,9 +83,13 @@ impl ComposerAttachments {
             // A thumbnail is cropped to a square this small, so opening it is
             // the only way to check what is about to be sent.
             .cursor_pointer()
+            .on_prepaint({
+                let placed = placed.clone();
+                move |bounds, _, _| placed.set(bounds)
+            })
             .on_click(cx.listener({
                 let image = image.clone();
-                move |this, _, _, cx| this.open_image(image.clone(), cx)
+                move |this, _, _, cx| this.open_image(image.clone(), Some(placed.get()), cx)
             }))
             .child(img(image).size_full().object_fit(ObjectFit::Cover))
             .child(

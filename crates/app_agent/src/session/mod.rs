@@ -220,7 +220,7 @@ impl AgentPane {
                 }
                 cx.notify();
             } else if let InputEvent::ClickLink(range) = event {
-                this.open_attached_image(range.clone(), cx);
+                this.open_attached_image(range.clone(), window, cx);
             }
         })
         .detach();

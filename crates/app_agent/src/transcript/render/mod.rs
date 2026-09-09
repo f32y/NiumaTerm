@@ -1,5 +1,5 @@
 mod compaction_row;
-mod image_preview;
+pub(super) mod image_preview;
 pub(super) mod text_style;
 
 use crate::transcript::render::text_style::{agent_text_style, markdown_view};

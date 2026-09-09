@@ -4,14 +4,18 @@
 //! scrolled by -- copy it, branch in front of it, restore the files it changed
 //! -- so the row carries a menu the other kinds have no use for.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::time::Instant;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, ClipboardItem, Context, Div, ObjectFit, Window, div, img, px, relative,
+    AnyElement, App, Bounds, ClipboardItem, Context, Div, ObjectFit, Window, div, img, px, relative,
 };
 use gpui_component::modern_menu::{ModernMenu, ModernMenuExt as _};
-use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, text, v_flex};
+use gpui_component::{
+    ActiveTheme as _, ElementExt as _, Icon, IconName, Sizable as _, h_flex, text, v_flex,
+};
 use nmt_i18n::i18n;
 
 use crate::composer::attachments::MAX_ATTACHMENTS;
@@ -352,7 +356,17 @@ impl TranscriptView {
                 .flex_wrap()
                 .justify_end()
                 .children(images.iter().enumerate().map(|(position, image)| {
+                    // A click carries the pointer's position, not the
+                    // thumbnail's; the bounds the layout gave it are kept from
+                    // the prepaint that precedes the click, so the preview
+                    // knows where to grow from.
+                    let placed = Rc::new(Cell::new(Bounds::default()));
+
                     div()
+                        // The measuring child is positioned absolutely, and
+                        // an absolute child measures its nearest positioned
+                        // ancestor; without this it would report the row.
+                        .relative()
                         .size(px(TRANSCRIPT_THUMBNAIL))
                         .flex_none()
                         .rounded(UI_RADIUS)
@@ -368,9 +382,15 @@ impl TranscriptView {
                         // only way to read what was sent.
                         .cursor_pointer()
                         .aria_label(i18n("agent-transcript-image-open"))
+                        .on_prepaint({
+                            let placed = placed.clone();
+                            move |bounds, _, _| placed.set(bounds)
+                        })
                         .on_click(cx.listener({
                             let image = image.clone();
-                            move |this, _, _, cx| this.zoom_image(image.clone(), cx)
+                            move |this, _, _, cx| {
+                                this.zoom_image(image.clone(), Some(placed.get()), cx)
+                            }
                         }))
                         .child(img(image.clone()).size_full().object_fit(ObjectFit::Cover))
                 }))

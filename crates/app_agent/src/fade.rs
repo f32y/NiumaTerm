@@ -31,10 +31,22 @@ pub(crate) struct Fade {
     from: f32,
     to: f32,
     start: Instant,
+    duration: Duration,
 }
 
 impl Fade {
     const DURATION: Duration = Duration::from_millis(150);
+
+    /// A ramp that takes `duration` end to end. A layer that only changes
+    /// opacity is done in the default; one that also travels across the pane
+    /// needs longer, since the eye follows a moving edge and reads the same
+    /// span as a jump.
+    pub(crate) fn lasting(duration: Duration) -> Self {
+        Self {
+            duration,
+            ..Self::default()
+        }
+    }
 
     /// The frame's worth of a layer that is up when `open` and away
     /// otherwise, asking for another frame while the ramp is still
@@ -60,13 +72,14 @@ impl Fade {
                 from: self.progress(now),
                 to,
                 start: now,
+                duration: self.duration,
             };
         }
 
         let opacity = if cx.global::<AgentSettings>().reduce_motion {
             to
         } else {
-            if now.duration_since(self.start) < Self::DURATION {
+            if now.duration_since(self.start) < self.duration {
                 window.request_animation_frame();
             }
             self.progress(now)
@@ -77,7 +90,7 @@ impl Fade {
 
     fn progress(&self, now: Instant) -> f32 {
         let elapsed = now.duration_since(self.start).as_secs_f32();
-        let t = (elapsed / Self::DURATION.as_secs_f32()).clamp(0.0, 1.0);
+        let t = (elapsed / self.duration.as_secs_f32()).clamp(0.0, 1.0);
 
         self.from + (self.to - self.from) * smoothstep(t)
     }
@@ -89,6 +102,7 @@ impl Default for Fade {
             from: 0.0,
             to: 0.0,
             start: Instant::now(),
+            duration: Self::DURATION,
         }
     }
 }
@@ -106,6 +120,13 @@ impl FadeFrame {
     /// and whatever was kept for its fade-out can go.
     pub(crate) fn gone(self) -> bool {
         !self.open && self.opacity <= 0.0
+    }
+
+    /// How far along its ramp the layer is, for content that travels with the
+    /// fade rather than only showing through it. The same number as the
+    /// opacity, so the travel and the fade settle on the same frame.
+    pub(crate) fn progress(self) -> f32 {
+        self.opacity
     }
 }
 

@@ -23,7 +23,7 @@ use image_rs::imageops::FilterType;
 
 use crate::AgentPane;
 
-mod render;
+pub(super) mod render;
 
 /// The placeholder as it is written into the composer. A space on each side
 /// keeps it a word of its own, so the prompt around it does not run into the

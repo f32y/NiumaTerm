@@ -9,11 +9,12 @@ use std::ops::Range;
 use std::path::Path;
 use std::sync::Arc;
 
-use gpui::{ClipboardEntry, Context, Image, ImageFormat, Window};
+use gpui::{Bounds, ClipboardEntry, Context, Image, ImageFormat, Pixels, Window, px, size};
 use nmt_i18n::i18n;
 
 use crate::AgentPane;
 use crate::composer::CommandFeedbackKind;
+use crate::composer::attachments::render::THUMBNAIL;
 use crate::composer::attachments::{AttachError, MAX_ATTACHMENTS};
 
 /// A copied file read as an image, or `None` for anything that is not one.
@@ -120,21 +121,38 @@ impl AgentPane {
 
     /// Open a pending image over the message stream, in the same layer a sent
     /// image opens in: an attachment is read at full size the same way
-    /// wherever the reader meets it.
-    pub(crate) fn open_image(&mut self, image: Arc<Image>, cx: &mut Context<Self>) {
-        self.transcript
-            .update(cx, |transcript, cx| transcript.zoom_image(image, cx));
+    /// wherever the reader meets it. `origin` is the thumbnail it was opened
+    /// from, when it was opened from one, for the preview to grow out of.
+    pub(crate) fn open_image(
+        &mut self,
+        image: Arc<Image>,
+        origin: Option<Bounds<Pixels>>,
+        cx: &mut Context<Self>,
+    ) {
+        self.transcript.update(cx, |transcript, cx| {
+            transcript.zoom_image(image, origin, cx)
+        });
     }
 
     /// Open the image a composer placeholder names. The placeholder is the
     /// only thing in the pending message that stands for an image, so
     /// following it shows what it stands for.
-    pub(crate) fn open_attached_image(&mut self, range: Range<usize>, cx: &mut Context<Self>) {
+    pub(crate) fn open_attached_image(
+        &mut self,
+        range: Range<usize>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
         let text = self.input.read(cx).text().to_string();
         let Some(image) = self.attachments.images().linked_image(&text, range) else {
             return;
         };
 
-        self.open_image(image, cx);
+        // The link is a run of text with no picture in it, so the preview
+        // grows out of a thumbnail's worth of space under the pointer: what
+        // was clicked is where the image comes from.
+        let origin =
+            Bounds::centered_at(window.mouse_position(), size(px(THUMBNAIL), px(THUMBNAIL)));
+        self.open_image(image, Some(origin), cx);
     }
 }
