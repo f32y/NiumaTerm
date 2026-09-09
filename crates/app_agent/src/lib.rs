@@ -28,7 +28,7 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use gpui::{Entity, FocusHandle, Pixels, Point, ScrollHandle, SharedString};
+use gpui::{Entity, FocusHandle, Pixels, Point, ScrollHandle, SharedString, Window};
 use gpui_component::VirtualListScrollHandle;
 use gpui_component::input::TextareaState;
 use nmt_agent_utils::chat::{
@@ -163,20 +163,44 @@ fn smoothstep(t: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-/// Ramp driving the transcript blur behind the recent-session list: where it
-/// started, what it is heading for, and when it left. Reversing mid-ramp starts
-/// a fresh one from wherever the previous had reached, so a list dismissed
-/// while it is still opening unblurs from the blur actually on screen instead
-/// of snapping to full.
+/// A `0..=1` ramp between two states of an effect: where it started, what it
+/// is heading for, and when it left. Reversing mid-ramp starts a fresh one from
+/// wherever the previous had reached, so an effect dismissed while it is still
+/// arriving retreats from the value actually on screen instead of snapping to
+/// full first.
 #[derive(Clone, Copy)]
-struct BlurFade {
+struct Fade {
     from: f32,
     to: f32,
     start: Instant,
 }
 
-impl BlurFade {
+impl Fade {
     const DURATION: Duration = Duration::from_millis(150);
+
+    /// Points the ramp at `to`, leaving from wherever it is now. A ramp already
+    /// heading there is left alone, so calling this every frame is free.
+    fn retarget(&mut self, to: f32, now: Instant) {
+        if self.to != to {
+            *self = Self {
+                from: self.progress(now),
+                to,
+                start: now,
+            };
+        }
+    }
+
+    /// The value on screen this frame, asking for another frame while the ramp
+    /// is still travelling. Called from a render, so the notify that produced
+    /// this frame already woke the pump; the next-frame request keeps it awake
+    /// until the ramp settles.
+    fn animate(&self, now: Instant, window: &mut Window) -> f32 {
+        if !self.settled(now) {
+            window.request_animation_frame();
+        }
+
+        self.progress(now)
+    }
 
     fn progress(&self, now: Instant) -> f32 {
         let elapsed = now.duration_since(self.start).as_secs_f32();
@@ -190,7 +214,7 @@ impl BlurFade {
     }
 }
 
-impl Default for BlurFade {
+impl Default for Fade {
     fn default() -> Self {
         Self {
             from: 0.0,
@@ -237,7 +261,7 @@ struct SessionHistoryUi {
     /// resume in place; those open where they worked instead.
     scope: SessionScope,
     scroll: VirtualListScrollHandle,
-    transcript_blur: BlurFade,
+    transcript_blur: Fade,
 }
 
 impl Default for SessionHistoryUi {
@@ -253,7 +277,7 @@ impl Default for SessionHistoryUi {
             pending_resume_replay: None,
             scope: SessionScope::default(),
             scroll: VirtualListScrollHandle::new(),
-            transcript_blur: BlurFade::default(),
+            transcript_blur: Fade::default(),
         }
     }
 }
@@ -367,4 +391,8 @@ pub struct AgentPane {
     /// open. Workflow agents are not child agents, so they never reach the
     /// `Background Tasks` state above.
     workflows: WorkflowUi,
+    /// Ramp of the layer that covers the pane while its backend cannot take
+    /// input. Cross-fading the whole layer keeps its arrival readable as the
+    /// tab being held rather than as a blur being switched on.
+    overlay_fade: Fade,
 }

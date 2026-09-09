@@ -14,7 +14,6 @@ use nmt_agent_utils::chat::{Item as SessionItem, ReplayTurn};
 use nmt_config::agent::CollapseRows;
 use nmt_i18n::i18n;
 
-use crate::AgentPane;
 use crate::composer::PALETTE_MAX_HEIGHT;
 use crate::profile::AgentKind;
 use crate::settings::{AgentSettings, UI_RADIUS};
@@ -24,6 +23,7 @@ use crate::transcript::rows::{TranscriptRow, folds_turns};
 use crate::transcript::turns::{LiveTurn, TurnLedger};
 use crate::transcript::typewriter::{Typewriter, shown_prefix};
 use crate::transcript::{CodeTranscriptCache, Entry, ReadingPosition, is_work_row};
+use crate::{AgentPane, Fade};
 
 /// One agent conversation as the user reads it: the entry list, the row
 /// structure derived from it, and every piece of view state that structure
@@ -86,10 +86,15 @@ pub struct TranscriptView {
     /// Revision of the conversation this view was last filled from, for a view
     /// that mirrors content someone else owns rather than accumulating its own.
     source_revision: Option<u64>,
-    /// The image a reader opened at full size over the conversation, while one
-    /// is open. Held per conversation rather than per pane so a child agent's
-    /// transcript enlarges its own images inside its own bounds.
+    /// The image a reader opened at full size over the conversation. Held per
+    /// conversation rather than per pane so a child agent's transcript
+    /// enlarges its own images inside its own bounds. Stays through the
+    /// layer's fade-out, which needs something to fade.
     pub(crate) zoomed_image: Option<Arc<Image>>,
+    /// Whether the preview layer is up or on its way out; the image alone
+    /// cannot say, because it outlives the dismissal by the fade.
+    pub(crate) zoom_open: bool,
+    pub(crate) zoom_fade: Fade,
     /// The pane whose conversation this is, for the row actions that address
     /// the conversation rather than the row: branching in front of a prompt,
     /// rewinding to one. Absent on a view that mirrors somebody else's
@@ -129,6 +134,8 @@ impl TranscriptView {
             kind,
             source_revision: None,
             zoomed_image: None,
+            zoom_open: false,
+            zoom_fade: Fade::default(),
             owner: None,
         }
     }
@@ -614,6 +621,6 @@ impl Render for TranscriptView {
                         ),
                 )
             })
-            .children(self.render_zoomed_image(window, cx))
+            .children(self.render_zoomed_image(now, window, cx))
     }
 }

@@ -61,7 +61,8 @@ use crate::settings::AgentSettings;
 use crate::transcript::TranscriptView;
 use crate::workflows::WorkflowUi;
 use crate::{
-    AgentPane, AgentPaneEvent, GitBranchPoll, RecentSessionsMode, SessionHistoryUi, SlashPalette,
+    AgentPane, AgentPaneEvent, Fade, GitBranchPoll, RecentSessionsMode, SessionHistoryUi,
+    SlashPalette,
 };
 
 /// A pane's attachment files live only as long as the pane: the harness that
@@ -297,6 +298,7 @@ impl AgentPane {
                 restored_session: None,
             },
             workflows: WorkflowUi::default(),
+            overlay_fade: Fade::default(),
         };
 
         this.start_session_with_options(resume, false, |_, _, _| {}, cx);
