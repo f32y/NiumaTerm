@@ -585,7 +585,11 @@ mod agent_profile_launch_tests {
             (
                 AgentProfileLauncher::PnpmDlx,
                 "pnpm",
-                vec!["dlx", "@deepseek-ai/dsh@latest"],
+                vec![
+                    "dlx",
+                    "--config.dlx-cache-max-age=Infinity",
+                    "@deepseek-ai/dsh@latest",
+                ],
             ),
         ];
 

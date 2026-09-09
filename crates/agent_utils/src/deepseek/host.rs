@@ -265,8 +265,17 @@ pub const NPX_ARGUMENTS: [&str; 2] = ["-y", "@deepseek-ai/dsh@latest"];
 /// pnpm's one-shot package launcher. Unlike npm's dependency resolver, pnpm
 /// can resolve the harness's mutually referring peer dependencies without
 /// spending unbounded CPU and memory in the installation phase.
+///
+/// Keep an installed release cached beyond pnpm's default one-day lifetime:
+/// rebuilding the same dependency tree delays the first tab in another process
+/// by tens of seconds. pnpm resolves `@latest` before choosing the cache keyed
+/// by the resolved release, so a new release still gets a new installation.
 pub const PNPM_DLX_EXECUTABLE: &str = "pnpm";
-pub const PNPM_DLX_ARGUMENTS: [&str; 2] = ["dlx", "@deepseek-ai/dsh@latest"];
+pub const PNPM_DLX_ARGUMENTS: [&str; 3] = [
+    "dlx",
+    "--config.dlx-cache-max-age=Infinity",
+    "@deepseek-ai/dsh@latest",
+];
 
 fn start_timeout(launch: &crate::LaunchConfig) -> Duration {
     let uses_pnpm_dlx = launch.executable.trim() == PNPM_DLX_EXECUTABLE
