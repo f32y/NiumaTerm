@@ -1063,14 +1063,20 @@ impl Theme {
         } else {
             self.light_theme = config.clone();
         }
-        if let Some(style) = &config.highlight {
-            let highlight_theme = Arc::new(HighlightTheme {
+        // A theme that states no syntax palette gets the built-in one for
+        // its own appearance. Keeping whatever palette was active before
+        // would carry a light palette into a dark theme (or the reverse)
+        // whenever the two themes switch, and code would then be painted
+        // in colors chosen for the opposite background.
+        self.highlight_theme = match &config.highlight {
+            Some(style) => Arc::new(HighlightTheme {
                 name: config.name.to_string(),
                 appearance: config.mode,
                 style: style.clone(),
-            });
-            self.highlight_theme = highlight_theme.clone();
-        }
+            }),
+            None if config.mode.is_dark() => HighlightTheme::default_dark(),
+            None => HighlightTheme::default_light(),
+        };
 
         let default_colors = if config.mode.is_dark() {
             ThemeColor::dark()
@@ -1109,6 +1115,7 @@ impl Theme {
 mod tests {
     use gpui::{linear_color_stop, linear_gradient, px};
 
+    use crate::highlighter::HighlightTheme;
     use crate::{Theme, ThemeConfig, ThemeMode, ThemeSet, try_parse_color};
 
     #[test]
@@ -1185,6 +1192,49 @@ mod tests {
         assert_eq!(theme.primary, try_parse_color("#7c3aed").unwrap());
         assert_eq!(theme.radius, px(7.));
         assert_eq!(theme.semantic_tokens().spacing, Default::default());
+    }
+
+    #[test]
+    fn test_apply_config_without_highlight_uses_the_palette_for_its_mode() {
+        let light = serde_json::from_value::<ThemeConfig>(serde_json::json!({
+            "name": "Light With Palette",
+            "mode": "light",
+            "colors": {},
+            "highlight": {
+                "syntax": { "string": { "color": "#036A07" } }
+            }
+        }))
+        .unwrap();
+        let dark = serde_json::from_value::<ThemeConfig>(serde_json::json!({
+            "name": "Dark Without Palette",
+            "mode": "dark",
+            "colors": {}
+        }))
+        .unwrap();
+
+        let mut theme = Theme::default();
+        theme.apply_config(&std::rc::Rc::new(light));
+        assert_eq!(theme.highlight_theme.appearance, ThemeMode::Light);
+        assert_eq!(theme.highlight_theme.name, "Light With Palette");
+
+        theme.apply_config(&std::rc::Rc::new(dark));
+        assert_eq!(theme.highlight_theme.appearance, ThemeMode::Dark);
+        assert_eq!(
+            theme.highlight_theme.style,
+            HighlightTheme::default_dark().style
+        );
+
+        let light_without = serde_json::from_value::<ThemeConfig>(serde_json::json!({
+            "name": "Light Without Palette",
+            "mode": "light",
+            "colors": {}
+        }))
+        .unwrap();
+        theme.apply_config(&std::rc::Rc::new(light_without));
+        assert_eq!(
+            theme.highlight_theme.style,
+            HighlightTheme::default_light().style
+        );
     }
 
     #[test]
