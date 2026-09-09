@@ -19,10 +19,8 @@ profile=release
 binary=
 out=dist
 identifier=${NMT_BUNDLE_ID:-io.f32.NiumaTerm}
-# The same 512px source the Windows icon was cut from; there is no larger one
-# in the tree, so the 1024px `512x512@2x` slice is left out rather than faked
-# by upscaling.
-icon=assets/windows/app-512.png
+# A shared high-resolution source supplies both standard and Retina slices.
+icon=assets/app-icon.png
 sign=-
 min_macos=13.0
 
@@ -71,7 +69,7 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 iconset=$(mktemp -d)
 trap 'rm -rf "$iconset"' EXIT
 mkdir -p "$iconset/AppIcon.iconset"
-for spec in 16:16x16 32:16x16@2x 32:32x32 64:32x32@2x 128:128x128 256:128x128@2x 256:256x256 512:256x256@2x 512:512x512; do
+for spec in 16:16x16 32:16x16@2x 32:32x32 64:32x32@2x 128:128x128 256:128x128@2x 256:256x256 512:256x256@2x 512:512x512 1024:512x512@2x; do
   pixels=${spec%%:*}
   name=${spec#*:}
   sips -z "$pixels" "$pixels" "$icon" --out "$iconset/AppIcon.iconset/icon_$name.png" >/dev/null
