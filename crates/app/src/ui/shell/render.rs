@@ -4,6 +4,7 @@ use gpui_component::modern_menu::{ModernMenu, dispatch_modern_menu_key};
 use nmt_app_agent::RecoveryIdentity;
 use nmt_i18n::i18n;
 
+use crate::ui::composition::FLOATING_SURFACE_SIDE_INSET;
 use crate::ui::shell::*;
 #[cfg(windows)]
 use crate::update::check_now;
@@ -18,10 +19,19 @@ pub(super) const TAB_STRIP_MIN_WIDTH: f32 = 120.0;
 /// reads it to re-anchor the macOS close/minimize/zoom buttons, which AppKit
 /// would otherwise center in its own, shorter strip.
 pub(crate) const TITLE_BAR_HEIGHT: f32 = 44.0;
+const TITLE_BAR_LEADING_INSET: f32 = 80.0;
 /// A leading-zone control: square, and spaced tightly enough that the group
 /// reads as one cluster rather than as separate buttons.
 const TITLE_BAR_BUTTON: f32 = 26.0;
 const TITLE_BAR_BUTTON_GAP: f32 = 4.0;
+// Four controls, the divider, four internal gaps, and a trailing gap must
+// stay visible before the first tab, including at the sidebar's drag limit.
+const TITLE_BAR_CONTROLS_WIDTH: f32 = 4.0 * TITLE_BAR_BUTTON + 1.0 + 5.0 * TITLE_BAR_BUTTON_GAP;
+pub(crate) const MIN_SIDEBAR_WIDTH: f32 = if cfg!(target_os = "macos") {
+    TITLE_BAR_LEADING_INSET + TITLE_BAR_CONTROLS_WIDTH - FLOATING_SURFACE_SIDE_INSET
+} else {
+    140.0
+};
 /// A hairline between the application menu and the layout controls beside it.
 /// At 26px the two icon clusters would otherwise read as one undifferentiated
 /// row, and the menu opens application-wide commands while its neighbours only
@@ -72,6 +82,13 @@ impl Shell {
         // Vertical tabs move the strip into the sidebar, which leaves the
         // middle of the bar free to name the session on screen instead.
         let vertical_tabs = cx.global::<AppSettings>().tab_bar_style == TabBarStyle::Vertical;
+        let leading_width = if cfg!(target_os = "macos") {
+            (self.sidebar.width + ui::composition::FLOATING_SURFACE_SIDE_INSET
+                - TITLE_BAR_LEADING_INSET)
+                .max(0.0)
+        } else {
+            self.sidebar.width - ui::composition::FLOATING_SURFACE_SIDE_INSET
+        };
 
         // Interactive chrome lives in the titlebar but is wrapped in
         // `occlude()`: that blocks the drag hitbox beneath it, so Windows
@@ -81,6 +98,9 @@ impl Shell {
         // Add future titlebar buttons the same way.
         TitleBar::new()
             .h(px(TITLE_BAR_HEIGHT))
+            .when(cfg!(target_os = "macos"), |bar| {
+                bar.pl(px(TITLE_BAR_LEADING_INSET))
+            })
             // The default X calls `remove_window()` directly (no
             // WM_CLOSE), skipping `on_window_should_close` — so the
             // shared close confirmation is handled here too.
@@ -91,15 +111,12 @@ impl Shell {
             }))
             .child(
                 h_flex()
-                    // Sized to the sidebar column so these controls line up
-                    // with it, but shrinkable and clipped: on a narrow window
-                    // the alignment is worth less than keeping the window
-                    // controls on screen, so this block gives up width before
-                    // anything to its right does.
-                    .w(px(
-                        self.sidebar.width - ui::composition::FLOATING_SURFACE_SIDE_INSET
-                    ))
-                    .min_w_0()
+                    // Subtract the title bar's existing inset so the tabs line up
+                    // with the content surface after its sidebar gutter.
+                    // Keep all leading controls reachable when the sidebar is narrow.
+                    .w(px(leading_width))
+                    .min_w(px(TITLE_BAR_CONTROLS_WIDTH))
+                    .flex_none()
                     .overflow_hidden()
                     .gap(px(TITLE_BAR_BUTTON_GAP))
                     .child(

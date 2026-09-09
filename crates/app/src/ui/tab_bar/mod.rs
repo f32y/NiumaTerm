@@ -327,6 +327,7 @@ impl TabStrip {
             // its room.
             .with_variant(TabVariant::Modern)
             .large()
+            .when(cfg!(target_os = "macos"), |bar| bar.pl_0())
             .w_full()
             .min_w_0()
             .selected_index(active_idx)
