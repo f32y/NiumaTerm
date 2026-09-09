@@ -369,8 +369,13 @@ impl AgentPane {
         if self.workspace == workspace {
             return;
         }
+        let primary_changed = self.workspace.primary() != workspace.primary();
         self.input_history_scope = InputHistoryScope::local(self.kind, &workspace);
         self.workspace = workspace;
+        if primary_changed {
+            self.git_branch_poll.invalidate();
+            self.refresh_git_branch(cx);
+        }
         cx.notify();
     }
 
@@ -395,16 +400,16 @@ impl AgentPane {
     }
 
     pub(super) fn refresh_git_branch(&mut self, cx: &mut Context<Self>) {
-        if !self.git_branch_poll.begin_refresh() {
+        let Some(generation) = self.git_branch_poll.begin_refresh() else {
             return;
-        }
+        };
 
         let Some(cwd) = self.cwd().or_else(|| {
             env::current_dir()
                 .ok()
                 .map(|path| path.to_string_lossy().to_string())
         }) else {
-            self.git_branch_poll.complete(None);
+            self.git_branch_poll.complete(generation, None);
             return;
         };
 
@@ -423,7 +428,7 @@ impl AgentPane {
             let branch = fetch.await;
 
             this.update(cx, |this, cx| {
-                this.git_branch_poll.complete(branch);
+                this.git_branch_poll.complete(generation, branch);
                 cx.notify();
             })
             .ok();

@@ -123,6 +123,7 @@ struct GitBranchPoll {
     branch: Option<String>,
     ready: bool,
     refreshing: bool,
+    generation: u64,
 }
 
 struct UnansweredPrompt {
@@ -133,15 +134,25 @@ struct UnansweredPrompt {
 }
 
 impl GitBranchPoll {
-    fn begin_refresh(&mut self) -> bool {
-        if self.refreshing {
-            return false;
-        }
-        self.refreshing = true;
-        true
+    fn invalidate(&mut self) {
+        self.generation += 1;
+        self.branch = None;
+        self.ready = false;
+        self.refreshing = false;
     }
 
-    fn complete(&mut self, branch: Option<String>) {
+    fn begin_refresh(&mut self) -> Option<u64> {
+        if self.refreshing {
+            return None;
+        }
+        self.refreshing = true;
+        Some(self.generation)
+    }
+
+    fn complete(&mut self, generation: u64, branch: Option<String>) {
+        if generation != self.generation {
+            return;
+        }
         self.branch = branch;
         self.ready = true;
         self.refreshing = false;
