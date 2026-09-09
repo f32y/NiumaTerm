@@ -5,7 +5,6 @@ use nmt_app_agent::RecoveryIdentity;
 use nmt_i18n::i18n;
 
 use crate::ui::shell::*;
-use crate::ui::tab_bar::new_tab_menu;
 #[cfg(windows)]
 use crate::update::check_now;
 
@@ -397,13 +396,12 @@ impl IconNamed for SideBarIcon {
 /// The application menu: opening things, then the two application-wide
 /// commands. Every entry here is reachable by keyboard as well, so the menu is
 /// a place to find them rather than the only way to reach them.
-fn app_menu(menu: ModernMenu, shell: &Entity<Shell>, cx: &mut App) -> ModernMenu {
+fn app_menu(menu: ModernMenu, shell: &Entity<Shell>, _cx: &mut App) -> ModernMenu {
     let window_shell = shell.clone();
     let workspace_shell = shell.clone();
     let settings_shell = shell.clone();
 
-    let menu = new_tab_menu(menu, shell, cx)
-        .separator()
+    let menu = menu
         .item(i18n("shell-menu-new-window"), move |window, cx| {
             window_shell.update(cx, |this, cx| {
                 this.on_new_window(&NewWindow, window, cx);

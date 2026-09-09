@@ -1,3 +1,5 @@
+use std::slice;
+
 use gpui::{App, Entity, SharedString};
 use gpui_component::modern_menu::ModernMenu;
 use gpui_component::{Icon, IconName, IconNamed, Sizable as _};
@@ -34,8 +36,7 @@ pub(in crate::ui) fn tab_icon(agent_kind: Option<AgentKind>, settings: bool) -> 
 /// A terminal Profile's launch command: the executable and its arguments.
 type LaunchCommand = (Option<String>, Vec<String>);
 
-/// One terminal Profile and workspace-directory pair offered by the `More`
-/// submenu.
+/// One terminal Profile and workspace-directory pair offered by its submenu.
 pub(in crate::ui) struct ProfileRootChoice {
     pub label: String,
     pub launch: LaunchCommand,
@@ -98,20 +99,6 @@ pub(in crate::ui) fn new_tab_menu(
 ) -> ModernMenu {
     let profiles = cx.global::<AppSettings>().profiles.clone();
 
-    for profile in profiles.clone() {
-        let Some(launch) = launch_command(&profile) else {
-            continue;
-        };
-        let item_shell = shell.clone();
-
-        menu = menu
-            .item(profile.name.clone(), move |window, cx| {
-                let launch = launch.clone();
-                item_shell.update(cx, |this, cx| this.open_profile_tab(launch, window, cx));
-            })
-            .icon(tab_icon(None, false));
-    }
-
     // One snapshot of the active workspace's directories and their last known
     // availability, taken as the menu opens. The re-check runs on the
     // background executor, so a drive that came back reaches the next opening
@@ -120,28 +107,42 @@ pub(in crate::ui) fn new_tab_menu(
         this.refresh_root_availability(cx);
         this.active_root_availability()
     });
-    if roots.len() > 1 {
-        let choices = profile_root_choices(&profiles, &roots);
-        let submenu_shell = shell.clone();
-
-        menu = menu.submenu(i18n("tabbar-menu-more"), move |mut menu| {
-            for choice in choices {
-                let item_shell = submenu_shell.clone();
-                let launch = choice.launch;
-                let cwd = choice.cwd;
-
-                menu = menu
-                    .item_disabled(choice.label, !choice.enabled, move |window, cx| {
-                        let launch = launch.clone();
-                        let cwd = cwd.clone();
-                        item_shell.update(cx, |this, cx| {
-                            this.open_profile_tab_in_directory(launch, cwd, window, cx)
-                        });
-                    })
-                    .icon(tab_icon(None, false));
-            }
-            menu
-        });
+    for profile in profiles {
+        let Some(launch) = launch_command(&profile) else {
+            continue;
+        };
+        let item_shell = shell.clone();
+        if roots.len() > 1 {
+            let choices = profile_root_choices(slice::from_ref(&profile), &roots);
+            menu = menu
+                .submenu(profile.name.clone(), move |mut menu| {
+                    for choice in choices {
+                        let item_shell = item_shell.clone();
+                        menu = menu
+                            .item_disabled(choice.label, !choice.enabled, move |window, cx| {
+                                item_shell.update(cx, |this, cx| {
+                                    this.open_profile_tab_in_directory(
+                                        choice.launch.clone(),
+                                        choice.cwd.clone(),
+                                        window,
+                                        cx,
+                                    )
+                                });
+                            })
+                            .icon(tab_icon(None, false));
+                    }
+                    menu
+                })
+                .icon(tab_icon(None, false));
+        } else {
+            menu = menu
+                .item(profile.name, move |window, cx| {
+                    item_shell.update(cx, |this, cx| {
+                        this.open_profile_tab(launch.clone(), window, cx)
+                    });
+                })
+                .icon(tab_icon(None, false));
+        }
     }
 
     let agent_profiles = cx.global::<AppSettings>().agent_profiles.clone();
