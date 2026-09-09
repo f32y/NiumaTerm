@@ -5,8 +5,8 @@ use std::path::Path;
 
 use gpui::prelude::*;
 use gpui::{App, ElementId, Font, SharedString, StyleRefinement, px, rems};
-use gpui_component::text;
 use gpui_component::text::TextViewStyle;
+use gpui_component::{ActiveTheme as _, text};
 
 use crate::links;
 use crate::settings::AgentSettings;
@@ -26,6 +26,16 @@ fn configured_transcript_code_block_style(cx: &App) -> StyleRefinement {
     transcript_code_block_style(settings.transcript_font(), settings.transcript_font_size)
 }
 
+/// The rich-text layer fills every markdown table with the popover surface
+/// color. On palettes whose popover is lighter than the pane fill (the gray
+/// light themes) that fill reads as a white card floating over the
+/// transcript. The theme's table background is the color a palette assigns to
+/// table surfaces; every shipped theme keeps it transparent so the table sits
+/// directly on the transcript fill and follows its translucency.
+fn transcript_table_style(cx: &App) -> StyleRefinement {
+    StyleRefinement::default().bg(cx.theme().table)
+}
+
 pub(crate) fn agent_text_style(cx: &App) -> TextViewStyle {
     // Prose stops at a reading measure. On a maximised window the pane is
     // wide enough for well over a hundred characters a line, and the eye
@@ -36,10 +46,13 @@ pub(crate) fn agent_text_style(cx: &App) -> TextViewStyle {
     TextViewStyle::default()
         .prose_max_width(rems(PROSE_MEASURE_REMS))
         .code_block(configured_transcript_code_block_style(cx))
+        .table(transcript_table_style(cx))
 }
 
 pub(crate) fn work_detail_text_style(cx: &App) -> TextViewStyle {
-    TextViewStyle::default().code_block(configured_transcript_code_block_style(cx))
+    TextViewStyle::default()
+        .code_block(configured_transcript_code_block_style(cx))
+        .table(transcript_table_style(cx))
 }
 
 pub(crate) fn markdown_view(
