@@ -23,6 +23,7 @@ pub struct ProgressCircle {
     size: Size,
     children: Vec<AnyElement>,
     loading: bool,
+    loading_duration: Duration,
 }
 
 impl ProgressCircle {
@@ -37,6 +38,7 @@ impl ProgressCircle {
             size: Size::default(),
             children: Vec::new(),
             loading: false,
+            loading_duration: Duration::from_secs(1),
         }
     }
 
@@ -46,6 +48,12 @@ impl ProgressCircle {
     /// rotating arc animation is shown instead.
     pub fn loading(mut self, loading: bool) -> Self {
         self.loading = loading;
+        self
+    }
+
+    /// Set the duration of one complete loading cycle.
+    pub fn loading_duration(mut self, duration: Duration) -> Self {
+        self.loading_duration = duration;
         self
     }
 
@@ -206,7 +214,7 @@ impl RenderOnce for ProgressCircle {
                 if loading {
                     this.with_animation(
                         "progress-circle-loading",
-                        Animation::new(Duration::from_secs(1)).repeat(),
+                        Animation::new(self.loading_duration).repeat(),
                         move |this, delta| {
                             let (start, end) = Self::loading_arc(delta);
                             this.child(Self::render_circle(start, end, color))
@@ -223,7 +231,7 @@ impl RenderOnce for ProgressCircle {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::progress::progress_circle::ProgressCircle;
 
     #[test]
     fn stores_an_explicit_accessibility_label() {
