@@ -52,6 +52,7 @@ pub struct ShimmerStyle {
     duration: Duration,
     highlight_color: Option<Hsla>,
     spread: ShimmerSpread,
+    peak_opacity: Option<f32>,
     reverse: bool,
     once: bool,
 }
@@ -95,6 +96,21 @@ impl ShimmerStyle {
         self
     }
 
+    /// Set how opaque the highlight is at the center of the band.
+    ///
+    /// The default is `0.6` on dark themes and `0.75` on light ones. Finite
+    /// values are clamped to the inclusive `0.0..=0.95` range; the band is
+    /// built from nested layers whose opacities compound to this peak, and a
+    /// fully opaque peak would make the outermost layer opaque too, turning
+    /// the soft falloff into a hard-edged box. Non-finite values leave the
+    /// existing setting unchanged.
+    pub fn peak_opacity(mut self, peak_opacity: f32) -> Self {
+        if peak_opacity.is_finite() {
+            self.peak_opacity = Some(peak_opacity.clamp(0., 0.95));
+        }
+        self
+    }
+
     /// Set whether the highlight should move from right to left.
     pub fn reverse(mut self, reverse: bool) -> Self {
         self.reverse = reverse;
@@ -118,6 +134,7 @@ impl Default for ShimmerStyle {
             duration: Duration::from_secs(2),
             highlight_color: None,
             spread: ShimmerSpread::default(),
+            peak_opacity: None,
             reverse: false,
             once: false,
         }
@@ -184,6 +201,13 @@ impl ShimmerText {
         self
     }
 
+    /// Set how opaque the highlight is at the center of the band; see
+    /// [`ShimmerStyle::peak_opacity`].
+    pub fn peak_opacity(mut self, peak_opacity: f32) -> Self {
+        self.shimmer_style = self.shimmer_style.peak_opacity(peak_opacity);
+        self
+    }
+
     /// Set whether the highlight should move from right to left.
     pub fn reverse(mut self, reverse: bool) -> Self {
         self.shimmer_style = self.shimmer_style.reverse(reverse);
@@ -223,6 +247,7 @@ impl RenderOnce for ShimmerText {
             foreground: tokens.colors.foreground,
             dark: cx.theme().is_dark(),
             spread: self.shimmer_style.spread,
+            peak_opacity: self.shimmer_style.peak_opacity,
             phase: 0.,
         }
         .with_animation(
@@ -250,6 +275,7 @@ struct ShimmerGlyphs {
     foreground: Hsla,
     dark: bool,
     spread: ShimmerSpread,
+    peak_opacity: Option<f32>,
     phase: f32,
 }
 
@@ -270,6 +296,7 @@ impl ShimmerGlyphs {
             self.foreground,
             self.dark,
             self.highlight_color,
+            self.peak_opacity,
         );
         let layout = self.text.layout();
         let line_height = layout.line_height();
@@ -436,6 +463,7 @@ fn shimmer_highlight_color(
     foreground: Hsla,
     dark: bool,
     override_color: Option<Hsla>,
+    peak_opacity: Option<f32>,
 ) -> Hsla {
     let highlight = override_color.unwrap_or_else(|| {
         if dark {
@@ -444,7 +472,7 @@ fn shimmer_highlight_color(
             text.mix_oklab(background, 0.2)
         }
     });
-    let peak_opacity: f32 = if dark { 0.6 } else { 0.75 };
+    let peak_opacity = peak_opacity.unwrap_or(if dark { 0.6 } else { 0.75 });
     let layer_opacity = 1. - (1. - peak_opacity).powf(1. / SHIMMER_LAYER_COUNT as f32);
 
     highlight.opacity(layer_opacity)
@@ -511,12 +539,14 @@ mod tests {
             .duration(Duration::from_secs(3))
             .highlight_color(color)
             .spread(0.45)
+            .peak_opacity(0.9)
             .reverse(true)
             .once(true);
 
         assert_eq!(style.duration, Duration::from_secs(3));
         assert_eq!(style.highlight_color, Some(color));
         assert_eq!(style.spread, ShimmerSpread::Relative(0.45));
+        assert_eq!(style.peak_opacity, Some(0.9));
         assert!(style.reverse);
         assert!(style.once);
 
@@ -565,6 +595,22 @@ mod tests {
             ShimmerStyle::new().duration(Duration::ZERO).duration,
             Duration::from_millis(1)
         );
+        assert_eq!(
+            ShimmerStyle::new().peak_opacity(2.).peak_opacity,
+            Some(0.95)
+        );
+        assert_eq!(ShimmerStyle::new().peak_opacity(-1.).peak_opacity, Some(0.));
+        assert_eq!(
+            ShimmerStyle::new().peak_opacity(f32::NAN).peak_opacity,
+            None
+        );
+        assert_eq!(
+            ShimmerText::new("Thinking")
+                .peak_opacity(0.8)
+                .shimmer_style
+                .peak_opacity,
+            Some(0.8)
+        );
     }
 
     #[test]
@@ -612,8 +658,8 @@ mod tests {
         let black = Hsla::black();
         let white = Hsla::white();
         let muted = white.mix_oklab(black, 0.55);
-        let light = shimmer_highlight_color(black, white, black, false, None);
-        let dark = shimmer_highlight_color(muted, black, white, true, None);
+        let light = shimmer_highlight_color(black, white, black, false, None, None);
+        let dark = shimmer_highlight_color(muted, black, white, true, None, None);
 
         assert!(light.l > black.l);
         assert!(dark.l > muted.l);
@@ -621,7 +667,11 @@ mod tests {
         assert!((1. - (1. - light.a).powi(SHIMMER_LAYER_COUNT as i32) - 0.75).abs() < 0.001);
         assert!((1. - (1. - dark.a).powi(SHIMMER_LAYER_COUNT as i32) - 0.6).abs() < 0.001);
 
-        let custom = shimmer_highlight_color(black, white, black, false, Some(muted));
+        let strong = shimmer_highlight_color(muted, black, white, true, None, Some(0.9));
+        assert!(strong.a > dark.a);
+        assert!((1. - (1. - strong.a).powi(SHIMMER_LAYER_COUNT as i32) - 0.9).abs() < 0.001);
+
+        let custom = shimmer_highlight_color(black, white, black, false, Some(muted), None);
         assert_eq!(custom.h, muted.h);
         assert_eq!(custom.s, muted.s);
         assert_eq!(custom.l, muted.l);
