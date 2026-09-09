@@ -216,7 +216,7 @@ impl BackgroundTasksView {
                 .ghost()
                 .xsmall()
                 .label(label.clone())
-                .aria_label(label)
+                .accessibility_label(label)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if is_running {
                         this.running_expanded = expand;

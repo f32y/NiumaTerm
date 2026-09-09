@@ -19,8 +19,9 @@ use gpui::{
     App, ClipboardItem, Context, FocusHandle, FontWeight, MouseButton, MouseUpEvent, Pixels, Point,
     SharedString, WeakEntity, Window, div, px, relative,
 };
+use gpui_base::TextSelection;
 use gpui_component::button::Button;
-use gpui_component::input::{Enter, Escape, IndentInline, Input, MoveDown, MoveUp, Paste};
+use gpui_component::input::{Enter, Escape, IndentInline, MoveDown, MoveUp, Paste, Textarea};
 use gpui_component::modern_menu::ModernMenu;
 use gpui_component::{IconName, IconNamed, WindowExt as _, h_flex, v_flex};
 use nmt_app_terminal::frame::theme_default_background;
@@ -320,7 +321,7 @@ impl Render for AgentPane {
                                             .pt_3()
                                             .pb_1()
                                             // GPUI resolves these keystrokes
-                                            // into Input actions before raw
+                                            // into Textarea actions before raw
                                             // key listeners run. Capturing
                                             // the actions lets the palette
                                             // own navigation while visible;
@@ -406,13 +407,17 @@ impl Render for AgentPane {
                                             .text_size(px(
                                                 cx.global::<AgentSettings>().font_size + 2.0
                                             ))
-                                            .child(div().flex_1().min_w_0().child(
-                                                Input::new(&self.input).appearance(false).disabled(
-                                                    branch_flow_working
-                                                        || session_loading
-                                                        || update_suspended,
+                                            .child(
+                                                div().flex_1().min_w_0().child(
+                                                    Textarea::new(&self.input)
+                                                        .appearance(false)
+                                                        .disabled(
+                                                            branch_flow_working
+                                                                || session_loading
+                                                                || update_suspended,
+                                                        ),
                                                 ),
-                                            )),
+                                            ),
                                     )
                                     .child(
                                         h_flex()
@@ -444,7 +449,9 @@ impl Render for AgentPane {
                                                     .rounded_full()
                                                     .icon(StopResponseIcon)
                                                     .tooltip(i18n("agent-action-stop-response"))
-                                                    .aria_label(i18n("agent-action-stop-response"))
+                                                    .accessibility_label(i18n(
+                                                        "agent-action-stop-response",
+                                                    ))
                                                     .on_click(cx.listener(|this, _, window, cx| {
                                                         this.interrupt_from_ui(window, cx)
                                                     }))
@@ -460,7 +467,9 @@ impl Render for AgentPane {
                                                     .rounded_full()
                                                     .icon(IconName::ArrowUp)
                                                     .tooltip(i18n("agent-action-send-message"))
-                                                    .aria_label(i18n("agent-action-send-message"))
+                                                    .accessibility_label(i18n(
+                                                        "agent-action-send-message",
+                                                    ))
                                                     .on_click(cx.listener(|this, _, window, cx| {
                                                         this.send_user_message(window, cx)
                                                     }))
@@ -498,7 +507,7 @@ impl AgentPane {
         window: &mut Window,
         cx: &mut App,
     ) {
-        let selected_text = window.selected_text(cx).trim().to_string();
+        let selected_text = TextSelection::selected_text(window, cx).trim().to_string();
         if selected_text.is_empty() {
             return;
         }

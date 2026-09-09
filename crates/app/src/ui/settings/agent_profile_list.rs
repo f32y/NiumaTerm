@@ -294,7 +294,7 @@ impl ListDelegate for AgentProfileList {
                                         .ghost()
                                         .with_size(TABLE_OPERATION_BUTTON)
                                         .icon(IconName::PenLine)
-                                        .aria_label(i18n("settings-common-edit"))
+                                        .accessibility_label(i18n("settings-common-edit"))
                                         .tooltip(i18n("settings-common-edit"))
                                         .on_click(move |_, window, cx: &mut App| {
                                             open_agent_profile_dialog(Some(row), window, cx);
@@ -305,7 +305,7 @@ impl ListDelegate for AgentProfileList {
                                         .ghost()
                                         .with_size(TABLE_OPERATION_BUTTON)
                                         .icon(TrashIcon)
-                                        .aria_label(i18n("settings-common-delete"))
+                                        .accessibility_label(i18n("settings-common-delete"))
                                         .tooltip(i18n("settings-common-delete"))
                                         .on_click(move |_, window, cx: &mut App| {
                                             delete_profile(row, window, cx);

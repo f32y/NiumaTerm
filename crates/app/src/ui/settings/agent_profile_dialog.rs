@@ -370,7 +370,7 @@ fn env_var_table(env: &[EnvVar], window: &mut Window, cx: &mut App) -> AnyElemen
                             .ghost()
                             .with_size(TABLE_OPERATION_BUTTON)
                             .icon(TrashIcon)
-                            .aria_label(i18n("settings-common-delete"))
+                            .accessibility_label(i18n("settings-common-delete"))
                             .tooltip(i18n("settings-common-delete"))
                             .on_click(move |_, _, cx: &mut App| {
                                 let draft = cx.global_mut::<AgentProfileDraft>();

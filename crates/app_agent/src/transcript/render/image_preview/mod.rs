@@ -119,7 +119,7 @@ impl TranscriptView {
                                 .rounded_full()
                                 .icon(IconName::Close)
                                 .tooltip(i18n("agent-transcript-image-close"))
-                                .aria_label(i18n("agent-transcript-image-close"))
+                                .accessibility_label(i18n("agent-transcript-image-close"))
                                 .on_click(
                                     cx.listener(|this, _, _, cx| this.close_zoomed_image(cx)),
                                 ),

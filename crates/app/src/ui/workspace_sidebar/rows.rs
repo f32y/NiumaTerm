@@ -74,7 +74,7 @@ impl Sidebar {
                         // it, while the named sizes would pin the height too.
                         .with_size(px(NEW_TAB_GLYPH))
                         .ghost()
-                        .aria_label(i18n("sidebar-tab-new"))
+                        .accessibility_label(i18n("sidebar-tab-new"))
                         .size(px(NEW_TAB_BUTTON))
                         .child("+"),
                     move |menu, _, cx| new_tab_menu(menu, &menu_shell, cx),
@@ -254,7 +254,7 @@ impl Sidebar {
             .when(!settings_entry, |this| {
                 this.tooltip(dirs_description.clone())
             })
-            .aria_label(if settings_entry {
+            .accessibility_label(if settings_entry {
                 display_label.clone()
             } else {
                 i18n("sidebar-workspace-item-label")

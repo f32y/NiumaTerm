@@ -104,7 +104,7 @@ fn opacity_slider_field(target: OpacityTarget) -> SettingField<SharedString> {
             // and the whole control collapses; horizontal layout needs a
             // fixed width, like NumberField's `w_32`.
             .map(|this| {
-                if options.layout.is_horizontal() {
+                if options.layout().is_horizontal() {
                     this.w_56()
                 } else {
                     this.w_full()
@@ -122,7 +122,7 @@ fn opacity_slider_field(target: OpacityTarget) -> SettingField<SharedString> {
             .child(
                 div().flex_1().px_2().child(
                     Slider::new(&slider)
-                        .disabled(options.disabled)
+                        .disabled(options.is_disabled())
                         .text_color(cx.theme().primary),
                 ),
             )
@@ -152,7 +152,7 @@ pub(super) fn background_image_field() -> SettingField<SharedString> {
 
         h_flex()
             .map(|this| {
-                if options.layout.is_horizontal() {
+                if options.layout().is_horizontal() {
                     this.w_64()
                 } else {
                     this.w_full()
@@ -164,7 +164,7 @@ pub(super) fn background_image_field() -> SettingField<SharedString> {
                 Button::new("background-image-browse")
                     .outline()
                     .label(i18n("settings-common-browse"))
-                    .disabled(options.disabled)
+                    .disabled(options.is_disabled())
                     .on_click(|_, window, cx| {
                         let rx = cx.prompt_for_paths(PathPromptOptions {
                             files: true,
@@ -197,7 +197,7 @@ pub(super) fn background_image_field() -> SettingField<SharedString> {
                 Button::new("background-image-clear")
                     .outline()
                     .label(i18n("settings-common-clear"))
-                    .disabled(options.disabled)
+                    .disabled(options.is_disabled())
                     .on_click(|_, _, cx: &mut App| {
                         cx.global_mut::<AppSettings>().background_image = None;
                     })

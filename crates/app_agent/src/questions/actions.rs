@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use gpui::prelude::*;
 use gpui::{Context, Window};
-use gpui_component::input::{InputEvent, InputState};
+use gpui_component::input::{InputEvent, InputState, TextareaState};
 use nmt_agent_utils::AgentEventKind;
 use nmt_agent_utils::chat::{
     Item, Question, QuestionInput, QuestionMode, QuestionRequest, QuestionResolution,
@@ -11,7 +11,7 @@ use nmt_i18n::i18n;
 
 use crate::AgentPane;
 use crate::composer::PaletteControl;
-use crate::questions::{QuestionEditor, QuestionPrompt, QuestionStatus};
+use crate::questions::{QuestionEditor, QuestionEditorState, QuestionPrompt, QuestionStatus};
 use crate::session::Status;
 
 impl AgentPane {
@@ -363,19 +363,9 @@ impl AgentPane {
                 continue;
             }
             let text = prompt.text[index].clone();
-            let state = cx.new(|cx| {
-                let mut state = InputState::new(window, cx)
-                    .auto_grow(1, 4)
-                    .placeholder(i18n("agent-question-free-text"));
-                if input == QuestionInput::Secret {
-                    state = state.masked(true);
-                }
-                state.set_value(text, window, cx);
-                state
-            });
             let epoch = self.runtime.epoch;
-            let subscription = cx.subscribe(&state, move |this, input, event: &InputEvent, cx| {
-                if this.runtime.epoch != epoch || !matches!(event, InputEvent::Change) {
+            let on_change = move |this: &mut Self, value: String, cx: &mut Context<Self>| {
+                if this.runtime.epoch != epoch {
                     return;
                 }
                 let Some(prompt) = this.prompts.batches.get_mut(batch) else {
@@ -384,7 +374,6 @@ impl AgentPane {
                 if prompt.status != QuestionStatus::Pending {
                     return;
                 }
-                let value = input.read(cx).value().to_string();
                 if prompt.text[index] == value {
                     return;
                 }
@@ -392,7 +381,34 @@ impl AgentPane {
                 prompt.custom[index] = true;
                 prompt.touch();
                 cx.notify();
-            });
+            };
+            let (state, subscription) = if input == QuestionInput::Secret {
+                let state = cx.new(|cx| {
+                    InputState::new(window, cx)
+                        .masked(true)
+                        .placeholder(i18n("agent-question-free-text"))
+                        .default_value(text)
+                });
+                let subscription = cx.subscribe(&state, move |this, input, event, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        on_change(this, input.read(cx).value().to_string(), cx);
+                    }
+                });
+                (QuestionEditorState::Secret(state), subscription)
+            } else {
+                let state = cx.new(|cx| {
+                    TextareaState::new(window, cx)
+                        .auto_grow(1, 4)
+                        .placeholder(i18n("agent-question-free-text"))
+                        .default_value(text)
+                });
+                let subscription = cx.subscribe(&state, move |this, input, event, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        on_change(this, input.read(cx).value().to_string(), cx);
+                    }
+                });
+                (QuestionEditorState::Text(state), subscription)
+            };
             self.prompts.batches[batch].editors[index] = Some(QuestionEditor {
                 state,
                 _subscription: subscription,

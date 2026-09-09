@@ -559,13 +559,13 @@ fn unavailable_session_keeps_input_without_recording(cx: &mut TestAppContext) {
 #[gpui::test]
 fn restored_multiline_text_places_the_utf8_cursor_at_the_end(cx: &mut gpui::TestAppContext) {
     use gpui::{AppContext as _, VisualTestContext};
-    use gpui_component::input::InputState;
+    use gpui_component::input::TextareaState;
 
     let mut input = None;
     let window = cx.update(|cx| {
         cx.open_window(Default::default(), |window, cx| {
             gpui_component::init(cx);
-            let state = cx.new(|cx| InputState::new(window, cx).auto_grow(1, 8));
+            let state = cx.new(|cx| TextareaState::new(window, cx).auto_grow(1, 8));
             input = Some(state.clone());
             cx.new(|cx| gpui_component::Root::new(state, window, cx))
         })

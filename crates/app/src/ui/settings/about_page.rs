@@ -90,7 +90,7 @@ fn update_check_item() -> SettingItem {
             Button::new("app-update-check")
                 .outline()
                 .label(i18n("settings-about-check-button"))
-                .disabled(options.disabled || !sparkle::can_check(cx))
+                .disabled(options.is_disabled() || !sparkle::can_check(cx))
                 .on_click(|_, _, cx: &mut App| sparkle::check_now(cx))
         }),
     )
@@ -109,7 +109,7 @@ fn update_check_item() -> SettingItem {
             } else {
                 i18n("settings-about-check-button")
             })
-            .disabled(options.disabled || busy)
+            .disabled(options.is_disabled() || busy)
             .on_click(|_, _, cx: &mut App| update::check_now(cx));
 
         // The channel resolved a specific release, so the link goes to that
@@ -121,7 +121,7 @@ fn update_check_item() -> SettingItem {
             Button::new("app-update-open")
                 .outline()
                 .label(i18n("settings-about-open-release"))
-                .disabled(options.disabled)
+                .disabled(options.is_disabled())
                 .on_click(move |_, _, cx: &mut App| cx.open_url(&page_url))
         });
 
@@ -129,7 +129,7 @@ fn update_check_item() -> SettingItem {
             Button::new("app-update-install")
                 .primary()
                 .label(i18n("settings-about-install-button"))
-                .disabled(options.disabled)
+                .disabled(options.is_disabled())
                 .on_click(|_, window, cx: &mut App| update::install_now(window, cx))
         });
 

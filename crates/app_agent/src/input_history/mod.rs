@@ -9,7 +9,7 @@ use std::sync::{Arc, mpsc};
 use std::{env, fs, io, process, thread};
 
 use gpui::{App, Context, Entity, Global, Window};
-use gpui_component::input::InputState;
+use gpui_component::input::TextareaState;
 use nmt_agent_utils::AgentWorkspace;
 use tracing::warn;
 
@@ -334,7 +334,7 @@ impl AgentPane {
 }
 
 fn replace_input_with_history<T: 'static>(
-    input: &Entity<InputState>,
+    input: &Entity<TextareaState>,
     text: String,
     window: &mut Window,
     cx: &mut Context<T>,

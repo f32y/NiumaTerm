@@ -1,6 +1,70 @@
-use nmt_agent_utils::chat::{Question, QuestionOption};
+use gpui::{AppContext as _, TestAppContext, VisualTestContext};
+use gpui_component::Root;
+use nmt_agent_utils::AgentWorkspace;
+use nmt_agent_utils::chat::{Question, QuestionInput, QuestionOption};
+use nmt_config::profile::{AgentProfile, AgentProfileKind};
 
-use crate::questions::QuestionPrompt;
+use crate::questions::{QuestionEditorState, QuestionPrompt};
+use crate::settings::AgentSettings;
+use crate::{AgentPane, AgentThreadDefaults};
+
+#[gpui::test]
+fn question_editors_keep_multiline_text_and_mask_secrets(cx: &mut TestAppContext) {
+    let profile = AgentProfile {
+        name: "Question Editor Test".into(),
+        kind: AgentProfileKind::Codex,
+        executable: "missing-question-test-agent.exe".into(),
+        ..AgentProfile::default()
+    };
+    let mut pane = None;
+    let window = cx.update(|cx| {
+        gpui_component::init(cx);
+        cx.set_global(AgentSettings::default());
+        cx.set_global(AgentThreadDefaults::default());
+        cx.open_window(Default::default(), |window, cx| {
+            let agent = cx.new(|cx| AgentPane::new(profile, AgentWorkspace::default(), window, cx));
+            pane = Some(agent.clone());
+            cx.new(|cx| Root::new(agent, window, cx))
+        })
+        .expect("open question editor test window")
+    });
+    let pane = pane.expect("create agent pane");
+    let mut cx = VisualTestContext::from_window(window.into(), cx);
+    cx.update(|window, cx| {
+        pane.update(cx, |pane, cx| {
+            let mut plain = question("Describe the change", false, &[]);
+            plain.input = QuestionInput::Text;
+            let mut secret = question("Enter a token", false, &[]);
+            secret.input = QuestionInput::Secret;
+            let mut prompt = QuestionPrompt::new(vec![plain, secret]);
+            prompt.text = vec!["first line\nsecond line".into(), "test-token".into()];
+            pane.prompts.ask_questions(prompt);
+            pane.prepare_question_editors(window, cx);
+            let prompt = pane.prompts.questions().expect("active questions");
+            let QuestionEditorState::Text(plain) =
+                &prompt.editors[0].as_ref().expect("plain editor").state
+            else {
+                panic!("ordinary answers use a textarea");
+            };
+            let plain = plain.read(cx);
+            assert!(plain.is_multi_line());
+            assert!(!plain.presentation().is_masked());
+            assert_eq!(plain.value().as_ref(), "first line\nsecond line");
+            let QuestionEditorState::Secret(secret) =
+                &prompt.editors[1].as_ref().expect("secret editor").state
+            else {
+                panic!("secret answers use a password input");
+            };
+            secret.update(cx, |secret, cx| secret.select_all(window, cx));
+            let secret = secret.read(cx);
+            assert!(secret.is_single_line());
+            assert!(secret.presentation().is_masked());
+            assert!(secret.context_menu_capabilities().has_selection());
+            assert!(!secret.context_menu_capabilities().is_copyable());
+            assert_eq!(secret.value().as_ref(), "test-token");
+        });
+    });
+}
 
 fn question(text: &str, multi_select: bool, labels: &[&str]) -> Question {
     Question {

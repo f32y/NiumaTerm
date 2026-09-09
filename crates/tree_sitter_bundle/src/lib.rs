@@ -168,7 +168,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             tree_sitter_go::LANGUAGE,
             include_str!(
-                "../../../third_party/gpui-component/ui/src/highlighter/languages/go/highlights.scm"
+                "../../../third_party/gpui-kit/crates/component/src/highlighter/languages/go/highlights.scm"
             ),
             "",
             ""
@@ -180,10 +180,10 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "javascript\0css",
             tree_sitter_html::LANGUAGE,
             include_str!(
-                "../../../third_party/gpui-component/ui/src/highlighter/languages/html/highlights.scm"
+                "../../../third_party/gpui-kit/crates/component/src/highlighter/languages/html/highlights.scm"
             ),
             include_str!(
-                "../../../third_party/gpui-component/ui/src/highlighter/languages/html/injections.scm"
+                "../../../third_party/gpui-kit/crates/component/src/highlighter/languages/html/injections.scm"
             ),
             ""
         ),
@@ -202,10 +202,10 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "jsdoc\0json\0css\0html\0sql\0typescript\0javascript\0tsx\0yaml\0graphql",
             tree_sitter_javascript::LANGUAGE,
             include_str!(
-                "../../../third_party/gpui-component/ui/src/highlighter/languages/javascript/highlights.scm"
+                "../../../third_party/gpui-kit/crates/component/src/highlighter/languages/javascript/highlights.scm"
             ),
             include_str!(
-                "../../../third_party/gpui-component/ui/src/highlighter/languages/javascript/injections.scm"
+                "../../../third_party/gpui-kit/crates/component/src/highlighter/languages/javascript/injections.scm"
             ),
             tree_sitter_javascript::LOCALS_QUERY
         ),
@@ -224,7 +224,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             tree_sitter_kotlin_sg::LANGUAGE,
             include_str!(
-                "../../../third_party/gpui-component/ui/src/highlighter/languages/kotlin/highlights.scm"
+                "../../../third_party/gpui-kit/crates/component/src/highlighter/languages/kotlin/highlights.scm"
             ),
             "",
             ""
@@ -235,7 +235,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             tree_sitter_lua::LANGUAGE,
             include_str!(
-                "../../../third_party/gpui-component/ui/src/highlighter/languages/lua/highlights.scm"
+                "../../../third_party/gpui-kit/crates/component/src/highlighter/languages/lua/highlights.scm"
             ),
             tree_sitter_lua::INJECTIONS_QUERY,
             tree_sitter_lua::LOCALS_QUERY
@@ -255,10 +255,10 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "markdown_inline\0html\0toml\0yaml",
             tree_sitter_md::LANGUAGE,
             include_str!(
-                "../../../third_party/gpui-component/ui/src/highlighter/languages/markdown/highlights.scm"
+                "../../../third_party/gpui-kit/crates/component/src/highlighter/languages/markdown/highlights.scm"
             ),
             include_str!(
-                "../../../third_party/gpui-component/ui/src/highlighter/languages/markdown/injections.scm"
+                "../../../third_party/gpui-kit/crates/component/src/highlighter/languages/markdown/injections.scm"
             ),
             ""
         ),
@@ -268,7 +268,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             tree_sitter_md::INLINE_LANGUAGE,
             include_str!(
-                "../../../third_party/gpui-component/ui/src/highlighter/languages/markdown_inline/highlights.scm"
+                "../../../third_party/gpui-kit/crates/component/src/highlighter/languages/markdown_inline/highlights.scm"
             ),
             "",
             ""
@@ -280,7 +280,7 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             tree_sitter_php::LANGUAGE_PHP,
             tree_sitter_php::HIGHLIGHTS_QUERY,
             include_str!(
-                "../../../third_party/gpui-component/ui/src/highlighter/languages/php/injections.scm"
+                "../../../third_party/gpui-kit/crates/component/src/highlighter/languages/php/injections.scm"
             ),
             ""
         ),
@@ -317,10 +317,10 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "rust",
             tree_sitter_rust::LANGUAGE,
             include_str!(
-                "../../../third_party/gpui-component/ui/src/highlighter/languages/rust/highlights.scm"
+                "../../../third_party/gpui-kit/crates/component/src/highlighter/languages/rust/highlights.scm"
             ),
             include_str!(
-                "../../../third_party/gpui-component/ui/src/highlighter/languages/rust/injections.scm"
+                "../../../third_party/gpui-kit/crates/component/src/highlighter/languages/rust/injections.scm"
             ),
             ""
         ),
@@ -376,10 +376,10 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "jsdoc\0json\0css\0html\0sql\0typescript\0javascript\0tsx\0yaml\0graphql",
             tree_sitter_typescript::LANGUAGE_TYPESCRIPT,
             include_str!(
-                "../../../third_party/gpui-component/ui/src/highlighter/languages/typescript/highlights.scm"
+                "../../../third_party/gpui-kit/crates/component/src/highlighter/languages/typescript/highlights.scm"
             ),
             include_str!(
-                "../../../third_party/gpui-component/ui/src/highlighter/languages/javascript/injections.scm"
+                "../../../third_party/gpui-kit/crates/component/src/highlighter/languages/javascript/injections.scm"
             ),
             tree_sitter_typescript::LOCALS_QUERY
         ),
@@ -398,10 +398,10 @@ fn descriptor(index: u32) -> Option<LanguageDescriptor> {
             "",
             tree_sitter_zig::LANGUAGE,
             include_str!(
-                "../../../third_party/gpui-component/ui/src/highlighter/languages/zig/highlights.scm"
+                "../../../third_party/gpui-kit/crates/component/src/highlighter/languages/zig/highlights.scm"
             ),
             include_str!(
-                "../../../third_party/gpui-component/ui/src/highlighter/languages/zig/injections.scm"
+                "../../../third_party/gpui-kit/crates/component/src/highlighter/languages/zig/injections.scm"
             ),
             ""
         ),

@@ -19,6 +19,7 @@ chrono.workspace = true
 futures.workspace = true
 gpui.workspace = true
 gpui-component.workspace = true
+gpui-base.workspace = true
 # Pasted images become GPUI `RenderImage` frames; same crate/version GPUI
 # links, so `image_rs::Frame` unifies with `gpui`'s `Frame`.
 image_rs.workspace = true

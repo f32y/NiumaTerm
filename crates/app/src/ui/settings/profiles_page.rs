@@ -81,8 +81,8 @@ fn terminal_profile_card(ix: usize, count: usize) -> SettingItem {
             profile.name.clone()
         };
 
-        let disabled = options.disabled;
-        let size = options.size;
+        let disabled = options.is_disabled();
+        let size = options.size();
 
         let name_input = card_text_input(
             format!("terminal-profile-name-{ix}"),

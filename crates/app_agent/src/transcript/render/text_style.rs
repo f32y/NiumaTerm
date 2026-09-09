@@ -47,7 +47,7 @@ pub(crate) fn markdown_view(
     markdown: impl Into<SharedString>,
     cwd: Option<String>,
 ) -> text::TextView {
-    text::TextView::markdown(id, markdown).on_link_click(move |target, _, cx| {
+    text::TextView::markdown(id, markdown).on_link_click(move |target, _, _, cx| {
         links::open(target, cwd.as_deref().map(Path::new), cx);
     })
 }

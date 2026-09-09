@@ -136,7 +136,7 @@ impl BackgroundTasksView {
                             .xsmall()
                             .icon(IconName::ArrowLeft)
                             .tooltip(i18n("tasks-background-back-tooltip"))
-                            .aria_label(i18n("tasks-background-back-tooltip"))
+                            .accessibility_label(i18n("tasks-background-back-tooltip"))
                             .on_click(cx.listener(|this, _, _, cx| this.close_detail(cx))),
                     )
                     .child(

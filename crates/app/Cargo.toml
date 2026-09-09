@@ -41,7 +41,7 @@ toml.workspace = true
 gpui.workspace = true
 gpui-component.workspace = true
 lsp-types.workspace = true
-gpui-component-assets.workspace = true
+gpui-kit-assets.workspace = true
 rust-embed.workspace = true
 nmt_input.workspace = true
 # Kitty graphics: construct GPUI `RenderImage` frames from decoded pixels. Same

@@ -1,5 +1,5 @@
 use gpui::{Context, Window};
-use gpui_component::WindowExt as _;
+use gpui_base::TextSelection;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -79,7 +79,7 @@ impl AgentPane {
             return;
         }
 
-        window.clear_text_selection(cx);
+        TextSelection::clear(window, cx);
         self.focus(window, cx);
         cx.notify();
     }

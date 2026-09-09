@@ -153,7 +153,7 @@ pub(super) fn folded_settings_pill(
 
     let pill = settings_pill(Button::new("agent-folded-settings"))
         .tooltip(name)
-        .aria_label(name)
+        .accessibility_label(name)
         .child(
             h_flex()
                 .gap_1p5()
@@ -303,7 +303,7 @@ pub(super) fn setting_picker(
     let pill = settings_pill(Button::new(id))
         .min_w(px(120.))
         .tooltip(name)
-        .aria_label(format!("{name}: {current_label}"))
+        .accessibility_label(format!("{name}: {current_label}"))
         .child(
             h_flex()
                 .gap_1p5()

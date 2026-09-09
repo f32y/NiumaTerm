@@ -101,7 +101,7 @@ impl AgentPane {
                                     .xsmall()
                                     .icon(IconName::Close)
                                     .tooltip(i18n("agent-history-queued-remove"))
-                                    .aria_label(i18n("agent-history-queued-remove"))
+                                    .accessibility_label(i18n("agent-history-queued-remove"))
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.remove_queued_prompt(&id, cx)
                                     }))

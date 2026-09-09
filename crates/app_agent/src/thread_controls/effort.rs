@@ -94,7 +94,7 @@ pub(super) fn effort_panel(
 
     let trigger = settings_pill(Button::new("agent-effort"))
         .tooltip(name)
-        .aria_label(format!("{name}: {current_label}"))
+        .accessibility_label(format!("{name}: {current_label}"))
         .child(
             h_flex()
                 .gap_1p5()

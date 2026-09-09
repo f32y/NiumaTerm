@@ -278,7 +278,7 @@ impl Shell {
                 .size(px(TITLE_BAR_BUTTON))
                 .icon(IconName::Menu)
                 .tooltip(i18n("shell-app-menu"))
-                .aria_label(i18n("shell-app-menu")),
+                .accessibility_label(i18n("shell-app-menu")),
             move |menu, _, cx| app_menu(menu, &shell, cx),
         )
     }

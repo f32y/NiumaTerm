@@ -119,7 +119,7 @@ pub fn font_family_field(target: FontTarget) -> SettingField<SharedString> {
 
         Select::new(&select)
             .menu_width(px(320.))
-            .when(options.layout.is_vertical(), |this| this.w_full())
+            .when(options.layout().is_vertical(), |this| this.w_full())
     })
 }
 

@@ -242,7 +242,7 @@ fn agent_update_check_item() -> SettingItem {
             } else {
                 i18n("settings-agent-check-button")
             })
-            .disabled(options.disabled || busy || installations.is_empty())
+            .disabled(options.is_disabled() || busy || installations.is_empty())
             .on_click(move |_, _, cx| {
                 agent_updates::manual_check_profiles(&check_profiles, cx);
             });
@@ -334,7 +334,7 @@ fn agent_update_status_item(ix: usize, title: String, key: InstallationKey) -> S
         let update = Button::new(("agent-update-install", ix))
             .primary()
             .label(i18n("settings-agent-update-button"))
-            .disabled(options.disabled || busy || !can_update)
+            .disabled(options.is_disabled() || busy || !can_update)
             .on_click(move |_, window, cx| {
                 agent_updates::request_update(update_key.clone(), window, cx);
             });

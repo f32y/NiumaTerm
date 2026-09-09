@@ -211,7 +211,7 @@ impl Render for TokenUsageView {
             .h(px(STATUS_ROW_HEIGHT))
             .px_1()
             .justify_start()
-            .aria_label(self.accessibility_label())
+            .accessibility_label(self.accessibility_label())
             .loading(self.state.user_requested)
             .child(
                 h_flex()

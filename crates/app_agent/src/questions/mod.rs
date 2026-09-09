@@ -5,8 +5,8 @@ mod render;
 
 use std::time::{Duration, Instant};
 
-use gpui::{Entity, Subscription};
-use gpui_component::input::InputState;
+use gpui::{AnyElement, App, Entity, IntoElement as _, Subscription, Window};
+use gpui_component::input::{Input, InputState, Textarea, TextareaState};
 use nmt_agent_utils::chat::{Question, QuestionInput, QuestionMode, QuestionRequest};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -20,8 +20,29 @@ pub(crate) enum QuestionStatus {
 }
 
 pub(super) struct QuestionEditor {
-    state: Entity<InputState>,
+    state: QuestionEditorState,
     _subscription: Subscription,
+}
+
+pub(super) enum QuestionEditorState {
+    Text(Entity<TextareaState>),
+    Secret(Entity<InputState>),
+}
+
+impl QuestionEditorState {
+    fn focus(&self, window: &mut Window, cx: &mut App) {
+        match self {
+            Self::Text(state) => state.update(cx, |state, cx| state.focus(window, cx)),
+            Self::Secret(state) => state.update(cx, |state, cx| state.focus(window, cx)),
+        }
+    }
+
+    fn render(&self, disabled: bool) -> AnyElement {
+        match self {
+            Self::Text(state) => Textarea::new(state).disabled(disabled).into_any_element(),
+            Self::Secret(state) => Input::new(state).disabled(disabled).into_any_element(),
+        }
+    }
 }
 
 pub(crate) struct QuestionPrompt {

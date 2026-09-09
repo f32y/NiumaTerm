@@ -60,7 +60,7 @@ pub(super) fn render_row(
         .xsmall()
         .icon(StopTaskIcon)
         .tooltip(i18n("tasks-background-stop-tooltip"))
-        .aria_label(i18n("tasks-background-stop-tooltip"))
+        .accessibility_label(i18n("tasks-background-stop-tooltip"))
         .on_click(cx.listener(move |this, _, _, cx| {
             // The row opens the child's conversation, so a click that was
             // meant for Stop must not also navigate.

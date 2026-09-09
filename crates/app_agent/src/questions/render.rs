@@ -2,7 +2,6 @@ use gpui::prelude::*;
 use gpui::{AnyElement, Context, FontWeight, MouseButton, SharedString, Window, div, px};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::checkbox::Checkbox;
-use gpui_component::input::Input;
 use gpui_component::radio::Radio;
 use gpui_component::{ActiveTheme as _, Disableable as _, Sizable as _, h_flex, v_flex};
 use nmt_agent_utils::chat::{QuestionInput, QuestionMode};
@@ -224,9 +223,7 @@ impl AgentPane {
                                     prompt.custom[index] = true;
                                     prompt.touch();
                                     if let Some(editor) = &prompt.editors[index] {
-                                        editor
-                                            .state
-                                            .update(cx, |input, cx| input.focus(window, cx));
+                                        editor.state.focus(window, cx);
                                     }
                                     cx.notify();
                                 }
@@ -235,7 +232,7 @@ impl AgentPane {
                 }
                 if pending {
                     if let Some(editor) = &prompt.editors[index] {
-                        row = row.child(Input::new(&editor.state).disabled(!enabled));
+                        row = row.child(editor.state.render(!enabled));
                     }
                 } else if prompt.status == QuestionStatus::Submitted && prompt.custom[index] {
                     row = row.child(

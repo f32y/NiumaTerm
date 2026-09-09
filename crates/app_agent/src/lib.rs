@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 
 use gpui::{Entity, FocusHandle, Pixels, Point, ScrollHandle, SharedString};
 use gpui_component::VirtualListScrollHandle;
-use gpui_component::input::InputState;
+use gpui_component::input::TextareaState;
 use nmt_agent_utils::chat::{
     ContextComposition, ContextWindowUsage, ReplayTurn, SessionScope, SessionStats, SessionSummary,
     SkillCatalog, SkillReference, SlashCommandInfo,
@@ -337,7 +337,7 @@ pub struct AgentPane {
     /// The conversation as the user reads it. Presentation lives in its own
     /// view so a child agent's conversation renders through the same code.
     transcript: Entity<TranscriptView>,
-    input: Entity<InputState>,
+    input: Entity<TextareaState>,
     history_ui: SessionHistoryUi,
     /// The backend process and its lifecycle; a (re)spawn replaces it whole.
     runtime: SessionRuntime,

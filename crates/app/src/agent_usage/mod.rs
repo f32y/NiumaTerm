@@ -561,7 +561,7 @@ impl Render for AgentUsageView {
             .w_full()
             .h(px(QUOTA_ROW_HEIGHT))
             .px_1()
-            .aria_label(self.accessibility_label())
+            .accessibility_label(self.accessibility_label())
             // Opacity communicates in-flight work without replacing or moving
             // the last successful values in this tightly packed status line.
             .when(refreshing, |this| this.opacity(0.65))

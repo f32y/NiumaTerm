@@ -93,7 +93,7 @@ impl ComposerAttachments {
                             .ghost()
                             .xsmall()
                             .icon(IconName::Close)
-                            .aria_label(i18n("agent-composer-image-remove"))
+                            .accessibility_label(i18n("agent-composer-image-remove"))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 // The control sits on the thumbnail, which
                                 // opens the image; taking the image off is not
@@ -173,7 +173,7 @@ impl ComposerAttachments {
                             .ghost()
                             .xsmall()
                             .icon(IconName::Close)
-                            .aria_label(i18n("agent-composer-annotations-remove"))
+                            .accessibility_label(i18n("agent-composer-annotations-remove"))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.remove_response_annotation(index, cx)
                             })),

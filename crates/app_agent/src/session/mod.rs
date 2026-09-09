@@ -25,7 +25,7 @@ use std::{env, fs};
 
 use futures::channel::mpsc;
 use gpui::{App, Context, Image, Window};
-use gpui_component::input::{InputEvent, InputState};
+use gpui_component::input::{InputEvent, TextareaState};
 use nmt_agent_utils::chat::{
     Item as SessionItem, QueuedPrompt, SendOutcome, SkillReference, ThreadSettings,
 };
@@ -183,7 +183,7 @@ impl AgentPane {
         // The view intercepts modified Enter actions before this input's
         // submit-on-enter behavior runs.
         let input = cx.new(|cx| {
-            InputState::new(window, cx)
+            TextareaState::new(window, cx)
                 .auto_grow(1, 8)
                 .submit_on_enter(true)
                 .placeholder(i18n("agent-session-message-placeholder").replace("{name}", name))

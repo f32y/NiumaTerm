@@ -6,7 +6,7 @@ use std::time::Duration;
 use gpui::prelude::*;
 use gpui::{AnyElement, App, Context, Pixels, Window, div, px};
 use gpui_component::ActiveTheme as _;
-use gpui_component::animation::Transition;
+use gpui_component::animation::EffectTransition;
 
 /// Identifies which handle a resize gesture came from.
 ///
@@ -82,7 +82,7 @@ pub(crate) fn slide_width<E: IntoElement + Styled + 'static>(
         (width, px(0.0))
     };
 
-    Transition::new(Duration::from_millis(180))
+    EffectTransition::new(Duration::from_millis(180))
         .width(from, to)
         .apply(wrapper, (id, open as usize))
         .into_any_element()
