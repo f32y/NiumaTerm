@@ -346,10 +346,6 @@
 "settings-remote-forget" = "忘记"
 
 # 主题和背景控件
-"settings-theme-preview-command" = "ls"
-"settings-theme-preview-directory" = "目录"
-"settings-theme-preview-executable" = "可执行文件"
-"settings-theme-preview-file" = "文件"
 "settings-theme-default" = "默认"
 "settings-theme-title" = "主题"
 "settings-theme-refresh" = "刷新"

@@ -347,10 +347,6 @@
 "settings-remote-forget" = "Forget"
 
 # Theme and background controls
-"settings-theme-preview-command" = "ls"
-"settings-theme-preview-directory" = "dir"
-"settings-theme-preview-executable" = "executable"
-"settings-theme-preview-file" = "file"
 "settings-theme-default" = "Default"
 "settings-theme-title" = "Themes"
 "settings-theme-refresh" = "Refresh"
