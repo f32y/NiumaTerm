@@ -83,6 +83,8 @@
 "settings-appearance-smooth-scrolling-description" = "Choose where traditional mouse-wheel scrolling is animated."
 "settings-appearance-reduce-motion" = "Reduce Motion"
 "settings-appearance-reduce-motion-description" = "Show expanded and collapsed content immediately instead of animating it in."
+"settings-appearance-human-friendly-agent-ui-layout" = "Human-friendly Agent UI Layout"
+"settings-appearance-human-friendly-agent-ui-layout-description" = "Keep the agent conversation column at a comfortable reading width, centered in the pane. With this off, the column follows the pane width with a 40px margin on each side."
 "settings-appearance-font" = "Font"
 "settings-appearance-ui-font" = "UI Font"
 "settings-appearance-ui-font-description" = "Font for the app chrome (titlebar, sidebar, tabs, dialogs)."

@@ -523,6 +523,8 @@ fn patch_settings_document(doc: &mut DocumentMut, patch: &SettingsPatch<'_>) -> 
         value(&appearance.agent_transcript_font_family);
     doc["appearance"]["agent-transcript-font-size"] = value(appearance.agent_transcript_font_size);
     doc["appearance"]["reduce-motion"] = value(appearance.reduce_motion);
+    doc["appearance"]["human-friendly-agent-ui-layout"] =
+        value(appearance.human_friendly_agent_ui_layout);
 
     ensure_explicit_table(doc, "cursor");
     doc["cursor"]["shape"] = value(cursor_shape.as_str());

@@ -33,6 +33,7 @@ fn sample_appearance() -> AppearanceConfig {
         agent_transcript_font_family: "JetBrains Mono".to_string(),
         agent_transcript_font_size: 12.5,
         reduce_motion: true,
+        human_friendly_agent_ui_layout: false,
     }
 }
 
@@ -122,6 +123,7 @@ fn settings_patch_preserves_comments_and_unrelated_keys() {
     assert!(out.contains("agent-transcript-font-family = \"JetBrains Mono\""));
     assert!(out.contains("agent-transcript-font-size = 12.5"));
     assert!(out.contains("reduce-motion = true"));
+    assert!(out.contains("human-friendly-agent-ui-layout = false"));
 
     let config: Config = parse_toml(&out).unwrap();
     assert_eq!(config.appearance, sample_appearance());

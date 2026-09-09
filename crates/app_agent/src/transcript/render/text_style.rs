@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use gpui::prelude::*;
-use gpui::{App, ElementId, Font, Hsla, SharedString, StyleRefinement, px, rems};
+use gpui::{App, ElementId, Font, Hsla, SharedString, StyleRefinement, px};
 use gpui_component::highlighter::HighlightTheme;
 use gpui_component::text::TextViewStyle;
 use gpui_component::{ActiveTheme as _, text};
@@ -13,7 +13,6 @@ use nmt_app_terminal::frame::theme_default_background;
 
 use crate::links;
 use crate::settings::AgentSettings;
-use crate::transcript::render::PROSE_MEASURE_REMS;
 
 /// Assistant reply: bare markdown — no bubble, no border; alignment and
 /// surface carry the distinction.
@@ -83,14 +82,7 @@ pub(crate) fn is_dark_surface(color: Hsla) -> bool {
 }
 
 pub(crate) fn agent_text_style(cx: &App) -> TextViewStyle {
-    // Prose stops at a reading measure. On a maximised window the pane is
-    // wide enough for well over a hundred characters a line, and the eye
-    // loses the start of the next line on the return sweep. Code blocks
-    // and tables stay full-width: their content is scanned column-wise
-    // rather than read across, and narrowing them only forces an inner
-    // scroll or a wrap that hides structure.
     let mut style = TextViewStyle::default()
-        .prose_max_width(rems(PROSE_MEASURE_REMS))
         .code_block(configured_transcript_code_block_style(cx))
         .table(transcript_table_style(cx));
     style.highlight_theme = transcript_highlight_theme(cx);

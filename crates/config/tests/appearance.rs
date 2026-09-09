@@ -18,6 +18,7 @@ fn appearance_section_defaults_when_absent() {
         config.appearance.terminal_font_family
     );
     assert_eq!(config.appearance.agent_transcript_font_size, 13.0);
+    assert!(config.appearance.human_friendly_agent_ui_layout);
     assert!(config.profiles.list.is_empty());
 }
 

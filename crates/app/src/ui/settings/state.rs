@@ -114,6 +114,8 @@ pub struct AppSettings {
     /// Put disclosed content on screen at once, skipping the entrance the
     /// agent transcript otherwise plays for it.
     pub reduce_motion: bool,
+    /// Hold the agent conversation column at a reading width and centre it.
+    pub human_friendly_agent_ui_layout: bool,
     /// Whole-window background opacity (0.2..=1.0) while transparency is enabled.
     pub background_opacity: f64,
     /// Local image drawn behind all window content.
@@ -211,6 +213,7 @@ impl Default for AppSettings {
             transparent_main_view: true,
             smooth_scrolling: SmoothScrollingMode::All,
             reduce_motion: false,
+            human_friendly_agent_ui_layout: true,
             background_opacity: 1.0,
             background_image: None,
             background_image_opacity: DEFAULT_BACKGROUND_IMAGE_OPACITY,
@@ -501,6 +504,7 @@ impl AppSettings {
             transparent_main_view: appearance.transparent_main_view,
             smooth_scrolling: appearance.smooth_scrolling,
             reduce_motion: appearance.reduce_motion,
+            human_friendly_agent_ui_layout: appearance.human_friendly_agent_ui_layout,
             background_opacity: clamp_background_opacity(appearance.background_opacity),
             background_image: appearance
                 .background_image
@@ -723,6 +727,7 @@ impl AppSettings {
             transparent_main_view: self.transparent_main_view,
             smooth_scrolling: self.smooth_scrolling,
             reduce_motion: self.reduce_motion,
+            human_friendly_agent_ui_layout: self.human_friendly_agent_ui_layout,
             background_opacity: self.background_opacity,
             background_image: self.background_image.clone(),
             background_image_opacity: self.background_image_opacity,

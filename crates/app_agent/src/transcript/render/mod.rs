@@ -15,7 +15,7 @@ mod work_row;
 use std::time::Instant;
 
 use gpui::prelude::*;
-use gpui::{AnyElement, Context, Pixels, Window, div, px, relative};
+use gpui::{AnyElement, App, Context, Div, Pixels, Window, div, px, relative, rems};
 use gpui_component::modern_menu::ModernMenuExt as _;
 use gpui_component::shimmer::ShimmerText;
 use gpui_component::spinner::Spinner;
@@ -23,7 +23,7 @@ use gpui_component::{ActiveTheme as _, IconName, Sizable as _, h_flex};
 use nmt_agent_utils::chat::Item as SessionItem;
 use nmt_i18n::i18n;
 
-use crate::settings::UI_RADIUS;
+use crate::settings::{AgentSettings, UI_RADIUS};
 use crate::transcript::disclosure_row::{
     AGENT_CARD_DETAIL_SIZE, AGENT_CARD_GAP, AGENT_CARD_ICON_BLOCK, AGENT_CARD_PADDING_X,
 };
@@ -37,18 +37,52 @@ use crate::transcript::{RowSpec, TranscriptView, is_work_row, working_label};
 const TRANSCRIPT_THUMBNAIL: f32 = 56.0;
 
 /// Share of the pane the conversation column takes, and the margin on each
-/// side that leaves. Expressed as a share rather than as a fixed measure
-/// because a fixed one reads as a narrow strip down the middle of a wide
-/// display.
-pub(crate) const TRANSCRIPT_COLUMN_FRACTION: f32 = 0.8;
-pub(crate) fn transcript_column_margin() -> f32 {
+/// side that leaves. A share rather than a fixed measure on a narrow pane,
+/// so the column keeps a little air at its sides instead of a fixed strip
+/// eating most of the width.
+const TRANSCRIPT_COLUMN_FRACTION: f32 = 0.8;
+fn transcript_column_margin() -> f32 {
     (1.0 - TRANSCRIPT_COLUMN_FRACTION) / 2.0
 }
-/// The measure assistant prose wraps at, inside that column: 880px at the
-/// default root size, which is around 90 latin characters or 45 CJK ones a
-/// line. Held in rems so it tracks the root size the rest of the UI scales
-/// with rather than pinning a physical width.
-const PROSE_MEASURE_REMS: f32 = 55.0;
+/// The measure the column stops growing at: 880px at the default root size,
+/// which is around 90 latin characters or 45 CJK ones a line of prose. On a
+/// maximised window a share of the pane would run well past that, the eye
+/// loses the start of the next line on the return sweep, and every card,
+/// bubble and the composer would stretch with it. Held in rems so it tracks
+/// the root size the rest of the UI scales with rather than pinning a
+/// physical width.
+const TRANSCRIPT_COLUMN_MAX_REMS: f32 = 55.0;
+/// Margin each side of the column when the reading measure is turned off and
+/// the column follows the pane width instead.
+const TRANSCRIPT_LOOSE_MARGIN: f32 = 40.0;
+
+/// The column every transcript row and the composer share.
+///
+/// With the human-friendly layout on it is the smaller of the pane share and
+/// the measure, centred in the pane. The cap sits on an inner box under the
+/// percent margin because a padding cannot express "the larger of these two
+/// margins". The inner box is a block centred by auto margins rather than a
+/// flex item: a flex container sizes its items from their content first, and
+/// a shrink-to-fit bubble measured that way wraps its CJK prose one glyph per
+/// line. Block layout hands the box its definite width straight down.
+///
+/// With it off the column is the pane less a fixed margin each side.
+pub(crate) fn transcript_column(body: impl IntoElement, cx: &App) -> Div {
+    if !cx.global::<AgentSettings>().human_friendly_layout {
+        return div().w_full().px(px(TRANSCRIPT_LOOSE_MARGIN)).child(body);
+    }
+
+    div()
+        .w_full()
+        .px(relative(transcript_column_margin()))
+        .child(
+            div()
+                .w_full()
+                .max_w(rems(TRANSCRIPT_COLUMN_MAX_REMS))
+                .mx_auto()
+                .child(body),
+        )
+}
 /// Three ranks of space, which is what makes a turn read as message / work /
 /// message rather than as one undifferentiated stack. The widest marks where
 /// one exchange ends; the middle one holds a turn's work off the prose it is
@@ -139,10 +173,7 @@ impl TranscriptView {
 
         // Each row is laid out on its own by the virtual list, so the reading
         // column has to be re-established per row rather than once around the
-        // conversation. The margin does that here rather than a centered inner
-        // box: an inner box is one more level for a width to resolve through,
-        // and a row whose width goes indefinite wraps its text at the minimum
-        // — one glyph per line for CJK prose.
+        // conversation.
         let body = div()
             .w_full()
             .when(in_run, |this| {
@@ -152,18 +183,22 @@ impl TranscriptView {
             .when(rule_carries_gap, |this| this.pb(px(gap)))
             .child(row);
 
-        let row = div()
-            .w_full()
-            .px(relative(transcript_column_margin()))
-            .when(!rule_carries_gap, |this| this.pb(px(gap)))
-            // A border is drawn at the element's own leading edge, outside any
-            // padding it carries, so the inset that puts the rule on the text
-            // column has to come from a level above it. Only a run needs one,
-            // and only a run pays for it.
-            .map(|this| match in_run {
-                true => this.child(div().w_full().pl(px(TRANSCRIPT_TEXT_INSET)).child(body)),
-                false => this.child(body),
-            });
+        // A border is drawn at the element's own leading edge, outside any
+        // padding it carries, so the inset that puts the rule on the text
+        // column has to come from a level above it. Only a run needs one,
+        // and only a run pays for it.
+        let row = transcript_column(
+            match in_run {
+                true => div()
+                    .w_full()
+                    .pl(px(TRANSCRIPT_TEXT_INSET))
+                    .child(body)
+                    .into_any_element(),
+                false => body.into_any_element(),
+            },
+            cx,
+        )
+        .when(!rule_carries_gap, |this| this.pb(px(gap)));
 
         // A row a run toggle or a turn fold spliced in grows and shrinks
         // rather than appearing and vanishing, so the conversation below it

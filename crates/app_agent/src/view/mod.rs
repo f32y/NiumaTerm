@@ -30,9 +30,9 @@ use crate::composer::{CommandFeedbackKind, ComposerAction, PaletteControl, compo
 use crate::fade::FrostedLayer;
 use crate::session::Status;
 use crate::settings::{AgentSettings, UI_RADIUS};
-// The composer takes the same share of the pane as the transcript column above
-// it, so the two edges line up at every window width.
-use crate::transcript::transcript_column_margin;
+// The composer sits in the same column as the transcript above it, so the
+// two edges line up at every window width.
+use crate::transcript::transcript_column;
 use crate::{AgentPane, AgentPaneEvent, RecentSessionsMode};
 
 /// The composer is the one surface the user types into, so it carries a softer
@@ -255,218 +255,208 @@ impl Render for AgentPane {
                 // composer height calculation. Both strips are painted before
                 // the shell, whose edge and shadow keep them visibly tucked
                 // behind the input card.
-                div()
-                    .w_full()
-                    .px(relative(transcript_column_margin()))
-                    .pb_3()
-                    .pt_1()
-                    .child(
-                        div()
-                            .w_full()
-                            .relative()
-                            .children(history.map(|history| {
-                                div()
-                                    .absolute()
-                                    .left_0()
-                                    .right_0()
-                                    .bottom(relative(1.))
-                                    .mb(px(-14.))
-                                    .child(history)
-                            }))
-                            .child(
-                                v_flex()
-                                    .w_full()
-                                    .rounded(px(COMPOSER_RADIUS))
-                                    .overflow_hidden()
-                                    .border_1()
-                                    .border_color(cx.theme().border)
-                                    .bg(cx.theme().popover)
-                                    .shadow_md()
-                                    .children(approval)
-                                    .children(questions)
-                                    .children(command_feedback)
-                                    .children(session_state)
-                                    .children(queued_message)
-                                    .children(self.attachments.render(cx))
-                                    .child(
-                                        h_flex()
-                                            .w_full()
-                                            .px(px(COMPOSER_EDGE_INSET))
-                                            .pt_3()
-                                            .pb_1()
-                                            // GPUI resolves these keystrokes
-                                            // into Textarea actions before raw
-                                            // key listeners run. Capturing
-                                            // the actions lets the palette
-                                            // own navigation while visible;
-                                            // the handler propagates them
-                                            // unchanged when it is closed.
-                                            // The composer's own paste inserts
-                                            // text; an image on the clipboard has
-                                            // to be taken before it gets there.
-                                            .capture_action(cx.listener(
-                                                |this, _: &Paste, window, cx| {
-                                                    if this.paste_image(window, cx) {
+                transcript_column(
+                    div()
+                        .w_full()
+                        .relative()
+                        .children(history.map(|history| {
+                            div()
+                                .absolute()
+                                .left_0()
+                                .right_0()
+                                .bottom(relative(1.))
+                                .mb(px(-14.))
+                                .child(history)
+                        }))
+                        .child(
+                            v_flex()
+                                .w_full()
+                                .rounded(px(COMPOSER_RADIUS))
+                                .overflow_hidden()
+                                .border_1()
+                                .border_color(cx.theme().border)
+                                .bg(cx.theme().popover)
+                                .shadow_md()
+                                .children(approval)
+                                .children(questions)
+                                .children(command_feedback)
+                                .children(session_state)
+                                .children(queued_message)
+                                .children(self.attachments.render(cx))
+                                .child(
+                                    h_flex()
+                                        .w_full()
+                                        .px(px(COMPOSER_EDGE_INSET))
+                                        .pt_3()
+                                        .pb_1()
+                                        // GPUI resolves these keystrokes
+                                        // into Textarea actions before raw
+                                        // key listeners run. Capturing
+                                        // the actions lets the palette
+                                        // own navigation while visible;
+                                        // the handler propagates them
+                                        // unchanged when it is closed.
+                                        // The composer's own paste inserts
+                                        // text; an image on the clipboard has
+                                        // to be taken before it gets there.
+                                        .capture_action(cx.listener(
+                                            |this, _: &Paste, window, cx| {
+                                                if this.paste_image(window, cx) {
+                                                    cx.stop_propagation();
+                                                }
+                                            },
+                                        ))
+                                        .capture_action(cx.listener(
+                                            |this, _: &MoveUp, window, cx| {
+                                                this.handle_palette_control(
+                                                    PaletteControl::Previous,
+                                                    window,
+                                                    cx,
+                                                )
+                                            },
+                                        ))
+                                        .capture_action(cx.listener(
+                                            |this, _: &MoveDown, window, cx| {
+                                                this.handle_palette_control(
+                                                    PaletteControl::Next,
+                                                    window,
+                                                    cx,
+                                                )
+                                            },
+                                        ))
+                                        .capture_action(cx.listener(
+                                            |this, action: &Enter, window, cx| {
+                                                match composer_enter_behavior(
+                                                    cx.global::<AgentSettings>().newline_shortcut,
+                                                    action,
+                                                ) {
+                                                    ComposerEnterBehavior::InsertNewline => {
+                                                        this.input.update(cx, |input, cx| {
+                                                            input.replace("\n", window, cx);
+                                                        });
                                                         cx.stop_propagation();
                                                     }
-                                                },
-                                            ))
-                                            .capture_action(cx.listener(
-                                                |this, _: &MoveUp, window, cx| {
-                                                    this.handle_palette_control(
-                                                        PaletteControl::Previous,
-                                                        window,
-                                                        cx,
-                                                    )
-                                                },
-                                            ))
-                                            .capture_action(cx.listener(
-                                                |this, _: &MoveDown, window, cx| {
-                                                    this.handle_palette_control(
-                                                        PaletteControl::Next,
-                                                        window,
-                                                        cx,
-                                                    )
-                                                },
-                                            ))
-                                            .capture_action(cx.listener(
-                                                |this, action: &Enter, window, cx| {
-                                                    match composer_enter_behavior(
-                                                        cx.global::<AgentSettings>()
-                                                            .newline_shortcut,
-                                                        action,
-                                                    ) {
-                                                        ComposerEnterBehavior::InsertNewline => {
-                                                            this.input.update(cx, |input, cx| {
-                                                                input.replace("\n", window, cx);
-                                                            });
-                                                            cx.stop_propagation();
-                                                        }
-                                                        ComposerEnterBehavior::Submit => {
-                                                            this.send_user_message(window, cx);
-                                                            cx.stop_propagation();
-                                                        }
-                                                        ComposerEnterBehavior::ActivateOrSubmit => {
-                                                            this.handle_palette_control(
-                                                                PaletteControl::Activate,
-                                                                window,
-                                                                cx,
-                                                            )
-                                                        }
+                                                    ComposerEnterBehavior::Submit => {
+                                                        this.send_user_message(window, cx);
+                                                        cx.stop_propagation();
                                                     }
-                                                },
-                                            ))
-                                            .capture_action(cx.listener(
-                                                |this, _: &IndentInline, window, cx| {
-                                                    this.handle_palette_control(
-                                                        PaletteControl::Complete,
-                                                        window,
-                                                        cx,
-                                                    )
-                                                },
-                                            ))
-                                            .capture_action(cx.listener(
-                                                |this, _: &Escape, window, cx| {
-                                                    this.handle_palette_control(
-                                                        PaletteControl::Dismiss,
-                                                        window,
-                                                        cx,
-                                                    )
-                                                },
-                                            ))
-                                            // The prompt editor reads larger than the
-                                            // chrome around it (t3code uses 16px over
-                                            // a 14px UI); +2 keeps that ratio at any
-                                            // configured agent font size.
-                                            .text_size(px(
-                                                cx.global::<AgentSettings>().font_size + 2.0
-                                            ))
-                                            .child(
-                                                div().flex_1().min_w_0().child(
-                                                    Textarea::new(&self.input)
-                                                        .appearance(false)
-                                                        .disabled(
-                                                            branch_flow_working
-                                                                || session_loading
-                                                                || update_suspended,
+                                                    ComposerEnterBehavior::ActivateOrSubmit => this
+                                                        .handle_palette_control(
+                                                            PaletteControl::Activate,
+                                                            window,
+                                                            cx,
                                                         ),
-                                                ),
+                                                }
+                                            },
+                                        ))
+                                        .capture_action(cx.listener(
+                                            |this, _: &IndentInline, window, cx| {
+                                                this.handle_palette_control(
+                                                    PaletteControl::Complete,
+                                                    window,
+                                                    cx,
+                                                )
+                                            },
+                                        ))
+                                        .capture_action(cx.listener(
+                                            |this, _: &Escape, window, cx| {
+                                                this.handle_palette_control(
+                                                    PaletteControl::Dismiss,
+                                                    window,
+                                                    cx,
+                                                )
+                                            },
+                                        ))
+                                        // The prompt editor reads larger than the
+                                        // chrome around it (t3code uses 16px over
+                                        // a 14px UI); +2 keeps that ratio at any
+                                        // configured agent font size.
+                                        .text_size(px(cx.global::<AgentSettings>().font_size + 2.0))
+                                        .child(div().flex_1().min_w_0().child(
+                                            Textarea::new(&self.input).appearance(false).disabled(
+                                                branch_flow_working
+                                                    || session_loading
+                                                    || update_suspended,
                                             ),
-                                    )
-                                    .child(
-                                        h_flex()
-                                            .w_full()
-                                            .px(px(COMPOSER_EDGE_INSET))
-                                            .pb_2()
-                                            .pt_0p5()
-                                            .items_center()
-                                            .gap_2()
-                                            .child(
-                                                div()
-                                                    .flex_1()
-                                                    .min_w_0()
-                                                    .child(self.controls.render_row(self.kind, cx)),
-                                            )
-                                            .children(self.render_last_response(cx))
-                                            // Send stands at the card's trailing
-                                            // corner, past the settings it is
-                                            // qualified by: those say what the next
-                                            // message is sent as, and this is the
-                                            // one control that sends it, so it is
-                                            // the last thing the eye reaches on its
-                                            // way out of the card. Stop replaces
-                                            // Send in place while a turn runs.
-                                            .child(if running {
-                                                Button::new("agent-send")
-                                                    .primary()
-                                                    .size(px(COMPOSER_SEND_BUTTON))
-                                                    .rounded_full()
-                                                    .icon(StopResponseIcon)
-                                                    .tooltip(i18n("agent-action-stop-response"))
-                                                    .accessibility_label(i18n(
-                                                        "agent-action-stop-response",
-                                                    ))
-                                                    .on_click(cx.listener(|this, _, window, cx| {
-                                                        this.interrupt_from_ui(window, cx)
-                                                    }))
-                                            } else {
-                                                Button::new("agent-send")
-                                                    .primary()
-                                                    .disabled(
-                                                        branch_flow_active
-                                                            || session_loading
-                                                            || update_suspended,
-                                                    )
-                                                    .size(px(COMPOSER_SEND_BUTTON))
-                                                    .rounded_full()
-                                                    .icon(IconName::ArrowUp)
-                                                    .tooltip(i18n("agent-action-send-message"))
-                                                    .accessibility_label(i18n(
-                                                        "agent-action-send-message",
-                                                    ))
-                                                    .on_click(cx.listener(|this, _, window, cx| {
-                                                        this.send_user_message(window, cx)
-                                                    }))
-                                            }),
-                                    ),
-                            )
-                            // The status footer reads out what the session has
-                            // spent so far, which is context for the message
-                            // rather than part of composing it. It sits under
-                            // the card on the pane's own surface, so the card's
-                            // edge still ends at the input it encloses.
-                            .child(self.render_composer_status(cx))
-                            .children(command_palette.map(|palette| {
-                                div()
-                                    .absolute()
-                                    .left_0()
-                                    .right_0()
-                                    .bottom(relative(1.))
-                                    .mb_2()
-                                    .occlude()
-                                    .child(palette)
-                            })),
-                    )
+                                        )),
+                                )
+                                .child(
+                                    h_flex()
+                                        .w_full()
+                                        .px(px(COMPOSER_EDGE_INSET))
+                                        .pb_2()
+                                        .pt_0p5()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .min_w_0()
+                                                .child(self.controls.render_row(self.kind, cx)),
+                                        )
+                                        .children(self.render_last_response(cx))
+                                        // Send stands at the card's trailing
+                                        // corner, past the settings it is
+                                        // qualified by: those say what the next
+                                        // message is sent as, and this is the
+                                        // one control that sends it, so it is
+                                        // the last thing the eye reaches on its
+                                        // way out of the card. Stop replaces
+                                        // Send in place while a turn runs.
+                                        .child(if running {
+                                            Button::new("agent-send")
+                                                .primary()
+                                                .size(px(COMPOSER_SEND_BUTTON))
+                                                .rounded_full()
+                                                .icon(StopResponseIcon)
+                                                .tooltip(i18n("agent-action-stop-response"))
+                                                .accessibility_label(i18n(
+                                                    "agent-action-stop-response",
+                                                ))
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    this.interrupt_from_ui(window, cx)
+                                                }))
+                                        } else {
+                                            Button::new("agent-send")
+                                                .primary()
+                                                .disabled(
+                                                    branch_flow_active
+                                                        || session_loading
+                                                        || update_suspended,
+                                                )
+                                                .size(px(COMPOSER_SEND_BUTTON))
+                                                .rounded_full()
+                                                .icon(IconName::ArrowUp)
+                                                .tooltip(i18n("agent-action-send-message"))
+                                                .accessibility_label(i18n(
+                                                    "agent-action-send-message",
+                                                ))
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    this.send_user_message(window, cx)
+                                                }))
+                                        }),
+                                ),
+                        )
+                        // The status footer reads out what the session has
+                        // spent so far, which is context for the message
+                        // rather than part of composing it. It sits under
+                        // the card on the pane's own surface, so the card's
+                        // edge still ends at the input it encloses.
+                        .child(self.render_composer_status(cx))
+                        .children(command_palette.map(|palette| {
+                            div()
+                                .absolute()
+                                .left_0()
+                                .right_0()
+                                .bottom(relative(1.))
+                                .mb_2()
+                                .occlude()
+                                .child(palette)
+                        })),
+                    cx,
+                )
+                .pb_3()
+                .pt_1()
             })
             // Painted last so it sits over the transcript and the composer.
             // Once the state it showed has ended the layer keeps fading with

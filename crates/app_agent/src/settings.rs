@@ -47,6 +47,9 @@ pub struct AgentSettings {
     /// Fallback chain matching the CJK preference the rest of the
     /// application text uses.
     pub font_fallbacks: FontFallbacks,
+    /// Hold the conversation column at a reading width and centre it in the
+    /// pane; off, the column follows the pane width with a fixed margin.
+    pub human_friendly_layout: bool,
 }
 
 impl Global for AgentSettings {}
@@ -88,6 +91,7 @@ impl Default for AgentSettings {
             profiles: Vec::new(),
             background_opacity: 1.0,
             font_fallbacks: FontFallbacks::default(),
+            human_friendly_layout: true,
         }
     }
 }

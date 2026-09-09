@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 
+use crate::defaults::default_bool_true;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum InputStyle {
@@ -434,6 +436,13 @@ pub struct AppearanceConfig {
     /// transcript otherwise plays for it.
     #[serde(default, rename = "reduce-motion")]
     pub reduce_motion: bool,
+    /// Hold the agent conversation column at a reading width and centre it.
+    /// Off, the column follows the pane width with a fixed margin each side.
+    #[serde(
+        default = "default_bool_true",
+        rename = "human-friendly-agent-ui-layout"
+    )]
+    pub human_friendly_agent_ui_layout: bool,
 }
 
 fn default_command_blocks() -> bool {
@@ -474,6 +483,7 @@ impl Default for AppearanceConfig {
             agent_transcript_font_family: default_agent_transcript_font_family(),
             agent_transcript_font_size: default_agent_transcript_font_size(),
             reduce_motion: false,
+            human_friendly_agent_ui_layout: true,
         }
     }
 }

@@ -1673,3 +1673,67 @@ mod surface_palette_tests {
         assert!(!is_dark_surface(rgb(0xFCFBFA).into()));
     }
 }
+
+#[cfg(test)]
+mod reading_column_tests {
+    use gpui::{
+        Context, InteractiveElement as _, IntoElement, ParentElement as _, Render, Styled as _,
+        TestAppContext, VisualTestContext, Window, div, px, relative,
+    };
+    use gpui_component::text::TextView;
+    use gpui_component::{h_flex, v_flex};
+
+    use crate::settings::AgentSettings;
+    use crate::transcript::transcript_column;
+
+    /// A prompt bubble sizes to its own words under a fractional cap, the
+    /// same shape as the transcript's user row. Under the reading column it
+    /// has to keep its single line: a column whose width went indefinite
+    /// would wrap CJK prose one glyph per line.
+    #[gpui::test]
+    fn reading_column_keeps_a_shrink_to_fit_bubble_on_one_line(cx: &mut TestAppContext) {
+        struct ColumnRoot;
+
+        impl Render for ColumnRoot {
+            fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                div().w(px(1400.)).h(px(400.)).child(transcript_column(
+                    h_flex().w_full().justify_end().child(
+                        v_flex().max_w(relative(0.6)).min_w_0().items_end().child(
+                            div()
+                                .debug_selector(|| "bubble".into())
+                                .min_w_0()
+                                .px(px(12.))
+                                .child(TextView::plain("bubble-text", "提交吧")),
+                        ),
+                    ),
+                    cx,
+                ))
+            }
+        }
+
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            cx.set_global(AgentSettings::default());
+        });
+        let (_, cx) = cx.add_window_view(|_, _| ColumnRoot);
+        let cx: &mut VisualTestContext = cx;
+
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+
+        let bubble = cx.debug_bounds("bubble").unwrap();
+        assert!(
+            bubble.size.width > bubble.size.height,
+            "bubble should stay on one line, got {bubble:?}"
+        );
+        // 1400px less the 10% margins leaves 1120px, more than the 880px
+        // measure, so the column is centred in that space and the bubble
+        // ends on its trailing edge: 140 + (1120 - 880) / 2 + 880.
+        assert!(
+            (bubble.right() - px(1140.)).abs() < px(1.),
+            "bubble should end on the centred column's edge, got {bubble:?}"
+        );
+    }
+}

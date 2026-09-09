@@ -411,6 +411,18 @@ fn reduce_motion_is_off_by_default_and_is_saved_when_turned_on() {
     assert!(settings.appearance_config().reduce_motion);
 }
 
+/// The reading column is on for a fresh configuration, and turning it off
+/// is what gets written to disk.
+#[test]
+fn human_friendly_agent_ui_layout_is_on_by_default_and_is_saved_when_turned_off() {
+    let mut settings = AppSettings::default();
+    assert!(settings.human_friendly_agent_ui_layout);
+    assert!(settings.appearance_config().human_friendly_agent_ui_layout);
+
+    settings.human_friendly_agent_ui_layout = false;
+    assert!(!settings.appearance_config().human_friendly_agent_ui_layout);
+}
+
 fn list_pixel_position(state: &ListState) -> f32 {
     let offset = state.logical_scroll_top();
     offset.item_ix as f32 * 20. + offset.offset_in_item.as_f32()
