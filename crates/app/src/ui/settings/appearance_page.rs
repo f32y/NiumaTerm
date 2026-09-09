@@ -301,7 +301,7 @@ pub(super) fn appearance_page(
                         i18n("settings-appearance-tab-width"),
                         SettingField::number_input(
                             NumberFieldOptions {
-                                min: DEFAULT_TAB_WIDTH,
+                                min: MIN_TAB_WIDTH,
                                 max: MAX_TAB_WIDTH,
                                 step: 1.0,
                             },

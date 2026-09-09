@@ -45,7 +45,8 @@ pub(super) const DEFAULT_BACKGROUND_IMAGE_OPACITY: f64 = 0.3;
 pub const DEFAULT_UI_FONT: &str = "Segoe UI";
 #[cfg(not(target_os = "windows"))]
 pub const DEFAULT_UI_FONT: &str = ".SystemUIFont";
-pub const DEFAULT_TAB_WIDTH: f64 = 120.0;
+pub const MIN_TAB_WIDTH: f64 = 120.0;
+pub const DEFAULT_TAB_WIDTH: f64 = 220.0;
 
 /// The app-wide settings model, stored as a gpui global.
 pub struct AppSettings {
@@ -93,7 +94,7 @@ pub struct AppSettings {
     pub agent_transcript_font_family: SharedString,
     /// Font size (px) used by code-oriented agent transcript content.
     pub agent_transcript_font_size: f64,
-    /// Fixed tab width in pixels (DEFAULT_TAB_WIDTH..=MAX_TAB_WIDTH). Ignored
+    /// Fixed tab width in pixels (MIN_TAB_WIDTH..=MAX_TAB_WIDTH). Ignored
     /// while `tab_auto_size` is on.
     pub tab_width: f64,
     /// Shrink tabs toward a minimum as the strip fills, rather than holding
@@ -374,7 +375,7 @@ pub(super) fn terminal_font_or_default(family: &str) -> SharedString {
 /// default for non-finite values.
 pub(super) fn clamp_tab_width(width: f64) -> f64 {
     if width.is_finite() {
-        width.clamp(DEFAULT_TAB_WIDTH, MAX_TAB_WIDTH)
+        width.clamp(MIN_TAB_WIDTH, MAX_TAB_WIDTH)
     } else {
         DEFAULT_TAB_WIDTH
     }

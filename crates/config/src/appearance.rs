@@ -219,7 +219,7 @@ fn default_git_status_refresh_interval() -> u64 {
 }
 
 fn default_tab_width() -> f64 {
-    120.0
+    220.0
 }
 
 /// The proportional face the interface is drawn in.

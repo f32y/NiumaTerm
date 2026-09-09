@@ -96,13 +96,12 @@ pub(crate) use crate::ui::settings::remote_session_page::reconcile_remote_host;
 use crate::ui::settings::remote_session_page::remote_session_page;
 pub(crate) use crate::ui::settings::state::builtin_agent_profile;
 pub use crate::ui::settings::state::{
-    AgentProfile, AgentProfileKind, AgentProfileLauncher, AppSettings, CollapseRows,
-    DEFAULT_TAB_WIDTH, EnvVar, InputStyle, Language, ModelListStyle, Profile, TabBarStyle,
-    WindowBackdrop,
+    AgentProfile, AgentProfileKind, AgentProfileLauncher, AppSettings, CollapseRows, EnvVar,
+    InputStyle, Language, MIN_TAB_WIDTH, ModelListStyle, Profile, TabBarStyle, WindowBackdrop,
 };
 #[cfg(test)]
 use crate::ui::settings::state::{
-    DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE, DEFAULT_BACKGROUND_IMAGE_OPACITY,
+    DEFAULT_AGENT_TRANSCRIPT_FONT_SIZE, DEFAULT_BACKGROUND_IMAGE_OPACITY, DEFAULT_TAB_WIDTH,
     clamp_agent_transcript_font_size, clamp_background_image_opacity, clamp_background_opacity,
     clamp_terminal_font_size, clamp_terminal_line_height, terminal_font_or_default,
     ui_font_or_default,
@@ -135,7 +134,7 @@ const APP_VERSION: &str = env!("NIUMATERM_VERSION");
 const APP_INTERNAL_VERSION: &str = env!("NIUMATERM_INTERNAL_VERSION");
 const RELEASE_PAGE_URL: &str = "https://github.com/f32y/NiumaTerm/releases";
 
-pub const MAX_TAB_WIDTH: f64 = DEFAULT_TAB_WIDTH * 3.0;
+pub const MAX_TAB_WIDTH: f64 = MIN_TAB_WIDTH * 3.0;
 
 pub fn settings_view(cx: &App) -> Settings {
     let profiles = cx.global::<AppSettings>().profiles.clone();

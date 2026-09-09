@@ -22,10 +22,11 @@ fn cursor_shape_dropdown_values_match_config_shapes() {
 
 #[test]
 fn tab_width_clamps_to_allowed_range() {
+    assert_eq!(clamp_tab_width(MIN_TAB_WIDTH), MIN_TAB_WIDTH);
     assert_eq!(clamp_tab_width(DEFAULT_TAB_WIDTH), DEFAULT_TAB_WIDTH);
     assert_eq!(clamp_tab_width(200.0), 200.0);
     assert_eq!(clamp_tab_width(MAX_TAB_WIDTH), MAX_TAB_WIDTH);
-    assert_eq!(clamp_tab_width(10.0), DEFAULT_TAB_WIDTH);
+    assert_eq!(clamp_tab_width(10.0), MIN_TAB_WIDTH);
     assert_eq!(clamp_tab_width(9999.0), MAX_TAB_WIDTH);
     assert_eq!(clamp_tab_width(f64::NAN), DEFAULT_TAB_WIDTH);
 }
