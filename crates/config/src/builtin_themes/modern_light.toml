@@ -185,3 +185,41 @@ overlay = "#0000004D"
 "base.magenta.light" = "#BC05BC"
 "base.cyan" = "#0598BC"
 "base.cyan.light" = "#0598BC"
+
+# Syntax palette for code blocks, drawn from the terminal palette above so
+# a snippet in the Agent pane reads in the same hues as the shell beside it.
+# The palette's green is too bright to read on white, so strings take the
+# red, as VS Code Light does.
+[colors.ui.highlight]
+"editor.background" = "#FFFFFF"
+"editor.foreground" = "#202020"
+"editor.line_number" = "#666666"
+"editor.active_line_number" = "#202020"
+"editor.invisible" = "#66666666"
+
+[colors.ui.highlight.syntax]
+comment = { color = "#666666" }
+"comment.doc" = { color = "#666666" }
+keyword = { color = "#0451A5" }
+tag = { color = "#0451A5" }
+link_text = { color = "#0451A5" }
+function = { color = "#949800" }
+type = { color = "#0598BC" }
+constructor = { color = "#0598BC" }
+enum = { color = "#0598BC" }
+attribute = { color = "#0598BC" }
+string = { color = "#CD3131" }
+"string.escape" = { color = "#CD3131" }
+"string.regex" = { color = "#CD3131" }
+"string.special" = { color = "#CD3131" }
+"string.special.symbol" = { color = "#CD3131" }
+"text.literal" = { color = "#CD3131" }
+"text.code.span" = { color = "#CD3131" }
+number = { color = "#BC05BC" }
+boolean = { color = "#BC05BC" }
+constant = { color = "#BC05BC" }
+"variable.special" = { color = "#BC05BC" }
+link_uri = { color = "#666666", font_style = "italic" }
+title = { color = "#0451A5", font_weight = 600 }
+emphasis = { font_style = "italic" }
+"emphasis.strong" = { font_weight = 700 }

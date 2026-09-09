@@ -65,10 +65,12 @@ pub(super) fn ui_theme_config(value: &UiTheme) -> Option<Rc<ComponentThemeConfig
 
     let mut colors = value.colors.clone();
 
-    // Shadow and the corner radii live at the top level of `ThemeConfig`, while
-    // the theme file format keeps them under `[colors.ui]`.
+    // Shadow, the corner radii, and the syntax palette live at the top level
+    // of `ThemeConfig`, while the theme file format keeps them under
+    // `[colors.ui]`. The color table's deserializer drops keys it does not
+    // know, so a palette left in place would vanish silently.
     if let Some(colors) = colors.as_table_mut() {
-        for key in ["shadow", "radius", "radius.lg"] {
+        for key in ["shadow", "radius", "radius.lg", "highlight"] {
             if let Some(value) = colors.remove(key) {
                 config.insert(key.to_string(), value);
             }

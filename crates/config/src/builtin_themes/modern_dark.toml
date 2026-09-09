@@ -185,3 +185,39 @@ overlay = "#0000004D"
 "base.magenta.light" = "#D670D6"
 "base.cyan" = "#11A8CD"
 "base.cyan.light" = "#29B8DB"
+
+# Syntax palette for code blocks, drawn from the terminal palette above so
+# a snippet in the Agent pane reads in the same hues as the shell beside it.
+[colors.ui.highlight]
+"editor.background" = "#121314"
+"editor.foreground" = "#D6D6D6"
+"editor.line_number" = "#666666"
+"editor.active_line_number" = "#D6D6D6"
+"editor.invisible" = "#66666666"
+
+[colors.ui.highlight.syntax]
+comment = { color = "#666666" }
+"comment.doc" = { color = "#666666" }
+keyword = { color = "#3B8EEA" }
+tag = { color = "#3B8EEA" }
+link_text = { color = "#3B8EEA" }
+function = { color = "#F5F543" }
+type = { color = "#29B8DB" }
+constructor = { color = "#29B8DB" }
+enum = { color = "#29B8DB" }
+attribute = { color = "#29B8DB" }
+string = { color = "#23D18B" }
+"string.escape" = { color = "#23D18B" }
+"string.regex" = { color = "#23D18B" }
+"string.special" = { color = "#23D18B" }
+"string.special.symbol" = { color = "#23D18B" }
+"text.literal" = { color = "#23D18B" }
+"text.code.span" = { color = "#23D18B" }
+number = { color = "#D670D6" }
+boolean = { color = "#D670D6" }
+constant = { color = "#D670D6" }
+"variable.special" = { color = "#D670D6" }
+link_uri = { color = "#666666", font_style = "italic" }
+title = { color = "#3B8EEA", font_weight = 600 }
+emphasis = { font_style = "italic" }
+"emphasis.strong" = { font_weight = 700 }

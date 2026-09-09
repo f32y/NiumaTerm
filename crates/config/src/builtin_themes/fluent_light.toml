@@ -182,3 +182,41 @@ overlay = "#0000004D"
 "base.magenta.light" = "#C678DD"
 "base.cyan" = "#0997B3"
 "base.cyan.light" = "#56B6C2"
+
+# Syntax palette for code blocks, drawn from the terminal palette above so
+# a snippet in the Agent pane reads in the same hues as the shell beside it.
+# The palette has no mid gray, so comments use One Light's own comment
+# gray.
+[colors.ui.highlight]
+"editor.background" = "#FFFFFF"
+"editor.foreground" = "#383A42"
+"editor.line_number" = "#A0A1A7"
+"editor.active_line_number" = "#383A42"
+"editor.invisible" = "#A0A1A766"
+
+[colors.ui.highlight.syntax]
+comment = { color = "#A0A1A7" }
+"comment.doc" = { color = "#A0A1A7" }
+keyword = { color = "#0184BC" }
+tag = { color = "#0184BC" }
+link_text = { color = "#0184BC" }
+function = { color = "#9D5D00" }
+type = { color = "#0997B3" }
+constructor = { color = "#0997B3" }
+enum = { color = "#0997B3" }
+attribute = { color = "#0997B3" }
+string = { color = "#0F7B0F" }
+"string.escape" = { color = "#0F7B0F" }
+"string.regex" = { color = "#0F7B0F" }
+"string.special" = { color = "#0F7B0F" }
+"string.special.symbol" = { color = "#0F7B0F" }
+"text.literal" = { color = "#0F7B0F" }
+"text.code.span" = { color = "#0F7B0F" }
+number = { color = "#A626A4" }
+boolean = { color = "#A626A4" }
+constant = { color = "#A626A4" }
+"variable.special" = { color = "#A626A4" }
+link_uri = { color = "#A0A1A7", font_style = "italic" }
+title = { color = "#0184BC", font_weight = 600 }
+emphasis = { font_style = "italic" }
+"emphasis.strong" = { font_weight = 700 }

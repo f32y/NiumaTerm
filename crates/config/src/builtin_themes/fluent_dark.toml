@@ -183,3 +183,41 @@ overlay = "#0000004D"
 "base.magenta.light" = "#B4009E"
 "base.cyan" = "#3A96DD"
 "base.cyan.light" = "#61D6D6"
+
+# Syntax palette for code blocks, drawn from the terminal palette above so
+# a snippet in the Agent pane reads in the same hues as the shell beside it.
+# Campbell's bright purple is too dark to read on the base surface, so
+# numbers take the bright red instead.
+[colors.ui.highlight]
+"editor.background" = "#1C1C1C"
+"editor.foreground" = "#CCCCCC"
+"editor.line_number" = "#767676"
+"editor.active_line_number" = "#CCCCCC"
+"editor.invisible" = "#76767666"
+
+[colors.ui.highlight.syntax]
+comment = { color = "#767676" }
+"comment.doc" = { color = "#767676" }
+keyword = { color = "#3B78FF" }
+tag = { color = "#3B78FF" }
+link_text = { color = "#3B78FF" }
+function = { color = "#F9F1A5" }
+type = { color = "#61D6D6" }
+constructor = { color = "#61D6D6" }
+enum = { color = "#61D6D6" }
+attribute = { color = "#61D6D6" }
+string = { color = "#16C60C" }
+"string.escape" = { color = "#16C60C" }
+"string.regex" = { color = "#16C60C" }
+"string.special" = { color = "#16C60C" }
+"string.special.symbol" = { color = "#16C60C" }
+"text.literal" = { color = "#16C60C" }
+"text.code.span" = { color = "#16C60C" }
+number = { color = "#E74856" }
+boolean = { color = "#E74856" }
+constant = { color = "#E74856" }
+"variable.special" = { color = "#E74856" }
+link_uri = { color = "#767676", font_style = "italic" }
+title = { color = "#3B78FF", font_weight = 600 }
+emphasis = { font_style = "italic" }
+"emphasis.strong" = { font_weight = 700 }

@@ -185,3 +185,41 @@ chart_bearish = "#EF2929"
 "base.magenta.light" = "#AD7FA8"
 "base.cyan" = "#06989A"
 "base.cyan.light" = "#34E2E2"
+
+# Syntax palette for code blocks, drawn from the terminal palette above so
+# a snippet in the Agent pane reads in the same hues as the shell beside it.
+# Comments use Tango's aluminium step between the palette's bright black
+# and white; the bright black is too faint on the aubergine surface.
+[colors.ui.highlight]
+"editor.background" = "#300A24"
+"editor.foreground" = "#F7F7F7"
+"editor.line_number" = "#888A85"
+"editor.active_line_number" = "#F7F7F7"
+"editor.invisible" = "#888A8566"
+
+[colors.ui.highlight.syntax]
+comment = { color = "#888A85" }
+"comment.doc" = { color = "#888A85" }
+keyword = { color = "#729FCF" }
+tag = { color = "#729FCF" }
+link_text = { color = "#729FCF" }
+function = { color = "#FCE94F" }
+type = { color = "#34E2E2" }
+constructor = { color = "#34E2E2" }
+enum = { color = "#34E2E2" }
+attribute = { color = "#34E2E2" }
+string = { color = "#8AE234" }
+"string.escape" = { color = "#8AE234" }
+"string.regex" = { color = "#8AE234" }
+"string.special" = { color = "#8AE234" }
+"string.special.symbol" = { color = "#8AE234" }
+"text.literal" = { color = "#8AE234" }
+"text.code.span" = { color = "#8AE234" }
+number = { color = "#AD7FA8" }
+boolean = { color = "#AD7FA8" }
+constant = { color = "#AD7FA8" }
+"variable.special" = { color = "#AD7FA8" }
+link_uri = { color = "#888A85", font_style = "italic" }
+title = { color = "#729FCF", font_weight = 600 }
+emphasis = { font_style = "italic" }
+"emphasis.strong" = { font_weight = 700 }

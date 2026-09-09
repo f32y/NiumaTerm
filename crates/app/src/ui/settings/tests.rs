@@ -520,7 +520,8 @@ fn built_in_ui_themes_parse_into_component_config() {
 
 /// Color names a theme file states under `[colors.ui]`. The corner radii share
 /// that section in the file format while being a separate choice a theme may
-/// leave to the application, so they are not part of color coverage.
+/// leave to the application, and the syntax palette is a table of its own, so
+/// neither is part of color coverage.
 fn ui_color_names(name: &str) -> BTreeSet<String> {
     let theme: ConfigTheme = toml::from_str(builtin_theme_source(name).unwrap()).unwrap();
 
@@ -531,7 +532,12 @@ fn ui_color_names(name: &str) -> BTreeSet<String> {
         .as_table()
         .unwrap()
         .keys()
-        .filter(|key| !matches!(key.as_str(), "radius" | "radius.lg" | "shadow"))
+        .filter(|key| {
+            !matches!(
+                key.as_str(),
+                "radius" | "radius.lg" | "shadow" | "highlight"
+            )
+        })
         .map(ToString::to_string)
         .collect()
 }
@@ -556,6 +562,40 @@ fn built_in_themes_state_the_same_colors() {
             missing.is_empty() && extra.is_empty(),
             "{name} misses {missing:?} and adds {extra:?}"
         );
+    }
+}
+
+/// A theme that states no syntax palette falls back to the component
+/// library's palette for its mode, which is tuned to the library's own
+/// surfaces rather than the theme's. Every built-in therefore states a palette
+/// of its own, and the palette's editor background sits on the same side of
+/// mid-gray as the theme's mode so light colors never land on a light surface.
+#[test]
+fn built_in_themes_state_a_syntax_palette_for_their_mode() {
+    for builtin in BUILTIN_THEMES {
+        let name = builtin.name;
+        let theme: ConfigTheme = toml::from_str(builtin.source).unwrap();
+        let config = ui_theme_config(&theme.ui_theme().unwrap()).unwrap();
+        let highlight = config
+            .highlight
+            .as_ref()
+            .unwrap_or_else(|| panic!("{name} states no syntax palette"));
+
+        let background = highlight
+            .editor_background
+            .unwrap_or_else(|| panic!("{name} states no editor background"));
+        assert_eq!(background.l < 0.5, config.mode.is_dark(), "{name}");
+
+        let syntax = &highlight.syntax;
+        for (role, style) in [
+            ("comment", &syntax.comment),
+            ("keyword", &syntax.keyword),
+            ("string", &syntax.string),
+            ("type", &syntax.type_),
+            ("number", &syntax.number),
+        ] {
+            assert!(style.is_some(), "{name} states no {role} color");
+        }
     }
 }
 

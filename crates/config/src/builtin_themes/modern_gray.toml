@@ -183,3 +183,41 @@ chart_bearish = "#CA233A"
 "base.magenta.light" = "#5E2BB4"
 "base.cyan" = "#267F99"
 "base.cyan.light" = "#20999D"
+
+# Syntax palette for code blocks, drawn from the terminal palette above so
+# a snippet in the Agent pane reads in the same hues as the shell beside it.
+# Comments use the white slot, which this palette keeps as a mid gray;
+# the bright black is too faint on the gray surface.
+[colors.ui.highlight]
+"editor.background" = "#E0E0E0"
+"editor.foreground" = "#292929"
+"editor.line_number" = "#666666"
+"editor.active_line_number" = "#292929"
+"editor.invisible" = "#66666666"
+
+[colors.ui.highlight.syntax]
+comment = { color = "#666666" }
+"comment.doc" = { color = "#666666" }
+keyword = { color = "#0E72A4" }
+tag = { color = "#0E72A4" }
+link_text = { color = "#0E72A4" }
+function = { color = "#806D0A" }
+type = { color = "#267F99" }
+constructor = { color = "#267F99" }
+enum = { color = "#267F99" }
+attribute = { color = "#267F99" }
+string = { color = "#2E7D32" }
+"string.escape" = { color = "#2E7D32" }
+"string.regex" = { color = "#2E7D32" }
+"string.special" = { color = "#2E7D32" }
+"string.special.symbol" = { color = "#2E7D32" }
+"text.literal" = { color = "#2E7D32" }
+"text.code.span" = { color = "#2E7D32" }
+number = { color = "#871094" }
+boolean = { color = "#871094" }
+constant = { color = "#871094" }
+"variable.special" = { color = "#871094" }
+link_uri = { color = "#666666", font_style = "italic" }
+title = { color = "#0E72A4", font_weight = 600 }
+emphasis = { font_style = "italic" }
+"emphasis.strong" = { font_weight = 700 }
