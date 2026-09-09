@@ -7,7 +7,7 @@ use nmt_app_agent::AgentKind;
 use nmt_config::local_state::TabState;
 use nmt_config::system::WarnBeforeTerminatingShell;
 
-use crate::ui::shell::render::TAB_STRIP_MIN_WIDTH;
+use crate::ui::shell::render::{TAB_STRIP_MIN_WIDTH, title_bar_leading_region};
 use crate::ui::shell::{
     InlineRename, InlineRenameStyle, TabSurface, should_confirm_close, should_confirm_tab_close,
 };
@@ -169,10 +169,7 @@ impl gpui::Render for TitleBarProbeView {
             .child(
                 TitleBar::new()
                     .child(
-                        h_flex()
-                            .w(px(self.1))
-                            .min_w_0()
-                            .overflow_hidden()
+                        title_bar_leading_region(self.1)
                             .on_prepaint(rec("left", probe.clone()))
                             .child(div().child(Button::new("a").ghost().icon(IconName::Settings)))
                             .child(div().child(Button::new("b").ghost().icon(IconName::Settings))),
@@ -218,7 +215,9 @@ fn title_bar_controls_stay_inside_a_narrow_window(cx: &mut TestAppContext) {
     });
     let mut cx = VisualTestContext::from_window(handle.into(), cx);
 
-    for width in [1200.0f32, 900.0, 700.0, MIN_WINDOW_WIDTH] {
+    // Also reserve the Windows caption controls and title bar padding:
+    // 640 - 3 * 46 - 8 leaves 494 pixels for application content.
+    for width in [1200.0f32, 900.0, 700.0, MIN_WINDOW_WIDTH, 494.0] {
         probe.borrow_mut().clear();
         cx.simulate_resize(size(px(width), px(800.)));
         cx.run_until_parked();

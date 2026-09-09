@@ -48,6 +48,17 @@ const TITLE_BAR_CHIP_PADDING_X: f32 = 8.0;
 const TITLE_BAR_CHIP_PADDING_Y: f32 = 2.0;
 const TITLE_BAR_CHIP_ICON: f32 = 11.0;
 
+pub(super) fn title_bar_leading_region(width: f32) -> Div {
+    // Sidebar alignment yields to the tab strip on narrow windows, while
+    // the minimum width keeps every leading control reachable.
+    h_flex()
+        .w(px(width))
+        .min_w(px(TITLE_BAR_CONTROLS_WIDTH))
+        .flex_initial()
+        .overflow_hidden()
+        .gap(px(TITLE_BAR_BUTTON_GAP))
+}
+
 impl Shell {
     fn bind_actions(element: Div, cx: &mut Context<Self>) -> Div {
         element
@@ -110,15 +121,7 @@ impl Shell {
                 }
             }))
             .child(
-                h_flex()
-                    // Subtract the title bar's existing inset so the tabs line up
-                    // with the content surface after its sidebar gutter.
-                    // Keep all leading controls reachable when the sidebar is narrow.
-                    .w(px(leading_width))
-                    .min_w(px(TITLE_BAR_CONTROLS_WIDTH))
-                    .flex_none()
-                    .overflow_hidden()
-                    .gap(px(TITLE_BAR_BUTTON_GAP))
+                title_bar_leading_region(leading_width)
                     .child(
                         div()
                             .flex_none()
