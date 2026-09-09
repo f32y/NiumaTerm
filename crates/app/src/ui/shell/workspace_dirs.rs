@@ -8,12 +8,15 @@
 use std::{collections, fs, iter, path};
 
 use gpui::prelude::*;
-use gpui::{Context, Div, PathPromptOptions, Render, SharedString, Window, div, px};
+use gpui::{Context, Div, PathPromptOptions, Render, SharedString, Window, div, px, relative};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::dialog::{
     DIALOG_BUTTON_MIN_WIDTH, DialogAction, DialogButtonProps, DialogClose, DialogFooter,
 };
-use gpui_component::{ActiveTheme as _, Sizable as _, WindowExt as _, h_flex, v_flex};
+use gpui_component::tooltip::Tooltip;
+use gpui_component::{
+    ActiveTheme as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex, v_flex,
+};
 use nmt_i18n::i18n;
 
 use crate::ui::Shell;
@@ -199,21 +202,32 @@ impl WorkspaceDirsEditor {
         let unavailable = self.available.get(index).is_some_and(|ok| !ok);
         let promote = path.clone();
         let detach = path.clone();
+        let name = path::Path::new(&path)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.clone());
 
         h_flex()
             .w_full()
-            .py_1()
+            .px_3()
+            .py_3()
             .gap_2()
             .items_center()
+            .child(
+                Icon::new(IconName::Folder)
+                    .size_4()
+                    .text_color(cx.theme().muted_foreground),
+            )
             .child(
                 div()
                     .id(("workspace-dir", index))
                     .flex_1()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
+                    .min_w_0()
+                    .truncate()
                     .text_sm()
                     .aria_label(path.clone())
-                    .child(path.clone()),
+                    .child(name)
+                    .tooltip(move |window, cx| Tooltip::new(path.clone()).build(window, cx)),
             )
             .when(unavailable, |this| {
                 this.child(
@@ -225,13 +239,20 @@ impl WorkspaceDirsEditor {
             })
             .child(if primary {
                 div()
+                    .flex_shrink_0()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .bg(cx.theme().muted)
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(i18n("shell-workspace-dirs-primary"))
                     .into_any_element()
             } else {
                 Button::new(("workspace-dir-primary", index))
-                    .ghost()
+                    .outline()
                     .xsmall()
                     .label(i18n("shell-workspace-dirs-make-primary"))
                     .on_click(cx.listener(move |editor, _, _, cx| {
@@ -241,7 +262,7 @@ impl WorkspaceDirsEditor {
             })
             .child(
                 Button::new(("workspace-dir-remove", index))
-                    .ghost()
+                    .outline()
                     .xsmall()
                     .label(i18n("shell-workspace-dirs-remove"))
                     .on_click(cx.listener(move |editor, _, _, cx| {
@@ -270,34 +291,50 @@ impl Render for WorkspaceDirsEditor {
             .collect();
 
         v_flex()
-            .gap_1()
-            .child(div().text_sm().child(i18n("shell-workspace-dirs-label")))
-            .child(v_flex().my_2().children(rows))
+            .gap_3()
             .child(
-                h_flex().child(
-                    Button::new("workspace-dir-add")
-                        .ghost()
-                        .small()
-                        .label(i18n("shell-workspace-dirs-add"))
-                        .on_click(cx.listener(|_editor, _, _, cx| {
-                            let rx = cx.prompt_for_paths(PathPromptOptions {
-                                files: false,
-                                directories: true,
-                                multiple: true,
-                                prompt: None,
-                                file_types: Vec::new(),
-                            });
+                h_flex()
+                    .w_full()
+                    .justify_between()
+                    .items_center()
+                    .child(div().text_sm().child(i18n("shell-workspace-dirs-label")))
+                    .child(
+                        Button::new("workspace-dir-add")
+                            .outline()
+                            .icon(IconName::Plus)
+                            .small()
+                            .label(i18n("shell-workspace-dirs-add"))
+                            .on_click(cx.listener(|_editor, _, _, cx| {
+                                let rx = cx.prompt_for_paths(PathPromptOptions {
+                                    files: false,
+                                    directories: true,
+                                    multiple: true,
+                                    prompt: None,
+                                    file_types: Vec::new(),
+                                });
 
-                            cx.spawn(async move |editor, cx| {
-                                if let Ok(Ok(Some(paths))) = rx.await {
-                                    let _ = editor
-                                        .update(cx, |editor, cx| editor.add_directories(paths, cx));
-                                }
-                            })
-                            .detach();
-                        })),
-                ),
+                                cx.spawn(async move |editor, cx| {
+                                    if let Ok(Ok(Some(paths))) = rx.await {
+                                        let _ = editor.update(cx, |editor, cx| {
+                                            editor.add_directories(paths, cx)
+                                        });
+                                    }
+                                })
+                                .detach();
+                            })),
+                    ),
             )
+            .when(!rows.is_empty(), |this| {
+                this.child(
+                    v_flex()
+                        .w_full()
+                        .border_1()
+                        .border_color(cx.theme().border)
+                        .rounded_lg()
+                        .overflow_hidden()
+                        .children(rows),
+                )
+            })
             .children(
                 self.notice
                     .clone()
@@ -329,7 +366,7 @@ impl Shell {
         let editor = cx.new(|cx| WorkspaceDirsEditor::new(Some(roots), cx));
         let shell = cx.entity();
 
-        window.open_dialog(cx, move |dialog, window, _| {
+        window.open_dialog(cx, move |dialog, window, cx| {
             let editor = editor.clone();
             let content_editor = editor.clone();
             let shell = shell.clone();
@@ -347,6 +384,19 @@ impl Shell {
                 )
                 .footer(
                     DialogFooter::new()
+                        .w_full()
+                        .border_t_1()
+                        .border_color(cx.theme().border)
+                        .pt_4()
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_xs()
+                                .line_height(relative(1.5))
+                                .text_color(cx.theme().muted_foreground)
+                                .child(i18n("shell-workspace-dirs-applies-next")),
+                        )
                         .child(
                             DialogAction::new().child(
                                 Button::new("save-ws-dirs")
@@ -363,16 +413,7 @@ impl Shell {
                             ),
                         ),
                 )
-                .content(move |content, _, cx| {
-                    content.child(
-                        v_flex().gap_2().child(content_editor.clone()).child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(i18n("shell-workspace-dirs-applies-next")),
-                        ),
-                    )
-                })
+                .content(move |content, _, _| content.child(content_editor.clone()))
                 .on_ok(move |_, _, cx| {
                     let Some(roots) = editor.read(cx).roots().cloned() else {
                         return false;
