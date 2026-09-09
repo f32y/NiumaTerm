@@ -32,10 +32,6 @@ pub(crate) struct SessionRuntime {
     /// state. Held rather than derived from [`Status::Exited`], which a
     /// conversation that ran and then ended also reaches.
     pub(crate) start_failure: Option<String>,
-    /// Whether the start has taken long enough to be worth covering the tab
-    /// for. Set by a timer rather than compared against a clock at render
-    /// time, because a pane waiting on its backend repaints for nothing else.
-    pub(crate) start_overlay_due: bool,
     /// Process replacement for a provider update is pane state rather than a
     /// terminal exit. Keeping it separate retains transcript and composer
     /// contents while preventing input from reaching a missing backend.

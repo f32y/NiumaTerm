@@ -298,18 +298,13 @@ impl AgentPane {
         Some(BlockingOverlay::new(body).into_any_element())
     }
 
-    /// The harness's start, over the tab it is starting in. Which panes wear
-    /// one, and how long a start runs before they do, is the session's own
-    /// call.
+    /// The harness's start, over the tab it is starting in. When a start
+    /// counts as still running is the session's own call.
     ///
     /// A start that failed keeps the overlay and answers with the two things
     /// left to do, because the pane behind it has no conversation to return
     /// to: the transcript holds one error row and nothing else.
     pub(super) fn render_start_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.wears_start_overlay() {
-            return None;
-        }
-
         let failure = self.runtime.start_failure.clone();
         if failure.is_none() && !self.shows_start_overlay() {
             return None;
