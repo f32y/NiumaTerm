@@ -37,6 +37,14 @@ const MAX_CREDENTIALS_BYTES: u64 = 128 * 1024;
 /// so the launcher a profile configures is out of reach here and the published
 /// name is what the shell is asked to resolve.
 const CLI_EXECUTABLE: &str = "claude";
+/// Settings that apply to the probe's own CLI session only. A fresh
+/// interactive session turns Remote Control on at startup unless a setting
+/// says otherwise, and with it on the CLI registers a remote session named
+/// after this machine as soon as it starts. The probe is killed within seconds
+/// and never unregisters that session, so every run would leave one more dead
+/// entry in Claude's remote-session lists. The override travels with the launch
+/// so the outcome stays the same whatever the user's global settings say.
+const CLI_SETTINGS_OVERRIDE: &str = r#"{"remoteControlAtStartup":false}"#;
 const OAUTH_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 const OAUTH_BETA_HEADER: &str = "oauth-2025-04-20";
 const CLAUDE_CODE_USER_AGENT: &str = "claude-code/2.1.0";
@@ -314,6 +322,8 @@ fn interactive_launch() -> (String, Vec<String>) {
             "/D".to_string(),
             "/C".to_string(),
             CLI_EXECUTABLE.to_string(),
+            "--settings".to_string(),
+            CLI_SETTINGS_OVERRIDE.to_string(),
         ],
     )
 }
@@ -322,7 +332,10 @@ fn interactive_launch() -> (String, Vec<String>) {
 fn interactive_launch() -> (String, Vec<String>) {
     (
         default_shell(),
-        vec!["-c".to_string(), format!("exec {CLI_EXECUTABLE}")],
+        vec![
+            "-c".to_string(),
+            format!("exec {CLI_EXECUTABLE} --settings '{CLI_SETTINGS_OVERRIDE}'"),
+        ],
     )
 }
 
