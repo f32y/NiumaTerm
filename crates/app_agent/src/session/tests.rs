@@ -381,6 +381,51 @@ mod conversation_title_tests {
     }
 
     #[gpui::test]
+    fn rejected_control_replies_keep_interaction_cards(cx: &mut TestAppContext) {
+        use nmt_agent_utils::chat::{Event, Question, QuestionInput};
+
+        let (pane, window) = open_pane(cx, AgentProfileKind::Codex, None);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, cx| {
+                pane.runtime.backend = Some(Backend::Test(TestBackend::new(
+                    [],
+                    SlashCommandOutcome::NotReady,
+                    Vec::new(),
+                )));
+                pane.apply_event(
+                    Event::ApprovalRequested {
+                        description: "Run a command".into(),
+                    },
+                    cx,
+                );
+                pane.respond_approval("accept", cx);
+                assert!(pane.prompts.approval().is_some());
+                pane.apply_event(Event::ApprovalResolved, cx);
+                pane.runtime.status = Status::Idle;
+                pane.apply_event(
+                    Event::QuestionsRequested {
+                        questions: vec![Question {
+                            input: QuestionInput::Text,
+                            header: None,
+                            question: "Describe the change".into(),
+                            multi_select: false,
+                            options: Vec::new(),
+                        }],
+                    },
+                    cx,
+                );
+                pane.skip_current_questions(cx);
+                let question = pane
+                    .prompts
+                    .questions()
+                    .expect("rejected answer remains visible");
+                assert!(question.error.is_some());
+            });
+        });
+    }
+
+    #[gpui::test]
     fn accepted_codex_prompt_publishes_a_provisional_title(cx: &mut TestAppContext) {
         let (pane, window) = open_pane(cx, AgentProfileKind::Codex, None);
         let mut cx = VisualTestContext::from_window(window.into(), cx);

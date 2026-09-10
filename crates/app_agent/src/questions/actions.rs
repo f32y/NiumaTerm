@@ -287,8 +287,11 @@ impl AgentPane {
         let result = match id.as_deref() {
             Some(id) => backend.respond_input(id, answers, &self.controls.settings),
             None => {
-                backend.respond_questions(answers);
-                Ok(())
+                if backend.respond_questions(answers) {
+                    Ok(())
+                } else {
+                    Err("The question response could not be queued.".to_string())
+                }
             }
         };
         let prompt = &mut self.prompts.batches[index];

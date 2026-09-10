@@ -467,10 +467,7 @@ impl Backend {
     /// caller keeps the recent-sessions list open and reports why.
     pub(crate) fn resume_thread(&mut self, thread_id: &str) -> bool {
         match self {
-            Backend::Codex(session) => {
-                session.resume_thread(thread_id);
-                true
-            }
+            Backend::Codex(session) => session.resume_thread(thread_id),
             // The harness answers whether it attached, because a conversation
             // rooted in another directory is one this tab cannot adopt.
             Backend::DeepSeek(session) => session.resume_thread(thread_id),
@@ -541,7 +538,9 @@ impl Backend {
     /// user-authored title of its own.
     pub(crate) fn rename_session(&mut self, title: &str) {
         match self {
-            Backend::Claude(session) => session.rename_session(title),
+            Backend::Claude(session) => {
+                session.rename_session(title);
+            }
             Backend::Codex(session) => session.rename_thread(title),
             Backend::DeepSeek(_) => {}
             #[cfg(test)]
@@ -586,23 +585,23 @@ impl Backend {
         }
     }
 
-    pub(crate) fn interrupt(&mut self) {
+    pub(crate) fn interrupt(&mut self) -> bool {
         match self {
             Backend::Codex(session) => session.interrupt(),
             Backend::Claude(session) => session.interrupt(),
             Backend::DeepSeek(session) => session.interrupt(),
             #[cfg(test)]
-            Backend::Test(_) => {}
+            Backend::Test(_) => false,
         }
     }
 
-    pub(crate) fn respond_approval(&mut self, decision: &str) {
+    pub(crate) fn respond_approval(&mut self, decision: &str) -> bool {
         match self {
             Backend::Codex(session) => session.respond_approval(decision),
             Backend::Claude(session) => session.respond_approval(decision),
             Backend::DeepSeek(session) => session.respond_approval(decision),
             #[cfg(test)]
-            Backend::Test(_) => {}
+            Backend::Test(_) => false,
         }
     }
 
@@ -709,13 +708,13 @@ impl Backend {
     }
 
     /// Answer a provider's selection request using its original response format.
-    pub(crate) fn respond_questions(&mut self, answers: Option<Vec<Vec<String>>>) {
+    pub(crate) fn respond_questions(&mut self, answers: Option<Vec<Vec<String>>>) -> bool {
         match self {
             Backend::Claude(session) => session.respond_questions(answers),
             Backend::DeepSeek(session) => session.respond_questions(answers),
-            Backend::Codex(_) => {}
+            Backend::Codex(_) => false,
             #[cfg(test)]
-            Backend::Test(_) => {}
+            Backend::Test(_) => false,
         }
     }
 }

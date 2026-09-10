@@ -42,6 +42,26 @@ fn disconnected_session() -> Session {
 }
 
 #[test]
+fn disconnected_controls_reject_without_consuming_approval_or_switching_state() {
+    let mut session = disconnected_session();
+    session.conversation.thread_id = Some("parent".into());
+    session.conversation.current_turn = Some("turn".into());
+    session.conversation.pending_approval = Some(42);
+    assert!(!session.interrupt());
+    assert!(!session.respond_approval("accept"));
+    assert_eq!(session.conversation.pending_approval, Some(42));
+    assert!(!session.resume_thread("other"));
+    assert!(!session.request_fork_checkpoints());
+    assert!(
+        session
+            .fork_thread(&ForkAnchor::CodexThrough("turn".into()))
+            .is_err()
+    );
+    assert_eq!(session.thread_id(), Some("parent"));
+    assert!(session.control.is_empty());
+}
+
+#[test]
 fn history_refresh_rejects_old_pages_and_keeps_the_latest_cursor() {
     let mut session = disconnected_session();
     let old = session.control.next_id();
@@ -86,13 +106,11 @@ fn latest_thread_selection_wins_over_late_resume_and_fork_results() {
     let mut session = disconnected_session();
     session.conversation.thread_id = Some("parent".into());
     let resume = session.control.next_id();
-    session.resume_thread("old-choice");
+    session.send_query(QueryKind::Resume, json!({"method": "thread/resume"}));
     let fork = session.control.next_id();
-    session
-        .fork_thread(&ForkAnchor::CodexThrough("turn".into()))
-        .unwrap();
+    session.send_query(QueryKind::Fork, json!({"method": "thread/fork"}));
     let latest = session.control.next_id();
-    session.resume_thread("chosen");
+    session.send_query(QueryKind::Resume, json!({"method": "thread/resume"}));
     for id in [resume, fork] {
         assert!(
             session
@@ -120,16 +138,16 @@ fn checkpoint_refresh_and_thread_switch_invalidate_old_results() {
     let mut session = disconnected_session();
     session.conversation.thread_id = Some("parent".into());
     let old = session.control.next_id();
-    assert!(session.request_fork_checkpoints());
+    session.send_query(QueryKind::Checkpoints, json!({"method": "thread/read"}));
     let current = session.control.next_id();
-    assert!(session.request_fork_checkpoints());
+    session.send_query(QueryKind::Checkpoints, json!({"method": "thread/read"}));
     assert!(
         session
             .process(json!({"id": old, "error": {"message": "stale"}}))
             .is_empty()
     );
     let resume = session.control.next_id();
-    session.resume_thread("new");
+    session.send_query(QueryKind::Resume, json!({"method": "thread/resume"}));
     session.process(json!({"id": resume, "result": {"thread": {"id": "new", "turns": []}}}));
     assert!(
         session

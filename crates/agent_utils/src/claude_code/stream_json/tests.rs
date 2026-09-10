@@ -129,6 +129,30 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
     session.rename_session("User title");
     assert!(session.process(json!({"type": "control_response", "response": {"request_id": id, "subtype": "success", "response": {"title": "Late title"}}})).is_empty());
     session.compacting = true;
+    session
+        .process
+        .shutdown(Duration::from_secs(1), true)
+        .unwrap();
+    session.control.pending_approval = Some(PendingApproval {
+        request_id: "blocked-approval".into(),
+        input: json!({}),
+        suggestions: None,
+    });
+    session.control.pending_questions = Some(PendingQuestions {
+        request_id: "blocked-questions".into(),
+        input: json!({}),
+        questions: Vec::new(),
+    });
+    assert!(!session.respond_approval("accept"));
+    assert!(!session.respond_questions(None));
+    assert!(session.control.pending_approval.is_some());
+    assert!(session.control.pending_questions.is_some());
+    assert!(!session.interrupt());
+    assert!(!session.rename_session("Not queued"));
+    assert!(matches!(
+        session.rewind_files("checkpoint"),
+        SlashCommandOutcome::NotReady
+    ));
     session.active_slash_command = Some("compact".into());
     let events = session.process_exit();
     assert!(

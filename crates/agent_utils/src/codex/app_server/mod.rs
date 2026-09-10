@@ -469,22 +469,23 @@ impl Session {
     }
 
     /// Interrupt the running turn (the Esc/Ctrl-C equivalent).
-    pub fn interrupt(&mut self) {
+    pub fn interrupt(&mut self) -> bool {
         let (Some(thread_id), Some(turn_id)) = (
             self.conversation.thread_id.clone(),
             self.conversation.current_turn.clone(),
         ) else {
-            return;
+            return false;
         };
 
         let rpc_id = self.alloc_rpc_id();
 
-        self.send(json!({
+        self.try_send(json!({
             "jsonrpc": "2.0",
             "id": rpc_id,
             "method": "turn/interrupt",
             "params": {"threadId": thread_id, "turnId": turn_id},
-        }));
+        }))
+        .is_ok()
     }
 
     /// Switch this session onto a persisted thread. The response carries the
@@ -492,18 +493,23 @@ impl Session {
     /// thread's persisted settings (emitted as [`Event::Ready`]); subsequent
     /// `turn/start` calls append to the resumed thread. On failure the
     /// session keeps the thread it started with, so the tab stays usable.
-    pub fn resume_thread(&mut self, thread_id: &str) {
-        self.cancel_title_generation();
-        self.conversation.compaction.reset_thread();
+    pub fn resume_thread(&mut self, thread_id: &str) -> bool {
         let params = thread_resume_params(thread_id, &self.thread_profile);
-        self.send_query(
-            QueryKind::Resume,
-            json!({
-                "jsonrpc": "2.0",
-                "method": "thread/resume",
-                "params": params,
-            }),
-        );
+        if self
+            .try_send_query(
+                QueryKind::Resume,
+                json!({
+                    "jsonrpc": "2.0",
+                    "method": "thread/resume",
+                    "params": params,
+                }),
+            )
+            .is_err()
+        {
+            return false;
+        }
+        self.cancel_title_generation();
+        true
     }
 
     /// Ask which prompts this conversation can be branched in front of.
@@ -517,15 +523,15 @@ impl Session {
             return false;
         };
 
-        self.send_query(
+        self.try_send_query(
             QueryKind::Checkpoints,
             json!({
                 "jsonrpc": "2.0",
                 "method": "thread/read",
                 "params": {"threadId": thread_id, "includeTurns": true},
             }),
-        );
-        true
+        )
+        .is_ok()
     }
 
     /// Branch the thread at `anchor` and move this session onto the copy.
@@ -541,19 +547,17 @@ impl Session {
         let Some(thread_id) = self.conversation.thread_id.clone() else {
             return Err("this conversation has no thread to branch".to_string());
         };
-        self.cancel_title_generation();
-
-        self.conversation.compaction.reset_thread();
         let mut params = thread_resume_params(&thread_id, &self.thread_profile);
         params["lastTurnId"] = json!(last_turn_id);
-        self.send_query(
+        self.try_send_query(
             QueryKind::Fork,
             json!({
                 "jsonrpc": "2.0",
                 "method": "thread/fork",
                 "params": params,
             }),
-        );
+        )?;
+        self.cancel_title_generation();
         Ok(())
     }
 
@@ -615,8 +619,7 @@ impl Session {
         };
         // The child's own `turn/completed` reports the interruption, so the row
         // moves to Interrupted through the same path as any other outcome.
-        self.send(request);
-        true
+        self.try_send(request).is_ok()
     }
 
     /// Read one descendant's stored conversation. A read already in flight for
@@ -663,16 +666,23 @@ impl Session {
 
     /// Answer the pending approval request (`"accept"` / `"decline"`); a no-op
     /// when none is pending.
-    pub fn respond_approval(&mut self, decision: &str) {
-        let Some(rpc_id) = self.conversation.pending_approval.take() else {
-            return;
+    pub fn respond_approval(&mut self, decision: &str) -> bool {
+        let Some(rpc_id) = self.conversation.pending_approval else {
+            return false;
         };
 
-        self.send(json!({
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "result": {"decision": decision},
-        }));
+        if self
+            .try_send(json!({
+                "jsonrpc": "2.0",
+                "id": rpc_id,
+                "result": {"decision": decision},
+            }))
+            .is_err()
+        {
+            return false;
+        }
+        self.conversation.pending_approval = None;
+        true
     }
 
     fn alloc_rpc_id(&mut self) -> u64 {
@@ -703,6 +713,14 @@ impl Session {
         if let Some((id, operation)) = outgoing {
             self.control.track(id, operation);
         }
+        Ok(())
+    }
+
+    fn try_send_query(&mut self, kind: QueryKind, mut message: Value) -> Result<(), String> {
+        let id = self.alloc_rpc_id();
+        message["id"] = json!(id);
+        self.try_send(message)?;
+        self.control.track_query(id, kind);
         Ok(())
     }
 

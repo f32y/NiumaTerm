@@ -24,9 +24,9 @@ impl Session {
     /// `cancelled` and `unavailable` are outcomes it reaches on its own. So a
     /// request to allow for the rest of the session cannot be expressed, and a
     /// request to cancel the turn is a refusal plus a stop.
-    pub fn respond_approval(&mut self, decision: &str) {
+    pub fn respond_approval(&mut self, decision: &str) -> bool {
         let Some(request) = self.pending_approval.take() else {
-            return;
+            return false;
         };
 
         let outcome = match decision {
@@ -46,6 +46,7 @@ impl Session {
                 error.message()
             );
             self.pending_approval = Some(request);
+            return false;
         } else {
             (self.deliver)(
                 json!({ "payload": { "type": "approval/resolved", "sessionId": self.session_id } }),
@@ -55,6 +56,7 @@ impl Session {
         if decision == "cancel" {
             self.interrupt();
         }
+        true
     }
 
     /// Answer the question batch the harness is blocked on, or dismiss it when
@@ -64,9 +66,9 @@ impl Session {
     /// answer per question, in ask order, carrying only labels it offered. So a
     /// batch that does not line up is dropped here rather than sent to be
     /// rejected, which would leave the turn waiting with the card already gone.
-    pub fn respond_questions(&mut self, answers: Option<Vec<Vec<String>>>) {
+    pub fn respond_questions(&mut self, answers: Option<Vec<Vec<String>>>) -> bool {
         let Some(request) = self.pending_questions.take() else {
-            return;
+            return false;
         };
 
         let result = match answers {
@@ -90,7 +92,7 @@ impl Session {
                     request.ids.len(),
                 );
                 self.pending_questions = Some(request);
-                return;
+                return false;
             }
             None => self.client.respond_event(&request.client_id, &request.event_id, json!({
                 "kind": "rejected",
@@ -106,10 +108,12 @@ impl Session {
                 error.message()
             );
             self.pending_questions = Some(request);
+            false
         } else {
             (self.deliver)(
                 json!({ "payload": { "type": "question/resolved", "sessionId": self.session_id } }),
             );
+            true
         }
     }
 
@@ -441,17 +445,14 @@ impl Session {
 
     /// Stop the running turn. The harness keeps whatever the turn already
     /// streamed, so nothing is discarded here either.
-    pub fn interrupt(&mut self) {
+    pub fn interrupt(&mut self) -> bool {
         if !self.running {
-            return;
+            return false;
         }
 
-        if let Err(error) = self
-            .client
+        self.client
             .request("session/cancel", json!({ "sessionId": &self.session_id }))
-        {
-            tracing::warn!("deepseek turn could not be stopped: {}", error.message());
-        }
+            .is_ok()
     }
 
     pub fn session_id(&self) -> Option<&str> {

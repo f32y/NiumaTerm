@@ -11,7 +11,7 @@ use chrono::Utc;
 use gpui::{Context, Window};
 use nmt_agent_utils::AgentEventKind;
 
-use crate::composer::restored_input_after_interruption;
+use crate::composer::{CommandFeedbackKind, restored_input_after_interruption};
 use crate::transcript::LAST_RESPONSE_LIMIT;
 use crate::{AgentPane, AgentPaneEvent};
 
@@ -130,20 +130,34 @@ impl AgentPane {
 
     pub(super) fn interrupt(&mut self, cx: &mut Context<Self>) {
         if let Some(session) = self.runtime.backend.as_mut() {
-            session.interrupt();
+            if !session.interrupt() {
+                self.palette.set_feedback(
+                    CommandFeedbackKind::Error,
+                    "The interrupt request could not be queued.",
+                    cx,
+                );
+                return;
+            }
             cx.emit(AgentPaneEvent::Interrupted);
             cx.notify();
         }
     }
 
     pub(crate) fn respond_approval(&mut self, decision: &str, cx: &mut Context<Self>) {
-        // The card is dismissed immediately for a snappy UI; the session's
-        // `ApprovalResolved` confirmation is then an idempotent status refresh.
-        self.prompts.dismiss_approval();
-        self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
-
-        if let Some(session) = self.runtime.backend.as_mut() {
-            session.respond_approval(decision);
+        let accepted = self
+            .runtime
+            .backend
+            .as_mut()
+            .is_some_and(|session| session.respond_approval(decision));
+        if accepted {
+            self.prompts.dismiss_approval();
+            self.emit_lifecycle(AgentEventKind::ToolFinished, "", "", cx);
+        } else {
+            self.palette.set_feedback(
+                CommandFeedbackKind::Error,
+                "The approval response could not be queued.",
+                cx,
+            );
         }
         cx.notify();
     }

@@ -526,9 +526,9 @@ impl Session {
     /// Ask the CLI how the context window is currently filled. This is a local
     /// computation rather than a model call, so it is cheap enough to refresh
     /// whenever the conversation grows; the answer arrives as an event.
-    pub fn request_context_composition(&mut self) {
+    pub fn request_context_composition(&mut self) -> bool {
         if !self.ready || !self.process.has_stdin() {
-            return;
+            return false;
         }
         // One outstanding request is enough: a second would answer with the
         // same breakdown the first is already about to deliver.
@@ -536,12 +536,15 @@ impl Session {
             .control
             .contains(&PendingControlOperation::ContextComposition)
         {
-            return;
+            return false;
         }
 
-        let request_id = self.send_control(json!({"subtype": "get_context_usage"}));
+        let Ok(request_id) = self.send_control(json!({"subtype": "get_context_usage"})) else {
+            return false;
+        };
         self.control
             .track(request_id, PendingControlOperation::ContextComposition);
+        true
     }
 
     /// Ask the CLI to name this conversation. The CLI summarizes `description`
@@ -553,9 +556,9 @@ impl Session {
     /// The CLI answers with a null title when `description` is under ten
     /// characters, and a build without this request answers with an error;
     /// both leave the conversation unnamed rather than reporting anything.
-    pub fn request_session_title(&mut self, description: &str) {
+    pub fn request_session_title(&mut self, description: &str) -> bool {
         if !self.ready || !self.process.has_stdin() {
-            return;
+            return false;
         }
         // One outstanding request is enough: a second would name the same
         // conversation twice.
@@ -563,21 +566,24 @@ impl Session {
             .control
             .contains(&PendingControlOperation::SessionTitle)
         {
-            return;
+            return false;
         }
 
         let description = session_title_description(description);
         if description.is_empty() {
-            return;
+            return false;
         }
 
-        let request_id = self.send_control(json!({
+        let Ok(request_id) = self.send_control(json!({
             "subtype": "generate_session_title",
             "description": description,
             "persist": true,
-        }));
+        })) else {
+            return false;
+        };
         self.control
             .track(request_id, PendingControlOperation::SessionTitle);
+        true
     }
 
     /// Give the conversation the name the user typed. The CLI records it with
@@ -588,15 +594,21 @@ impl Session {
     /// Fire-and-forget, like the model and permission requests: a refusal
     /// reaches the user through the generic control-error path, and there is
     /// nothing to put back when a name the tab already carries is rejected.
-    pub fn rename_session(&mut self, title: &str) {
+    pub fn rename_session(&mut self, title: &str) -> bool {
         let title = title.trim();
 
         if !self.ready || !self.process.has_stdin() || title.is_empty() {
-            return;
+            return false;
         }
 
+        if self
+            .send_control(json!({"subtype": "rename_session", "title": title}))
+            .is_err()
+        {
+            return false;
+        }
         self.control.cancel_generated_title();
-        self.send_control(json!({"subtype": "rename_session", "title": title}));
+        true
     }
 
     pub fn rewind_files(&mut self, user_message_id: &str) -> SlashCommandOutcome {
@@ -614,7 +626,10 @@ impl Session {
             };
         }
 
-        let request_id = self.send_control(file_rewind_request(user_message_id));
+        let request_id = match self.send_control(file_rewind_request(user_message_id)) {
+            Ok(id) => id,
+            Err(message) => return SlashCommandOutcome::Rejected { message },
+        };
         self.control
             .track(request_id, PendingControlOperation::FileRewind);
 
@@ -713,8 +728,8 @@ impl Session {
     }
 
     /// Interrupt the running turn (the Esc/Ctrl-C equivalent).
-    pub fn interrupt(&mut self) {
-        self.send_control(json!({"subtype": "interrupt"}));
+    pub fn interrupt(&mut self) -> bool {
+        self.send_control(json!({"subtype": "interrupt"})).is_ok()
     }
 
     /// Stop one child agent, leaving this session's own turn running. Returns
@@ -728,8 +743,8 @@ impl Session {
         let Some(task_id) = self.tasks.stop_target(key).map(str::to_owned) else {
             return false;
         };
-        self.send_control(json!({"subtype": "stop_task", "task_id": task_id}));
-        true
+        self.send_control(json!({"subtype": "stop_task", "task_id": task_id}))
+            .is_ok()
     }
 
     /// The CLI's session id, known immediately for a resumed process and
@@ -744,9 +759,9 @@ impl Session {
     /// `acceptForSession` allows and applies the CLI's own permission
     /// suggestions (e.g. switching to acceptEdits for the session), `decline`
     /// denies, and `cancel` denies and interrupts the turn.
-    pub fn respond_approval(&mut self, decision: &str) {
-        let Some(pending) = self.control.pending_approval.take() else {
-            return;
+    pub fn respond_approval(&mut self, decision: &str) -> bool {
+        let Some(pending) = self.control.pending_approval.as_ref() else {
+            return false;
         };
 
         let response = match decision {
@@ -754,8 +769,8 @@ impl Session {
             "acceptForSession" => {
                 let mut response = json!({"behavior": "allow", "updatedInput": pending.input});
 
-                if let Some(suggestions) = pending.suggestions {
-                    response["updatedPermissions"] = suggestions;
+                if let Some(suggestions) = &pending.suggestions {
+                    response["updatedPermissions"] = suggestions.clone();
                 }
 
                 response
@@ -764,33 +779,40 @@ impl Session {
             _ => json!({"behavior": "deny", "message": "User declined tool execution."}),
         };
 
-        self.send(json!({
-            "type": "control_response",
-            "response": {
-                "subtype": "success",
-                "request_id": pending.request_id,
-                "response": response,
-            },
-        }));
+        if self
+            .try_send(json!({
+                "type": "control_response",
+                "response": {
+                    "subtype": "success",
+                    "request_id": pending.request_id,
+                    "response": response,
+                },
+            }))
+            .is_err()
+        {
+            return false;
+        }
+        self.control.pending_approval = None;
 
         if decision == "cancel" {
             self.interrupt();
         }
+        true
     }
 
     /// Answer the pending `AskUserQuestion` request. `answers` holds the chosen
     /// option labels per question, in question order; `None` declines. The CLI
     /// re-runs the tool with the merged input and writes the tool result
     /// itself, so nothing further is sent for this tool call.
-    pub fn respond_questions(&mut self, answers: Option<Vec<Vec<String>>>) {
-        let Some(pending) = self.control.pending_questions.take() else {
-            return;
+    pub fn respond_questions(&mut self, answers: Option<Vec<Vec<String>>>) -> bool {
+        let Some(pending) = self.control.pending_questions.as_ref() else {
+            return false;
         };
 
         let response = match answers {
             Some(answers) if answers.iter().any(|labels| !labels.is_empty()) => {
                 let updated_input =
-                    merge_question_answers(pending.input, &pending.questions, answers);
+                    merge_question_answers(pending.input.clone(), &pending.questions, answers);
 
                 json!({"behavior": "allow", "updatedInput": updated_input})
             }
@@ -802,14 +824,21 @@ impl Session {
             }),
         };
 
-        self.send(json!({
-            "type": "control_response",
-            "response": {
-                "subtype": "success",
-                "request_id": pending.request_id,
-                "response": response,
-            },
-        }));
+        if self
+            .try_send(json!({
+                "type": "control_response",
+                "response": {
+                    "subtype": "success",
+                    "request_id": pending.request_id,
+                    "response": response,
+                },
+            }))
+            .is_err()
+        {
+            return false;
+        }
+        self.control.pending_questions = None;
+        true
     }
 
     /// What each still-running workflow run needs read on the next refresh
@@ -870,12 +899,21 @@ impl Session {
             .unwrap_or_default()
     }
 
-    fn send_control(&mut self, request: Value) -> String {
+    fn send_control(&mut self, request: Value) -> Result<String, String> {
         let (request_id, message) = self.control.request(request);
+        self.try_send(message)?;
         self.control
             .track(request_id.clone(), PendingControlOperation::Other);
-        self.send(message);
-        request_id
+        Ok(request_id)
+    }
+
+    fn try_send(&mut self, message: Value) -> Result<(), String> {
+        if self.control.is_closed() {
+            return Err("Claude is not connected".into());
+        }
+        self.process
+            .write_line(message)
+            .map_err(|error| error.to_string())
     }
 
     /// Write one line; write failures stay unsurfaced because the reader-side
