@@ -364,6 +364,41 @@ mod conversation_title_tests {
         (pane.expect("create Agent pane"), window)
     }
 
+    #[gpui::test]
+    fn rejected_rename_keeps_latest_name_until_admitted(cx: &mut TestAppContext) {
+        use crate::profile::AgentKind;
+        use crate::session::backend::RenameOutcome;
+
+        let (pane, window) = open_pane(cx, AgentProfileKind::Codex, None);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|_, cx| {
+            pane.update(cx, |pane, _| {
+                pane.runtime.epoch += 1;
+                let mut backend = TestBackend::new([], SlashCommandOutcome::NotReady, vec![])
+                    .with_recovery(AgentKind::Codex, "thread");
+                backend.rename_outcome = RenameOutcome::Rejected;
+                pane.runtime.backend = Some(Backend::Test(backend));
+                pane.rename_session("first");
+                pane.rename_session("latest");
+                assert_eq!(pane.pending_conversation_rename.as_deref(), Some("latest"));
+                pane.sync_pending_rename();
+                assert_eq!(pane.pending_conversation_rename.as_deref(), Some("latest"));
+                let Some(Backend::Test(backend)) = pane.runtime.backend.as_mut() else {
+                    panic!("expected test backend");
+                };
+                backend.rename_outcome = RenameOutcome::Accepted;
+                pane.sync_pending_rename();
+                assert!(pane.pending_conversation_rename.is_none());
+                let Some(Backend::Test(backend)) = pane.runtime.backend.as_mut() else {
+                    panic!("expected test backend");
+                };
+                backend.rename_outcome = RenameOutcome::Unsupported;
+                pane.rename_session("local only");
+                assert!(pane.pending_conversation_rename.is_none());
+            });
+        });
+    }
+
     fn collect_titles(
         pane: &Entity<AgentPane>,
         cx: &mut VisualTestContext,

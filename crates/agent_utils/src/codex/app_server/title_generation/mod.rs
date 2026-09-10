@@ -80,9 +80,18 @@ impl TitleGenerationResult {
 impl Session {
     /// A user-authored name invalidates any generated replacement before the
     /// provider write is queued, so a late worker result cannot rename it.
-    pub fn rename_thread(&mut self, name: &str) {
+    pub fn rename_thread(&mut self, name: &str) -> bool {
         self.cancel_title_generation();
-        self.queue_thread_name(name);
+        let Some(thread_id) = self.conversation.thread_id.clone() else {
+            return false;
+        };
+        let name = name.trim();
+        if name.is_empty() {
+            return false;
+        }
+        let rpc_id = self.alloc_rpc_id();
+        self.try_send(thread_name_request(rpc_id, &thread_id, name))
+            .is_ok()
     }
 
     pub fn cancel_title_generation(&mut self) {

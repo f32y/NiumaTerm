@@ -295,19 +295,16 @@ fn host_exit_closes_requests_and_prevents_late_revival() {
 }
 
 #[test]
-fn rejected_name_write_is_consumed_without_a_session_error() {
+fn rejected_name_write_reports_failure_without_pending_state() {
     let mut session = disconnected_session();
     session.conversation.thread_id = Some("parent".into());
     let (tx, rx) = channel();
     session.deliver = Arc::new(move |message| {
         let _ = tx.send(message);
     });
-    session.rename_thread("chosen name");
-    assert!(!session.control.is_empty());
-    let response = rx.try_recv().unwrap();
-    assert!(session.process(response.clone()).is_empty());
+    assert!(!session.rename_thread("chosen name"));
     assert!(session.control.is_empty());
-    assert!(session.process(response).is_empty());
+    assert!(rx.try_recv().is_err());
 }
 
 #[test]

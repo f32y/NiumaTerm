@@ -61,8 +61,16 @@ pub(super) struct ConversationTitleRequest {
     pub(super) provisional_title: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RenameOutcome {
+    Accepted,
+    Rejected,
+    Unsupported,
+}
+
 #[cfg(test)]
 pub(crate) struct TestBackend {
+    pub(super) rename_outcome: RenameOutcome,
     pub(crate) timeout_polls: usize,
     send_outcomes: VecDeque<SendOutcome>,
     slash_outcome: SlashCommandOutcome,
@@ -82,6 +90,7 @@ impl TestBackend {
         commands: Vec<SlashCommandInfo>,
     ) -> Self {
         Self {
+            rename_outcome: RenameOutcome::Unsupported,
             send_outcomes: send_outcomes.into_iter().collect(),
             timeout_polls: 0,
             slash_outcome,
@@ -553,15 +562,18 @@ impl Backend {
 
     /// Name the conversation this backend holds when its provider stores a
     /// user-authored title of its own.
-    pub(crate) fn rename_session(&mut self, title: &str) {
-        match self {
-            Backend::Claude(session) => {
-                session.rename_session(title);
-            }
+    pub(super) fn rename_session(&mut self, title: &str) -> RenameOutcome {
+        let accepted = match self {
+            Backend::Claude(session) => session.rename_session(title),
             Backend::Codex(session) => session.rename_thread(title),
-            Backend::DeepSeek(_) => {}
+            Backend::DeepSeek(_) => return RenameOutcome::Unsupported,
             #[cfg(test)]
-            Backend::Test(_) => {}
+            Backend::Test(session) => return session.rename_outcome,
+        };
+        if accepted {
+            RenameOutcome::Accepted
+        } else {
+            RenameOutcome::Rejected
         }
     }
 

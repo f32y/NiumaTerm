@@ -855,6 +855,7 @@ impl AgentPane {
             return false;
         }
 
+        self.sync_pending_rename();
         let title_text = restore_on_interrupt
             .as_ref()
             .map_or(text.as_str(), |(prompt, _)| prompt.as_str());
@@ -1010,17 +1011,29 @@ impl AgentPane {
     /// harness's own session record rather than living only in this tab.
     pub fn rename_session(&mut self, title: &str) {
         self.conversation_named = true;
+        self.pending_conversation_rename = Some(title.to_string());
+        self.sync_pending_rename();
+    }
+
+    pub(super) fn sync_pending_rename(&mut self) {
+        use crate::session::backend::RenameOutcome;
+
         let can_address_conversation = self
             .runtime
             .backend
             .as_ref()
             .and_then(Backend::recovery_identity)
             .is_some();
-        if can_address_conversation && let Some(session) = self.runtime.backend.as_mut() {
-            session.rename_session(title);
-            self.pending_conversation_rename = None;
-        } else {
-            self.pending_conversation_rename = Some(title.to_string());
+        if can_address_conversation
+            && let Some(session) = self.runtime.backend.as_mut()
+            && let Some(title) = self.pending_conversation_rename.as_deref()
+        {
+            match session.rename_session(title) {
+                RenameOutcome::Accepted | RenameOutcome::Unsupported => {
+                    self.pending_conversation_rename = None;
+                }
+                RenameOutcome::Rejected => {}
+            }
         }
     }
 
