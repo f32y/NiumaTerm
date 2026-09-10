@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::{collections, sync, time};
+use std::time;
 #[cfg(windows)]
 use std::{env, fs, process, thread};
 
@@ -7,17 +7,14 @@ use std::{env, fs, process, thread};
 use base64::engine::general_purpose::STANDARD;
 #[cfg(windows)]
 use nmt_platform::windows::powershell::INTEGRATION_SCRIPT;
-use nmt_terminal::block_store::BlockStore;
-use nmt_terminal::event::{BlockEvent, TerminalEvent};
+use nmt_terminal::event::TerminalEvent;
 use parking_lot::Mutex;
 #[cfg(windows)]
 use tokio::runtime::{Builder as RuntimeBuilder, Runtime};
 
 use crate::error::EngineErrorCode;
-use crate::graphics;
 use crate::session::{
-    HostEvent, HostEventQueue, SessionGraphics, TerminalEventProxy, TerminalSession,
-    TerminalSessionConfig,
+    HostEvent, SessionSharedState, TerminalEventProxy, TerminalSession, TerminalSessionConfig,
 };
 use crate::wake::Wake;
 
@@ -274,6 +271,56 @@ fn bad_shell_returns_structured_error() {
     assert!(!err.message.is_empty());
 }
 
+#[cfg(windows)]
+#[test]
+fn local_session_publishes_engine_output_and_host_events() {
+    use crate::wake::WakeSender;
+
+    const ROUTE: u64 = 91_301;
+    const MARKER: &str = "nmt-session-shared-state";
+    let wakes = Arc::new(Mutex::new(Vec::new()));
+    let received_wakes = Arc::clone(&wakes);
+    let session = TerminalSession::new(
+        &TerminalSessionConfig {
+            shell: Some("cmd.exe".into()),
+            args: vec!["/D".into(), "/Q".into()],
+            cols: 90,
+            rows: 25,
+            manage_process_tree: true,
+            ..TerminalSessionConfig::default()
+        },
+        ROUTE,
+        Some(WakeSender::from_fn(move |wake| {
+            received_wakes.lock().push(wake)
+        })),
+    )
+    .unwrap();
+    assert!(session.engine_blocks());
+    assert_eq!(session.engine.lock().cols(), 90);
+    assert_eq!(session.engine.lock().rows(), 25);
+    session.write_input(format!("title {MARKER}\r\necho {MARKER}\r\n").as_bytes());
+    let deadline = time::Instant::now() + time::Duration::from_secs(10);
+    let mut title_seen = false;
+    loop {
+        title_seen |= session
+            .poll_events()
+            .iter()
+            .any(|event| matches!(event, HostEvent::Title(title) if title == MARKER));
+        let output = session.engine.lock().format_vt_state().unwrap();
+        if title_seen && String::from_utf8_lossy(&output).contains(MARKER) {
+            break;
+        }
+        assert!(
+            time::Instant::now() < deadline,
+            "shell output and title must reach the session"
+        );
+        thread::sleep(time::Duration::from_millis(10));
+    }
+    let wakes = wakes.lock();
+    assert!(wakes.contains(&Wake::Content(ROUTE)));
+    assert!(wakes.contains(&Wake::Chrome(ROUTE)));
+}
+
 #[test]
 fn restorable_tab_state_keeps_original_launch_command() {
     let config = TerminalSessionConfig {
@@ -304,19 +351,9 @@ fn restorable_tab_state_keeps_original_launch_command() {
 fn host_events_map_from_terminal_events() {
     use nmt_terminal::event::{EventListener, TerminalEvent, WindowId};
 
-    let events: HostEventQueue = Arc::new(Mutex::new(collections::VecDeque::new()));
-    let listener = TerminalEventProxy::new(
-        Arc::clone(&events),
-        Arc::new(Mutex::new(BlockStore::default())),
-        Arc::new(Mutex::new(graphics::GenerationStore::new())),
-        Arc::new(sync::atomic::AtomicUsize::new(0)),
-        Arc::new(Mutex::new(Vec::new())),
-        Arc::new(Mutex::new(None)),
-        Arc::new(Mutex::new(false)),
-        Default::default(),
-        1,
-        None,
-    );
+    let shared = Arc::new(SessionSharedState::default());
+    let events = &shared.events;
+    let listener = TerminalEventProxy::new(Arc::clone(&shared), 1, None);
     let wid = WindowId::dummy();
 
     listener.send_event(TerminalEvent::Title("t".into()), wid);
@@ -351,19 +388,9 @@ fn osc_notification_drains_into_shared_exact_notification_lifecycle() {
     };
     use nmt_terminal::event::{EventListener, TerminalEvent, WindowId};
 
-    let events: HostEventQueue = Arc::new(Mutex::new(collections::VecDeque::new()));
-    let listener = TerminalEventProxy::new(
-        Arc::clone(&events),
-        Arc::new(Mutex::new(BlockStore::default())),
-        Arc::new(Mutex::new(graphics::GenerationStore::new())),
-        Arc::new(sync::atomic::AtomicUsize::new(0)),
-        Arc::new(Mutex::new(Vec::new())),
-        Arc::new(Mutex::new(None)),
-        Arc::new(Mutex::new(false)),
-        Default::default(),
-        1,
-        None,
-    );
+    let shared = Arc::new(SessionSharedState::default());
+    let events = &shared.events;
+    let listener = TerminalEventProxy::new(Arc::clone(&shared), 1, None);
     listener.send_event(
         TerminalEvent::DesktopNotification {
             title: "T".repeat(300),
@@ -429,21 +456,11 @@ fn in_flight_block_lifecycle() {
         }
     }
 
-    let events: HostEventQueue = Arc::new(Mutex::new(collections::VecDeque::new()));
-    let in_flight = Arc::new(Mutex::new(None));
-    let open_prompt = Arc::new(Mutex::new(false));
-    let proxy = TerminalEventProxy::new(
-        Arc::clone(&events),
-        Arc::new(Mutex::new(BlockStore::default())),
-        Arc::new(Mutex::new(graphics::GenerationStore::new())),
-        Arc::new(sync::atomic::AtomicUsize::new(0)),
-        Arc::new(Mutex::new(Vec::new())),
-        Arc::clone(&in_flight),
-        Arc::clone(&open_prompt),
-        Default::default(),
-        1,
-        None,
-    );
+    let shared = Arc::new(SessionSharedState::default());
+    let events = &shared.events;
+    let in_flight = &shared.in_flight;
+    let open_prompt = &shared.open_prompt;
+    let proxy = TerminalEventProxy::new(Arc::clone(&shared), 1, None);
     let wid = WindowId::dummy();
 
     proxy.send_event(TerminalEvent::PromptStarted, wid);
@@ -502,19 +519,9 @@ fn block_batches_and_seq_metadata_reach_the_block_store() {
     };
     use nmt_terminal::ghostty::BlockHandle;
 
-    let store = Arc::new(Mutex::new(BlockStore::default()));
-    let proxy = TerminalEventProxy::new(
-        Arc::new(Mutex::new(collections::VecDeque::new())),
-        Arc::clone(&store),
-        Arc::new(Mutex::new(graphics::GenerationStore::new())),
-        Arc::new(sync::atomic::AtomicUsize::new(0)),
-        Arc::new(Mutex::new(Vec::new())),
-        Arc::new(Mutex::new(None)),
-        Arc::new(Mutex::new(false)),
-        Default::default(),
-        1,
-        None,
-    );
+    let shared = Arc::new(SessionSharedState::default());
+    let store = &shared.block_store;
+    let proxy = TerminalEventProxy::new(Arc::clone(&shared), 1, None);
     let wid = WindowId::dummy();
     let now = SystemTime::now();
 
@@ -571,46 +578,23 @@ fn block_batches_and_seq_metadata_reach_the_block_store() {
 /// Build a `TerminalEventProxy` whose state Arcs the test retains, plus a wake
 /// collector. `id` is the route so `UpdateGraphics` routing can be exercised.
 fn graphics_proxy(id: u64) -> (TerminalEventProxy, GraphicsProbes) {
-    use crate::graphics::GenerationStore;
     use crate::wake::WakeSender;
 
-    let events: HostEventQueue = Arc::new(Mutex::new(collections::VecDeque::new()));
-    let block_store = Arc::new(Mutex::new(BlockStore::default()));
-    let generation_store = Arc::new(Mutex::new(GenerationStore::new()));
-    let staged_blocks = Arc::new(Mutex::new(Vec::new()));
+    let shared = Arc::new(SessionSharedState::default());
     let wakes = Arc::new(Mutex::new(Vec::new()));
     let wakes_for_sender = Arc::clone(&wakes);
     let proxy = TerminalEventProxy::new(
-        Arc::clone(&events),
-        Arc::clone(&block_store),
-        Arc::clone(&generation_store),
-        Arc::new(sync::atomic::AtomicUsize::new(0)),
-        Arc::clone(&staged_blocks),
-        Arc::new(Mutex::new(None)),
-        Arc::new(Mutex::new(false)),
-        Default::default(),
+        Arc::clone(&shared),
         id,
         Some(WakeSender::from_fn(move |w| {
             wakes_for_sender.lock().push(w)
         })),
     );
-    (
-        proxy,
-        GraphicsProbes {
-            events,
-            block_store,
-            generation_store,
-            staged_blocks,
-            wakes,
-        },
-    )
+    (proxy, GraphicsProbes { shared, wakes })
 }
 
 struct GraphicsProbes {
-    events: HostEventQueue,
-    block_store: Arc<Mutex<BlockStore>>,
-    generation_store: SessionGraphics,
-    staged_blocks: Arc<Mutex<Vec<BlockEvent>>>,
+    shared: Arc<SessionSharedState>,
     wakes: Arc<Mutex<Vec<Wake>>>,
 }
 
@@ -648,11 +632,11 @@ fn graphics_events_bypass_host_queue_and_are_route_scoped() {
 
     proxy.send_event(rgba_update(4, 7, 2, 2), wid);
     assert!(
-        p.events.lock().is_empty(),
+        p.shared.events.lock().is_empty(),
         "graphics never enters the host queue"
     );
     assert!(
-        p.generation_store.lock().get(7).is_some(),
+        p.shared.generation_store.lock().get(7).is_some(),
         "generation installed"
     );
     assert_eq!(*p.wakes.lock(), vec![Wake::Content(4)], "one content wake");
@@ -660,7 +644,7 @@ fn graphics_events_bypass_host_queue_and_are_route_scoped() {
     // A cross-session route is dropped: no install, no wake.
     proxy.send_event(rgba_update(999, 8, 2, 2), wid);
     assert!(
-        p.generation_store.lock().get(8).is_none(),
+        p.shared.generation_store.lock().get(8).is_none(),
         "wrong route ignored"
     );
     assert_eq!(p.wakes.lock().len(), 1, "no wake for wrong route");
@@ -691,17 +675,17 @@ fn sustained_output_does_not_grow_ui_queue() {
         proxy.send_event(TerminalEvent::TerminalDamaged(1), wid);
         // After each read's damage flush the staging buffer is empty again.
         assert!(
-            p.staged_blocks.lock().is_empty(),
+            p.shared.staged_blocks.lock().is_empty(),
             "staging bounded to one read"
         );
     }
     assert!(
-        p.events.lock().is_empty(),
+        p.shared.events.lock().is_empty(),
         "host queue never grew from graphics/block events"
     );
     // The live generation is a single replaced entry, not 1000 accumulated ones.
     assert_eq!(
-        p.generation_store.lock().len(),
+        p.shared.generation_store.lock().len(),
         1,
         "one live generation, replaced"
     );
@@ -732,17 +716,17 @@ fn active_and_frozen_state_coherent_at_wake() {
     );
     proxy.send_event(rgba_update(1, 42, 2, 2), wid);
     // Before the flush the frozen row is not yet in the store.
-    assert!(p.block_store.lock().items().is_empty());
+    assert!(p.shared.block_store.lock().items().is_empty());
     proxy.send_event(TerminalEvent::TerminalDamaged(1), wid);
 
     // At the wake both sides are coherent: live generation present AND frozen row
     // committed to history.
     assert!(
-        p.generation_store.lock().get(42).is_some(),
+        p.shared.generation_store.lock().get(42).is_some(),
         "live generation present"
     );
     assert_eq!(
-        p.block_store.lock().items().len(),
+        p.shared.block_store.lock().items().len(),
         1,
         "frozen history committed by the same wake"
     );

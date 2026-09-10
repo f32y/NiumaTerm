@@ -60,9 +60,6 @@ zip.workspace = true
 tree-sitter.workspace = true
 tree-sitter-language.workspace = true
 
-[target.'cfg(unix)'.dependencies]
-libc.workspace = true
-
 [build-dependencies]
 nmt_version.workspace = true
 winres.workspace = true
@@ -71,7 +68,6 @@ winres.workspace = true
 # platform type, and the application picks one to hand `Application::with_platform`.
 [target.'cfg(windows)'.dependencies]
 gpui_windows.workspace = true
-windows-sys.workspace = true
 # Remote sessions are hosted by ConPTY and keyed by DPAPI, neither of which has
 # been ported.
 nmt_remote_net.workspace = true

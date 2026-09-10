@@ -138,45 +138,6 @@ fn theme_file_path(dir: &Path, name: &str) -> PathBuf {
 }
 
 impl Config {
-    #[cfg(test)]
-    fn load_from_path(path: &PathBuf) -> Self {
-        if path.exists() {
-            let content = fs::read_to_string(path).unwrap();
-            let decoded: Config = parse_toml(&content).unwrap_or_else(|_| Config::default());
-            decoded
-        } else {
-            Config::default()
-        }
-    }
-    #[cfg(test)]
-    fn load_from_path_without_fallback(path: &PathBuf) -> Result<Self, String> {
-        if path.exists() {
-            let content = fs::read_to_string(path).unwrap();
-            match parse_toml::<Config>(&content) {
-                Ok(mut decoded) => {
-                    let theme = &decoded.theme;
-                    if theme.is_empty() {
-                        return Ok(decoded);
-                    }
-
-                    let tmp = env::temp_dir();
-                    let path = theme_file_path(&tmp, theme);
-                    if let Ok(loaded_theme) = Config::load_theme(&path) {
-                        decoded.ui_theme = loaded_theme.ui_theme();
-                        decoded.colors = loaded_theme.colors.terminal;
-                    } else {
-                        warn!("failed to load theme: {}", theme);
-                    }
-
-                    Ok(decoded)
-                }
-                Err(err_message) => Err(format!("error parsing: {err_message:?}")),
-            }
-        } else {
-            Err(String::from("filepath does not exist"))
-        }
-    }
-
     fn load_theme(path: &PathBuf) -> Result<Theme, String> {
         let content = if path.exists() {
             fs::read_to_string(path).map_err(|err| err.to_string())?

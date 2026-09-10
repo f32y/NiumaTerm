@@ -1,7 +1,6 @@
-use std::io::Write;
+use tempfile::Builder as TempDirBuilder;
 
-use colors::hex_to_color_arr;
-
+use crate::colors::hex_to_color_arr;
 use crate::*;
 
 fn sample_appearance() -> AppearanceConfig {
@@ -308,19 +307,18 @@ api-key = "sk-legacy"
 
 #[test]
 fn legacy_plaintext_credentials_load_without_touching_the_file() {
-    let dir = tmp_dir().join("NiumaTerm-legacy-credentials-test");
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("config.toml");
+    let dir = TempDirBuilder::new()
+        .prefix("NiumaTerm-legacy-credentials-test")
+        .tempdir()
+        .unwrap();
+    let path = dir.path().join("config.toml");
     fs::write(&path, LEGACY_PROFILE_TOML).unwrap();
 
-    let config = Config::load_for_startup_from(&path, &dir).unwrap();
+    let config = Config::load_for_startup_from(&path, dir.path()).unwrap();
     let profile = &config.agent_profiles.list[0];
     assert_eq!(profile.api_base_url, "https://legacy.example.com");
     assert_eq!(profile.api_key, "sk-legacy");
     assert_eq!(fs::read_to_string(&path).unwrap(), LEGACY_PROFILE_TOML);
-
-    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -388,19 +386,11 @@ fn testing_mode_uses_test_subdirectory() {
     assert_eq!(config_dir_for_mode(base.clone(), true), base.join("Test"));
 }
 
-fn tmp_dir() -> PathBuf {
-    env::temp_dir()
-}
-
 fn create_temporary_config(prefix: &str, toml_str: &str) -> Config {
-    let file_name = tmp_dir().join(format!("test-rio-{prefix}-config.toml"));
-    let mut file = fs::File::create(&file_name).unwrap();
-    writeln!(file, "{toml_str}").unwrap();
-
-    match Config::load_from_path_without_fallback(&file_name) {
-        Ok(config) => config,
-        Err(e) => panic!("{e}"),
-    }
+    let dir = TempDirBuilder::new().prefix(prefix).tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    fs::write(&path, toml_str).unwrap();
+    Config::load_for_startup_from(&path, dir.path()).unwrap()
 }
 
 /// Terminal palette of the built-in default theme, which a config that
@@ -412,40 +402,19 @@ fn default_theme_colors() -> Colors {
         .terminal
 }
 
-fn create_temporary_theme(theme: &str, toml_str: &str) {
-    let file_name = tmp_dir().join(theme).with_extension("toml");
-    let mut file = fs::File::create(file_name).unwrap();
-    writeln!(file, "{toml_str}").unwrap();
-}
-
-#[test]
-fn test_filepath_does_not_exist_without_fallback() {
-    let should_fail =
-        Config::load_from_path_without_fallback(&tmp_dir().join("it-should-never-exist"));
-    assert!(should_fail.is_err(), "{}", true);
-}
-
-#[test]
-fn test_filepath_does_not_exist_with_fallback() {
-    let config = Config::load_from_path(&tmp_dir().join("it-should-never-exist"));
-    assert_eq!(config.theme, default_theme());
-    assert_eq!(config.cursor.shape, default_cursor());
-}
-
 #[test]
 fn startup_load_defaults_when_missing_and_errors_on_bad_toml() {
-    let dir = tmp_dir().join("NiumaTerm-startup-config-test");
-    let _ = fs::remove_dir_all(&dir);
-    let path = dir.join("config.toml");
+    let dir = TempDirBuilder::new()
+        .prefix("NiumaTerm-startup-config-test")
+        .tempdir()
+        .unwrap();
+    let path = dir.path().join("config.toml");
 
-    let missing = Config::load_for_startup_from(&path, &dir).unwrap();
+    let missing = Config::load_for_startup_from(&path, dir.path()).unwrap();
     assert_eq!(missing, Config::default());
 
-    fs::create_dir_all(&dir).unwrap();
     fs::write(&path, "not [ valid").unwrap();
-    assert!(Config::load_for_startup_from(&path, &dir).is_err());
-
-    let _ = fs::remove_dir_all(&dir);
+    assert!(Config::load_for_startup_from(&path, dir.path()).is_err());
 }
 
 #[test]
@@ -463,27 +432,18 @@ fn test_if_explicit_defaults_match() {
 }
 
 #[test]
-fn test_invalid_config_file() {
+fn unknown_config_fields_keep_defaults() {
     let toml_str = r#"
             Performance = 2
             width = "big"
             height = "small"
         "#;
 
-    let file_name = tmp_dir()
-        .join("test-rio-invalid-config")
-        .with_extension("toml");
-    let mut file = fs::File::create(&file_name).unwrap();
-    writeln!(file, "{toml_str}").unwrap();
-
-    let result = Config::load_from_path(&file_name);
+    let result = create_temporary_config("unknown-config-fields", toml_str);
 
     assert_eq!(result.theme, default_theme());
     // Colors
-    assert_eq!(result.colors.background, colors::defaults::background());
-    assert_eq!(result.colors.foreground, colors::defaults::foreground());
-    assert_eq!(result.colors.tabs_active, colors::defaults::tabs_active());
-    assert_eq!(result.colors.cursor, colors::defaults::cursor());
+    assert_eq!(result.colors, default_theme_colors());
 }
 
 #[test]
@@ -530,8 +490,14 @@ fn test_change_theme() {
 
 #[test]
 fn test_change_theme_with_colors() {
-    create_temporary_theme(
-        "lucario-with-colors",
+    let dir = TempDirBuilder::new()
+        .prefix("custom-theme-config")
+        .tempdir()
+        .unwrap();
+    let themes = dir.path().join("themes");
+    fs::create_dir(&themes).unwrap();
+    fs::write(
+        themes.join("lucario-with-colors.toml"),
         r#"
             name = 'Lucario'
             mode = 'dark'
@@ -543,14 +509,18 @@ fn test_change_theme_with_colors() {
             [colors.ui]
             background = '#2B3E50'
         "#,
-    );
+    )
+    .unwrap();
 
-    let result = create_temporary_config(
-        "change-theme-with-colors",
+    let path = dir.path().join("config.toml");
+    fs::write(
+        &path,
         r#"
             theme = "lucario-with-colors"
         "#,
-    );
+    )
+    .unwrap();
+    let result = Config::load_for_startup_from(&path, dir.path()).unwrap();
 
     // Colors
     assert_eq!(result.colors.tabs_active, colors::defaults::tabs_active());
@@ -570,9 +540,11 @@ fn test_change_theme_with_colors() {
 
 #[test]
 fn theme_list_loads_valid_toml_files_in_name_order() {
-    let dir = env::temp_dir().join("NiumaTerm-theme-list-test");
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
+    let temp = TempDirBuilder::new()
+        .prefix("NiumaTerm-theme-list-test")
+        .tempdir()
+        .unwrap();
+    let dir = temp.path();
     fs::write(
         dir.join("Zulu.toml"),
         "[colors.terminal]\nbackground = '#111111'\n",
@@ -586,7 +558,7 @@ fn theme_list_loads_valid_toml_files_in_name_order() {
     fs::write(dir.join("invalid.toml"), "[colors\n").unwrap();
     fs::write(dir.join("ignored.txt"), "[colors.terminal]\n").unwrap();
 
-    let themes = Config::load_themes_from(&dir);
+    let themes = Config::load_themes_from(dir);
     assert_eq!(
         themes
             .iter()
@@ -594,17 +566,16 @@ fn theme_list_loads_valid_toml_files_in_name_order() {
             .collect::<Vec<_>>(),
         ["alpha", "Zulu"]
     );
-
-    fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
 fn built_in_themes_load_without_user_files() {
+    let dir = TempDirBuilder::new()
+        .prefix("NiumaTerm-missing-builtins")
+        .tempdir()
+        .unwrap();
     for builtin in BUILTIN_THEMES {
-        let path = tmp_dir()
-            .join("NiumaTerm-missing-builtins")
-            .join(builtin.name)
-            .with_extension("toml");
+        let path = dir.path().join(builtin.name).with_extension("toml");
         let theme = Config::load_theme(&path).unwrap();
         assert!(!theme.name.is_empty());
     }

@@ -1,13 +1,17 @@
-pub(crate) use notifier::{remove, show};
-pub(crate) use powershell::{
+pub(crate) use crate::windows::notifier::{remove, show};
+pub(crate) use crate::windows::powershell::{
     build_hook_command, default_shell, hook_command_contains, prompt_integration,
 };
-pub use process_exit::wait_for_exit;
-pub use readiness::SoftReady;
-pub use shell_integration::{
+pub use crate::windows::process_exit::wait_for_exit;
+pub use crate::windows::readiness::SoftReady;
+pub use crate::windows::shell_integration::{
     is_shell_integration_registered, register_shell_integration, set_system_notification_enabled,
     shell_integration_dll_mismatched, system_notification_enabled, unregister_shell_integration,
 };
+
+#[cfg(feature = "clipboard")]
+mod clipboard;
+pub(crate) mod library;
 
 pub mod data_protection;
 pub mod environment;

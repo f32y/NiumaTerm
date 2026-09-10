@@ -8,7 +8,14 @@ authors.workspace = true
 [lints]
 workspace = true
 
+[features]
+clipboard = ["dep:copypasta", "dep:raw-window-handle"]
+x11 = ["clipboard", "copypasta/x11"]
+wayland = ["clipboard", "copypasta/wayland"]
+
 [dependencies]
+copypasta = { workspace = true, optional = true }
+raw-window-handle = { workspace = true, optional = true }
 dirs.workspace = true
 libc.workspace = true
 mio.workspace = true

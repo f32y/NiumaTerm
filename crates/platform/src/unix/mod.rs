@@ -3,6 +3,10 @@
 use dirs::home_dir;
 use tracing::info;
 
+#[cfg(feature = "clipboard")]
+mod clipboard;
+pub(crate) mod library;
+
 pub mod environment;
 pub mod filesystem;
 pub mod ipc;
@@ -32,18 +36,17 @@ use std::process::{Child as ChildProcess, Command, Stdio};
 use std::sync::Arc;
 use std::{env, error, io, ptr, str};
 
-#[cfg(target_os = "macos")]
-use macos::*;
 use mio::unix::SourceFd;
 use mio::{Interest, Poll, Token, Waker};
-#[cfg(target_os = "macos")]
-pub(crate) use notifier::request_authorization;
-pub(crate) use notifier::{remove, show};
 use signal_hook::consts as sigconsts;
-use signals::Signals;
 
 use crate::unix::hook_command::single_quoted;
 pub(crate) use crate::unix::hook_command::{build_hook_command, hook_command_contains};
+#[cfg(target_os = "macos")]
+use crate::unix::macos::*;
+#[cfg(target_os = "macos")]
+pub(crate) use crate::unix::notifier::request_authorization;
+pub(crate) use crate::unix::notifier::{remove, show};
 use crate::unix::process::{KillOnCloseJob, ProcessTree};
 pub use crate::unix::process_exit::wait_for_exit;
 pub(crate) use crate::unix::shell::{default_shell, prompt_integration};
@@ -51,6 +54,7 @@ pub use crate::unix::shell_integration::{
     is_shell_integration_registered, register_shell_integration, set_system_notification_enabled,
     shell_integration_dll_mismatched, system_notification_enabled, unregister_shell_integration,
 };
+use crate::unix::signals::Signals;
 use crate::{APP_ID, ChildEvent, EventedPty, ProcessReadWrite, Winsize, WinsizeBuilder};
 
 #[cfg(all(target_os = "linux", not(target_env = "musl")))]

@@ -5,6 +5,8 @@
 use libc::c_ushort;
 pub use mio::{Events, Interest, Poll, Token, Waker};
 
+#[cfg(feature = "clipboard")]
+pub mod clipboard;
 /// ConPTY's resize behaviour, recognized from the byte stream alone.
 ///
 /// The quirk is Windows-only, and `USES_CONPTY` tells callers when it
@@ -12,6 +14,7 @@ pub use mio::{Events, Interest, Poll, Token, Waker};
 /// Windows backend lets the shared PTY read loop compile on every platform
 /// without splitting its control flow across `cfg` arms.
 pub mod conpty_realign;
+pub mod library;
 
 #[cfg(not(windows))]
 mod unix;

@@ -1,6 +1,6 @@
 pub mod ansi;
 pub mod block_store;
-pub mod clipboard;
+pub use nmt_platform::clipboard;
 pub mod event;
 pub mod ghostty;
 pub mod graphics;

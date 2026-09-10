@@ -11,21 +11,20 @@ workspace = true
 [features]
 default = ["wayland", "x11"]
 x11 = [
-    "copypasta/x11"
+    "nmt_platform/x11"
 ]
 wayland = [
-    "copypasta/wayland",
+    "nmt_platform/wayland",
 ]
 
 [dependencies]
 libghostty-vt-sys.workspace = true
 nmt_config.workspace = true
-nmt_platform.workspace = true
+nmt_platform = { workspace = true, features = ["clipboard"] }
 
 base64.workspace = true
 bitflags.workspace = true
 bytemuck.workspace = true
-copypasta.workspace = true
 cursor-icon.workspace = true
 dirs.workspace = true
 flate2.workspace = true
@@ -35,7 +34,6 @@ libc.workspace = true
 memchr.workspace = true
 parking_lot.workspace = true
 rapidhash.workspace = true
-raw-window-handle.workspace = true
 regex.workspace = true
 rustc-hash.workspace = true
 serde.workspace = true

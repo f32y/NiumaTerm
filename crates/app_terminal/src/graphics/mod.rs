@@ -217,10 +217,6 @@ pub struct GenerationStore {
 }
 
 impl GenerationStore {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// The shared atlas-release queue for this session; clone into the block store so
     /// frozen generations release through the same window atlas.
     pub fn release_queue(&self) -> ReleaseQueue {
