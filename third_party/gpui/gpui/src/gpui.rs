@@ -24,9 +24,9 @@ mod element;
 mod elements;
 mod executor;
 mod platform_scheduler;
-pub(crate) use platform_scheduler::PlatformScheduler;
 /// Per-second frame pacing digest, logged at info level while enabled.
-pub mod frame_stats;
+pub use nmt_profiling::frame_stats;
+pub(crate) use platform_scheduler::PlatformScheduler;
 mod geometry;
 mod gestures;
 mod global;

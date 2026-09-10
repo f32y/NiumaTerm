@@ -1,9 +1,4 @@
-use std::{
-    cell::Cell,
-    rc::Rc,
-    sync::atomic::Ordering,
-    time::{Duration, Instant},
-};
+use std::{cell::Cell, rc::Rc, sync::atomic::Ordering, time::Duration};
 
 use anyhow::Context as _;
 use gpui_util::ResultExt;
@@ -96,7 +91,7 @@ impl WindowsWindowInner {
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> LRESULT {
-        let started_at = frame_stats::enabled().then(Instant::now);
+        let started_at = frame_stats::start_timer();
         let handled = match msg {
             WM_MOUSEACTIVATE => self.handle_mouse_activate_msg(handle),
             WM_ACTIVATE => self.handle_activate_msg(wparam),

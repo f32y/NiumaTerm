@@ -2934,7 +2934,7 @@ impl Window {
         let frame_dirty = self.invalidator.take_frame_dirty();
         #[cfg(feature = "profiler")]
         self.window_profiler.begin_draw();
-        let draw_started_at = frame_stats::enabled().then(Instant::now);
+        let draw_started_at = frame_stats::start_timer();
 
         // Set up the per-App arena for element allocation during this draw.
         // This ensures that multiple test Apps have isolated arenas.
@@ -3105,7 +3105,7 @@ impl Window {
                 .map(|rect| rect.scale(self.scale_factor))
                 .collect()
         });
-        let present_started_at = frame_stats::enabled().then(Instant::now);
+        let present_started_at = frame_stats::start_timer();
         self.platform_window
             .draw(&self.rendered_frame.scene, damage.as_deref());
         #[cfg(feature = "profiler")]

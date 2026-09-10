@@ -1,7 +1,6 @@
 use std::{
     slice,
     sync::{Arc, OnceLock},
-    time::Instant,
 };
 
 use anyhow::{Context, Result};
@@ -540,7 +539,7 @@ impl DirectXRenderer {
             .as_ref()
             .and_then(|resources| resources.frame_latency_waitable)
         {
-            let wait_started_at = frame_stats::enabled().then(Instant::now);
+            let wait_started_at = frame_stats::start_timer();
             unsafe {
                 WaitForSingleObject(HANDLE(waitable as _), FRAME_LATENCY_WAIT_MS);
             }

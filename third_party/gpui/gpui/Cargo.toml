@@ -46,6 +46,7 @@ path = "src/gpui.rs"
 doctest = false
 
 [dependencies]
+nmt_profiling.workspace = true
 accesskit.workspace = true
 anyhow.workspace = true
 async-task.workspace = true

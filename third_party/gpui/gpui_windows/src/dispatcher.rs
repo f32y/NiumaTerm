@@ -3,7 +3,7 @@ use std::{
     ptr::NonNull,
     sync::atomic::{AtomicBool, Ordering},
     thread::{ThreadId, current},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use anyhow::Context;
@@ -98,12 +98,11 @@ impl WindowsDispatcher {
     /// a task that outlasts the frame budget shows up as a dropped frame with
     /// no time attributable to drawing.
     pub(crate) fn execute_runnable_on_main(runnable: RunnableVariant) {
-        if !frame_stats::enabled() {
+        let Some(started_at) = frame_stats::start_timer() else {
             Self::execute_runnable(runnable);
             return;
-        }
+        };
         let location = runnable.metadata().location;
-        let started_at = Instant::now();
         Self::execute_runnable(runnable);
         let elapsed = started_at.elapsed();
         frame_stats::record_main_thread_task(elapsed);
