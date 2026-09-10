@@ -5,7 +5,7 @@
 //! and each is retargeted as the active tab changes rather than rebuilt.
 
 use gpui::{App, Context, Entity, Window};
-use nmt_app_agent::AgentPane;
+use nmt_agent_ui::AgentPane;
 use nmt_config::get;
 
 use crate::ui::git_status::GitStatusModel;

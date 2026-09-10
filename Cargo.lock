@@ -302,8 +302,7 @@ dependencies = [
  "image",
  "lsp-types",
  "nmt_agent",
- "nmt_app_agent",
- "nmt_app_terminal",
+ "nmt_agent_ui",
  "nmt_config",
  "nmt_i18n",
  "nmt_input",
@@ -311,6 +310,7 @@ dependencies = [
  "nmt_remote_net",
  "nmt_sparkle",
  "nmt_terminal",
+ "nmt_terminal_ui",
  "nmt_version",
  "notify",
  "parking_lot",
@@ -4252,7 +4252,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "nmt_app_agent"
+name = "nmt_agent_ui"
 version = "1.3.4"
 dependencies = [
  "chrono",
@@ -4279,29 +4279,6 @@ dependencies = [
  "tree-sitter-rust",
  "uuid",
  "vte",
-]
-
-[[package]]
-name = "nmt_app_terminal"
-version = "1.3.4"
-dependencies = [
- "base64",
- "futures",
- "gpui",
- "gpui-component",
- "gpui_macos",
- "gpui_windows",
- "image",
- "nmt_agent",
- "nmt_config",
- "nmt_i18n",
- "nmt_input",
- "nmt_platform",
- "nmt_remote_net",
- "nmt_terminal",
- "parking_lot",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -4442,6 +4419,29 @@ dependencies = [
  "tracing",
  "unicode-width-16",
  "url",
+]
+
+[[package]]
+name = "nmt_terminal_ui"
+version = "1.3.4"
+dependencies = [
+ "base64",
+ "futures",
+ "gpui",
+ "gpui-component",
+ "gpui_macos",
+ "gpui_windows",
+ "image",
+ "nmt_agent",
+ "nmt_config",
+ "nmt_i18n",
+ "nmt_input",
+ "nmt_platform",
+ "nmt_remote_net",
+ "nmt_terminal",
+ "parking_lot",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

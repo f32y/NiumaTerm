@@ -14,8 +14,8 @@ use gpui::{
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::{ActiveTheme as _, IconName, Sizable as _, StyledExt as _, h_flex, v_flex};
 use nmt_agent::workflow::{WorkflowAgent, WorkflowAgentState, WorkflowRun, WorkflowRunState};
-use nmt_app_agent::AgentPane;
-use nmt_app_agent::transcript::TranscriptView;
+use nmt_agent_ui::AgentPane;
+use nmt_agent_ui::transcript::TranscriptView;
 use nmt_i18n::i18n;
 
 use crate::ui::AppSettings;

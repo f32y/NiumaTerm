@@ -9,9 +9,9 @@
 //! of their reaction by construction.
 
 use gpui::{App, rgb};
-use nmt_app_agent::settings::AgentSettings;
-use nmt_app_terminal::frame::theme_default_background;
-use nmt_app_terminal::settings::TerminalSettings;
+use nmt_agent_ui::settings::AgentSettings;
+use nmt_terminal_ui::frame::theme_default_background;
+use nmt_terminal_ui::settings::TerminalSettings;
 
 use crate::ui::settings::opacity::main_view_background_opacity;
 use crate::ui::settings::state::AppSettings;

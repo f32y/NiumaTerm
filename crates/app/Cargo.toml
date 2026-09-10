@@ -14,8 +14,8 @@ path = "src/main.rs"
 
 [dependencies]
 nmt_agent.workspace = true
-nmt_app_agent.workspace = true
-nmt_app_terminal.workspace = true
+nmt_agent_ui.workspace = true
+nmt_terminal_ui.workspace = true
 nmt_config.workspace = true
 nmt_i18n.workspace = true
 nmt_terminal.workspace = true

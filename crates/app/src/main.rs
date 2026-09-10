@@ -50,7 +50,7 @@ mod utils;
 mod window;
 mod workspace;
 
-use nmt_app_agent::{AgentThreadDefaults, input_history};
+use nmt_agent_ui::{AgentThreadDefaults, input_history};
 
 use crate::cli::CliAction;
 use crate::ui::{AppAssets, AppSettings};

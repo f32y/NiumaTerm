@@ -10,7 +10,7 @@ use gpui_component::{ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex};
 use nmt_agent::claude_code::usage_fetcher::{self as claude_usage, UsageFetchError};
 use nmt_agent::codex::usage_fetcher as codex_usage;
 use nmt_agent::usage::{UsageSnapshot, UsageWindow, now_unix_millis};
-use nmt_app_agent::profile::{ClaudeIcon, CodexIcon};
+use nmt_agent_ui::profile::{ClaudeIcon, CodexIcon};
 use nmt_i18n::i18n;
 use tracing::warn;
 

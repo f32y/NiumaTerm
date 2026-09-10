@@ -5,7 +5,7 @@ use gpui::Global;
 #[cfg(windows)]
 use gpui::SharedString;
 use nmt_agent::deepseek;
-use nmt_app_agent::AgentKind;
+use nmt_agent_ui::AgentKind;
 use nmt_config::agent::AgentConfig;
 pub use nmt_config::agent::{CollapseRows, ModelListStyle};
 use nmt_config::appearance::AppearanceConfig;

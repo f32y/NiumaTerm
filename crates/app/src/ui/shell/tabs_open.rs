@@ -1,4 +1,4 @@
-use nmt_app_agent::RecoveryIdentity;
+use nmt_agent_ui::RecoveryIdentity;
 use nmt_i18n::i18n;
 
 use crate::ui::persistence::spawn_default_pane;

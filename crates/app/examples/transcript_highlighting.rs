@@ -15,9 +15,9 @@ use gpui_macos::MacPlatform as Platform;
 #[cfg(windows)]
 use gpui_windows::WindowsPlatform as Platform;
 use nmt_agent::chat::Item;
-use nmt_app_agent::profile::AgentKind;
-use nmt_app_agent::settings::AgentSettings;
-use nmt_app_agent::transcript::TranscriptView;
+use nmt_agent_ui::profile::AgentKind;
+use nmt_agent_ui::settings::AgentSettings;
+use nmt_agent_ui::transcript::TranscriptView;
 use nmt_config::agent::CollapseRows;
 
 #[path = "../src/ui/assets.rs"]

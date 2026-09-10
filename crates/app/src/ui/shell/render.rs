@@ -1,7 +1,7 @@
 use gpui::KeyDownEvent;
 use gpui_component::Disableable;
 use gpui_component::modern_menu::{ModernMenu, dispatch_modern_menu_key};
-use nmt_app_agent::RecoveryIdentity;
+use nmt_agent_ui::RecoveryIdentity;
 use nmt_i18n::i18n;
 
 use crate::ui::composition::FLOATING_SURFACE_SIDE_INSET;

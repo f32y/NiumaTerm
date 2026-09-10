@@ -1,4 +1,4 @@
-use nmt_app_agent::AgentKind;
+use nmt_agent_ui::AgentKind;
 use nmt_i18n::i18n;
 
 use crate::ui::settings::*;

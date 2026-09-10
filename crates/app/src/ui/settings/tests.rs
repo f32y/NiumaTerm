@@ -6,7 +6,7 @@ use gpui::{
     Context, Entity, IntoElement, ListAlignment, ListOffset, ListState, ScrollDelta,
     ScrollWheelEvent, TestAppContext, list, point, size,
 };
-use nmt_app_agent::AgentKind;
+use nmt_agent_ui::AgentKind;
 use nmt_config::Config;
 use nmt_config::builtin_themes::{THEMES as BUILTIN_THEMES, get as builtin_theme_source};
 use nmt_config::theme::Theme as ConfigTheme;

@@ -19,7 +19,7 @@ use nmt_agent::update::{
     ClaudeMaintenance, CodexMaintenance, HttpClaudeReleaseChannel, InstallationKey,
     InstallationSnapshot, ProviderKind, ProviderMaintenance, UpdateCoordinator,
 };
-use nmt_app_agent::agent_launch;
+use nmt_agent_ui::agent_launch;
 use nmt_config::profile::AgentProfile;
 
 use crate::agent_updates::doubles::{FakeMaintenance, UnavailableMaintenance};

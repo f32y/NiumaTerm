@@ -6,8 +6,8 @@ use gpui::{
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::scroll::Scrollbar;
 use gpui_component::{ActiveTheme, IconName, Sizable as _, h_flex, v_flex};
-use nmt_app_terminal::metrics;
 use nmt_i18n::i18n;
+use nmt_terminal_ui::metrics;
 
 use crate::ui::git_status::{DiffLine, DiffLineKind, GitStatusModel, fetch_file_diff};
 

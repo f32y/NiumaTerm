@@ -11,7 +11,7 @@ use nmt_agent::update::{
     InstallationKey, ProviderKind, UpdateCoordinator, UpdateError, UpdateErrorKind, UpdatePhase,
     UpdateProgress,
 };
-use nmt_app_agent::{AgentPane, RecoveryReadiness, RecoverySnapshot, RestorationReadiness};
+use nmt_agent_ui::{AgentPane, RecoveryReadiness, RecoverySnapshot, RestorationReadiness};
 use nmt_config::profile::AgentProfileKind;
 use nmt_i18n::i18n;
 

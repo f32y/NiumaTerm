@@ -16,7 +16,7 @@ position is a file:
 
 Six filled faces is what the longest ladder any harness offers needs. The
 mapping from a level to a face lives in `effort_gauge_step`, in
-crates/app_agent/src/view/settings_row.rs; this script owns only the drawing.
+crates/agent_ui/src/thread_controls/effort.rs; this script owns only the drawing.
 
 Each face is a half-circle track at low alpha, an arc over it filled in
 proportion to the level, and a needle from the dial's centre to the end of that

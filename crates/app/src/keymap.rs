@@ -9,7 +9,7 @@
 //! not what any macOS application does.
 
 use gpui::{App, KeyBinding};
-use nmt_app_terminal::view::{
+use nmt_terminal_ui::view::{
     CopyBlockCommand, CopyBlockOutput, NextBlock, PreviousBlock, RerunBlock, SendShiftTab, SendTab,
 };
 

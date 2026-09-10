@@ -10,7 +10,7 @@ use gpui_component::{
     ActiveTheme, Disableable, Icon, IconName, IconNamed, Selectable, Sizable, h_flex, v_flex,
 };
 use nmt_agent::AgentRuntimeStatus;
-use nmt_app_agent::AgentKind;
+use nmt_agent_ui::AgentKind;
 use nmt_config::appearance::TabBarStyle;
 use nmt_i18n::i18n;
 use nmt_terminal::event::ProgressReport;

@@ -1,5 +1,5 @@
 [package]
-name = "nmt_app_terminal"
+name = "nmt_terminal_ui"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

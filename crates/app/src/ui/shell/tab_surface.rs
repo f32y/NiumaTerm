@@ -1,7 +1,7 @@
 use gpui::{App, Entity};
-use nmt_app_agent::{AgentKind, AgentPane};
-use nmt_app_terminal::view::TerminalPane;
+use nmt_agent_ui::{AgentKind, AgentPane};
 use nmt_config::local_state::TabState;
+use nmt_terminal_ui::view::TerminalPane;
 
 use crate::pane_tree::PaneId;
 use crate::ui::terminal_layout::TerminalLayout;

@@ -19,8 +19,8 @@ use gpui_component::{ActiveTheme as _, IconNamed, Sizable as _, StyledExt as _, 
 use nmt_agent::background_task::{
     BackgroundTaskDiscoveryState, BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskSummary,
 };
-use nmt_app_agent::AgentPane;
-use nmt_app_agent::transcript::TranscriptView;
+use nmt_agent_ui::AgentPane;
+use nmt_agent_ui::transcript::TranscriptView;
 use nmt_i18n::i18n;
 
 use crate::ui::AppSettings;

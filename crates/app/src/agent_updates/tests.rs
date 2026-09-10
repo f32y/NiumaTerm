@@ -7,7 +7,7 @@ use nmt_agent::update::{
     DiscoverySupport, InstallationKey, InstallationSnapshot, InstallationUpdateState, ProviderKind,
     ProviderMaintenance, UpdateError, UpdateErrorKind, UpdatePhase, UpdateProgress, VersionStatus,
 };
-use nmt_app_agent::{AgentKind, RecoveryIdentity, RecoveryReadiness, RecoverySnapshot};
+use nmt_agent_ui::{AgentKind, RecoveryIdentity, RecoveryReadiness, RecoverySnapshot};
 use semver::Version;
 
 use crate::agent_updates::*;

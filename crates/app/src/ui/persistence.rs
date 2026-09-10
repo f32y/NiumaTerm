@@ -3,12 +3,12 @@ use std::process;
 use dirs::home_dir;
 use gpui::{App, AppContext, Axis, Context, Entity, Window};
 use gpui_component::resizable::ResizableState;
-use nmt_app_agent::{AgentKind, AgentPane};
-use nmt_app_terminal::view::TerminalPane;
+use nmt_agent_ui::{AgentKind, AgentPane};
 use nmt_config::local_state::{
     PaneNodeState, PaneSplitAxis, SessionState, TabState, WorkspaceState,
 };
 use nmt_i18n::i18n;
+use nmt_terminal_ui::view::TerminalPane;
 use tracing::warn;
 
 use crate::pane_tree::{PaneId, PaneNode, PaneTree};

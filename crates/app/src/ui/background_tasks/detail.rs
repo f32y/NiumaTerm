@@ -13,7 +13,7 @@ use gpui_component::{ActiveTheme as _, IconName, Sizable as _, h_flex, v_flex};
 use nmt_agent::background_task::{
     BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscriptState,
 };
-use nmt_app_agent::transcript::TranscriptView;
+use nmt_agent_ui::transcript::TranscriptView;
 use nmt_i18n::i18n;
 
 use crate::ui::background_tasks::BackgroundTasksView;
