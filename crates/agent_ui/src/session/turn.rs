@@ -46,6 +46,11 @@ pub(crate) fn response_age_tick(age: Duration) -> Option<Duration> {
 }
 
 impl AgentPane {
+    pub(crate) fn note_visible_output(&mut self) {
+        self.delivery.visible_output();
+        self.turn.note_visible_output();
+    }
+
     /// Start the turn clock and drive the once-a-second repaint of the live
     /// progress row; the ticker stops itself once `finish_working` clears it.
     pub(crate) fn start_working(&mut self, cx: &mut Context<Self>) {
@@ -79,7 +84,7 @@ impl AgentPane {
     /// row. These values are UI state rather than provider transcript content,
     /// so they stay outside the shared item stream.
     pub(super) fn finish_working(&mut self, cx: &mut Context<Self>) {
-        let turn = self.turn.seq;
+        let turn = self.delivery.turn();
 
         self.transcript
             .update(cx, |transcript, cx| transcript.settle_turn(turn, cx));
@@ -102,16 +107,9 @@ impl AgentPane {
     }
 
     pub(crate) fn interrupt_from_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let working = self.transcript.read(cx).is_working();
+        let working = self.delivery.is_active();
 
-        if let Some(prompt) = self
-            .turn
-            .unanswered_prompt
-            .take()
-            .filter(|prompt| prompt.turn == self.turn.seq && working)
-        {
-            let turn = prompt.turn;
-
+        if let Some((turn, prompt)) = self.delivery.take_interrupted_prompt() {
             self.transcript
                 .update(cx, |transcript, cx| transcript.discard_turn(turn, cx));
 
@@ -129,7 +127,9 @@ impl AgentPane {
             cx.notify();
         }
 
-        let outcome = self.runtime.interrupt(working.then_some(self.turn.seq));
+        let outcome = self
+            .runtime
+            .interrupt(working.then_some(self.delivery.turn()));
 
         self.present_interrupt_result(outcome, cx);
     }

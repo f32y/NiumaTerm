@@ -35,6 +35,7 @@ use nmt_agent::chat::{
     ContextComposition, ContextWindowUsage, ReplayTurn, SessionScope, SessionStats, SessionSummary,
     SkillCatalog, SkillReference, SlashCommandInfo,
 };
+use nmt_agent::session::delivery::MessageDelivery;
 use nmt_agent::session::lifecycle::SessionRuntime;
 use nmt_agent::{AgentEvent, AgentRoute, AgentWorkspace};
 use nmt_config::profile::AgentProfile;
@@ -44,7 +45,7 @@ use crate::composer::attachments::ComposerAttachments;
 use crate::composer::{BranchFlow, CommandFeedback, PendingSlashCommand};
 use crate::fade::Fade;
 use crate::input_history::{InputHistoryNavigation, InputHistoryScope};
-use crate::pane_state::{ChildAgents, TurnState};
+use crate::pane_state::{ChildAgents, TurnPresentation};
 pub use crate::profile::{AgentKind, AgentKindExt, AgentThreadDefaults, agent_launch};
 use crate::session::history::FilesystemHistoryRequest;
 use crate::session::prompts::PendingPrompts;
@@ -126,13 +127,6 @@ struct GitBranchPoll {
     ready: bool,
     refreshing: bool,
     generation: u64,
-}
-
-struct UnansweredPrompt {
-    turn: u64,
-    text: String,
-    response_annotations: Vec<String>,
-    skill: Option<SkillReference>,
 }
 
 impl GitBranchPoll {
@@ -329,7 +323,8 @@ pub struct AgentPane {
     /// Thread controls under the composer: values, catalogs, seeding flags.
     controls: ThreadControls,
     /// The running turn's bookkeeping, from submission to settled output.
-    turn: TurnState,
+    turn: TurnPresentation,
+    delivery: MessageDelivery,
     /// Child-agent activity the provider adapter reports for this session.
     children: ChildAgents,
     /// The approval and question cards that block a turn until answered.

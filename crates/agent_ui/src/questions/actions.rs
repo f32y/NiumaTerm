@@ -125,7 +125,7 @@ impl AgentPane {
             } => {
                 if let Some(text) = message {
                     if started_turn && self.runtime.status() == Status::Idle {
-                        self.turn.seq += 1;
+                        self.delivery.begin_turn();
                         self.start_working(cx);
                         self.runtime.turn_started();
                         self.emit_lifecycle(AgentEventKind::PromptSubmitted, "", "", cx);

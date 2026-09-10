@@ -47,7 +47,7 @@ impl AgentPane {
             || self.prompts.approval_open()
             || self.palette.awaiting_command_turn
             || !self.palette.command_queue.is_empty()
-            || !self.turn.queued_user_messages.is_empty()
+            || !self.delivery.pending().is_empty()
             || self.branch.rewind.state.is_some()
             || self.branch.fork.state.is_some()
             || self.transcript.read(cx).is_compacting()
@@ -103,6 +103,7 @@ impl AgentPane {
 
         self.palette.command_queue.clear();
         self.palette.awaiting_command_turn = false;
+        self.delivery.stopping_for_update();
         self.publish_queued_user_messages(cx);
 
         if self

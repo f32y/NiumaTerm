@@ -383,11 +383,11 @@ impl AgentPane {
         let turns = self
             .session_stats
             .map(|stats| stats.turns)
-            .unwrap_or(self.turn.seq);
+            .unwrap_or(self.delivery.turn());
 
         let stats = composer_stats_label(
             turns,
-            self.transcript.read(cx).turn_steps(self.turn.seq),
+            self.transcript.read(cx).turn_steps(self.delivery.turn()),
             self.turn.first_output_latency,
             self.context_window_usage.and_then(cache_hit_percent),
         );

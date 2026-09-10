@@ -6,23 +6,19 @@
 //! tell from the type which fields move as a unit and which merely live on
 //! the same pane.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use gpui::Context;
 use nmt_agent::background_task::{
     BackgroundTaskKey, BackgroundTaskSnapshot, BackgroundTaskTranscript,
 };
-use nmt_agent::chat::QueuedPrompt;
 
+use crate::AgentPane;
 use crate::session::turn::response_age_tick;
-use crate::{AgentPane, UnansweredPrompt};
 
-/// One turn's bookkeeping, from submission to settled output.
-pub(crate) struct TurnState {
-    /// Monotonic turn counter; entries are tagged with the turn they arrived
-    /// in so a settled turn can fold as one unit.
-    pub(crate) seq: u64,
+/// Timing shown for the current turn and the most recently settled response.
+pub(crate) struct TurnPresentation {
     /// When the running turn was handed to the backend, kept until its first
     /// visible output answers it. Measured from submission rather than from
     /// the backend's turn-started event, so the reading covers the whole wait
@@ -32,27 +28,13 @@ pub(crate) struct TurnState {
     /// turn so the composer keeps reporting it while the conversation is
     /// idle.
     pub(crate) first_output_latency: Option<Duration>,
-    /// The active prompt remains recoverable until provider activity becomes
-    /// visible, allowing an immediate stop to return it to the composer.
-    pub(crate) unanswered_prompt: Option<UnansweredPrompt>,
-    /// Mid-turn inputs stay near the composer until provider activity
-    /// confirms they have joined the running response. A backend that owns
-    /// its own pending queue republishes this whole list, which is what gives
-    /// the rows the identities a removal needs.
-    pub(crate) queued_user_messages: VecDeque<QueuedPrompt>,
-    /// The prompt this side already put in the transcript because the backend
-    /// admitted it as a new turn. A backend that publishes its pending inbox
-    /// keeps listing that prompt until the turn claims it, and every list it
-    /// appears in would show the message a second time beside the row that is
-    /// already there.
-    pub(crate) published_prompt: Option<String>,
     /// When the agent last finished answering, for the composer's idle reading
     /// of how long the conversation has been waiting on the user. `None` until
     /// the first turn settles.
     pub(crate) last_response_at: Option<Instant>,
 }
 
-impl TurnState {
+impl TurnPresentation {
     pub(crate) fn last_response_at(&self) -> Option<Instant> {
         self.last_response_at
     }
@@ -107,14 +89,6 @@ impl TurnState {
     pub(crate) fn note_visible_output(&mut self) {
         if let Some(submitted_at) = self.submitted_at.take() {
             self.first_output_latency = Some(submitted_at.elapsed());
-        }
-
-        if self
-            .unanswered_prompt
-            .as_ref()
-            .is_some_and(|prompt| prompt.turn == self.seq)
-        {
-            self.unanswered_prompt = None;
         }
     }
 }

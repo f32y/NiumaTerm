@@ -4,6 +4,7 @@ use crate::update::ProviderKind;
 
 mod attachments;
 mod backend;
+pub mod delivery;
 pub mod lifecycle;
 #[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]

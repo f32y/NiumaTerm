@@ -2,11 +2,11 @@ use futures::StreamExt as _;
 use gpui::prelude::*;
 use nmt_agent::AgentEvent;
 use nmt_agent::session::ImageAttachment;
+use nmt_agent::session::delivery::{MessageDelivery, RecoverablePrompt, Submission};
 use nmt_agent::session::lifecycle::{SessionRuntime, StartOutcome};
 
-use crate::UnansweredPrompt;
 use crate::capabilities::AgentCapabilities as _;
-use crate::pane_state::{ChildAgents, TurnState};
+use crate::pane_state::{ChildAgents, TurnPresentation};
 use crate::profile::AgentKindExt as _;
 use crate::session::output::{EventBatch, MAX_MESSAGES_PER_BATCH, MAX_UPDATE_TIME};
 use crate::session::prompts::PendingPrompts;
@@ -25,7 +25,7 @@ mod tests;
 pub(crate) mod turn;
 mod update_recovery;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -33,10 +33,7 @@ use std::{env, fs};
 
 use gpui::{App, Context, Image, Window};
 use gpui_component::input::{InputEvent, TextareaState};
-use nmt_agent::chat::{
-    Event as SessionEvent, Item as SessionItem, QueuedPrompt, SendOutcome, SkillReference,
-    ThreadSettings,
-};
+use nmt_agent::chat::{Event as SessionEvent, Item as SessionItem, SkillReference, ThreadSettings};
 use nmt_agent::claude_code::sessions as claude_sessions;
 use nmt_agent::codex::app_server;
 pub(super) use nmt_agent::session::Backend;
@@ -54,7 +51,6 @@ use nmt_i18n::i18n;
 use nmt_platform::filesystem::path_identity;
 use tracing::info;
 
-use crate::capabilities::QueuedPromptDelivery;
 use crate::commands::reconcile_skill_binding;
 use crate::composer::attachments::{ComposerAttachments, scratch_dir};
 use crate::composer::{BranchFlow, CommandFeedbackKind, prompt_with_response_annotations};
@@ -262,13 +258,10 @@ impl AgentPane {
                 agent_preset: None,
                 effort_drag: None,
             },
-            turn: TurnState {
-                seq: 0,
+            delivery: MessageDelivery::new(kind),
+            turn: TurnPresentation {
                 submitted_at: None,
                 first_output_latency: None,
-                unanswered_prompt: None,
-                queued_user_messages: VecDeque::new(),
-                published_prompt: None,
                 last_response_at: None,
             },
             palette: SlashPalette {
@@ -386,7 +379,7 @@ impl AgentPane {
         images: Vec<Arc<Image>>,
         cx: &mut Context<Self>,
     ) {
-        let turn = self.turn.seq;
+        let turn = self.delivery.turn();
 
         self.transcript
             .update(cx, |transcript, cx| transcript.push(turn, item, images, cx));
@@ -443,7 +436,7 @@ impl AgentPane {
             agent: self.kind.id().to_string(),
             session_id: format!("agent-tab-{}", self.runtime.epoch()),
             turn_id: (kind != AgentEventKind::SessionStarted)
-                .then(|| format!("turn-{}", self.turn.seq)),
+                .then(|| format!("turn-{}", self.delivery.turn())),
             kind,
             title: normalize_title(title),
             body: normalize_body(body),
@@ -453,7 +446,7 @@ impl AgentPane {
     pub(super) fn latest_agent_message(&self, cx: &App) -> Option<String> {
         self.transcript
             .read(cx)
-            .latest_agent_message(self.turn.seq)
+            .latest_agent_message(self.delivery.turn())
             .map(str::to_owned)
     }
 
@@ -738,6 +731,7 @@ impl AgentPane {
                     );
                 }
 
+                this.delivery.exited();
                 this.publish_queued_user_messages(cx);
                 this.finish_working(cx);
                 this.push_item(
@@ -794,9 +788,9 @@ impl AgentPane {
                 cx.emit(AgentPaneEvent::Interrupted);
                 self.palette.awaiting_command_turn = false;
                 self.palette.command_queue.clear();
-                self.turn.queued_user_messages.clear();
+                self.delivery.start_failed();
 
-                let turn = self.turn.seq;
+                let turn = self.delivery.turn();
 
                 self.transcript.update(cx, |transcript, _| {
                     transcript.push_stamped(turn, SessionItem::Error { text });
@@ -925,20 +919,31 @@ impl AgentPane {
             }
         });
 
-        // Both refusals keep the composed text recoverable; they differ only in
-        // whether the backend could say why.
-        let refusal = match &outcome {
-            SendOutcome::NotReady => {
-                Some(i18n("agent-session-still-starting").replace("{name}", self.kind.display()))
+        let restores_annotations = restore_on_interrupt.is_some();
+        let started_text = match self.delivery.submit(outcome, text, || {
+            restore_on_interrupt.map(|(text, response_annotations)| RecoverablePrompt {
+                text,
+                response_annotations,
+                skill: skill.cloned(),
+            })
+        }) {
+            Submission::Started { text } => Some(text),
+            Submission::Queued => None,
+            Submission::NotReady => {
+                self.push_item(
+                    SessionItem::Error {
+                        text: i18n("agent-session-still-starting")
+                            .replace("{name}", self.kind.display()),
+                    },
+                    cx,
+                );
+                return false;
             }
-            SendOutcome::Rejected { message } => Some(message.clone()),
-            SendOutcome::StartedTurn | SendOutcome::Steered => None,
+            Submission::Rejected { message } => {
+                self.push_item(SessionItem::Error { text: message }, cx);
+                return false;
+            }
         };
-
-        if let Some(text) = refusal {
-            self.push_item(SessionItem::Error { text }, cx);
-            return false;
-        }
 
         // Both providers generate their final title asynchronously. Claiming
         // the first accepted prompt here prevents a failed generation from
@@ -962,7 +967,7 @@ impl AgentPane {
 
         self.attachments.clear_images();
 
-        if restore_on_interrupt.is_some() {
+        if restores_annotations {
             self.attachments.clear_annotations();
         }
 
@@ -970,43 +975,16 @@ impl AgentPane {
         // history list is no longer offered.
         self.history_ui.mode = RecentSessionsMode::Hidden;
 
-        match outcome {
-            SendOutcome::StartedTurn => {
-                self.turn.seq += 1;
-
-                // A backend that publishes its pending inbox lists this prompt
-                // until the turn claims it; the row below is the claim's, so
-                // the claim has to know it was already drawn.
-                if self.kind.caps().queued_prompt_delivery == QueuedPromptDelivery::PendingInbox {
-                    self.turn.published_prompt = Some(text.clone());
-                }
-
-                let unanswered_prompt =
-                    restore_on_interrupt.map(|(text, response_annotations)| UnansweredPrompt {
-                        turn: self.turn.seq,
-                        text,
-                        response_annotations,
-                        skill: skill.cloned(),
-                    });
-
+        match started_text {
+            Some(text) => {
                 self.push_item_with_images(
                     SessionItem::UserMessage { text: Some(text) },
                     sent_images,
                     cx,
                 );
-                self.turn.unanswered_prompt = unanswered_prompt;
                 self.start_working(cx);
             }
-            SendOutcome::Steered => {
-                // The backend may republish this row with an identity of its
-                // own a moment later; until then it is this side's record that
-                // the message is pending, and it carries no removal control.
-                self.turn
-                    .queued_user_messages
-                    .push_back(QueuedPrompt::local(text));
-                cx.notify();
-            }
-            SendOutcome::NotReady | SendOutcome::Rejected { .. } => unreachable!(),
+            None => cx.notify(),
         }
 
         true
@@ -1015,16 +993,14 @@ impl AgentPane {
     pub(super) fn clear_conversation_presentation(&mut self, cx: &mut Context<Self>) {
         self.transcript
             .update(cx, |transcript, _| transcript.clear());
-        self.turn.seq = 0;
+        self.delivery.reset();
         self.turn.submitted_at = None;
-        self.turn.published_prompt = None;
         self.turn.first_output_latency = None;
 
         // The reading answers "how long has this conversation been waiting on
         // me"; the replaced conversation's last answer says nothing about the
         // fresh one, which has never been answered at all.
         self.turn.forget_last_response();
-        self.turn.unanswered_prompt = None;
 
         // The new conversation restarts turn ids from zero, so a stop request
         // left over from the old one could match an unrelated future turn.
@@ -1033,7 +1009,6 @@ impl AgentPane {
         self.context_composition = None;
         self.session_state.clear();
         self.session_stats = None;
-        self.turn.queued_user_messages.clear();
         self.branch.clear();
         self.history_ui.pending_resume_replay = None;
         self.history_ui.invalidate_filesystem_history();

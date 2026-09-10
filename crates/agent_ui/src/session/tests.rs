@@ -202,63 +202,6 @@ fn no_pinned_effort_leaves_the_remembered_pick_in_place() {
 }
 
 #[test]
-fn a_pending_snapshot_claims_only_the_prompts_it_stopped_naming() {
-    use std::collections::VecDeque;
-
-    use nmt_agent::chat::QueuedPrompt;
-
-    use crate::session::conversation::claimed_prompts;
-
-    let backend = |id: &str, text: &str| QueuedPrompt {
-        id: Some(id.into()),
-        text: text.into(),
-    };
-
-    let held = VecDeque::from([
-        backend("msg-1", "run the tests"),
-        backend("msg-2", "then push"),
-        // Sent a moment ago; the backend has not named it yet.
-        QueuedPrompt::local("and tag it".into()),
-    ]);
-
-    // The snapshot that first names the local row must not read as a claim:
-    // the prompt is still waiting, and publishing it would show it as sent.
-    assert_eq!(
-        claimed_prompts(
-            &held,
-            &[
-                backend("msg-1", "run the tests"),
-                backend("msg-2", "then push"),
-                backend("msg-3", "and tag it"),
-            ],
-        ),
-        Vec::<String>::new(),
-    );
-
-    // The agent took the head of the queue; that row is now due.
-    assert_eq!(
-        claimed_prompts(
-            &held,
-            &[
-                backend("msg-2", "then push"),
-                backend("msg-3", "and tag it")
-            ],
-        ),
-        vec!["run the tests".to_string()],
-    );
-
-    // An emptied queue claims everything still held, in queue order.
-    assert_eq!(
-        claimed_prompts(&held, &[]),
-        vec![
-            "run the tests".to_string(),
-            "then push".to_string(),
-            "and tag it".to_string(),
-        ],
-    );
-}
-
-#[test]
 fn a_prompt_names_its_tab_by_its_first_real_line() {
     assert_eq!(
         tab_title_from_prompt(
@@ -798,21 +741,21 @@ mod queued_prompt_placement_tests {
                 pane.runtime.ready();
                 pane.palette.awaiting_command_turn = true;
 
-                let previous_turn = pane.turn.seq;
+                let previous_turn = pane.delivery.turn();
 
                 assert!(!pane.transcript.read(cx).is_working());
 
                 pane.apply_event(SessionEvent::TurnStarted, cx);
 
                 assert!(!pane.palette.awaiting_command_turn);
-                assert_eq!(pane.turn.seq, previous_turn + 1);
+                assert_eq!(pane.delivery.turn(), previous_turn + 1);
                 assert_eq!(pane.runtime.status(), Status::Running);
                 assert!(pane.transcript.read(cx).is_working());
 
                 pane.apply_event(SessionEvent::TurnStarted, cx);
 
                 assert_eq!(
-                    pane.turn.seq,
+                    pane.delivery.turn(),
                     previous_turn + 1,
                     "a repeated event must not open another turn"
                 );
@@ -847,7 +790,7 @@ mod queued_prompt_placement_tests {
 
                 pane.apply_event(SessionEvent::TurnStarted, cx);
 
-                let first_turn = pane.turn.seq;
+                let first_turn = pane.delivery.turn();
 
                 assert!(pane.send_text("queued behind it".into(), cx));
 
@@ -870,7 +813,11 @@ mod queued_prompt_placement_tests {
                 // The CLI answers the held prompt in a turn nothing here sent.
                 pane.apply_event(SessionEvent::TurnStarted, cx);
 
-                assert_eq!(pane.turn.seq, first_turn + 1, "that turn is numbered");
+                assert_eq!(
+                    pane.delivery.turn(),
+                    first_turn + 1,
+                    "that turn is numbered"
+                );
                 assert_eq!(pane.runtime.status(), Status::Running);
                 assert!(pane.transcript.read(cx).is_working());
                 assert_eq!(
@@ -928,7 +875,7 @@ mod queued_prompt_placement_tests {
                 );
 
                 assert!(
-                    pane.turn.queued_user_messages.is_empty(),
+                    pane.delivery.pending().is_empty(),
                     "a prompt already in the transcript is not also waiting"
                 );
 
@@ -946,7 +893,7 @@ mod queued_prompt_placement_tests {
                     vec![(1, text)],
                     "the message appears once, in the turn it opened"
                 );
-                assert!(pane.turn.queued_user_messages.is_empty());
+                assert!(pane.delivery.pending().is_empty());
             });
         });
     }

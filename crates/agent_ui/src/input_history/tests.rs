@@ -1059,3 +1059,88 @@ async fn editing_a_workspace_reaches_the_next_conversation_only(cx: &mut TestApp
 
     assert!(entries.is_empty());
 }
+
+#[gpui::test]
+fn interruption_restores_only_unanswered_input_and_preserves_new_drafts(cx: &mut TestAppContext) {
+    use nmt_agent::chat::{Event, Item};
+
+    for visible in [false, true] {
+        let directory = TestDirectory::new();
+        let (pane, window) = open_test_pane(cx, &directory);
+        let mut view_cx = VisualTestContext::from_window(window.into(), cx);
+
+        view_cx.update(|window, cx| {
+            pane.update(cx, |pane, cx| {
+                let epoch = pane.runtime.begin_start();
+                let mut backend = TestBackend::new(
+                    [SendOutcome::StartedTurn],
+                    SlashCommandOutcome::NotReady,
+                    Vec::new(),
+                );
+                backend.interrupt_accepted = true;
+                assert!(matches!(
+                    pane.runtime.install(epoch, Ok(Backend::Test(backend))),
+                    StartOutcome::Installed
+                ));
+                pane.runtime.ready();
+                pane.attachments.add_annotation("quoted answer".into());
+                pane.input.update(cx, |input, cx| {
+                    input.set_value("original draft", window, cx)
+                });
+                pane.send_user_message(window, cx);
+                let turn = pane.delivery.turn();
+
+                pane.start_item(
+                    Item::AgentMessage {
+                        id: "answer".into(),
+                        text: None,
+                        questions: None,
+                    },
+                    cx,
+                );
+                if visible {
+                    pane.append_delta(
+                        "answer",
+                        "visible response",
+                        |item| match item {
+                            Item::AgentMessage { text, .. } => Some(text),
+                            _ => None,
+                        },
+                        cx,
+                    );
+                }
+
+                pane.input
+                    .update(cx, |input, cx| input.set_value("new draft", window, cx));
+                pane.interrupt_from_ui(window, cx);
+                let input = pane.input.read(cx).text().to_string();
+
+                if visible {
+                    assert_eq!(input, "new draft");
+                    assert!(pane.attachments.annotations().is_empty());
+                    assert!(pane.delivery.is_active());
+                    pane.apply_event(Event::TurnStarted, cx);
+                    assert_eq!(pane.delivery.turn(), turn);
+                } else {
+                    assert!(input.contains("original draft"));
+                    assert!(input.ends_with("new draft"));
+                    assert_eq!(pane.attachments.annotations(), ["quoted answer"]);
+                    assert!(!pane.transcript.read(cx).is_working());
+                    assert!(!pane.delivery.is_active());
+
+                    pane.apply_event(Event::TurnStarted, cx);
+                    assert_eq!(pane.delivery.turn(), turn + 1);
+                    assert!(pane.transcript.read(cx).is_working());
+                }
+
+                assert_eq!(
+                    cx.global::<AgentInputHistory>()
+                        .entries(&pane.input_history_scope)
+                        .len(),
+                    1,
+                    "recovering a draft must not record a second submission"
+                );
+            });
+        });
+    }
+}

@@ -2,34 +2,13 @@
 //! its title, its branches, the search over its siblings, and the prompts
 //! waiting behind the running turn.
 
-use std::collections::VecDeque;
-
 use gpui::Context;
-use nmt_agent::chat::{QueuedPrompt, SessionSummary};
+use nmt_agent::chat::SessionSummary;
 use nmt_i18n::i18n;
 
 use crate::composer::CommandFeedbackKind;
 use crate::session::errors::operation_error;
 use crate::{AgentPane, RecentSessionsMode};
-
-/// Which of the prompts this side is holding a new pending-inbox snapshot no
-/// longer names.
-///
-/// A prompt the backend has stopped listing is one it has claimed into the
-/// running turn, which is the moment its transcript row is due. Rows are
-/// matched on their text rather than on the backend's identity because a
-/// prompt this side queued optimistically has no identity yet, and treating it
-/// as claimed on the very first snapshot would show it as sent while it was
-/// still waiting.
-pub(crate) fn claimed_prompts(
-    held: &VecDeque<QueuedPrompt>,
-    pending: &[QueuedPrompt],
-) -> Vec<String> {
-    held.iter()
-        .filter(|held| !pending.iter().any(|pending| pending.text == held.text))
-        .map(|held| held.text.clone())
-        .collect()
-}
 
 impl AgentPane {
     /// Pin a title on this conversation.
@@ -171,9 +150,7 @@ impl AgentPane {
             return;
         }
 
-        self.turn
-            .queued_user_messages
-            .retain(|queued| queued.id.as_deref() != Some(item_id));
+        self.delivery.removed(item_id);
         cx.notify();
     }
 }

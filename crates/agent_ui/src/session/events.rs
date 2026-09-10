@@ -10,10 +10,9 @@ use nmt_agent::chat::{
 use nmt_i18n::i18n;
 use tracing::{info, warn};
 
-use crate::capabilities::{AgentCapabilities as _, QueuedPromptDelivery};
+use crate::capabilities::AgentCapabilities as _;
 use crate::composer::CommandFeedbackKind;
 use crate::questions::{QuestionPrompt, QuestionStatus};
-use crate::session::conversation::claimed_prompts;
 use crate::session::{Backend, RecoverySnapshot, Status};
 use crate::thread_controls::{launch_effort, launch_model, stored_thread_settings};
 use crate::transcript::hidden;
@@ -120,7 +119,7 @@ impl AgentPane {
                 cx.notify();
             }
             SessionEvent::CompactionStarted => {
-                self.turn.note_visible_output();
+                self.note_visible_output();
                 self.transcript
                     .update(cx, |transcript, cx| transcript.set_compacting(true, cx));
                 cx.notify();
@@ -176,7 +175,7 @@ impl AgentPane {
                 );
             }
             SessionEvent::ApprovalRequested { description } => {
-                self.turn.note_visible_output();
+                self.note_visible_output();
                 self.emit_lifecycle(
                     AgentEventKind::PermissionRequested,
                     &i18n("agent-session-needs-input").replace("{name}", self.kind.display()),
@@ -192,7 +191,7 @@ impl AgentPane {
                 cx.notify();
             }
             SessionEvent::QuestionsRequested { questions } => {
-                self.turn.note_visible_output();
+                self.note_visible_output();
 
                 // The turn is blocked on the user exactly as an approval is, so
                 // it raises the same attention signal rather than a new one.
@@ -465,20 +464,17 @@ impl AgentPane {
     /// under the previous one and leave the pane looking idle while it runs.
     fn on_turn_started(&mut self, cx: &mut Context<Self>) {
         let command_turn = take(&mut self.palette.awaiting_command_turn);
-        let harness_opened = !command_turn && !self.transcript.read(cx).is_working();
+        let new_turn = if command_turn {
+            self.delivery.begin_turn();
+            true
+        } else {
+            self.delivery.provider_started()
+        };
 
-        if command_turn || harness_opened {
-            self.turn.seq += 1;
+        if new_turn {
             self.start_working(cx);
         }
-
-        // The prompt the harness held is what this turn answers, so it
-        // heads this turn rather than trailing the finished one.
-        if harness_opened
-            && self.kind.caps().queued_prompt_delivery == QueuedPromptDelivery::FollowingTurn
-        {
-            self.publish_queued_user_messages(cx);
-        }
+        self.publish_queued_user_messages(cx);
 
         self.runtime.turn_started();
         self.emit_lifecycle(AgentEventKind::PromptSubmitted, "", "", cx);
@@ -491,16 +487,21 @@ impl AgentPane {
     /// never shows an "Interrupted" row above live output. A stale request
     /// for an earlier turn is dropped at this boundary.
     fn on_turn_completed(&mut self, error: Option<String>, cx: &mut Context<Self>) {
-        if self.runtime.turn_completed(self.turn.seq) {
-            let turn = self.turn.seq;
+        if self.runtime.turn_completed(self.delivery.turn()) {
+            let turn = self.delivery.turn();
             self.transcript
                 .update(cx, |transcript, _| transcript.mark_interrupted(turn));
         }
 
-        let interrupted_by_user = self.transcript.read(cx).was_interrupted(self.turn.seq);
-        let error_already_shown = error
-            .as_deref()
-            .is_some_and(|text| self.transcript.read(cx).turn_has_error(self.turn.seq, text));
+        let interrupted_by_user = self
+            .transcript
+            .read(cx)
+            .was_interrupted(self.delivery.turn());
+        let error_already_shown = error.as_deref().is_some_and(|text| {
+            self.transcript
+                .read(cx)
+                .turn_has_error(self.delivery.turn(), text)
+        });
 
         let completion_body = error
             .clone()
@@ -510,21 +511,14 @@ impl AgentPane {
             });
 
         self.palette.awaiting_command_turn = false;
-        self.turn.unanswered_prompt = None;
+        self.delivery.completed();
 
         // Compaction lives inside a turn; a flag surviving the turn
         // would leave the indicator spinning with nothing behind it.
         self.transcript
             .update(cx, |transcript, cx| transcript.set_compacting(false, cx));
 
-        // A prompt steered into this turn is one the backend never
-        // acknowledges, so the turn's end is the last moment that can
-        // still say it went in. The other two deliveries run their
-        // queue in a turn of its own, which the end of this one does
-        // not make sent.
-        if self.kind.caps().queued_prompt_delivery == QueuedPromptDelivery::RunningTurn {
-            self.publish_queued_user_messages(cx);
-        }
+        self.publish_queued_user_messages(cx);
 
         self.finish_working(cx);
         self.refresh_git_branch(cx);
@@ -549,7 +543,7 @@ impl AgentPane {
     /// A backend error lands in the transcript; a fatal one also ends the
     /// session, returns queued work, and reports the interruption outward.
     fn on_error(&mut self, message: String, fatal: bool, cx: &mut Context<Self>) {
-        self.turn.note_visible_output();
+        self.note_visible_output();
 
         if self.history_ui.mode == RecentSessionsMode::Loading {
             self.history_ui.mode = RecentSessionsMode::Open;
@@ -584,7 +578,7 @@ impl AgentPane {
 
             cx.emit(AgentPaneEvent::Interrupted);
             self.runtime.exited(&message);
-            self.turn.unanswered_prompt = None;
+            self.delivery.exited();
             self.palette.awaiting_command_turn = false;
             self.palette.command_queue.clear();
             self.publish_queued_user_messages(cx);
@@ -668,31 +662,10 @@ impl AgentPane {
     /// can arrive first. Both read the same list and remove what they
     /// publish, so whichever loses the race finds nothing left to publish and
     /// the row appears exactly once.
-    fn on_queued_prompts(&mut self, mut prompts: Vec<QueuedPrompt>, cx: &mut Context<Self>) {
-        // A prompt whose own send started the turn is already in the
-        // transcript, and the backend keeps listing it until the turn
-        // claims it. Repeating it above the composer would show the
-        // same message twice for that whole window, so it is dropped
-        // from the list here and the snapshot that stops naming it —
-        // the moment the turn took it — retires the record.
-        if let Some(drawn) = self.turn.published_prompt.take() {
-            let before = prompts.len();
-
-            prompts.retain(|prompt| prompt.text != drawn);
-
-            if prompts.len() != before {
-                self.turn.published_prompt = Some(drawn);
-            }
-        }
-
-        let claimed = claimed_prompts(&self.turn.queued_user_messages, &prompts);
-
-        self.turn.queued_user_messages = prompts.into();
-
-        for text in claimed {
+    fn on_queued_prompts(&mut self, prompts: Vec<QueuedPrompt>, cx: &mut Context<Self>) {
+        for text in self.delivery.snapshot(prompts) {
             self.push_item(SessionItem::UserMessage { text: Some(text) }, cx);
         }
-
         cx.notify();
     }
 
@@ -725,9 +698,7 @@ impl AgentPane {
         for turn in replay {
             // Each restored turn takes its own id, so the sequence continues
             // past the replay and new turns cannot merge into the last one.
-            self.turn.seq += 1;
-
-            let id = self.turn.seq;
+            let id = self.delivery.replay_turn();
             let newest = turn.items.iter().filter_map(|item| item.at).max();
 
             answered_at = answered_at.max(newest);
@@ -748,33 +719,19 @@ impl AgentPane {
     pub(crate) fn start_item(&mut self, item: SessionItem, cx: &mut Context<Self>) {
         if let SessionItem::UserMessage { text } = &item {
             if let Some(text) = text
-                && self
-                    .turn
-                    .queued_user_messages
-                    .front()
-                    .is_some_and(|queued| &queued.text == text)
+                && let Some(text) = self.delivery.echoed(text)
             {
-                let text = text.clone();
-                self.turn.queued_user_messages.pop_front();
                 self.push_item(SessionItem::UserMessage { text: Some(text) }, cx);
             }
-
             return;
         }
 
         if !hidden(&item) {
-            self.turn.note_visible_output();
+            self.note_visible_output();
         }
 
-        // Where a prompt joins the turn already in flight, assistant output is
-        // the only sign the backend gives that it landed. The other two
-        // deliveries answer the question themselves — one by opening a turn
-        // for the prompt, one by listing it until a turn claims it — and
-        // guessing beside either would show a message as sent while it is
-        // still waiting.
-        if matches!(item, SessionItem::AgentMessage { .. })
-            && self.kind.caps().queued_prompt_delivery == QueuedPromptDelivery::RunningTurn
-        {
+        if matches!(item, SessionItem::AgentMessage { .. }) {
+            self.delivery.agent_message();
             self.publish_queued_user_messages(cx);
         }
 
@@ -782,13 +739,8 @@ impl AgentPane {
     }
 
     pub(super) fn publish_queued_user_messages(&mut self, cx: &mut Context<Self>) {
-        while let Some(queued) = self.turn.queued_user_messages.pop_front() {
-            self.push_item(
-                SessionItem::UserMessage {
-                    text: Some(queued.text),
-                },
-                cx,
-            );
+        while let Some(text) = self.delivery.pop_confirmed() {
+            self.push_item(SessionItem::UserMessage { text: Some(text) }, cx);
         }
     }
 
@@ -809,7 +761,7 @@ impl AgentPane {
             .update(cx, |transcript, _| transcript.merge_completed(&item));
 
         if !hidden(&item) {
-            self.turn.note_visible_output();
+            self.note_visible_output();
         }
 
         cx.notify();
@@ -829,7 +781,7 @@ impl AgentPane {
         });
 
         if visible {
-            self.turn.note_visible_output();
+            self.note_visible_output();
         }
 
         cx.notify();
