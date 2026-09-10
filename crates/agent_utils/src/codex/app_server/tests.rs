@@ -27,12 +27,10 @@ fn disconnected_session() -> Session {
         registration_id: 0,
         deliver: Arc::new(|_| {}),
         detached: false,
-        next_rpc_id: FIRST_TURN_RPC_ID,
+        control: ControlState::default(),
         next_title_generation_id: 0,
         title_generation: None,
         history_cursor: None,
-        pending_commands: HashMap::new(),
-        pending_thread_names: HashMap::new(),
         history_scope: SessionScope::default(),
         skill_refresh: SkillRefreshState::default(),
         thread_profile: ThreadProfile::default(),
@@ -41,6 +39,134 @@ fn disconnected_session() -> Session {
         suppress_resume_replay: false,
         background: CodexTasks::default(),
     }
+}
+
+#[test]
+fn control_responses_complete_once_and_ignore_unknown_ids() {
+    let mut session = disconnected_session();
+    let id = session.alloc_rpc_id();
+    session
+        .control
+        .track(id, ControlOperation::Command("compact".into()));
+    session.conversation.compaction.request_manual();
+    let response = json!({"id": id, "error": {"message": "busy"}});
+    let events = session.process(response.clone());
+    assert!(
+        matches!(events.as_slice(), [Event::SlashCommandResult { name, outcome: SlashCommandOutcome::Rejected { .. } }] if name == "compact")
+    );
+    assert!(!session.has_active_operation());
+    assert!(session.process(response).is_empty());
+    assert!(
+        session
+            .process(json!({"id": id + 500, "error": {"message": "unknown"}}))
+            .is_empty()
+    );
+}
+
+#[test]
+fn thread_switch_retires_commands_but_keeps_catalog_responses() {
+    for transition in [THREAD_RESUME_RPC_ID, THREAD_FORK_RPC_ID] {
+        let mut session = disconnected_session();
+        session.conversation.thread_id = Some("old".into());
+        session.conversation.pending_approval = Some(42);
+        let command = session.alloc_rpc_id();
+        session
+            .control
+            .track(command, ControlOperation::Command("compact".into()));
+        session.conversation.compaction.request_manual();
+        let catalog = session.alloc_rpc_id();
+        session.control.track(catalog, ControlOperation::Other);
+        session.skill_refresh.start(catalog);
+        let turn_request = session.alloc_rpc_id();
+        let (id, operation) = ControlState::outgoing(
+            &json!({"id": turn_request, "method": "turn/steer", "params": {"threadId": "old"}}),
+        )
+        .unwrap();
+        session.control.track(id, operation);
+
+        session
+            .process(json!({"id": transition, "result": {"thread": {"id": "new", "turns": []}}}));
+        assert_eq!(session.thread_id(), Some("new"));
+        assert!(!session.has_active_operation());
+        assert!(
+            session
+                .process(json!({"id": turn_request, "error": {"message": "old turn"}}))
+                .is_empty()
+        );
+        session.conversation.compaction.request_manual();
+        assert!(
+            session
+                .process(json!({"id": command, "error": {"message": "old failure"}}))
+                .is_empty()
+        );
+        let completion = compaction_completed(
+            &mut session.conversation.compaction,
+            &json!({"id": "new-compaction"}),
+        );
+        assert!(completion.iter().any(|event| matches!(event, Event::ItemCompleted(Item::Compaction { detail, .. }) if detail.trigger == Some(CompactionTrigger::Manual))));
+        let events = session.process(json!({"id": catalog, "result": {"data": []}}));
+        assert!(matches!(events.as_slice(), [Event::Skills(_)]));
+        assert!(session.skill_refresh.in_flight.is_none());
+    }
+}
+
+#[test]
+fn failed_thread_switch_preserves_pending_command() {
+    let mut session = disconnected_session();
+    let id = session.alloc_rpc_id();
+    session
+        .control
+        .track(id, ControlOperation::Command("review".into()));
+    session.process(json!({"id": THREAD_RESUME_RPC_ID, "error": {"message": "missing"}}));
+    assert!(session.has_active_operation());
+    assert!(
+        matches!(session.process(json!({"id": id, "result": {}})).as_slice(), [Event::SlashCommandResult { name, .. }] if name == "review")
+    );
+}
+
+#[test]
+fn host_exit_closes_requests_and_prevents_late_revival() {
+    let mut session = disconnected_session();
+    let id = session.alloc_rpc_id();
+    session.control.track(id, ControlOperation::Other);
+    session.skill_refresh.start(id);
+    let events =
+        session.process(json!({"method": HOST_EXIT_METHOD, "params": {"message": "stopped"}}));
+    assert!(matches!(events.as_slice(), [Event::HostExited { .. }]));
+    assert!(session.control.is_empty());
+    assert!(session.skill_refresh.in_flight.is_none());
+    assert!(
+        session
+            .process(json!({"id": id, "result": {"data": []}}))
+            .is_empty()
+    );
+    assert!(
+        session
+            .process(json!({"id": THREAD_START_RPC_ID, "result": {"thread": {"id": "late"}}}))
+            .is_empty()
+    );
+    assert!(
+        session
+            .process(json!({"method": "turn/started", "params": {"turn": {"id": "late"}}}))
+            .is_empty()
+    );
+    assert!(!session.has_active_operation());
+}
+
+#[test]
+fn rejected_name_write_is_consumed_without_a_session_error() {
+    let mut session = disconnected_session();
+    session.conversation.thread_id = Some("parent".into());
+    let (tx, rx) = channel();
+    session.deliver = Arc::new(move |message| {
+        let _ = tx.send(message);
+    });
+    session.rename_thread("chosen name");
+    assert!(!session.control.is_empty());
+    let response = rx.try_recv().unwrap();
+    assert!(session.process(response.clone()).is_empty());
+    assert!(session.control.is_empty());
+    assert!(session.process(response).is_empty());
 }
 
 #[test]
@@ -60,7 +186,7 @@ fn rejected_background_requests_settle_their_pending_state() {
         session.execute_slash_command("compact", ""),
         SlashCommandOutcome::Rejected { .. }
     ));
-    assert!(session.pending_commands.is_empty());
+    assert!(!session.control.has_command());
     assert!(!session.has_active_operation());
 }
 
@@ -70,7 +196,7 @@ fn disconnected_submissions_are_rejected_without_requesting_a_title() {
     session.conversation.thread_id = Some("parent".into());
     for turn in [None, Some("active".to_string())] {
         session.conversation.current_turn = turn.clone();
-        let next_rpc_id = session.next_rpc_id;
+        let next_rpc_id = session.control.next_id();
         let outcome = session.send_user_message_with_generated_title(
             "keep this draft",
             &ThreadSettings::default(),
@@ -83,12 +209,12 @@ fn disconnected_submissions_are_rejected_without_requesting_a_title() {
         );
         assert_eq!(session.conversation.current_turn, turn);
         assert_eq!(
-            session.next_rpc_id,
+            session.control.next_id(),
             next_rpc_id + 1,
             "a rejected prompt must not queue a title request"
         );
         assert!(session.title_generation.is_none());
-        assert!(session.pending_thread_names.is_empty());
+        assert!(session.control.is_empty());
     }
 }
 

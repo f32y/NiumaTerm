@@ -7,6 +7,146 @@ use crate::claude_code::stream_json::*;
 use crate::workspace::AgentWorkspace;
 
 #[test]
+fn control_cancellation_matches_prompt_ids_and_close_settles_once() {
+    let mut control = ControlState::default();
+    control.pending_approval = Some(PendingApproval {
+        request_id: "approval".into(),
+        input: json!({}),
+        suggestions: None,
+    });
+    control.pending_questions = Some(PendingQuestions {
+        request_id: "questions".into(),
+        input: json!({}),
+        questions: Vec::new(),
+    });
+    let (id, _) = control.request(json!({"subtype": "rewind_files"}));
+    control.track(id.clone(), PendingControlOperation::FileRewind);
+    assert!(control.cancel_prompt("unknown").is_empty());
+    assert_eq!(
+        control.cancel_prompt("approval"),
+        vec![Event::ApprovalResolved]
+    );
+    assert!(control.cancel_prompt("approval").is_empty());
+    assert!(control.has_active_request());
+    assert_eq!(
+        control.close("stopped"),
+        vec![
+            Event::QuestionsResolved,
+            Event::FileRewindCompleted {
+                error: Some("stopped".into())
+            }
+        ]
+    );
+    assert!(!control.has_active_request());
+    assert!(control.close("stopped again").is_empty());
+    assert!(
+        control
+            .resolve(&json!({"request_id": id, "subtype": "error", "error": "late"}))
+            .is_none()
+    );
+}
+
+#[test]
+fn turn_completion_preserves_session_requests_and_retires_prompts() {
+    let mut control = ControlState::default();
+    control.pending_questions = Some(PendingQuestions {
+        request_id: "questions".into(),
+        input: json!({}),
+        questions: Vec::new(),
+    });
+    let (id, _) = control.request(json!({"subtype": "generate_session_title"}));
+    control.track(id.clone(), PendingControlOperation::SessionTitle);
+    assert_eq!(control.finish_turn(), vec![Event::QuestionsResolved]);
+    assert!(control.finish_turn().is_empty());
+    assert_eq!(
+        control.resolve(
+            &json!({"request_id": id, "subtype": "success", "response": {"title": "Session title"}})
+        ),
+        Some(Event::TitleUpdated("Session title".into()))
+    );
+    assert!(!control.has_active_request());
+}
+
+#[cfg(windows)]
+#[test]
+fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
+    use std::env;
+    use std::path::Path;
+
+    use uuid::Uuid;
+
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude/fake-stream-json.cmd");
+    let log = env::temp_dir().join(format!("niumaterm-controls-{}.jsonl", Uuid::new_v4()));
+    let launch = LaunchConfig {
+        executable: fixture.to_string_lossy().into_owned(),
+        env: vec![(
+            "NMT_FAKE_STREAM_LOG".into(),
+            log.to_string_lossy().into_owned(),
+        )],
+        ..LaunchConfig::default()
+    };
+    let mut session =
+        Session::spawn(&launch, &AgentWorkspace::default(), None, |_| {}, |_| {}).unwrap();
+    session.ready = true;
+    for operation in [
+        PendingControlOperation::SessionTitle,
+        PendingControlOperation::ContextComposition,
+    ] {
+        let (id, _) = session.control.request(json!({}));
+        session.control.track(id.clone(), operation);
+        let response = json!({"type": "control_response", "response": {"request_id": id, "subtype": "error", "error": "unsupported"}});
+        assert!(session.process(response.clone()).is_empty());
+        assert!(session.process(response).is_empty());
+    }
+    let (id, _) = session.control.request(json!({}));
+    session
+        .control
+        .track(id.clone(), PendingControlOperation::Other);
+    let response = json!({"type": "control_response", "response": {"request_id": id, "subtype": "error", "error": "denied"}});
+    assert!(matches!(
+        session.process(response.clone()).as_slice(),
+        [Event::Error { fatal: false, .. }]
+    ));
+    assert!(session.process(response).is_empty());
+
+    let (id, _) = session.control.request(json!({}));
+    session
+        .control
+        .track(id.clone(), PendingControlOperation::SessionTitle);
+    session.rename_session("User title");
+    assert!(session.process(json!({"type": "control_response", "response": {"request_id": id, "subtype": "success", "response": {"title": "Late title"}}})).is_empty());
+    session.compacting = true;
+    session.active_slash_command = Some("compact".into());
+    let events = session.process_exit();
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, Event::CompactionFinished { error: Some(_) }))
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::SlashCommandResult {
+            outcome: SlashCommandOutcome::Rejected { .. },
+            ..
+        }
+    )));
+    assert!(!session.has_active_operation());
+    assert!(session.process_exit().is_empty());
+    assert!(
+        session
+            .process(json!({"type": "system", "subtype": "init", "session_id": "late"}))
+            .is_empty()
+    );
+    assert_eq!(
+        session.send_user_message("late", &ThreadSettings::default(), &[]),
+        SendOutcome::NotReady
+    );
+    drop(session);
+    let _ = fs::remove_file(log);
+}
+
+#[test]
 fn transcript_snapshots_complete_their_streamed_items() {
     let mut transcript = TranscriptState::default();
     transcript.begin_turn();
@@ -218,7 +358,7 @@ fn oversized_input_keeps_settings_unchanged_and_a_retry_is_atomic() {
     let previous_model = session.applied_model.clone();
     let previous_permission = session.applied_permission.clone();
     let previous_effort = session.applied_effort.clone();
-    let pending = session.pending_control_operations.len();
+    let pending = session.control.pending_count();
     let settings = ThreadSettings {
         model: Some("test-model".into()),
         approval: Some("plan".into()),
@@ -232,7 +372,7 @@ fn oversized_input_keeps_settings_unchanged_and_a_retry_is_atomic() {
     assert_eq!(session.applied_model, previous_model);
     assert_eq!(session.applied_permission, previous_permission);
     assert_eq!(session.applied_effort, previous_effort);
-    assert_eq!(session.pending_control_operations.len(), pending);
+    assert_eq!(session.control.pending_count(), pending);
     assert!(!session.turn_active);
     assert!(session.process.has_stdin());
     assert_eq!(
@@ -985,9 +1125,8 @@ fn a_resumed_session_asks_for_its_context_before_the_first_turn() {
     // outstanding operation is what proves the session asked.
     assert!(
         session
-            .pending_control_operations
-            .values()
-            .any(|operation| *operation == PendingControlOperation::ContextComposition),
+            .control
+            .contains(&PendingControlOperation::ContextComposition),
         "a restored session must ask how full its window is"
     );
 

@@ -5,7 +5,6 @@
 //! third-party UIs (it powers the VS Code extension). Each `Session` owns one
 //! conversation thread and shares its app-server host with other sessions.
 
-use std::collections::HashMap;
 use std::mem::take;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -30,6 +29,7 @@ use crate::{CodexProviderConfig, LaunchConfig};
 
 mod background_tasks;
 mod compaction;
+mod control;
 mod conversation;
 mod host;
 mod options;
@@ -40,6 +40,7 @@ mod title_generation;
 
 use crate::codex::app_server::background_tasks::{CodexTasks, ThreadScope, notification_thread_id};
 use crate::codex::app_server::compaction::is_legacy_compaction_notification;
+use crate::codex::app_server::control::{ControlOperation, ControlState};
 use crate::codex::app_server::conversation::ConversationState;
 #[cfg(test)]
 use crate::codex::app_server::conversation::TurnOutputUsage;
@@ -111,10 +112,6 @@ impl From<&LaunchConfig> for ThreadProfile {
     }
 }
 
-struct PendingThreadName {
-    thread_id: String,
-}
-
 type SessionDelivery = Arc<dyn Fn(Value) + Send + Sync>;
 
 pub struct Session {
@@ -123,17 +120,11 @@ pub struct Session {
     registration_id: RegistrationId,
     deliver: SessionDelivery,
     detached: bool,
-    next_rpc_id: u64,
+    control: ControlState,
     next_title_generation_id: u64,
     title_generation: Option<TitleGenerationHandle>,
     /// Cursor for the next history page; `None` once the final page arrived.
     history_cursor: Option<String>,
-    /// Command RPC responses are independent of turn ids. Tracking their
-    /// request ids keeps command failures non-fatal to the live thread.
-    pending_commands: HashMap<u64, String>,
-    /// Name responses arrive independently of turn events. Retaining the
-    /// requested value lets the UI publish only a name the server accepted.
-    pending_thread_names: HashMap<u64, PendingThreadName>,
     history_scope: SessionScope,
     skill_refresh: SkillRefreshState,
     /// Profile-level model/provider overrides reused for thread start, history
@@ -255,12 +246,10 @@ impl Session {
             registration_id,
             deliver,
             detached: false,
-            next_rpc_id: FIRST_TURN_RPC_ID,
+            control: ControlState::default(),
             next_title_generation_id: 0,
             title_generation: None,
             history_cursor: None,
-            pending_commands: HashMap::new(),
-            pending_thread_names: HashMap::new(),
             history_scope: SessionScope::default(),
             skill_refresh: SkillRefreshState::default(),
             thread_profile,
@@ -288,7 +277,7 @@ impl Session {
         self.conversation.current_turn.is_some()
             || self.conversation.pending_approval.is_some()
             || self.conversation.questions.has_active_request()
-            || !self.pending_commands.is_empty()
+            || self.control.has_command()
             || self.conversation.compaction.active.is_some()
     }
 
@@ -337,6 +326,7 @@ impl Session {
         } else {
             Ok(())
         };
+        self.control.close();
         self.detached = true;
         result
     }
@@ -350,6 +340,9 @@ impl Session {
     /// Handle one message from the server: advances the handshake, answers
     /// protocol-level requests, and returns the events a chat UI reacts to.
     pub fn process(&mut self, message: Value) -> Vec<Event> {
+        if self.detached || self.control.is_closed() {
+            return Vec::new();
+        }
         let id = message["id"].as_u64();
         let method = message["method"].as_str().map(str::to_owned);
 
@@ -473,7 +466,8 @@ impl Session {
         if name == "compact" {
             self.conversation.compaction.request_manual();
         }
-        self.pending_commands.insert(rpc_id, name.to_string());
+        self.control
+            .track(rpc_id, ControlOperation::Command(name.to_string()));
         SlashCommandOutcome::Accepted
     }
 
@@ -675,11 +669,7 @@ impl Session {
     }
 
     fn alloc_rpc_id(&mut self) -> u64 {
-        let id = self.next_rpc_id;
-
-        self.next_rpc_id += 1;
-
-        id
+        self.control.alloc_id()
     }
 
     fn request_skills(&mut self, force_reload: bool) {
@@ -694,19 +684,31 @@ impl Session {
     }
 
     /// Interactive submissions need the write result to retain a rejected draft.
-    fn try_send(&self, message: Value) -> Result<(), String> {
+    fn try_send(&mut self, message: Value) -> Result<(), String> {
+        if self.detached || self.control.is_closed() {
+            return Err("Codex app-server is not connected".to_string());
+        }
+        let outgoing = ControlState::outgoing(&message);
         self.host
             .as_ref()
             .ok_or("Codex app-server is not connected")?
-            .send(self.registration_id, message)
+            .send(self.registration_id, message)?;
+        if let Some((id, operation)) = outgoing {
+            self.control.track(id, operation);
+        }
+        Ok(())
     }
 
     fn send(&mut self, message: Value) {
+        let outgoing = ControlState::outgoing(&message);
         let request_id = message["method"]
             .is_string()
             .then(|| message["id"].as_u64())
             .flatten();
         if let Err(error) = self.try_send(message) {
+            if let Some((id, operation)) = outgoing {
+                self.control.track(id, operation);
+            }
             tracing::warn!("could not write Codex app-server request: {error}");
             // Background requests already have local pending state. Deliver the
             // rejection through the usual response path so it can settle that
@@ -753,16 +755,18 @@ impl Session {
     }
 
     fn process_response(&mut self, rpc_id: u64, message: &Value) -> Vec<Event> {
+        let pending_command = if rpc_id >= FIRST_TURN_RPC_ID {
+            match self.control.finish(rpc_id) {
+                Some(ControlOperation::Command(command)) => Some(command),
+                Some(ControlOperation::Other | ControlOperation::ThreadRequest) => None,
+                Some(ControlOperation::ThreadName) | None => return Vec::new(),
+            }
+        } else {
+            None
+        };
         if let Some(events) = self.process_question_response(rpc_id, message) {
             return events;
         }
-        if let Some(pending) = self.pending_thread_names.remove(&rpc_id) {
-            if self.conversation.thread_id.as_deref() != Some(pending.thread_id.as_str()) {
-                return Vec::new();
-            }
-            return Vec::new();
-        }
-
         if self.skill_refresh.in_flight == Some(rpc_id) {
             let catalog = skill_catalog_from_response(message);
             let force_reload_again = self.skill_refresh.finish(rpc_id).unwrap_or(false);
@@ -832,7 +836,6 @@ impl Session {
             return self.background_events(changed);
         }
 
-        let pending_command = self.pending_commands.remove(&rpc_id);
         let is_command = pending_command.is_some();
 
         if let Some(error) = message["error"]["message"].as_str() {
@@ -929,6 +932,9 @@ impl Session {
             THREAD_RESUME_RPC_ID | THREAD_FORK_RPC_ID => {
                 let result = &message["result"];
 
+                self.control.reset_thread();
+                self.conversation.pending_approval = None;
+                self.conversation.compaction.reset_thread();
                 self.conversation.questions = QuestionState::default();
                 self.conversation.current_turn = None;
                 self.conversation.thread_id = result["thread"]["id"].as_str().map(str::to_owned);
@@ -949,7 +955,8 @@ impl Session {
             self.conversation.current_turn = None;
             self.conversation.pending_approval = None;
             self.conversation.questions = QuestionState::default();
-            self.pending_commands.clear();
+            self.control.close();
+            self.skill_refresh = SkillRefreshState::default();
             self.conversation.compaction.reset_thread();
             return vec![Event::HostExited {
                 message: params["message"]

@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 use std::mem::take;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use tracing::debug;
 
 use crate::chat::{ContextComposition, ContextSegment, Event, Question, QuestionOption};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum PendingControlOperation {
+    Other,
     FileRewind,
     ContextComposition,
     SessionTitle,
@@ -15,6 +16,116 @@ pub(super) enum PendingControlOperation {
     /// refuses it: ultracode the deployment does not offer, an environment
     /// variable that pins the level, or a level beyond what the model reaches.
     EffortChange(Option<String>),
+}
+
+pub(super) struct ControlState {
+    next_request_id: u64,
+    operations: HashMap<String, PendingControlOperation>,
+    closed: bool,
+    pub(super) pending_approval: Option<PendingApproval>,
+    pub(super) pending_questions: Option<PendingQuestions>,
+}
+
+impl Default for ControlState {
+    fn default() -> Self {
+        Self {
+            next_request_id: 1,
+            operations: HashMap::new(),
+            closed: false,
+            pending_approval: None,
+            pending_questions: None,
+        }
+    }
+}
+
+impl ControlState {
+    pub(super) fn request(&mut self, request: Value) -> (String, Value) {
+        let request_id = format!("nmt-{}", self.next_request_id);
+        self.next_request_id += 1;
+        let message = json!({
+            "type": "control_request", "request_id": request_id, "request": request,
+        });
+        (request_id, message)
+    }
+
+    pub(super) fn track(&mut self, id: String, operation: PendingControlOperation) {
+        if !self.closed {
+            self.operations.insert(id, operation);
+        }
+    }
+
+    pub(super) fn contains(&self, operation: &PendingControlOperation) -> bool {
+        self.operations.values().any(|pending| pending == operation)
+    }
+
+    pub(super) fn has_active_request(&self) -> bool {
+        self.pending_approval.is_some()
+            || self.pending_questions.is_some()
+            || self
+                .operations
+                .values()
+                .any(|operation| !matches!(operation, PendingControlOperation::Other))
+    }
+
+    pub(super) fn resolve(&mut self, response: &Value) -> Option<Event> {
+        resolve_pending_control_operation(&mut self.operations, response)
+    }
+
+    pub(super) fn cancel_generated_title(&mut self) {
+        self.operations
+            .retain(|_, operation| !matches!(operation, PendingControlOperation::SessionTitle));
+    }
+
+    pub(super) fn cancel_prompt(&mut self, id: &str) -> Vec<Event> {
+        let mut events = Vec::new();
+        if self
+            .pending_approval
+            .as_ref()
+            .is_some_and(|pending| pending.request_id == id)
+        {
+            self.pending_approval = None;
+            events.push(Event::ApprovalResolved);
+        }
+        if self
+            .pending_questions
+            .as_ref()
+            .is_some_and(|pending| pending.request_id == id)
+        {
+            self.pending_questions = None;
+            events.push(Event::QuestionsResolved);
+        }
+        events
+    }
+
+    pub(super) fn finish_turn(&mut self) -> Vec<Event> {
+        let mut events = Vec::new();
+        if self.pending_approval.take().is_some() {
+            events.push(Event::ApprovalResolved);
+        }
+        if self.pending_questions.take().is_some() {
+            events.push(Event::QuestionsResolved);
+        }
+        events
+    }
+
+    pub(super) fn close(&mut self, message: &str) -> Vec<Event> {
+        self.closed = true;
+        let mut events = self.finish_turn();
+        events.extend(fail_pending_control_operations(
+            &mut self.operations,
+            message,
+        ));
+        events
+    }
+
+    pub(super) fn is_closed(&self) -> bool {
+        self.closed
+    }
+
+    #[cfg(test)]
+    pub(super) fn pending_count(&self) -> usize {
+        self.operations.len()
+    }
 }
 
 /// A `can_use_tool` control request awaiting the user's decision. The original
@@ -127,6 +238,10 @@ pub(super) fn resolve_pending_control_operation(
     };
 
     match operation {
+        PendingControlOperation::Other => error.map(|message| Event::Error {
+            message,
+            fatal: false,
+        }),
         PendingControlOperation::FileRewind => Some(Event::FileRewindCompleted { error }),
         // A composition that could not be computed leaves the previous
         // breakdown in place: the accounting beside it is still accurate, and
@@ -227,6 +342,7 @@ pub(super) fn fail_pending_control_operations(
     operations
         .into_values()
         .filter_map(|operation| match operation {
+            PendingControlOperation::Other => None,
             PendingControlOperation::FileRewind => Some(Event::FileRewindCompleted {
                 error: Some(message.to_string()),
             }),

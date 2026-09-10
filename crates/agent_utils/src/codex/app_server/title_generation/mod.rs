@@ -8,7 +8,7 @@ use serde_json::{Map, Value, json};
 use crate::chat::Event;
 use crate::codex::app_server::host::{CodexHost, HOST_EXIT_METHOD, RegistrationId};
 use crate::codex::app_server::protocol::{thread_name_request, thread_start_params};
-use crate::codex::app_server::{PendingThreadName, Session, ThreadProfile};
+use crate::codex::app_server::{Session, ThreadProfile};
 use crate::workspace::AgentWorkspace;
 
 const PROVISIONAL_TITLE_CHARS: usize = 60;
@@ -147,13 +147,6 @@ impl Session {
         // user rename that follows a generated name must be the final request
         // the server applies.
         let rpc_id = self.alloc_rpc_id();
-        self.pending_thread_names.insert(
-            rpc_id,
-            PendingThreadName {
-                thread_id: thread_id.clone(),
-            },
-        );
-
         self.send(thread_name_request(rpc_id, &thread_id, name));
     }
 }

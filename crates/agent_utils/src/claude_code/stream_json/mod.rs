@@ -11,7 +11,6 @@
 //! `--allow-dangerously-skip-permissions` present — that flag only unlocks
 //! switching into `bypassPermissions` mode).
 
-use std::collections::HashMap;
 #[cfg(all(test, windows))]
 use std::fs;
 use std::process::Command;
@@ -32,8 +31,12 @@ use crate::chat::{
 use crate::claude_code::sessions::{RestoredTask, load_child_transcript};
 use crate::claude_code::shell_output::shell_items;
 use crate::claude_code::stream_json::control::{
-    PendingApproval, PendingControlOperation, PendingQuestions, fail_pending_control_operations,
-    merge_question_answers, parse_questions, resolve_pending_control_operation,
+    ControlState, PendingApproval, PendingControlOperation, PendingQuestions,
+    merge_question_answers, parse_questions,
+};
+#[cfg(test)]
+use crate::claude_code::stream_json::control::{
+    fail_pending_control_operations, resolve_pending_control_operation,
 };
 #[cfg(test)]
 use crate::claude_code::stream_json::launch::{ANTHROPIC_MODEL_ENV, FILE_CHECKPOINTING_ENV};
@@ -102,7 +105,7 @@ fn session_title_description(description: &str) -> String {
 pub struct Session {
     process: JsonLineProcess,
     transcript: TranscriptState,
-    next_request_id: u64,
+    control: ControlState,
     ready: bool,
     /// The CLI's session id from the `init` message; the handle a future tab
     /// needs to `--resume` this conversation.
@@ -112,8 +115,6 @@ pub struct Session {
     /// message after a send emits `TurnStarted` (the protocol has no explicit
     /// turn-started notification — `result` is the only turn boundary).
     turn_reported: bool,
-    pending_approval: Option<PendingApproval>,
-    pending_questions: Option<PendingQuestions>,
     /// Last model/permission/effort actually applied by the backend, so
     /// settings picked in the UI turn into `set_model`,
     /// `set_permission_mode` and `apply_flag_settings` control requests
@@ -122,10 +123,6 @@ pub struct Session {
     applied_permission: Option<String>,
     applied_effort: Option<String>,
     active_slash_command: Option<String>,
-    /// Control requests with user-visible completion semantics. Fire-and-forget
-    /// settings requests are deliberately absent; only operations that the UI
-    /// must await are correlated here.
-    pending_control_operations: HashMap<String, PendingControlOperation>,
     /// A structured initialize catalog carries richer metadata than the
     /// string-only first-turn fallback and must remain authoritative.
     structured_commands_published: bool,
@@ -280,7 +277,7 @@ impl Session {
         let mut session = Self {
             process,
             transcript: TranscriptState::default(),
-            next_request_id: 1,
+            control: ControlState::default(),
             ready: false,
             // A resumed process may not emit `system/init` until its next
             // model turn. The caller already obtained this identity from the
@@ -289,14 +286,11 @@ impl Session {
             session_id: resume,
             turn_active: false,
             turn_reported: false,
-            pending_approval: None,
-            pending_questions: None,
             applied_model: initial_model,
             applied_permission: None,
             // The launch flag below already put the process on this level.
             applied_effort: launch.effort.clone(),
             active_slash_command: None,
-            pending_control_operations: HashMap::new(),
             structured_commands_published: false,
             compacting: false,
             tasks: ClaudeTasks::default(),
@@ -320,11 +314,7 @@ impl Session {
     }
 
     pub fn has_active_operation(&self) -> bool {
-        self.turn_active
-            || self.pending_approval.is_some()
-            || self.pending_questions.is_some()
-            || self.compacting
-            || !self.pending_control_operations.is_empty()
+        self.turn_active || self.control.has_active_request() || self.compacting
     }
 
     /// Request EOF shutdown and wait for the launcher plus every contained
@@ -337,6 +327,9 @@ impl Session {
     /// Handle one message from the CLI: answers control requests and returns
     /// the events a chat UI reacts to.
     pub fn process(&mut self, message: Value) -> Vec<Event> {
+        if self.control.is_closed() {
+            return Vec::new();
+        }
         let mut events = Vec::new();
 
         // Child reduction runs before parent handling because the parent path
@@ -371,24 +364,8 @@ impl Session {
             Some("control_request") => events.extend(self.process_control_request(&message)),
             Some("control_response") => events.extend(self.process_control_response(&message)),
             Some("control_cancel_request") => {
-                let cancelled = message["request_id"].as_str();
-
-                if self
-                    .pending_approval
-                    .as_ref()
-                    .is_some_and(|p| Some(p.request_id.as_str()) == cancelled)
-                {
-                    self.pending_approval = None;
-                    events.push(Event::ApprovalResolved);
-                }
-
-                if self
-                    .pending_questions
-                    .as_ref()
-                    .is_some_and(|p| Some(p.request_id.as_str()) == cancelled)
-                {
-                    self.pending_questions = None;
-                    events.push(Event::QuestionsResolved);
+                if let Some(id) = message["request_id"].as_str() {
+                    events.extend(self.control.cancel_prompt(id));
                 }
             }
             _ => {}
@@ -420,7 +397,7 @@ impl Session {
         settings: &ThreadSettings,
         images: &[MessageImage],
     ) -> SendOutcome {
-        if !self.process.has_stdin() {
+        if self.control.is_closed() || !self.process.has_stdin() {
             return SendOutcome::NotReady;
         }
 
@@ -429,7 +406,8 @@ impl Session {
             let model = settings.model.clone().unwrap_or_default();
 
             messages.push(
-                self.control_request(json!({"subtype": "set_model", "model": model}))
+                self.control
+                    .request(json!({"subtype": "set_model", "model": model}))
                     .1,
             );
         }
@@ -437,7 +415,8 @@ impl Session {
             let mode = settings.approval.clone().unwrap_or_default();
 
             messages.push(
-                self.control_request(json!({"subtype": "set_permission_mode", "mode": mode}))
+                self.control
+                    .request(json!({"subtype": "set_permission_mode", "mode": mode}))
                     .1,
             );
         }
@@ -447,10 +426,9 @@ impl Session {
             let ultracode = effort == ULTRACODE_EFFORT;
             let level = if ultracode { "xhigh" } else { effort.as_str() };
 
-            // Correlated, unlike the model and permission requests: this one
-            // can be refused for reasons the user has to be told about, and
-            // the answer carries which.
-            let (request_id, request) = self.control_request(json!({
+            // A refusal must restore the previous effort selection, unlike
+            // model and permission errors that only report a diagnostic.
+            let (request_id, request) = self.control.request(json!({
                 "subtype": "apply_flag_settings",
                 "settings": {"effortLevel": level, "ultracode": ultracode},
             }));
@@ -475,10 +453,17 @@ impl Session {
             "type": "user",
             "message": {"role": "user", "content": content},
         }));
+        let control_ids: Vec<String> = messages
+            .iter()
+            .filter_map(|message| message["request_id"].as_str().map(str::to_owned))
+            .collect();
         if let Err(error) = self.process.try_write_batch(messages, InputClass::Normal) {
             return SendOutcome::Rejected {
                 message: error.to_string(),
             };
+        }
+        for id in control_ids {
+            self.control.track(id, PendingControlOperation::Other);
         }
         if settings.model.is_some() {
             self.applied_model = settings.model.clone();
@@ -487,7 +472,7 @@ impl Session {
             self.applied_permission = settings.approval.clone();
         }
         if let Some(request_id) = pending_effort {
-            self.pending_control_operations.insert(
+            self.control.track(
                 request_id,
                 PendingControlOperation::EffortChange(self.applied_effort.clone()),
             );
@@ -556,16 +541,15 @@ impl Session {
         // One outstanding request is enough: a second would answer with the
         // same breakdown the first is already about to deliver.
         if self
-            .pending_control_operations
-            .values()
-            .any(|operation| *operation == PendingControlOperation::ContextComposition)
+            .control
+            .contains(&PendingControlOperation::ContextComposition)
         {
             return;
         }
 
         let request_id = self.send_control(json!({"subtype": "get_context_usage"}));
-        self.pending_control_operations
-            .insert(request_id, PendingControlOperation::ContextComposition);
+        self.control
+            .track(request_id, PendingControlOperation::ContextComposition);
     }
 
     /// Ask the CLI to name this conversation. The CLI summarizes `description`
@@ -584,9 +568,8 @@ impl Session {
         // One outstanding request is enough: a second would name the same
         // conversation twice.
         if self
-            .pending_control_operations
-            .values()
-            .any(|operation| *operation == PendingControlOperation::SessionTitle)
+            .control
+            .contains(&PendingControlOperation::SessionTitle)
         {
             return;
         }
@@ -601,8 +584,8 @@ impl Session {
             "description": description,
             "persist": true,
         }));
-        self.pending_control_operations
-            .insert(request_id, PendingControlOperation::SessionTitle);
+        self.control
+            .track(request_id, PendingControlOperation::SessionTitle);
     }
 
     /// Give the conversation the name the user typed. The CLI records it with
@@ -620,6 +603,7 @@ impl Session {
             return;
         }
 
+        self.control.cancel_generated_title();
         self.send_control(json!({"subtype": "rename_session", "title": title}));
     }
 
@@ -627,24 +611,20 @@ impl Session {
         if !self.ready || !self.process.has_stdin() {
             return SlashCommandOutcome::NotReady;
         }
-        if self.turn_active || self.pending_approval.is_some() {
+        if self.turn_active || self.control.pending_approval.is_some() {
             return SlashCommandOutcome::Rejected {
                 message: "Claude must be idle before restoring files.".to_string(),
             };
         }
-        if self
-            .pending_control_operations
-            .values()
-            .any(|operation| *operation == PendingControlOperation::FileRewind)
-        {
+        if self.control.contains(&PendingControlOperation::FileRewind) {
             return SlashCommandOutcome::Rejected {
                 message: "A Claude file restore is already running.".to_string(),
             };
         }
 
         let request_id = self.send_control(file_rewind_request(user_message_id));
-        self.pending_control_operations
-            .insert(request_id, PendingControlOperation::FileRewind);
+        self.control
+            .track(request_id, PendingControlOperation::FileRewind);
 
         SlashCommandOutcome::Accepted
     }
@@ -718,10 +698,26 @@ impl Session {
     }
 
     pub fn process_exit(&mut self) -> Vec<Event> {
-        fail_pending_control_operations(
-            &mut self.pending_control_operations,
-            "Claude exited before file restore completed.",
-        )
+        self.ready = false;
+        self.turn_active = false;
+        self.turn_reported = false;
+        let message = "Claude exited before the control request completed.";
+        let mut events = self.control.close(message);
+        if self.compacting {
+            self.compacting = false;
+            events.push(Event::CompactionFinished {
+                error: Some(message.to_string()),
+            });
+        }
+        if let Some(name) = self.active_slash_command.take() {
+            events.push(Event::SlashCommandResult {
+                name,
+                outcome: SlashCommandOutcome::Rejected {
+                    message: message.to_string(),
+                },
+            });
+        }
+        events
     }
 
     /// Interrupt the running turn (the Esc/Ctrl-C equivalent).
@@ -757,7 +753,7 @@ impl Session {
     /// suggestions (e.g. switching to acceptEdits for the session), `decline`
     /// denies, and `cancel` denies and interrupts the turn.
     pub fn respond_approval(&mut self, decision: &str) {
-        let Some(pending) = self.pending_approval.take() else {
+        let Some(pending) = self.control.pending_approval.take() else {
             return;
         };
 
@@ -795,7 +791,7 @@ impl Session {
     /// re-runs the tool with the merged input and writes the tool result
     /// itself, so nothing further is sent for this tool call.
     pub fn respond_questions(&mut self, answers: Option<Vec<Vec<String>>>) {
-        let Some(pending) = self.pending_questions.take() else {
+        let Some(pending) = self.control.pending_questions.take() else {
             return;
         };
 
@@ -883,22 +879,11 @@ impl Session {
     }
 
     fn send_control(&mut self, request: Value) -> String {
-        let (request_id, message) = self.control_request(request);
+        let (request_id, message) = self.control.request(request);
+        self.control
+            .track(request_id.clone(), PendingControlOperation::Other);
         self.send(message);
         request_id
-    }
-
-    fn control_request(&mut self, request: Value) -> (String, Value) {
-        let request_id = format!("nmt-{}", self.next_request_id);
-
-        self.next_request_id += 1;
-        let message = json!({
-            "type": "control_request",
-            "request_id": request_id,
-            "request": request,
-        });
-
-        (request_id, message)
     }
 
     /// Write one line; write failures stay unsurfaced because the reader-side
@@ -977,17 +962,7 @@ impl Session {
         self.turn_active = false;
         self.turn_reported = false;
 
-        let mut events = Vec::new();
-
-        // A turn that ends with an unanswered approval (e.g. after an
-        // interrupt) must tear down the approval card.
-        if self.pending_approval.take().is_some() {
-            events.push(Event::ApprovalResolved);
-        }
-
-        if self.pending_questions.take().is_some() {
-            events.push(Event::QuestionsResolved);
-        }
+        let mut events = self.control.finish_turn();
 
         // Compaction only runs inside a turn, so a still-set flag here means
         // its end notification was lost (interrupt, aborted turn); the
@@ -1070,7 +1045,7 @@ impl Session {
                 return Vec::new();
             }
 
-            self.pending_questions = Some(PendingQuestions {
+            self.control.pending_questions = Some(PendingQuestions {
                 request_id,
                 input: request["input"].clone(),
                 questions: questions.clone(),
@@ -1081,7 +1056,7 @@ impl Session {
 
         let description = approval_description(tool_name, &request["input"]);
 
-        self.pending_approval = Some(PendingApproval {
+        self.control.pending_approval = Some(PendingApproval {
             request_id,
             input: request["input"].clone(),
             suggestions: (!request["permission_suggestions"].is_null())
@@ -1094,9 +1069,10 @@ impl Session {
     fn process_control_response(&mut self, message: &Value) -> Vec<Event> {
         let response = &message["response"];
 
-        if let Some(event) =
-            resolve_pending_control_operation(&mut self.pending_control_operations, response)
-        {
+        if response["request_id"].as_str() != Some(INIT_REQUEST_ID) {
+            let Some(event) = self.control.resolve(response) else {
+                return Vec::new();
+            };
             // A refused change left the session on the level it had, so the
             // next change is measured against that one rather than against the
             // pick that never took.
