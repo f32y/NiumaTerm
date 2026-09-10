@@ -19,6 +19,7 @@ use crate::codex::app_server::host::{
     MAX_EARLY_THREADS, RegistrationId, message_thread_id,
 };
 use crate::request_policy::RequestClass;
+use crate::subprocess::InputTicket;
 
 const MAX_HOST_REQUESTS: usize = 1024;
 const RESERVED_HOST_CONTROLS: usize = 64;
@@ -71,15 +72,22 @@ struct PendingRoute {
     purpose: RequestPurpose,
     class: RequestClass,
     deadline: Instant,
+    input: Option<InputTicket>,
 }
 
 impl PendingRoute {
     fn timeout_response(&self) -> Value {
+        let cancelled = self.input.as_ref().is_some_and(InputTicket::cancel);
+        let message = if cancelled {
+            "Codex request expired before writing and was cancelled; it was not sent.".to_string()
+        } else {
+            self.class.timeout_message("Codex")
+        };
         json!({
             "id": self.purpose.local_id(),
             "error": {
-                "message": self.class.timeout_message("Codex"),
-                "data": {"requestTimedOut": true},
+                "message": message,
+                "data": {"requestTimedOut": true, "notSent": cancelled},
             },
         })
     }
@@ -304,6 +312,7 @@ impl Router {
                     purpose: RequestPurpose::from_message(message, id),
                     class,
                     deadline: Instant::now() + class.timeout(),
+                    input: None,
                 },
             );
             message["id"] = json!(global_id);
@@ -323,6 +332,14 @@ impl Router {
 
     pub(super) fn reject_outgoing(&self, id: u64) {
         self.state.lock().pending_requests.remove(&id);
+    }
+
+    pub(super) fn attach_input(&self, id: u64, ticket: InputTicket) {
+        if let Some(route) = self.state.lock().pending_requests.get_mut(&id) {
+            route.input = Some(ticket);
+        } else {
+            ticket.cancel();
+        }
     }
 
     pub(super) fn retain_requests(&self, owner: RegistrationId, ids: &[u64]) {

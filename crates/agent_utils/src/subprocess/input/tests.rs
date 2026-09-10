@@ -7,6 +7,34 @@ use crate::subprocess::input::{
 };
 
 #[test]
+fn cancellation_wins_before_start_and_cannot_split_a_started_batch() {
+    let (queue, receiver) = InputQueue::new();
+    let ticket = queue
+        .submit_tracked(
+            vec![json!("settings"), json!({"type":"user"})],
+            InputClass::Normal,
+        )
+        .unwrap();
+    assert!(ticket.is_batch());
+    assert!(ticket.cancel());
+    assert!(ticket.cancel());
+    let cancelled = receiver.recv().unwrap();
+    assert!(!cancelled.ticket.begin());
+    drop(cancelled);
+    assert_eq!(queue.budget.lock().bytes, 0);
+    let ticket = queue
+        .submit_tracked(
+            vec![json!("settings"), json!({"type":"user"})],
+            InputClass::Normal,
+        )
+        .unwrap();
+    let writing = receiver.recv().unwrap();
+    assert!(writing.ticket.begin());
+    assert!(!ticket.cancel());
+    assert_eq!(writing.messages.len(), 2);
+}
+
+#[test]
 fn normal_bytes_cannot_consume_the_control_reserve() {
     let (queue, receiver) = InputQueue::new();
     let normal = Value::String("n".repeat(MAX_BYTES - RESERVED_BYTES - size_of::<Value>()));

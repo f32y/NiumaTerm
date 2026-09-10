@@ -11,6 +11,25 @@ use crate::codex::app_server::host::{
     HOST_INIT_RPC_ID, HostBootstrap, HostKey, Router, initialize_request, redact,
 };
 use crate::request_policy::RequestClass;
+use crate::subprocess::InputTicket;
+
+#[test]
+fn expired_queued_requests_report_not_sent_and_ignore_late_success() {
+    let router = router();
+    let (owner, rx) = register(&router);
+    let mut request = json!({"id": 10, "method": "thread/start"});
+    router.prepare_outgoing(owner, &mut request).unwrap();
+    let global_id = request["id"].as_u64().unwrap();
+    let ticket = InputTicket::queued_for_test(false);
+    router.attach_input(global_id, ticket.clone());
+    router.expire_requests(Instant::now() + Duration::from_secs(301));
+    let response = rx.try_recv().unwrap();
+    assert_eq!(response["id"], 10);
+    assert_eq!(response["error"]["data"]["notSent"], true);
+    assert!(ticket.cancel());
+    router.handle_message(json!({"id":global_id,"result":{"thread":{"id":"late"}}}));
+    assert!(rx.try_recv().is_err());
+}
 
 fn router() -> Router {
     let (startup_tx, _startup_rx) = sync_channel(1);

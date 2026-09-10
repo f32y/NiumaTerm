@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, mpsc};
 
 use parking_lot::Mutex;
@@ -51,9 +52,50 @@ impl Drop for Reservation {
 
 pub(super) struct QueuedInput {
     pub(super) messages: Vec<Value>,
+    pub(super) ticket: InputTicket,
     // The writer retains this reservation until every line has finished.
     // Removing a blocked write from the channel must not free its budget.
     _reservation: Reservation,
+}
+
+#[derive(Clone)]
+pub(crate) struct InputTicket {
+    state: Arc<AtomicU8>,
+    batch: bool,
+}
+
+impl InputTicket {
+    #[cfg(test)]
+    pub(crate) fn queued_for_test(batch: bool) -> Self {
+        Self::new(batch)
+    }
+
+    fn new(batch: bool) -> Self {
+        Self {
+            state: Arc::new(AtomicU8::new(0)),
+            batch,
+        }
+    }
+
+    pub(super) fn begin(&self) -> bool {
+        self.state
+            .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    }
+
+    /// True only when no byte from this item can have been written. Every
+    /// request in a batch shares the same marker and is cancelled together.
+    pub(crate) fn cancel(&self) -> bool {
+        matches!(
+            self.state
+                .compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire),
+            Ok(_) | Err(2)
+        )
+    }
+
+    pub(crate) fn is_batch(&self) -> bool {
+        self.batch
+    }
 }
 
 pub(super) struct InputQueue {
@@ -73,9 +115,21 @@ impl InputQueue {
         )
     }
 
+    #[cfg(test)]
     pub(super) fn submit(&self, messages: Vec<Value>, class: InputClass) -> Result<(), InputError> {
+        self.submit_tracked(messages, class).map(|_| ())
+    }
+
+    pub(super) fn submit_tracked(
+        &self,
+        messages: Vec<Value>,
+        class: InputClass,
+    ) -> Result<InputTicket, InputError> {
+        let ticket = InputTicket::new(
+            messages.len() > 1 || messages.iter().any(|message| message["type"] == "user"),
+        );
         if messages.is_empty() {
-            return Ok(());
+            return Ok(ticket);
         }
         let (max_messages, max_bytes) = match class {
             InputClass::Normal => (MAX_MESSAGES - RESERVED_MESSAGES, MAX_BYTES - RESERVED_BYTES),
@@ -106,12 +160,14 @@ impl InputQueue {
         self.sender
             .try_send(QueuedInput {
                 messages,
+                ticket: ticket.clone(),
                 _reservation: reservation,
             })
             .map_err(|error| match error {
                 mpsc::TrySendError::Full(_) => InputError::MessageLimit,
                 mpsc::TrySendError::Disconnected(_) => InputError::Closed,
-            })
+            })?;
+        Ok(ticket)
     }
 }
 

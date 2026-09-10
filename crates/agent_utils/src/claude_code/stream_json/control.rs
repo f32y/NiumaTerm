@@ -8,6 +8,13 @@ use tracing::debug;
 use crate::chat::{ContextComposition, ContextSegment, Event, Question, QuestionOption};
 use crate::claude_code::stream_json::effort::EffortState;
 use crate::request_policy::RequestClass;
+use crate::subprocess::InputTicket;
+
+struct Deadline {
+    at: Instant,
+    class: RequestClass,
+    input: Option<InputTicket>,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum PendingControlOperation {
@@ -20,7 +27,7 @@ pub(super) enum PendingControlOperation {
 pub(super) struct ControlState {
     next_request_id: u64,
     operations: HashMap<String, PendingControlOperation>,
-    deadlines: HashMap<String, (Instant, RequestClass)>,
+    deadlines: HashMap<String, Deadline>,
     closed: bool,
     effort: EffortState,
     pub(super) pending_approval: Option<PendingApproval>,
@@ -55,17 +62,33 @@ impl ControlState {
     }
 
     pub(super) fn record_admitted(&mut self, id: String, class: RequestClass, now: Instant) {
-        self.deadlines.insert(id, (now + class.timeout(), class));
+        self.deadlines.insert(
+            id,
+            Deadline {
+                at: now + class.timeout(),
+                class,
+                input: None,
+            },
+        );
+    }
+
+    pub(super) fn attach_input(&mut self, id: &str, ticket: InputTicket) {
+        if let Some(deadline) = self.deadlines.get_mut(id) {
+            deadline.input = Some(ticket);
+        }
     }
 
     pub(super) fn complete(&mut self, id: &str) {
         self.deadlines.remove(id);
     }
 
-    pub(super) fn expired(&mut self, now: Instant) -> Vec<(String, RequestClass)> {
+    pub(super) fn expired(
+        &mut self,
+        now: Instant,
+    ) -> Vec<(String, RequestClass, Option<InputTicket>)> {
         self.deadlines
-            .extract_if(|_, (deadline, _)| *deadline <= now)
-            .map(|(id, (_, class))| (id, class))
+            .extract_if(|_, deadline| deadline.at <= now)
+            .map(|(id, deadline)| (id, deadline.class, deadline.input))
             .collect()
     }
 

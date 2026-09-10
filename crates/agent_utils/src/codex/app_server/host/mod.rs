@@ -234,20 +234,37 @@ impl CodexHost {
             .then(|| message["id"].as_u64())
             .flatten();
         let result = match message["method"].as_str() {
-            None | Some("turn/interrupt" | "thread/unsubscribe") => {
-                self.process.lock().write_line(message)
+            None => self.process.lock().write_line(message).map(|_| None),
+            Some("turn/interrupt" | "thread/unsubscribe") => {
+                let mut process = self.process.lock();
+                let result = process.write_tracked(vec![message], InputClass::Control);
+                if result.is_err() {
+                    process.abort();
+                }
+                result.map(Some)
             }
             _ => self
                 .process
                 .lock()
-                .try_write_line(message, InputClass::Normal),
+                .write_tracked(vec![message], InputClass::Normal)
+                .map(Some),
         };
         if result.is_err()
             && let Some(id) = request_id
         {
             self.router.reject_outgoing(id);
         }
-        result.map_err(|error| error.to_string())
+        match result {
+            Ok(ticket) => {
+                if let Some(id) = request_id
+                    && let Some(ticket) = ticket
+                {
+                    self.router.attach_input(id, ticket);
+                }
+                Ok(())
+            }
+            Err(error) => Err(error.to_string()),
+        }
     }
 
     pub(super) fn claim_descendants(

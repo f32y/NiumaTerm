@@ -465,14 +465,18 @@ impl Session {
         {
             return SendOutcome::Rejected { message };
         }
-        if let Err(error) = self.process.try_write_batch(messages, InputClass::Normal) {
-            return SendOutcome::Rejected {
-                message: error.to_string(),
-            };
-        }
+        let ticket = match self.process.write_tracked(messages, InputClass::Normal) {
+            Ok(ticket) => ticket,
+            Err(error) => {
+                return SendOutcome::Rejected {
+                    message: error.to_string(),
+                };
+            }
+        };
         for id in control_ids {
             self.control
                 .record_admitted(id.clone(), RequestClass::Mutation, Instant::now());
+            self.control.attach_input(&id, ticket.clone());
             self.control.track(id, PendingControlOperation::Other);
         }
         if settings.model.is_some() {
@@ -721,8 +725,20 @@ impl Session {
     /// Expire unanswered protocol requests without retrying side effects.
     pub fn poll_timeouts(&mut self, now: Instant) -> Vec<Event> {
         let mut events = Vec::new();
-        for (id, class) in self.control.expired(now) {
-            let message = class.timeout_message("Claude");
+        for (id, class, ticket) in self.control.expired(now) {
+            let cancelled = ticket.as_ref().is_some_and(|ticket| ticket.cancel());
+            let message = if cancelled {
+                "Claude request expired before writing and was cancelled; it was not sent."
+                    .to_string()
+            } else {
+                class.timeout_message("Claude")
+            };
+            if cancelled && ticket.as_ref().is_some_and(|ticket| ticket.is_batch()) {
+                self.process.abort();
+                events.extend(self.control.close(&message));
+                events.push(Event::Error { message: format!("{message} The entire settings-and-prompt batch was cancelled. Reopen the session before retrying."), fatal: true });
+                break;
+            }
             if id == INIT_REQUEST_ID {
                 events.extend(self.control.close(&message));
                 events.push(Event::Error {
@@ -731,7 +747,7 @@ impl Session {
                 });
                 break;
             }
-            if let Some(effort_events) = self.control.expire_effort(&id) {
+            if !cancelled && let Some(effort_events) = self.control.expire_effort(&id) {
                 events.extend(effort_events);
                 events.push(Event::Error {
                     message,
@@ -962,11 +978,13 @@ impl Session {
         } else {
             InputClass::Normal
         };
-        self.process
-            .try_write_line(message, input_class)
+        let ticket = self
+            .process
+            .write_tracked(vec![message], input_class)
             .map_err(|error| error.to_string())?;
         self.control
             .record_admitted(request_id.clone(), class, Instant::now());
+        self.control.attach_input(&request_id, ticket);
         self.control
             .track(request_id.clone(), PendingControlOperation::Other);
         Ok(request_id)

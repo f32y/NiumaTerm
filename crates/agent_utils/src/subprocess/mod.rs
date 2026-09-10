@@ -17,7 +17,7 @@ mod input;
 mod output;
 use crate::message_memory::OUTPUT_FAILURE_METHOD;
 use crate::subprocess::input::InputQueue;
-pub(crate) use crate::subprocess::input::{InputClass, InputError};
+pub(crate) use crate::subprocess::input::{InputClass, InputError, InputTicket};
 use crate::subprocess::output::{MAX_STDERR_CHUNK, MAX_STDOUT_LINE, read_piece};
 
 /// A spawned agent CLI with piped stdio, kill-on-close containment, and
@@ -97,6 +97,9 @@ impl JsonLineProcess {
             .name(format!("{provider}-stdin"))
             .spawn(move || {
                 for input in input_rx {
+                    if !input.ticket.begin() {
+                        continue;
+                    }
                     let result = input.messages.iter().try_for_each(|message| {
                         writeln!(stdin, "{message}").and_then(|_| stdin.flush())
                     });
@@ -189,6 +192,14 @@ impl JsonLineProcess {
         messages: Vec<Value>,
         class: InputClass,
     ) -> Result<(), InputError> {
+        self.write_tracked(messages, class).map(|_| ())
+    }
+
+    pub(crate) fn write_tracked(
+        &mut self,
+        messages: Vec<Value>,
+        class: InputClass,
+    ) -> Result<InputTicket, InputError> {
         if !self.has_stdin() {
             return Err(InputError::Closed);
         }
@@ -196,12 +207,17 @@ impl JsonLineProcess {
             .stdin
             .as_ref()
             .ok_or(InputError::Closed)?
-            .submit(messages, class);
-        if result == Err(InputError::Closed) {
+            .submit_tracked(messages, class);
+        if matches!(result, Err(InputError::Closed)) {
             self.stdin.take();
             self.job.lock().take();
         }
         result
+    }
+
+    pub(crate) fn abort(&mut self) {
+        self.stdin.take();
+        self.job.lock().take();
     }
 
     /// False once shutdown has closed the protocol input.

@@ -6,6 +6,7 @@ use std::time::Instant;
 use crate::chat::{ContextComposition, Item, TokenUsageBreakdown};
 use crate::claude_code::stream_json::*;
 use crate::request_policy::RequestClass;
+use crate::subprocess::InputTicket;
 use crate::workspace::AgentWorkspace;
 
 #[test]
@@ -28,7 +29,7 @@ fn pending_control_capacity_preserves_urgent_slots_and_releases_expired_queries(
     assert!(state.expired(now + Duration::from_secs(14)).is_empty());
     let expired = state.expired(now + Duration::from_secs(15));
     assert_eq!(expired.len(), 8);
-    for (id, class) in expired {
+    for (id, class, _) in expired {
         assert_eq!(class, RequestClass::Control);
         state.resolve(&json!({"request_id": id, "subtype": "error", "error": class.timeout_message("Claude")}));
     }
@@ -141,6 +142,23 @@ fn control_responses_do_not_fall_through_or_revive_cancelled_titles() {
         [Event::Error { fatal: false, .. }]
     ));
     assert!(session.process(response).is_empty());
+
+    let ticket = InputTicket::queued_for_test(false);
+    session.control.record_admitted(
+        "queued-restore".into(),
+        RequestClass::Mutation,
+        Instant::now(),
+    );
+    session
+        .control
+        .attach_input("queued-restore", ticket.clone());
+    session
+        .control
+        .track("queued-restore".into(), PendingControlOperation::FileRewind);
+    session.control.complete(INIT_REQUEST_ID);
+    let events = session.poll_timeouts(Instant::now() + Duration::from_secs(301));
+    assert!(events.iter().any(|event| matches!(event, Event::FileRewindCompleted { error: Some(message) } if message.contains("not sent"))));
+    assert!(ticket.cancel());
 
     let (id, _) = session.control.request(json!({}));
     session
